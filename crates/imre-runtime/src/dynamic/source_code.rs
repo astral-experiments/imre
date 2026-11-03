@@ -1303,7 +1303,9 @@ impl Program {
                     }
                     let (roots, reads) =
                         child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
-                    if let DefinitionKind::ClassParameters(params) = &definition.kind {
+                    if let DefinitionKind::ClassParameters(params)
+                    | DefinitionKind::TypeAlias(Some(params)) = &definition.kind
+                    {
                         nested_reads.extend(
                             reads
                                 .iter()
@@ -2169,7 +2171,10 @@ impl Program {
                     }
                     Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::TypeAlias(s) if !function && self.class_attributes.is_none() => {
+                Stmt::TypeAlias(s)
+                    if self.class_attributes.is_none()
+                        && (!function || s.type_params.is_some()) =>
+                {
                     if s.type_params.as_deref().is_some_and(|params| {
                         params.iter().any(|param| {
                             param.default().is_some()
