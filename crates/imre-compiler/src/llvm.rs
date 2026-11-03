@@ -330,23 +330,54 @@ fn emit_program(
     let borrows = borrows::analyze(module, &callable_targets);
     let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
+    let mut literal_globals = vec![None; module.globals.len()];
     let mut extension_modules = std::collections::BTreeSet::new();
     let mut function_link_types = HashSet::new();
     let mut declared_caches = HashSet::new();
+    let mut uses_sys_argv = false;
+    let mut uses_orig_argv = false;
+    let mut uses_linecache = false;
+    let mut uses_cache_paths = false;
+    let mut uses_builtins_last = false;
+    let mut changes_stdout = false;
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::ExtensionImport(name), _) = &expr.kind {
-                extension_modules.insert(name.clone());
-            }
-            if let ExprKind::Builtin(
-                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet,
-                args,
-            ) = &expr.kind
-            {
-                function_link_types.insert(args[0].ty);
-            }
-            if let ExprKind::Builtin(Builtin::ModuleCache(id), _) = &expr.kind {
-                declared_caches.insert(*id);
+            let ExprKind::Builtin(builtin, args) = &expr.kind else {
+                return;
+            };
+            match builtin {
+                Builtin::ExtensionImport(name) => {
+                    extension_modules.insert(name.clone());
+                }
+                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
+                    function_link_types.insert(args[0].ty);
+                }
+                Builtin::ModuleCache(id) => {
+                    declared_caches.insert(*id);
+                }
+                Builtin::GlobalSet(slot) => {
+                    // A checked module binding has only one initializer.
+                    if let [
+                        Expr {
+                            kind: ExprKind::Str(value),
+                            ..
+                        },
+                    ] = args.as_slice()
+                    {
+                        literal_globals[*slot] = Some(value.clone());
+                    }
+                }
+                Builtin::SysArgv => uses_sys_argv = true,
+                Builtin::SysOrigArgv => uses_orig_argv = true,
+                Builtin::Linecache(..) => uses_linecache = true,
+                Builtin::WarningFormat { .. } if args[5].ty != Type::Str => uses_linecache = true,
+                Builtin::CachePath(_) | Builtin::ModuleCacheFromOrigin => uses_cache_paths = true,
+                Builtin::BuiltinsSetLast
+                | Builtin::SysDisplayHook
+                | Builtin::BuiltinsLen
+                | Builtin::BuiltinsSetLen => uses_builtins_last = true,
+                Builtin::SysStdoutSet | Builtin::SysStdoutDelete => changes_stdout = true,
+                _ => {}
             }
         });
     }
@@ -362,7 +393,6 @@ fn emit_program(
     }) {
         return Err("Imre: wrapper links require a callable signature with only known, unbound native functions".to_owned());
     }
-    let (uses_sys_argv, uses_orig_argv, uses_linecache, uses_cache_paths) = module.startup_usage();
     let mut emitter = Emitter {
         module,
         output,
@@ -381,7 +411,7 @@ fn emit_program(
         integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         http_members: Vec::new(),
-        literal_globals: literal_globals(module),
+        literal_globals,
         next_value: 0,
         next_label: 0,
         current: "entry".to_owned(),
@@ -416,13 +446,13 @@ fn emit_program(
         inline_dispatch,
         callable_targets,
         integer_regions: integer_regions::analyze(module),
-        uses_sys_argv,
+        uses_sys_argv: uses_sys_argv || uses_orig_argv,
         uses_orig_argv,
         uses_linecache,
         uses_percent_tuple: false,
-        uses_builtins_last: module.uses_builtins_last(),
+        uses_builtins_last,
         uses_cache_paths,
-        changes_stdout: module.changes_stdout(),
+        changes_stdout,
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -9007,24 +9037,6 @@ fn concat_leaves<'e>(emitter: &Emitter<'_, '_>, expression: &'e Expr) -> Vec<&'e
     let mut result = Vec::new();
     visit(emitter, expression, &mut result);
     result
-}
-
-/// The checked IR publishes each module binding once and forbids later rebinding.
-/// Retaining only direct literal initializers avoids evaluating any user code or
-/// assuming a mutable container's contents are constant.
-fn literal_globals(module: &Module) -> Vec<Option<String>> {
-    let mut strings = vec![None; module.globals.len()];
-    for function in module.functions.iter().chain([&module.entry]) {
-        crate::ir::walk_expressions(&function.body, &mut |expression| {
-            if let ExprKind::Builtin(Builtin::GlobalSet(slot), args) = &expression.kind
-                && let [value] = args.as_slice()
-                && let ExprKind::Str(value) = &value.kind
-            {
-                strings[*slot] = Some(value.clone());
-            }
-        });
-    }
-    strings
 }
 
 /// Only the sealed integer conversion can use the eager scratch formatter.
