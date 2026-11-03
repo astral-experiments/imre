@@ -255,6 +255,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
         owner,
         "object"
             | "dict"
+            | "list"
             | "mappingproxy"
             | "float"
             | "function"
@@ -417,6 +418,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
+    "__new__",
     "__add__",
     "__getitem__",
     "__iadd__",
