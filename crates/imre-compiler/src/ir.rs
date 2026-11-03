@@ -2479,6 +2479,14 @@ pub(crate) struct ExceptHandler {
     pub body: Vec<Statement>,
 }
 
+/// Selects the pull ABI for a cursor created by the compiler.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IterNextKind {
+    Generic,
+    String,
+    CodePoint,
+}
+
 #[derive(Clone)]
 pub(crate) enum Statement {
     Assign(usize, Expr),
@@ -2511,6 +2519,7 @@ pub(crate) enum Statement {
     /// Transfers iterator results into owned output locals only on success.
     /// `ready` is always written; exhausted cursors preserve both output locals.
     IterNext {
+        kind: IterNextKind,
         iterator: usize,
         key: usize,
         value: Option<usize>,

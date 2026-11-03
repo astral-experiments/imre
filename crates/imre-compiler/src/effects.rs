@@ -530,6 +530,7 @@ def integers(values: list[int]) -> int:
         assert!(block(
             &[Statement::Scope {
                 body: vec![Statement::IterNext {
+                    kind: crate::ir::IterNextKind::Generic,
                     iterator: 0,
                     key: 1,
                     value: None,

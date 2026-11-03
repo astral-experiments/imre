@@ -2391,8 +2391,9 @@ impl Emitter<'_, '_> {
                 key,
                 value,
                 ready,
+                kind,
             } => {
-                self.iter_next(*iterator, *key, *value, *ready);
+                self.iter_next(*iterator, *key, *value, *ready, *kind);
             }
             Statement::SetItem(list, index, expression) => {
                 if self.copy_item(list, index, expression) {
@@ -8364,7 +8365,14 @@ impl Emitter<'_, '_> {
     /// values are converted before publication. Exhaustion never reads scratch
     /// or replaces an output owner; nested loops can safely reuse both scratch
     /// words after this synchronous conversion.
-    fn iter_next(&mut self, iterator: usize, key: usize, value: Option<usize>, ready: usize) {
+    fn iter_next(
+        &mut self,
+        iterator: usize,
+        key: usize,
+        value: Option<usize>,
+        ready: usize,
+        kind: ir::IterNextKind,
+    ) {
         debug_assert!(matches!(
             self.locals[iterator],
             Type::Iterator | Type::Cursor(_)
@@ -8385,10 +8393,21 @@ impl Emitter<'_, '_> {
         } else {
             "null"
         };
-        let byte = self.checked_instruction(format!(
-            "call i32 @imre_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
-            iterator.operand
-        ));
+        let byte = match kind {
+            ir::IterNextKind::Generic => self.checked_instruction(format!(
+                "call i32 @imre_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
+                iterator.operand
+            )),
+            ir::IterNextKind::String | ir::IterNextKind::CodePoint => {
+                debug_assert!(value.is_none());
+                let next = if kind == ir::IterNextKind::String {
+                    "imre_str_iter_next"
+                } else {
+                    "imre_str_iter_next_ord"
+                };
+                self.instruction(format!("call i32 @{next}(ptr {}, ptr %mapping_key_word)", iterator.operand))
+            }
+        };
         let ready_value = Value {
             ty: Type::Bool,
             operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
@@ -9880,6 +9899,8 @@ declare i32 @imre_set_contains(ptr, i64)
 declare void @imre_set_add(ptr, i64)
 declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)
+declare i32 @imre_str_iter_next(ptr, ptr)
+declare i32 @imre_str_iter_next_ord(ptr, ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)

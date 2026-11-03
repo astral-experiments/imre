@@ -375,6 +375,7 @@ impl Checker<'_> {
             acquire: Vec::new(),
             next: vec![
                 Statement::IterNext {
+                    kind: crate::ir::IterNextKind::Generic,
                     iterator,
                     key: index,
                     value: Some(field),
@@ -976,6 +977,7 @@ impl Checker<'_> {
             next: vec![
                 Statement::Clear(value),
                 Statement::IterNext {
+                    kind: crate::ir::IterNextKind::Generic,
                     iterator,
                     key: value,
                     value: None,
@@ -1641,6 +1643,11 @@ impl Checker<'_> {
             }
             clear.extend(second);
             pull.push(Statement::IterNext {
+                kind: if ty == Type::Str {
+                    ir::IterNextKind::String
+                } else {
+                    ir::IterNextKind::Generic
+                },
                 iterator,
                 key,
                 value: second,
