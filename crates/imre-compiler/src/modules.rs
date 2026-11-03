@@ -2680,7 +2680,16 @@ impl SourceModule {
     }
 }
 
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub(crate) enum FloatComponents {
+    #[default]
+    Native,
+    Used,
+    Boxed,
+}
+
 pub(crate) struct SourceGraph {
+    pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
     pub(crate) handled_tracebacks: bool,
@@ -3978,6 +3987,7 @@ impl<'a> Loader<'a> {
             }),
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
+            float_components: Default::default(),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
             check_decorated_method_calls: Default::default(),
             check_method_factories: Default::default(),

@@ -533,6 +533,21 @@ pub(crate) fn lower_with_owners(
 
 pub(crate) fn lower_with_caller_cache(
     graph: &SourceGraph,
+    cache: Option<&mut CallerCache>,
+) -> Result<(ir::Module, Vec<ModuleId>), String> {
+    use crate::modules::FloatComponents;
+    graph.float_components.set(FloatComponents::Native);
+    let result = lower_graph(graph, cache);
+    if result.is_err() && graph.float_components.get() == FloatComponents::Used {
+        // Recover the original descriptor diagnostic when a later use needs object semantics.
+        graph.float_components.set(FloatComponents::Boxed);
+        return lower_graph(graph, None);
+    }
+    result
+}
+
+fn lower_graph(
+    graph: &SourceGraph,
     mut cache: Option<&mut CallerCache>,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
@@ -7973,6 +7988,22 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::Float
+                    && matches!(attribute.attr.as_str(), "real" | "imag")
+                    && self.graph.float_components.get() != crate::modules::FloatComponents::Boxed
+                {
+                    self.graph
+                        .float_components
+                        .set(crate::modules::FloatComponents::Used);
+                    if attribute.attr.as_str() == "real" {
+                        return Ok(receiver);
+                    }
+                    let zero = Expr {
+                        ty: Type::Float,
+                        kind: ExprKind::Float(0.0),
+                    };
+                    return Ok(self.evaluated_receiver(Some(receiver), zero));
+                }
                 if let Type::WeakProxy(class) = receiver.ty
                     && attribute.attr.as_str() == "__class__"
                 {
