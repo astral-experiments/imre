@@ -376,6 +376,15 @@ REJECTED = {
         "main.py": "from helper import selected\n",
         "helper.py": "if True:\n    selected: int\nelse:\n    selected = 1\n",
     }, 'no static binding "selected"'),
+    "inspect_descriptor_doc_preserves_typed_call": ({
+        "main.py": (
+            "from inspect import getdoc, ismemberdescriptor\n"
+            "def typed(n: int) -> int: return n\n"
+            "getdoc(int)\n"
+            "ismemberdescriptor(int)\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "namedtuple_descriptor_preserves_typed_call": ({
         "main.py": (
             "from collections import namedtuple\n"

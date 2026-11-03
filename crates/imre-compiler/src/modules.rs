@@ -1538,6 +1538,10 @@ impl IntrinsicModule {
                 "cache" => crate::ir::LinecacheOperation::Cache,
                 _ => return None,
             }),
+            (Self::Inspect, "getdoc") => Intrinsic::ScopedObjectExport("inspect.getdoc"),
+            (Self::Inspect, "ismemberdescriptor") => {
+                Intrinsic::ScopedObjectExport("inspect.ismemberdescriptor")
+            }
             (Self::Inspect, "trace") => Intrinsic::ScopedObjectExport("inspect.trace"),
             (Self::Inspect, "getinnerframes") => {
                 Intrinsic::ScopedObjectExport("inspect.getinnerframes")
