@@ -287,6 +287,9 @@ impl Context {
     }
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if let Value::Class { scope, .. } = self.heap.get(class) {
+            return self.namespace_binding(self.scope_data(*scope), name);
+        }
         if let Some(&dictionary) = self.native_type_dicts.get(&class)
             && let Some(value) = self.dict_named_item(dictionary, name)
         {
@@ -294,7 +297,6 @@ impl Context {
         }
         match self.heap.get(class) {
             Value::Native(kind) if name == "__sizeof__" => self.builtins.get(object_size::descriptor(kind)?).copied(),
-            Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
             // The native generic alias inherits the same subclass hook as source special forms.
             Value::Native(kind) if kind == "typing._GenericAlias" && name == "__init_subclass__" => {
                 self.classes.get("typing._Final").and_then(|&base| self.own_class_attr(base, name))
@@ -1845,6 +1847,12 @@ impl Context {
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
             self.attribute_hook(hook, obj, class, name, original)
+        } else if name == "__class__"
+            && matches!(self.heap.get(obj), Value::Instance { .. })
+            && self.class_attr(class, name).is_none()
+        {
+            // object.__class__ is a data descriptor and takes precedence over instance fields.
+            Ok(class)
         } else if let Value::Module { scope, .. } = *self.heap.get(obj) {
             self.module_get_attribute(obj, scope, name, original)
         } else {
