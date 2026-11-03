@@ -19,7 +19,7 @@ pub(super) fn alias(
             let kind = crate::frontend::exception_kind(n.id.as_str())?;
             Some(ExceptionAlias::Builtin {
                 kind,
-                name: n.id.to_string(),
+                name: imre_ast::exceptions::Kind::try_from_raw(kind)?.name().into(),
             })
         }),
         _ => None,
