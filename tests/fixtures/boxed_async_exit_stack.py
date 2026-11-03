@@ -1,4 +1,4 @@
-from contextlib import AbstractAsyncContextManager, AsyncExitStack, ExitStack
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, ExitStack, nullcontext
 from types import MethodType
 
 
@@ -33,6 +33,19 @@ async def close(label, *, extra):
 
 
 async def verify():
+    async with nullcontext() as entered:
+        assert entered is None
+    noop = nullcontext(enter_result=events)
+    assert isinstance(noop, AbstractAsyncContextManager)
+    try:
+        async with noop as entered:
+            assert entered is events
+            raise failure
+    except ValueError as exc:
+        assert exc is failure
+    else:
+        raise AssertionError("nullcontext suppressed the body exception")
+
     stack = Stack()
     assert isinstance(stack, AbstractAsyncContextManager)
     assert not hasattr(stack, "__enter__")
