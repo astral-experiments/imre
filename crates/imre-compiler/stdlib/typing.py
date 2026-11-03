@@ -2,6 +2,7 @@
 
 import builtins as _builtins
 import functools
+import sys as _sys
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
@@ -715,6 +716,25 @@ def assert_type(val, typ, /):
             assert_type(name, int)  # type checker error
     """
     return val
+
+
+def reveal_type[T](obj: T, /) -> T:
+    """Ask a static type checker to reveal the inferred type of an expression.
+
+    When a static type checker encounters a call to ``reveal_type()``,
+    it will emit the inferred type of the argument::
+
+        x: int = 1
+        reveal_type(x)
+
+    Running a static type checker (e.g., mypy) on this example
+    will produce output similar to 'Revealed type is "builtins.int"'.
+
+    At runtime, the function prints the runtime type of the
+    argument and returns the argument unchanged.
+    """
+    print(f"Runtime type is {type(obj).__name__!r}", file=_sys.stderr)
+    return obj
 
 
 _ASSERT_NEVER_REPR_MAX_LENGTH = 100

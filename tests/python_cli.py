@@ -1965,6 +1965,12 @@ def report(text):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
+        plugin.write_bytes((fixtures / "boxed_typing_reveal_type.py").read_bytes())
+        for exe in (sys.executable, imre):
+            result = run(exe, "-IB", "-c", imports + "arithmetic.current()")
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, b"", b"Runtime type is 'Model'\n",
+            ), result
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
