@@ -108,7 +108,25 @@ def current():
         raise AssertionError("member accepted unrelated receiver")
 
     from annotationlib import Format
-    from typing import NoDefault, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
+    from typing import NoDefault, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeAliasType, TypeVarTuple, cast
+
+    for cls in (Any, TypeVar, TypeVarTuple, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeAliasType):
+        assert isinstance(cls, type) and issubclass(cls, object)
+        assert cls.__base__ is object and cls.__bases__ == (object,)
+        assert cls.__bases__ is cls.__bases__
+        mro = cls.__mro__
+        assert type(mro) is tuple and mro is cls.__mro__
+        assert len(mro) == 2 and mro[0] is cls and mro[1] is object
+    assert type(Any).__mro__ == (type(Any), type, object)
+    assert not isinstance(Any, type("type", (), {}))
+    for value in (variable, Callable, cast):
+        assert not isinstance(value, type) and not hasattr(value, "__mro__")
+    try:
+        isinstance(1, Any)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("Any accepted an instance check")
 
     P = ParamSpec("P")
     parameters = (variable, P, P.args, P.kwargs, TypeVarTuple("Ts"))

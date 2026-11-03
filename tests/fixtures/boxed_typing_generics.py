@@ -1,6 +1,8 @@
 import sys
 from sys import path
-from types import GenericAlias
+from inspect import signature
+from types import FunctionType, GenericAlias
+from typing import cast
 import typing as t
 
 rendered_spec = t.ParamSpec("P")
@@ -170,6 +172,18 @@ print(t.get_overloads(first)[0] is wrapped, t.get_overloads(wrapped)[1] is secon
 t.clear_overloads()
 
 marker = []
+assert cast is t.cast and type(cast) is FunctionType
+assert cast.__module__ == "typing" and cast.__qualname__ == "cast"
+assert str(signature(cast)) == "(typ, val)"
+assert cast(marker, val=marker) is marker
+for args, kwargs in (((), {}), ((T,), {}), ((T, marker, None), {}),
+                     ((T, marker), {"typ": T}), ((T,), {"other": marker})):
+    try:
+        cast(*args, **kwargs)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("cast accepted invalid arguments")
 print(t.cast(T, marker) is marker, t.get_origin(t.Generic) is t.Generic)
 
 print(type(K) is t.TypeVar, K.__class__ is type(K), isinstance(K, t.TypeVar))

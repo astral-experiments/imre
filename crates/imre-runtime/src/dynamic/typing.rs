@@ -1329,11 +1329,19 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                     .and_then(|method| ctx.bind_attribute(method, value, class)),
             );
         }
-        Value::Native(class) if class == "collections.abc._CallableGenericAlias"
-            && matches!(name, "__base__" | "__bases__" | "__mro__") =>
+        Value::Native(class)
+            if matches!(name, "__base__" | "__bases__" | "__mro__")
+                && (ParameterClass::lookup(class).is_some()
+                    || matches!(
+                        class.as_str(),
+                        "typing.Any"
+                            | "typing._AnyMeta"
+                            | "typing.TypeAliasType"
+                            | "collections.abc._CallableGenericAlias"
+                    )) =>
         {
             if name == "__base__" {
-                ctx.builtin("types.GenericAlias")
+                ctx.builtin(Context::native_base(class).unwrap_or("object"))
             } else {
                 ctx.builtin_hierarchy_tuple(value, name)
             }
@@ -2225,16 +2233,6 @@ pub(super) fn call(
     if operation == "TypeVar" {
         let module = ctx.heap.caller_module();
         return typevar(ctx, args, kwargs, module, false);
-    }
-    if operation == "cast" {
-        let [typ, value] = super::builtins::bind("cast()", args, kwargs, ["typ", "val"])?;
-        if let (Some(_), Some(value)) = (typ, value) {
-            return Ok(value);
-        }
-        return Err(Error::new(
-            "TypeError",
-            "cast() requires a type and a value",
-        ));
     }
     if matches!(
         operation,

@@ -1190,7 +1190,7 @@ impl Context {
                 return true;
             }
             if parent == "object" {
-                return self.builtin_type_name(class) == Some("type");
+                return self.is_type_object(class);
             }
             if let Some(result) = builtins::exception_subclass(child, parent) {
                 return result;
@@ -1588,6 +1588,7 @@ impl Context {
             }
         }
         match (name, self.heap.get(value)) {
+            ("type", _) if self.builtins.get("type") == Some(&class) => self.is_type_object(value),
             (HashState::CLASS, Value::Hash(state)) => {
                 !HashState::is_provider_class(state.lock().class_name())
             }
