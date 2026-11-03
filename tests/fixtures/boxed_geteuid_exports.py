@@ -2,7 +2,7 @@ import sys
 
 # Runtime module names allow this executable to run without bundling os.py.
 posix = __import__(sys.argv[2])
-names = ("chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups")
+names = ("chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups", "setgroups")
 getters = ("getegid",)
 if sys.platform == "linux":
     getters += ("getresgid", "getresuid")
@@ -65,3 +65,22 @@ for name, current, real, effective in (
         else:
             raise AssertionError(f"{name} accepted invalid arguments")
     assert converted == [-1, 2**32 - 1]
+
+
+setter = os.setgroups
+assert setter.__self__ is posix and setter.__text_signature__ == "($module, groups, /)"
+groups = os.getgroups()
+try:
+    assert setter(tuple(groups)) is None
+except PermissionError as exc:
+    assert exc.errno == 1 and exc.filename is None
+assert os.getgroups() == groups
+converted = []
+for value in (iter(()), {}, [None], (Identifier(-2),)):
+    try:
+        setter(value)
+    except (OverflowError, TypeError) as exc:
+        print(type(exc).__name__, str(exc))
+    else:
+        raise AssertionError("setgroups accepted invalid groups")
+assert converted == [-2]

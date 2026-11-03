@@ -159,11 +159,7 @@ fn extra_group_ids(ctx: &mut Context, gids: Id) -> Result<Option<Vec<libc::gid_t
         return Err(Error::new("TypeError", "setgroups argument must be a list"));
     }
     let count = ctx.sequence_len(gids)?;
-    unsafe extern "C" {
-        fn imre_platform_max_groups() -> usize;
-    }
-    // SAFETY: this function returns the limit from the target's C headers.
-    if count > unsafe { imre_platform_max_groups() } {
+    if count > crate::objects::os::max_groups() {
         return Err(Error::new("ValueError", "too many extra_groups"));
     }
     let mut groups = Vec::new();

@@ -196,6 +196,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             Intrinsic::ObjectRuntimeExport("posix.getgrouplist")
         }
         "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
+        "setgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.setgroups"),
         "cpu_count" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.cpu_count")
         }

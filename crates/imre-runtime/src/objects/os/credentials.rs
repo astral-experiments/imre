@@ -99,6 +99,20 @@ pub(crate) fn getgroups() -> Result<Vec<Int>> {
         .collect())
 }
 
+pub(crate) fn max_groups() -> usize {
+    unsafe extern "C" {
+        fn imre_platform_max_groups() -> usize;
+    }
+    // SAFETY: this function returns the limit from the target's C headers.
+    unsafe { imre_platform_max_groups() }
+}
+
+pub(crate) fn setgroups(groups: &[libc::gid_t]) -> Result<()> {
+    // SAFETY: groups provides the requested number of contiguous gid_t values.
+    checked(unsafe { libc::setgroups(groups.len() as _, groups.as_ptr()) })?;
+    Ok(())
+}
+
 macro_rules! setter {
     ($name:ident, $sys:ident, $id:ty, $($arg:ident),+) => {
         pub(crate) fn $sys($($arg: $id),+) -> Result<()> {
