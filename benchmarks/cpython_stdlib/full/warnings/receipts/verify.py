@@ -33,7 +33,7 @@ def native_children(receipt, label, head):
             with tarfile.open(archive) as raw:
                 raw.extractall(scratch, filter="data")
         result = validate(scratch, tag, label, head)
-        if receipt == "061b0196":
+        if label != "selected_children":
             audit = runpy.run_path(str(ROOT / receipt / "workloads.py"))["verify"]
             audit(Path(scratch), tag, label, result)
         return result
@@ -80,6 +80,8 @@ def main():
     shutdown = native_children("061b0196", "selected_shutdown_children",
                                "061b01963d06311f964de28ecf655176265f66c0")
     assert len(shutdown) == 2 and all(r["paired"] for r in shutdown.values())
+    traced = native_children("76aed745", "selected_tracemalloc",
+                             "76aed745516103a63aea7e19fb4f22bf5b0fc774")
     assert set(children) == {r["id"] for r in baseline if r["disposition"] == "requires-native-child"}
     replayed = environment_children()
     assert len(replayed) == 4 and all(k in children and n == 1 for k, n in replayed)
@@ -92,6 +94,8 @@ def main():
                 assert row == replayed_child_row(first, replayed[key])
             elif first["disposition"] != "paired" and prior["id"] in shutdown:
                 assert row == child_row(first, shutdown[prior["id"]], "061b0196")
+            elif first["disposition"] != "paired" and prior["id"] in traced:
+                assert row == child_row(first, traced[prior["id"]], "76aed745")
             else:
                 assert row == first
         elif row["receipt"] == "dfe0f18e":
