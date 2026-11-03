@@ -4705,8 +4705,14 @@ impl Context {
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
-            if matches!(self.heap.get(obj), Value::Native(owner) if owner == "type") {
-                return Ok(self.builtin("type.__init__"));
+            if let Value::Native(owner) = self.heap.get(obj) {
+                match owner.as_str() {
+                    "type" => return Ok(self.builtin("type.__init__")),
+                    "bool" | "int" | "float" | "complex" | "str" | "bytes" => {
+                        return Ok(self.builtin("object.__init__"));
+                    }
+                    _ => {}
+                }
             }
             let tuple = self.builtin("tuple");
             if self.direct_subclass(obj, tuple) {

@@ -620,6 +620,7 @@ def _autospec_target(spec, name, value):
 
 
 def _make_autospec(spec, strict, as_instance, name=None, target=None):
+    from dataclasses import fields, is_dataclass
     from functools import partial
     from inspect import iscoroutinefunction, isdatadescriptor, signature
     from types import FunctionType
@@ -661,6 +662,13 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
             if isinstance(value, FunctionType):
                 target_method = _autospec_target(spec, entry, value)
             members[entry] = (value, target_method)
+        if is_class and as_instance and is_dataclass(spec):
+            # Fields without defaults need not appear in dir(spec). The declared
+            # type supplies the instance attribute's spec even when it has a default.
+            for field in fields(spec):
+                mock._mock_methods.append(field.name)
+                if "__%s__" % field.name[2:-2] != field.name:
+                    members[field.name] = (field.type, None)
         mock._node._autospec_members = members
     if target is not None:
         try:

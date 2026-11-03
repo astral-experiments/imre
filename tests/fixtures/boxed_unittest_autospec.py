@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from inspect import signature
 from unittest import TestCase
 from unittest.mock import InvalidSpecError, NonCallableMagicMock, call, create_autospec, seal
@@ -126,4 +127,26 @@ with check.assertRaises(TypeError):
     receive()
 receive("packet")
 receive.assert_called_once_with(data="packet")
+
+
+@dataclass
+class Request:
+    sink: Sink
+    count: int = 0
+
+
+request_type = create_autospec(Request, spec_set=True)
+with check.assertRaises(AttributeError):
+    request_type.sink
+for scalar in (bool, int, float, complex, str, bytes):
+    assert scalar.__init__ is object.__init__
+assert dict.__init__ is not object.__init__
+request = request_type(Sink())
+assert isinstance(request.count, int)
+assert isinstance(request.sink, Sink) and isinstance(request.sink(), Sink)
+request.sink.write("body")
+request.sink.write.assert_called_once_with(value="body")
+with check.assertRaises(AttributeError):
+    request.sink.extra = 1
+
 print("autospec checked")
