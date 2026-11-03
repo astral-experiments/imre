@@ -13,6 +13,14 @@ def global_lambda(unused):
     return (lambda: marker), ref(unused)
 
 
+def local_class(kept, unused):
+    class Reader:
+        def read(self):
+            return kept
+
+    return Reader, ref(unused)
+
+
 def decorated_reader(captured):
     def keep(fn):
         return fn
@@ -132,6 +140,10 @@ def current():
                                 argdefs=reader.__defaults__, closure=reader.__closure__)
     replay.__kwdefaults__ = reader.__kwdefaults__
     assert replay() == (8, "replacement", "module", 0)
+
+    reader_type, unused = local_class(payload, Payload())
+    assert unused() is None
+    assert reader_type().read() is payload
 
     reader, unused = global_lambda(Payload())
     pressure = []
