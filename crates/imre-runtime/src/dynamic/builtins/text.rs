@@ -2321,6 +2321,19 @@ pub(super) fn method(
         }
         return Ok(ctx.alloc(Value::Int(found)));
     }
+    if owner == "bytes" && name == "removeprefix" {
+        let method = format!("{}.{name}", ctx.type_name(original_receiver));
+        let prefix = one_positional_arg(&method, args, kwargs)?;
+        ctx.check_buffer_exporter(prefix)?;
+        let prefix = ctx.native_buffer_bytes(prefix)?;
+        let data = ctx.bytes_like(receiver)?;
+        let result = data.strip_prefix(prefix).unwrap_or(data);
+        if result.len() == data.len() && original_receiver == receiver {
+            return Ok(receiver);
+        }
+        let bytes = super::super::copy_ids(result)?;
+        return Ok(ctx.heap.bytes_from_data(bytes));
+    }
     if matches!(owner, "str" | "bytes" | "bytearray")
         && matches!(name, "strip" | "lstrip" | "rstrip")
     {

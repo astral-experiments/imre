@@ -739,6 +739,10 @@ impl BuiltinDescriptor {
                     ("center", "__doc__") => {
                         "Return a centered string of length width.\n\nPadding is done using the specified fill character (default is a space)."
                     }
+                    ("removeprefix", "__doc__") if self.owner == "bytes" => {
+                        "Return a bytes object with the given prefix string removed if present.\n\nIf the bytes starts with the prefix string, return bytes[len(prefix):].\nOtherwise, return a copy of the original bytes."
+                    }
+                    ("removeprefix", _) if self.owner == "bytes" => "($self, prefix, /)",
                     ("ljust", "__doc__") if matches!(self.owner, "bytes" | "bytearray") => {
                         "Return a left-justified string of length width.\n\nPadding is done using the specified fill character."
                     }
