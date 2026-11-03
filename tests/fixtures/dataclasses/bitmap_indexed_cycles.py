@@ -55,6 +55,15 @@ def main() -> None:
     measure(thin, len(thin), 701, 701 + 32768, -13.0)
     measure(thin, len(thin), 123, 123 + len(thin) + 32768, 5.0)
 
+    # A non-coprime stride visits one residue class. Exercise both a whole
+    # orbit and a partial last orbit from a nonzero start.
+    orbit = [Reading(-11.0, False)] * 7168
+    for j in range(1792):
+        orbit[3 * j] = other
+    measure(orbit, len(orbit), 37, 37 + 4 * 1024, -13.0)
+    measure(orbit, len(orbit), 93, 93 + 9 * 1024 + 57, 5.0)
+    measure(orbit, len(orbit), 93, 93 + 9 * 1024 + 57, 0.5)
+
     # Sparse physical edits can repeat one payload, or contain distinct rows.
     sparse = [Reading(-11.0, False)] * 65535
     for j in range(53):
