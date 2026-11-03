@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -591,7 +592,6 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
 fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, usize)> {
     use regex_syntax::ast::{ErrorKind, parse::ParserBuilder};
-    use std::borrow::Cow;
 
     let text: Cow<'_, str> = match ctx.heap.get(ctx.scalar_value(source)) {
         // Preserve one parser position per original Python code point.
@@ -1749,8 +1749,11 @@ pub(super) fn search(
         let mut captures = pattern.regex.create_captures();
         return match split::next_span(pattern, text, start, None, &mut captures) {
             Ok(Some(first)) => {
-                let text = text.to_vec();
-                findall(ctx, pattern, &text, first, &mut captures)
+                let snapshot = match &subject.projection {
+                    Some(p) => Cow::Borrowed(&p.text.as_bytes()[..end]),
+                    None => Cow::Owned(text.to_vec()),
+                };
+                findall(ctx, pattern, &subject, &snapshot, first, &mut captures)
             }
             Ok(None) => Ok(ctx.alloc(Value::List(Vec::new()))),
             Err(message) => Err(pattern.match_error(ctx, message)),
@@ -1856,28 +1859,34 @@ pub(super) fn match_method(ctx: &mut Context, name: &str, args: &[Id]) -> Result
 fn findall(
     ctx: &mut Context,
     pattern: &Pattern,
+    subject: &SearchSubject,
     text: &[u8],
     mut span: Span,
     captures: &mut Captures,
 ) -> Result<Id> {
+    let capture = |ctx: &mut Context, field: Option<Span>| {
+        let span = field.unwrap_or_else(|| Span::from(0..0));
+        if subject.projection.is_some() {
+            subject.slice(ctx, span)
+        } else {
+            Ok(ctx.alloc(group_value(&text[span.range()], pattern.bytes)))
+        }
+    };
     let mut found = Vec::new();
     loop {
-        let fields: Vec<_> = group_spans(captures)
-            .map(|span| span.map(|s| &text[s.range()]))
-            .collect();
+        let fields: Vec<_> = group_spans(captures).collect();
         let value = match fields.as_slice() {
-            [complete] => group_value(complete.unwrap_or_default(), pattern.bytes),
-            [_, one] => group_value(one.unwrap_or_default(), pattern.bytes),
+            [one] | [_, one] => capture(ctx, *one)?,
             [_, groups @ ..] => {
                 let values = groups
                     .iter()
-                    .map(|s| ctx.alloc(group_value(s.unwrap_or_default(), pattern.bytes)))
-                    .collect();
-                Value::Tuple(values)
+                    .map(|&s| capture(ctx, s))
+                    .collect::<Result<_>>()?;
+                ctx.alloc(Value::Tuple(values))
             }
             [] => unreachable!("every regex has an overall match"),
         };
-        found.push(ctx.alloc(value));
+        found.push(value);
         let Some(next) = split::next_span(pattern, text, span.end, Some(span), captures)
             .map_err(|message| pattern.match_error(ctx, message))?
         else {
