@@ -1188,6 +1188,7 @@ pub(crate) enum Builtin {
     Len,
     LengthResult,
     Abs,
+    FloatCopySign,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
     SortByComparator,

@@ -5129,6 +5129,7 @@ impl Emitter<'_, '_> {
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::HexFormat { .. }
+            | Builtin::FloatCopySign
             | Builtin::Abs => self.stdlib_builtin(builtin, &args),
             Builtin::TupleCacheNew => return self.record(returns),
             Builtin::TupleCacheResult => Value {
@@ -9568,6 +9569,7 @@ declare void @imre_popen_set_selector(ptr)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
+declare double @llvm.copysign.f64(double, double)
 declare double @llvm.trunc.f64(double)
 declare ptr @imre_int_str(i64)
 declare ptr @imre_decimal_int_text(i64)

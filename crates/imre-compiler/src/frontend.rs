@@ -9463,6 +9463,30 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name @ "math.copysign")))
+                if call.arguments.keywords.is_empty()
+                    && let [x, y] = call.arguments.args.as_ref()
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "math",
+                        "copysign",
+                    ) =>
+            {
+                let x = self
+                    .expr(x)
+                    .map_err(|_| self.object_runtime_export(name, call))?;
+                let y = self
+                    .expr(y)
+                    .map_err(|_| self.object_runtime_export(name, call))?;
+                if x.ty == Type::Float && y.ty == Type::Float {
+                    return Ok(Expr {
+                        ty: Type::Float,
+                        kind: ExprKind::Builtin(Builtin::FloatCopySign, vec![x, y]),
+                    });
+                }
+                return Err(self.object_runtime_export(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("posix.getpid")))
                 if call.arguments.is_empty()
                     && self
