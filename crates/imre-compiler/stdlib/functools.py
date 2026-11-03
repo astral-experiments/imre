@@ -316,6 +316,23 @@ class partialmethod:
     __class_getitem__ = classmethod(GenericAlias)
 
 
+def _unwrap_partial(func):
+    while isinstance(func, partial):
+        func = func.func
+    return func
+
+def _unwrap_partialmethod(func):
+    prev = None
+    while func is not prev:
+        prev = func
+        while isinstance(getattr(func, "__partialmethod__", None), partialmethod):
+            func = func.__partialmethod__
+        while isinstance(func, partialmethod):
+            func = getattr(func, 'func')
+        func = _unwrap_partial(func)
+    return func
+
+
 def _c3_merge(sequences):
     """Merges MROs in *sequences* to a single MRO using the C3 algorithm.
 

@@ -90,6 +90,13 @@ enum FunctionKind {
     Generator,
     GeneratorLambda,
     Coroutine,
+    AsyncGenerator,
+}
+
+impl FunctionKind {
+    fn is_async(self) -> bool {
+        matches!(self, Self::Coroutine | Self::AsyncGenerator)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -450,7 +457,7 @@ struct SourceCursor<'a> {
     advanced: Option<Result<DelegateOutcome>>,
     nested_resume: bool,
     sent: Id,
-    thrown: Option<(Error, Vec<Id>)>,
+    thrown: Option<(Error, Vec<Id>, bool)>,
 }
 
 impl<'a> SourceCursor<'a> {
@@ -464,7 +471,11 @@ impl<'a> SourceCursor<'a> {
     ) -> Self {
         let (sent, thrown) = match input {
             GeneratorInput::Send(sent) => (sent, None),
-            GeneratorInput::Throw { error, args } => (NONE, Some((error, args))),
+            GeneratorInput::Throw {
+                error,
+                args,
+                close_delegate,
+            } => (NONE, Some((error, args, close_delegate))),
         };
         Self {
             ip,
@@ -480,7 +491,11 @@ impl<'a> SourceCursor<'a> {
 
 pub(super) enum GeneratorInput {
     Send(Id),
-    Throw { error: Error, args: Vec<Id> },
+    Throw {
+        error: Error,
+        args: Vec<Id>,
+        close_delegate: bool,
+    },
 }
 
 pub(super) enum DelegateOutcome {
@@ -1712,7 +1727,7 @@ impl Program {
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) if !function => {
                 return Err(Error::new("SyntaxError", "'yield' outside function"));
             }
-            ast::Expr::Await(a) if self.kind == FunctionKind::Coroutine => {
+            ast::Expr::Await(a) if self.kind.is_async() => {
                 let value = match *a.value {
                     ast::Expr::Call(call) if Self::has_awaited_call_arguments(&call) => {
                         self.lower_awaited_call(call, line);
@@ -1732,13 +1747,21 @@ impl Program {
                 return Ok(None);
             }
             ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
+            ast::Expr::YieldFrom(_) if self.kind.is_async() => {
+                return Err(Error::new(
+                    "SyntaxError",
+                    "'yield from' inside async function",
+                ));
+            }
             ast::Expr::YieldFrom(y) => {
                 self.instructions.push((line, Instruction::Iter(*y.value)));
                 Instruction::Delegate
             }
             value => return Ok(Some(value)),
         };
-        self.kind = FunctionKind::Generator;
+        if !self.kind.is_async() {
+            self.kind = FunctionKind::Generator;
+        }
         self.instructions.push((line, op));
         Ok(None)
     }
@@ -2004,6 +2027,12 @@ impl Program {
                         self.instructions.push((line, Instruction::Return(None)));
                         continue;
                     };
+                    if self.kind == FunctionKind::AsyncGenerator {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            "'return' with value in async generator",
+                        ));
+                    }
                     match self.lower_suspension(*value, line, function)? {
                         Some(value) => Instruction::Return(Some(value)),
                         None => Instruction::ReturnSent,
@@ -2085,10 +2114,11 @@ impl Program {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
-                        if imre_ast::code_flags::is_generator(&s.body) {
-                            return Err(unsupported("async generator function"));
-                        }
-                        child.kind = FunctionKind::Coroutine;
+                        child.kind = if imre_ast::code_flags::is_generator(&s.body) {
+                            FunctionKind::AsyncGenerator
+                        } else {
+                            FunctionKind::Coroutine
+                        };
                     }
                     child.lower_namespace(s.body, lines, true)?;
                     for param in s.parameters.iter() {
@@ -2264,7 +2294,7 @@ impl Program {
                     continue;
                 }
                 Stmt::With(s) => {
-                    if s.is_async && self.kind != FunctionKind::Coroutine {
+                    if s.is_async && !self.kind.is_async() {
                         return Err(Error::new(
                             "SyntaxError",
                             "'async with' outside async function",
@@ -2993,6 +3023,7 @@ impl Context {
                 FunctionKind::Generator | FunctionKind::GeneratorLambda => {
                     imre_ast::code_flags::GENERATOR
                 }
+                FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
                 FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
                 FunctionKind::Plain => 0,
             },
@@ -3534,13 +3565,25 @@ impl Context {
         let definition = self.code_object(code);
         let kind = match &definition.body {
             Body::Source(program) => program.kind,
+            Body::PendingGenerator { .. }
+                if definition.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 =>
+            {
+                FunctionKind::AsyncGenerator
+            }
             Body::PendingGenerator { .. } if definition.coroutine => FunctionKind::Coroutine,
             Body::PendingGenerator { .. } => FunctionKind::Generator,
             Body::Native(_) => unreachable!("source function"),
         };
         if kind != FunctionKind::Plain {
             let frame = self.new_generator(code, scope, owner);
-            Ok(if kind == FunctionKind::Coroutine {
+            Ok(if kind == FunctionKind::AsyncGenerator {
+                self.alloc(Value::AsyncGenerator {
+                    frame,
+                    running: false,
+                    closed: false,
+                    finalizer: None,
+                })
+            } else if kind == FunctionKind::Coroutine {
                 let origin = self.coroutine_origin();
                 self.alloc(Value::Coroutine { frame, origin })
             } else {
@@ -3564,6 +3607,38 @@ impl Context {
                     unreachable!("classified generator")
                 }
             }
+        }
+    }
+
+    /// Return the live await delegate, if the frame is parked at a delegation instruction.
+    pub(super) fn async_generator_await(&self, frame: Id) -> Id {
+        let Value::Generator {
+            code,
+            offset: Some(ip),
+            iterators,
+            ..
+        } = self.heap.get(frame)
+        else {
+            return NONE;
+        };
+        let Body::Source(program) = &self.code_object(*code).body else {
+            return NONE;
+        };
+        if !matches!(
+            program.instructions.get(*ip),
+            Some((_, Instruction::Delegate))
+        ) {
+            return NONE;
+        }
+        match iterators.last() {
+            Some(&iter) => match *self.heap.get(iter) {
+                Value::CoroutineWrapper {
+                    coroutine,
+                    implicit: true,
+                } => coroutine,
+                _ => iter,
+            },
+            None => NONE,
         }
     }
 
@@ -3613,7 +3688,9 @@ impl Context {
         program.private_names = private_names;
         program.qualname = self.str_value(code.qualname)?.to_owned();
         program.first_line = code.first_line;
-        program.kind = if def.is_async {
+        program.kind = if code.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
+            FunctionKind::AsyncGenerator
+        } else if def.is_async {
             FunctionKind::Coroutine
         } else {
             FunctionKind::Generator
@@ -3649,6 +3726,11 @@ impl Context {
     }
 
     pub(super) fn generator_send(&mut self, generator: Id, sent: Id) -> Result<Id> {
+        self.send_to_frame(generator, sent)?
+            .ok_or_else(|| self.exception("StopIteration", &[]))
+    }
+
+    pub(super) fn send_to_frame(&mut self, generator: Id, sent: Id) -> Result<Option<Id>> {
         let Value::Generator {
             code,
             running,
@@ -3662,7 +3744,13 @@ impl Context {
             ));
         };
         let coroutine = self.code_object(code).coroutine;
-        let kind = if coroutine { "coroutine" } else { "generator" };
+        let kind = if self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
+            "async generator"
+        } else if coroutine {
+            "coroutine"
+        } else {
+            "generator"
+        };
         if running {
             return Err(Error::new(
                 "ValueError",
@@ -3681,14 +3769,13 @@ impl Context {
                 format!("can't send non-None value to a just-started {kind}"),
             ));
         }
-        let next = if sent == NONE || matches!(self.code_object(code).body, Body::Native(_)) {
-            self.next_result(generator)?
+        if sent == NONE || matches!(self.code_object(code).body, Body::Native(_)) {
+            self.next_result(generator)
         } else {
             stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
                 self.resume_source(generator, sent)
-            })?
-        };
-        next.ok_or_else(|| self.exception("StopIteration", &[]))
+            })
+        }
     }
 
     pub(super) fn resume_source(&mut self, id: Id, sent: Id) -> Result<Option<Id>> {
@@ -3749,13 +3836,13 @@ impl Context {
         if advanced.is_none() {
             let input_roots = match &input {
                 GeneratorInput::Send(_) => 1,
-                GeneratorInput::Throw { error, args } => args.len() + error.roots().count(),
+                GeneratorInput::Throw { error, args, .. } => args.len() + error.roots().count(),
             };
             self.heap.reserve_temporaries(1 + input_roots)?;
             self.heap.keep(id);
             match &input {
                 GeneratorInput::Send(value) => self.heap.keep(*value),
-                GeneratorInput::Throw { error, args } => {
+                GeneratorInput::Throw { error, args, .. } => {
                     for root in error.roots().chain(args.iter().copied()) {
                         self.heap.keep(root);
                     }
@@ -3808,6 +3895,8 @@ impl Context {
                     self.frame_error(error, code)
                 }
             });
+        let owns_finalizer =
+            self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR == 0;
         let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
             if matches!(&self.code_object(code).body, Body::Source(program)
                 if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate)))));
@@ -3834,7 +3923,7 @@ impl Context {
                 *offset = Some(ip);
                 *iterators = active;
                 *protected = blocks;
-                if needs_finalizer {
+                if needs_finalizer && owns_finalizer {
                     self.heap.register_finalizer(id);
                 }
                 return Ok(step);
@@ -4021,7 +4110,7 @@ impl Context {
                         live.extend_from_slice(cursor.iterators);
                         live.extend(cursor.protected.iter().flat_map(FinallyBlock::roots));
                         live.push(cursor.sent);
-                        if let Some((error, args)) = &cursor.thrown {
+                        if let Some((error, args, _)) = &cursor.thrown {
                             live.extend(error.roots());
                             live.extend_from_slice(args);
                         }
@@ -4054,7 +4143,7 @@ impl Context {
                 #[cfg(not(unix))]
                 let interrupt: Option<Error> = None;
                 let raised = if inject {
-                    cursor.thrown.take().map(|(error, _)| error)
+                    cursor.thrown.take().map(|(error, _, _)| error)
                 } else {
                     interrupt
                 };
@@ -4685,7 +4774,11 @@ impl Context {
                     )));
                 } else if delegated {
                     let input = match thrown.take() {
-                        Some((error, args)) => GeneratorInput::Throw { error, args },
+                        Some((error, args, close_delegate)) => GeneratorInput::Throw {
+                            error,
+                            args,
+                            close_delegate,
+                        },
                         None => GeneratorInput::Send(*sent),
                     };
                     self.advance_delegate(iter, input)?
@@ -4724,7 +4817,12 @@ impl Context {
                     .transpose()?
                     .unwrap_or(NONE);
                 return Ok(Some(if matches!(op, Instruction::Yield(_)) {
-                    Step::Yield(v, *ip)
+                    let yielded = if code.kind == FunctionKind::AsyncGenerator {
+                        self.alloc(Value::AsyncGeneratorYield(v))
+                    } else {
+                        v
+                    };
+                    Step::Yield(yielded, *ip)
                 } else {
                     Step::Return(v)
                 }));
