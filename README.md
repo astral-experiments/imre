@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **8,356 of 13,328 tests (62.7%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **8,593 of 13,328 tests (64.5%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -134,10 +134,10 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `tempfile` | 108 | 118 | 2 | All 118 originals finished in ordinary and boxed O0/O3. Each native run passed 108 and skipped 10. Stock passed 112 and skipped six. Two extra native skips are documented omissions. The other two require working os.fork and os.spawnl. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
-| `typing` | 450 | 712 | 0 | One more original resolved all four `ClassVar[int]` annotations through `get_type_hints` on stock and ordinary O0/O3. The total includes earlier selected and class runs. [Callbacks and replay](benchmarks/cpython_stdlib/full/typing/receipts/annotation-resolution/README.md) |
+| `typing` | 687 | 712 | 0 | 687 upstream parents passed across stock and public native O0/O3 runs. The latest class and doctest results matched all 114 child subtests and 37 doctest examples. Some classes had separate failing parents. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged scripts compiled and exited 0 in ordinary and runtime-import modes at both native levels. Four HTTP tests now pass with SSL enabled. Three originals matched only in child callbacks, and two Windows cases skipped on stock Linux. |
-| **Total** | **8,356** | **13,328** | **27** | **3 complete suites match stock on `main`** |
+| **Total** | **8,593** | **13,328** | **27** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
