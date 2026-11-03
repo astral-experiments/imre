@@ -222,12 +222,7 @@ impl Classes {
                     ) {
                         let error =
                             module.error(base, "socketserver base class requires object lowering");
-                        graph.class_body_error.replace(Some(error.clone()));
-                        graph
-                            .object_builtin_errors
-                            .borrow_mut()
-                            .insert(error.clone());
-                        return Err(error);
+                        return Err(graph.require_object_class_layout(error));
                     }
                     ids.insert(definition, source_nodes.len());
                     let mut record = std::borrow::Cow::Borrowed(node);
@@ -274,7 +269,7 @@ impl Classes {
             .collect::<Vec<_>>();
         let definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
         // An inner class uses the object runtime, but every fixed class must validate first.
-        if let Some(error) = graph.class_body_error.borrow().as_ref() {
+        if let Some(error) = graph.class_layout_error.borrow().as_ref() {
             return Err(error.clone());
         }
         let data_names: HashSet<_> = definitions
@@ -831,7 +826,7 @@ fn collect_class(
                 }
                 if name == "__del__" && graph.command_startup.is_some() {
                     let error = module.error(method, "class finalizers require the object runtime");
-                    graph.class_body_error.replace(Some(error.clone()));
+                    graph.class_layout_error.replace(Some(error.clone()));
                     return Err(error);
                 }
                 let unary_protocol = matches!(
@@ -870,7 +865,7 @@ fn collect_class(
                         decorator,
                         "unittest method skips require native class construction",
                     );
-                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    graph.class_layout_error.borrow_mut().get_or_insert(error);
                     graph.check_decorated_method_calls.set(true);
                     decorators.has_runtime_method = true;
                     MethodKind::Instance
@@ -891,7 +886,7 @@ fn collect_class(
                             }) {
                                 // The class builder evaluates the factory and binds its result.
                                 graph
-                                    .class_body_error
+                                    .class_layout_error
                                     .borrow_mut()
                                     .get_or_insert(error.clone());
                                 graph.check_method_factories.set(true);
@@ -1114,7 +1109,7 @@ fn collect_class(
                     return Err(module.error(nested, "duplicate class binding"));
                 }
                 class_bindings.insert(name.to_owned());
-                graph.class_body_error.borrow_mut().get_or_insert_with(|| {
+                graph.class_layout_error.borrow_mut().get_or_insert_with(|| {
                     module.error(nested, "nested classes require native class construction")
                 });
             }
@@ -1135,7 +1130,7 @@ fn collect_class(
                     branch,
                     "conditional method definitions require native class construction",
                 );
-                graph.class_body_error.replace(Some(error.clone()));
+                graph.class_layout_error.replace(Some(error.clone()));
                 return Err(error);
             }
             _ => {
@@ -1511,7 +1506,7 @@ pub(crate) fn method_kind(
     let module = &graph.modules[module_id];
     let unsupported = |error: String| {
         if graph.command_startup.is_some() {
-            graph.class_body_error.replace(Some(error.clone()));
+            graph.class_layout_error.replace(Some(error.clone()));
         }
         Err(error)
     };

@@ -2408,7 +2408,7 @@ pub(crate) struct SourceGraph {
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
     pub(crate) check_decorated_method_calls: std::cell::Cell<bool>,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
-    pub(crate) class_body_error: std::cell::RefCell<Option<String>>,
+    pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
     pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
     pub(crate) return_errors: std::cell::RefCell<HashSet<String>>,
@@ -2432,6 +2432,13 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Select object class construction while preserving checked calls and typed module layouts.
+    pub(crate) fn require_object_class_layout(&self, error: String) -> String {
+        self.class_layout_error.replace(Some(error.clone()));
+        self.object_builtin_errors.borrow_mut().insert(error.clone());
+        error
+    }
+
     /// The native value-struct decorator has no corresponding Python object runtime export.
     pub(crate) fn imports_struct_decorator(&self) -> bool {
         self.modules.iter().any(|module| {
@@ -3688,7 +3695,7 @@ impl<'a> Loader<'a> {
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
             check_decorated_method_calls: Default::default(),
             check_method_factories: Default::default(),
-            class_body_error: Default::default(),
+            class_layout_error: Default::default(),
             object_builtin_errors: Default::default(),
             deferred_object_error: self.wildcard_import.into(),
             return_errors: Default::default(),

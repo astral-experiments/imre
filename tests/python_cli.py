@@ -1692,6 +1692,21 @@ def main():
         )
         compare("-B", descriptor, native_args=("run", descriptor, "--quiet"))
 
+        (root / "namedtuple_spec.py").write_text(
+            "from importlib.machinery import ModuleSpec\n"
+            "def make_spec(): return ModuleSpec('example', None)\n"
+        )
+        options = root / "namedtuple_options.py"
+        options.write_text(
+            "from collections import namedtuple\n"
+            "T = namedtuple('T', ['line', 'class'], defaults=[None], rename=True, module='other')\n"
+            "def spec_name():\n"
+            "    from namedtuple_spec import make_spec\n"
+            "    return make_spec().name\n"
+            "print(T(7), T._field_defaults, T.__module__, spec_name())\n"
+        )
+        compare("-B", options, native_args=("run", options, "--quiet"))
+
         unrelated = root / "unrelated_asdict.py"
         unrelated.write_text(
             "from collections import namedtuple\n"

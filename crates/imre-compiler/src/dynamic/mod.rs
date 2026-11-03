@@ -484,7 +484,7 @@ pub(crate) enum ObjectOperation<'a> {
     TracedEntry,
     Builtin,
     OrderedCommandImport,
-    ClassBody(&'a crate::modules::SourceGraph),
+    ClassLayout(&'a crate::modules::SourceGraph),
 }
 
 pub(crate) fn compile(
@@ -753,7 +753,7 @@ pub(crate) fn compile(
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
             && match operation {
-                Some(ObjectOperation::ClassBody(graph)) => owner == "__main__"
+                Some(ObjectOperation::ClassLayout(graph)) => owner == "__main__"
                     || graph.modules.iter().any(|m| m.name == owner),
                 _ => true,
             }

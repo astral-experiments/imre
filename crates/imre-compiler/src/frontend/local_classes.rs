@@ -178,7 +178,7 @@ impl Checker<'_> {
                         ))
                     ) {
                         let error = self.scoped_builtin_error("socketserver base class", base);
-                        self.graph.class_body_error.replace(Some(error.clone()));
+                        self.graph.class_layout_error.replace(Some(error.clone()));
                         return Err(error);
                     }
                     if self.graph.session.is_known_class(

@@ -346,8 +346,8 @@ fn object_fallback<T>(
     let operation = graph.as_ref().and_then(|g| {
         if traced_typed_entry {
             Some(dynamic::ObjectOperation::TracedEntry)
-        } else if g.class_body_error.borrow().as_ref() == Some(&error) {
-            Some(dynamic::ObjectOperation::ClassBody(g))
+        } else if g.class_layout_error.borrow().as_ref() == Some(&error) {
+            Some(dynamic::ObjectOperation::ClassLayout(g))
         } else {
             g.object_builtin_errors
                 .borrow()
