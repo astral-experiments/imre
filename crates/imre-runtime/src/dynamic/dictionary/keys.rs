@@ -704,6 +704,7 @@ impl Context {
                     let mut duration = value.hash_delta_parts();
                     if matches!(kind, "time" | "datetime")
                         && (receiver != key
+                            || value.is_packed_datetime() && value.fields()[7] != 0
                             || crate::dynamic::stdlib::datetime::comparison::custom(self, *tzinfo))
                         && let Some(offset) =
                             crate::dynamic::stdlib::datetime::comparison::hash_offset(

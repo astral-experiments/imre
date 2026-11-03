@@ -56,7 +56,7 @@ impl Clock {
 
     fn flipped_offset(&self, ctx: &mut Context) -> Result<Option<i128>> {
         let subtype = ctx.scalar_value(self.receiver) != self.receiver;
-        if !subtype && !custom(ctx, self.zone) {
+        if !subtype && !custom(ctx, self.zone) && !self.value.is_packed_datetime() {
             return self.offset(ctx);
         }
         let mark = ctx.heap.temporary_mark();
@@ -97,7 +97,10 @@ fn pair(ctx: &mut Context, a: Id, b: Id) -> Option<(Clock, Clock)> {
     let left = Clock::get(ctx, a)?;
     let right = Clock::get(ctx, b)?;
     if left.value.class() != right.value.class()
-        || !(custom(ctx, left.zone) || custom(ctx, right.zone))
+        || !(custom(ctx, left.zone)
+            || custom(ctx, right.zone)
+            || (left.zone != right.zone
+                && (left.value.is_packed_datetime() || right.value.is_packed_datetime())))
     {
         return None;
     }
@@ -140,10 +143,14 @@ pub(in crate::dynamic) fn compare(
     let Some((a, b)) = pair(ctx, a, b) else {
         return Ok(None);
     };
-    let mut diff = a.value.wall_microseconds() - b.value.wall_microseconds();
+    let time = a.value.class() == "time";
+    let mut diff = if time {
+        a.value.wall_microseconds() - b.value.wall_microseconds()
+    } else {
+        a.value.compare_datetime_fields(&b.value) as i128
+    };
     if a.zone != b.zone {
         let (left, right) = (a.offset(ctx)?, b.offset(ctx)?);
-        let time = a.value.class() == "time";
         if left != right {
             match (left, right) {
                 // The accelerator compares time offsets in whole seconds, including for negative deltas.
@@ -221,7 +228,7 @@ pub(super) fn rich_method(
         let Some(right) = calendar(ctx, b, "date").filter(|right| right.class() == "date") else {
             return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
         };
-        let order = left.ordinal().cmp(&right.ordinal());
+        let order = left.fields()[..3].cmp(&right.fields()[..3]);
         return Ok(crate::dynamic::builtins::boolean(match name {
             "__eq__" => order.is_eq(),
             "__ne__" => order.is_ne(),
