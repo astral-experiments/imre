@@ -10,13 +10,15 @@ pub struct ChildControl {
 }
 
 struct State {
-    child: Child,
+    child: LaunchedChild,
     status: Option<ReturnCode>,
 }
 
 /// Kernel statuses fit a C int. Users may assign any Python integer to returncode.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum ReturnCode {
+    /// Another waiter consumed the kernel status. Public poll/wait then report zero.
+    NoChild,
     Small(i32),
     Large(BigInt),
 }
@@ -31,6 +33,7 @@ impl ReturnCode {
 
     pub(super) fn into_word(self) -> usize {
         match self {
+            Self::NoChild => exit_word(0),
             Self::Small(value) => exit_word(value),
             Self::Large(value) => Int::new(value).into_raw(),
         }
@@ -38,10 +41,11 @@ impl ReturnCode {
 
     /// Synchronous run/call own a fresh Popen that never escapes to user code.
     pub(super) fn kernel(self) -> i32 {
-        let Self::Small(code) = self else {
-            unreachable!("kernel status fits in a C int")
-        };
-        code
+        match self {
+            Self::NoChild => 0,
+            Self::Small(code) => code,
+            Self::Large(_) => unreachable!("kernel status fits in a C int"),
+        }
     }
 }
 
@@ -50,7 +54,7 @@ impl State {
         if self.status.is_none() {
             let value = value()?;
             // SAFETY: the locked state still owns this PID; kill checks the signal.
-            if unsafe { libc::kill(self.child.id() as libc::pid_t, value) } < 0 {
+            if unsafe { libc::kill(self.child.pid(), value) } < 0 {
                 let error = io::Error::last_os_error();
                 if error.raw_os_error() != Some(libc::ESRCH) {
                     return Err(errno_error(error));
@@ -60,13 +64,12 @@ impl State {
         Ok(())
     }
 
-    /// Poll the kernel when the public cache is empty. Rust's Child::try_wait
-    /// caches a previous reap even after Python assigns returncode = None.
+    /// Poll the kernel when the public cache is empty.
     fn refresh(&mut self) -> Result<()> {
         if self.status.is_some() {
             return Ok(());
         }
-        let pid = self.child.id() as libc::pid_t;
+        let pid = self.child.pid();
         let mut status = 0;
         loop {
             // SAFETY: status is writable, and the mutex serializes all Popen reapers.
@@ -76,7 +79,7 @@ impl State {
                     let error = io::Error::last_os_error();
                     match error.raw_os_error() {
                         Some(libc::EINTR) => continue,
-                        Some(libc::ECHILD) => self.status = Some(ReturnCode::Small(0)),
+                        Some(libc::ECHILD) => self.status = Some(ReturnCode::NoChild),
                         _ => return Err(errno_error(error)),
                     }
                 }
@@ -90,9 +93,9 @@ impl State {
 }
 
 impl ChildControl {
-    pub(super) fn new(child: Child) -> Self {
+    pub(super) fn new(child: LaunchedChild) -> Self {
         Self {
-            pid: child.id() as libc::pid_t,
+            pid: child.pid(),
             state: Mutex::new(State {
                 child,
                 status: None,
@@ -201,7 +204,7 @@ mod tests {
             .args(["-c", "exec sleep 10"])
             .spawn()
             .unwrap();
-        let control = ChildControl::new(child);
+        let control = ChildControl::new(LaunchedChild::Process(child));
         let ready = Barrier::new(3);
         std::thread::scope(|scope| {
             let readers: Vec<_> = [true, false]

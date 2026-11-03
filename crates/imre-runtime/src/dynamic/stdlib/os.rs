@@ -8,6 +8,8 @@ pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
 #[cfg(target_os = "linux")]
+pub(super) use spawn_child::fork_for_child_callbacks;
+#[cfg(target_os = "linux")]
 mod spawn_plain;
 pub(in crate::dynamic) mod stat;
 #[cfg(target_os = "linux")]
@@ -218,7 +220,7 @@ pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     super::audit::event(ctx, "os.fork", &[])?;
     let pid = match spawn_plain::try_spawn(ctx, path, argv, exec)? {
         Some(pid) => pid,
-        None => spawn_child::fork_for_child_callbacks(ctx)?,
+        None => fork_for_child_callbacks(ctx)?,
     };
     Ok(ctx.int(i64::from(pid)))
 }

@@ -33,11 +33,20 @@ pub unsafe extern "C" fn imre_subprocess_shell_output(
         // SAFETY: the command uses the same rooted scalar/list/tuple ABI as Popen.
         let command = unsafe { WordKind::new(kind).acquire(args as usize) };
         // SAFETY: the borrowed config points only to the same rooted command.
-        let child = unsafe {
-            launch_error::spawn(&command, &config, streams, Default::default(), true, |_| {
-                Ok(ChildAttributes::default())
-            })
-        }?;
+        let popen::LaunchedChild::Process(child) = unsafe {
+            launch_error::spawn(
+                &command,
+                &config,
+                streams,
+                Default::default(),
+                true,
+                None,
+                |_| Ok(ChildAttributes::default()),
+            )
+        }?
+        else {
+            unreachable!("shell output uses the ordinary launcher")
+        };
         let (status, bytes, _) = capture(child).map_err(capture_error)?;
         let mut output = codec.decode_stream(&bytes, errors.map(Str::as_str), true)?;
         if output.ends_with('\n') {

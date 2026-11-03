@@ -211,9 +211,10 @@ def _fork_fds(pass_fds):
 class Popen:
     __class_getitem__ = classmethod(_GenericAlias)
     _handle = None
+    _child_created = False
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
-                 stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
+                 stderr=None, preexec_fn=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
                  umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, extra_groups=None):
         if bufsize is None:
@@ -273,7 +274,7 @@ class Popen:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
             self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
             self._replacement_output = None
-            self._execute_child(args, executable, None, close_fds, pass_fds, cwd, env,
+            self._execute_child(args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
                                 startupinfo, creationflags, shell, *fds, restore_signals,
                                 None, gids, None, umask, start_new_session,
                                 -1 if process_group is None else process_group)
@@ -295,10 +296,18 @@ class Popen:
                        start_new_session, process_group):
         if (p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite) != self._pipe_fds:
             raise NotImplementedError("replacing prepared subprocess descriptors is unsupported")
-        if preexec_fn is not None or gid is not None or uid is not None:
+        if gid is not None or uid is not None:
             raise NotImplementedError("unsupported subprocess child settings")
-        self._handle = _process.launch(self._prepared, args, executable, close_fds, restore_signals,
-                                       cwd, env, shell, start_new_session, process_group, umask, pass_fds, gids)
+        slot = None
+        if preexec_fn is not None:
+            # A parent signal can run before the launch call returns to Python.
+            slot = self._handle = _process.reserve_handle()
+        handle = _process.launch(self._prepared, args, executable, close_fds, restore_signals,
+                                 cwd, env, shell, start_new_session, process_group, umask, pass_fds,
+                                 gids, preexec_fn, slot, self)
+        if slot is None:
+            self._handle = handle
+            self._child_created = True
 
     def __repr__(self):
         result = f"<{self.__class__.__name__}: returncode: {self.returncode} args: {self.args!r}>"
@@ -307,7 +316,7 @@ class Popen:
         return result
 
     def __del__(self, _warn=_warn):
-        if self._handle is None:
+        if self._handle is None or not _process.started(self._handle):
             return
         if self.returncode is None:
             _warn("subprocess %s is still running" % self.pid, ResourceWarning, source=self)
