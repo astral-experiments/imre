@@ -502,6 +502,15 @@ impl Context {
         }
     }
 
+    fn writable_owner_bytes(&mut self, owner: Id) -> Result<&mut [u8]> {
+        let storage = self.view_storage_id(owner);
+        if let Value::RawReadWindow(w) = *self.heap.get(storage) {
+            let range = w.checked_range(self.owner_bytes(w.backing)?.len())?;
+            return Ok(&mut self.writable_storage_bytes(w.backing)?[range]);
+        }
+        self.writable_storage_bytes(storage)
+    }
+
     fn writable_storage_bytes(&mut self, storage: Id) -> Result<&mut [u8]> {
         Self::mutable_storage_bytes(self.heap.get_mut(storage))
     }

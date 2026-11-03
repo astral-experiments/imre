@@ -214,7 +214,22 @@ def check_incremental_decoder_factory():
         entry.incrementaldecoder = IncrementalDecoder
 
 
+def check_utf8_buffer_slice():
+    from array import array
+
+    assert codecs.utf_8_decode(array("B", b"data")) == ("data", 4)
+    source = memoryview(array("B", b"\xffdata\xff"))
+    assert codecs.utf_8_decode(source[1:5].cast("I")) == ("data", 4)
+    try:
+        codecs.utf_8_decode(source[1:5:2])
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("decoded a non-contiguous array view")
+
+
 def current():
+    check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
     check_incremental_decoder_factory()
     check_text_encoding_flag()

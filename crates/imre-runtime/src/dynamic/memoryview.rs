@@ -5,6 +5,8 @@ use num_traits::ToPrimitive;
 #[derive(Clone, Copy)]
 pub(super) struct ViewLayout {
     pub(super) start: usize,
+    // Remainder when the first byte of a cast is unaligned for its item size.
+    byte_offset: usize,
     pub(super) len: usize,
     pub(super) stride: i64,
     pub(super) byte_format: Option<&'static str>,
@@ -14,6 +16,7 @@ impl ViewLayout {
     pub(super) fn full(len: usize) -> Self {
         Self {
             start: 0,
+            byte_offset: 0,
             len,
             stride: 1,
             byte_format: None,
@@ -29,8 +32,10 @@ impl ViewLayout {
     }
 
     // The first and last element bound every address in a one-dimensional view.
-    fn checked(self, elements: usize) -> Result<Self> {
-        if self.len > elements
+    fn checked(self, bytes: usize, width: usize) -> Result<Self> {
+        let elements = bytes.saturating_sub(self.byte_offset) / width;
+        if self.byte_offset > bytes
+            || self.len > elements
             || self.start > elements
             || (self.len != 0
                 && (self.start == elements
@@ -46,6 +51,14 @@ impl ViewLayout {
 
     fn element(self, index: usize) -> usize {
         self.position(index) as usize
+    }
+
+    pub(super) fn byte_start(self, width: usize) -> usize {
+        self.byte_offset + self.start * width
+    }
+
+    fn byte_at(self, index: usize, width: usize) -> usize {
+        self.byte_offset + self.element(index) * width
     }
 
     fn sliced(self, bounds: [Option<i64>; 3]) -> Self {
@@ -65,7 +78,7 @@ impl ViewLayout {
             },
             len,
             stride,
-            byte_format: self.byte_format,
+            ..self
         }
     }
 }
@@ -80,7 +93,7 @@ struct Span<'a> {
 
 impl<'a> Span<'a> {
     fn element(&self, index: usize) -> &[u8] {
-        let offset = self.layout.element(index) * self.width;
+        let offset = self.layout.byte_at(index, self.width);
         &self.data[offset..offset + self.width]
     }
 
@@ -91,7 +104,7 @@ impl<'a> Span<'a> {
                 "memoryview: underlying buffer is not C-contiguous",
             ));
         }
-        let begin = self.layout.start * self.width;
+        let begin = self.layout.byte_start(self.width);
         Ok(&self.data[begin..begin + self.layout.len * self.width])
     }
 
@@ -110,12 +123,16 @@ impl<'a> Span<'a> {
         Ok(bytes)
     }
 
-    fn item(&self, index: usize) -> Option<Value> {
+    fn item(&self, index: usize) -> Result<Value> {
         if let Some(array) = self.array {
-            array.at(self.layout.element(index)).ok()
-        } else {
-            Some(Value::Int(i64::from(self.element(index)[0]).into()))
+            return array.at(self.layout.element(index));
         }
+        let bytes = self.element(index);
+        let number = match self.format {
+            "I" | "@I" => i64::from(u32::from_ne_bytes(bytes.try_into().unwrap())),
+            _ => i64::from(bytes[0]),
+        };
+        Ok(Value::Int(number.into()))
     }
 }
 
@@ -144,12 +161,17 @@ impl Context {
             None => ViewLayout::full(self.view_element_count(owner)?),
         };
         let (_, width) = self.view_format_width(owner, layout);
-        layout.checked(self.owner_bytes(owner)?.len() / width)
+        layout.checked(self.owner_bytes(owner)?.len(), width)
     }
 
     pub(super) fn view_format_width(&self, owner: Id, layout: ViewLayout) -> (&'static str, usize) {
         if let Some(format) = layout.byte_format {
-            return (format, 1);
+            let width = if matches!(format, "I" | "@I") {
+                size_of::<u32>()
+            } else {
+                1
+            };
+            return (format, width);
         }
         if !matches!(self.heap.get(owner), Value::RawReadWindow(_))
             && let Value::Array(a) = self.heap.get(self.view_storage_id(owner))
@@ -157,14 +179,6 @@ impl Context {
             return a.view_layout();
         }
         ("B", 1)
-    }
-
-    pub(super) fn unsigned_assignment_bytes(&self, value: Id, len: usize) -> Result<Vec<u8>> {
-        let span = self.buffer_span(value)?;
-        if span.format.trim_start_matches('@') != "B" || span.layout.len != len {
-            return Err(structure_error());
-        }
-        span.gather()
     }
 
     fn buffer_span(&self, id: Id) -> Result<Span<'_>> {
@@ -177,7 +191,12 @@ impl Context {
         Ok(Span {
             data: self.owner_bytes(owner)?,
             array: match self.heap.get(self.view_storage_id(owner)) {
-                Value::Array(array) if layout.byte_format.is_none() => Some(array),
+                Value::Array(array)
+                    if layout.byte_format.is_none()
+                        && !matches!(self.heap.get(owner), Value::RawReadWindow(_)) =>
+                {
+                    Some(array)
+                }
                 _ => None,
             },
             layout,
@@ -215,32 +234,41 @@ impl Context {
                 "memoryview: casts are restricted to C-contiguous views",
             ));
         }
-        let byte_format = match name {
-            "B" => "B",
-            "@B" => "@B",
+        let native = name.strip_prefix('@').unwrap_or(name);
+        if native.len() != 1 || !"cBb?hHiIlLqQnNefdP".contains(native) {
+            return Err(Error::new(
+                "ValueError",
+                "memoryview: destination format must be a native single character format prefixed with an optional '@'",
+            ));
+        }
+        if !matches!(span.format.trim_start_matches('@'), "B" | "b" | "c")
+            && !matches!(native, "B" | "b" | "c")
+        {
+            return Err(Error::new(
+                "TypeError",
+                "memoryview: cannot cast between two non-byte formats",
+            ));
+        }
+        let (format, width) = match name {
+            "B" => ("B", 1),
+            "@B" => ("@B", 1),
+            "I" => ("I", size_of::<u32>()),
+            "@I" => ("@I", size_of::<u32>()),
             _ => {
-                let native = name.strip_prefix('@').unwrap_or(name);
-                if native.len() != 1 || !"cb?hHiIlLqQnNefdP".contains(native) {
-                    return Err(Error::new(
-                        "ValueError",
-                        "memoryview: destination format must be a native single character format prefixed with an optional '@'",
-                    ));
-                }
-                if !matches!(span.format.trim_start_matches('@'), "B" | "b" | "c")
-                    && !matches!(native, "B" | "b" | "c")
-                {
-                    return Err(Error::new(
-                        "TypeError",
-                        "memoryview: cannot cast between two non-byte formats",
-                    ));
-                }
                 return Err(Error::new(
                     "NotImplementedError",
-                    "only casts to unsigned bytes are supported",
+                    "only casts to unsigned bytes and unsigned ints are supported",
                 ));
             }
         };
-        let len = span.layout.len * span.width;
+        let nbytes = span.layout.len * span.width;
+        if !nbytes.is_multiple_of(width) {
+            return Err(Error::new(
+                "TypeError",
+                "memoryview: length is not a multiple of itemsize",
+            ));
+        }
+        let len = nbytes / width;
         if let Some(shape) = shape {
             let (Value::List(dims) | Value::Tuple(dims)) = self.heap.get(self.scalar_value(shape))
             else {
@@ -283,9 +311,11 @@ impl Context {
                 ));
             }
         }
+        let offset = span.layout.byte_start(span.width);
         let cast = ViewLayout {
-            start: span.layout.start * span.width,
-            byte_format: Some(byte_format),
+            start: offset / width,
+            byte_offset: offset % width,
+            byte_format: Some(format),
             ..ViewLayout::full(len)
         };
         let child = self.new_memoryview(view)?;
@@ -326,7 +356,7 @@ impl Context {
         {
             return x == y;
         }
-        (0..left.layout.len).all(|i| match (left.item(i), right.item(i)) {
+        (0..left.layout.len).all(|i| match (left.item(i).ok(), right.item(i).ok()) {
             (Some(Value::Int(x)), Some(Value::Int(y))) => x.cmp(&y).is_eq(),
             (Some(Value::Float(x)), Some(Value::Float(y))) => x == y,
             (Some(Value::Int(n)), Some(Value::Float(f)))
@@ -397,7 +427,7 @@ impl Context {
                 "index out of bounds on dimension 1",
             ));
         }
-        Ok(layout.element(index as usize))
+        Ok(index as usize)
     }
 
     pub(super) fn memoryview_get(&mut self, view: Id, key: Id) -> Result<Id> {
@@ -435,16 +465,8 @@ impl Context {
             return Ok(child);
         }
         let index = self.view_index(view, key, false)?;
-        let owner = self.view_owner(view)?;
-        if self.view_layout(view)?.byte_format.is_none()
-            && let Value::Array(array) = self.heap.get(self.view_storage_id(owner))
-        {
-            let item = array.at(index)?;
-            Ok(self.alloc(item))
-        } else {
-            let value = self.owner_bytes(owner)?[index];
-            Ok(self.int(value.into()))
-        }
+        let item = self.buffer_span(view)?.item(index)?;
+        Ok(self.alloc(item))
     }
 
     pub(super) fn buffer_item_method(
@@ -507,6 +529,7 @@ impl Context {
     }
 
     fn packed_view_value(&mut self, format: &str, value: Id) -> Result<Vec<u8>> {
+        let format = format.strip_prefix('@').unwrap_or(format);
         let invalid_type = || {
             Error::new(
                 "TypeError",
@@ -550,7 +573,13 @@ impl Context {
             }
         };
         Ok(match format {
-            "B" | "@B" => vec![n.big().to_u8().ok_or_else(invalid_value)?],
+            "B" => vec![n.big().to_u8().ok_or_else(invalid_value)?],
+            "I" => n
+                .big()
+                .to_u32()
+                .ok_or_else(invalid_value)?
+                .to_ne_bytes()
+                .to_vec(),
             "b" => vec![n.big().to_i8().ok_or_else(invalid_value)? as u8],
             "q" => n.to_i64().ok_or_else(invalid_value)?.to_ne_bytes().to_vec(),
             "i" => n
@@ -594,20 +623,20 @@ impl Context {
         } else {
             let index = self.view_index(view, key, true)?;
             let bytes = self.packed_view_value(format, value)?;
-            self.view_owner(view)?;
+            let layout = self.view_layout(view)?;
             (
                 ViewLayout {
-                    start: index,
-                    ..ViewLayout::full(1)
+                    start: layout.element(index),
+                    len: 1,
+                    ..layout
                 },
                 bytes,
             )
         };
-        let storage = self.view_storage_id(owner);
-        let bytes = self.writable_storage_bytes(storage)?;
-        dest.checked(bytes.len() / width)?;
+        let bytes = self.writable_owner_bytes(owner)?;
+        dest.checked(bytes.len(), width)?;
         for (i, item) in source.chunks_exact(width).enumerate() {
-            let start = dest.element(i) * width;
+            let start = dest.byte_at(i, width);
             bytes[start..start + width].copy_from_slice(item);
         }
         Ok(())

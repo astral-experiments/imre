@@ -1,6 +1,5 @@
 //! Writable byte windows passed to Python raw.readinto callbacks.
-use super::{Context, Error, Id, Result, Value, slice};
-use num_traits::ToPrimitive;
+use super::{Context, Error, Id, Result, Value};
 use std::ops::Range;
 
 #[derive(Clone, Copy)]
@@ -9,6 +8,19 @@ pub(super) struct Window {
     backing_len: usize,
     start: usize,
     pub(super) len: usize,
+}
+
+impl Window {
+    /// Retained raw views remain usable only while their backing storage has its original size.
+    pub(super) fn checked_range(self, backing_len: usize) -> Result<Range<usize>> {
+        if backing_len != self.backing_len {
+            return Err(Error::new(
+                "BufferError",
+                "underlying buffer has changed size",
+            ));
+        }
+        Ok(self.start..self.start + self.len)
+    }
 }
 
 impl Context {
@@ -64,26 +76,9 @@ impl Context {
         }
     }
 
-    fn checked_window(&self, id: Id) -> Result<Window> {
-        let w = self.raw_read_window(id).ok_or_else(|| {
-            Error::new(
-                "ValueError",
-                "operation forbidden on released memoryview object",
-            )
-        })?;
-        self.window_bytes(w)?;
-        Ok(w)
-    }
-
     pub(super) fn window_bytes(&self, w: Window) -> Result<&[u8]> {
         let data = self.owner_bytes(w.backing)?;
-        if data.len() != w.backing_len {
-            return Err(Error::new(
-                "BufferError",
-                "underlying buffer has changed size",
-            ));
-        }
-        Ok(&data[w.start..w.start + w.len])
+        Ok(&data[w.checked_range(data.len())?])
     }
 
     pub(super) fn writable_byte_span(&self, object: Id) -> Result<Option<(Id, Range<usize>)>> {
@@ -103,10 +98,6 @@ impl Context {
         {
             return Ok(None);
         }
-        if let Some(w) = self.raw_read_window(object) {
-            self.window_bytes(w)?;
-            return Ok(Some((w.backing, w.start..w.start + w.len)));
-        }
         let storage_len = |id| match self.heap.get(id) {
             Value::Bytes(bytes) if !writable => Some(bytes.len()),
             _ => self.mutable_storage_len(id),
@@ -119,7 +110,7 @@ impl Context {
                     return Ok(None);
                 }
                 let (_, width) = self.view_format_width(owner, view);
-                (owner, view.start * width, view.len * width)
+                (owner, view.byte_start(width), view.len * width)
             }
             Value::BytesIoBuffer { .. } => (object, 0, self.view_element_count(object)?),
             _ => {
@@ -127,93 +118,15 @@ impl Context {
                 return Ok(storage_len(storage).map(|n| (storage, 0..n)));
             }
         };
+        if let Value::RawReadWindow(w) = *self.heap.get(owner) {
+            // The view layout was checked against the window; exporters use backing coordinates.
+            let start = w.start + start;
+            return Ok(Some((w.backing, start..start + len)));
+        }
         if writable {
             self.invalidate_stream_snapshot(owner);
         }
         let storage = self.view_storage_id(owner);
         Ok(storage_len(storage).map(|_| (storage, start..start + len)))
-    }
-
-    fn raw_view_index(&mut self, id: Id, key: Id) -> Result<usize> {
-        let n = self
-            .index_integer(key)?
-            .to_i64()
-            .ok_or_else(|| Error::new("IndexError", "memoryview index out of range"))?;
-        let len = self.checked_window(id)?.len as i64;
-        let pos = if n < 0 { n + len } else { n };
-        if !(0..len).contains(&pos) {
-            return Err(Error::new(
-                "IndexError",
-                "index out of bounds on dimension 1",
-            ));
-        }
-        Ok(pos as usize)
-    }
-
-    fn raw_view_slice(&mut self, id: Id, parts: [Id; 3]) -> Result<Range<usize>> {
-        let bounds = slice::sequence_components(self, parts)?;
-        let [start, end, step] = slice::normalize(bounds, self.checked_window(id)?.len as i64);
-        if step != 1 {
-            return Err(Error::new(
-                "NotImplementedError",
-                "strided raw buffer windows are unsupported",
-            ));
-        }
-        Ok(start as usize..end.max(start) as usize)
-    }
-
-    pub(super) fn raw_view_get(&mut self, id: Id, key: Id) -> Result<Id> {
-        if let Value::Slice(parts) = *self.heap.get(key) {
-            let range = self.raw_view_slice(id, parts)?;
-            let w = self.checked_window(id)?;
-            let parent = self.view_layout(id)?;
-            let child =
-                self.ownerless_byte_view(w.backing, w.start + range.start, range.len(), false)?;
-            let Value::MemoryView {
-                lease: parent_lease,
-                ..
-            } = *self.heap.get(id)
-            else {
-                unreachable!()
-            };
-            if let Value::MemoryView { layout, lease, .. } = self.heap.get_mut(child) {
-                *lease = parent_lease;
-                *layout = Some(super::memoryview::ViewLayout {
-                    start: 0,
-                    len: range.len(),
-                    ..parent
-                });
-            }
-            return Ok(child);
-        }
-        let pos = self.raw_view_index(id, key)?;
-        let byte = self.window_bytes(self.checked_window(id)?)?[pos];
-        Ok(self.int(i64::from(byte)))
-    }
-
-    pub(super) fn raw_view_set(&mut self, id: Id, key: Id, value: Id) -> Result<()> {
-        let w = self.checked_window(id)?;
-        if self.view_is_readonly(id)? {
-            return Err(Error::new("TypeError", "cannot modify read-only memory"));
-        }
-        self.with_buffer_export(w.backing, |ctx| {
-            let (range, input) = if let Value::Slice(parts) = *ctx.heap.get(key) {
-                let range = ctx.raw_view_slice(id, parts)?;
-                ctx.check_buffer_exporter(value)?;
-                // Snapshot first for assignments between overlapping windows.
-                let bytes = ctx.unsigned_assignment_bytes(value, range.len())?;
-                (range, bytes)
-            } else {
-                let index = ctx.raw_view_index(id, key)?;
-                let byte = ctx.index_integer(value)?.big().to_u8().ok_or_else(|| {
-                    Error::new("ValueError", "memoryview: invalid value for format 'B'")
-                })?;
-                (index..index + 1, vec![byte])
-            };
-            let w = ctx.checked_window(id)?;
-            let dst = ctx.writable_storage_bytes(w.backing)?;
-            dst[w.start + range.start..w.start + range.end].copy_from_slice(&input);
-            Ok(())
-        })
     }
 }
