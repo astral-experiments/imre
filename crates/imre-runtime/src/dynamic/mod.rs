@@ -1,6 +1,8 @@
 //! Object operations for native Python functions with dynamically loaded modules.
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
+pub(crate) use stdlib::hashlib::digest::State as DigestState;
+
 mod abstract_class;
 mod allocation_traces;
 mod array;

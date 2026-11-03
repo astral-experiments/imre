@@ -56,7 +56,10 @@ impl Drop for Stream {
 }
 
 impl Stream {
-    pub(crate) fn new(name: &'static str, digest: &Digest) -> Result<Self> {
+    pub(in crate::dynamic::stdlib::hashlib) fn new(
+        name: &'static str,
+        digest: &Digest,
+    ) -> Result<Self> {
         let size = digest.size();
         // SAFETY: the fetched EVP_MD is live for this call.
         let block = unsafe { (digest.provider.stream.block_size)(digest.md.as_ptr()) };
@@ -96,7 +99,7 @@ impl Stream {
         })
     }
 
-    pub(crate) fn update(&mut self, data: &[u8]) -> Result<()> {
+    pub(in crate::dynamic::stdlib::hashlib) fn update(&mut self, data: &[u8]) -> Result<()> {
         // SAFETY: the exclusive context and input slice are live for the synchronous update.
         if unsafe {
             (self.provider.stream.update)(self.ctx.as_ptr(), data.as_ptr().cast(), data.len())
@@ -107,7 +110,7 @@ impl Stream {
         Ok(())
     }
 
-    pub(crate) fn try_copy(&self) -> Result<Self> {
+    pub(in crate::dynamic::stdlib::hashlib) fn try_copy(&self) -> Result<Self> {
         let copy = Self::empty(self.provider, self.name, self.digest_size, self.block_size)?;
         // SAFETY: the destination is empty and distinct from the initialized source.
         if unsafe { (self.provider.stream.copy)(copy.ctx.as_ptr(), self.ctx.as_ptr()) } != 1 {
@@ -116,7 +119,7 @@ impl Stream {
         Ok(copy)
     }
 
-    pub(crate) fn digest(&self) -> Result<Vec<u8>> {
+    pub(in crate::dynamic::stdlib::hashlib) fn digest(&self) -> Result<Vec<u8>> {
         let copy = self.try_copy()?;
         let mut bytes = vec![0; self.digest_size];
         let mut written = 0;
