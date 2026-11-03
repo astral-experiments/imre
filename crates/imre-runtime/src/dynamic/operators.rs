@@ -2603,7 +2603,7 @@ impl Context {
         format!("<{name} object at {receiver:#x}>")
     }
 
-    fn qualified_class_name(&self, class: Id, scope: Id) -> String {
+    pub(super) fn qualified_class_name(&self, class: Id, scope: Id) -> String {
         let module = match self.namespace_binding(self.scope_data(scope), "__module__") {
             Some(value) => self.str_value(value).ok(),
             None => Some(self.scope_data(scope).module.as_str()),

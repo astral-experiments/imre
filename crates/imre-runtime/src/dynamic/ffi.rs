@@ -192,8 +192,8 @@ impl Context {
                 };
                 Ok(self.alloc(Value::TypeAlias {
                     name: a,
+                    parameters,
                     definition: typing::AliasDefinition::Lazy {
-                        parameters,
                         evaluator: b,
                         cached: None,
                     },

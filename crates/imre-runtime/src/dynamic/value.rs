@@ -54,7 +54,7 @@ pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
-const EMPTY_TUPLE: Id = 5;
+pub(super) const EMPTY_TUPLE: Id = 5;
 
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
 
@@ -1097,6 +1097,7 @@ pub(super) enum Value {
     ConstEvaluator(Id),
     TypeAlias {
         name: Id,
+        parameters: Id,
         definition: super::typing::AliasDefinition,
     },
     TypeVar(super::typing::TypeVariable),
@@ -1817,15 +1818,15 @@ impl Value {
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
             Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
-            Self::TypeAlias { name, definition } => {
-                visit.push(*name);
+            Self::TypeAlias {
+                name,
+                parameters,
+                definition,
+            } => {
+                visit.extend([*name, *parameters]);
                 match *definition {
-                    super::typing::AliasDefinition::Lazy {
-                        parameters,
-                        evaluator,
-                        cached,
-                    } => {
-                        visit.extend([parameters, evaluator]);
+                    super::typing::AliasDefinition::Lazy { evaluator, cached } => {
+                        visit.push(evaluator);
                         visit.extend(cached);
                     }
                     super::typing::AliasDefinition::Eager { value, module } => {
