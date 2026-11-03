@@ -1719,8 +1719,11 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
-    if let Some(layout) = name.strip_suffix(".__reduce__").and_then(os::stat::layout) {
-        return os::stat::reduce(ctx, layout, args, kwargs);
+    if let Some((class, method)) = name.rsplit_once('.')
+        && let Some(layout) = os::stat::layout(class)
+        && layout.methods().contains(&method)
+    {
+        return os::stat::method(ctx, layout, method, args, kwargs);
     }
     if let Some(layout) = os::stat::layout(name) {
         return os::stat::construct(ctx, layout, args, kwargs);
