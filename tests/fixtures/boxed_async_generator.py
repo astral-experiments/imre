@@ -1,7 +1,14 @@
 import gc
 import weakref
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Iterator
-from inspect import AGEN_CLOSED, AGEN_CREATED, AGEN_RUNNING, AGEN_SUSPENDED, getasyncgenstate
+from inspect import (
+    AGEN_CLOSED,
+    AGEN_CREATED,
+    AGEN_RUNNING,
+    AGEN_SUSPENDED,
+    getasyncgenlocals,
+    getasyncgenstate,
+)
 
 
 class Pause:
@@ -48,10 +55,13 @@ def current():
     assert getasyncgenstate(gen) == AGEN_CREATED
     frame = gen.ag_frame
     assert frame.f_code is gen.ag_code
+    bindings = getasyncgenlocals(gen)
+    assert bindings == {"value": "first", "events": events}
+    bindings["value"] = "changed"
     assert isinstance(gen, AsyncIterator) and issubclass(type(gen), AsyncGenerator)
     assert isinstance(gen, AsyncGenerator) and not isinstance(gen, (Awaitable, Iterator))
     assert gen.__aiter__() is gen and events == []
-    assert finish(anext(gen)) == "first" and events == ["started"]
+    assert finish(anext(gen)) == "changed" and events == ["started"]
     assert getasyncgenstate(gen) == AGEN_SUSPENDED and gen.ag_frame is frame
     pending = gen.asend("sent")
     assert isinstance(pending, Awaitable) and pending.send(None) == "paused"
@@ -62,7 +72,9 @@ def current():
         assert "already running" in str(exc)
     else:
         raise AssertionError("another operation entered the suspended generator")
-    assert finish(pending, "reply") == ("sent", "reply")
+    assert bindings["sent"] == "sent" and "reply" not in bindings
+    bindings["sent"] = "edited"
+    assert finish(pending, "reply") == ("edited", "reply")
 
     owner = weakref.ref(gen)
     close = gen.aclose()
@@ -71,6 +83,7 @@ def current():
     assert owner() is not None
     assert finish(close) is None and events == ["started", "closed"]
     assert owner().ag_frame is None and getasyncgenstate(owner()) == AGEN_CLOSED
+    assert getasyncgenlocals(owner()) == {} and bindings["reply"] == "reply"
     del close
     gc.collect()
     assert owner() is None

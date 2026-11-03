@@ -3252,11 +3252,13 @@ impl Context {
             if !self.is_type_object(base) {
                 return Err(Error::new("TypeError", "bases must be types"));
             }
-            if self.classes.get("typing.Union") == Some(&base) {
-                return Err(Error::new(
-                    "TypeError",
-                    "type 'typing.Union' is not an acceptable base type",
-                ));
+            for name in ["typing.Union", super::frame_locals::CLASS] {
+                if self.classes.get(name) == Some(&base) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("type '{name}' is not an acceptable base type"),
+                    ));
+                }
             }
             if matches!(self.heap.get(base), Value::Native(name) if name == "typing._UnpackGenericAlias")
             {

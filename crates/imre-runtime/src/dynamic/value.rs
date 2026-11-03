@@ -881,6 +881,9 @@ pub(super) struct ClosureScope {
     pub declared_complete: bool,
     pub nonlocals: HashSet<String>,
     pub cells: HashMap<String, Id>,
+    /// Keys added by frame introspection that are not lexical variables.
+    pub extra_locals: Option<Id>,
+    pub cleared: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1059,6 +1062,10 @@ pub(super) enum Value {
     },
     Dict(super::dictionary::Entries),
     MappingProxy(Id),
+    FrameLocalsProxy {
+        class: Id,
+        frame: Id,
+    },
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -1466,6 +1473,7 @@ impl Value {
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
             Self::MappingProxy(_) => "mappingproxy",
+            Self::FrameLocalsProxy { .. } => "FrameLocalsProxy",
             Self::Function { .. } => "function",
             Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => {
                 "member_descriptor"
@@ -1537,7 +1545,7 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } => Some(*class),
+            Self::Instance { class, .. } | Self::FrameLocalsProxy { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -1745,7 +1753,9 @@ impl Value {
                 visit.extend(entry.cached_objects());
             }
             Self::Selector(selector) => selector.borrow().trace(visit),
+            Self::FrameLocalsProxy { class, frame } => visit.extend([*class, *frame]),
             Self::Scope(scope) => {
+                visit.extend(scope.closure.extra_locals);
                 visit.extend(scope.closure.cells.values().copied());
                 visit.extend(scope.class_cell);
                 if let Some(state) = &scope.enum_namespace {
@@ -3574,6 +3584,13 @@ impl Heap {
             return Err(Error::new("TypeError", "expected a frame"));
         };
         if scope == NONE {
+            return Ok(());
+        }
+        if let Value::Scope(data) = self.get_mut(scope)
+            && data.closure.cleared
+        {
+            // Clearing again releases extras but keeps local slots rebound after the first clear.
+            self.collect_next_statement |= data.closure.extra_locals.take().is_some();
             return Ok(());
         }
         if self.frames.iter().any(|frame| frame.scope == scope) {

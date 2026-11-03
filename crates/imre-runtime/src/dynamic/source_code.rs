@@ -3457,23 +3457,48 @@ impl Context {
         if let Some(locals) = frame.exec_locals {
             return Ok(locals);
         }
-        if frame.parent.is_none() {
+        if frame.parent.is_none() && !frame.closure.cleared {
             return self.module_globals(scope);
         }
         if frame.class_body.is_some() {
             return Ok(self.active_class_namespace(scope));
         }
-        let mut names = BTreeSet::new();
+        let mut bindings = Vec::new();
+        for name in self.frame_binding_names(scope, code)? {
+            match self.lookup(scope, &name) {
+                Ok(value) => bindings.push((self.heap.code_name(&name), value)),
+                Err(error) if self.is_builtin_error(&error, "NameError") => {}
+                Err(error) => return Err(error),
+            }
+        }
+        let snapshot = self.dict(bindings);
+        if let Some(extras) = self.scope_data(scope).closure.extra_locals {
+            self.for_each_mapping_item(
+                extras,
+                snapshot,
+                super::calls::MappingOperation::Update,
+                |ctx, key, value, hash| {
+                    ctx.set_dictionary_key(snapshot, key, value, hash, true)
+                        .map(|_| ())
+                },
+            )?;
+        }
+        Ok(snapshot)
+    }
+
+    pub(super) fn frame_binding_names(
+        &self,
+        scope: Id,
+        code: Id,
+    ) -> Result<indexmap::IndexSet<String>> {
+        let mut names = indexmap::IndexSet::new();
         let mut local = scope;
         loop {
             let frame = self.scope_data(local);
-            names.extend(
-                frame
-                    .names
-                    .keys()
-                    .chain(frame.closure.cells.keys())
-                    .cloned(),
-            );
+            names.extend(frame.names.keys().cloned());
+            let mut cells: Vec<_> = frame.closure.cells.keys().cloned().collect();
+            cells.sort_unstable();
+            names.extend(cells);
             let Some(parent) = frame.parent else { break };
             if frame.comprehension != Some(ComprehensionKind::Ordinary)
                 || self.scope_data(parent).parent.is_none()
@@ -3508,15 +3533,7 @@ impl Context {
                 );
             }
         }
-        let mut bindings = Vec::new();
-        for name in names {
-            match self.lookup(scope, &name) {
-                Ok(value) => bindings.push((self.heap.code_name(&name), value)),
-                Err(error) if self.is_builtin_error(&error, "NameError") => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(self.dict(bindings))
+        Ok(names)
     }
 
     pub(super) fn exec_source(

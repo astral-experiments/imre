@@ -188,7 +188,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "def getcomments(object):"),
                         &source_blocks,
-                        section("AGEN_CREATED =", "def getasyncgenlocals("),
+                        section("AGEN_CREATED =", "_NonUserDefinedCallables ="),
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
                         section("def getmro(cls):", "def indentsize(line):"),

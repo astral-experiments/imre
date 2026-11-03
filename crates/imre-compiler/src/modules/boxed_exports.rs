@@ -321,6 +321,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "FullArgSpec",
             "Parameter",
             "Signature",
+            "getasyncgenlocals",
             "getasyncgenstate",
             "getfullargspec",
             "getmodule",
