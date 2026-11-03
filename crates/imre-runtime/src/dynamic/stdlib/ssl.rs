@@ -28,6 +28,8 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     ctx.bind(scope, "Error", class);
     for name in [
         "context",
+        "server_context",
+        "is_server",
         "security_level",
         "minimum_version",
         "maximum_version",
@@ -39,6 +41,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "set_post_handshake_auth",
         "set_ciphers",
         "load_verify_locations",
+        "load_cert_chain",
         "wrap",
         "channel_binding",
         "hostname_checks_common_name",
@@ -68,6 +71,21 @@ fn session(ctx: &Context, id: Id) -> Result<&RefCell<Option<provider::Session>>>
     }
 }
 
+fn cert_path(ctx: &mut Context, path: Id, arg: &str) -> Result<CString> {
+    let type_error = ctx.builtin("TypeError");
+    let path = super::posixpath::fspath(ctx, path).map_err(|error| {
+        if ctx.raised_error_matches(&error, type_error) {
+            Error::new(
+                "TypeError",
+                format!("{arg} should be a valid filesystem path"),
+            )
+        } else {
+            error
+        }
+    })?;
+    super::os::c_path(ctx, path, "embedded null byte")
+}
+
 fn closed() -> Error {
     errno_error(io::Error::from_raw_os_error(libc::EBADF)).into()
 }
@@ -95,10 +113,14 @@ pub(super) fn call(
         ));
     }
     match (name, args) {
-        ("context", []) => {
-            let handle = provider::Context::client().map_err(|e| provider_error(ctx, e))?;
+        ("context" | "server_context", []) => {
+            let handle = provider::Context::new(name == "server_context")
+                .map_err(|e| provider_error(ctx, e))?;
             Ok(ctx.alloc(Value::TlsContext(Rc::new(RefCell::new(handle)))))
         }
+        ("is_server", &[handle]) => Ok(super::builtins::boolean(
+            context(ctx, handle)?.borrow().is_server(),
+        )),
         ("minimum_version" | "maximum_version", [handle]) => {
             let n = context(ctx, *handle)?
                 .borrow()
@@ -168,8 +190,14 @@ pub(super) fn call(
             let Value::Bytes(protocols) = ctx.heap.get(ctx.scalar_value(wire)) else {
                 return Err(Error::new("TypeError", "expected ALPN wire bytes"));
             };
-            context(ctx, handle)?
-                .borrow_mut()
+            let mut context = context(ctx, handle)?.borrow_mut();
+            if context.is_server() && !protocols.is_empty() {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "server ALPN selection is unsupported",
+                ));
+            }
+            context
                 .set_alpn_protocols(protocols)
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
@@ -181,9 +209,27 @@ pub(super) fn call(
                     "expected bool for post_handshake_auth",
                 ));
             };
+            let mut context = context(ctx, handle)?.borrow_mut();
+            if context.is_server() && enabled {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "server post-handshake client authentication is unsupported",
+                ));
+            }
+            context.set_post_handshake_auth(enabled);
+            Ok(NONE)
+        }
+        ("load_cert_chain", &[handle, certfile, keyfile]) => {
+            let certfile = cert_path(ctx, certfile, "certfile")?;
+            let keyfile = if keyfile == NONE {
+                None
+            } else {
+                Some(cert_path(ctx, keyfile, "keyfile")?)
+            };
             context(ctx, handle)?
                 .borrow_mut()
-                .set_post_handshake_auth(enabled);
+                .load_cert_chain(&certfile, keyfile.as_deref().unwrap_or(&certfile))
+                .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
         ("load_verify_locations", &[handle, cafile]) => {
@@ -205,23 +251,34 @@ pub(super) fn call(
             Ok(NONE)
         }
         ("wrap", &[handle, socket, hostname]) => {
-            let host = ctx.str_value(hostname)?;
-            if host.is_empty() || host.starts_with('.') || host.contains('\0') {
-                return Err(Error::new("ValueError", "invalid server_hostname"));
-            }
-            if !host.is_ascii() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "TLS requires an ASCII server_hostname",
-                ));
-            }
             let handle = context(ctx, handle)?;
+            let host = if handle.borrow().is_server() {
+                if hostname != NONE {
+                    return Err(Error::new(
+                        "ValueError",
+                        "server_hostname can only be specified in client mode",
+                    ));
+                }
+                None
+            } else {
+                let host = ctx.str_value(hostname)?;
+                if host.is_empty() || host.starts_with('.') || host.contains('\0') {
+                    return Err(Error::new("ValueError", "invalid server_hostname"));
+                }
+                if !host.is_ascii() {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "TLS requires an ASCII server_hostname",
+                    ));
+                }
+                Some(host)
+            };
             let Value::Socket(socket) = ctx.heap.get(socket) else {
                 return Err(Error::new("TypeError", "expected a socket"));
             };
             let fd = socket::take_tls_stream(socket)?;
             // Provider calls cannot invoke Python. Release the handle borrow before VM allocation.
-            let result = provider::Session::connect(&handle.borrow(), fd, host);
+            let result = provider::Session::wrap(&handle.borrow(), fd, host);
             match result {
                 Ok(session) => {
                     Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))

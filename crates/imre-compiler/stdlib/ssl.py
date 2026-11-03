@@ -1,4 +1,4 @@
-"""TLS client contexts and blocking, connected sockets using system OpenSSL."""
+"""TLS contexts and blocking, connected sockets using system OpenSSL."""
 
 import _imre_ssl
 import _ssl
@@ -258,39 +258,42 @@ class Purpose(_ASN1Object, _Enum):
 
 
 class SSLContext:
-    """TLS settings and trusted certificates for client connections."""
+    """TLS settings, trusted certificates and local certificate chains."""
 
     __slots__ = ("_ctx", "_post_handshake_auth")
 
     def __init__(self, protocol):
-        if protocol != PROTOCOL_TLS_CLIENT:
-            raise NotImplementedError("only PROTOCOL_TLS_CLIENT is supported")
-        self._ctx = _call(_imre_ssl.context)
+        if protocol == PROTOCOL_TLS_CLIENT:
+            self._ctx = _call(_imre_ssl.context)
+        elif protocol == PROTOCOL_TLS_SERVER:
+            self._ctx = _call(_imre_ssl.server_context)
+        else:
+            raise NotImplementedError("only PROTOCOL_TLS_CLIENT and PROTOCOL_TLS_SERVER are supported")
         self._post_handshake_auth = False
 
     @property
     def protocol(self):
-        return PROTOCOL_TLS_CLIENT
+        return PROTOCOL_TLS_SERVER if _imre_ssl.is_server(self._ctx) else PROTOCOL_TLS_CLIENT
 
     @property
     def check_hostname(self):
-        return True
+        return self.protocol == PROTOCOL_TLS_CLIENT
 
     @check_hostname.setter
     def check_hostname(self, enabled):
-        if not enabled:
-            raise NotImplementedError("disabling hostname checks is unsupported")
+        if bool(enabled) != self.check_hostname:
+            raise NotImplementedError("hostname checks are required in client mode and disabled in server mode")
 
     @property
     def verify_mode(self):
-        return CERT_REQUIRED
+        return CERT_REQUIRED if self.check_hostname else CERT_NONE
 
     @verify_mode.setter
     def verify_mode(self, mode):
-        if mode == CERT_NONE:
+        if mode == CERT_NONE and self.check_hostname:
             raise ValueError("Cannot set verify_mode to CERT_NONE when check_hostname is enabled.")
-        if mode != CERT_REQUIRED:
-            raise NotImplementedError("only CERT_REQUIRED is supported")
+        if mode != self.verify_mode:
+            raise NotImplementedError("only CERT_REQUIRED for clients and CERT_NONE for servers are supported")
 
     @property
     def options(self):
@@ -364,6 +367,11 @@ class SSLContext:
     def set_ciphers(self, cipherlist, /):
         _call(_imre_ssl.set_ciphers, self._ctx, cipherlist)
 
+    def load_cert_chain(self, certfile, keyfile=None, password=None):
+        if password is not None:
+            raise NotImplementedError("load_cert_chain supports unencrypted private keys")
+        _call(_imre_ssl.load_cert_chain, self._ctx, certfile, keyfile)
+
     def load_verify_locations(self, cafile=None, capath=None, cadata=None):
         if capath is not None or cadata is not None:
             raise NotImplementedError("only cafile is supported")
@@ -373,18 +381,25 @@ class SSLContext:
 
     def wrap_socket(self, sock, server_side=False, do_handshake_on_connect=True,
                     suppress_ragged_eofs=True, server_hostname=None, session=None):
-        if server_side:
-            raise ValueError("Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
+        if server_side and server_hostname is not None:
+            raise ValueError("server_hostname can only be specified in client mode")
+        if server_side and session is not None:
+            raise ValueError("session can only be specified in client mode")
+        if self.check_hostname and not server_hostname:
+            raise ValueError("check_hostname requires server_hostname")
+        if bool(server_side) != (self.protocol == PROTOCOL_TLS_SERVER):
+            if server_side:
+                raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
+            raise SSLError(0, "Cannot create a client socket with a PROTOCOL_TLS_SERVER context")
         if not do_handshake_on_connect or not suppress_ragged_eofs or session is not None:
             raise NotImplementedError("only a blocking handshake with default session and EOF handling is supported")
-        if not server_hostname:
-            raise ValueError("check_hostname requires server_hostname")
-        if isinstance(server_hostname, bytes):
-            server_hostname = server_hostname.decode("ascii")
-        if not isinstance(server_hostname, str):
-            raise TypeError("server_hostname must be a string")
-        if not server_hostname.isascii():
-            raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the socket")
+        if not server_side:
+            if isinstance(server_hostname, bytes):
+                server_hostname = server_hostname.decode("ascii")
+            if not isinstance(server_hostname, str):
+                raise TypeError("server_hostname must be a string")
+            if not server_hostname.isascii():
+                raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the socket")
         result = _call(_imre_ssl.wrap, self._ctx, sock, server_hostname)
         if isinstance(result, tuple):
             code, message = result
@@ -405,13 +420,14 @@ class SSLContext:
         peer._session = result
         peer._context = self
         peer._server_hostname = server_hostname
+        peer.server_side = bool(server_side)
         return peer
 
 
 class SSLSocket:
     """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
 
-    __slots__ = ("_session", "_context", "_server_hostname")
+    __slots__ = ("_session", "_context", "_server_hostname", "server_side")
 
     def __init__(self, *args, **kwargs):
         raise TypeError("SSLSocket does not have a public constructor. Instances are returned by SSLContext.wrap_socket().")
@@ -454,19 +470,19 @@ class SSLSocket:
 
 
 def create_default_context(purpose=Purpose.SERVER_AUTH, *, cafile=None, capath=None, cadata=None):
-    """Create a verifying client context for server authentication."""
+    """Create a context with the default settings for the requested purpose."""
     if not isinstance(purpose, _ASN1Object):
         raise TypeError(purpose)
     if purpose == Purpose.SERVER_AUTH:
         context = SSLContext(PROTOCOL_TLS_CLIENT)
     elif purpose == Purpose.CLIENT_AUTH:
-        raise NotImplementedError("server contexts are unsupported")
+        context = SSLContext(PROTOCOL_TLS_SERVER)
     else:
         raise ValueError(purpose)
     _call(_imre_ssl.default_verify_flags, context._ctx)
     if cafile or capath or cadata:
         context.load_verify_locations(cafile, capath, cadata)
-    else:
+    elif context.verify_mode != CERT_NONE:
         context.set_default_verify_paths()
     return context
 
