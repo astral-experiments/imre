@@ -3056,6 +3056,7 @@ impl Context {
                 stdlib::os::sysconf::initialize(self, module, scope);
                 for name in [
                     "getrandom",
+                    "execve",
                     "get_terminal_size",
                     "lockf",
                     "posix_fadvise",
@@ -3245,6 +3246,8 @@ impl Context {
                     let value = self.lookup_attr(path, name)?;
                     self.bind(scope, name, value);
                 }
+                let os_name = self.heap.code_name(crate::sys::OS_NAME);
+                self.bind(scope, "name", os_name);
                 let linesep = self.text(crate::objects::os::LINE_SEPARATOR);
                 self.bind(scope, "linesep", linesep);
                 self.bind(scope, "path", path);

@@ -358,6 +358,47 @@ if sys.platform == "linux":
         """Execute file with the given arguments. Return its exit code or its PID for P_NOWAIT."""
         return spawnv(mode, file, args)
 
+    # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+    def execvpe(file, args, env):
+        """execvpe(file, args, env)
+
+    Execute the executable file (which is searched for along $PATH)
+    with argument list args and environment env, replacing the
+    current process.
+    args may be a list or tuple of strings. """
+        _execvpe(file, args, env)
+
+    def _execvpe(file, args, env=None):
+        if env is not None:
+            exec_func = execve
+            argrest = (args, env)
+        else:
+            exec_func = execv
+            argrest = (args,)
+            env = environ
+
+        if path.dirname(file):
+            exec_func(file, *argrest)
+            return
+        saved_exc = None
+        path_list = get_exec_path(env)
+        if name != 'nt':
+            file = fsencode(file)
+            path_list = map(fsencode, path_list)
+        for dir in path_list:
+            fullname = path.join(dir, file)
+            try:
+                exec_func(fullname, *argrest)
+            except (FileNotFoundError, NotADirectoryError) as e:
+                last_exc = e
+            except OSError as e:
+                last_exc = e
+                if saved_exc is None:
+                    saved_exc = e
+        if saved_exc is not None:
+            raise saved_exc
+        raise last_exc
+
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
 def get_exec_path(env=None):

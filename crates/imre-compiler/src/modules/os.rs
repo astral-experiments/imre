@@ -181,6 +181,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
         "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
         "execv" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.execv"),
+        "execve" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.execve"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
         "getpgrp" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgrp"),
         "getpgid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgid"),

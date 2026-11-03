@@ -2139,6 +2139,12 @@ impl IntrinsicModule {
             (Self::Os, "removedirs") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("os.removedirs")
             }
+            (Self::Os, "execvpe") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.execvpe")
+            }
+            (Self::Os, "_execvpe") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os._execvpe")
+            }
             (Self::Os, "spawnv") if cfg!(target_os = "linux") => {
                 Intrinsic::ObjectRuntimeExport("os.spawnv")
             }
