@@ -483,8 +483,8 @@ class SSLContext:
         if self.check_hostname and not server_hostname:
             raise ValueError("check_hostname requires server_hostname")
         _check_role(self.protocol, server_side)
-        if not do_handshake_on_connect or not suppress_ragged_eofs or session is not None:
-            raise NotImplementedError("only a blocking handshake with default session and EOF handling is supported")
+        if not do_handshake_on_connect or session is not None:
+            raise NotImplementedError("only a blocking handshake with the default session is supported")
         if not server_side and server_hostname is not None:
             if isinstance(server_hostname, bytes):
                 server_hostname = server_hostname.decode("ascii")
@@ -513,7 +513,7 @@ class SSLContext:
         return peer
 
 
-_BIO_ERRORS = {
+_TLS_ERRORS = {
     "WANT_READ": (SSLWantReadError, SSL_ERROR_WANT_READ, "The operation did not complete (read)", None),
     "WANT_WRITE": (SSLWantWriteError, SSL_ERROR_WANT_WRITE, "The operation did not complete (write)", None),
     "ZERO_RETURN": (SSLZeroReturnError, SSL_ERROR_ZERO_RETURN, "TLS/SSL connection has been closed (EOF)", None),
@@ -522,6 +522,26 @@ _BIO_ERRORS = {
     "PROTOCOL_IS_SHUTDOWN": (SSLError, SSL_ERROR_SSL, "protocol is shutdown", "SSL"),
     "SHUTDOWN_WHILE_IN_INIT": (SSLError, SSL_ERROR_SSL, "shutdown while in init", "SSL"),
 }
+
+
+def _tls_result(result, hostname):
+    if isinstance(result, tuple):
+        # Certificate errors carry a numeric verification code, record errors a reason name.
+        reason, message = result
+        if isinstance(reason, int):
+            _raise_verify_error(hostname, reason, message)
+        kind, code, library = SSLError, SSL_ERROR_SSL, "SSL"
+    elif isinstance(result, str):
+        reason = result
+        kind, code, message, library = _TLS_ERRORS[reason]
+    else:
+        return result
+    if library:
+        message = f"[{library}: {reason}] {message}"
+    error = kind(code, message)
+    error.library = library
+    error.reason = reason if library else None
+    raise error
 
 
 class SSLObject:
@@ -560,24 +580,7 @@ class SSLObject:
         return self._server_hostname
 
     def _bio_call(self, operation, *args):
-        result = _call(operation, self._sslobj, *args)
-        if isinstance(result, tuple):
-            # Certificate errors carry a numeric verification code, record errors a reason name.
-            reason, message = result
-            if isinstance(reason, int):
-                _raise_verify_error(self.server_hostname, reason, message)
-            kind, code, library = SSLError, SSL_ERROR_SSL, "SSL"
-        elif isinstance(result, str):
-            reason = result
-            kind, code, message, library = _BIO_ERRORS[reason]
-        else:
-            return result
-        if library:
-            message = f"[{library}: {reason}] {message}"
-        error = kind(code, message)
-        error.library = library
-        error.reason = reason if library else None
-        raise error
+        return _tls_result(_call(operation, self._sslobj, *args), self.server_hostname)
 
     def read(self, len=1024, buffer=None):
         """Read up to len decrypted bytes, or return the number read into buffer."""
@@ -667,10 +670,34 @@ class SSLSocket:
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")
         return _call(_imre_ssl.sendall, self._session, data, flags)
 
+    def read(self, len=1024, buffer=None):
+        if not _imre_ssl.is_session(self._session):
+            raise ValueError("Read on closed or unwrapped SSL socket.")
+        try:
+            return _tls_result(_call(_imre_ssl.read, self._session, len, buffer), self.server_hostname)
+        except SSLError as exc:
+            if exc.args[0] == SSL_ERROR_EOF and self.suppress_ragged_eofs:
+                return b"" if buffer is None else 0
+            raise
+
     def recv(self, buflen=1024, flags=0):
-        if _imre_ssl.is_session(self._session) and flags:
-            raise ValueError("non-zero flags not allowed in calls to recv() on SSLSocket")
+        if _imre_ssl.is_session(self._session):
+            if flags:
+                raise ValueError("non-zero flags not allowed in calls to recv() on SSLSocket")
+            return self.read(buflen)
         return _call(_imre_ssl.recv, self._session, buflen, flags)
+
+    def pending(self):
+        if not _imre_ssl.is_session(self._session):
+            return 0
+        return _tls_result(_call(_imre_ssl.pending, self._session), self.server_hostname)
+
+    def unwrap(self):
+        if not _imre_ssl.is_session(self._session):
+            raise ValueError("No SSL wrapper around " + str(self))
+        _tls_result(_call(_imre_ssl.tls_shutdown, self._session), self.server_hostname)
+        self._session = _imre_ssl.release_session(self._session)
+        return self
 
     def get_channel_binding(self, cb_type="tls-unique"):
         if not _imre_ssl.is_session(self._session):

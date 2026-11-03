@@ -866,6 +866,7 @@ enum Operation<'a> {
     Connect,
     Read(&'a mut [u8]),
     Write(&'a [u8]),
+    Shutdown,
 }
 
 impl Session {
@@ -903,20 +904,28 @@ impl Session {
         if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
             return Err(api.error("SSL_set_fd"));
         }
-        let handshake = session.blocking_io(if server {
-            Operation::Accept
-        } else {
-            Operation::Connect
-        });
+        let handshake = session.blocking_io(
+            if server {
+                Operation::Accept
+            } else {
+                Operation::Connect
+            },
+            |api, _, label| api.error(label),
+        );
         api.verify_peer(handle.as_ptr(), !server && handshake.is_ok())?;
         handshake?;
         Ok(session)
     }
 
     /// Retry a blocking socket BIO operation with the same buffer and length.
-    fn blocking_io(&self, mut operation: Operation<'_>) -> Result<usize, Failure> {
+    fn blocking_io<E: From<Failure>>(
+        &self,
+        mut operation: Operation<'_>,
+        failure: impl FnOnce(&Api, i32, &str) -> E,
+    ) -> Result<usize, E> {
         let api = self.api;
         let ssl = self.handle.as_ptr();
+        let mut sent_shutdown = false;
         loop {
             api.clear();
             let mut n = 0;
@@ -925,6 +934,7 @@ impl Session {
             // output counter outlive each attempt.
             let (rc, label) = unsafe {
                 match &mut operation {
+                    Operation::Shutdown => ((api.SSL_shutdown)(ssl), "SSL_shutdown"),
                     Operation::Accept => ((api.SSL_accept)(ssl), "SSL_accept"),
                     Operation::Connect => ((api.SSL_connect)(ssl), "SSL_connect"),
                     Operation::Read(buf) => (
@@ -939,6 +949,17 @@ impl Session {
             };
             if rc == 1 {
                 return Ok(n);
+            }
+            if rc == 0 && matches!(operation, Operation::Shutdown) {
+                // Retry for the peer's close_notify without consuming subsequent
+                // cleartext. CPython accepts a second zero from SSL_shutdown.
+                if sent_shutdown {
+                    return Ok(0);
+                }
+                sent_shutdown = true;
+                // SAFETY: read-ahead is a setting on this live SSL.
+                unsafe { (api.SSL_set_read_ahead)(ssl, 0) };
+                continue;
             }
             // Snapshot errno before any other OpenSSL call can change it.
             let os_error = std::io::Error::last_os_error();
@@ -956,21 +977,9 @@ impl Session {
                 }
                 SSL_ERROR_SYSCALL if os_error.kind() == std::io::ErrorKind::Interrupted => continue,
                 SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
-                    return Err(Failure::Io(os_error));
+                    return Err(Failure::Io(os_error).into());
                 }
-                _ => {
-                    if matches!(operation, Operation::Read(_)) {
-                        // SAFETY: peek at the error from this operation before clearing the queue.
-                        let detail = unsafe { (api.ERR_peek_last_error)() };
-                        // Our public wrapper accepts only suppress_ragged_eofs=True.
-                        if kind == SSL_ERROR_ZERO_RETURN
-                            || (kind == SSL_ERROR_SSL && detail == UNEXPECTED_EOF)
-                        {
-                            return Ok(0);
-                        }
-                    }
-                    return Err(api.error(label));
-                }
+                _ => return Err(failure(api, kind, label)),
             }
         }
     }
@@ -1029,7 +1038,7 @@ impl Session {
     }
 
     pub(crate) fn send(&mut self, bytes: &[u8]) -> Result<usize, Failure> {
-        let n = self.blocking_io(Operation::Write(bytes))?;
+        let n = self.blocking_io(Operation::Write(bytes), |api, _, label| api.error(label))?;
         if (n == 0 && !bytes.is_empty()) || n > bytes.len() {
             return Err(Failure::Other("invalid SSL_write byte count".into()));
         }
@@ -1044,14 +1053,22 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn recv(&mut self, size: usize) -> Result<Vec<u8>, Failure> {
-        // A TLS application-data read returns at most one plaintext record.
-        let mut bytes = vec![0; size.min(16 * 1024)];
-        if !bytes.is_empty() {
-            let n = self.blocking_io(Operation::Read(&mut bytes))?;
-            bytes.truncate(n);
+    pub(in crate::dynamic) fn read(&mut self, out: &mut [u8]) -> Result<usize, bio::BioFailure> {
+        if out.is_empty() {
+            return Ok(0);
         }
-        Ok(bytes)
+        let result = self.blocking_io(Operation::Read(out), Api::ssl_failure_kind);
+        self.api.finish_read(self.handle, result)
+    }
+
+    pub(in crate::dynamic) fn pending(&self) -> Result<usize, bio::BioFailure> {
+        self.api.ssl_pending(self.handle)
+    }
+
+    /// Exchange close notifications while the session still owns the socket.
+    pub(in crate::dynamic) fn shutdown(&mut self) -> Result<(), bio::BioFailure> {
+        self.blocking_io(Operation::Shutdown, Api::ssl_failure_kind)?;
+        Ok(())
     }
 }
 

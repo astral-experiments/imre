@@ -71,7 +71,7 @@ pub(in crate::dynamic) struct BioSession {
     server: bool,
 }
 
-/// A BIO operation never waits for an fd. Its caller moves ciphertext before retrying.
+/// An SSL I/O failure, including the direction needed to retry an incomplete operation.
 pub(in crate::dynamic) enum BioFailure {
     WantRead,
     WantWrite,
@@ -85,6 +85,90 @@ pub(in crate::dynamic) enum BioFailure {
         message: String,
     },
     Tls(Failure),
+}
+
+impl From<Failure> for BioFailure {
+    fn from(error: Failure) -> Self {
+        Self::Tls(error)
+    }
+}
+
+impl Api {
+    /// Classify the immediately preceding operation, before any other OpenSSL call.
+    fn ssl_failure(&self, ssl: NonNull<c_void>, rc: i32, operation: &str) -> BioFailure {
+        let os_error = std::io::Error::last_os_error();
+        // SAFETY: SSL_get_error examines the same thread and live SSL as the failed call.
+        let kind = unsafe { (self.SSL_get_error)(ssl.as_ptr(), rc) };
+        if kind == super::SSL_ERROR_SYSCALL && os_error.raw_os_error() != Some(0) {
+            return BioFailure::Tls(Failure::Io(os_error));
+        }
+        self.ssl_failure_kind(kind, operation)
+    }
+
+    /// Interpret SSL_get_error after handling syscall errno.
+    pub(super) fn ssl_failure_kind(&self, kind: i32, operation: &str) -> BioFailure {
+        match kind {
+            super::SSL_ERROR_WANT_READ => BioFailure::WantRead,
+            super::SSL_ERROR_WANT_WRITE => BioFailure::WantWrite,
+            super::SSL_ERROR_ZERO_RETURN => BioFailure::ZeroReturn,
+            // SAFETY: inspect the current operation's error queue without removing entries.
+            super::SSL_ERROR_SYSCALL if unsafe { (self.ERR_peek_error)() } == 0 => BioFailure::Eof,
+            super::SSL_ERROR_SSL => {
+                // OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_*).
+                const SHUTDOWN_IN_INIT: std::ffi::c_ulong = (20 << 23) | 407;
+                const PROTOCOL_IS_SHUTDOWN: std::ffi::c_ulong = (20 << 23) | 207;
+                const RECORD_LAYER_FAILURE: std::ffi::c_ulong = (20 << 23) | 313;
+                const DECRYPTION_FAILED_OR_BAD_RECORD_MAC: std::ffi::c_ulong = (20 << 23) | 281;
+                const SSLV3_ALERT_BAD_RECORD_MAC: std::ffi::c_ulong = (20 << 23) | 1020;
+                // SAFETY: this thread's last error belongs to the failed SSL operation.
+                let code = unsafe { (self.ERR_peek_last_error)() };
+                let reason = match code {
+                    super::UNEXPECTED_EOF => return BioFailure::UnexpectedEof,
+                    PROTOCOL_IS_SHUTDOWN => return BioFailure::ProtocolIsShutdown,
+                    SHUTDOWN_IN_INIT => return BioFailure::ShutdownInInit,
+                    RECORD_LAYER_FAILURE => "RECORD_LAYER_FAILURE",
+                    DECRYPTION_FAILED_OR_BAD_RECORD_MAC => "DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
+                    SSLV3_ALERT_BAD_RECORD_MAC => "SSLV3_ALERT_BAD_RECORD_MAC",
+                    _ => return BioFailure::Tls(self.error(operation)),
+                };
+                BioFailure::RecordError {
+                    reason,
+                    message: self
+                        .reason_text(code)
+                        .map_or_else(|| operation.to_owned(), |s| s.into_owned()),
+                }
+            }
+            _ => BioFailure::Tls(self.error(operation)),
+        }
+    }
+
+    pub(super) fn ssl_pending(
+        &self,
+        ssl: NonNull<c_void>,
+    ) -> std::result::Result<usize, BioFailure> {
+        self.clear();
+        super::clear_errno();
+        // SAFETY: SSL_pending inspects decrypted bytes buffered by this SSL.
+        let count = unsafe { (self.SSL_pending)(ssl.as_ptr()) };
+        usize::try_from(count).map_err(|_| self.ssl_failure(ssl, count, "SSL_pending"))
+    }
+
+    pub(super) fn finish_read(
+        &self,
+        ssl: NonNull<c_void>,
+        result: std::result::Result<usize, BioFailure>,
+    ) -> std::result::Result<usize, BioFailure> {
+        // CPython returns an empty read for a peer's close_notify. Once both
+        // parties have sent close_notify, the same result is SSLZeroReturnError.
+        const SSL_RECEIVED_SHUTDOWN: i32 = 2;
+        if matches!(result, Err(BioFailure::ZeroReturn))
+            // SAFETY: read the shutdown flags on the same SSL as this operation.
+            && unsafe { (self.SSL_get_shutdown)(ssl.as_ptr()) } == SSL_RECEIVED_SHUTDOWN
+        {
+            return Ok(0);
+        }
+        result
+    }
 }
 
 impl BioSession {
@@ -142,49 +226,6 @@ impl BioSession {
         Ok(session)
     }
 
-    /// Classify the immediately preceding operation, before any other OpenSSL call.
-    fn failure(&self, rc: i32, operation: &str) -> BioFailure {
-        let api = self.api;
-        let os_error = std::io::Error::last_os_error();
-        // SAFETY: SSL_get_error examines the same thread and live SSL as the failed call.
-        match unsafe { (api.SSL_get_error)(self.handle.as_ptr(), rc) } {
-            super::SSL_ERROR_WANT_READ => BioFailure::WantRead,
-            super::SSL_ERROR_WANT_WRITE => BioFailure::WantWrite,
-            super::SSL_ERROR_ZERO_RETURN => BioFailure::ZeroReturn,
-            super::SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
-                BioFailure::Tls(Failure::Io(os_error))
-            }
-            // SAFETY: inspect the current operation's error queue without removing entries.
-            super::SSL_ERROR_SYSCALL if unsafe { (api.ERR_peek_error)() } == 0 => BioFailure::Eof,
-            super::SSL_ERROR_SSL => {
-                // OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_*).
-                const SHUTDOWN_IN_INIT: std::ffi::c_ulong = (20 << 23) | 407;
-                const PROTOCOL_IS_SHUTDOWN: std::ffi::c_ulong = (20 << 23) | 207;
-                const RECORD_LAYER_FAILURE: std::ffi::c_ulong = (20 << 23) | 313;
-                const DECRYPTION_FAILED_OR_BAD_RECORD_MAC: std::ffi::c_ulong = (20 << 23) | 281;
-                const SSLV3_ALERT_BAD_RECORD_MAC: std::ffi::c_ulong = (20 << 23) | 1020;
-                // SAFETY: this thread's last error belongs to the failed SSL operation.
-                let code = unsafe { (api.ERR_peek_last_error)() };
-                let reason = match code {
-                    super::UNEXPECTED_EOF => return BioFailure::UnexpectedEof,
-                    PROTOCOL_IS_SHUTDOWN => return BioFailure::ProtocolIsShutdown,
-                    SHUTDOWN_IN_INIT => return BioFailure::ShutdownInInit,
-                    RECORD_LAYER_FAILURE => "RECORD_LAYER_FAILURE",
-                    DECRYPTION_FAILED_OR_BAD_RECORD_MAC => "DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
-                    SSLV3_ALERT_BAD_RECORD_MAC => "SSLV3_ALERT_BAD_RECORD_MAC",
-                    _ => return BioFailure::Tls(api.error(operation)),
-                };
-                BioFailure::RecordError {
-                    reason,
-                    message: api
-                        .reason_text(code)
-                        .map_or_else(|| operation.to_owned(), |s| s.into_owned()),
-                }
-            }
-            _ => BioFailure::Tls(api.error(operation)),
-        }
-    }
-
     pub(in crate::dynamic) fn handshake(&mut self) -> std::result::Result<(), BioFailure> {
         self.handshake_complete = false;
         self.api.clear();
@@ -194,7 +235,7 @@ impl BioSession {
         let result = if rc == 1 {
             Ok(())
         } else {
-            Err(self.failure(rc, "SSL_do_handshake"))
+            Err(self.api.ssl_failure(self.handle, rc, "SSL_do_handshake"))
         };
         if !matches!(result, Err(BioFailure::WantRead | BioFailure::WantWrite)) {
             self.api
@@ -222,7 +263,7 @@ impl BioSession {
         if rc == 1 {
             Ok(count)
         } else {
-            Err(self.failure(rc, label))
+            Err(self.api.ssl_failure(self.handle, rc, label))
         }
     }
 
@@ -237,16 +278,7 @@ impl BioSession {
             // SAFETY: the SSL is live and data has space for exactly data.len() bytes.
             unsafe { (api.SSL_read_ex)(ssl, data.as_mut_ptr().cast(), data.len(), count) }
         });
-        // CPython returns an empty read for a peer's close_notify. Once both
-        // parties have sent close_notify, the same result is SSLZeroReturnError.
-        const SSL_RECEIVED_SHUTDOWN: i32 = 2;
-        if matches!(result, Err(BioFailure::ZeroReturn))
-            // SAFETY: read the shutdown flags on the same SSL as this operation.
-            && unsafe { (self.api.SSL_get_shutdown)(self.handle.as_ptr()) } == SSL_RECEIVED_SHUTDOWN
-        {
-            return Ok(0);
-        }
-        result
+        self.api.finish_read(self.handle, result)
     }
 
     pub(in crate::dynamic) fn write(
@@ -260,11 +292,7 @@ impl BioSession {
     }
 
     pub(in crate::dynamic) fn pending(&self) -> std::result::Result<usize, BioFailure> {
-        self.api.clear();
-        super::clear_errno();
-        // SAFETY: SSL_pending inspects decrypted bytes buffered by this SSL.
-        let count = unsafe { (self.api.SSL_pending)(self.handle.as_ptr()) };
-        usize::try_from(count).map_err(|_| self.failure(count, "SSL_pending"))
+        self.api.ssl_pending(self.handle)
     }
 
     pub(in crate::dynamic) fn peer_certificate(
@@ -317,7 +345,7 @@ impl BioSession {
         match rc {
             1 => Ok(()),
             0 => Err(BioFailure::WantRead),
-            _ => Err(self.failure(rc, "SSL_shutdown")),
+            _ => Err(self.api.ssl_failure(self.handle, rc, "SSL_shutdown")),
         }
     }
 }

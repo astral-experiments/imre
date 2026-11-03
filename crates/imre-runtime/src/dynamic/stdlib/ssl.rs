@@ -52,6 +52,9 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "wrap",
         "is_session",
         "release_session",
+        "read",
+        "pending",
+        "tls_shutdown",
         "shutdown",
         "fileno",
         "getsockname",
@@ -183,8 +186,13 @@ fn bio_count(
     }
 }
 
-fn bio_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id> {
-    // __index__ can resize or release the destination, or reenter this SSLObject.
+fn read_plaintext(
+    ctx: &mut Context,
+    size: Id,
+    buffer: Id,
+    read: impl FnOnce(&mut [u8]) -> std::result::Result<usize, provider::bio::BioFailure>,
+) -> Result<Id> {
+    // __index__ may resize the destination or reenter the TLS session.
     let size = ctx
         .index_integer(size)?
         .to_i64()
@@ -195,7 +203,6 @@ fn bio_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id> {
                 "Python int too large to convert to C ssize_t",
             )
         })?;
-    let session = bio_session(ctx, handle)?;
     if buffer != NONE {
         let (storage, range) = match ctx.writable_byte_span(buffer) {
             Ok(Some(span)) => span,
@@ -218,7 +225,7 @@ fn bio_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id> {
             size as usize
         };
         let dest = &mut ctx.writable_storage_bytes(storage)?[range.start..range.start + size];
-        let result = session.borrow_mut().read(dest);
+        let result = read(dest);
         return bio_count(ctx, result);
     }
 
@@ -233,7 +240,7 @@ fn bio_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id> {
     // Match CPython's allocation check, but SSL_read_ex returns data from at
     // most one 16 KiB TLS record. Only that prefix needs initializing.
     data.resize(size.min(16 * 1024), 0);
-    match session.borrow_mut().read(&mut data) {
+    match read(&mut data) {
         Ok(count) => {
             data.truncate(count);
             crate::compact_bytes(&mut data);
@@ -241,6 +248,23 @@ fn bio_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id> {
         }
         Err(error) => bio_failure(ctx, error),
     }
+}
+
+fn socket_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id> {
+    let Value::TlsSession(socket) = ctx.heap.get(handle) else {
+        return Err(closed());
+    };
+    let socket = Rc::clone(socket);
+    read_plaintext(ctx, size, buffer, |data| {
+        // The length's __index__ may have closed or unwrapped this socket.
+        let mut socket = socket.borrow_mut();
+        let session = socket.as_mut().ok_or_else(|| {
+            provider::bio::BioFailure::Tls(provider::Failure::Io(io::Error::from_raw_os_error(
+                libc::EBADF,
+            )))
+        })?;
+        session.read(data)
+    })
 }
 
 fn verify_failure(ctx: &mut Context, code: i64, message: String) -> Id {
@@ -624,7 +648,30 @@ pub(super) fn call(
                 .borrow()
                 .peer_certificate(ctx, binary)
         }
-        ("bio_read", &[handle, size, buffer]) => bio_read(ctx, handle, size, buffer),
+        ("bio_read", &[handle, size, buffer]) => {
+            let session = bio_session(ctx, handle)?;
+            read_plaintext(ctx, size, buffer, |data| session.borrow_mut().read(data))
+        }
+        ("read", &[handle, size, buffer]) => socket_read(ctx, handle, size, buffer),
+        ("pending", &[handle]) => {
+            let result = session(ctx, handle)?
+                .borrow()
+                .as_ref()
+                .ok_or_else(closed)?
+                .pending();
+            bio_count(ctx, result)
+        }
+        ("tls_shutdown", &[handle]) => {
+            let result = session(ctx, handle)?
+                .borrow_mut()
+                .as_mut()
+                .ok_or_else(closed)?
+                .shutdown();
+            match result {
+                Ok(()) => Ok(NONE),
+                Err(error) => bio_failure(ctx, error),
+            }
+        }
         ("bio_write", &[handle, data]) => {
             ctx.check_buffer_exporter(data)?;
             let result = bio_session(ctx, handle)?
@@ -870,24 +917,18 @@ pub(super) fn call(
                 let bytes = socket::recv(&raw, length, flags)?;
                 return Ok(ctx.alloc(Value::Bytes(bytes)));
             }
+            if !without_session(ctx, *handle) {
+                return socket_read(ctx, *handle, *size, NONE);
+            }
             let size = usize::try_from(ctx.as_integer(*size)?)
                 .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
-            if without_session(ctx, *handle) {
-                if let Some(&flags) = flags.first() {
-                    ctx.index_c_int(flags)?;
-                }
-                if size == 0 {
-                    return Ok(ctx.alloc(Value::Bytes(Vec::new())));
-                }
-                return Err(pending_io_error(ctx, *handle, libc::ENOTCONN));
+            if let Some(&flags) = flags.first() {
+                ctx.index_c_int(flags)?;
             }
-            let data = session(ctx, *handle)?
-                .borrow_mut()
-                .as_mut()
-                .ok_or_else(closed)?
-                .recv(size)
-                .map_err(|e| provider_error(ctx, e))?;
-            Ok(ctx.alloc(Value::Bytes(data)))
+            if size == 0 {
+                return Ok(ctx.alloc(Value::Bytes(Vec::new())));
+            }
+            Err(pending_io_error(ctx, *handle, libc::ENOTCONN))
         }
         ("close", &[handle]) => {
             if let Value::Socket(s) | Value::TlsListener(s) = ctx.heap.get(handle) {
