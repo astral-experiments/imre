@@ -3337,6 +3337,7 @@ for name in ("md4", "ripemd160"):
             "boxed_binary_subclass_lengths.py",
             "boxed_binary_ljust.py",
             "boxed_binary_strip.py",
+            "boxed_bytes_removeprefix.py",
             "boxed_class_union.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
