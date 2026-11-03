@@ -352,7 +352,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "zip_longest"
         ),
         M::Locale => exports!("locale", "getlocale", "getpreferredencoding", "setlocale"),
-        M::Math => exports!("math", "copysign", "isnan", "isqrt"),
+        M::Math => exports!("math", "copysign", "isinf", "isnan", "isqrt"),
         M::Numbers => exports!("numbers", "Complex", "Integral", "Rational", "Real"),
         M::Pickle => exports!("pickle", "UnpicklingError", "_loads", "dumps", "loads"),
         M::PosixPath => exports!("posixpath", "expanduser", "ismount", "split"),
