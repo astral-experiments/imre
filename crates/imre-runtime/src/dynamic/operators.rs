@@ -3395,8 +3395,8 @@ impl Context {
         }
         Ok(false)
     }
-    fn slice(&mut self, obj: Id, parts: [Id; 3]) -> Result<Id> {
-        let obj = self.scalar_value(obj);
+    fn slice(&mut self, receiver: Id, parts: [Id; 3]) -> Result<Id> {
+        let obj = self.scalar_value(receiver);
         if let Value::Range(range) = self.heap.get(obj) {
             return super::slice::range(self, parts, range.clone());
         }
@@ -3463,6 +3463,13 @@ impl Context {
                     sliced_text(text.chars().rev().skip(skip), stride, count)?
                 };
                 Value::Str(value)
+            }
+            Value::Bytes(data) if step == 1 => {
+                if receiver == obj && count == len {
+                    return Ok(obj);
+                }
+                let bytes = sliced_values(data, positions, count)?;
+                return Ok(self.heap.bytes_from_data(bytes));
             }
             Value::Bytes(data) => Value::Bytes(sliced_values(data, positions, count)?),
             Value::ByteArray(data) => Value::ByteArray(sliced_values(data, positions, count)?),

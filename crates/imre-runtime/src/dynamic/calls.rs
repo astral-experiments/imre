@@ -3016,6 +3016,11 @@ impl Context {
                             && let Some((signature, doc)) = method
                                 .strip_prefix("_warnings.")
                                 .and_then(stdlib::warnings_accel::method_metadata)
+                                .or_else(|| {
+                                    method
+                                        .strip_prefix("_tracemalloc.")
+                                        .and_then(stdlib::tracemalloc::method_metadata)
+                                })
                         {
                             return Ok(if name == "__doc__" {
                                 doc.map_or(NONE, |text| self.text(text))

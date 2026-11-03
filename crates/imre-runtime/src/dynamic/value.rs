@@ -284,13 +284,7 @@ impl Context {
                 continue;
             }
             let code = self.code_object(frame.code);
-            let line = match (frame.expression, &code.body) {
-                (ExpressionPosition::Line(line), _) => line,
-                (ExpressionPosition::Source { offset, .. }, Body::Source(program)) => {
-                    program.expression_line(offset).unwrap_or(location.line)
-                }
-                _ => location.line,
-            };
+            let line = frame.line(&self.heap, location);
             let (file, name) = (code.filename, code.name);
             let line = self.int(i64::from(line));
             frames.push(self.alloc(Value::Tuple(vec![file, line, name])));
@@ -2413,10 +2407,13 @@ impl CycleSet {
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
     slots: Vec<Slot>,
+    pub(super) allocation_traces: super::allocation_traces::AllocationTraces,
+    pub(super) loading_linked_constant: bool,
     // Keep the collector's links contiguous so it can scan marks without loading every Value.
     traces: Vec<Cell<usize>>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
+    short_bytes: HashMap<Option<u8>, Id>,
     full_collection: Option<CycleSet>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
@@ -2500,6 +2497,21 @@ struct Frame {
 }
 
 impl Frame {
+    fn line(&self, heap: &Heap, location: &Location) -> u32 {
+        match self.expression {
+            ExpressionPosition::Line(line) => line,
+            ExpressionPosition::Source { offset, .. } => {
+                if let Value::Code(code) = heap.get(self.code)
+                    && let Body::Source(program) = &code.body
+                {
+                    return program.expression_line(offset).unwrap_or(location.line);
+                }
+                location.line
+            }
+            ExpressionPosition::Statement => location.line,
+        }
+    }
+
     fn new(scope: Id, code: Id, owner: FrameOwner, inherited: Id) -> Self {
         Self {
             owner,
@@ -2613,9 +2625,12 @@ impl Heap {
         let mut heap = Self {
             traces: vec![Cell::new(UNMARKED); slots.len()],
             slots,
+            allocation_traces: Default::default(),
+            loading_linked_constant: false,
             gc_order: GcOrder::EMPTY,
             full_collection: None,
             linked_string_constants: HashMap::new(),
+            short_bytes: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
             abc_subclass_cache: HashMap::new(),
@@ -2832,9 +2847,13 @@ impl Heap {
         if let Value::Str(text) = &value
             && let Some(owner) = crate::objects::short_string(text)
         {
-            return self.intern_literal(owner);
+            return self.intern_literal(owner, true);
         }
-        self.alloc_slot(value)
+        match value {
+            Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
+            Value::Tuple(items) if items.is_empty() => EMPTY_TUPLE,
+            value => self.alloc_slot(value),
+        }
     }
 
     /// Linked code owns these immutable constants for the lifetime of its context.
@@ -2872,6 +2891,21 @@ impl Heap {
         id
     }
 
+    /// Reuse CPython's empty and one-byte singletons when copying known byte data.
+    /// Allocating an uninitialized one-byte result (for example, bytes(1)) is distinct.
+    pub(super) fn bytes_from_data(&mut self, bytes: Vec<u8>) -> Id {
+        if bytes.len() > 1 {
+            return self.alloc_slot(Value::Bytes(bytes));
+        }
+        let byte = bytes.first().copied();
+        if let Some(&id) = self.short_bytes.get(&byte) {
+            return id;
+        }
+        let id = self.alloc_slot_with_trace(Value::Bytes(bytes), false);
+        self.short_bytes.insert(byte, id);
+        id
+    }
+
     /// Allocate a distinct string result even when its value is a cached Latin-1 character.
     pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
         debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
@@ -2902,6 +2936,13 @@ impl Heap {
     }
 
     fn alloc_slot(&mut self, value: Value) -> Id {
+        self.alloc_slot_with_trace(value, true)
+    }
+
+    fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
+        let trace = trace
+            && self.allocation_traces.is_tracing()
+            && !matches!(&value, Value::Int(n) if matches!(n.as_small(), Some(-5..=256)));
         let has_gc_header = value.has_gc_header(self);
         let index = if self.free_head != END {
             let index = self.free_head;
@@ -2932,19 +2973,32 @@ impl Heap {
         }
         self.slots[index].finalization = Finalization::None;
         let id = index as Id;
+        if trace {
+            if self.loading_linked_constant {
+                self.allocation_traces.record_linked(id);
+            } else {
+                self.allocation_traces.record(
+                    id,
+                    self.frames.iter().rev().filter_map(|frame| {
+                        let location = frame.location.as_ref()?;
+                        Some((location.file.as_ref(), frame.line(self, location)))
+                    }),
+                );
+            }
+        }
         self.keep(id);
         id
     }
 
     /// A code literal and every occurrence of a Latin-1 character share their Python handle.
-    fn intern_literal(&mut self, owner: crate::StrOwner) -> Id {
+    fn intern_literal(&mut self, owner: crate::StrOwner, static_character: bool) -> Id {
         if let Some(entry) = self.interned.get_mut(&owner) {
             entry.literal = true;
             let id = entry.id;
             self.keep(id);
             return id;
         }
-        let id = self.alloc_slot(Value::Str(owner.to_string()));
+        let id = self.alloc_slot_with_trace(Value::Str(owner.to_string()), !static_character);
         self.interned
             .insert(owner, InternedString { id, literal: true });
         id
@@ -2958,12 +3012,19 @@ impl Heap {
             self.keep(id);
             return id;
         }
-        self.intern_literal(crate::sys::intern_owner(&crate::objects::literal_string(
-            text,
-        )))
+        if let Some(owner) = crate::objects::short_string(text) {
+            return self.intern_literal(owner, true);
+        }
+        self.intern_literal(
+            crate::sys::intern_owner(&crate::objects::literal_string(text)),
+            false,
+        )
     }
 
     pub fn string_literal(&mut self, text: &str) -> Result<Id> {
+        if let Some(owner) = crate::objects::short_string(text) {
+            return Ok(self.intern_literal(owner, true));
+        }
         let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
         if intern && let Some(entry) = self.interned.get_mut(text) {
             entry.literal = true;
@@ -3577,6 +3638,7 @@ impl Heap {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_string_constants.values().copied());
+        pending.extend(self.short_bytes.values().copied());
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned
@@ -4499,6 +4561,8 @@ impl Heap {
             self.traces[owner as usize].get() != UNMARKED
                 && self.traces[member as usize].get() != UNMARKED
         });
+        self.allocation_traces
+            .retain_live(|id| self.traces[id as usize].get() != UNMARKED);
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for id in 0..self.slots.len() {
@@ -4528,6 +4592,27 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reusing_an_object_slot_replaces_its_allocation_trace() {
+        let mut heap = Heap::new();
+        heap.allocation_traces.start(1);
+        let mut location = Location {
+            file: "test.py".into(),
+            line: 1,
+            span: None,
+        };
+        heap.publish_statement(&[], location.clone(), NONE);
+        let first = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(heap.allocation_traces.get(first).unwrap()[0].1, 1);
+        location.line = 2;
+        heap.publish_statement(&[], location, NONE);
+        heap.collect(std::iter::empty());
+        assert!(heap.allocation_traces.get(first).is_none());
+        let next = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(next, first);
+        assert_eq!(heap.allocation_traces.get(next).unwrap()[0].1, 2);
+    }
 
     #[test]
     fn removing_heap_slots_preserves_collection_order() {

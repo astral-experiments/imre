@@ -231,15 +231,12 @@ fn convert(ctx: &mut Context, node: Id, depth: usize) -> Result<Id> {
             return Ok(set);
         }
         ctx.heap.keep(iter);
-        let result = ctx.alloc(if is(ctx, node, "ast.Tuple") {
-            Value::Tuple(Vec::new())
-        } else {
-            Value::List(Vec::new())
-        });
+        let tuple = is(ctx, node, "ast.Tuple");
+        let result = ctx.alloc(Value::List(Vec::new()));
         let mark = ctx.heap.temporary_mark();
         while let Some(elt) = ctx.next_item(iter)? {
             let value = convert(ctx, elt, depth + 1)?;
-            let (Value::List(values) | Value::Tuple(values)) = ctx.heap.get_mut(result) else {
+            let Value::List(values) = ctx.heap.get_mut(result) else {
                 unreachable!();
             };
             values
@@ -247,6 +244,13 @@ fn convert(ctx: &mut Context, node: Id, depth: usize) -> Result<Id> {
                 .map_err(|_| Error::new("MemoryError", ""))?;
             values.push(value);
             ctx.heap.release_temporaries_since(mark);
+        }
+        if tuple {
+            let Value::List(values) = ctx.heap.get_mut(result) else {
+                unreachable!();
+            };
+            let values = std::mem::take(values);
+            return Ok(ctx.heap.packed_tuple(values, false));
         }
         return Ok(result);
     }
