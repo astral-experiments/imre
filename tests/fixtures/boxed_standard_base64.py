@@ -1,11 +1,18 @@
 import base64
 import binascii
+from array import array
+from io import BytesIO
 
 
 class Text(str):
     def encode(self, encoding):
         print("encoding", encoding)
         return b"YWJj"
+
+
+class ShortReads(BytesIO):
+    def read(self, size):
+        return super().read(min(size, 7))
 
 
 def current():
@@ -33,3 +40,15 @@ def current():
         base64.encodebytes("text")
     except TypeError as exc:
         print(str(exc))
+
+    encoded = b64encode(b"\xfb\xff", altchars=array("B", b"*$"))
+    print(encoded, b64decode(memoryview(encoded), altchars=memoryview(b"*$")))
+    print(b64decode(array("B", b"YWJj")), base64.standard_b64decode(memoryview(b"Y.W.J.j.")[::2]))
+
+    stream = BytesIO()
+    base64.encode(ShortReads(b"x" * 58), stream)
+    print(stream.getvalue())
+    stream.seek(0)
+    decoded = BytesIO()
+    base64.decode(stream, decoded)
+    print(decoded.getvalue())
