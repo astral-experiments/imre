@@ -45,6 +45,18 @@ class CallableInstance:
         raise AssertionError("signature compared the callable")
 
 
+class FunctionProxy:
+    def __init__(self, func):
+        self.__name__ = func.__name__
+        self.__code__ = func.__code__
+        self.__defaults__ = func.__defaults__
+        self.__kwdefaults__ = func.__kwdefaults__
+        self.__annotations__ = func.__annotations__
+
+    def __call__(self, *args, **kwargs):
+        pass
+
+
 class StaticCall:
     __call__ = staticmethod(lambda first, second: None)
 
@@ -92,6 +104,37 @@ class NewFirst(ConstructorBase):
 class DefaultInit(ConstructorBase):
     __init__ = object.__init__
 
+
+@warnings.deprecated("old constructor")
+class DeprecatedChild(ConstructorBase):
+    pass
+
+
+class InitDescriptor:
+    __wrapped__ = object.__init__
+
+    def __get__(self, instance, owner):
+        return lambda selected: None
+
+
+class DescriptorInit:
+    __init__ = InitDescriptor()
+
+
+proxy = FunctionProxy(original)
+assert inspect.signature(proxy) == inspect.signature(original)
+proxy.__defaults__ = (5,)
+proxy.__kwdefaults__ = {"flag": True}
+proxy.__annotations__ = {"return": bytes}
+proxy_sig = inspect.signature(proxy)
+assert proxy_sig.parameters["b"].default == 5
+assert proxy_sig.parameters["flag"].default is True
+assert proxy_sig.return_annotation is bytes
+proxy.__code__ = compile("1 + 1", "<expr>", "eval")
+proxy.__annotations__ = {}
+assert str(inspect.signature(proxy)) == "()"
+del proxy.__defaults__
+assert str(inspect.signature(proxy)) == "(*args, **kwargs)"
 
 target = CallableInstance()
 target.__call__ = lambda shadow: None
@@ -161,28 +204,12 @@ assert not inspect.ismodule(inspect.Parameter)
 print(inspect.signature(ConstructorChild), inspect.signature(NewFirst), inspect.signature(DefaultInit))
 
 
-@warnings.deprecated("old constructor")
-class DeprecatedChild(ConstructorBase):
-    pass
-
-
 assert inspect.signature(DeprecatedChild) == inspect.signature(ConstructorBase)
 assert str(inspect.signature(DeprecatedChild, follow_wrapped=False)) == "(*args, **kwargs)"
 DeprecatedChild.__new__.__signature__ = Signature([
     Parameter("cls", Parameter.POSITIONAL_ONLY), Parameter("published", Parameter.KEYWORD_ONLY),
 ])
 assert str(inspect.signature(DeprecatedChild)) == "(*, published)"
-
-
-class InitDescriptor:
-    __wrapped__ = object.__init__
-
-    def __get__(self, instance, owner):
-        return lambda selected: None
-
-
-class DescriptorInit:
-    __init__ = InitDescriptor()
 
 
 assert str(inspect.signature(DescriptorInit)) == "(selected)"
