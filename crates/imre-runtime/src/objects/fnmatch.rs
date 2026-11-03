@@ -12,6 +12,11 @@ pub(crate) fn compile(pattern: &str) -> impl Fn(&str) -> bool + use<> {
     move |name| pattern.matches(name)
 }
 
+/// Match a single name without copying the pattern's literal spans.
+pub(crate) fn matches_once(name: &str, pattern: &str) -> bool {
+    Pattern::<&str>::from_component(pattern).matches(name)
+}
+
 pub(crate) fn byte_spelling(bytes: &[u8]) -> Result<Cow<'_, str>> {
     if bytes.is_ascii() {
         Ok(Cow::Borrowed(
@@ -61,7 +66,7 @@ pub unsafe extern "C" fn imre_fnmatch(
                 spelling(pat, pat_bytes != 0)?,
             )
         };
-        Ok(u32::from(compile(&pat)(&name)))
+        Ok(u32::from(matches_once(&name, &pat)))
     };
     finish(matched(), 0)
 }
