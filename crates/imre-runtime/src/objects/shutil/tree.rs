@@ -62,29 +62,47 @@ struct Frame {
 }
 
 fn makedirs(dst: &Name, existing: bool) -> Result<()> {
-    if dst.path().as_os_str().as_bytes().contains(&0) {
-        return Err(Error::new(
-            Kind::ValueError,
-            "mkdir: embedded null character in path",
-        ));
+    let spelling = dst.path().as_os_str().as_bytes();
+    let mut path = spelling;
+    let mut pending = smallvec::SmallVec::<[&[u8]; 4]>::new();
+    loop {
+        let (head, tail) = crate::objects::posixpath::split(path);
+        let (head, tail) = if tail.is_empty() {
+            crate::objects::posixpath::split(head)
+        } else {
+            (head, tail)
+        };
+        if head.is_empty() || tail.is_empty() || Path::new(OsStr::from_bytes(head)).exists() {
+            pending.push(path);
+            break;
+        }
+        // os.makedirs creates the missing parent of "new/." and stops there.
+        if tail != b"." {
+            pending.push(path);
+        }
+        path = head;
     }
-    match fs::create_dir(dst.path()) {
-        Ok(()) => return Ok(()),
-        Err(_) if existing && dst.path().is_dir() => return Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            if let Some(parent) = dst.path().parent().filter(|p| !p.as_os_str().is_empty()) {
-                let parent = dst.joined(parent)?;
-                fs::create_dir_all(parent.path()).map_err(|e| parent.error(e))?;
-            } else {
+    for name in pending.into_iter().rev() {
+        if name.contains(&0) {
+            return Err(Error::new(
+                Kind::ValueError,
+                "mkdir: embedded null character in path",
+            ));
+        }
+        let path = Path::new(OsStr::from_bytes(name));
+        if let Err(e) = fs::create_dir(path) {
+            if (name != spelling && e.kind() == io::ErrorKind::AlreadyExists)
+                || (existing && path.is_dir())
+            {
+                continue;
+            }
+            if name == spelling {
                 return Err(dst.error(e));
             }
+            return Err(dst.joined(path)?.error(e));
         }
-        Err(e) => return Err(dst.error(e)),
     }
-    match fs::create_dir(dst.path()) {
-        Err(_) if existing && dst.path().is_dir() => Ok(()),
-        result => result.map_err(|e| dst.error(e)),
-    }
+    Ok(())
 }
 
 fn open(src: &Name, dst: &Name, existing: bool, ignore: Option<Ignore>) -> TreeResult<Frame> {
