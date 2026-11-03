@@ -24,23 +24,31 @@ result:
 
 ; Describe the physical prefix [0, n) using the existing read-only span API.
 ; Uniform spans may share one payload. Record at most eight other physical indices.
-; Inspect at most 17 spans (eight exceptions with a default gap on either side).
-define internal i64 @imre_struct_modular_runs(ptr %list, i64 %tagged_n, i64 %scale, i64 %offset, ptr %plan) nounwind {
+; One iteration cannot reuse a projection. Otherwise check one span for a uniform
+; prefix, then allow one more per eight iterations, up to eight exceptions and nine gaps.
+define internal i64 @imre_struct_modular_runs(ptr %list, i64 %tagged_n, i64 %scale, i64 %offset, i64 %tagged_distance, ptr %plan) nounwind {
 entry:
   %span = alloca { i64, i64, i64, ptr }, align 8
   %length_slot = getelementptr i64, ptr %span, i64 1
   %mask_slot = getelementptr i64, ptr %span, i64 2
   %data_slot = getelementptr i64, ptr %span, i64 3
   %indices = getelementptr i64, ptr %plan, i64 1
+  %single = icmp eq i64 %tagged_distance, 2
+  br i1 %single, label %ordinary, label %prepare
+prepare:
+  %extra = lshr i64 %tagged_distance, 4
+  %full = icmp uge i64 %extra, 16
+  %available = add i64 %extra, 1
+  %spans = select i1 %full, i64 17, i64 %available
   %n = lshr i64 %tagged_n, 1
   %stride = urem i64 %scale, %n
   %constant = icmp eq i64 %stride, 0
   br i1 %constant, label %uniform, label %scan
 scan:
-  %at = phi i64 [ 0, %entry ], [ %end, %more ]
-  %count = phi i64 [ 0, %entry ], [ %used, %more ]
-  %remaining = phi i64 [ 17, %entry ], [ %left, %more ]
-  %default = phi ptr [ null, %entry ], [ %anchor, %more ]
+  %at = phi i64 [ 0, %prepare ], [ %end, %more ]
+  %count = phi i64 [ 0, %prepare ], [ %used, %more ]
+  %remaining = phi i64 [ %spans, %prepare ], [ %left, %more ]
+  %default = phi ptr [ null, %prepare ], [ %anchor, %more ]
   call void @imre_struct_seek_span(ptr %list, i64 %at, ptr %span)
   %start = load i64, ptr %span
   %length = load i64, ptr %length_slot
