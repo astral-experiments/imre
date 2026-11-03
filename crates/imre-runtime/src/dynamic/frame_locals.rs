@@ -57,12 +57,18 @@ fn class(ctx: &mut Context) -> Result<Id> {
 
 /// Recreate empty lexical slots on first access after frame.clear(), without
 /// retaining any of the values or closure cells released by the clear.
-fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id)> {
-    let Value::PythonFrame { scope, code, .. } = *ctx.heap.get(frame) else {
+fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
+    let Value::PythonFrame {
+        scope,
+        code,
+        unoptimized_locals,
+        ..
+    } = *ctx.heap.get(frame)
+    else {
         unreachable!("a proxy owns a Python frame")
     };
     if scope != NONE {
-        return Ok((scope, code));
+        return Ok((scope, code, unoptimized_locals.is_none()));
     }
     let layout = ctx.code_object(code);
     let mut names: std::collections::HashSet<_> = layout.freevars.iter().cloned().collect();
@@ -86,28 +92,34 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id)> {
         unreachable!()
     };
     *scope = empty;
-    Ok((empty, code))
+    Ok((empty, code, unoptimized_locals.is_none()))
 }
 
-fn optimized(ctx: &Context, scope: Id) -> bool {
+/// Capture the actual namespace while a class body or other unoptimized scope is still active.
+pub(super) fn unoptimized_namespace(ctx: &mut Context, scope: Id, code: Id) -> Result<Option<Id>> {
     let data = ctx.scope_data(scope);
-    data.closure.cleared
-        || data.parent.is_some() && data.exec_locals.is_none() && data.class_body.is_none()
+    if data.parent.is_none() || data.exec_locals.is_some() || data.class_body.is_some() {
+        return ctx.locals_for_code(scope, code).map(Some);
+    }
+    Ok(None)
 }
 
 /// Return the actual namespace in unoptimized frames and a fresh view in optimized ones.
 pub(super) fn get(ctx: &mut Context, frame: Id) -> Result<Id> {
-    let (scope, code) = frame_scope(ctx, frame)?;
-    if !optimized(ctx, scope) {
-        return ctx.locals_for_code(scope, code);
+    if let Value::PythonFrame {
+        unoptimized_locals: Some(namespace),
+        ..
+    } = *ctx.heap.get(frame)
+    {
+        return Ok(namespace);
     }
     let class = class(ctx)?;
     Ok(ctx.alloc(Value::FrameLocalsProxy { class, frame }))
 }
 
 fn snapshot(ctx: &mut Context, frame: Id) -> Result<Id> {
-    let (scope, code) = frame_scope(ctx, frame)?;
-    if optimized(ctx, scope) {
+    let (scope, code, optimized) = frame_scope(ctx, frame)?;
+    if optimized {
         return ctx.locals_for_code(scope, code);
     }
     // A proxy explicitly constructed from an unoptimized frame exposes only extra keys.
@@ -127,9 +139,9 @@ enum Access {
 /// Resolve keys against lexical slots, including unbound names. An object
 /// comparing equal to a local's name addresses the same slot.
 fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id>> {
-    let (original, code) = frame_scope(ctx, frame)?;
+    let (original, code, optimized) = frame_scope(ctx, frame)?;
     let mut names = indexmap::IndexSet::new();
-    if optimized(ctx, original) {
+    if optimized {
         names = ctx.frame_binding_names(original, code)?;
         names.extend(ctx.scope_data(original).closure.declared.iter().cloned());
     }
@@ -141,7 +153,7 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
     ctx.heap.keep(slots);
     let (hash, index) = ctx.find_dictionary_key(slots, key, None)?;
     // Hashing or comparing a Python key can clear this frame.
-    let (scope, _) = frame_scope(ctx, frame)?;
+    let (scope, ..) = frame_scope(ctx, frame)?;
     if let Some(index) = index {
         let name = &names[index];
         let mut owner = scope;

@@ -73,6 +73,10 @@ impl FrameLine<'_> {
 /// Capture the bindings that FrameSummary will immediately convert to representations.
 pub(super) fn frame_locals(ctx: &mut Context, frame: Id) -> Result<Id> {
     match *ctx.heap.get(frame) {
+        Value::PythonFrame {
+            unoptimized_locals: Some(namespace),
+            ..
+        } => Ok(namespace),
         Value::PythonFrame { scope: NONE, .. } => Ok(ctx.dict(Vec::new())),
         Value::PythonFrame { scope, code, .. } => ctx.locals_for_code(scope, code),
         _ => ctx.lookup_attr(frame, "f_locals"),

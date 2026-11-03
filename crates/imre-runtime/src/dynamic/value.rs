@@ -367,7 +367,9 @@ impl Context {
             }
             let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
             let globals = self.module_globals(scope)?;
+            let unoptimized_locals = super::frame_locals::unoptimized_namespace(self, scope, code)?;
             let object = self.alloc(Value::PythonFrame {
+                unoptimized_locals,
                 scope,
                 code,
                 globals,
@@ -414,6 +416,7 @@ impl Context {
         }
         let globals = self.module_globals(scope)?;
         let object = self.alloc(Value::PythonFrame {
+            unoptimized_locals: None,
             scope,
             code,
             globals,
@@ -1210,6 +1213,8 @@ pub(super) enum Value {
         span: Option<[u32; 3]>,
     },
     PythonFrame {
+        // The original namespace outlives execution of a module or class body.
+        unoptimized_locals: Option<Id>,
         scope: Id,
         code: Id,
         globals: Id,
@@ -2031,12 +2036,14 @@ impl Value {
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
             Self::PythonFrame {
+                unoptimized_locals,
                 scope,
                 code,
                 globals,
                 back,
                 ..
             } => {
+                visit.extend(*unoptimized_locals);
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
@@ -3580,20 +3587,26 @@ impl Heap {
 
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
     pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
-        let Value::PythonFrame { scope, .. } = *self.get(value) else {
+        let Value::PythonFrame {
+            scope,
+            unoptimized_locals,
+            ..
+        } = *self.get(value)
+        else {
             return Err(Error::new("TypeError", "expected a frame"));
         };
-        if scope == NONE {
+        if scope == NONE && unoptimized_locals.is_none() {
             return Ok(());
         }
         if let Value::Scope(data) = self.get_mut(scope)
             && data.closure.cleared
+            && unoptimized_locals.is_none()
         {
             // Clearing again releases extras but keeps local slots rebound after the first clear.
             self.collect_next_statement |= data.closure.extra_locals.take().is_some();
             return Ok(());
         }
-        if self.frames.iter().any(|frame| frame.scope == scope) {
+        if scope != NONE && self.frames.iter().any(|frame| frame.scope == scope) {
             return Err(Error::new(
                 "RuntimeError",
                 "cannot clear an executing frame",
@@ -3619,10 +3632,18 @@ impl Heap {
             self.discard_generator_frame(id);
             return Ok(());
         }
-        let Value::PythonFrame { scope, .. } = self.get_mut(value) else {
+        // Held namespaces survive a clear; subsequent access gets a fresh empty dict.
+        let namespace = unoptimized_locals.map(|_| self.alloc(Value::Dict(Default::default())));
+        let Value::PythonFrame {
+            scope,
+            unoptimized_locals,
+            ..
+        } = self.get_mut(value)
+        else {
             unreachable!()
         };
         *scope = NONE;
+        *unoptimized_locals = namespace;
         self.collect_next_statement = true;
         Ok(())
     }

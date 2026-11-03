@@ -16,6 +16,22 @@ def current():
     assert caller() is frame and frame.f_globals is globals()
     assert frame.f_code.co_name == 'current' and frame.f_lineno > frame.f_code.co_firstlineno
 
+    namespace = {'sys': sys}
+    exec("captured = sys._getframe()", namespace)
+
+    class Example:
+        captured = sys._getframe()
+        namespace = locals()
+
+    for captured, original in [(namespace['captured'], namespace), (Example.captured, Example.namespace)]:
+        assert captured.f_locals is original
+        captured.clear()
+        held = captured.f_locals
+        assert type(held) is dict and not held and captured.f_locals is held
+        held['after'] = 1
+        captured.clear()
+        assert held == {'after': 1} and captured.f_locals == {}
+
     def resume(generator):
         return next(generator)
 
