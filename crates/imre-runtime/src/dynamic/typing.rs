@@ -2635,6 +2635,13 @@ pub(super) fn call(
             }
             Ok(class)
         }
+        ("_clear_alias_caches", []) => {
+            for cache in ctx.typing.alias_caches.into_iter().flatten() {
+                let clear = ctx.lookup_attr(cache, "cache_clear")?;
+                ctx.call(clear, Vec::new(), Vec::new())?;
+            }
+            Ok(NONE)
+        }
         ("_get_alias_kind", [value]) => Ok(match ctx.heap.get(*value) {
             Value::GenericAlias(alias) => {
                 let kind = match alias.kind {
