@@ -1530,7 +1530,7 @@ def main() -> None:
                 "        module.current()\n"
                 "    elif sys.argv[3] == 'read':\n"
                 "        with module.open('members.gz', 'rb') as stream:\n"
-                "            print(stream.read())\n"
+                "            print(stream.read1(65536), stream.read())\n"
                 "        print(stream.closed)\n"
             )
             for module, operation, path, expected in [
@@ -1539,7 +1539,7 @@ def main() -> None:
                 ("main", "import", temporary / "codeop_module", ""),
                 ("main", "import", temporary / "codeop_named_helper", "16896\n"),
                 ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
-                ("gzip", "read", temporary, "b'firstsecond'\nTrue\n"),
+                ("gzip", "read", temporary, "b'first' b'second'\nTrue\n"),
             ]:
                 result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
                 require_success(result)

@@ -401,6 +401,9 @@ impl Input {
             self.raw.consume(count);
             return Ok(data);
         }
+        if size > crate::MAX_BYTES_LEN {
+            return Err(Error::new(Kind::OverflowError, "byte string is too large"));
+        }
         let mut data = reserve(size)?;
         if size != 0 {
             loop {
@@ -421,6 +424,7 @@ impl Input {
                 break;
             }
         }
+        crate::compact_bytes(&mut data);
         Ok(data)
     }
 

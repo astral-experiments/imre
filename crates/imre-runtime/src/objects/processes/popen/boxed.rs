@@ -404,7 +404,7 @@ impl BoxedPipe {
     }
 
     pub(crate) fn read1(&self, size: Option<usize>) -> Result<Vec<u8>> {
-        self.with_file(|file| file.read_pipe_once(size))
+        self.with_file(|file| file.read_once(size))
     }
 
     pub(crate) fn write(&self, data: &[u8]) -> Result<()> {

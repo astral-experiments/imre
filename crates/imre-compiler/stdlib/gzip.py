@@ -44,8 +44,7 @@ class GzipFile(io.BufferedIOBase):
 
     def read1(self, size=-1):
         reader = self._open_reader()
-        size = operator.index(size)
-        return _imre_gzip.read(reader, io.DEFAULT_BUFFER_SIZE if size < 0 else size)
+        return _imre_gzip.read1(reader, io.DEFAULT_BUFFER_SIZE if size < 0 else size)
 
     def readline(self, size=-1):
         reader = self._open_reader()

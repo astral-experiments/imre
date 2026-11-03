@@ -167,7 +167,10 @@ impl FileState {
         self.input()?.take_read_ahead()
     }
 
-    pub(super) fn read_pipe_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+    pub(crate) fn read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        if size == Some(0) && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
+            return Ok(Bytes::new());
+        }
         self.input()?.read_once(size)
     }
 

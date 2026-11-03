@@ -394,7 +394,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_imre_tempfile",
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "finalize_at_shutdown",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("_imre_gzip", "open" | "read" | "readline" | "fileno" | "close") => {
+        ("_imre_gzip", "open" | "read" | "read1" | "readline" | "fileno" | "close") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("_imre_gzip", "BadGzipFile") => ctx.builtin("gzip.BadGzipFile"),

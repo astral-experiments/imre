@@ -11,7 +11,11 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let arity = if name == "read" { 2 } else { 1 };
+    let arity = if matches!(name, "read" | "read1") {
+        2
+    } else {
+        1
+    };
     if !kwargs.is_empty() || args.len() != arity {
         return Err(Error::new(
             "TypeError",
@@ -41,6 +45,11 @@ pub(super) fn call(
             }
             let size = ctx.index_integer(args[1])?;
             let bytes = handle.borrow_mut().read_size(&size)?;
+            Ok(ctx.alloc(Value::Bytes(bytes)))
+        }
+        "read1" => {
+            let size = os::ssize_t(ctx, args[1])?;
+            let bytes = handle.borrow_mut().read_once(usize::try_from(size).ok())?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         "readline" => {
