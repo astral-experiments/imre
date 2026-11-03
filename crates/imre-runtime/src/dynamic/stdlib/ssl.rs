@@ -50,6 +50,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "set_hostname_checks_common_name",
         "get_verified_chain",
         "get_unverified_chain",
+        "send",
         "sendall",
         "recv",
         "close",
@@ -385,7 +386,24 @@ pub(super) fn call(
                 .collect();
             Ok(ctx.alloc(Value::List(chain)))
         }
+        ("send", &[handle, data, flags]) => {
+            ctx.check_buffer_exporter(data)?;
+            let data = ctx.native_buffer_bytes(data)?;
+            if handle == NONE {
+                // A closed SSLSocket falls back to socket.send, which parses flags before EBADF.
+                ctx.index_c_int(flags)?;
+                return Err(closed());
+            }
+            let n = session(ctx, handle)?
+                .borrow_mut()
+                .as_mut()
+                .ok_or_else(closed)?
+                .send(data)
+                .map_err(|e| provider_error(ctx, e))?;
+            Ok(ctx.int(n as i64))
+        }
         ("sendall", &[handle, data]) => {
+            ctx.check_buffer_exporter(data)?;
             let data = ctx.native_buffer_bytes(data)?;
             session(ctx, handle)?
                 .borrow_mut()

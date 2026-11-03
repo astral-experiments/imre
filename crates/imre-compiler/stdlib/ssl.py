@@ -473,6 +473,11 @@ class SSLSocket:
         """Return the certificate chain sent by the peer as a list of DER-encoded certificates."""
         return _call(_imre_ssl.get_unverified_chain, self._session)
 
+    def send(self, data, flags=0):
+        if self._session is not None and flags != 0:
+            raise ValueError("non-zero flags not allowed in calls to send() on %s" % self.__class__)
+        return _call(_imre_ssl.send, self._session, data, flags)
+
     def sendall(self, data, flags=0):
         if flags:
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")

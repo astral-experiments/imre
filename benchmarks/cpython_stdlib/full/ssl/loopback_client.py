@@ -58,6 +58,7 @@ def main():
                 data += chunk
             assert data == b"local tls\n"
             assert peer.recv(0) == b""
+            assert peer.send(b"") == 0
             binding = peer.get_channel_binding()
             assert isinstance(binding, bytes) and binding
             assert peer.get_channel_binding(cb_type="tls-unique") == binding
@@ -70,7 +71,7 @@ def main():
             assert response.strip() == repr(binding).encode("ascii")
             with peer.makefile("rb") as reader:
                 with peer.makefile("rb", buffering=0) as raw_reader:
-                    peer.sendall(b"X\n")
+                    assert peer.send(memoryview(b"X\n")) == 2
                     buf = bytearray(b"??")
                     assert raw_reader.readinto(memoryview(buf)[1:]) == 1
                     assert buf == b"?x" and raw_reader.read(1) == b"\n"
