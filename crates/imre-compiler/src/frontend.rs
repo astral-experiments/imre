@@ -3933,7 +3933,7 @@ impl<'a> Checker<'a> {
         } else {
             self.iteration_input(&loop_.iter, self.split_guard(loop_))?
         };
-        input = self.fuse_splitlines(input);
+        input = self.fuse_split(input);
         if let Iteration::Container {
             iterable,
             items: false,
@@ -11896,6 +11896,20 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn byte_split_fuses_only_the_immediately_consumed_list() {
+        let llvm = crate::compile(
+            include_str!("../../../tests/fixtures/iterator_pipelines/split_fields.py"),
+            &crate::CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @imre_str_split_byte_iter(").count(),
+            2
+        );
+        assert_eq!(llvm.matches("call ptr @imre_str_split(").count(), 4);
     }
 
     #[test]
