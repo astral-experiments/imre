@@ -79,6 +79,14 @@ class ClassCall:
         return item
 
 
+class JoinCall(str):
+    __call__ = str.join
+
+
+class BoundJoinCall:
+    __call__ = ":".join
+
+
 class InheritedName(str):
     pass
 
@@ -209,6 +217,10 @@ target.__text_signature__ = ""
 assert str(inspect.signature(target)) == "(item, /, *, count=1)"
 assert str(inspect.signature(StaticCall())) == "(first, second)"
 assert str(inspect.signature(ClassCall())) == "(item)"
+for join in (JoinCall(":"), BoundJoinCall()):
+    sig = inspect.signature(join)
+    assert str(sig) == "(iterable, /)"
+    assert join(*sig.bind(["a", "bc"]).args) == "a:bc"
 
 update_wrapper(wrapper, original)
 spec = inspect.getfullargspec(original)
