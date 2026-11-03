@@ -1,0 +1,64 @@
+{
+  "cpython_revision": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_version": "3.14.5",
+  "stock_binary_sha256": "2a25b2cd5fc431ff940c20a1cf800f288ab61096c0a92f9871103b9671998f69",
+  "imre_revision": "534110d9678fcfa513f930c65b43db57e5d98f22",
+  "imre_tree": "ca82a64f575369020bde6d8b62980e685703fb7c",
+  "native_artifacts_sha256": {
+    "compiler": "28ba000aa70877ed99fcbc8a98208ab13203aa5b70bd81a0e2a60bd81ba2cc0a",
+    "runtime": "f04dc368d95072027f93eeb11d88748554cc1558b38b39621c299b5dab7f050d",
+    "clang": "7965eca808fd8808a3825e361d85dd4cfa086e8593bcbd9bb9518753c65be3de"
+  },
+  "cases": {
+    "annotationlib": {
+      "id": "test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format",
+      "occurrence": 1,
+      "module_sha256": "5ee4cc37e64a1e06f162777f31ecc3cb6032981575a800aaa51f37331e7e6987",
+      "method_lines": [
+        2138,
+        2164
+      ],
+      "method_sha256": "69a2a8a4b8ea2d810a87dbf9df10a20142fb53e99a42e9462c90c6bc4a3bf5d8",
+      "stage_sha256": {
+        "entry.py": "21f93e00af1595f51a0135ceae3f37d2253469f18878e8e58f708cfa8dde6ca5",
+        "test/__init__.py": "836cdb388117cf81e78d9fa2a141cca1b14b0179733322e710067749a1b16fe9",
+        "test/support/__init__.py": "c33ea142571b94db4656d4dcc4bc6de8142a59dd3c6971bec5015802cf0102b2",
+        "test/test_annotationlib.py": "338b51754d847a3762574f86daa3d5a537502ec9ba72f48714136d52f82995c2"
+      },
+      "upstream": "functools/upstream/Lib/test/test_annotationlib.py",
+      "ordinal": 23,
+      "denominator": 117,
+      "paired_before": 18,
+      "paired_after": 19,
+      "elf_sha256": {
+        "O0": "664b3a9b9e07bcffb6477920759cd324f5115c40b976ef271c1ada70804d1b3e",
+        "O3": "0d2bc7af8c1c83186a61a6e155a90f50198e97ff5c4103a78a0a0826e2069fa1"
+      }
+    },
+    "typing": {
+      "id": "test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string",
+      "occurrence": 1,
+      "module_sha256": "28d17772f523800f02a5bf1e0cc012779d7df1f616fec7cc34d922dcba7ee1cc",
+      "method_lines": [
+        6326,
+        6338
+      ],
+      "method_sha256": "ac1b9bd25908f47d371ca0ff31a23e3366aff9448c98e28b73773354240f1e34",
+      "stage_sha256": {
+        "entry.py": "c0a7f4166adfded3e761df9bcb9dbf0d7260a72b17f80d898c78e33ffdcc7493",
+        "test/__init__.py": "836cdb388117cf81e78d9fa2a141cca1b14b0179733322e710067749a1b16fe9",
+        "test/test_typing.py": "ce1726c19a6c32a3ab399bcad7df305d6de0a43afa8ba83d4439045bba711753"
+      },
+      "upstream": "typing/upstream/Lib/test/test_typing.py",
+      "ordinal": 354,
+      "denominator": 712,
+      "paired_before": 449,
+      "paired_after": 450,
+      "elf_sha256": {
+        "O0": "8c35274800a2728e1bc9e7ac73cba0cb8d52e89b4a89337ea376936310fd7c6e",
+        "O3": "592597d6e95089364420cfd27302b2405b049a56ec753ed5e1e3815587f02090"
+      }
+    }
+  },
+  "proposed_omissions": []
+}
