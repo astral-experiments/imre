@@ -876,7 +876,10 @@ impl Context {
                     } else if let Some(answer) = self.binary_special("==", left, right)? {
                         Work::Done(self.truth(answer)?)
                     } else if matches!(
-                        (self.heap.get(left), self.heap.get(right)),
+                        (
+                            self.heap.get(self.scalar_value(left)),
+                            self.heap.get(self.scalar_value(right))
+                        ),
                         (Value::GenericAlias(_), Value::GenericAlias(_))
                     ) {
                         if let Some((a, b)) =

@@ -2230,7 +2230,22 @@ pub(super) fn call(
         let receiver = builtins::noargs_method_receiver(ctx, owner, "__reduce__", args, kwargs)?;
         return super::typing::reduce_builtin_alias(ctx, receiver);
     }
-    if name == "types.GenericAlias" {
+    if matches!(name, "types.GenericAlias" | "types.GenericAlias.__new__") {
+        let base = ctx.builtin("types.GenericAlias");
+        let (class, args) = if name.ends_with(".__new__") {
+            let Some((&class, rest)) = args.split_first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    "types.GenericAlias.__new__(): not enough arguments",
+                ));
+            };
+            if !ctx.subclass(class, base) {
+                return Err(ctx.invalid_new_subtype("types.GenericAlias", class));
+            }
+            (class, rest)
+        } else {
+            (base, args)
+        };
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -2243,7 +2258,16 @@ pub(super) fn call(
                 format!("GenericAlias expected 2 arguments, got {}", args.len()),
             ));
         };
-        return Ok(super::typing::builtin_alias(ctx, *origin, *parameters));
+        let alias = super::typing::builtin_alias(ctx, *origin, *parameters);
+        if class == base {
+            return Ok(alias);
+        }
+        let instance = ctx.instance(class, None);
+        let Value::Instance { scalar, .. } = ctx.heap.get_mut(instance) else {
+            unreachable!()
+        };
+        *scalar = Some(alias);
+        return Ok(instance);
     }
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {

@@ -562,9 +562,10 @@ pub(super) fn checked_alias_parts(
     left: Id,
     right: Id,
 ) -> Result<Option<(Id, Id)>> {
-    let (Value::GenericAlias(a), Value::GenericAlias(b)) =
-        (ctx.heap.get(left), ctx.heap.get(right))
-    else {
+    let (Value::GenericAlias(a), Value::GenericAlias(b)) = (
+        ctx.heap.get(ctx.scalar_value(left)),
+        ctx.heap.get(ctx.scalar_value(right)),
+    ) else {
         unreachable!()
     };
     if matches!(
@@ -625,9 +626,15 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     allocate_alias(ctx, AliasKind::Builtin, origin, args, NONE, None, true)
 }
 
+/// Return the underlying PEP 585 alias while preserving the subtype object for callbacks.
+pub(super) fn alias_payload(ctx: &Context, obj: Id) -> Option<Id> {
+    let payload = ctx.scalar_value(obj);
+    (payload != obj && matches!(ctx.heap.get(payload), Value::GenericAlias(_))).then_some(payload)
+}
+
 /// Rebuild PEP 585 aliases and their one-shot unpacking iterators through public constructors.
 pub(super) fn reduce_builtin_alias(ctx: &mut Context, receiver: Id) -> Result<Id> {
-    let (constructor, args) = match ctx.heap.get(receiver) {
+    let (constructor, args) = match ctx.heap.get(ctx.scalar_value(receiver)) {
         Value::GenericAlias(alias) => {
             let (origin, args) = (alias.origin, alias.args);
             if alias.unpacked {
@@ -1277,6 +1284,12 @@ impl ParameterClass {
 pub(super) fn install_alias_class(ctx: &mut Context, owner: &str, class: Id) {
     let mut entries = Vec::new();
     match owner {
+        "types.GenericAlias" => {
+            for name in ["__new__", "__reduce__"] {
+                let method = ctx.builtin(&format!("{owner}.{name}"));
+                entries.push((ctx.text(name), method));
+            }
+        }
         "typing.TypeAliasType" => {
             let owner = "typing.TypeAliasType";
             for field in [
@@ -1347,6 +1360,35 @@ fn generic_alias_method(ctx: &Context, name: &str) -> Option<Id> {
         "copy_with" => ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name),
         "__reduce__" => ctx.module_value("typing", "_reduce_generic_alias"),
         _ => None,
+    }
+}
+
+/// GenericAlias forwards most names to the origin but keeps its own metadata and reduction.
+pub(super) fn subclass_alias_attribute(
+    ctx: &mut Context,
+    value: Id,
+    class: Id,
+    name: &str,
+) -> Option<Result<Id>> {
+    let payload = alias_payload(ctx, value)?;
+    let Value::GenericAlias(alias) = ctx.heap.get(payload) else {
+        unreachable!()
+    };
+    match name {
+        "__class__" | "__bases__" | "__copy__" | "__deepcopy__" | "__reduce__"
+        | "__reduce_ex__" => None,
+        "__origin__"
+        | "__args__"
+        | "__parameters__"
+        | "__unpacked__"
+        | "__typing_unpacked_tuple_args__"
+        | "__mro_entries__" => {
+            if ctx.class_attr(class, name).is_some() {
+                return None;
+            }
+            Some(ctx.lookup_attr(payload, name))
+        }
+        _ => Some(ctx.lookup_attr(alias.origin, name)),
     }
 }
 
@@ -1482,6 +1524,9 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             if class == "typing.TypeAliasType" && matches!(name, "__name__" | "__qualname__") =>
         {
             ctx.text("TypeAliasType")
+        }
+        Value::Native(class) if class == "types.GenericAlias" && name == "__new__" => {
+            ctx.builtin("types.GenericAlias.__new__")
         }
         Value::Native(class)
             if name == "__module__"
@@ -2834,6 +2879,9 @@ impl Context {
                 {
                     let result = self.call(check, vec![value], Vec::new())?;
                     return self.truth(result);
+                }
+                if alias_payload(self, class).is_some() {
+                    return Err(AliasKind::Builtin.class_check_error("isinstance"));
                 }
                 if self.is_protocol_declaration(class) {
                     self.check_runtime_protocol(class, false)?;
