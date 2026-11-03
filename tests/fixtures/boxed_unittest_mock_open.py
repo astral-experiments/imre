@@ -111,6 +111,11 @@ items.__getitem__.assert_called_with(slice(1, 3))
 assert not hasattr(items["key"], "missing")
 assert not hasattr(other, "__getitem__")
 
+writer = MagicMock()
+writer.open()["key"] = 42
+assert writer.mock_calls == [call.open(), call.open().__setitem__("key", 42)]
+assert not hasattr(other, "__setitem__")
+
 locked = MagicMock(spec=["__iter__"])
 seal(locked)
 with check.assertRaises(AttributeError):
