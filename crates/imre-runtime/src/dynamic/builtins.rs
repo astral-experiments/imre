@@ -794,11 +794,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) | Value::NamedTuple { .. }
-            if matches!(attr, "__len__" | "count" | "index") =>
+            if matches!(attr, "__getitem__" | "__len__" | "count" | "index") =>
         {
             "tuple"
         }
-        Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
+        Value::Tuple(_) if attr == "__repr__" => "tuple",
         Value::Set { frozen, .. } => {
             let owner = if *frozen { "frozenset" } else { "set" };
             if !(set_methods(owner).contains(&attr) || set_operators(owner).contains(&attr)) {
