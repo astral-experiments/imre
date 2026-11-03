@@ -1459,6 +1459,29 @@ impl Value {
         }
     }
 
+    /// Whether allocating this boxed slot represents a Python object allocated with a GC header.
+    fn has_gc_header(&self, heap: &Heap) -> bool {
+        use crate::objects::HashState;
+        match self {
+            // A calendar subclass has its own instance slot. Its scalar payload stays untracked,
+            // including when a time or datetime retains a user-defined tzinfo.
+            Self::Calendar { .. } => false,
+            // The BytesIO instance owns its single GC header. Its byte buffer adds none.
+            Self::BytesIoStorage(_) => false,
+            Self::Instance { class, .. } => !matches!(
+                heap.get(*class),
+                Self::Native(name) if matches!(name.as_str(), "object" | super::stdlib::datetime::TZINFO)
+            ),
+            // OpenSSL hashes have no GC header. The fallback MD5 instance owns a separate boxed
+            // state, whereas a BLAKE2 or SHA-3 provider object is represented directly by its state.
+            Self::Hash(state) => !matches!(
+                state.lock().class_name(),
+                HashState::CLASS | HashState::XOF_CLASS | HashState::OPENSSL_CLASS | super::stdlib::hashlib::md5::CLASS
+            ),
+            _ => self.gc_object(),
+        }
+    }
+
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
@@ -2701,8 +2724,7 @@ impl Heap {
     }
 
     fn alloc_slot(&mut self, value: Value) -> Id {
-        let has_gc_header = value.gc_object()
-            && !matches!(&value, Value::Instance {class, ..} if matches!(self.get(*class), Value::Native(name) if name == "object"));
+        let has_gc_header = value.has_gc_header(self);
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
@@ -4049,6 +4071,7 @@ impl Heap {
                 .filter(|(slot, trace)| {
                     trace.get() != UNMARKED
                         && slot.generation <= generation
+                        && slot.has_gc_header
                         && slot.gc_tracked(self)
                 })
                 .count();
@@ -4355,6 +4378,24 @@ mod tests {
                     slot.gc_prev.get() == UNMARKED && slot.gc_next.get() == UNMARKED
                 })
             );
+        }
+    }
+
+    #[test]
+    fn hash_state_pressure_depends_on_the_python_allocation() {
+        use super::super::stdlib::hashlib::{digest::SharedHash, md5};
+        use crate::objects::HashState;
+        let heap = Heap::new();
+        for (algorithm, class, expected) in [
+            ("sha256", None, false),
+            ("sha256", Some(HashState::OPENSSL_CLASS), false),
+            ("md5", Some(md5::CLASS), false), // Its separate Python instance owns the header.
+            ("sha3_256", Some("_sha3.sha3_256"), true),
+        ] {
+            let provider = HashState::provider(algorithm)
+                .unwrap_or_else(|_| panic!("missing hash provider for {algorithm}"));
+            let hash = Value::Hash(SharedHash::new(provider.create(class, &[])));
+            assert_eq!(hash.has_gc_header(&heap), expected);
         }
     }
 

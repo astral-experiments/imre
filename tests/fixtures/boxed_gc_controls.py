@@ -61,8 +61,58 @@ def check_thresholds():
         set_threshold(*saved)
 
 
+def check_header_pressure():
+    from datetime import timedelta
+    from hashlib import blake2s, sha256
+
+    class Delta(timedelta):
+        pass
+
+    target = Node()
+
+    def ignore(wr):
+        pass
+
+    def new_ref():
+        return ref(target, ignore)
+
+    saved = get_threshold()
+    enabled = gc.isenabled()
+    try:
+        for factory, keep, collected in (
+            (timedelta, True, False),
+            (sha256, True, False),
+            (Delta, True, True),
+            (blake2s, True, True),
+            (new_ref, True, True),
+            (new_ref, False, False),
+        ):
+            gc.disable()
+            retained = [None] * 128
+            callbacks = []
+            gc.collect()
+            victim = cycle(callbacks)
+            set_threshold(32, 10000, 10000)
+            gc.enable()
+            for i in range(len(retained)):
+                if keep:
+                    retained[i] = factory()
+                else:
+                    factory()
+            gc.disable()
+            assert (victim() is None) == collected, (factory, keep)
+            assert callbacks == ([victim] if collected else [])
+    finally:
+        set_threshold(*saved)
+        if enabled:
+            gc.enable()
+        else:
+            gc.disable()
+
+
 def current():
     check_thresholds()
+    check_header_pressure()
     was_enabled = gc.isenabled()
     events = []
     try:
