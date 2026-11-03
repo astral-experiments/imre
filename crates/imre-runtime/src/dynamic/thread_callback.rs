@@ -32,7 +32,7 @@ pub(super) struct Callback {
     values: Vec<Argument>,
     receiver: Option<(String, Argument)>,
     config: serde_json::Value,
-    automatic_gc: Arc<std::sync::atomic::AtomicBool>,
+    gc_settings: Arc<super::gc_schedule::GcSettings>,
     finalizing: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -348,7 +348,7 @@ impl Callback {
             values,
             receiver: None,
             config: ctx.config.clone(),
-            automatic_gc: ctx.heap.automatic_gc.clone(),
+            gc_settings: ctx.heap.gc_settings.clone(),
             finalizing: ctx.finalizing.clone(),
         })
     }
@@ -359,7 +359,7 @@ impl Callback {
 
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
         let mut ctx = ffi::new_context(self.config, std::iter::empty::<String>());
-        ctx.heap.automatic_gc = self.automatic_gc;
+        ctx.heap.gc_settings = self.gc_settings;
         ctx.finalizing = self.finalizing;
         let globals = ctx.scope(&self.module, None);
         let scope = if let Some((name, receiver)) = self.receiver {

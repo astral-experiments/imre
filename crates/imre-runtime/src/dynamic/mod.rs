@@ -17,6 +17,7 @@ mod enums;
 mod ffi;
 mod finalizers;
 mod function_fields;
+mod gc_schedule;
 mod generator_protocol;
 mod import_meta;
 mod importlib;
