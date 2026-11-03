@@ -505,6 +505,26 @@ impl Context {
         Ok(head)
     }
 
+    /// Store an explicit cause, including None, using the same state as raise-from.
+    pub(super) fn set_exception_cause(&mut self, exception: Id, cause: Id) -> Result<()> {
+        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+            return Err(Error::new(
+                "TypeError",
+                "exception cause must be None or derive from BaseException",
+            ));
+        }
+        let Value::Raised(error) = self.heap.get_mut(exception) else {
+            unreachable!("cause assignment requires an exception instance")
+        };
+        if let Some(old) = error.tracing().cause.replace(cause)
+            && old != NONE
+            && old != cause
+        {
+            self.heap.collect_next_statement = true;
+        }
+        Ok(())
+    }
+
     /// Adopt the exact Python traceback chain and replace any previously retained frames.
     pub(super) fn set_traceback(&mut self, exception: Id, tb: Id) -> Result<()> {
         if !matches!(self.heap.get(exception), Value::Raised(_)) {

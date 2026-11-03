@@ -327,3 +327,70 @@ def exit_locations(mode):
 
 for mode in ("normal", "return", "raise"):
     exit_locations(mode)
+
+
+# Explicit causes are writable independently of raising, including cycles.
+error = Exception("error")
+error.__context__ = KeyError("context")
+error.__cause__ = error
+assert error.__cause__ is error and error.__suppress_context__
+try:
+    error.__cause__ = Exception
+except TypeError as problem:
+    assert str(problem) == "exception cause must be None or derive from BaseException"
+else:
+    raise AssertionError("accepted an exception class as the cause")
+assert error.__cause__ is error
+error.__cause__ = None
+assert error.__cause__ is None and error.__suppress_context__
+assert isinstance(error.__context__, KeyError)
+try:
+    del error.__cause__
+except TypeError as problem:
+    assert str(problem) == "__cause__ may not be deleted"
+else:
+    raise AssertionError("deleted the cause")
+
+
+# Re-raising preserves a cause installed on the caught instance.
+linked = KeyError("cause")
+try:
+    try:
+        raise error
+    except Exception as caught:
+        caught.__cause__ = linked
+        raise
+except Exception as reraised:
+    assert reraised is error and reraised.__cause__ is linked
+
+
+class OwnCause(Exception):
+    @property
+    def __cause__(self):
+        return self.link
+
+    @__cause__.setter
+    def __cause__(self, value):
+        self.link = value
+
+
+custom = OwnCause()
+custom.__cause__ = 42
+assert custom.__cause__ == 42 and not custom.__suppress_context__
+
+
+class Payload:
+    pass
+
+
+def attach_payload(error):
+    import weakref
+    payload = Payload()
+    error.__cause__ = Exception(payload)
+    return weakref.ref(payload)
+
+
+ref = attach_payload(error)
+assert ref() is not None
+error.__cause__ = None
+assert ref() is None

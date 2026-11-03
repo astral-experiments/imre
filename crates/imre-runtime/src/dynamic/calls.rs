@@ -4788,6 +4788,9 @@ impl Context {
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, None);
         }
+        if name == "__cause__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return Err(Error::new("TypeError", "__cause__ may not be deleted"));
+        }
         if self.update_key_wrapper_field(obj, name, None)?
             || self.update_os_field(obj, name, None)?
         {
@@ -5796,6 +5799,9 @@ impl Context {
         }
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, Some(value));
+        }
+        if name == "__cause__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return self.set_exception_cause(obj, value);
         }
         if self.update_key_wrapper_field(obj, name, Some(value))?
             || self.update_os_field(obj, name, Some(value))?
