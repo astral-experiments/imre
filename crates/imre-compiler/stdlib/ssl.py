@@ -352,6 +352,8 @@ class SSLContext:
         self._post_handshake_auth = enabled
 
     def cert_store_stats(self, /):
+        if not issubclass(type(self), SSLContext):
+            _imre_ssl.raise_context_receiver_error("cert_store_stats", self)
         return _imre_ssl.cert_store_stats(self._ctx)
 
     def set_default_verify_paths(self):

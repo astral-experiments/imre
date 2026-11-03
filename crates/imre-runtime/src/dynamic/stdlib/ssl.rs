@@ -36,6 +36,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "options",
         "verify_flags",
         "cert_store_stats",
+        "raise_context_receiver_error",
         "default_verify_paths",
         "default_verify_flags",
         "set_alpn_protocols",
@@ -174,6 +175,15 @@ pub(super) fn call(
         ("verify_flags", &[handle]) => {
             let flags = context(ctx, handle)?.borrow().verify_flags();
             Ok(ctx.alloc(Value::Int(crate::Int::new(flags.into()))))
+        }
+        ("raise_context_receiver_error", &[method, receiver]) => {
+            let method = ctx.str_value(method)?;
+            let kind = super::diagnostic_type_name(ctx, receiver);
+            let kind = &kind[..kind.floor_char_boundary(100)];
+            Err(Error::new(
+                "TypeError",
+                format!("descriptor '{method}' for '_ssl._SSLContext' objects doesn't apply to a '{kind}' object"),
+            ))
         }
         ("cert_store_stats", &[handle]) => {
             let counts = context(ctx, handle)?
