@@ -36,14 +36,28 @@ impl IntRange {
 /// Missing facts, including unreachable or arbitrary-precision expressions, must
 /// use the ordinary checked lowering path.
 pub(crate) struct RangeFacts<'ir> {
-    intervals: HashMap<*const Expr, Interval>,
+    intervals: IntegerFacts,
     cursors: HashMap<*const Statement, Interval>,
     module: PhantomData<&'ir Module>,
 }
 
+pub(crate) struct IntegerFacts(HashMap<*const Expr, Interval>);
+
+impl IntegerFacts {
+    /// Looks up an expression at its original position in the analyzed IR.
+    pub(crate) fn get(&self, expression: &Expr) -> Option<IntRange> {
+        self.0.get(&std::ptr::from_ref(expression))?.small()
+    }
+}
+
 impl RangeFacts<'_> {
     pub(crate) fn integer(&self, expression: &Expr) -> Option<IntRange> {
-        self.intervals.get(&std::ptr::from_ref(expression))?.small()
+        self.intervals.get(expression)
+    }
+
+    /// A rewrite may query these facts only on original expressions before moving them.
+    pub(crate) fn into_original_integers(self) -> IntegerFacts {
+        self.intervals
     }
 
     /// Covers the independent range cursor's initial value and final increment,
@@ -136,7 +150,7 @@ pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
         analyzer.function(function);
     }
     RangeFacts {
-        intervals: analyzer.intervals,
+        intervals: IntegerFacts(analyzer.intervals),
         cursors: analyzer.cursors,
         module: PhantomData,
     }
