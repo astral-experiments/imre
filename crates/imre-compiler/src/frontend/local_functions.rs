@@ -324,6 +324,11 @@ impl Checker<'_> {
             })
             .and_then(|binding| binding.sites.pop_front())
         else {
+            if self.module_scope && self.graph.command_startup.is_some() {
+                return Err(
+                    self.scoped_builtin_error("conditional function definition", definition)
+                );
+            }
             return Err(error(
                 self.source,
                 definition,
