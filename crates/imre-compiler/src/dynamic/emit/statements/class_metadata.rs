@@ -9,14 +9,28 @@ use super::{ClassBindings, ClosureNames};
 
 const GENERATED: [&str; 3] = ["__module__", "__qualname__", "__doc__"];
 
-pub(super) fn capture(bindings: &mut ClosureNames, body: &[ast::Stmt], string_annotations: bool) {
-    let mut uses = Uses::new(string_annotations, false);
+/// Collect class frame reads and the implicit metadata stores resolved as nonlocals.
+pub(super) fn capture(
+    bindings: &mut ClosureNames,
+    body: &[ast::Stmt],
+    string_annotations: bool,
+) -> BTreeSet<String> {
+    let mut uses = Uses::new(string_annotations);
     uses.visit_body(body);
-    for name in uses.direct.into_iter().chain(uses.nested) {
-        if !bindings.locals.contains(&name) && !bindings.globals.contains(&name) {
-            bindings.nonlocals.insert(name);
+    for name in GENERATED {
+        if (uses.direct.contains(name) || uses.nested.contains(name))
+            && !bindings.locals.contains(name)
+            && !bindings.globals.contains(name)
+        {
+            bindings.nonlocals.insert(name.to_owned());
         }
     }
+    // Class bindings shadow direct reads; functions defined in the body skip its namespace.
+    uses.direct
+        .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
+    uses.direct.append(&mut uses.nested);
+    uses.direct.extend(bindings.nonlocals.iter().cloned());
+    uses.direct
 }
 
 /// Methods look through the class namespace to read their enclosing cells.
@@ -30,7 +44,7 @@ pub(super) fn method_class_reads(
     {
         return None;
     }
-    let mut uses = Uses::new(string_annotations, true);
+    let mut uses = Uses::new(string_annotations);
     uses.visit_body(body);
     uses.direct.append(&mut uses.nested);
     Some(uses.direct)
@@ -42,7 +56,7 @@ pub(super) fn annotation_reads(
     class: Option<&ClassBindings>,
     string_annotations: bool,
 ) -> BTreeSet<String> {
-    let mut uses = Uses::new(string_annotations, true);
+    let mut uses = Uses::new(string_annotations);
     for (_, expression) in entries {
         uses.visit_annotation(expression);
     }
@@ -62,14 +76,12 @@ struct Uses {
     direct: BTreeSet<String>,
     nested: BTreeSet<String>,
     string_annotations: bool,
-    all_names: bool,
 }
 
 impl Uses {
-    fn new(string_annotations: bool, all_names: bool) -> Self {
+    fn new(string_annotations: bool) -> Self {
         Self {
             string_annotations,
-            all_names,
             ..Self::default()
         }
     }
@@ -96,17 +108,13 @@ impl Uses {
                 self.nested.insert(name);
             }
         }
-        for name in bounds.nonlocals {
-            if self.all_names || GENERATED.contains(&name.as_str()) {
-                self.nested.insert(name);
-            }
-        }
+        self.nested.extend(bounds.nonlocals);
     }
 
     fn suite(&mut self, body: &[ast::Stmt], params: Option<&ast::Parameters>, class: bool) {
         let mut bounds = ClosureNames::default();
         bounds.visit_body(body);
-        let mut child = Self::new(self.string_annotations, self.all_names);
+        let mut child = Self::new(self.string_annotations);
         child.visit_body(body);
         self.child(child, bounds, params, class);
     }
@@ -116,7 +124,7 @@ impl Uses {
         generators: &[ast::Comprehension],
         items: impl IntoIterator<Item = &'a ast::Expr>,
     ) {
-        let mut child = Self::new(self.string_annotations, self.all_names);
+        let mut child = Self::new(self.string_annotations);
         let mut bounds = ClosureNames::default();
         for (index, generator) in generators.iter().enumerate() {
             bounds.visit_expr(&generator.target);
@@ -172,9 +180,7 @@ impl<'a> Visitor<'a> for Uses {
         match expr {
             ast::Expr::Name(n) if n.ctx == ast::ExprContext::Load => {
                 let name = n.id.as_str();
-                if self.all_names || GENERATED.contains(&name) {
-                    self.direct.insert(name.to_owned());
-                }
+                self.direct.insert(name.to_owned());
             }
             ast::Expr::Lambda(f) => {
                 if let Some(params) = &f.parameters {
@@ -182,7 +188,7 @@ impl<'a> Visitor<'a> for Uses {
                 }
                 let mut bounds = ClosureNames::default();
                 bounds.visit_expr(&f.body);
-                let mut child = Self::new(self.string_annotations, self.all_names);
+                let mut child = Self::new(self.string_annotations);
                 child.visit_expr(&f.body);
                 self.child(child, bounds, f.parameters.as_deref(), false);
             }

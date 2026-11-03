@@ -1066,6 +1066,7 @@ impl Context {
                         || name.starts_with("collections.defaultdict.")
                         || name.starts_with("property.")
                         || (name.starts_with("dict.") && name != "dict.__new__")
+                        || name.starts_with("FrameLocalsProxy.")
                         || name.starts_with("abc.")
                         || name.starts_with("selectors._SelectorMapping.")
                         || name
@@ -1618,6 +1619,7 @@ impl Context {
         }
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
+            Value::FrameLocalsProxy { class, .. } => Ok(*class),
             Value::Instance { class, .. }
             | Value::Class {
                 metaclass: Some(class),
@@ -2411,6 +2413,12 @@ impl Context {
                     Some(caller) => Ok(caller),
                     None => self.generator_frame_back(obj),
                 };
+            }
+            Value::FrameLocalsProxy { class, .. } => {
+                return self.instance_attribute(obj, class, None, name);
+            }
+            Value::PythonFrame { .. } if name == "f_locals" => {
+                return super::frame_locals::get(self, obj);
             }
             Value::PythonFrame { globals, .. } if name == "f_globals" => return Ok(globals),
             Value::PythonFrame { code, .. } if name == "f_code" => {
@@ -6958,6 +6966,11 @@ impl Context {
                     ) =>
             {
                 builtins::call(self, &name, &args, &kwargs)
+            }
+            Value::Native(ref name)
+                if let Some(method) = name.strip_prefix("FrameLocalsProxy.") =>
+            {
+                super::frame_locals::method(self, method, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs)
                 .map_err(|error| stdlib::io::qualify_error(self, error, None)),

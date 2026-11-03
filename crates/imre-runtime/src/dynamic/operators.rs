@@ -491,7 +491,7 @@ impl Context {
             } => !bindings.is_empty(),
             Value::Array(array) => array.len() != 0,
             Value::Range(range) => range.len.as_small() != Some(0),
-            Value::Instance { .. } | Value::Raised(_) => {
+            Value::Instance { .. } | Value::Raised(_) | Value::FrameLocalsProxy { .. } => {
                 if let Some(hook) = self.bound_slot(id, "__bool__")? {
                     let value = self.call(hook, Vec::new(), Vec::new())?;
                     let Value::Bool(result) = self.heap.get(value) else {
@@ -1363,7 +1363,7 @@ impl Context {
     /// Resolve formatting methods on heap instances and exceptions that retain their Python class.
     fn format_slot(&self, id: Id, name: &str) -> Option<(Id, Id)> {
         let class = match self.heap.get(id) {
-            Value::Instance { class, .. } => *class,
+            Value::Instance { class, .. } | Value::FrameLocalsProxy { class, .. } => *class,
             Value::Raised(error) => error.class()?,
             Value::Weak(wr) if name == "__repr__" => *self.builtins.get(wr.kind.class())?,
             value if name == "__repr__" => match value.native_io_class_name()? {

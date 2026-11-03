@@ -367,7 +367,11 @@ impl Context {
             }
             let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
             let globals = self.module_globals(scope)?;
+            let unoptimized_locals = super::frame_locals::unoptimized_namespace(self, scope, code)?;
+            let class_proxy_scope = super::frame_locals::class_cells(self, scope, code);
             let object = self.alloc(Value::PythonFrame {
+                unoptimized_locals,
+                class_proxy_scope,
                 scope,
                 code,
                 globals,
@@ -414,6 +418,8 @@ impl Context {
         }
         let globals = self.module_globals(scope)?;
         let object = self.alloc(Value::PythonFrame {
+            unoptimized_locals: None,
+            class_proxy_scope: None,
             scope,
             code,
             globals,
@@ -881,6 +887,9 @@ pub(super) struct ClosureScope {
     pub declared_complete: bool,
     pub nonlocals: HashSet<String>,
     pub cells: HashMap<String, Id>,
+    /// Keys added by frame introspection that are not lexical variables.
+    pub extra_locals: Option<Id>,
+    pub cleared: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1059,6 +1068,10 @@ pub(super) enum Value {
     },
     Dict(super::dictionary::Entries),
     MappingProxy(Id),
+    FrameLocalsProxy {
+        class: Id,
+        frame: Id,
+    },
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -1203,6 +1216,10 @@ pub(super) enum Value {
         span: Option<[u32; 3]>,
     },
     PythonFrame {
+        // The original namespace outlives execution of a module or class body.
+        unoptimized_locals: Option<Id>,
+        // A class proxy sees lexical cells, even when its namespace shadows their names.
+        class_proxy_scope: Option<Id>,
         scope: Id,
         code: Id,
         globals: Id,
@@ -1468,6 +1485,7 @@ impl Value {
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
             Self::MappingProxy(_) => "mappingproxy",
+            Self::FrameLocalsProxy { .. } => "FrameLocalsProxy",
             Self::Function { .. } => "function",
             Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => {
                 "member_descriptor"
@@ -1539,7 +1557,7 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } => Some(*class),
+            Self::Instance { class, .. } | Self::FrameLocalsProxy { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -1747,7 +1765,9 @@ impl Value {
                 visit.extend(entry.cached_objects());
             }
             Self::Selector(selector) => selector.borrow().trace(visit),
+            Self::FrameLocalsProxy { class, frame } => visit.extend([*class, *frame]),
             Self::Scope(scope) => {
+                visit.extend(scope.closure.extra_locals);
                 visit.extend(scope.closure.cells.values().copied());
                 visit.extend(scope.class_cell);
                 if let Some(state) = &scope.enum_namespace {
@@ -2023,12 +2043,16 @@ impl Value {
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
             Self::PythonFrame {
+                unoptimized_locals,
+                class_proxy_scope,
                 scope,
                 code,
                 globals,
                 back,
                 ..
             } => {
+                visit.extend(*unoptimized_locals);
+                visit.extend(*class_proxy_scope);
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
@@ -3581,13 +3605,27 @@ impl Heap {
 
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
     pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
-        let Value::PythonFrame { scope, .. } = *self.get(value) else {
+        let Value::PythonFrame {
+            scope,
+            unoptimized_locals,
+            class_proxy_scope,
+            ..
+        } = *self.get(value)
+        else {
             return Err(Error::new("TypeError", "expected a frame"));
         };
-        if scope == NONE {
+        if scope == NONE && unoptimized_locals.is_none() {
             return Ok(());
         }
-        if self.frames.iter().any(|frame| frame.scope == scope) {
+        if let Value::Scope(data) = self.get_mut(scope)
+            && data.closure.cleared
+            && unoptimized_locals.is_none()
+        {
+            // Clearing again releases extras but keeps local slots rebound after the first clear.
+            self.collect_next_statement |= data.closure.extra_locals.take().is_some();
+            return Ok(());
+        }
+        if scope != NONE && self.frames.iter().any(|frame| frame.scope == scope) {
             return Err(Error::new(
                 "RuntimeError",
                 "cannot clear an executing frame",
@@ -3613,10 +3651,31 @@ impl Heap {
             self.discard_generator_frame(id);
             return Ok(());
         }
-        let Value::PythonFrame { scope, .. } = self.get_mut(value) else {
+        if let Some(cells) = class_proxy_scope {
+            let Value::Scope(data) = self.get_mut(cells) else {
+                unreachable!()
+            };
+            data.closure.extra_locals = None;
+            if !data.closure.cleared {
+                let closure = &mut *data.closure;
+                closure
+                    .declared
+                    .extend(closure.cells.drain().map(|(name, _)| name));
+                closure.cleared = true;
+            }
+        }
+        // Held namespaces survive a clear; subsequent access gets a fresh empty dict.
+        let namespace = unoptimized_locals.map(|_| self.alloc(Value::Dict(Default::default())));
+        let Value::PythonFrame {
+            scope,
+            unoptimized_locals,
+            ..
+        } = self.get_mut(value)
+        else {
             unreachable!()
         };
         *scope = NONE;
+        *unoptimized_locals = namespace;
         self.collect_next_statement = true;
         Ok(())
     }

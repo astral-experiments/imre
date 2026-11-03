@@ -184,7 +184,7 @@ impl<'a> CompiledStrings<'a, '_> {
     pub(super) fn annotation_code(
         &mut self,
         provider: &'a mut Rc<Program>,
-        class_locals: Option<&HashSet<String>>,
+        class_locals: Option<&indexmap::IndexSet<String>>,
         line_at: &impl Fn(usize) -> u32,
     ) -> Result<&'a BTreeSet<String>> {
         let provider = Rc::get_mut(provider).expect("new annotation code");

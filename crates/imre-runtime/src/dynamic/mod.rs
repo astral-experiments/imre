@@ -24,6 +24,7 @@ mod enums;
 mod excepthook;
 mod ffi;
 mod finalizers;
+mod frame_locals;
 mod function_fields;
 mod gc_schedule;
 mod generator_protocol;

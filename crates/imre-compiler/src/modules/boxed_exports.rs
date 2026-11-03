@@ -329,6 +329,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "GEN_SUSPENDED",
             "Parameter",
             "Signature",
+            "getasyncgenlocals",
             "getasyncgenstate",
             "getcoroutinestate",
             "getfullargspec",

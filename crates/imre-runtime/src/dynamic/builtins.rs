@@ -2570,7 +2570,7 @@ pub(super) fn call(
                         )
                     });
                 }
-                Value::Instance { .. } | Value::Raised(_) => {
+                Value::Instance { .. } | Value::Raised(_) | Value::FrameLocalsProxy { .. } => {
                     ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
                 }
                 _ => return Err(no_length(ctx)),
