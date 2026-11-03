@@ -308,7 +308,6 @@ impl Context {
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
             }
-            ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (_, Value::DictView { .. }) => {
                 Self::dict_view_owner(self.type_name(object)) == Some(owner)
             }
@@ -1509,16 +1508,6 @@ impl Context {
             self.heap.get(self.scalar_value(id))
         {
             return copy_ids(items).map(Some);
-        }
-        if let Value::Instance { class, fields, .. } = self.heap.get(id)
-            && let Some(names) = self.namedtuple_fields(*class)
-        {
-            let mut items = Vec::new();
-            items
-                .try_reserve_exact(names.len())
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            items.extend(names.iter().map(|name| fields[name]));
-            return Ok(Some(items));
         }
         Ok(None)
     }

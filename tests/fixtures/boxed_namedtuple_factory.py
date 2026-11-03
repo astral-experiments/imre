@@ -163,6 +163,7 @@ def current():
     assert shadow.left == "shadow"
     shadow.left = 8
     assert shadow.left == 8 and Fields.left.__get__(shadow) == 3
+    assert not isinstance(shadow, type("tuple", (), {}))
 
     slot = type(getter).__repr__
     bound = getter.__repr__

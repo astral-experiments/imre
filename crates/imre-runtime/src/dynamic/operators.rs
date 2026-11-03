@@ -270,12 +270,6 @@ impl Context {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some(v.clone())
             }
-            Value::Instance { class, fields, .. } => Some(
-                self.namedtuple_fields(*class)?
-                    .iter()
-                    .map(|k| fields[k])
-                    .collect(),
-            ),
             _ => None,
         }
     }
@@ -283,10 +277,6 @@ impl Context {
         match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some((v.len(), v.get(index).copied()))
-            }
-            Value::Instance { class, fields, .. } => {
-                let names = self.namedtuple_fields(*class)?;
-                Some((names.len(), names.get(index).map(|key| fields[key])))
             }
             _ => None,
         }
@@ -548,7 +538,6 @@ impl Context {
         // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
         let supported = match self.heap.get(self.scalar_value(mapping)) {
             Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
-            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => false,
             Value::Dict(_)
             | Value::DefaultDict { .. }
             | Value::MappingProxy(_)
@@ -1932,7 +1921,7 @@ impl Context {
                     }
                 }
                 Part::Fields(id, index) => {
-                    let Value::Instance { class, fields, .. } = ctx.heap.get(id) else {
+                    let Value::Instance { class, .. } = ctx.heap.get(id) else {
                         unreachable!("active named tuple")
                     };
                     let Some(names) = ctx.namedtuple_fields(*class) else {
@@ -1945,15 +1934,10 @@ impl Context {
                         append_rendered_text(&mut output, name)?;
                         append_rendered_text(&mut output, "=")?;
                         push_frame(&mut work, Part::Fields(id, index + 1))?;
-                        push_frame(
-                            &mut work,
-                            Part::Value(
-                                *fields
-                                    .get(name)
-                                    .ok_or_else(|| Error::new("AttributeError", name.clone()))?,
-                                true,
-                            ),
-                        )?;
+                        let Value::Tuple(items) = ctx.tuple_backing(id) else {
+                            unreachable!("active named tuple storage")
+                        };
+                        push_frame(&mut work, Part::Value(items[index], true))?;
                     }
                 }
                 Part::SnapshotMembers(members, index) => {
@@ -2352,13 +2336,14 @@ impl Context {
                             push_frame(&mut work, Part::Value(*backing, repr))?;
                             continue;
                         }
-                        Value::Instance { class, fields, .. }
+                        Value::Instance { class, .. }
                             if let Value::Class {
                                 name,
                                 namedtuple_fields: Some(names),
                                 ..
                             } = ctx.heap.get(*class)
-                                && names.iter().all(|field| fields.contains_key(field)) =>
+                                && let Value::Tuple(items) = ctx.tuple_backing(id)
+                                && items.len() >= names.len() =>
                         {
                             if checked {
                                 ctx.check_call_depth(namedtuple_depth)?;
@@ -3062,7 +3047,6 @@ impl Context {
         let kind = match self.heap.get(storage) {
             Value::List(_) => "list",
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
-            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => "tuple",
             Value::Str(_) | Value::SurrogateStr(_) => "string",
             Value::Bytes(_) => "byte",
             Value::ByteArray(_) => "bytearray",
@@ -3129,12 +3113,6 @@ impl Context {
         Ok(match self.heap.get(storage) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 v[position(v.len())?]
-            }
-            Value::Instance { class, fields, .. } => {
-                let names = self
-                    .namedtuple_fields(*class)
-                    .expect("validated named tuple");
-                fields[&names[position(names.len())?]]
             }
             Value::SurrogateStr(points) => {
                 let point = points[position(points.len())?];
@@ -3430,8 +3408,7 @@ impl Context {
                 | Value::List(_)
                 | Value::Tuple(_)
                 | Value::NamedTuple { .. }
-        ) && !matches!(self.heap.get(obj), Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some())
-        {
+        ) {
             return Err(Error::new(
                 "TypeError",
                 format!("'{}' object is not subscriptable", self.type_name(obj)),
@@ -3458,10 +3435,6 @@ impl Context {
             Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                 items.len()
             }
-            Value::Instance { class, .. } => self
-                .namedtuple_fields(*class)
-                .expect("validated named tuple")
-                .len(),
             _ => unreachable!("validated sequence"),
         };
         let [start, end, step] = super::slice::normalize(bounds, len as i64);
@@ -3499,15 +3472,6 @@ impl Context {
             Value::List(items) => Value::List(sliced_values(items, positions, count)?),
             Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                 Value::Tuple(sliced_values(items, positions, count)?)
-            }
-            Value::Instance { class, fields, .. } => {
-                let names = self
-                    .namedtuple_fields(*class)
-                    .expect("validated named tuple");
-                let mut items = Vec::new();
-                items.try_reserve_exact(count).map_err(slice_memory_error)?;
-                items.extend(positions.map(|i| fields[&names[i]]));
-                Value::Tuple(items)
             }
             _ => unreachable!("validated sequence"),
         };
