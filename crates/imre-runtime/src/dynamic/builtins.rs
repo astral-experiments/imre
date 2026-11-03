@@ -1867,7 +1867,9 @@ pub(super) fn call(
                 {
                     ctx.check_heap_method_receiver(class, field, values[0])?;
                     true
-                } else if owner == "int" || Context::dict_view_owner(owner).is_some() {
+                } else if matches!(owner, "int" | "float")
+                    || Context::dict_view_owner(owner).is_some()
+                {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))
@@ -1897,6 +1899,7 @@ pub(super) fn call(
                 Ok(ctx.alloc(Value::MappingProxy(dict)))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
+            "_float_getset" => float::component(ctx, method, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),

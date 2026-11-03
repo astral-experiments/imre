@@ -2023,6 +2023,13 @@ def main():
             "from io import text_encoding\n__name__ = None\nprint(text_encoding(None, 1))",
         )
 
+        for statement, error in (
+            ("del (0.0).imag", "AttributeError"),
+            ("float.real = 1", "TypeError"),
+            ("del float.imag", "TypeError"),
+        ):
+            compare("-c", f"try:\n    {statement}\nexcept {error} as exc:\n    print(exc)")
+
         subset_method = root / "set_issubset.py"
         for statement in (
             "print({1, 2}.issubset([2, 1]))",

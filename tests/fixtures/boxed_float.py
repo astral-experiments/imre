@@ -149,6 +149,29 @@ def current():
         def __float__(self):
             return 7
 
+    exact = float("-0")
+    assert exact.real is exact and repr(exact.imag) == "0.0"
+    derived = Raises("-0")
+    derived.__dict__["real"] = 1
+    assert type(derived.real) is float and repr(derived.real) == "-0.0"
+    assert derived.real is not derived.real and repr(derived.imag) == "0.0"
+
+    class Shadow(float):
+        real = "shadow"
+
+    assert Shadow(2.5).real == "shadow"
+    assert float.real.__get__(Shadow(2.5)) == 2.5
+    for field in ("real", "imag"):
+        descriptor = getattr(float, field)
+        assert descriptor is vars(float)[field] and descriptor.__objclass__ is float
+        assert descriptor.__qualname__ == "float." + field
+        try:
+            setattr(derived, field, 1)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError("overwrote a float component")
+
     assert float(Override(1.5)) == 9.5
     for cls, kind in ((Raises, ValueError), (Wrong, TypeError)):
         try:

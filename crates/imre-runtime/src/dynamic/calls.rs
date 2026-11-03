@@ -1314,6 +1314,23 @@ impl Context {
         self.own_class_attr(owner, "mapping")
     }
 
+    /// Resolve numeric fields on exact scalar values and their builtin classes.
+    /// Subclasses find these descriptors through their normal method resolution order.
+    fn builtin_numeric_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        let kind = match self.heap.get(obj) {
+            Value::Native(kind) => kind.as_str(),
+            Value::Int(_) | Value::Bool(_) => "int",
+            Value::Float(_) => "float",
+            _ => return None,
+        };
+        let owner = match (kind, name) {
+            ("int" | "bool", "numerator" | "denominator") => self.builtin("int"),
+            ("float", "real" | "imag") => self.builtin("float"),
+            _ => return None,
+        };
+        self.own_class_attr(owner, name)
+    }
+
     fn equal_class(&self, a: Id, b: Id) -> bool {
         a == b
             || matches!((self.heap.get(a),self.heap.get(b)),(Value::Native(x),Value::Native(y)) if x==y)
@@ -2082,26 +2099,17 @@ impl Context {
         {
             return Ok(value);
         }
-        if name == "mapping"
-            && let Some(descriptor) = self.dict_view_mapping_member(obj)
-        {
+        let builtin_member = match name {
+            "mapping" => self.dict_view_mapping_member(obj),
+            "numerator" | "denominator" | "real" | "imag" => self.builtin_numeric_member(obj, name),
+            _ => None,
+        };
+        if let Some(descriptor) = builtin_member {
             if matches!(self.heap.get(obj), Value::Native(_)) {
                 return Ok(descriptor);
             }
             let class = self.exact_type(obj)?;
             return self.bind_attribute(descriptor, obj, class);
-        }
-        if matches!(name, "numerator" | "denominator") {
-            let receiver = match self.heap.get(obj) {
-                Value::Int(_) | Value::Bool(_) => Some(obj),
-                Value::Native(kind) if matches!(kind.as_str(), "int" | "bool") => Some(NONE),
-                _ => None,
-            };
-            if let Some(receiver) = receiver {
-                let owner = self.builtin("int");
-                let descriptor = self.own_class_attr(owner, name).unwrap();
-                return self.bind_attribute(descriptor, receiver, owner);
-            }
         }
         if matches!(
             self.heap.get(obj),
@@ -3475,6 +3483,7 @@ impl Context {
             } if matches!(
                 owner,
                 "int"
+                    | "float"
                     | super::deque::CLASS
                     | "typing.Union"
                     | "typing.TypeAliasType"
@@ -3501,6 +3510,10 @@ impl Context {
                     "__doc__" if owner == super::deque::CLASS => {
                         return Ok(self.text("maximum size of a deque or None if unbounded"));
                     }
+                    "__doc__" if owner == "float" => {
+                        let part = if field == "real" { "real" } else { "imaginary" };
+                        return Ok(self.text(format!("the {part} part of a complex number")));
+                    }
                     "__doc__" if owner == "int" => {
                         return Ok(
                             self.text(format!("the {field} of a rational number in lowest terms"))
@@ -3516,6 +3529,7 @@ impl Context {
                             || matches!(
                                 owner,
                                 "int"
+                                    | "float"
                                     | "typing.Union"
                                     | "typing.TypeAliasType"
                                     | "_ssl.MemoryBIO"
@@ -5200,11 +5214,13 @@ impl Context {
         if name == "mapping" && matches!(self.heap.get(obj), Value::DictView { .. }) {
             return self.dict_view_mapping_member(obj);
         }
-        if matches!(name, "numerator" | "denominator")
-            && matches!(self.heap.get(obj), Value::Int(_) | Value::Bool(_))
+        if matches!(name, "numerator" | "denominator" | "real" | "imag")
+            && matches!(
+                self.heap.get(obj),
+                Value::Int(_) | Value::Bool(_) | Value::Float(_)
+            )
         {
-            let owner = self.builtin("int");
-            return self.own_class_attr(owner, name);
+            return self.builtin_numeric_member(obj, name);
         }
         if let Value::NamedTuple {
             class: Some(owner), ..
@@ -6820,6 +6836,7 @@ impl Context {
                                 | "set"
                                 | "int"
                                 | "_int_getset"
+                                | "_float_getset"
                                 | "_dictview_mapping"
                                 | "frozenset"
                                 | "tuple"
