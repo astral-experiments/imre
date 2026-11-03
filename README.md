@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **9,036 of 13,328 tests (67.8%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **9,073 of 13,328 tests (68.1%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -115,7 +115,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `argparse` | 1,887 | 1,893 | 6 | All 1,887 eligible originals have paired passes across public revisions. The translations test ran the real pygettext child and produced all 32 expected messages. Six explicitly documented compiled-entry omissions remain in the 1,893-test denominator. A complete run on one revision is tracked separately. |
 | `collections` | 641 | 659 | 9 | The async-generator ABC original passed on public #4804. All 40 originals in that ABC cohort now have a paired result or an individual omission decision. |
 | `csv` | 122 | 128 | 0 | Complete suite on `main`, 122 passed and six matched upstream skips. |
-| `dataclasses` | 255 | 276 | 0 | Both initializer-annotation originals passed. Four other originals from the same registered group still raised NameError during decoration. |
+| `dataclasses` | 259 | 276 | 0 | Four deferred-annotation originals passed with the packaged dataclasses and annotationlib modules. Each native run registered all 276 tests and completed teardown. |
 | `datetime` | 1,037 | 1,098 | 0 | Three additional date originals passed inside their complete upstream owners. All three runs restored the original module state. |
 | `fnmatch` | 24 | 24 | 0 | Complete suite on `main`, all 24 passed. |
 | `functools` | 91 | 329 | 0 | The intact 325-case primary module passed 89 in all four modes. Two more original cases passed in separate runs. |
@@ -135,9 +135,9 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 701 | 712 | 0 | The unchanged async-generator ABC original passed on public #4804 at O0 and O3 and matched the pinned stock result. |
-| `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
+| `unittest` | 308 | 1,090 | 0 | All 115 Test_TestCase originals ran on stock and both native builds. Each native build passed 106. Clean selections confirmed 29 previously unlisted passes and four more originals on public main. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,036** | **13,328** | **30** | **4 complete suites match stock on `main`** |
+| **Total** | **9,073** | **13,328** | **30** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -151,10 +151,10 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `contextlib` | 148 | 149 | All 58 async originals and 90 of 91 synchronous originals have paired passes. The module entry point passed nine of the ten `TestSuppress` cases on public Imre. The remaining case exercises exception groups. |
 | `inspect` | 0 | 362 | Stock ran 362 originals, with 361 passes and one skip. On public revision `00755c8c`, native compilation stopped before discovery, and a compiled import stopped at `_pickle`. Separate replays passed 44 tests in renamed modules. |
 | `ssl` | 35 | 195 | Two more SSLContext originals passed on public main. They cover hostname checking and protocol-specific verification mode. Each selected process registered all 195 tests. |
-| `types` | 128 | 141 | All 25 unchanged ClassCreationTests passed together on stock, O0 and O3. Eight previously unpaired parents extend the published ledger. |
+| `types` | 130 | 141 | The isolated crash test passed with the parent and child at matching optimization levels. The GenericAlias subclass union test and all three of its subtests also passed on public main. |
 | `warnings` | 181 | 187 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| **Measured total (6 of 6 families)** | **661** | **1,217** |  |
+| **Measured total (6 of 6 families)** | **663** | **1,217** |  |
 
 ## Design
 
