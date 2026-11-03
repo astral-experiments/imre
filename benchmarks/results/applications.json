@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "suite": "applications",
-  "date_utc": "2026-11-03T14:25:50.541722+00:00",
+  "date_utc": "2026-11-03T14:58:20.326653+00:00",
   "host": "charlie-ohm-perf-1022",
   "os": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39",
   "cpu_model": "AMD EPYC-Milan Processor",
   "logical_cpu": 13,
   "logical_cpus": 32,
   "load_before": [
-    0.91357421875,
-    0.37060546875,
-    0.24267578125
+    0.7333984375,
+    0.41455078125,
+    0.3232421875
   ],
   "python": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
   "build": {
@@ -75,22 +75,22 @@
       ]
     },
     "sha256": {
-      "imre": "0677da28da2020b0cdf6b0713c41af1902c2465ee0e7de7566218e58aa2b8600",
-      "libimre_runtime.a": "118751fdb8589a8092c9502e552762a2dd9b2787abe06b038e0dd6584cb8fdea",
-      "catalog": "8a8d146c162f43b91d6813ced7ff487cd8edda7a813dba0e35c5c1af8f5f95c2",
-      "search": "bccfedd213cb5e9eaf3ac91f8519d8a87d2d6d7ef9629c6c9f439375f18450a9",
-      "wheel": "cab573ecbbc495193ca72620c407fc5f54ac1ad8db615ab6fca01662cb9cbd48",
-      "roads": "d493c18b2274960076fd9edf047466e6fc57890407509b3b30aea70e11746443",
-      "conformance": "5d4591646e248e8e7ce3b5976979b3da4e2023bf8c1662f81fcbdd5063cf8098",
+      "imre": "0c45e2b09813900265065ec3a19cdb908b25e57a578e3a96305e640a70b079eb",
+      "libimre_runtime.a": "26e47c13db73dee2589ff5c173c0ffe63da102a3eb2cdd614797e2c5c1042546",
+      "catalog": "4c15d442fe1b0b027b6c3964e458a515349871ea09923acd1fa2b4941a3b47ac",
+      "search": "39c5d31f212f87001780cd4c625995d0b1eefc8e21d90764cd6d82a217d499d5",
+      "wheel": "0faeac83ca79e1dd04a99aebc277709750670f22e5f3e33c0859920f79ab443b",
+      "roads": "3e6947f516f4799d0d7b6119fd6bdc270ead7412dd17203dd86189c431345a99",
+      "conformance": "34f414f469a40822350275715ea300c8c3b3749c548e032c9e8a9a5b9b40a578",
       "road-routing": "b1faf5e9ffb0bf127a193d9a7ef135b07a9afa3a366eb17fd5e14700a722fb43",
       "verify-wheel": "823c462cf64597cc05a07be2acb5c6864e55667ac75b9e67a7701ace29cb1dc6",
       "source-search": "6a92c55bc461454f2c0cc87ca2298ea229304b9f2b2f7007ee1854501987313d",
       "python-catalog-reference": "454cce3dc0bbe70518b9e8a0f35f327ade7e0f7765cab1caed247aef390c9d6e",
       "conformance-report-reference": "4a19b51944ce0d6cf7d4440efa8b9165d8c143ab99e590b7b304b2950b29b13f"
     },
-    "road_lto_runtime_sha256": "c012f3fa92329d75455bf3e607a89ea2769dacfb8f52a559b4374cf778b1477c",
+    "road_lto_runtime_sha256": "7e487daafb6f6c54c5dc4aec2b67d44e9598a83fbf3b2dbc2f4d6e1dab858241",
     "road_lto_linker_sha256": "ba6c2912725661b6afc16596274f2428b310c8bc9c49acb5e83c61e6cf11d36a",
-    "source_revision": "7e873d978e43f9089ee60d789116da6c3d37d63f"
+    "source_revision": "d76cbc867bfea17c937da949e617a0e73c9314ee"
   },
   "runner_sha256": "cbeb30fa7aab63d65a77886843702f23c74b7d99895152fe3bd9d1faa89004c7",
   "cases": [
@@ -99,125 +99,125 @@
       "input": "58,721 release artifacts",
       "warmups_ns": [
         {
-          "imre": 202333974,
-          "rust": 100885063,
-          "cpython": 2848034249,
-          "original_cpython": 1710314322
+          "imre": 156748929,
+          "rust": 102184969,
+          "cpython": 2963482975,
+          "original_cpython": 1376429800
         },
         {
-          "original_cpython": 1147612576,
-          "cpython": 2873435771,
-          "rust": 105279923,
-          "imre": 150598670
+          "original_cpython": 1045196309,
+          "cpython": 2898266259,
+          "rust": 105455578,
+          "imre": 151558275
         }
       ],
       "samples_ns": [
         {
-          "imre": 363099924,
-          "rust": 120555801,
-          "cpython": 2720284737,
-          "original_cpython": 1356074649
+          "imre": 297561909,
+          "rust": 111009687,
+          "cpython": 2841777609,
+          "original_cpython": 1162924109
         },
         {
-          "rust": 101903220,
-          "cpython": 2907594604,
-          "original_cpython": 1828185396,
-          "imre": 160895610
+          "rust": 98656075,
+          "cpython": 2857992140,
+          "original_cpython": 1699711099,
+          "imre": 216724567
         },
         {
-          "cpython": 2872804933,
-          "original_cpython": 1376283037,
-          "imre": 149427709,
-          "rust": 99543593
+          "cpython": 2672054103,
+          "original_cpython": 1604528265,
+          "imre": 161480931,
+          "rust": 101310055
         },
         {
-          "original_cpython": 1517006204,
-          "imre": 190224869,
-          "rust": 98807211,
-          "cpython": 2960937726
+          "original_cpython": 1125162951,
+          "imre": 144813872,
+          "rust": 99127102,
+          "cpython": 2939764706
         },
         {
-          "original_cpython": 1899621130,
-          "cpython": 2965250916,
-          "rust": 120588603,
-          "imre": 152897334
+          "original_cpython": 1758913839,
+          "cpython": 2725565797,
+          "rust": 100522834,
+          "imre": 148918066
         },
         {
-          "cpython": 2875672457,
-          "rust": 117613679,
-          "imre": 155089931,
-          "original_cpython": 1340028086
+          "cpython": 2883303985,
+          "rust": 106964991,
+          "imre": 153226131,
+          "original_cpython": 1325834336
         },
         {
-          "rust": 98690653,
-          "imre": 147296375,
-          "original_cpython": 1642752384,
-          "cpython": 3106574849
+          "rust": 274648990,
+          "imre": 197592246,
+          "original_cpython": 1411918033,
+          "cpython": 3080747587
         },
         {
-          "imre": 178561915,
-          "original_cpython": 1386782322,
-          "cpython": 2901910702,
-          "rust": 113933040
+          "imre": 167953371,
+          "original_cpython": 1353030064,
+          "cpython": 2955997359,
+          "rust": 105634607
         },
         {
-          "imre": 151718369,
-          "rust": 99935073,
-          "cpython": 2880500182,
-          "original_cpython": 1351791821
+          "imre": 154626361,
+          "rust": 98902612,
+          "cpython": 2856719685,
+          "original_cpython": 1825275499
         },
         {
-          "rust": 101113029,
-          "cpython": 2901166028,
-          "original_cpython": 1772881843,
-          "imre": 155898810
+          "rust": 131813518,
+          "cpython": 2675460051,
+          "original_cpython": 1111192762,
+          "imre": 149810476
         },
         {
-          "cpython": 2898933831,
-          "original_cpython": 1816462685,
-          "imre": 162365992,
-          "rust": 101371782
+          "cpython": 3002410521,
+          "original_cpython": 1250313169,
+          "imre": 148342999,
+          "rust": 99096862
         },
         {
-          "original_cpython": 1191423776,
-          "imre": 284259881,
-          "rust": 106727562,
-          "cpython": 2965450634
+          "original_cpython": 1057907497,
+          "imre": 147281929,
+          "rust": 98818192,
+          "cpython": 2863302320
         },
         {
-          "original_cpython": 1409010732,
-          "cpython": 2913561437,
-          "rust": 116768956,
-          "imre": 153597000
+          "original_cpython": 1187407272,
+          "cpython": 3068816980,
+          "rust": 144554209,
+          "imre": 160730249
         },
         {
-          "cpython": 2877231994,
-          "rust": 107674637,
-          "imre": 152904069,
-          "original_cpython": 1803444900
+          "cpython": 2884746424,
+          "rust": 118402831,
+          "imre": 151066748,
+          "original_cpython": 1165418649
         },
         {
-          "rust": 125452329,
-          "imre": 361371247,
-          "original_cpython": 1463546441,
-          "cpython": 3025742906
+          "rust": 98679812,
+          "imre": 146854572,
+          "original_cpython": 1411811512,
+          "cpython": 2899219421
         },
         {
-          "imre": 171622974,
-          "original_cpython": 1820551994,
-          "cpython": 2949894116,
-          "rust": 122506580
+          "imre": 168487250,
+          "original_cpython": 1342850714,
+          "cpython": 2911469388,
+          "rust": 107739109
         }
       ],
       "report_bytes": 3440812,
       "report_sha256": "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6",
       "activity_before": {
         "selected": {
-          "busy_pct": 0.33,
+          "busy_pct": 0.0,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.19,
+          "busy_pct": 0.9,
           "steal_pct": 0.0
         }
       },
@@ -227,17 +227,17 @@
           "steal_pct": 0.01
         },
         "other_cpus": {
-          "busy_pct": 0.7,
+          "busy_pct": 1.84,
           "steal_pct": 0.0
         }
       },
       "activity_after": {
         "selected": {
-          "busy_pct": 0.0,
+          "busy_pct": 0.33,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.12,
+          "busy_pct": 0.23,
           "steal_pct": 0.0
         }
       }
@@ -247,108 +247,108 @@
       "input": "1,956 Ruff source files",
       "warmups_ns": [
         {
-          "imre": 126735020,
-          "rust": 49344561,
-          "cpython": 197127447
+          "imre": 261702776,
+          "rust": 51741580,
+          "cpython": 227041094
         },
         {
-          "cpython": 195059993,
-          "rust": 49248902,
-          "imre": 53156114
+          "cpython": 196935799,
+          "rust": 49444644,
+          "imre": 57105415
         }
       ],
       "samples_ns": [
         {
-          "imre": 52502818,
-          "rust": 48053012,
-          "cpython": 191794268
+          "imre": 56891366,
+          "rust": 50375172,
+          "cpython": 190211509
         },
         {
-          "rust": 48432050,
-          "cpython": 192478652,
-          "imre": 56528309
+          "rust": 48454109,
+          "cpython": 188266780,
+          "imre": 55317430
         },
         {
-          "cpython": 192543684,
-          "imre": 54554149,
-          "rust": 46633870
+          "cpython": 186417972,
+          "imre": 54768236,
+          "rust": 47475864
         },
         {
-          "cpython": 203968377,
-          "rust": 220216345,
-          "imre": 148334964
+          "cpython": 196765693,
+          "rust": 47217011,
+          "imre": 54131399
         },
         {
-          "rust": 48922936,
-          "imre": 53780207,
-          "cpython": 241522713
+          "rust": 48342049,
+          "imre": 53787236,
+          "cpython": 185710383
         },
         {
-          "imre": 54171106,
-          "cpython": 188098382,
-          "rust": 47927491
+          "imre": 53376369,
+          "cpython": 447141983,
+          "rust": 62803484
         },
         {
-          "imre": 54545063,
-          "rust": 47172844,
-          "cpython": 184609007
+          "imre": 64497222,
+          "rust": 48703715,
+          "cpython": 197619536
         },
         {
-          "rust": 46677972,
-          "cpython": 185765981,
-          "imre": 54452110
+          "rust": 48055134,
+          "cpython": 186816767,
+          "imre": 56349826
         },
         {
-          "cpython": 185509134,
-          "imre": 53944985,
-          "rust": 46457791
+          "cpython": 189394214,
+          "imre": 56247474,
+          "rust": 47472988
         },
         {
-          "cpython": 184631739,
-          "rust": 48740074,
-          "imre": 52815048
+          "cpython": 186647440,
+          "rust": 48153348,
+          "imre": 53267176
         },
         {
-          "rust": 45682316,
-          "imre": 52162672,
-          "cpython": 186496023
+          "rust": 46392462,
+          "imre": 52888620,
+          "cpython": 184645817
         },
         {
-          "imre": 53828206,
-          "cpython": 184628843,
-          "rust": 47257141
+          "imre": 54165822,
+          "cpython": 183633479,
+          "rust": 46966664
         }
       ],
       "report_bytes": 28841,
       "report_sha256": "8119d1d18f39ed6ae1de612a0b9b1799e7f8ac1e63d487b221e59b162e40a941",
       "activity_before": {
         "selected": {
-          "busy_pct": 0.0,
+          "busy_pct": 0.33,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.19,
+          "busy_pct": 0.26,
           "steal_pct": 0.0
         }
       },
       "activity_during": {
         "selected": {
-          "busy_pct": 99.1,
+          "busy_pct": 99.13,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 1.76,
-          "steal_pct": 0.0
+          "busy_pct": 1.47,
+          "steal_pct": 0.01
         }
       },
       "activity_after": {
         "selected": {
-          "busy_pct": 0.67,
+          "busy_pct": 0.66,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.52,
-          "steal_pct": 0.0
+          "busy_pct": 0.62,
+          "steal_pct": 0.01
         }
       }
     },
@@ -357,317 +357,97 @@
       "input": "pip 26.1.1 \u00b7 465 members",
       "warmups_ns": [
         {
-          "imre": 89200189,
-          "rust": 28599449,
-          "cpython": 237526225
+          "imre": 80601529,
+          "rust": 27354272,
+          "cpython": 217792572
         },
         {
-          "cpython": 155892228,
-          "rust": 23020101,
-          "imre": 36889440
+          "cpython": 152143311,
+          "rust": 22537547,
+          "imre": 35718143
         }
       ],
       "samples_ns": [
         {
-          "imre": 35766466,
-          "rust": 22428659,
-          "cpython": 151491616
+          "imre": 35149601,
+          "rust": 21425614,
+          "cpython": 150473857
         },
         {
-          "rust": 22679357,
-          "cpython": 148738216,
-          "imre": 36097223
+          "rust": 22550452,
+          "cpython": 148115909,
+          "imre": 38129460
         },
         {
-          "cpython": 151594479,
-          "imre": 36207598,
-          "rust": 22332361
+          "cpython": 154701894,
+          "imre": 37172164,
+          "rust": 22215257
         },
         {
-          "cpython": 152396464,
-          "rust": 22811863,
-          "imre": 35788188
+          "cpython": 158946421,
+          "rust": 22590025,
+          "imre": 36194100
         },
         {
-          "rust": 21765863,
-          "imre": 35434007,
-          "cpython": 149265438
+          "rust": 22634688,
+          "imre": 35479999,
+          "cpython": 153950010
         },
         {
-          "imre": 35796883,
-          "cpython": 292564699,
-          "rust": 39885733
+          "imre": 37534311,
+          "cpython": 146939213,
+          "rust": 21623933
         },
         {
-          "imre": 53029017,
-          "rust": 22632740,
-          "cpython": 185748459
+          "imre": 35267982,
+          "rust": 89479239,
+          "cpython": 311561981
         },
         {
-          "rust": 23875295,
-          "cpython": 156751549,
-          "imre": 35729178
+          "rust": 24249782,
+          "cpython": 157573560,
+          "imre": 48834857
         },
         {
-          "cpython": 152772705,
-          "imre": 36931095,
-          "rust": 22263912
+          "cpython": 155677538,
+          "imre": 37810546,
+          "rust": 23010710
         },
         {
-          "cpython": 149468669,
-          "rust": 22300963,
-          "imre": 36696859
+          "cpython": 172084035,
+          "rust": 22952392,
+          "imre": 36680871
         },
         {
-          "rust": 21286400,
-          "imre": 35834162,
-          "cpython": 150480914
+          "rust": 22392637,
+          "imre": 37567401,
+          "cpython": 153998841
         },
         {
-          "imre": 36006924,
-          "cpython": 150758010,
-          "rust": 23454261
+          "imre": 36409922,
+          "cpython": 159092343,
+          "rust": 22844720
         }
       ],
       "report_bytes": 0,
       "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "activity_before": {
         "selected": {
-          "busy_pct": 0.33,
+          "busy_pct": 1.33,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.5,
+          "busy_pct": 0.89,
           "steal_pct": 0.0
         }
       },
       "activity_during": {
         "selected": {
-          "busy_pct": 98.79,
+          "busy_pct": 98.8,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.69,
-          "steal_pct": 0.0
-        }
-      },
-      "activity_after": {
-        "selected": {
-          "busy_pct": 0.0,
-          "steal_pct": 0.0
-        },
-        "other_cpus": {
-          "busy_pct": 0.2,
-          "steal_pct": 0.0
-        }
-      }
-    },
-    {
-      "name": "Road graph load",
-      "input": "NYC \u00b7 733,846 directed arcs",
-      "warmups_ns": [
-        {
-          "imre": 97377098,
-          "rust": 106029732,
-          "cpython": 1188536878
-        },
-        {
-          "cpython": 530784617,
-          "rust": 61936677,
-          "imre": 61682996
-        }
-      ],
-      "samples_ns": [
-        {
-          "imre": 61265778,
-          "rust": 60301180,
-          "cpython": 522736989
-        },
-        {
-          "rust": 62145267,
-          "cpython": 988047105,
-          "imre": 112127958
-        },
-        {
-          "cpython": 682106149,
-          "imre": 60607861,
-          "rust": 62202633
-        },
-        {
-          "cpython": 524908696,
-          "rust": 60805751,
-          "imre": 59405049
-        },
-        {
-          "rust": 60467731,
-          "imre": 61542925,
-          "cpython": 1150867574
-        },
-        {
-          "imre": 87528172,
-          "cpython": 537068968,
-          "rust": 61202801
-        },
-        {
-          "imre": 61387394,
-          "rust": 60020917,
-          "cpython": 516794275
-        },
-        {
-          "rust": 60864500,
-          "cpython": 1133757147,
-          "imre": 86394870
-        },
-        {
-          "cpython": 524363592,
-          "imre": 61456874,
-          "rust": 64221106
-        },
-        {
-          "cpython": 520526841,
-          "rust": 59528921,
-          "imre": 59863544
-        },
-        {
-          "rust": 60028112,
-          "imre": 59095934,
-          "cpython": 1205362127
-        },
-        {
-          "imre": 74601322,
-          "cpython": 531402419,
-          "rust": 60715723
-        }
-      ],
-      "report_bytes": 14,
-      "report_sha256": "6bd6c1ed761d2703a969c8033ea59b81967bf2a2afaa1adbc5e33f742ca055f5",
-      "activity_before": {
-        "selected": {
-          "busy_pct": 0.0,
-          "steal_pct": 0.0
-        },
-        "other_cpus": {
-          "busy_pct": 0.13,
-          "steal_pct": 0.0
-        }
-      },
-      "activity_during": {
-        "selected": {
-          "busy_pct": 99.6,
-          "steal_pct": 0.0
-        },
-        "other_cpus": {
-          "busy_pct": 0.44,
-          "steal_pct": 0.0
-        }
-      },
-      "activity_after": {
-        "selected": {
-          "busy_pct": 0.0,
-          "steal_pct": 0.0
-        },
-        "other_cpus": {
-          "busy_pct": 0.43,
-          "steal_pct": 0.0
-        }
-      }
-    },
-    {
-      "name": "Road routing",
-      "input": "NYC \u00b7 load and route 4 trips",
-      "warmups_ns": [
-        {
-          "imre": 283235242,
-          "rust": 200615759,
-          "cpython": 1812984953
-        },
-        {
-          "cpython": 1977837341,
-          "rust": 101696607,
-          "imre": 103869808
-        }
-      ],
-      "samples_ns": [
-        {
-          "imre": 102261680,
-          "rust": 86497993,
-          "cpython": 1295634038
-        },
-        {
-          "rust": 88328234,
-          "cpython": 1952012268,
-          "imre": 126113953
-        },
-        {
-          "cpython": 1260331593,
-          "imre": 101594576,
-          "rust": 86012528
-        },
-        {
-          "cpython": 1923163340,
-          "rust": 106228344,
-          "imre": 101608223
-        },
-        {
-          "rust": 84380987,
-          "imre": 101096970,
-          "cpython": 1863149739
-        },
-        {
-          "imre": 126416787,
-          "cpython": 1929420565,
-          "rust": 111702144
-        },
-        {
-          "imre": 102407221,
-          "rust": 85480086,
-          "cpython": 1832703731
-        },
-        {
-          "rust": 123025076,
-          "cpython": 1272653550,
-          "imre": 100770451
-        },
-        {
-          "cpython": 1934342169,
-          "imre": 131505721,
-          "rust": 87792776
-        },
-        {
-          "cpython": 1262238730,
-          "rust": 90130653,
-          "imre": 255458267
-        },
-        {
-          "rust": 229077861,
-          "imre": 109538252,
-          "cpython": 1576150554
-        },
-        {
-          "imre": 105019891,
-          "cpython": 1945965144,
-          "rust": 110294431
-        }
-      ],
-      "report_bytes": 28,
-      "report_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
-      "activity_before": {
-        "selected": {
-          "busy_pct": 0.0,
-          "steal_pct": 0.0
-        },
-        "other_cpus": {
-          "busy_pct": 0.11,
-          "steal_pct": 0.0
-        }
-      },
-      "activity_during": {
-        "selected": {
-          "busy_pct": 99.85,
-          "steal_pct": 0.0
-        },
-        "other_cpus": {
-          "busy_pct": 0.64,
+          "busy_pct": 0.78,
           "steal_pct": 0.0
         }
       },
@@ -683,101 +463,101 @@
       }
     },
     {
-      "name": "Conformance report",
-      "input": "146 files \u00b7 two captured ty runs",
+      "name": "Road graph load",
+      "input": "NYC \u00b7 733,846 directed arcs",
       "warmups_ns": [
         {
-          "imre": 181021614,
-          "rust": 32989601,
-          "cpython": 358980418
+          "imre": 177073687,
+          "rust": 130295510,
+          "cpython": 826261915
         },
         {
-          "cpython": 246178113,
-          "rust": 21785411,
-          "imre": 29589645
+          "cpython": 522253244,
+          "rust": 60432901,
+          "imre": 60296645
         }
       ],
       "samples_ns": [
         {
-          "imre": 28386353,
-          "rust": 20495116,
-          "cpython": 253005896
+          "imre": 60313919,
+          "rust": 59224337,
+          "cpython": 1164094382
         },
         {
-          "rust": 23570698,
-          "cpython": 248157781,
-          "imre": 29634729
+          "rust": 71396338,
+          "cpython": 533246789,
+          "imre": 61477869
         },
         {
-          "cpython": 242155826,
-          "imre": 30326337,
-          "rust": 20904329
+          "cpython": 519935170,
+          "imre": 60647851,
+          "rust": 59604726
         },
         {
-          "cpython": 247470782,
-          "rust": 21828881,
-          "imre": 32676910
+          "cpython": 1191867726,
+          "rust": 90191607,
+          "imre": 62464389
         },
         {
-          "rust": 25227975,
-          "imre": 28936698,
-          "cpython": 243756179
+          "rust": 59573026,
+          "imre": 61390175,
+          "cpython": 533507944
         },
         {
-          "imre": 28845138,
-          "cpython": 244141528,
-          "rust": 21771284
+          "imre": 61134047,
+          "cpython": 522127517,
+          "rust": 60552373
         },
         {
-          "imre": 28351027,
-          "rust": 20294982,
-          "cpython": 257819700
+          "imre": 59986558,
+          "rust": 59631274,
+          "cpython": 519117352
         },
         {
-          "rust": 21097729,
-          "cpython": 242061591,
-          "imre": 29192515
+          "rust": 60990029,
+          "cpython": 521867442,
+          "imre": 60650426
         },
         {
-          "cpython": 243549664,
-          "imre": 28536050,
-          "rust": 20277240
+          "cpython": 1131469294,
+          "imre": 79972915,
+          "rust": 61884800
         },
         {
-          "cpython": 243393654,
-          "rust": 20675603,
-          "imre": 29758139
+          "cpython": 528889096,
+          "rust": 60797921,
+          "imre": 60628815
         },
         {
-          "rust": 20161354,
-          "imre": 27965148,
-          "cpython": 460603668
+          "rust": 70487403,
+          "imre": 61753584,
+          "cpython": 537216188
         },
         {
-          "imre": 52428259,
-          "cpython": 251326776,
-          "rust": 22669519
+          "imre": 61183971,
+          "cpython": 520087251,
+          "rust": 60923874
         }
       ],
-      "report_bytes": 109258,
-      "report_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
+      "report_bytes": 14,
+      "report_sha256": "6bd6c1ed761d2703a969c8033ea59b81967bf2a2afaa1adbc5e33f742ca055f5",
       "activity_before": {
         "selected": {
-          "busy_pct": 0.0,
+          "busy_pct": 0.99,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.1,
+          "busy_pct": 1.89,
           "steal_pct": 0.0
         }
       },
       "activity_during": {
         "selected": {
-          "busy_pct": 99.14,
+          "busy_pct": 99.65,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.93,
+          "busy_pct": 0.36,
           "steal_pct": 0.0
         }
       },
@@ -787,88 +567,196 @@
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.17,
+          "busy_pct": 0.15,
           "steal_pct": 0.0
         }
       }
-    }
-  ],
-  "excluded_runs": [
+    },
+    {
+      "name": "Road routing",
+      "input": "NYC \u00b7 load and route 4 trips",
+      "warmups_ns": [
+        {
+          "imre": 99778308,
+          "rust": 268475841,
+          "cpython": 1801923740
+        },
+        {
+          "cpython": 1276273823,
+          "rust": 85042160,
+          "imre": 295167666
+        }
+      ],
+      "samples_ns": [
+        {
+          "imre": 170711449,
+          "rust": 185826143,
+          "cpython": 1598856830
+        },
+        {
+          "rust": 96020447,
+          "cpython": 1961852396,
+          "imre": 126009551
+        },
+        {
+          "cpython": 1275635265,
+          "imre": 99710510,
+          "rust": 89127982
+        },
+        {
+          "cpython": 1977219762,
+          "rust": 110964860,
+          "imre": 102842190
+        },
+        {
+          "rust": 88552157,
+          "imre": 100024395,
+          "cpython": 1916618807
+        },
+        {
+          "imre": 130870297,
+          "cpython": 1261851479,
+          "rust": 85111218
+        },
+        {
+          "imre": 99156025,
+          "rust": 84612257,
+          "cpython": 1947542559
+        },
+        {
+          "rust": 100444702,
+          "cpython": 1937138849,
+          "imre": 126410409
+        },
+        {
+          "cpython": 1269817891,
+          "imre": 102460378,
+          "rust": 293617961
+        },
+        {
+          "cpython": 1752502805,
+          "rust": 86433684,
+          "imre": 101274516
+        },
+        {
+          "rust": 86050659,
+          "imre": 100075409,
+          "cpython": 1968595758
+        },
+        {
+          "imre": 115824344,
+          "cpython": 1976787580,
+          "rust": 111122363
+        }
+      ],
+      "report_bytes": 28,
+      "report_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+      "activity_before": {
+        "selected": {
+          "busy_pct": 0.0,
+          "steal_pct": 0.0
+        },
+        "other_cpus": {
+          "busy_pct": 0.04,
+          "steal_pct": 0.0
+        }
+      },
+      "activity_during": {
+        "selected": {
+          "busy_pct": 99.85,
+          "steal_pct": 0.0
+        },
+        "other_cpus": {
+          "busy_pct": 0.46,
+          "steal_pct": 0.0
+        }
+      },
+      "activity_after": {
+        "selected": {
+          "busy_pct": 0.66,
+          "steal_pct": 0.0
+        },
+        "other_cpus": {
+          "busy_pct": 0.14,
+          "steal_pct": 0.0
+        }
+      }
+    },
     {
       "name": "Conformance report",
       "input": "146 files \u00b7 two captured ty runs",
       "warmups_ns": [
         {
-          "imre": 38017841,
-          "rust": 21591910,
-          "cpython": 269384802
+          "imre": 38964174,
+          "rust": 21470956,
+          "cpython": 259980678
         },
         {
-          "cpython": 248652112,
-          "rust": 22026039,
-          "imre": 29484999
+          "cpython": 252805735,
+          "rust": 22158428,
+          "imre": 29739238
         }
       ],
       "samples_ns": [
         {
-          "imre": 29890666,
-          "rust": 20838666,
-          "cpython": 253008903
+          "imre": 28919489,
+          "rust": 21226580,
+          "cpython": 247849883
         },
         {
-          "rust": 21921393,
-          "cpython": 255518360,
-          "imre": 30241801
+          "rust": 21325195,
+          "cpython": 257292534,
+          "imre": 31153696
         },
         {
-          "cpython": 251726442,
-          "imre": 30491946,
-          "rust": 22849483
+          "cpython": 493111347,
+          "imre": 53742840,
+          "rust": 23370520
         },
         {
-          "cpython": 253926761,
-          "rust": 21936553,
-          "imre": 29198004
+          "cpython": 465825833,
+          "rust": 38657662,
+          "imre": 56723208
         },
         {
-          "rust": 24678553,
-          "imre": 28884050,
-          "cpython": 451638396
+          "rust": 21917370,
+          "imre": 30994850,
+          "cpython": 276919731
         },
         {
-          "imre": 61180960,
-          "cpython": 274609398,
-          "rust": 111472888
+          "imre": 30402958,
+          "cpython": 246816053,
+          "rust": 21906159
         },
         {
-          "imre": 61719003,
-          "rust": 26266852,
-          "cpython": 337325110
+          "imre": 28214966,
+          "rust": 21125182,
+          "cpython": 244166932
         },
         {
-          "rust": 21709649,
-          "cpython": 242688709,
-          "imre": 30063898
+          "rust": 21460649,
+          "cpython": 248452557,
+          "imre": 29300259
         },
         {
-          "cpython": 250001107,
-          "imre": 30065773,
-          "rust": 21052174
+          "cpython": 444384872,
+          "imre": 53276721,
+          "rust": 22333515
         },
         {
-          "cpython": 245053838,
-          "rust": 21377722,
-          "imre": 28877318
+          "cpython": 263024501,
+          "rust": 22692174,
+          "imre": 28942161
         },
         {
-          "rust": 21657151,
-          "imre": 29433203,
-          "cpython": 247706381
+          "rust": 21365640,
+          "imre": 28375796,
+          "cpython": 254601625
         },
         {
-          "imre": 29663312,
-          "cpython": 243457522,
-          "rust": 21466355
+          "imre": 29455628,
+          "cpython": 245248348,
+          "rust": 21842429
         }
       ],
       "report_bytes": 109258,
@@ -879,40 +767,41 @@
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.11,
+          "busy_pct": 0.4,
           "steal_pct": 0.0
         }
       },
       "activity_during": {
         "selected": {
-          "busy_pct": 99.15,
+          "busy_pct": 99.2,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 0.77,
-          "steal_pct": 0.0
+          "busy_pct": 0.96,
+          "steal_pct": 0.01
         }
       },
       "activity_after": {
         "selected": {
-          "busy_pct": 1.66,
+          "busy_pct": 0.0,
           "steal_pct": 0.0
         },
         "other_cpus": {
-          "busy_pct": 2.8,
+          "busy_pct": 0.68,
           "steal_pct": 0.0
         }
       }
     }
   ],
+  "excluded_runs": [],
   "load_after": [
-    0.8701171875,
-    0.625,
-    0.37158203125
+    0.83056640625,
+    0.6962890625,
+    0.45849609375
   ],
   "complete": true,
   "revisions": {
-    "compiler_and_runtime": "7e873d978e43f9089ee60d789116da6c3d37d63f",
-    "benchmarks": "7e873d978e43f9089ee60d789116da6c3d37d63f"
+    "compiler_and_runtime": "d76cbc867bfea17c937da949e617a0e73c9314ee",
+    "benchmarks": "d76cbc867bfea17c937da949e617a0e73c9314ee"
   }
 }

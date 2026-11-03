@@ -16,22 +16,22 @@ Median elapsed milliseconds on one AMD EPYC Milan vCPU with warm filesystem cach
 
 | Workload | Imre | Rust | CPython |
 | --- | ---: | ---: | ---: |
-| uv download catalog | 158.4 | 107.2 | 2,904.8 |
-| Source search | 54.1 | 47.6 | 187.3 |
-| Wheel verification | 35.9 | 22.5 | 151.5 |
-| Road graph load | 61.4 | 60.8 | 534.2 |
-| Road routing | 103.7 | 89.2 | 1,847.9 |
-| Conformance report | 29.1 | 21.0 | 245.8 |
+| uv download catalog | 153.9 | 103.5 | 2,884.0 |
+| Source search | 54.5 | 48.1 | 187.5 |
+| Wheel verification | 36.9 | 22.6 | 155.2 |
+| Road graph load | 61.2 | 60.9 | 531.1 |
+| Road routing | 102.7 | 92.6 | 1,926.9 |
+| Conformance report | 29.9 | 21.9 | 255.9 |
 
-uv’s original script on CPython took 1,490.3 ms. During the accepted CLI runs, the other 31 vCPUs averaged 0.44–1.76% busy.
+uv’s original script on CPython took 1,334.3 ms. During the accepted CLI runs, the other 31 vCPUs averaged 0.36–1.84% busy.
 
-In 24 paired rounds, skipping nonmatching split fields and sizing regular-file reads cut Imre’s source search from 164.6 to 54.3 ms. Searching whole files and counting newlines between hits cut Rust from 70.9 to 47.6 ms. In 20 routing rounds, Rust took 130.6 ms with per-node vectors, 104.3 ms with a flat edge table and 84.7 ms with rows of up to four packed edges stored inline. Longer rows and wider values use overflow storage. Imre took 100.2 ms on the same graph. The 95% bootstrap interval for the median paired difference (Imre minus Rust) was 14.8 to 18.0 ms. [Paired samples](../results/application-pairs.json.gz)
+In 24 paired rounds, skipping nonmatching split fields and sizing regular-file reads cut Imre’s source search from 165.1 to 54.6 ms. Searching whole files and counting newlines between hits cut Rust from 71.4 to 47.5 ms. In 20 routing rounds, Rust took 127.7 ms with per-node vectors, 103.3 ms with a flat edge table and 84.6 ms with rows of up to four packed edges stored inline. Longer rows and wider values use overflow storage. Imre took 99.1 ms on the same graph. The 95% bootstrap interval for the median paired difference (Imre minus Rust) was 12.8 to 15.9 ms. [Paired samples](../results/application-pairs.json.gz)
 
-In a separate Callgrind run, loading the graph took 444 million instructions in Imre and 460 million in Rust. Including the four routes brought those totals to 829 million and 581 million.
+In a separate Callgrind run, loading the graph took 464 million instructions in Imre and 460 million in Rust. Including the four routes brought those totals to 812 million and 581 million.
 
-Across 36 paired wheel-verification rounds, sharing the ZIP read buffer cut Imre from 37.9 to 35.0 ms. Enabling SIMD detection for DEFLATE and hashing in 64 KiB chunks cut Rust from 24.9 to 21.6 ms. PyPA installer opens a new `/dev/null` stream for each hashed member and copies the member into it. Adding those file operations to the Rust verifier cost 10.1 ms (95% paired bootstrap interval 9.9–10.2 ms).
+Across 36 paired wheel-verification rounds, sharing the ZIP read buffer cut Imre from 38.1 to 35.7 ms. A separate Linux trace counted 1,402 positional reads before buffering and two after. Enabling SIMD detection for DEFLATE and hashing in 64 KiB chunks cut Rust from 25.0 to 21.8 ms. PyPA installer opens a new `/dev/null` stream for each hashed member and copies the member into it. Adding those file operations to the Rust verifier cost 10.2 ms (95% paired bootstrap interval 9.8–10.3 ms).
 
-The compiler and runtime come from `7e873d978`. Rust uses release builds. The catalog, router and conformance reporter use ThinLTO and one codegen unit. The Imre router links its runtime with ThinLTO. Imre parses integer fields directly from the input text and stores rows of up to four integer pairs inline.
+The compiler and runtime come from `d76cbc867`. Rust uses release builds. The catalog, router and conformance reporter use ThinLTO and one codegen unit. The Imre router links its runtime with ThinLTO. Imre parses integer fields directly from the input text and stores rows of up to four integer pairs inline.
 
 ## Flask
 
