@@ -247,8 +247,8 @@ enum DefinitionName<'a> {
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
-    /// A suspended suite and whether it was declared with async def.
-    GeneratorFunction((&'a [ast::Stmt], bool)),
+    /// A suspended suite and its generator, coroutine, or async generator code flag.
+    GeneratorFunction(&'a [ast::Stmt], u32),
     ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
@@ -259,7 +259,6 @@ enum Body<'a> {
     YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
     Generator(&'a [ast::Comprehension], &'a ast::Expr),
-    UnsupportedAsyncGenerator(&'a ast::StmtFunctionDef),
 }
 
 struct SourceMap<'a> {
@@ -460,16 +459,12 @@ impl Output {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
-            Body::GeneratorFunction(_) | Body::YieldingLambda(_) => {
+            Body::GeneratorFunction(..) | Body::YieldingLambda(_) => {
                 unreachable!("suspended definitions store their source in the code site")
             }
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class, false),
             Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
-            Body::UnsupportedAsyncGenerator(function) => {
-                f.checkpoint(function);
-                f.unsupported("async function");
-            }
             Body::Generator(generators, element) => f.generator_step(generators, element),
             Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);

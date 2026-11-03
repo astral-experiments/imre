@@ -1399,6 +1399,7 @@ impl Context {
                             | "float"
                             | "code"
                             | "coroutine"
+                            | "async_generator"
                             | "cell"
                             | "function"
                             | "module"

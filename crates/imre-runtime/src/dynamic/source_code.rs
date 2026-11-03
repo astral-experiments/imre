@@ -94,6 +94,16 @@ enum FunctionKind {
 }
 
 impl FunctionKind {
+    fn prelinked(code: &value::CodeObject) -> Self {
+        if code.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
+            Self::AsyncGenerator
+        } else if code.coroutine {
+            Self::Coroutine
+        } else {
+            Self::Generator
+        }
+    }
+
     fn is_async(self) -> bool {
         matches!(self, Self::Coroutine | Self::AsyncGenerator)
     }
@@ -3649,8 +3659,7 @@ impl Context {
         let definition = self.code_object(code);
         let kind = match &definition.body {
             Body::Source(program) => program.kind,
-            Body::PendingGenerator { .. } if definition.coroutine => FunctionKind::Coroutine,
-            Body::PendingGenerator { .. } => FunctionKind::Generator,
+            Body::PendingGenerator { .. } => FunctionKind::prelinked(definition),
             Body::Native(_) => unreachable!("source function"),
         };
         if kind != FunctionKind::Plain {
@@ -3730,11 +3739,7 @@ impl Context {
         program.private_names = private_names;
         program.qualname = self.str_value(code.qualname)?.to_owned();
         program.first_line = code.first_line;
-        program.kind = if def.is_async {
-            FunctionKind::Coroutine
-        } else {
-            FunctionKind::Generator
-        };
+        program.kind = FunctionKind::prelinked(code);
         program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
         if signature.generator_lambda {
             program.kind = FunctionKind::GeneratorLambda;
