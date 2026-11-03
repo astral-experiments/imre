@@ -221,67 +221,20 @@ fn prove_prefix_reads(body: &mut [Statement], source: usize, cursor: usize) {
             return;
         }
         match &mut value.kind {
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression(value, source, cursor);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression(key, source, cursor);
-                    expression(value, source, cursor);
-                }
-            }
-            ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression(value, source, cursor),
             ExprKind::Scope { body, value, .. } => {
                 prove_prefix_reads(body, source, cursor);
                 expression(value, source, cursor);
             }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression(left, source, cursor);
-                expression(right, source, cursor);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression(test, source, cursor);
-                expression(yes, source, cursor);
-                expression(no, source, cursor);
-            }
-            ExprKind::Exception {
-                message: Some(message),
-                ..
-            } => expression(message, source, cursor),
-            // Calls and expression rebinding were rejected before versioning.
-            // Other leaves contain no access to specialize.
-            _ => {}
+            // Bound-method captures are outside the index proof.
+            ExprKind::Callable { .. } => {}
+            _ => crate::ir::children_mut(value, |child| expression(child, source, cursor)),
         }
     }
     for statement in body {
-        match statement {
-            Statement::Assign(_, value)
-            | Statement::Expr(value)
-            | Statement::Return(value)
-            | Statement::Assert(value)
-            | Statement::Raise(Some(value)) => expression(value, source, cursor),
-            Statement::Scope { body, .. } => prove_prefix_reads(body, source, cursor),
-            Statement::If(test, yes, no) => {
-                expression(test, source, cursor);
-                prove_prefix_reads(yes, source, cursor);
-                prove_prefix_reads(no, source, cursor);
-            }
-            // Nested loops, mutation, and try regions cannot pass the proof.
-            // Cleanup and terminal control statements contain no expressions.
-            _ => {}
-        }
+        crate::ir::statement_children_mut(statement, |child| match child {
+            crate::ir::ChildMut::Expression(value) => expression(value, source, cursor),
+            crate::ir::ChildMut::Suite(body) => prove_prefix_reads(body, source, cursor),
+        });
     }
 }
 
