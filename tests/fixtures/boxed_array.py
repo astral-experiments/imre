@@ -150,6 +150,27 @@ def current():
     finally:
         gc.enable()
 
+    import weakref
+
+    payload = array("B", b"abc")
+    callbacks = []
+    handle = weakref.ref(payload, callbacks.append)
+    access = weakref.proxy(payload)
+    view = memoryview(payload)
+    del payload
+    gc.collect()
+    assert handle() is view.obj and access.tobytes() == b"abc"
+    assert not callbacks
+    view.release()
+    gc.collect()
+    assert handle() is None and len(callbacks) == 1 and callbacks[0] is handle
+    try:
+        access.tobytes()
+    except ReferenceError:
+        pass
+    else:
+        raise AssertionError("proxy survived its array")
+
     a = array('i', [0])
     views = []
     class ExportDuringAppend:
