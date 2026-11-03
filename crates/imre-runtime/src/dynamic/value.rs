@@ -3320,18 +3320,18 @@ impl Heap {
         self.frames.last().unwrap().scope
     }
 
+    /// Iterate over live Python warning locations, starting at the innermost caller.
+    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (&Location, Id)> {
+        self.frames.iter().rev().filter_map(|frame| {
+            frame.location.as_ref().map(|location| (location, frame.scope))
+        })
+    }
+
     /// Python stack levels start at one and exclude the native root frame.
     pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
-        self.frames
-            .iter()
-            .rev()
-            .filter_map(|frame| {
-                frame
-                    .location
-                    .clone()
-                    .map(|location| (location, frame.scope))
-            })
+        self.warning_frames()
             .nth((level.max(1) - 1) as usize)
+            .map(|(location, scope)| (location.clone(), scope))
     }
 
     pub(super) fn replace_expression(

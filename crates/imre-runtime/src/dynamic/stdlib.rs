@@ -73,6 +73,7 @@ mod system_size;
 pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
+pub(super) mod warnings_accel;
 mod zipimport;
 mod zlib;
 
@@ -146,6 +147,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "json"
             | "subprocess"
             | "warnings"
+            | "_warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
         || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
         || has_lazy_attributes(name)
@@ -1052,6 +1054,9 @@ pub(super) fn call(
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     if name == "_locale.nl_langinfo" {
         return locale::nl_langinfo(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_warnings.") {
+        return warnings_accel::call(ctx, method, args, kwargs);
     }
     if name == "_locale.setlocale" {
         return locale::setlocale(ctx, args, kwargs);
