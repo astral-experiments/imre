@@ -32,6 +32,48 @@ def current():
         captured.clear()
         assert held == {'after': 1} and captured.f_locals == {}
 
+    def class_cells(x, hidden):
+        class Captured:
+            y = x
+            frame = sys._getframe()
+
+        proxy = type(sys._getframe().f_locals)(Captured.frame)
+        assert proxy.copy() == {'x': 13}
+        proxy['x'] = 99
+        assert x == 99 and Captured.y == 13 and proxy.copy() == {'x': 99}
+        proxy['hidden'] = 2
+        assert hidden == 1 and 'x' not in Captured.frame.f_locals
+        Captured.frame.clear()
+        assert not proxy
+        proxy['x'] = 37
+        Captured.frame.clear()
+        assert x == 99 and proxy.copy() == {'x': 37}
+
+        class Shadow:
+            x = 7
+            frame = sys._getframe()
+            def read(self):
+                return x
+
+        view = type(proxy)(Shadow.frame)
+        assert view['x'] == 99 and Shadow.frame.f_locals['x'] == 7
+        view['x'] = 42
+        assert Shadow().read() == x == 42 and Shadow.x == 7
+
+    class_cells(13, 1)
+
+    def slot_order(flag):
+        if flag:
+            zebra = 0
+        alpha = 2
+        zebra = 1
+        return sys._getframe().f_locals
+
+    layout = slot_order(False)
+    layout['extra'] = 3
+    assert list(layout.keys()) == ['flag', 'zebra', 'alpha', 'extra']
+    assert list(layout.values()) == [False, 1, 2, 3]
+
     def resume(generator):
         return next(generator)
 

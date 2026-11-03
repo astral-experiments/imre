@@ -62,11 +62,15 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
         scope,
         code,
         unoptimized_locals,
+        class_proxy_scope,
         ..
     } = *ctx.heap.get(frame)
     else {
         unreachable!("a proxy owns a Python frame")
     };
+    if let Some(cells) = class_proxy_scope {
+        return Ok((cells, NONE, true));
+    }
     if scope != NONE {
         return Ok((scope, code, unoptimized_locals.is_none()));
     }
@@ -93,6 +97,54 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
     };
     *scope = empty;
     Ok((empty, code, unoptimized_locals.is_none()))
+}
+
+/// A class proxy exposes its captured slots, independently of the class namespace.
+pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> {
+    let data = ctx.scope_data(scope);
+    if data.class_body.is_none() {
+        return None;
+    }
+    let parent = data.parent?;
+    #[derive(serde::Deserialize)]
+    struct Bindings {
+        #[serde(default)]
+        class_frame_reads: Vec<String>,
+        #[serde(default)]
+        needs_class_cell: bool,
+        #[serde(default)]
+        needs_dict_cell: bool,
+    }
+    let Value::Code(code) = ctx.heap.get(code) else {
+        return None;
+    };
+    let Value::Str(signature) = ctx.heap.get(code.parameters) else {
+        return None;
+    };
+    let bindings: Bindings = serde_json::from_str(signature).ok()?;
+    let mut names = Vec::new();
+    let mut cells = Vec::new();
+    if bindings.needs_class_cell
+        && let Some(cell) = ctx.scope_data(scope).class_cell
+    {
+        names.push("__class__".to_owned());
+        cells.push(cell);
+    }
+    if bindings.needs_dict_cell {
+        names.push("__classdict__".to_owned());
+        cells.push(ctx.class_annotation_dict_cell(scope));
+    }
+    for name in bindings.class_frame_reads {
+        if ctx.is_enclosing_freevar(parent, &name) == Some(true) && !names.contains(&name) {
+            cells.push(ctx.capture_free_cell(parent, &name));
+            names.push(name);
+        }
+    }
+    if cells.is_empty() {
+        return None;
+    }
+    let globals = ctx.root_scope(parent);
+    Some(ctx.closure_environment(globals, names, &cells))
 }
 
 /// Capture the actual namespace while a class body or other unoptimized scope is still active.

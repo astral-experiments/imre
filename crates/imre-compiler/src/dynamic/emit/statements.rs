@@ -13,7 +13,7 @@ use super::{Body, Cleanup, DefinitionName, Function, LoopTarget};
 
 #[derive(Default)]
 struct ClosureNames {
-    locals: std::collections::BTreeSet<String>,
+    locals: indexmap::IndexSet<String>,
     reads: std::collections::BTreeSet<String>,
     globals: std::collections::BTreeSet<String>,
     nonlocals: std::collections::BTreeSet<String>,
@@ -36,7 +36,7 @@ pub(super) fn class_locals(body: &[ast::Stmt]) -> ClassBindings {
         .locals
         .retain(|name| !names.globals.contains(name) && !names.nonlocals.contains(name));
     ClassBindings {
-        locals: names.locals,
+        locals: names.locals.into_iter().collect(),
         globals: names.globals,
     }
 }
@@ -843,7 +843,9 @@ impl Function<'_, '_> {
             Body::Namespace(stmts) => {
                 let mut bindings = ClosureNames::default();
                 bindings.visit_body(stmts);
-                class_metadata::capture(&mut bindings, stmts, self.source.string_annotations);
+                let reads =
+                    class_metadata::capture(&mut bindings, stmts, self.source.string_annotations);
+                signature["class_frame_reads"] = json!(reads);
                 if !bindings.globals.is_empty() {
                     signature["class_globals"] = json!(bindings.globals);
                 }
@@ -932,7 +934,7 @@ impl Function<'_, '_> {
             }
         }
         for name in closure_names.globals.iter().chain(&closure_names.nonlocals) {
-            closure_names.locals.remove(name);
+            closure_names.locals.shift_remove(name);
         }
         closure_names.reads.retain(|name| {
             !closure_names.locals.contains(name) && !closure_names.globals.contains(name)
@@ -940,7 +942,7 @@ impl Function<'_, '_> {
         closure_names
             .reads
             .extend(closure_names.nonlocals.iter().cloned());
-        signature["scope_locals"] = json!(closure_names.locals);
+        signature["scope_locals"] = json!(closure_names.locals.iter().collect::<Vec<_>>());
         signature["scope_reads"] = json!(closure_names.reads);
         signature["scope_nonlocals"] = json!(closure_names.nonlocals);
         signature["scope_complete"] = json!(!closure_names.incomplete);

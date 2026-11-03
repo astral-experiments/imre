@@ -34,7 +34,7 @@ pub(super) struct Program {
     first_line: u32,
     kind: FunctionKind,
     interactive: bool,
-    locals: HashSet<String>,
+    locals: indexmap::IndexSet<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
     reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
@@ -1158,7 +1158,7 @@ impl Program {
         shared: &mut SharedConstants<'a>,
         spellings: &StringReplacements,
         line_at: &impl Fn(usize) -> u32,
-        annotation_class: Option<&HashSet<String>>,
+        annotation_class: Option<&indexmap::IndexSet<String>>,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
         let class_parameters = self.class_parameter_header();
@@ -1727,7 +1727,7 @@ impl Program {
             first_line: 1,
             kind: FunctionKind::Plain,
             interactive: false,
-            locals: HashSet::new(),
+            locals: indexmap::IndexSet::new(),
             directives: HashMap::new(),
             reads: BTreeSet::new(),
             method_imports: Rc::default(),
@@ -2677,10 +2677,10 @@ impl Program {
         Self::collect_target_names(target, &mut self.locals)
     }
 
-    fn collect_target_names(target: &ast::Expr, names: &mut HashSet<String>) -> Result<()> {
+    fn collect_target_names(target: &ast::Expr, names: &mut impl Extend<String>) -> Result<()> {
         match target {
             ast::Expr::Name(n) => {
-                names.insert(n.id.to_string());
+                names.extend([n.id.to_string()]);
             }
             ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {}
             ast::Expr::Starred(_) => {
@@ -3492,6 +3492,40 @@ impl Context {
         code: Id,
     ) -> Result<indexmap::IndexSet<String>> {
         let mut names = indexmap::IndexSet::new();
+        let frame = self.scope_data(scope);
+        if frame.comprehension.is_none()
+            && let Value::Code(code) = self.heap.get(code)
+            && let Value::Str(parameters) = self.heap.get(code.parameters)
+        {
+            let signature: serde_json::Value = serde_json::from_str(parameters)
+                .map_err(|error| Error::new("SystemError", error.to_string()))?;
+            // Argument slots come first, including arguments held in closure cells.
+            let arguments = ["posonly", "positional", "kwonly"]
+                .into_iter()
+                .flat_map(|group| signature[group].as_array().into_iter().flatten())
+                .filter_map(serde_json::Value::as_str)
+                .chain(
+                    ["varargs", "kwargs"]
+                        .into_iter()
+                        .filter_map(|key| signature[key].as_str()),
+                );
+            for name in arguments {
+                if frame.names.contains_key(name) || frame.closure.cells.contains_key(name) {
+                    names.insert(name.to_owned());
+                }
+            }
+            // Slot order comes from the code layout even when a branch skipped the first store.
+            for name in signature["scope_locals"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+            {
+                if frame.names.contains_key(name) {
+                    names.insert(name.to_owned());
+                }
+            }
+        }
         let mut local = scope;
         loop {
             let frame = self.scope_data(local);
@@ -5130,6 +5164,7 @@ impl Context {
                 };
                 serde_json::json!({
                     "class_globals": declared(ScopeDirective::Global),
+                    "class_frame_reads": child.reads,
                     "scope_nonlocals": declared(ScopeDirective::Nonlocal),
                     "needs_class_cell": child.needs_class_cell,
                     "needs_dict_cell": child.needs_dict_cell,
@@ -5154,8 +5189,7 @@ impl Context {
                     }
                 }
                 sig["class_cell"] = serde_json::json!(child.class_cell);
-                sig["scope_locals"] =
-                    serde_json::json!(child.locals.iter().collect::<BTreeSet<_>>());
+                sig["scope_locals"] = serde_json::json!(child.locals.iter().collect::<Vec<_>>());
                 sig["scope_locals_complete"] = true.into();
                 sig
             }

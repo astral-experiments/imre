@@ -368,8 +368,10 @@ impl Context {
             let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
             let globals = self.module_globals(scope)?;
             let unoptimized_locals = super::frame_locals::unoptimized_namespace(self, scope, code)?;
+            let class_proxy_scope = super::frame_locals::class_cells(self, scope, code);
             let object = self.alloc(Value::PythonFrame {
                 unoptimized_locals,
+                class_proxy_scope,
                 scope,
                 code,
                 globals,
@@ -417,6 +419,7 @@ impl Context {
         let globals = self.module_globals(scope)?;
         let object = self.alloc(Value::PythonFrame {
             unoptimized_locals: None,
+            class_proxy_scope: None,
             scope,
             code,
             globals,
@@ -1215,6 +1218,8 @@ pub(super) enum Value {
     PythonFrame {
         // The original namespace outlives execution of a module or class body.
         unoptimized_locals: Option<Id>,
+        // A class proxy sees lexical cells, even when its namespace shadows their names.
+        class_proxy_scope: Option<Id>,
         scope: Id,
         code: Id,
         globals: Id,
@@ -2037,6 +2042,7 @@ impl Value {
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
             Self::PythonFrame {
                 unoptimized_locals,
+                class_proxy_scope,
                 scope,
                 code,
                 globals,
@@ -2044,6 +2050,7 @@ impl Value {
                 ..
             } => {
                 visit.extend(*unoptimized_locals);
+                visit.extend(*class_proxy_scope);
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
@@ -3590,6 +3597,7 @@ impl Heap {
         let Value::PythonFrame {
             scope,
             unoptimized_locals,
+            class_proxy_scope,
             ..
         } = *self.get(value)
         else {
@@ -3631,6 +3639,19 @@ impl Heap {
             // The surviving Python frame keeps its locals after closing the unstarted generator.
             self.discard_generator_frame(id);
             return Ok(());
+        }
+        if let Some(cells) = class_proxy_scope {
+            let Value::Scope(data) = self.get_mut(cells) else {
+                unreachable!()
+            };
+            data.closure.extra_locals = None;
+            if !data.closure.cleared {
+                let closure = &mut *data.closure;
+                closure
+                    .declared
+                    .extend(closure.cells.drain().map(|(name, _)| name));
+                closure.cleared = true;
+            }
         }
         // Held namespaces survive a clear; subsequent access gets a fresh empty dict.
         let namespace = unoptimized_locals.map(|_| self.alloc(Value::Dict(Default::default())));

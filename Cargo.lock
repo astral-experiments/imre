@@ -708,6 +708,7 @@ dependencies = [
  "fancy-regex",
  "imre-ast",
  "imre-regex",
+ "indexmap",
  "libc",
  "notify",
  "num-bigint",

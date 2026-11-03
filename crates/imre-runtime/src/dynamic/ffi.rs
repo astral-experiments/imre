@@ -1383,6 +1383,30 @@ impl Context {
         }
     }
 
+    /// Share an enclosing lexical slot with a function closure or an exposed class frame.
+    pub(super) fn capture_free_cell(&mut self, mut cursor: Id, name: &str) -> Id {
+        loop {
+            let frame = self.scope_data(cursor);
+            if let Some(&cell) = frame.closure.cells.get(name) {
+                return cell;
+            }
+            if frame.class_body.is_none() && frame.closure.declared.contains(name) {
+                let Value::Scope(frame) = self.heap.get_mut(cursor) else {
+                    unreachable!()
+                };
+                let value = frame.names.shift_remove(name);
+                let cell = self.alloc(Value::Cell(value));
+                self.heap.keep(cell);
+                let Value::Scope(frame) = self.heap.get_mut(cursor) else {
+                    unreachable!()
+                };
+                frame.closure.cells.insert(name.to_owned(), cell);
+                return cell;
+            }
+            cursor = frame.parent.expect("free variable has enclosing scope");
+        }
+    }
+
     pub(super) fn prelinked_code(
         &mut self,
         body: value::Body,
@@ -1544,29 +1568,7 @@ impl Context {
                     continue;
                 }
             }
-            let mut cursor = scope;
-            loop {
-                let frame = self.scope_data(cursor);
-                if let Some(&cell) = frame.closure.cells.get(name) {
-                    cells.push(cell);
-                    break;
-                }
-                if frame.class_body.is_none() && frame.closure.declared.contains(name) {
-                    let Value::Scope(frame) = self.heap.get_mut(cursor) else {
-                        unreachable!()
-                    };
-                    let value = frame.names.shift_remove(name);
-                    let cell = self.alloc(Value::Cell(value));
-                    self.heap.keep(cell);
-                    let Value::Scope(frame) = self.heap.get_mut(cursor) else {
-                        unreachable!()
-                    };
-                    frame.closure.cells.insert(name.clone(), cell);
-                    cells.push(cell);
-                    break;
-                }
-                cursor = frame.parent.expect("free variable has enclosing scope");
-            }
+            cells.push(self.capture_free_cell(scope, name));
         }
         let scope = if self.code_object(code).closure_supported {
             let mut globals = scope;
