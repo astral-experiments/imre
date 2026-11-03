@@ -327,6 +327,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/contextlib_redirect.py"),
                 "\n",
+                include_str!("../stdlib/contextlib_chdir.py"),
+                "\n",
                 include_str!("../stdlib/contextlib_closing.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_contextmanager.py"),
@@ -1745,6 +1747,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("contextlib.AbstractAsyncContextManager")
             }
             (Self::Contextlib, "aclosing") => Intrinsic::ObjectRuntimeExport("contextlib.aclosing"),
+            (Self::Contextlib, "chdir") => Intrinsic::ObjectRuntimeExport("contextlib.chdir"),
             (Self::Contextlib, "closing") => Intrinsic::ObjectRuntimeExport("contextlib.closing"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
