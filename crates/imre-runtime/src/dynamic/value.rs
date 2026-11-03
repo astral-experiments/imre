@@ -3839,6 +3839,20 @@ impl Heap {
         Ok(live)
     }
 
+    /// Every live descendant, including unbound local classes, with parents before children.
+    pub(super) fn class_hierarchy(&self, class: Id) -> Vec<Id> {
+        let mut affected = Vec::new();
+        for (index, slot) in self.slots.iter().enumerate() {
+            if let Some(Value::Class { ancestors, .. }) = slot.value.as_ref()
+                && (index as Id == class || ancestors.contains(&class))
+            {
+                affected.push((ancestors.len(), index as Id));
+            }
+        }
+        affected.sort_unstable();
+        affected.into_iter().map(|(_, class)| class).collect()
+    }
+
     pub(super) fn slot_count(&self) -> usize {
         self.slots.len()
     }

@@ -11,6 +11,7 @@ mod atexit;
 mod builtins;
 mod calls;
 mod class_annotations;
+mod class_bases;
 mod collection_pattern;
 mod complex;
 mod defaultdict;
