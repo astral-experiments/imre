@@ -1981,6 +1981,13 @@ def main():
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
         compare(
             "-B", "-c",
+            "class Owner:\n"
+            "    def __del__(self): print('finalized')\n"
+            "owner = Owner()",
+            native_timeout=300,
+        )
+        compare(
+            "-B", "-c",
             "import atexit, os\n"
             "atexit.register(lambda: print('after shutdown', handler.stream is None))\n"
             "import logging\n"
