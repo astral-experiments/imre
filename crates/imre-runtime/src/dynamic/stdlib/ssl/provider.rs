@@ -105,6 +105,8 @@ functions! {
     SSL_CTX_get_verify_mode(Handle) -> c_int;
     SSL_CTX_set_verify(Handle, c_int, VerifyCallback) -> ();
     SSL_CTX_set_cipher_list(Handle, *const c_char) -> c_int;
+    SSL_CTX_get_num_tickets(Handle) -> usize;
+    SSL_CTX_set_num_tickets(Handle, usize) -> c_int;
     SSL_CTX_get_security_level(Handle) -> c_int;
     SSL_CTX_set_default_verify_paths(Handle) -> c_int;
     X509_get_default_cert_file_env() -> *const c_char;
@@ -866,6 +868,22 @@ impl Context {
                 },
             );
         }
+    }
+
+    pub(super) fn num_tickets(&self) -> usize {
+        // SAFETY: the context owns the SSL_CTX handle throughout this query.
+        unsafe { (self.api.SSL_CTX_get_num_tickets)(self.handle.as_ptr()) }
+    }
+
+    pub(super) fn set_num_tickets(&mut self, count: usize) -> Result<(), &'static str> {
+        if self.protocol != Protocol::Server {
+            return Err("SSLContext is not a server context.");
+        }
+        // SAFETY: the context owns the SSL_CTX handle and OpenSSL copies the count.
+        if unsafe { (self.api.SSL_CTX_set_num_tickets)(self.handle.as_ptr(), count) } != 1 {
+            return Err("failed to set num tickets.");
+        }
+        Ok(())
     }
 
     pub(crate) fn security_level(&self) -> i32 {
