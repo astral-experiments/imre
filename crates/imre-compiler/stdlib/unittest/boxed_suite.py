@@ -98,7 +98,10 @@ def _boxedSubTestExit(self, typ, value, tb):
         suppressed = self._executor.__exit__(typ, value, tb)
         if typ is not None and not suppressed:
             return False
-        if outcome.expectedFailure or (not outcome.success and getattr(outcome.result, "failfast", False)):
+        if not outcome.success:
+            if getattr(outcome.result, "failfast", False):
+                raise case._ShouldStop
+        elif outcome.expectedFailure:
             raise case._ShouldStop
         return suppressed
     finally:
