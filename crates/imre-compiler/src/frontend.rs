@@ -11697,6 +11697,15 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
+        if gzip
+            && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
+            && matches!(
+                mode.value.to_str(),
+                "w" | "wb" | "wt" | "a" | "ab" | "at" | "x" | "xb" | "xt"
+            )
+        {
+            return Err(self.scoped_builtin_error("gzip.open", call));
+        }
         // Sealed file handles close on drop without running Python's warning machinery.
         if !gzip
             && self
