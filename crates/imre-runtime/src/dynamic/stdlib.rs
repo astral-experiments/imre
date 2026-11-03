@@ -60,7 +60,7 @@ pub(super) mod posix_spawn;
 mod posixpath;
 #[cfg(target_os = "linux")]
 mod process_arguments;
-mod random;
+pub(super) mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
 #[cfg(target_os = "linux")]
@@ -771,7 +771,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "calcsize" | "pack" | "unpack" | "unpack_from")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
-        | ("random", "random" | "choice" | "choices" | "shuffle" | "randint" | "randbytes")
+        | (
+            "random",
+            "seed" | "getrandbits" | "random" | "choice" | "choices" | "shuffle" | "randint"
+            | "randbytes",
+        )
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -1572,19 +1576,19 @@ pub(super) fn call(
         "resource.setrlimit" => return resource::setrlimit(ctx, args, kwargs),
         _ => {}
     }
+    if name == "random.seed" {
+        return random::seed(ctx, args, kwargs);
+    }
+    if name == "random.getrandbits" {
+        let count = random::bit_count(ctx, args, kwargs)?;
+        return Ok(
+            ctx.alloc(Value::Int(crate::Int::new(crate::objects::random_bits(
+                &count,
+            )?))),
+        );
+    }
     if name == "random.random" {
-        if !kwargs.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "Random.random() takes no keyword arguments",
-            ));
-        }
-        if !args.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                format!("Random.random() takes no arguments ({} given)", args.len()),
-            ));
-        }
+        random::random_args(args, kwargs)?;
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
     }
     if name == "random.shuffle" {

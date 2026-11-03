@@ -11,6 +11,16 @@ fn random(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
 
 impl Checker<'_> {
     pub(super) fn random_call(&mut self, op: Op, call: &ast::ExprCall) -> Result<Expr, String> {
+        if op == Op::Seed
+            && (call.arguments.args.len() == 2
+                || call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .any(|kw| kw.arg.as_deref() == Some("version")))
+        {
+            return Err(self.scoped_builtin_error("random.seed", call));
+        }
         let specs = match op {
             Op::Shuffle => vec![("x", None)],
             Op::Float => vec![],
@@ -53,6 +63,9 @@ impl Checker<'_> {
                     } else {
                         Err(checker.object_builtin_error("random.shuffle", node))
                     };
+                }
+                if op == Op::Seed && value.ty == Type::Float {
+                    return Err(checker.scoped_builtin_error("random.seed", node));
                 }
                 if op == Op::Seed && matches!(value.ty, Type::None | Type::Str | Type::Bytes)
                     || op == Op::Randrange && i == 1 && value.ty == Type::None

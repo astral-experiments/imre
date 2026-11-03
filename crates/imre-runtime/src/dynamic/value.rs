@@ -1026,6 +1026,7 @@ pub(super) enum Value {
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
+    Random(std::rc::Rc<std::cell::RefCell<crate::objects::Generator>>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     #[cfg(unix)]
     MemoryBio(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::Bio>>),
@@ -1521,6 +1522,7 @@ impl Value {
             Self::ClassMethod { .. } => "classmethod",
             Self::ThreadLocal(_) => super::thread_local::CLASS,
             Self::ThreadHandle(_) => "_thread._ThreadHandle",
+            Self::Random(_) => "Random",
             Self::HandlerLock(_) => super::thread_rlock::CLASS,
             Self::PrimitiveLock(_) => super::thread_lock::CLASS,
             Self::FormatIterator { kind, .. } => match kind {
@@ -2114,6 +2116,7 @@ impl Value {
             | Self::Struct { .. }
             | Self::Hash(_)
             | Self::MetadataArchive(_)
+            | Self::Random(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
