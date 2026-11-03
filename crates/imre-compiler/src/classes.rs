@@ -838,7 +838,7 @@ fn collect_class(
                         .object_builtin_errors
                         .borrow_mut()
                         .insert(error.clone());
-                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    graph.class_layout_error.borrow_mut().get_or_insert(error);
                     has_custom_dir = true;
                     class_bindings.insert(name.to_owned());
                     continue;
