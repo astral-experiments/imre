@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **9,121 of 13,328 tests (68.4%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **9,157 of 13,328 tests (68.7%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -125,7 +125,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `itertools` | 112 | 138 | 0 | Selected runs account for 112 original passes. Public 90955053 resolved the typing.Iterable import. The unchanged 137-case primary now reaches a module-level type alias in _pyrepl/types.py and stops before discovery at both native levels. A separate GIL companion supplies the 138th registration. |
 | `json` | 214 | 216 | 0 | All 34 unmodified CLI originals passed, with 32 child subtests and 64 tool subprocesses per lane. The O0/O3 children ran native code. Two help cases matched the upstream usage-prefix assertion while their full stdout differed from stock. |
 | `logging` | 232 | 272 | 0 | Seven more originals passed from the full upstream logging test file in separate stock and native processes. They cover task names, formatter precision, shutdown and recursion. |
-| `os` | 411 | 579 | 0 | Two new originals checked the filename carried by OSError and a long current directory. The /dev/null original also passed and already had a paired result. |
+| `os` | 412 | 579 | 0 | The os.times original passed in the full stock module and the complete TimesTests class at public native O0/O3. The ordinary full-source import still reaches missing asyncio in test support. |
 | `pathlib` | 974 | 1,369 | 1 | Four more `glob` and `rglob` tests passed with recursive symlinks after complete discovery of all 1,369 originals. All three owners exited cleanly, and filesystem observations confirmed the links and teardown in all twelve fixtures. |
 | `re` | 147 | 165 | 7 | Seven CPython compiler and bytecode checks have explicit omissions. The 147 paired originals include focused and complete runs. |
 | `shutil` | 154 | 223 | 0 | Stock and public native O0/O3 each discovered all 223 originals and ran the same 49 additional tests. All three owners exited 0 with identical parent callbacks and four successful subtests. |
@@ -134,10 +134,10 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `tempfile` | 108 | 118 | 2 | All 118 originals finished in ordinary and boxed O0/O3. Each native run passed 108 and skipped 10. Stock passed 112 and skipped six. Two extra native skips are documented omissions. The other two require working os.fork and os.spawnl. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
-| `typing` | 701 | 712 | 0 | The unchanged async-generator ABC original passed on public #4804 at O0 and O3 and matched the pinned stock result. |
-| `unittest` | 341 | 1,090 | 0 | The complete 57-test test_result file contributed 33 previously unlisted paired passes on public native O0 and O3. |
+| `typing` | 702 | 712 | 0 | The unchanged generic type erasure test passed on stock and public native O0/O3 when selected from the complete test_typing module. |
+| `unittest` | 375 | 1,090 | 0 | The complete 57-test result module passed 50 parents on public native O0/O3. The complete sealable module passed 17 of 19 on that build. Both full inventories were checked against pinned stock. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,121** | **13,328** | **30** | **4 complete suites match stock on `main`** |
+| **Total** | **9,157** | **13,328** | **30** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -151,10 +151,10 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `contextlib` | 148 | 149 | All 58 async originals and 90 of 91 synchronous originals have paired passes. The module entry point passed nine of the ten `TestSuppress` cases on public Imre. The remaining case exercises exception groups. |
 | `inspect` | 0 | 362 | Stock ran 362 originals, with 361 passes and one skip. On public revision `00755c8c`, native compilation stopped before discovery, and a compiled import stopped at `_pickle`. Separate replays passed 44 tests in renamed modules. |
 | `ssl` | 35 | 195 | Two more SSLContext originals passed on public main. They cover hostname checking and protocol-specific verification mode. Each selected process registered all 195 tests. |
-| `types` | 130 | 141 | The isolated crash test passed with the parent and child at matching optimization levels. The GenericAlias subclass union test and all three of its subtests also passed on public main. |
+| `types` | 131 | 141 | The method descriptor type original passed through ordinary unittest invocation on stock and public native O0/O3. |
 | `warnings` | 181 | 187 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| **Measured total (6 of 6 families)** | **663** | **1,217** |  |
+| **Measured total (6 of 6 families)** | **664** | **1,217** |  |
 
 ## Design
 
