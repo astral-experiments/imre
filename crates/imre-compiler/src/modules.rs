@@ -91,6 +91,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
         "_colorize" => Some(("_colorize.py", include_str!("../stdlib/_colorize.py"))),
+        // CPython 3.14.5 Lib/_pyio.py. See licenses/CPython.txt.
+        "_pyio" => Some(("_pyio.py", include_str!("../stdlib/_pyio.py"))),
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
         "_strptime" => Some(("_strptime.py", include_str!("../stdlib/_strptime.py"))),
         "calendar" => Some(("calendar.py", include_str!("../stdlib/calendar.py"))),
@@ -4765,6 +4767,23 @@ impl<'a> Loader<'a> {
         Ok(module)
     }
 
+    /// Look for a source file on the project search path before using a bundled fallback.
+    fn has_project_source(&mut self, name: &str) -> bool {
+        let roots = std::iter::once(&self.root)
+            .skip(usize::from(self.skip_current_root))
+            .chain(&self.search_roots[..self.archive_roots]);
+        for root in roots {
+            let base = root.join(name);
+            for path in [base.join("__init__.py"), base.with_extension("py")] {
+                if self.fs.is_file(&path) {
+                    return true;
+                }
+                self.inputs.missing.push(path);
+            }
+        }
+        false
+    }
+
     fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
         if self.allow_imports && !self.skip_current_root {
             for base in [
@@ -4856,6 +4875,7 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "_pyio" if self.allow_imports && self.has_project_source(name) => None,
             // Fixed-layout Decimal values use the scalar methods. Rich comparisons use the
             // complete provider on the boxed route, where Python dispatches equality and hashing.
             "decimal" => Some((

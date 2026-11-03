@@ -629,6 +629,7 @@ pub(crate) fn compile(
         && (src.contains("logging")
             || src.contains("tokenize")
             || src.contains("configparser")
+            || src.contains("_pyio")
             || !src.is_ascii());
     let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
     if !object_hint && !provider_hint && !ordered_command {
@@ -670,7 +671,9 @@ pub(crate) fn compile(
     let logging_script = !object_entry && provider_hint && first.imports_logging;
     let tokenize_script = !object_entry && imports_provider("tokenize");
     let configparser_script = !object_entry && imports_provider("configparser");
-    let ordered_only = !object_entry && !logging_script && !tokenize_script && !configparser_script;
+    let pyio_script = !object_entry && imports_provider("_pyio");
+    let fallback_script = logging_script || tokenize_script || configparser_script || pyio_script;
+    let ordered_only = !object_entry && !fallback_script;
     if ordered_only
         && (!ordered_command
             || first.uses_import_builtin
@@ -681,8 +684,7 @@ pub(crate) fn compile(
     {
         return Ok(None);
     }
-    let provider_script =
-        provider_script || logging_script || tokenize_script || configparser_script;
+    let provider_script = provider_script || fallback_script;
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -809,7 +811,7 @@ pub(crate) fn compile(
                 imports.add(0, "unittest.mock");
             }
             if uses_import_builtin || seen.contains("importlib") {
-                for name in ["configparser", "py_compile", "sysconfig", "uuid"] {
+                for name in ["_pyio", "configparser", "py_compile", "sysconfig", "uuid"] {
                     if !seen.contains(name) {
                         imports.names.push((0, name.to_owned()));
                     }
@@ -999,7 +1001,8 @@ pub(crate) fn compile(
                             || (argparse_script && prefix == "argparse")
                             || (logging_script && prefix == "logging")
                             || (tokenize_script && prefix == "tokenize")
-                            || (configparser_script && prefix == "configparser"))
+                            || (configparser_script && prefix == "configparser")
+                            || (pyio_script && prefix == "_pyio"))
                     {
                         return Ok(None);
                     }

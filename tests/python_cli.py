@@ -1714,6 +1714,27 @@ def main():
         )
         compare("-B", tokenize_script)
 
+        pyio_script = root / "pyio_entry.py"
+        pyio_script.write_text(
+            "import io, _pyio\n"
+            "assert io.BytesIO is not _pyio.BytesIO\n"
+            "for stream in (io.BytesIO, _pyio.BytesIO):\n"
+            "    with stream(b'abc') as buf:\n"
+            "        print(stream.__module__, buf.read())\n"
+        )
+        compare("-I", pyio_script, native_timeout=600)
+        compare(
+            "-I", "-c", "import sys; print(__import__(sys.argv[1]).BytesIO(b'abc').read())",
+            "_pyio", native_timeout=600,
+        )
+
+        pyio_project = root / "pyio_project"
+        pyio_project.mkdir()
+        (pyio_project / "_pyio.py").write_text("marker = 'local provider'\n")
+        local_script = pyio_project / "entry.py"
+        local_script.write_text("import _pyio\nprint(_pyio.marker)\n")
+        compare("-B", local_script)
+
         config_script = root / "config_entry.py"
         config_script.write_text(
             "from configparser import ConfigParser\n"
