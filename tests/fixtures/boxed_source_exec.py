@@ -301,6 +301,28 @@ def source_generic_classes():
     assert get_type_hints(row)["item"] is row.__type_params__[0]
 
 
+def source_annotated_targets():
+    events = []
+
+    def mark(label, value):
+        events.append(label)
+        return value
+
+    class Box:
+        pass
+
+    target = Box()
+    items = {}
+    namespace = {"mark": mark, "target": target, "items": items}
+    exec("""mark("object", target).value: mark("annotation", int) = mark("value", 3)
+class C:
+    mark("items", items)[mark("key", "x")]: mark("annotation", int) = mark("item", 4)
+""", namespace)
+    assert events == ["value", "object", "item", "items", "key"]
+    assert target.value == 3 and items == {"x": 4}
+    assert not namespace["C"].__annotations__
+
+
 def module_annotations():
     events = []
     ns = {"events": events, "alias": int}
@@ -1096,6 +1118,7 @@ def current():
     method_argument_lifetime()
     named_bindings()
     source_annotations()
+    source_annotated_targets()
     module_annotations()
     source_genexpr()
     source_listcomp()

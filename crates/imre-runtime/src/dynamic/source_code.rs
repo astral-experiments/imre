@@ -2047,6 +2047,7 @@ impl Program {
                 Stmt::AnnAssign(s)
                     if function
                         || s.simple
+                        || s.value.is_some()
                         || (self.class_attributes.is_none() && s.target.is_name_expr()) =>
                 {
                     let name = s.target.as_name_expr().map(|name| name.id.to_string());
