@@ -2187,6 +2187,14 @@ def main():
             extra={"IMREFLAGS": "--opt-level 0"},
             native_timeout=300,
         )
+        compare(
+            "-I", "-c",
+            "for enabled in (False, True):\n"
+            "    if enabled:\n"
+            "        def pop(items): return items.pop()\n"
+            "    try: print(pop([42]))\n"
+            "    except NameError: print('unbound')\n",
+        )
         compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
         if os.name == "posix":
             for base in ("list", "tuple"):
