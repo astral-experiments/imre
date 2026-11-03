@@ -370,6 +370,10 @@ pub fn numeric_condition_diagnostic(
 }
 
 /// Diagnose the first invalid reference in source order, optionally including open backreferences.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the public diagnostic signature for callers that configure the syntax visitor."
+)]
 pub fn group_reference_diagnostic(
     pattern: &str,
     verbose: bool,
