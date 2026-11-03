@@ -2368,6 +2368,11 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
+        if self.is_bundled("platform") && name == "win32_is_iot" {
+            return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                "platform.win32_is_iot",
+            )));
+        }
         if self.is_bundled("socketserver")
             && matches!(
                 name,

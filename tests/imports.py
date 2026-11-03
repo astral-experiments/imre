@@ -232,6 +232,13 @@ REJECTED = {
             "    value: int = 'wrong'\n    print(value)\nrun()\n"
         ),
     }, "expected int, got str"),
+    "platform_iot_preserves_checked_calls": ({
+        "main.py": (
+            "import helper\ndef typed(value: int) -> int:\n    return value + 1\n"
+            "print(helper.win32_is_iot(), typed('wrong'))\n"
+        ),
+        "helper.py": "from platform import win32_is_iot\n",
+    }, "invalid-argument-type"),
     "unused_queue_listener_preserves_assignment": ({
         "main.py": (
             "from logging.handlers import QueueListener\ndef run() -> None:\n"
@@ -673,6 +680,10 @@ ACCEPTED = {
             "    value = fractions.Fraction(6, -8) + fractions.Fraction(1, 4)\n"
             "    return isinstance(value, Rational), value.numerator, value.denominator\n"
         ),
+    },
+    "platform_iot_indirect": {
+        "main.py": "import helper\nprint(helper.win32_is_iot())\n",
+        "helper.py": "from platform import win32_is_iot\n",
     },
     "ntpath_indirect": {
         "main.py": "from helper import paths\nprint(paths())\n",
@@ -1431,8 +1442,8 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
-                    "email_address_parsers", "filesystem_resources", "fractions_indirect", "record_warnings",
-                    "warn_named_helper", "zip_source_spec",
+                    "email_address_parsers", "filesystem_resources", "fractions_indirect", "platform_iot_indirect",
+                    "record_warnings", "warn_named_helper", "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
