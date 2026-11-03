@@ -497,6 +497,18 @@ impl Context {
         self.update_dictionary_field(obj, dictionary, name, value)
     }
 
+    /// Assign or delete a local naming attribute without changing the generic alias's origin.
+    fn update_alias_name(&mut self, obj: Id, name: &str, value: Option<Id>) -> Option<Result<()>> {
+        let Value::GenericAlias(alias) = self.heap.get(obj) else {
+            return None;
+        };
+        let fields = alias.naming_fields?;
+        if !matches!(name, "__name__" | "__qualname__" | "__module__") {
+            return None;
+        }
+        Some(self.update_dictionary_field(obj, fields, name, value))
+    }
+
     fn update_dictionary_field(
         &mut self,
         obj: Id,
@@ -4567,6 +4579,9 @@ impl Context {
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         self.check_immutable_type_write(obj, name)?;
+        if let Some(result) = self.update_alias_name(obj, name, None) {
+            return result;
+        }
         if matches!(name, "__name__" | "__qualname__")
             && matches!(self.heap.get(obj), Value::Generator { .. })
         {
@@ -5353,6 +5368,9 @@ impl Context {
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         self.check_immutable_type_write(obj, name)?;
+        if let Some(result) = self.update_alias_name(obj, name, Some(value)) {
+            return result;
+        }
         if matches!(name, "__name__" | "__qualname__")
             && matches!(self.heap.get(obj), Value::Generator { .. })
         {
