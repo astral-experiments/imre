@@ -127,9 +127,20 @@ impl Context {
         Ok(self.alloc(Value::Tuple(values)))
     }
 
+    /// Class patterns require a type before performing Python's instance check.
+    pub(super) fn class_pattern_matches(&mut self, subject: Id, class: Id) -> Result<bool> {
+        if !self.is_type_object(class) {
+            return Err(Error::new(
+                "TypeError",
+                "called match pattern must be a class",
+            ));
+        }
+        self.python_instance_check(subject, class)
+    }
+
     /// Fetch keyword fields in source order before evaluating their nested patterns.
     fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
-        if !self.instance_of(subject, class) {
+        if !self.class_pattern_matches(subject, class)? {
             return Ok(NONE);
         }
         let Value::List(names) = self.heap.get(names) else {
