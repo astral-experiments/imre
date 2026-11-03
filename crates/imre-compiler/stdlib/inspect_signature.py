@@ -132,8 +132,8 @@ def _instance_call(obj):
 
 
 def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
-                             globals=None, locals=None, eval_str=False,
-                             annotation_format=Format.VALUE):
+                             skip_bound_arg=True, globals=None, locals=None,
+                             eval_str=False, annotation_format=Format.VALUE):
     if not callable(obj):
         raise TypeError(f"{obj!r} is not a callable object")
     if follow_wrapper_chains and not isinstance(obj, types.MethodType):
@@ -142,9 +142,9 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if isinstance(obj, types.MethodType):
         inner = _signature_from_callable(
             obj.__func__, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-            globals=globals, locals=locals, eval_str=eval_str,
-            annotation_format=annotation_format)
-        return _signature_bound_method(inner)
+            skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+            eval_str=eval_str, annotation_format=annotation_format)
+        return _signature_bound_method(inner) if skip_bound_arg else inner
     explicit = getattr(obj, "__signature__", None)
     if explicit is not None:
         if not isinstance(explicit, Signature):
@@ -154,8 +154,8 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if isinstance(partialmethod, functools.partialmethod):
         wrapped = _signature_from_callable(
             partialmethod.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-            globals=globals, locals=locals, eval_str=eval_str,
-            annotation_format=annotation_format)
+            skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+            eval_str=eval_str, annotation_format=annotation_format)
         # Reserve the receiver while binding the partial arguments, then restore it
         # in the signature of the unbound method.
         sig = _signature_get_partial(wrapped, partialmethod, (None,))
@@ -168,8 +168,8 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if isinstance(obj, functools.partial):
         wrapped = _signature_from_callable(
             obj.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-            globals=globals, locals=locals, eval_str=eval_str,
-            annotation_format=annotation_format)
+            skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+            eval_str=eval_str, annotation_format=annotation_format)
         return _signature_get_partial(wrapped, obj)
     if isinstance(obj, types.FunctionType) or _signature_is_functionlike(obj):
         return _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format)
@@ -181,9 +181,9 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         method, drop_first = _instance_call(obj)
     inner = _signature_from_callable(
         method, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-        globals=globals, locals=locals, eval_str=eval_str,
-        annotation_format=annotation_format)
-    return _signature_bound_method(inner) if drop_first else inner
+        skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+        eval_str=eval_str, annotation_format=annotation_format)
+    return _signature_bound_method(inner) if drop_first and skip_bound_arg else inner
 
 
 def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format):

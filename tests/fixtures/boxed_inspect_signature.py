@@ -2,7 +2,7 @@ import inspect
 import warnings
 from annotationlib import Format
 from functools import Placeholder, partial, partialmethod, update_wrapper
-from inspect import Parameter, Signature
+from inspect import FullArgSpec, Parameter, Signature, getfullargspec
 
 
 def omitted(value=inspect._sentinel):
@@ -167,6 +167,13 @@ assert str(inspect.signature(StaticCall())) == "(first, second)"
 assert str(inspect.signature(ClassCall())) == "(item)"
 
 update_wrapper(wrapper, original)
+spec = inspect.getfullargspec(original)
+assert type(spec) is FullArgSpec
+assert spec == FullArgSpec(["a", "b"], "args", "kwargs", (3,), ["flag"], {"flag": False},
+                           {"b": int, "return": str})
+assert getfullargspec(wrapper).varargs == "values"
+assert getfullargspec(C().method).args == ["self", "value"]
+assert getfullargspec(partial(C().method, b"x")).args == ["value"]
 sig = Signature.from_callable(wrapper)
 print(str(sig), sig.return_annotation is str)
 print([(p.name, p.kind.name) for p in sig.parameters.values()])
