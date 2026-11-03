@@ -937,7 +937,11 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "dict.fromkeys" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
+        if matches!(self.heap.get(value), Value::Native(name) if name == "dict.fromkeys") {
+            stdlib::datetime::validate_classmethod_receiver(self, "dict", "fromkeys", owner)?;
+            return Ok(self.bind_native_classmethod(value, owner));
+        }
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -2223,7 +2227,8 @@ impl Context {
                 && match self.heap.get(member) {
                     Value::Native(symbol) => {
                         !stdlib::datetime::clock_classmethod(symbol)
-                            && BuiltinDescriptor::lookup(symbol).is_some()
+                            && BuiltinDescriptor::lookup(symbol)
+                                .is_some_and(|slot| slot.class() != "classmethod_descriptor")
                     }
                     Value::IoMethod {
                         name: "writelines", ..
