@@ -29,8 +29,14 @@ def getattr_static(obj, attr, default=_sentinel):
     raise AttributeError(attr)
 
 
+def _unwrap_constructor_method(method, follow_wrapper_chains):
+    if follow_wrapper_chains:
+        return unwrap(method, stop=lambda f: hasattr(f, "__signature__") or _signature_is_builtin(f))
+    return method
+
+
 def _constructor(obj, follow_wrapper_chains):
-    # Inspect binds a metaclass's __call__ descriptor to the metaclass itself.
+    # Only a user-defined metaclass __call__ takes precedence over the class constructor.
     meta = type(obj)
     for base in getattr(meta, "__mro__", ()):
         if base is type or base is object:
@@ -38,7 +44,9 @@ def _constructor(obj, follow_wrapper_chains):
         if "__call__" in base.__dict__:
             method = base.__dict__["__call__"]
             if method is not None:
-                return _bind_signature_method(method, meta)
+                original = _unwrap_constructor_method(method, follow_wrapper_chains)
+                if not isinstance(original, _NonUserDefinedCallables):
+                    return _bind_signature_method(method, meta)
             break
 
     # A shadowed __init__ and an inherited __new__ can coexist. Find the first
@@ -58,11 +66,7 @@ def _constructor(obj, follow_wrapper_chains):
                 seen.add(name)
                 method = obj.__new__ if name == "__new__" else namespace[name]
                 # A decorator can wrap the object default without defining a constructor.
-                original = method
-                if follow_wrapper_chains:
-                    original = unwrap(method, stop=lambda f: hasattr(f, "__signature__")
-                                      or isbuiltin(f) or ismethoddescriptor(f))
-                if original is default:
+                if _unwrap_constructor_method(method, follow_wrapper_chains) is default:
                     continue
                 uses_object_defaults = False
                 if method is None:

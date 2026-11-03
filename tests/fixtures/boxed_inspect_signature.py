@@ -131,6 +131,18 @@ class DescriptorInit:
     __init__ = InitDescriptor()
 
 
+class JoinMeta(type):
+    def __call__(cls, *args, **kwargs):
+        return ":".join(*args, **kwargs)
+
+    __call__.__wrapped__ = ":".join
+
+
+class Joined(metaclass=JoinMeta):
+    def __init__(self, parts):
+        pass
+
+
 def documented(*args, **kwargs):
     pass
 
@@ -266,6 +278,15 @@ assert str(inspect.signature(DeprecatedChild)) == "(*, published)"
 
 
 assert str(inspect.signature(DescriptorInit)) == "(selected)"
+
+assert str(inspect.signature(Joined)) == "(parts)"
+assert str(inspect.signature(Joined, follow_wrapped=False)) == "(*args, **kwargs)"
+JoinMeta.__call__.__signature__ = Signature([
+    Parameter("cls", Parameter.POSITIONAL_ONLY), Parameter("items", Parameter.KEYWORD_ONLY),
+])
+assert str(inspect.signature(Joined)) == "(*, items)"
+JoinMeta.__call__ = ":".join
+assert str(inspect.signature(Joined, follow_wrapped=False)) == "(parts)"
 
 
 assert str(inspect.signature(partial(with_options, 1))) == "(b, *args, flag=False)"

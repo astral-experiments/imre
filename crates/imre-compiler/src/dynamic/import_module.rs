@@ -196,8 +196,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("CORO_CREATED = ", "def getcoroutinelocals("),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("FullArgSpec = namedtuple(", "ArgInfo = namedtuple("),
-                        section("def _signature_get_partial(", "def _signature_is_builtin("),
-                        section("def _signature_is_functionlike(obj):", "def _signature_strip_non_python_syntax("),
+                        section("_NonUserDefinedCallables =", "def _signature_get_user_defined_method("),
+                        section("def _signature_get_partial(", "def _signature_strip_non_python_syntax("),
                         &text_signatures,
                         section("class _void:", "class BufferFlags("),
                     ]
