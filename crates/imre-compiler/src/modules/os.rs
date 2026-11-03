@@ -230,6 +230,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "statvfs_result" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("os.statvfs_result")
         }
+        "times" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.times"),
+        "times_result" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.times_result"),
         "terminal_size" => Intrinsic::ObjectRuntimeExport("os.terminal_size"),
         "close" => Intrinsic::Fd(FdOperation::Close),
         "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),

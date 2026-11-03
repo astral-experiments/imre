@@ -3578,6 +3578,8 @@ else:
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform in ("darwin", "linux"):
             compare("-IB", str(fixtures / "boxed_geteuid_exports.py"), "os", "posix")
+            plugin.write_bytes((fixtures / "boxed_os_times.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_grp.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())

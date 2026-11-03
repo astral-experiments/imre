@@ -8,6 +8,7 @@ pub(in crate::dynamic) const PASSWD: &str = "pwd.struct_passwd";
 pub(in crate::dynamic) const HASH_INFO: &str = "sys.hash_info";
 pub(in crate::dynamic) const THREAD_INFO: &str = "sys.thread_info";
 pub(in crate::dynamic) const SCHED_PARAM: &str = "posix.sched_param";
+pub(in crate::dynamic) const TIMES_RESULT: &str = "posix.times_result";
 pub(in crate::dynamic) const TERMINAL_SIZE: &str = "os.terminal_size";
 pub(in crate::dynamic) const ASYNCGEN_HOOKS: &str = "asyncgen_hooks";
 pub(in crate::dynamic) const UNRAISABLE_ARGS: &str = "UnraisableHookArgs";
@@ -31,6 +32,7 @@ pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
         THREAD_INFO => Some(THREAD_INFO),
         ASYNCGEN_HOOKS => Some(ASYNCGEN_HOOKS),
         UNRAISABLE_ARGS => Some(UNRAISABLE_ARGS),
+        TIMES_RESULT if cfg!(unix) => Some(TIMES_RESULT),
         TERMINAL_SIZE => Some(TERMINAL_SIZE),
         SCHED_PARAM if cfg!(target_os = "linux") => Some(SCHED_PARAM),
         _ => None,
@@ -58,6 +60,13 @@ pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
             "exc_traceback",
             "err_msg",
             "object",
+        ],
+        TIMES_RESULT => &[
+            "user",
+            "system",
+            "children_user",
+            "children_system",
+            "elapsed",
         ],
         TERMINAL_SIZE => &["columns", "lines"],
         SCHED_PARAM => &["sched_priority"],
@@ -301,6 +310,13 @@ pub(in crate::dynamic) fn type_attribute(
         "__doc__" if class == THREAD_INFO => ctx.text(
             "sys.thread_info\n\nA named tuple holding information about the thread implementation.",
         ),
+        "__doc__" if class == TIMES_RESULT => ctx.text(concat!(
+            "times_result: Result from os.times().\n\n",
+            "This object may be accessed either as a tuple of\n",
+            "  (user, system, children_user, children_system, elapsed),\n",
+            "or via the attributes user, system, children_user, children_system,\n",
+            "and elapsed.\n\nSee os.times for more information."
+        )),
         "__doc__" if class == GROUP => ctx.text(concat!(
             "grp.struct_group: Results from getgr*() routines.\n\n",
             "This object may be accessed either as a tuple of\n",
