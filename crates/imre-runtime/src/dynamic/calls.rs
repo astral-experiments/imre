@@ -6416,13 +6416,12 @@ impl Context {
                     stdlib::hashlib::md5::call(self, owner, name, &args, &kwargs)
                 }
             }
-            Value::IoOpen {
-                reader,
-                writer,
-                random,
-                unsupported,
-            } => stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)
-                .map_err(|error| stdlib::io::qualify_error(self, error, Some(unsupported))),
+            Value::IoOpen { types, unsupported } => {
+                let (_, arguments) = args.split_first()
+                    .ok_or_else(|| Error::new("TypeError", "_io.open needs its module"))?;
+                stdlib::io::open(self, arguments, &kwargs, Some(types))
+                    .map_err(|error| stdlib::io::qualify_error(self, error, Some(unsupported)))
+            }
             Value::IoMethod {
                 owner,
                 name,

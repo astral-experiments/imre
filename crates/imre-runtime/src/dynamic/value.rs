@@ -880,6 +880,16 @@ impl NativeModuleState {
     }
 }
 
+/// Private file constructors associated with one low-level I/O module.
+#[derive(Clone, Copy)]
+pub(super) struct IoOpenTypes {
+    pub file: Id,
+    pub reader: Id,
+    pub writer: Id,
+    pub random: Id,
+    pub wrapper: Id,
+}
+
 #[derive(Clone)]
 pub(super) enum Value {
     None,
@@ -1235,9 +1245,7 @@ pub(super) enum Value {
         kind: FormatKind,
     },
     IoOpen {
-        reader: Id,
-        writer: Id,
-        random: Id,
+        types: IoOpenTypes,
         unsupported: Id,
     },
     HeapTypeMethod {
@@ -1933,12 +1941,9 @@ impl Value {
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
-            Self::IoOpen {
-                reader,
-                writer,
-                random,
-                unsupported,
-            } => visit.extend([*reader, *writer, *random, *unsupported]),
+            Self::IoOpen { types, unsupported } => visit.extend([
+                types.file, types.reader, types.writer, types.random, types.wrapper, *unsupported,
+            ]),
             Self::IoMethod {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
