@@ -3762,6 +3762,26 @@ impl Heap {
         if remaining == 0 {
             return Ok(None);
         }
+        // Closing a bound text stream can leave its wrapper, buffer and raw file alive.
+        // Re-read both native edges and the frame binding before ruling out finalization.
+        if remaining <= 3
+            && self.ordinary_finalizers.iter().any(|&owner| {
+                !stdin.is_some_and(|input| input.contains(&owner))
+                    && super::stdlib::io::text_descriptor_chain(self, owner).is_some_and(|chain| {
+                        self.ordinary_finalizers.iter().all(|id| {
+                            chain.contains(id) || stdin.is_some_and(|input| input.contains(id))
+                        }) && (self.bound_in_active_frame(owner)
+                            || self.frames.iter().any(|frame| {
+                                // Materialized scopes can retain additional native local names.
+                                matches!(self.get(frame.scope), Value::Scope(scope)
+                                    if scope.namespace.is_some()
+                                        && scope.names.values().any(|&bound| bound == owner))
+                            }))
+                    })
+            })
+        {
+            return Ok(None);
+        }
         // A suspended caller keeps earlier operands live across a nested call.
         // Scan the callers once when only one finalizer needs a reachability check.
         if let [owner] = self.ordinary_finalizers.as_slice()
