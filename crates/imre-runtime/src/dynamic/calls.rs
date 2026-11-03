@@ -1985,7 +1985,7 @@ impl Context {
         }
         if name == "__new__" {
             let class = self.heap.get(obj).instance_class().unwrap_or(obj);
-            if self.heap.get(class).hash_type().is_some() {
+            if self.nonconstructible_heap_type(class).is_some() {
                 return Ok(self.builtin("object.__new__"));
             }
         }
@@ -2055,6 +2055,7 @@ impl Context {
         }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
+                "__new__" => return Ok(self.builtin("object.__new__")),
                 "__args__" => return Ok(union.args),
                 "__parameters__" => return Ok(union.parameters),
                 "__class__" | "__origin__" => return Ok(super::union::class(self)),
@@ -5928,6 +5929,16 @@ impl Context {
             })
     }
 
+    /// These class objects expose the inherited object.__new__ but cannot allocate instances.
+    fn nonconstructible_heap_type(&self, class: Id) -> Option<&'static str> {
+        let value = self.heap.get(class);
+        if matches!(value, Value::Class { .. }) && self.classes.get("typing.Union") == Some(&class)
+        {
+            return Some("typing.Union");
+        }
+        value.hash_type()
+    }
+
     /// Allocate a plain instance without invoking its constructor or initializer.
     fn new_object(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         let Some((&class, rest)) = args.split_first() else {
@@ -5956,7 +5967,7 @@ impl Context {
                 format!("object.__new__({name}) is not safe, use {name}.__new__()"),
             ));
         }
-        if let Some(name) = self.heap.get(class).hash_type() {
+        if let Some(name) = self.nonconstructible_heap_type(class) {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot create '{name}' instances"),
@@ -6186,7 +6197,7 @@ impl Context {
         if self.heap.get(callable).heap_type() == Some(stdlib::ssl::provider::bio::CLASS) {
             return stdlib::ssl::provider::bio::construct(self, callable, &args, &kwargs);
         }
-        if let Some(name) = self.heap.get(callable).hash_type() {
+        if let Some(name) = self.nonconstructible_heap_type(callable) {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot create '{name}' instances"),
@@ -6736,12 +6747,6 @@ impl Context {
                 }
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
-                }
-                if self.classes.get("typing.Union") == Some(&callable) {
-                    return Err(Error::new(
-                        "TypeError",
-                        "cannot create 'typing.Union' instances",
-                    ));
                 }
                 if self.scope_data(scope).is_abstract {
                     return Err(self.abstract_class_error(scope, &name)?);
