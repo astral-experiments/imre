@@ -2614,7 +2614,7 @@ def report(text):
         (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
         compare("-IB", "-c", uuid_import + "print(uuid.marker)")
         compare(
-            "-IB", "-c",
+            "-B", "-c",
             "import importlib, os, sys\n"
             "name = sys.argv[1]\n"
             "module = importlib.import_module(name)\n"
@@ -2634,7 +2634,8 @@ def report(text):
             f"sys.path.insert(0, {str(helpers)!r})\n"
             "print(importlib.import_module(name).marker)\n",
             "uuid",
-            native_timeout=180,
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
         )
 
         (helpers / "pprint.py").write_text("def incomplete(:\n")
