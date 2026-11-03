@@ -809,7 +809,7 @@ pub(crate) fn compile(
                 imports.add(0, "unittest.mock");
             }
             if uses_import_builtin || seen.contains("importlib") {
-                for name in ["configparser", "py_compile", "sysconfig"] {
+                for name in ["configparser", "py_compile", "sysconfig", "uuid"] {
                     if !seen.contains(name) {
                         imports.names.push((0, name.to_owned()));
                     }

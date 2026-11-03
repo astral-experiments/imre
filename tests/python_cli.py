@@ -2614,6 +2614,30 @@ def report(text):
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
         (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
         compare("-IB", "-c", uuid_import + "print(uuid.marker)")
+        compare(
+            "-B", "-c",
+            "import importlib, os, sys\n"
+            "name = sys.argv[1]\n"
+            "module = importlib.import_module(name)\n"
+            "value = module.uuid4()\n"
+            "assert value.version == 4 and value.variant == module.RFC_4122\n"
+            "assert value.bytes == value.int.to_bytes(16, 'big')\n"
+            "def entropy(n):\n"
+            "    assert n == 16\n"
+            "    return bytes.fromhex('0123456789abbdef4123456789abcdef')\n"
+            "original = os.urandom\n"
+            "os.urandom = entropy\n"
+            "try:\n"
+            "    assert str(module.uuid4()) == '01234567-89ab-4def-8123-456789abcdef'\n"
+            "finally:\n"
+            "    os.urandom = original\n"
+            "del sys.modules[name]\n"
+            f"sys.path.insert(0, {str(helpers)!r})\n"
+            "print(importlib.import_module(name).marker)\n",
+            "uuid",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
 
         (helpers / "pprint.py").write_text("def incomplete(:\n")
         compare("-IB", "-c", f"import sys\nsys.path.insert(0, {str(helpers)!r})\nprint(__import__('sys').__name__)")
