@@ -1,6 +1,6 @@
 from inspect import signature
 from unittest import TestCase
-from unittest.mock import NonCallableMagicMock, create_autospec, seal
+from unittest.mock import NonCallableMagicMock, call, create_autospec, seal
 
 
 class Version:
@@ -11,8 +11,14 @@ class Version:
         raise AttributeError
 
 
+class Sink:
+    def write(self, value):
+        pass
+
+
 class Client:
     version = Version()
+    sink = Sink()
 
     def __init__(self, host):
         pass
@@ -68,4 +74,26 @@ seal(client)
 assert client.extra == 1 and client.Codec.encode("more") == "encoded"
 with check.assertRaises(AttributeError):
     client.Codec.missing = 1
+write = instance.sink.write
+write("one")
+write.assert_called_once_with(value="one")
+write(value="two")
+write.assert_called_with("two")
+write.assert_any_call(value="one")
+write.assert_has_calls([call(value="one"), call("two")])
+instance.assert_has_calls([call.sink.write(value="one"), call.sink.write("two")])
+assert write.call_args_list == [call("one"), call(value="two")]
+with check.assertRaises(AssertionError):
+    write.assert_has_calls([call("two"), call("one")])
+with check.assertRaises(AssertionError) as invalid:
+    write.assert_called_with(unknown="two")
+assert isinstance(invalid.exception.__cause__, TypeError)
+
+source = Client("localhost")
+source.receive = lambda data: None
+receive = create_autospec(source).receive
+with check.assertRaises(TypeError):
+    receive()
+receive("packet")
+receive.assert_called_once_with(data="packet")
 print("autospec checked")

@@ -69,21 +69,25 @@ def _get_target(target):
     return lambda: _patch_owner(owner), attribute
 
 
-_missing_option = object()
-
-
 class _patch:
-    def __init__(self, getter, attribute, new, create, *,
-                 side_effect=_missing_option, return_value=_missing_option):
+    _active_patches = []
+
+    def __init__(self, getter, attribute, new, create, *, new_callable=None, **kwargs):
+        if new_callable is not None:
+            if new is not DEFAULT:
+                raise ValueError("Cannot use 'new' and 'new_callable' together")
+            if kwargs.get('autospec') is not None:
+                raise ValueError("Cannot use 'autospec' and 'new_callable' together")
+        # These are patch options, not arguments to the replacement factory.
+        for option in ('spec', 'spec_set', 'autospec', 'unsafe'):
+            if option in kwargs:
+                raise TypeError(f"unsupported patch option: {option!r}")
         self.getter = getter
         self.attribute = attribute
         self.new = new
         self.create = create
-        self.mock_kwargs = {}
-        if side_effect is not _missing_option:
-            self.mock_kwargs['side_effect'] = side_effect
-        if return_value is not _missing_option:
-            self.mock_kwargs['return_value'] = return_value
+        self.new_callable = new_callable
+        self.mock_kwargs = kwargs
         self.is_started = False
 
     def __enter__(self):
@@ -103,7 +107,12 @@ class _patch:
             raise AttributeError(f"{target} does not have the attribute {name!r}")
         replacement = self.new
         if replacement is DEFAULT:
-            replacement = MagicMock(name=name, **self.mock_kwargs)
+            factory = MagicMock if self.new_callable is None else self.new_callable
+            kwargs = {}
+            if isinstance(factory, type) and issubclass(factory, NonCallableMock):
+                kwargs['name'] = name
+            kwargs.update(self.mock_kwargs)
+            replacement = factory(**kwargs)
         elif self.mock_kwargs:
             raise TypeError("Can't pass kwargs to a mock we aren't creating")
         setattr(target, name, replacement)
@@ -129,6 +138,19 @@ class _patch:
             del self.target
             del self.original
             self.is_started = False
+            return False
+
+    def start(self):
+        replacement = self.__enter__()
+        self._active_patches.append(self)
+        return replacement
+
+    def stop(self):
+        try:
+            self._active_patches.remove(self)
+        except ValueError:
+            return None
+        return self.__exit__(None, None, None)
 
     def __call__(self, func):
         if isinstance(func, type):
@@ -138,7 +160,7 @@ class _patch:
                     # Some boxed builtins are callable without exposing __call__.
                     if hasattr(method, '__call__') or isinstance(method, type(len)):
                         patcher = _patch(self.getter, self.attribute, self.new, self.create,
-                                         **self.mock_kwargs)
+                                         new_callable=self.new_callable, **self.mock_kwargs)
                         setattr(func, name, patcher(method))
             return func
         if hasattr(func, 'patchings'):
