@@ -121,6 +121,17 @@ def current():
         else:
             raise AssertionError("invalid struct input accepted")
 
+    # Read a signed field within a larger record from either end of a mutable buffer.
+    field = struct.Struct(">l")
+    data = bytearray(b"ab" + field.pack(-2) + b"c")
+    assert struct.unpack_from(">l", data, 2) == field.unpack_from(buffer=data, offset=-5) == (-2,)
+    try:
+        field.unpack_from(data, -3)
+    except struct.error as error:
+        assert str(error) == "not enough data to unpack 4 bytes at offset -3"
+    else:
+        raise AssertionError("short field accepted")
+
     record = struct.Struct(">lbb")
     assert record.size == 6
     encoded = b"\xff\xff\xff\xff\x80\x7f"

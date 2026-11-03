@@ -386,7 +386,15 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "getrlimit",
             "setrlimit"
         ),
-        M::Struct => exports!("struct", "Struct", "calcsize", "error", "pack", "unpack"),
+        M::Struct => exports!(
+            "struct",
+            "Struct",
+            "calcsize",
+            "error",
+            "pack",
+            "unpack",
+            "unpack_from"
+        ),
         M::Sys => exports!(
             "sys",
             "byteorder",
