@@ -69,6 +69,59 @@ impl Context {
         Ok(())
     }
 
+    /// Acquire an asynchronous iterator once, without binding its next descriptor yet.
+    pub(super) fn async_for_iter(&mut self, iterable: Id) -> Result<Id> {
+        let Some(method) = self.bound_slot(iterable, "__aiter__")? else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "'async for' requires an object with __aiter__ method, got {:.100}",
+                    self.type_name(iterable),
+                ),
+            ));
+        };
+        let iter = self.call(method, Vec::new(), Vec::new())?;
+        if !matches!(self.heap.get(iter), Value::AsyncGenerator { .. })
+            && self.slot(iter, "__anext__").is_none()
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "'async for' received an object from __aiter__ that does not implement __anext__: {:.100}",
+                    self.type_name(iter),
+                ),
+            ));
+        }
+        Ok(iter)
+    }
+
+    /// Invoke the next slot and distinguish its errors from an invalid awaitable result.
+    pub(super) fn async_for_next(&mut self, iter: Id) -> Result<Id> {
+        let Some(method) = self.bound_slot(iter, "__anext__")? else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "'async for' requires an iterator with __anext__ method, got {:.100}",
+                    self.type_name(iter),
+                ),
+            ));
+        };
+        let value = self.call(method, Vec::new(), Vec::new())?;
+        self.get_await_iterator(value, None).map_err(|error| {
+            let mut invalid = Error::new(
+                "TypeError",
+                format!(
+                    "'async for' received an invalid object from __anext__: {:.100}",
+                    self.type_name(value)
+                ),
+            );
+            let cause = self.raised_instance(error);
+            invalid.tracing().cause = Some(cause);
+            invalid.context = cause;
+            invalid
+        })
+    }
+
     /// A coroutine is awaitable but does not implement the iterator protocol itself.
     pub(super) fn await_iterator(
         &mut self,

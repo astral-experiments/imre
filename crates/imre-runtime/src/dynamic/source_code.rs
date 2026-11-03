@@ -158,7 +158,10 @@ enum Instruction {
         end: usize,
     },
     Iter(ast::Expr),
-    UnsupportedAsyncIter(Option<ast::Expr>),
+    AsyncIter(Option<ast::Expr>),
+    AsyncNext,
+    BindAsyncItem(ast::Expr),
+    EndAsyncFor,
     Await(Option<ast::Expr>),
     SaveCallOperand(Option<ast::Expr>),
     SaveCallMethod(ast::ExprAttribute),
@@ -1148,8 +1151,9 @@ impl Program {
                         }
                     }
                 }
+                Instruction::BindAsyncItem(target) => strings.visit_expr(target),
                 Instruction::AsyncWithMethods(Some(context))
-                | Instruction::UnsupportedAsyncIter(Some(context)) => strings.visit_expr(context),
+                | Instruction::AsyncIter(Some(context)) => strings.visit_expr(context),
                 Instruction::EnterAsyncWith {
                     target: Some(target),
                     ..
@@ -1297,7 +1301,9 @@ impl Program {
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
                 | Instruction::AsyncWithMethods(None)
-                | Instruction::UnsupportedAsyncIter(None)
+                | Instruction::AsyncIter(None)
+                | Instruction::AsyncNext
+                | Instruction::EndAsyncFor
                 | Instruction::EnterAsyncWith { target: None, .. }
                 | Instruction::ExitWith
                 | Instruction::CallAsyncExit
@@ -2260,22 +2266,27 @@ impl Program {
                     Instruction::Jump(current.head)
                 }
                 Stmt::For(_) | Stmt::While(_) => {
+                    let mut async_target = None;
                     let (body, orelse, guard) = match stmt {
                         Stmt::For(s) => {
                             self.declare_target(&s.target)?;
-                            let iter = if !s.is_async {
-                                Instruction::Iter(*s.iter)
-                            } else if self.kind.is_async() {
+                            let guard = if s.is_async {
+                                if !self.kind.is_async() {
+                                    return Err(Error::new(
+                                        "SyntaxError",
+                                        "'async for' outside async function",
+                                    ));
+                                }
                                 let iterable = self.lower_suspension(*s.iter, line, function)?;
-                                Instruction::UnsupportedAsyncIter(iterable)
+                                self.instructions
+                                    .push((line, Instruction::AsyncIter(iterable)));
+                                async_target = Some(*s.target);
+                                Instruction::EnterExcept { handler: 0, end: 0 }
                             } else {
-                                return Err(Error::new(
-                                    "SyntaxError",
-                                    "'async for' outside async function",
-                                ));
+                                self.instructions.push((line, Instruction::Iter(*s.iter)));
+                                Instruction::Next(Some(*s.target), 0)
                             };
-                            self.instructions.push((line, iter));
-                            (s.body, s.orelse, Instruction::Next(Some(*s.target), 0))
+                            (s.body, s.orelse, guard)
                         }
                         Stmt::While(s) => (s.body, s.orelse, Instruction::Unless(*s.test, 0)),
                         _ => unreachable!("loop statement"),
@@ -2283,15 +2294,28 @@ impl Program {
                     let head = self.instructions.len();
                     let mut current = LoopJumps {
                         head,
-                        has_iterator: matches!(guard, Instruction::Next(..)),
+                        has_iterator: async_target.is_some()
+                            || matches!(guard, Instruction::Next(..)),
                         breaks: Vec::new(),
                     };
                     self.instructions.push((line, guard));
+                    if let Some(target) = async_target {
+                        // Only GET_ANEXT and its await are protected by END_ASYNC_FOR.
+                        self.instructions.push((line, Instruction::AsyncNext));
+                        self.instructions.push((line, Instruction::Delegate));
+                        self.instructions
+                            .push((line, Instruction::BindAsyncItem(target)));
+                    }
                     self.lower(body, lines, function, Some(&mut current))?;
                     self.instructions.push((line, Instruction::Jump(head)));
                     let other = self.instructions.len();
                     match &mut self.instructions[head].1 {
                         Instruction::Next(_, end) | Instruction::Unless(_, end) => *end = other,
+                        Instruction::EnterExcept { handler, end } => {
+                            *handler = other;
+                            *end = other + 1;
+                            self.instructions.push((line, Instruction::EndAsyncFor));
+                        }
                         _ => unreachable!("loop guard"),
                     }
                     self.lower(orelse, lines, function, active.as_deref_mut())?;
@@ -4045,7 +4069,8 @@ impl Context {
                             | Instruction::Await(None)
                             | Instruction::SaveCallOperand(None)
                             | Instruction::AsyncWithMethods(None)
-                            | Instruction::UnsupportedAsyncIter(None)
+                            | Instruction::AsyncIter(None)
+                            | Instruction::BindAsyncItem(_)
                             | Instruction::CallAsyncEnter
                             | Instruction::AwaitWithResult(_)
                             | Instruction::EnterAsyncWith { .. }
@@ -4152,6 +4177,22 @@ impl Context {
                                 destination: end,
                                 pop_iter: false,
                             }
+                        }
+                        Instruction::EndAsyncFor => {
+                            let block = cursor.protected.pop().expect("async for guard");
+                            let Some(Transfer::Raise(exception)) = block.pending else {
+                                unreachable!("async for exception handler");
+                            };
+                            let iter = cursor.iterators.pop().expect("async iterator");
+                            self.release_loop_iterator(iter);
+                            self.heap.weak_edge_removed(iter);
+                            let Value::Raised(error) = self.heap.get(exception) else {
+                                unreachable!("raised iteration error");
+                            };
+                            if self.is_builtin_error(error, "StopAsyncIteration") {
+                                continue;
+                            }
+                            Transfer::Raise(exception)
                         }
                         Instruction::EndFinally => cursor
                             .protected
@@ -4683,14 +4724,23 @@ impl Context {
             | Instruction::EnterExcept { .. }
             | Instruction::StartFinally
             | Instruction::EndFinally
+            | Instruction::EndAsyncFor
             | Instruction::Jump(_)
             | Instruction::Break(_) => unreachable!("source control instruction"),
-            Instruction::UnsupportedAsyncIter(iterable) => {
-                // An awaited operand has already finished. Evaluate any other operand here.
-                if let Some(iterable) = iterable {
-                    eval(self, iterable)?;
-                }
-                return Err(unsupported("async for"));
+            Instruction::AsyncIter(expr) => {
+                let iterable = match expr {
+                    Some(expr) => eval(self, expr)?,
+                    None => std::mem::replace(sent, NONE),
+                };
+                iterators.push(self.async_for_iter(iterable)?);
+            }
+            Instruction::AsyncNext => {
+                let iter = *iterators.last().expect("async iterator");
+                iterators.push(self.async_for_next(iter)?);
+            }
+            Instruction::BindAsyncItem(target) => {
+                cursor.protected.pop().expect("completed async for pull");
+                self.bind_target(code, scope, target, *sent)?;
             }
             Instruction::Iter(e) => {
                 let value = eval(self, e)?;
