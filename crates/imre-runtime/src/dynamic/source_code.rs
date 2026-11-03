@@ -244,6 +244,7 @@ enum DefinitionKind {
     Class {
         arguments: Option<Box<ast::Arguments>>,
         parameterized: bool,
+        needs_enclosing_frame: bool,
     },
     ClassParameters(Box<ast::TypeParams>),
 }
@@ -2255,6 +2256,12 @@ impl Program {
                     child.class_attributes = Some(imre_ast::class_attributes::static_attributes(
                         &s.body, spellings,
                     ));
+                    // Method-only classes can use the lexical reads collected for their methods.
+                    let needs_enclosing_frame = s.type_params.is_some()
+                        || !s
+                            .body
+                            .iter()
+                            .all(|stmt| matches!(stmt, Stmt::Pass(_) | Stmt::FunctionDef(_)));
                     child.instructions.push((line, Instruction::ClassStart));
                     child.lower_namespace(s.body, lines, false)?;
                     child.instructions.push((line, Instruction::ClassEnd));
@@ -2266,6 +2273,7 @@ impl Program {
                         kind: DefinitionKind::Class {
                             arguments: s.arguments,
                             parameterized: s.type_params.is_some(),
+                            needs_enclosing_frame,
                         },
                         annotate: None,
                     };
@@ -5083,6 +5091,7 @@ impl Context {
             DefinitionKind::Class {
                 arguments: args,
                 parameterized,
+                ..
             } => {
                 let mut values = Vec::new();
                 let mut keywords = Vec::new();
@@ -5149,7 +5158,13 @@ impl Context {
             let freevars = if alias_parameters != NONE {
                 self.enclosing_freevars(defining_scope, child.reads.iter().map(String::as_str))
             } else if (code.name != "<module>" || self.scope_data(scope).comprehension.is_some())
-                && child.class_attributes.is_none()
+                && !matches!(
+                    definition.kind,
+                    DefinitionKind::Class {
+                        needs_enclosing_frame: true,
+                        ..
+                    }
+                )
                 && !child.class_cell
             {
                 // A function defined in a class captures an enclosing function's cells.

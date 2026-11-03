@@ -145,6 +145,15 @@ def current():
     assert unused() is None
     assert reader_type().read() is payload
 
+    namespace = {"ref": ref}
+    exec("def make(kept, unused):\n"
+         "    class Reader:\n"
+         "        def read(self): return kept\n"
+         "    return Reader, ref(unused)\n", namespace)
+    reader_type, unused = namespace["make"](payload, Payload())
+    assert unused() is None
+    assert reader_type().read() is payload
+
     reader, unused = global_lambda(Payload())
     pressure = []
     for index in range(20000):
