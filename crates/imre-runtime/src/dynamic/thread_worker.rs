@@ -469,11 +469,24 @@ pub(super) fn start_detached(
     Ok((worker.ident, worker.active))
 }
 
+/// Thread.run expands *args and **kwargs before calling the target. A bound method
+/// can keep an exact input tuple during the call. An ordinary function binds its
+/// arguments into a frame and releases the call containers before its body runs.
+pub(super) fn expanded_call_roots(ctx: &Context, target: Id, args: Id) -> Vec<Id> {
+    if matches!(ctx.heap.get(target), Value::Method { .. })
+        && matches!(ctx.heap.get(args), Value::Tuple(_))
+    {
+        vec![target, args]
+    } else {
+        vec![target]
+    }
+}
+
 // Validate the actual bound method and its operands before starting an OS
 // thread. No Python handle, callback, or pointer into Context may cross here.
 fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Operation, Vec<Id>)> {
     if target == NONE {
-        return Ok((Operation::Empty, vec![target, args, kwargs]));
+        return Ok((Operation::Empty, Vec::new()));
     }
     if let Some((callback, roots)) = Callback::capture_for_thread(ctx, target, args, kwargs)? {
         return Ok((callback, roots));
@@ -517,7 +530,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         };
         if let Some(operation) = operation {
             // The bound call owns its expanded arguments even if the caller clears the list.
-            let mut roots = vec![target, args, kwargs];
+            let mut roots = expanded_call_roots(ctx, target, args);
             roots.extend_from_slice(pos);
             return Ok((operation, roots));
         }
