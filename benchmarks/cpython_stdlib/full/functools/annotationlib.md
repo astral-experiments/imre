@@ -118,3 +118,13 @@ compare that commit with the same source plus native `inspect`. For
 move from `test/support/__init__.py:9` (`inspect`) to line 11 (`_opcode`).
 All 24 import/runner checks per revision stopped before executing a test.
 The four `test_functools` startup checks still stop at `builtins` on line 3.
+
+## ForwardRef evaluation with explicit locals
+
+On public Imre `534110d9`, the original
+`TestForwardRefClass.test_evaluate_forwardref_format` passed at ordinary O0
+and O3. It preserves an unresolved `a + b` reference and evaluates it to 3
+when given locals `a=1` and `b=2`. Stock CPython 3.14.5 passed the method
+in the full module and in the one-method projection. This adds one parent to
+the 18 paired annotationlib originals, bringing that inventory to 19 of 117.
+[Callbacks and replay](../typing/receipts/annotation-resolution/README.md)
