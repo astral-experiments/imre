@@ -2,6 +2,7 @@
 # Lib/urllib/request.py. See ../docstrings/LICENSE.
 import base64
 import bisect
+import hashlib
 import http.client
 import io
 import os
@@ -10,6 +11,7 @@ import socket
 import string
 import sys
 import tempfile
+import time
 
 from email.message import Message
 from urllib.error import ContentTooShortError, HTTPError, URLError
@@ -23,6 +25,7 @@ __all__ = [
     "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "FTPHandler", "UnknownHandler",
     "HTTPPasswordMgr", "HTTPPasswordMgrWithDefaultRealm", "HTTPPasswordMgrWithPriorAuth",
     "AbstractBasicAuthHandler", "HTTPBasicAuthHandler",
+    "AbstractDigestAuthHandler", "HTTPDigestAuthHandler",
     "ProxyHandler", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
     "pathname2url", "url2pathname", "getproxies",
@@ -885,6 +888,176 @@ class HTTPBasicAuthHandler(AbstractBasicAuthHandler, BaseHandler):
         return response
 
 
+_randombytes = os.urandom
+
+
+class AbstractDigestAuthHandler:
+    # Digest authentication is specified in RFC 2617/7616.
+
+    # XXX The client does not inspect the Authentication-Info header
+    # in a successful response.
+
+    # XXX It should be possible to test this implementation against
+    # a mock server that just generates a static set of challenges.
+
+    # XXX qop="auth-int" supports is shaky
+
+    def __init__(self, passwd=None):
+        if passwd is None:
+            passwd = HTTPPasswordMgr()
+        self.passwd = passwd
+        self.add_password = self.passwd.add_password
+        self.retried = 0
+        self.nonce_count = 0
+        self.last_nonce = None
+
+    def reset_retry_count(self):
+        self.retried = 0
+
+    def http_error_auth_reqed(self, auth_header, host, req, headers):
+        authreq = headers.get(auth_header, None)
+        if self.retried > 5:
+            # Don't fail endlessly - if we failed once, we'll probably
+            # fail a second time. Hm. Unless the Password Manager is
+            # prompting for the information. Crap. This isn't great
+            # but it's better than the current 'repeat until recursion
+            # depth exceeded' approach <wink>
+            raise HTTPError(req.full_url, 401, "digest auth failed",
+                            headers, None)
+        else:
+            self.retried += 1
+        if authreq:
+            scheme = authreq.split()[0]
+            if scheme.lower() == 'digest':
+                return self.retry_http_digest_auth(req, authreq)
+            elif scheme.lower() != 'basic':
+                raise ValueError("AbstractDigestAuthHandler does not support"
+                                 " the following scheme: '%s'" % scheme)
+
+    def retry_http_digest_auth(self, req, auth):
+        token, challenge = auth.split(' ', 1)
+        chal = parse_keqv_list(filter(None, parse_http_list(challenge)))
+        auth = self.get_authorization(req, chal)
+        if auth:
+            auth_val = 'Digest %s' % auth
+            if req.headers.get(self.auth_header, None) == auth_val:
+                return None
+            req.add_unredirected_header(self.auth_header, auth_val)
+            resp = self.parent.open(req, timeout=req.timeout)
+            return resp
+
+    def get_cnonce(self, nonce):
+        # The cnonce-value is an opaque
+        # quoted string value provided by the client and used by both client
+        # and server to avoid chosen plaintext attacks, to provide mutual
+        # authentication, and to provide some message integrity protection.
+        # This isn't a fabulous effort, but it's probably Good Enough.
+        s = "%s:%s:%s:" % (self.nonce_count, nonce, time.ctime())
+        b = s.encode("ascii") + _randombytes(8)
+        dig = hashlib.sha1(b).hexdigest()
+        return dig[:16]
+
+    def get_authorization(self, req, chal):
+        try:
+            realm = chal['realm']
+            nonce = chal['nonce']
+            qop = chal.get('qop')
+            algorithm = chal.get('algorithm', 'MD5')
+            # mod_digest doesn't send an opaque, even though it isn't
+            # supposed to be optional
+            opaque = chal.get('opaque', None)
+        except KeyError:
+            return None
+
+        H, KD = self.get_algorithm_impls(algorithm)
+        if H is None:
+            return None
+
+        user, pw = self.passwd.find_user_password(realm, req.full_url)
+        if user is None:
+            return None
+
+        # XXX not implemented yet
+        if req.data is not None:
+            entdig = self.get_entity_digest(req.data, chal)
+        else:
+            entdig = None
+
+        A1 = "%s:%s:%s" % (user, realm, pw)
+        A2 = "%s:%s" % (req.get_method(),
+                        # XXX selector: what about proxies and full urls
+                        req.selector)
+        # NOTE: As per  RFC 2617, when server sends "auth,auth-int", the client could use either `auth`
+        #     or `auth-int` to the response back. we use `auth` to send the response back.
+        if qop is None:
+            respdig = KD(H(A1), "%s:%s" % (nonce, H(A2)))
+        elif 'auth' in qop.split(','):
+            if nonce == self.last_nonce:
+                self.nonce_count += 1
+            else:
+                self.nonce_count = 1
+                self.last_nonce = nonce
+            ncvalue = '%08x' % self.nonce_count
+            cnonce = self.get_cnonce(nonce)
+            noncebit = "%s:%s:%s:%s:%s" % (nonce, ncvalue, cnonce, 'auth', H(A2))
+            respdig = KD(H(A1), noncebit)
+        else:
+            # XXX handle auth-int.
+            raise URLError("qop '%s' is not supported." % qop)
+
+        # XXX should the partial digests be encoded too?
+
+        base = 'username="%s", realm="%s", nonce="%s", uri="%s", ' \
+               'response="%s"' % (user, realm, nonce, req.selector,
+                                  respdig)
+        if opaque:
+            base += ', opaque="%s"' % opaque
+        if entdig:
+            base += ', digest="%s"' % entdig
+        base += ', algorithm="%s"' % algorithm
+        if qop:
+            base += ', qop=auth, nc=%s, cnonce="%s"' % (ncvalue, cnonce)
+        return base
+
+    def get_algorithm_impls(self, algorithm):
+        # algorithm names taken from RFC 7616 Section 6.1
+        # lambdas assume digest modules are imported at the top level
+        if algorithm == 'MD5':
+            H = lambda x: hashlib.md5(x.encode("ascii")).hexdigest()
+        elif algorithm == 'SHA':  # non-standard, retained for compatibility.
+            H = lambda x: hashlib.sha1(x.encode("ascii")).hexdigest()
+        elif algorithm == 'SHA-256':
+            H = lambda x: hashlib.sha256(x.encode("ascii")).hexdigest()
+        # XXX MD5-sess
+        else:
+            raise ValueError("Unsupported digest authentication "
+                             "algorithm %r" % algorithm)
+        KD = lambda s, d: H("%s:%s" % (s, d))
+        return H, KD
+
+    def get_entity_digest(self, data, chal):
+        # XXX not implemented yet
+        return None
+
+
+class HTTPDigestAuthHandler(BaseHandler, AbstractDigestAuthHandler):
+    """An authentication protocol defined by RFC 2069
+
+    Digest authentication improves on basic authentication because it
+    does not transmit passwords in the clear.
+    """
+
+    auth_header = 'Authorization'
+    handler_order = 490  # before Basic auth
+
+    def http_error_401(self, req, fp, code, msg, headers):
+        host = urlparse(req.full_url)[1]
+        retry = self.http_error_auth_reqed('www-authenticate',
+                                           host, req, headers)
+        self.reset_retry_count()
+        return retry
+
+
 class AbstractHTTPHandler(BaseHandler):
 
     def __init__(self, debuglevel=None):
@@ -1255,6 +1428,61 @@ class DataHandler(BaseHandler):
         headers["Content-type"] = mediatype.lstrip(" ")
         headers["Content-length"] = str(len(data))
         return addinfourl(io.BytesIO(data), headers, url)
+
+
+def parse_keqv_list(l):
+    """Parse list of key=value strings where keys are not duplicated."""
+    parsed = {}
+    for elt in l:
+        k, v = elt.split('=', 1)
+        if v[0] == '"' and v[-1] == '"':
+            v = v[1:-1]
+        parsed[k] = v
+    return parsed
+
+
+def parse_http_list(s):
+    """Parse lists as described by RFC 2068 Section 2.
+
+    In particular, parse comma-separated lists where the elements of
+    the list may include quoted-strings.  A quoted-string could
+    contain a comma.  A non-quoted string could have quotes in the
+    middle.  Neither commas nor quotes count if they are escaped.
+    Only double-quotes count, not single-quotes.
+    """
+    res = []
+    part = ''
+
+    escape = quote = False
+    for cur in s:
+        if escape:
+            part += cur
+            escape = False
+            continue
+        if quote:
+            if cur == '\\':
+                escape = True
+                continue
+            elif cur == '"':
+                quote = False
+            part += cur
+            continue
+
+        if cur == ',':
+            res.append(part)
+            part = ''
+            continue
+
+        if cur == '"':
+            quote = True
+
+        part += cur
+
+    # append last part
+    if part:
+        res.append(part)
+
+    return [part.strip() for part in res]
 
 
 class FileHandler(BaseHandler):
