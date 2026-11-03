@@ -1320,11 +1320,19 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                     .and_then(|method| ctx.bind_attribute(method, value, class)),
             );
         }
-        Value::Native(class) if class == "collections.abc._CallableGenericAlias"
-            && matches!(name, "__base__" | "__bases__" | "__mro__") =>
+        Value::Native(class)
+            if matches!(name, "__base__" | "__bases__" | "__mro__")
+                && (ParameterClass::lookup(class).is_some()
+                    || matches!(
+                        class.as_str(),
+                        "typing.Any"
+                            | "typing._AnyMeta"
+                            | "typing.TypeAliasType"
+                            | "collections.abc._CallableGenericAlias"
+                    )) =>
         {
             if name == "__base__" {
-                ctx.builtin("types.GenericAlias")
+                ctx.builtin(Context::native_base(class).unwrap_or("object"))
             } else {
                 ctx.builtin_hierarchy_tuple(value, name)
             }
