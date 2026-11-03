@@ -247,7 +247,34 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
         "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
-        "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
+        "base64" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some((
+                "base64.py",
+                SOURCE.get_or_init(|| {
+                    const UPSTREAM: &str = include_str!(
+                        "../../../benchmarks/cpython_stdlib/full/base64/upstream/Lib/base64.py"
+                    );
+                    let section = |start: &str, end: &str| {
+                        let start = UPSTREAM.find(start).expect("pinned base64 section");
+                        let (section, _) = UPSTREAM[start..]
+                            .split_once(end)
+                            .expect("pinned base64 section end");
+                        section
+                    };
+                    [
+                        "import binascii\nimport struct\n",
+                        // The runtime supplies the URL-safe codecs.
+                        section("bytes_types =", "_urlsafe_encode_translation ="),
+                        section("# Base32 encoding/decoding", "# RFC 3548, Base 16"),
+                        include_str!("../stdlib/base85_encode.py"),
+                        section("def a85decode(", "# The following code is originally taken"),
+                        section("def b85decode(", "def main():"),
+                    ]
+                    .join("\n")
+                }),
+            ))
+        }
         // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
         "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
