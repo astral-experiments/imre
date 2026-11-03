@@ -685,7 +685,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         #[cfg(not(target_os = "linux"))]
         ("os", "confstr") => ctx.builtin("os.confstr"),
-        ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {

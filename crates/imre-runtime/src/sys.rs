@@ -366,14 +366,12 @@ pub(crate) fn thread_version() -> Option<String> {
     None
 }
 
+pub(crate) const OS_NAME: &str = if cfg!(windows) { "nt" } else { "posix" };
+
 /// Return the OS interface Python exposes on the target that built this runtime.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_name() -> *const Str {
-    StrOwner::into_raw(StrOwner::new(Str::new(if cfg!(windows) {
-        "nt"
-    } else {
-        "posix"
-    })))
+    StrOwner::into_raw(canonical(OS_NAME))
 }
 
 /// Write text without a newline and return the number of Unicode characters.

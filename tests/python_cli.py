@@ -944,6 +944,18 @@ def check_python_process_identity(imre, root, env):
                     pass
 
 
+def check_os_execvpe(imre, root, run):
+    fixture = Path(__file__).resolve().with_name("fixtures") / "boxed_os_execvpe.py"
+    executable = root / "execvpe"
+    built = run(imre, "build", fixture, "--opt-level", "0", "-o", executable, timeout=300)
+    assert built.returncode == 0, built
+    for mode in ("errors", "bindings", "inherited", "supplied", "slash"):
+        expected = (0, b"", b"") if mode in ("errors", "bindings") else (77, b"replaced\n", b"")
+        for command in ((sys.executable, "-IB", fixture), (executable,)):
+            result = run(*command, mode)
+            assert (result.returncode, result.stdout, result.stderr) == expected, (mode, result)
+
+
 def check_os_abort(imre, run):
     import signal
 
@@ -1324,6 +1336,7 @@ def main():
             check_python_process_identity(imre, root, env)
         if sys.platform.startswith("linux"):
             check_os_abort(imre, run)
+            check_os_execvpe(imre, root, run)
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
