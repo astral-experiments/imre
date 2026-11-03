@@ -51,6 +51,8 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "load_cert_chain",
         "wrap",
         "is_session",
+        "release_session",
+        "shutdown",
         "fileno",
         "getsockname",
         "getpeername",
@@ -106,7 +108,10 @@ fn session(ctx: &Context, id: Id) -> Result<&RefCell<Option<provider::Session>>>
 }
 
 fn without_session(ctx: &Context, handle: Id) -> bool {
-    matches!(ctx.heap.get(handle), Value::TlsListener(_) | Value::None)
+    matches!(
+        ctx.heap.get(handle),
+        Value::Socket(_) | Value::TlsListener(_) | Value::None
+    )
 }
 
 /// Pending sockets must never consume or emit application bytes before TLS authenticates them.
@@ -597,6 +602,24 @@ pub(super) fn call(
                 Err(e) => Err(provider_error(ctx, e)),
             }
         }
+        ("release_session", &[handle]) => match ctx.heap.get(handle) {
+            Value::TlsSession(state) => {
+                let tls = state.borrow_mut().take();
+                Ok(tls.map_or(NONE, |tls| ctx.alloc(Value::Socket(tls.into_socket()))))
+            }
+            Value::Socket(_) | Value::TlsListener(_) | Value::None => Ok(handle),
+            _ => Err(Error::new("TypeError", "expected a TLS socket")),
+        },
+        ("shutdown", &[handle, how]) => {
+            let how = ctx.index_c_int(how)?;
+            let raw = match ctx.heap.get(handle) {
+                Value::Socket(raw) | Value::TlsListener(raw) => raw,
+                Value::None => return Err(closed()),
+                _ => return Err(Error::new("TypeError", "expected a raw TLS transport")),
+            };
+            socket::shutdown(raw, how)?;
+            Ok(NONE)
+        }
         ("is_session", &[handle]) => Ok(super::builtins::boolean(matches!(
             ctx.heap.get(handle),
             Value::TlsSession(s) if s.borrow().is_some()
@@ -605,9 +628,9 @@ pub(super) fn call(
             if rest.is_empty() || (name == "listen" && rest.len() == 1) =>
         {
             let socket = match ctx.heap.get(*handle) {
-                Value::TlsListener(s) => Some(s.clone()),
+                Value::Socket(s) | Value::TlsListener(s) => Some(s.clone()),
                 Value::TlsSession(session) => {
-                    session.borrow().as_ref().map(|tls| tls.socket.clone())
+                    session.borrow().as_ref().map(|tls| tls.socket().clone())
                 }
                 Value::None => None,
                 _ => return Err(Error::new("TypeError", "expected a TLS socket")),
@@ -698,6 +721,23 @@ pub(super) fn call(
             if flags.len() == 1 || (flags.is_empty() && name == "sendall") =>
         {
             ctx.check_buffer_exporter(*data)?;
+            if let Value::Socket(raw) = ctx.heap.get(*handle) {
+                let raw = raw.clone();
+                ctx.native_buffer_bytes(*data)?;
+                return ctx.with_buffer_export(*data, |ctx| {
+                    let flags = flags
+                        .first()
+                        .map(|&id| ctx.index_c_int(id))
+                        .transpose()?
+                        .unwrap_or(0);
+                    let bytes = ctx.native_buffer_bytes(*data)?;
+                    if name == "sendall" {
+                        socket::send_all(&raw, bytes, flags)?;
+                        return Ok(NONE);
+                    }
+                    Ok(ctx.int(socket::send(&raw, bytes, flags)? as i64))
+                });
+            }
             let data = ctx.native_buffer_bytes(*data)?;
             if without_session(ctx, *handle) {
                 if let Some(&flags) = flags.first() {
@@ -717,6 +757,19 @@ pub(super) fn call(
             Ok(ctx.int(sent as i64))
         }
         ("recv", [handle, size, flags @ ..]) if flags.len() <= 1 => {
+            if let Value::Socket(raw) = ctx.heap.get(*handle) {
+                let raw = raw.clone();
+                let length = ctx.index_c_long(*size)?;
+                let flags = flags
+                    .first()
+                    .map(|&id| ctx.index_c_int(id))
+                    .transpose()?
+                    .unwrap_or(0);
+                let length = usize::try_from(length)
+                    .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
+                let bytes = socket::recv(&raw, length, flags)?;
+                return Ok(ctx.alloc(Value::Bytes(bytes)));
+            }
             let size = usize::try_from(ctx.as_integer(*size)?)
                 .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
             if without_session(ctx, *handle) {
@@ -737,7 +790,7 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Bytes(data)))
         }
         ("close", &[handle]) => {
-            if let Value::TlsListener(s) = ctx.heap.get(handle) {
+            if let Value::Socket(s) | Value::TlsListener(s) = ctx.heap.get(handle) {
                 socket::close(s)?;
             } else {
                 session(ctx, handle)?.borrow_mut().take();

@@ -677,6 +677,10 @@ class SSLSocket:
             raw.close()
             raise
 
+    def shutdown(self, how):
+        self._session = _imre_ssl.release_session(self._session)
+        _imre_ssl.shutdown(self._session, how)
+
     def close(self):
         self._closed = True
         if not self._io_refs and self._session is not None:

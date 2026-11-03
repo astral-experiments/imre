@@ -846,7 +846,7 @@ impl Drop for Context {
 pub(crate) struct Session {
     api: &'static Api,
     handle: NonNull<c_void>,
-    pub(super) socket: crate::ObjectOwner,
+    socket: Option<crate::ObjectOwner>,
     server: bool,
 }
 
@@ -858,6 +858,15 @@ enum Operation<'a> {
 }
 
 impl Session {
+    pub(super) fn socket(&self) -> &crate::ObjectOwner {
+        self.socket.as_ref().expect("live TLS transport")
+    }
+
+    /// Free the non-closing TLS BIO and transfer its original socket back to the caller.
+    pub(super) fn into_socket(mut self) -> crate::ObjectOwner {
+        self.socket.take().expect("live TLS transport")
+    }
+
     pub(crate) fn wrap(
         ctx: &Context,
         socket: crate::ObjectOwner,
@@ -872,7 +881,7 @@ impl Session {
         let session = Self {
             api,
             handle,
-            socket,
+            socket: Some(socket),
             server,
         };
         if let Some(host) = host {
@@ -880,7 +889,7 @@ impl Session {
         }
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
-        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(&session.socket)) } != 1 {
+        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
             return Err(api.error("SSL_set_fd"));
         }
         let handshake = session.blocking_io(if server {
@@ -931,7 +940,8 @@ impl Session {
                     } else {
                         libc::POLLOUT
                     };
-                    socket::wait_blocking(socket::fd(&self.socket), events).map_err(Failure::Io)?;
+                    socket::wait_blocking(socket::fd(self.socket()), events)
+                        .map_err(Failure::Io)?;
                 }
                 SSL_ERROR_SYSCALL if os_error.kind() == std::io::ErrorKind::Interrupted => continue,
                 SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
@@ -1039,6 +1049,8 @@ impl Drop for Session {
         // SAFETY: free the SSL and its non-closing BIO while the socket is still valid.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
         // An endpoint operation may still hold a reference across a Python callback.
-        let _ = socket::close(&self.socket);
+        if let Some(socket) = &self.socket {
+            let _ = socket::close(socket);
+        }
     }
 }

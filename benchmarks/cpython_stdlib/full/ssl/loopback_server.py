@@ -14,6 +14,18 @@ class ClosingBacklog:
         return 1
 
 
+class ShutdownWrite:
+    def __init__(self, sock):
+        self.sock = sock
+
+    def __index__(self):
+        # SSLSocket discards its TLS state before the underlying socket converts how.
+        assert self.sock.get_channel_binding() is None
+        assert self.sock.recv(1) == b"R"
+        self.sock.sendall(memoryview(b"S"))
+        return socket.SHUT_WR
+
+
 def accept_one(listener):
     listener.listen(1)
     print("PORT", listener.getsockname()[1], flush=True)
@@ -34,7 +46,7 @@ def main():
     if mode == "load":
         print("LOADED", flush=True)
         return
-    assert mode in ("serve", "reject", "listen")
+    assert mode in ("serve", "reject", "listen", "shutdown")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         if mode == "listen":
@@ -52,7 +64,7 @@ def main():
                     assert mode == "reject" and raw.fileno() == -1
                     print("PEER_REJECTED", str(exc), flush=True)
                     return
-                assert mode == "serve" and raw.fileno() == -1
+                assert mode in ("serve", "shutdown") and raw.fileno() == -1
         with wrapped as peer:
             assert peer.server_side and peer.server_hostname is None and peer.context is ctx
             assert peer.get_verified_chain() == []
@@ -67,6 +79,15 @@ def main():
                 data += chunk
             assert data == b"LOCAL TLS\n"
             peer.sendall(data.decode("ascii").lower().encode("ascii"))
+            if mode == "shutdown":
+                fd = peer.fileno()
+                with peer.makefile("rb", buffering=0) as reader:
+                    peer.shutdown(ShutdownWrite(peer))
+                    peer.close()
+                    assert peer.fileno() == fd
+                    assert reader.read(1) == b"T"
+                    assert reader.read(1) == b""
+                assert peer.fileno() == -1
             if mode == "listen":
                 try:
                     peer.listen(ClosingBacklog(peer))
