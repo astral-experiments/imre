@@ -17,6 +17,9 @@ def current():
         else:
             raise AssertionError("invalid TypeVar reducer call")
     assert issubclass(type(Any), type)
+    assert Any.__qualname__ == "Any"
+    assert type(Any).__qualname__ == "_AnyMeta"
+    assert not hasattr(variable, "__qualname__")
     assert Callable.__qualname__ == Callable.__name__ == "Callable"
     assert Callable.__origin__ is Callable[[int], str].__origin__ is ABCCallable
     assert type(Callable).__reduce__ is type(List).__reduce__
