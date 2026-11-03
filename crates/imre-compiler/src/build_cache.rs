@@ -231,6 +231,7 @@ pub fn compile_objects(
     opt: &OsStr,
     stage: &Path,
     cache: Option<&Cache>,
+    python_startup: bool,
     mut progress: impl FnMut(&str, bool),
 ) -> Result<Vec<PathBuf>, String> {
     let store = cache.and_then(|c| {
@@ -266,8 +267,8 @@ pub fn compile_objects(
         }
         if !hit {
             fs::write(&ir_path, &unit.llvm_ir).map_err(|e| e.to_string())?;
-            let status = toolchain
-                .driver()
+            let mut compiler = toolchain.driver();
+            compiler
                 .current_dir(stage)
                 .arg(format!("-O{}", opt.to_string_lossy()))
                 .args([
@@ -278,8 +279,8 @@ pub fn compile_objects(
                     "module.ll",
                     "-o",
                     &filename,
-                ])
-                .status()
+                ]);
+            let status = super::tool_status(&mut compiler, python_startup, None)
                 .map_err(|e| format!("Could not compile {}: {e}", unit.name))?;
             if !status.success() {
                 return Err(format!(

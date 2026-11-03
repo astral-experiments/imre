@@ -898,6 +898,45 @@ def check_class_metadata_allocation(imre, run, flags):
 
 
 
+def check_private_compiler_pipes(imre, root, env):
+    import signal
+    import socket
+
+    address = str(root / "compiler.sock")
+    clang = root / "holding-clang"
+    clang.write_text(
+        f"#!{sys.executable}\n"
+        "import socket\n"
+        "with socket.socket(socket.AF_UNIX) as gate:\n"
+        f"    gate.connect({address!r})\n"
+        "    gate.sendall(gate.recv(1))\n"
+    )
+    clang.chmod(0o700)
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind(address)
+        listener.listen(1)
+        listener.settimeout(60)
+        with subprocess.Popen(
+            [imre, "-c", "pass"], cwd=root, env=env | {"IMRE_ENCODED_FLAGS": f"--clang\x1f{clang}"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ) as child:
+            try:
+                gate, _ = listener.accept()
+                with gate:
+                    child.kill()
+                    assert child.wait(timeout=10) == -signal.SIGKILL
+                    # The tool is still blocked. Both application pipes must already be at EOF.
+                    for stream in (child.stdout, child.stderr):
+                        os.set_blocking(stream.fileno(), False)
+                    output = child.stdout.read(), child.stderr.read()
+                    gate.settimeout(10)
+                    gate.sendall(b"x")
+                    assert gate.recv(1) == b"x"
+                    assert output == (b"", b""), output
+            finally:
+                child.kill()
+
+
 def check_python_process_identity(imre, root, env):
     import select
     import signal
@@ -1348,6 +1387,7 @@ def main():
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
+            check_private_compiler_pipes(imre, root, env)
         if sys.platform.startswith("linux"):
             check_os_abort(imre, run)
             check_os_execvpe(imre, root, run)
