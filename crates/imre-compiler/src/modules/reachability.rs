@@ -60,7 +60,11 @@ impl References<'_> {
             }
             Some(Binding::Intrinsic(
                 Intrinsic::Adler32
-                | Intrinsic::Fd(crate::ir::FdOperation::Read | crate::ir::FdOperation::Write),
+                | Intrinsic::Fd(
+                    crate::ir::FdOperation::Read
+                    | crate::ir::FdOperation::Write
+                    | crate::ir::FdOperation::TcSetPgrp,
+                ),
             )) => Some(2),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 Some(super::credential_arity(name))

@@ -300,6 +300,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "unlockpt" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.unlockpt"),
         "ptsname" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::PtsName),
         "tcgetpgrp" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::TcGetPgrp),
+        "tcsetpgrp" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::TcSetPgrp),
         "ttyname" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.ttyname"),
         "O_NOCTTY" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_noctty"),
         "get_terminal_size" if cfg!(target_os = "linux") => {

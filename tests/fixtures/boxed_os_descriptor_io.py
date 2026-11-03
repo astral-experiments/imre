@@ -81,8 +81,9 @@ def check_posix_pty():
 
 def check_tcgetpgrp():
     import subprocess
-    from os import tcgetpgrp
+    from os import tcgetpgrp, tcsetpgrp
 
+    assert tcsetpgrp is os.tcsetpgrp and tcsetpgrp is posix.tcsetpgrp
     assert tcgetpgrp is os.tcgetpgrp and tcgetpgrp is posix.tcgetpgrp
     master, slave = os.openpty()
     try:
@@ -94,6 +95,7 @@ def check_tcgetpgrp():
                 assert child.stdout.readline() == b"ready\n"
                 assert tcgetpgrp(Index(master)) == child.pid
                 expect_errno(tcgetpgrp, (child.stdin.fileno(),), errno.ENOTTY)
+                expect_errno(tcsetpgrp, (Index(child.stdin.fileno()), Index(child.pid)), errno.ENOTTY)
             finally:
                 child.communicate(b"done\n")
             assert child.returncode == 0
@@ -101,6 +103,7 @@ def check_tcgetpgrp():
         os.close(slave)
         os.close(master)
     expect_errno(tcgetpgrp, (slave,), errno.EBADF)
+    expect_errno(tcsetpgrp, (slave, 0), errno.EBADF)
 
 
 def check_sync(sync):
