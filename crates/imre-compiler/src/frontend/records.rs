@@ -636,15 +636,12 @@ impl Checker<'_> {
             )
         });
         self.class = context.map(|context| context.class);
-        let lexical_base = context.and_then(|context| {
+        let lexical_owner = context.map(|context| {
             let classes = &self.classes.declarations;
             let origin = classes.definitions[context.class].method_origins[context.index];
-            classes.definitions[classes.ids[&origin]]
-                .bases
-                .first()
-                .copied()
+            classes.ids[&origin]
         });
-        self.super_method_base = context
+        self.super_method_owner = context
             .filter(|context| {
                 let classes = &self.classes.declarations;
                 matches!(
@@ -652,7 +649,7 @@ impl Checker<'_> {
                     MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter
                 ) && classes.definitions[context.class].initializer != Some(context.index)
             })
-            .and(lexical_base);
+            .and(lexical_owner);
         self.exception_formatter = context.and_then(|ctx| {
             let class = &self.classes.declarations.definitions[ctx.class];
             class.forwarder.as_ref()?;
@@ -667,7 +664,9 @@ impl Checker<'_> {
             if record.methods[context.index].name.as_str() != "__init__" {
                 return None;
             }
-            Some(lexical_base.map_or(BaseInitializer::Object, BaseInitializer::Record))
+            let storage = lexical_owner
+                .and_then(|owner| self.classes.declarations.definitions[owner].storage_base);
+            Some(storage.map_or(BaseInitializer::Object, BaseInitializer::Record))
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];

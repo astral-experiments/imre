@@ -51,6 +51,16 @@ REJECTED = {
             "print(Other.extra())\n"
         ),
     }, "method decorators cannot be stacked"),
+    "leading_mixin_preserves_assignment_check": ({
+        "helper.py": "def invalid() -> int:\n    value: int = 'wrong'\n    return value\n",
+        "main.py": (
+            "from helper import invalid\n"
+            "class Methods:\n    def extra(self) -> int: return 1\n"
+            "class Storage:\n    def __init__(self, n: int): self.x = n\n"
+            "class Child(Methods, Storage): pass\n"
+            "print(Child(3).extra())\n"
+        ),
+    }, "expected int, got str"),
     "second_base_has_storage": ({
         "main.py": (
             "class Left:\n    def __init__(self, x: int): self.left = x\n"
@@ -471,6 +481,25 @@ ACCEPTED = {
             "print(next(gen))\n"
             "try: next(gen)\n"
             "except TypeError as error: print(error)\n"
+        ),
+    },
+    "imported_leading_method_mixin": {
+        "helper.py": (
+            "OFFSET = 7\n"
+            "class Methods:\n"
+            "    def extra(self) -> int: return OFFSET\n"
+        ),
+        "main.py": (
+            "from helper import Methods\n"
+            "class Storage:\n"
+            "    def __init__(self, n: int): self.number = n\n"
+            "    def value(self) -> int: return self.number\n"
+            "class Child(Methods, Storage):\n"
+            "    def total(self) -> int: return super().extra() + super().value()\n"
+            "item = Child(5)\n"
+            "print(item.total())\n"
+            "print(isinstance(item, Methods))\n"
+            "print(isinstance(item, Storage))\n"
         ),
     },
     "imported_method_mixin": {
