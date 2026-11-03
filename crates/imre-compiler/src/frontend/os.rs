@@ -85,12 +85,13 @@ impl Checker<'_> {
         if op == CopyFileRange {
             return self.copy_file_range(call);
         }
-        if matches!(op, Read | Write) {
-            let (name, returns) = if op == Read {
-                ("read", Type::Bytes)
-            } else {
-                ("write", Type::Int)
-            };
+        let pair = match op {
+            Read => Some(("read", Type::Bytes)),
+            Write => Some(("write", Type::Int)),
+            TcSetPgrp => Some(("tcsetpgrp", Type::None)),
+            _ => None,
+        };
+        if let Some((name, returns)) = pair {
             return self.posix_positional(call, name, 2, returns, |checker, scope, args| {
                 let Ok([fd, data]) = <[Expr; 2]>::try_from(args) else {
                     unreachable!()
@@ -102,7 +103,7 @@ impl Checker<'_> {
                         .checked_argument_type(checker.module, argument.range());
                 }
                 let index = checker.index_word(fd, &call.func, false)?;
-                // Convert fd before consulting the length or buffer protocol.
+                // Convert the descriptor before applying the second argument's protocol.
                 let fd = scope.hold(
                     checker,
                     Expr {
@@ -113,7 +114,7 @@ impl Checker<'_> {
                         ),
                     },
                 );
-                let data = if op == Read {
+                let data = if op != Write {
                     checker.index_word(data, &call.func, false)?
                 } else if data.ty == Type::Bytes {
                     data
@@ -245,7 +246,7 @@ impl Checker<'_> {
             Pipe | Pipe2 | OpenPty => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
             DeviceEncoding => self.types.optional(Type::Str),
-            PtsName | TcGetPgrp => unreachable!("terminal query handled above"),
+            PtsName | TcGetPgrp | TcSetPgrp => unreachable!("terminal call handled above"),
         };
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
     }

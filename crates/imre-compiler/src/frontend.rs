@@ -6580,6 +6580,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::Fd(ir::FdOperation::TcGetPgrp) => {
                     return Err(self.object_runtime_export("posix.tcgetpgrp", expression));
                 }
+                Intrinsic::Fd(ir::FdOperation::TcSetPgrp) => {
+                    return Err(self.object_runtime_export("posix.tcsetpgrp", expression));
+                }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
@@ -9144,6 +9147,7 @@ impl<'a> Checker<'a> {
                 Some(Binding::Intrinsic(Intrinsic::Fd(
                     op @ (ir::FdOperation::Pipe2
                     | ir::FdOperation::TcGetPgrp
+                    | ir::FdOperation::TcSetPgrp
                     | ir::FdOperation::Read
                     | ir::FdOperation::Write
                     | ir::FdOperation::CopyFileRange),

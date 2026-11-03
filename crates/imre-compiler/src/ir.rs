@@ -2180,6 +2180,7 @@ pub(crate) enum FdOperation {
     DeviceEncoding,
     PtsName,
     TcGetPgrp,
+    TcSetPgrp,
     GetBlocking,
     SetBlocking,
     GetInheritable,

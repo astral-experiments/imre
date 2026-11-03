@@ -2999,6 +2999,8 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 "tcgetpgrp",
                 #[cfg(target_os = "linux")]
+                "tcsetpgrp",
+                #[cfg(target_os = "linux")]
                 "ttyname",
                 "getegid",
                 "setgroups",
