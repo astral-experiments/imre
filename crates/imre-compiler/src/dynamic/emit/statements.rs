@@ -253,12 +253,6 @@ impl Function<'_, '_> {
                 {
                     let outer = self.scope.clone();
                     let params = if let Some(params) = v.type_params.as_deref() {
-                        if params
-                            .iter()
-                            .any(|param| !matches!(param, ast::TypeParam::TypeVar(_)))
-                        {
-                            self.unsupported("variadic type alias parameters");
-                        }
                         self.scope = self.parameter_scope(&outer, params, false);
                         let key = self.code_name(".type_params");
                         self.op("lookup", &[&self.scope.clone(), &key])

@@ -239,7 +239,7 @@ struct Definition {
 }
 
 enum DefinitionKind {
-    TypeAlias(Vec<String>),
+    TypeAlias(Option<Box<ast::TypeParams>>),
     Function(Box<ast::Parameters>),
     Class {
         arguments: Option<Box<ast::Arguments>>,
@@ -2166,19 +2166,13 @@ impl Program {
                     Instruction::From(module.to_owned(), s.level, names)
                 }
                 Stmt::TypeAlias(s) if !function && self.class_attributes.is_none() => {
-                    let mut parameters = Vec::new();
-                    if let Some(params) = s.type_params {
-                        for param in &*params {
-                            let ast::TypeParam::TypeVar(var) = param else {
-                                return Err(unsupported("variadic type alias parameters"));
-                            };
-                            if var.bound.is_some() || var.default.is_some() {
-                                return Err(unsupported(
-                                    "type alias parameter bounds and defaults",
-                                ));
-                            }
-                            parameters.push(var.name.to_string());
-                        }
+                    if s.type_params.as_deref().is_some_and(|params| {
+                        params.iter().any(|param| {
+                            param.default().is_some()
+                                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
+                        })
+                    }) {
+                        return Err(unsupported("type alias parameter bounds and defaults"));
                     }
                     let ast::Expr::Name(name) = *s.name else {
                         return Err(unsupported("type alias target"));
@@ -2199,7 +2193,7 @@ impl Program {
                         binding: name.to_string(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::TypeAlias(parameters),
+                        kind: DefinitionKind::TypeAlias(s.type_params),
                         annotate: None,
                     })
                 }
@@ -2977,15 +2971,15 @@ impl Context {
             return Err(error);
         }
         if let ast::Mod::Module(module) = parsed.syntax()
-            && let Some((expr, message)) = imre_ast::type_alias_error(&module.body)
+            && let Some((range, message)) = imre_ast::type_alias_error(&module.body)
         {
             let position = |offset: ruff_text_size::TextSize| {
                 let offset = offset.to_usize();
                 let line = lines.partition_point(|start| *start <= offset);
                 (line as i64, (offset - lines[line - 1] + 1) as i64)
             };
-            let (line, column) = position(expr.start());
-            let (end_line, end_column) = position(expr.end());
+            let (line, column) = position(range.start());
+            let (end_line, end_column) = position(range.end());
             let msg = self.text(message);
             let line = self.int(line);
             let mut fields = self.syntax_fields(&[msg]);
@@ -5053,13 +5047,23 @@ impl Context {
         let mut alias_parameters = NONE;
         let mut bases = None;
         let sig = match &definition.kind {
-            DefinitionKind::TypeAlias(names) => {
-                if !names.is_empty() {
-                    let entries = names
+            DefinitionKind::TypeAlias(params) => {
+                if let Some(params) = params {
+                    let entries = params
                         .iter()
-                        .map(|name| {
-                            let id = self.heap.code_name(name);
-                            (id, id)
+                        .map(|param| {
+                            let binding = self.heap.code_name(param.name().as_str());
+                            let name = self.heap.code_name(child.definition_spelling(param.name()));
+                            let declaration = match param {
+                                ast::TypeParam::TypeVar(_) => name,
+                                ast::TypeParam::TypeVarTuple(_) => {
+                                    super::typing::declared_pack(self, name)
+                                }
+                                ast::TypeParam::ParamSpec(_) => {
+                                    super::paramspec::declared(self, name)
+                                }
+                            };
+                            (binding, declaration)
                         })
                         .collect();
                     let names = self.dict(entries);

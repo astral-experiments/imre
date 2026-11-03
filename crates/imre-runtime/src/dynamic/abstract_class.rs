@@ -6,6 +6,42 @@ use std::ffi::c_long;
 use super::Context;
 use super::value::{Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
+/// Methods supplied by native collection and iterator layouts.
+pub(super) fn native_collection_method(kind: &str, name: &str) -> bool {
+    match kind {
+        "list"
+        | "range"
+        | "dict"
+        | "collections.defaultdict"
+        | "collections.deque"
+        | "dict_keys"
+        | "dict_items"
+        | "odict_keys"
+        | "odict_items"
+        | "mappingproxy" => {
+            matches!(
+                name,
+                "__iter__" | "__len__" | "__contains__" | "__reversed__"
+            )
+        }
+        "str" | "bytes" | "bytearray" | "tuple" | "set" | "frozenset" => {
+            matches!(name, "__iter__" | "__len__" | "__contains__")
+        }
+        "dict_values" | "odict_values" => {
+            matches!(name, "__iter__" | "__len__" | "__reversed__")
+        }
+        "memoryview" => matches!(name, "__iter__" | "__len__"),
+        "coroutine" | "coroutine_wrapper" | "anext_awaitable" => {
+            super::generator_protocol::coroutine_method(kind, name)
+        }
+        _ => {
+            super::async_generator::method(kind, name)
+                || super::builtins::is_iterator_type(kind)
+                    && matches!(name, "__iter__" | "__next__")
+        }
+    }
+}
+
 impl Context {
     /// Look up a value in an already loaded module without invoking its attribute hooks.
     pub(super) fn module_value(&self, module: &str, name: &str) -> Option<Id> {
@@ -112,39 +148,7 @@ impl Context {
                     )
                     .then_some(true);
                 }
-                let present = match kind.as_str() {
-                    "list"
-                    | "range"
-                    | "dict"
-                    | "collections.defaultdict"
-                    | "collections.deque"
-                    | "dict_keys"
-                    | "dict_items"
-                    | "odict_keys"
-                    | "odict_items"
-                    | "mappingproxy" => {
-                        matches!(
-                            name,
-                            "__iter__" | "__len__" | "__contains__" | "__reversed__"
-                        )
-                    }
-                    "str" | "bytes" | "bytearray" | "tuple" | "set" | "frozenset" => {
-                        matches!(name, "__iter__" | "__len__" | "__contains__")
-                    }
-                    "dict_values" | "odict_values" => {
-                        matches!(name, "__iter__" | "__len__" | "__reversed__")
-                    }
-                    "memoryview" => matches!(name, "__iter__" | "__len__"),
-                    "coroutine" | "coroutine_wrapper" | "anext_awaitable" => {
-                        super::generator_protocol::coroutine_method(kind, name)
-                    }
-                    _ => {
-                        super::async_generator::method(kind, name)
-                            || super::builtins::is_iterator_type(kind)
-                                && matches!(name, "__iter__" | "__next__")
-                    }
-                };
-                present.then_some(true)
+                native_collection_method(kind, name).then_some(true)
             });
             if declared != Some(true) {
                 return Ok(NOT_IMPLEMENTED);

@@ -191,8 +191,8 @@ impl Output {
             statements::type_parameters::check_nonlocals(source, &body)
                 .map_err(|error| format!("{}:{error}", path.display()))?;
         }
-        if let Some((expr, reason)) = imre_ast::type_alias_error(&body) {
-            let error = crate::frontend::error(source, expr, &format!("SyntaxError: {reason}"));
+        if let Some((range, reason)) = imre_ast::type_alias_error(&body) {
+            let error = crate::frontend::error(source, &range, &format!("SyntaxError: {reason}"));
             return Err(format!("{}:{error}", path.display()));
         }
         if let Some(param) = &private_names.duplicate_type_parameter {

@@ -1,25 +1,40 @@
 //! Expression restrictions in annotation scopes used by type aliases and generic classes.
+use std::collections::HashSet;
+
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
+use ruff_text_size::{Ranged, TextRange};
 
 type Error<'a> = (&'a Expr, &'static str);
 
-/// Check aliases throughout the module suite, including declarations in untaken branches.
-pub fn type_alias_error(body: &[Stmt]) -> Option<Error<'_>> {
+/// Validate alias declarations before execution, including those in nested or untaken suites.
+pub fn type_alias_error(body: &[Stmt]) -> Option<(TextRange, String)> {
     #[derive(Default)]
-    struct Module<'a>(Option<Error<'a>>);
-    impl<'a> Visitor<'a> for Module<'a> {
+    struct Module(Option<(TextRange, String)>);
+    impl<'a> Visitor<'a> for Module {
         fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            if self.0.is_none() {
-                match stmt {
-                    Stmt::TypeAlias(alias) if alias.type_params.is_none() => {
-                        let mut rhs = Rhs::default();
-                        rhs.visit_expr(&alias.value);
-                        self.0 = rhs.error;
+            if self.0.is_some() {
+                return;
+            }
+            if let Stmt::TypeAlias(alias) = stmt {
+                if let Some(params) = &alias.type_params {
+                    let mut names = HashSet::new();
+                    for param in params.iter() {
+                        let name = param.name();
+                        if !names.insert(name.as_str()) {
+                            self.0 =
+                                Some((param.range(), format!("duplicate type parameter '{name}'")));
+                            return;
+                        }
                     }
-                    Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
-                    _ => visitor::walk_stmt(self, stmt),
                 }
+                let mut rhs = Rhs::default();
+                rhs.visit_expr(&alias.value);
+                self.0 = rhs
+                    .error
+                    .map(|(expr, reason)| (expr.range(), reason.to_owned()));
+            } else {
+                visitor::walk_stmt(self, stmt);
             }
         }
         fn visit_expr(&mut self, _: &'a Expr) {}

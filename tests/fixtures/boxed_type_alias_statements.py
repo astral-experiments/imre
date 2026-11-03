@@ -1,4 +1,4 @@
-from typing import TypeAliasType
+from typing import Callable, TypeAliasType, TypeVar, TypeVarTuple, Unpack
 
 
 type Forward = later
@@ -13,6 +13,19 @@ def current():
     assert eager.__type_params__ == eager.__parameters__ == ()
     assert eager.evaluate_value(1) is value and eager.__reduce__() == "Eager"
     assert TypeAliasType(name="N", value=None, type_params=()).__value__ is None
+
+    t = TypeVar("T")
+    ts = TypeVarTuple("Ts")
+    params = (t, ts)
+    rows = TypeAliasType("Rows", tuple[t, *ts], type_params=params)
+    assert rows.__type_params__ is params and rows.__parameters__ == (t, Unpack[ts])
+    assert rows[int, str].__origin__ is rows and rows[int, str].__args__ == (int, str)
+    try:
+        TypeAliasType("Invalid", list[t], type_params=(1,))
+    except TypeError as exc:
+        assert str(exc) == "Expected a type param, got 1"
+    else:
+        raise AssertionError("accepted a non-parameter")
 
     assert type(Forward) is TypeAliasType
     assert Forward.__module__ == __name__ and Forward.__name__ == "Forward"
@@ -83,4 +96,19 @@ def current():
     assert first.__value__.__args__[2] is bytes and first.evaluate_value().__args__[2] is bool
     exec(code, namespace, bindings)
     assert bindings["Pair"].__type_params__[0] is not key
+    type Row[*Cols, **P] = Callable[P, tuple[*Cols]]
+    exec("type Row[*Cols, **P] = Callable[P, tuple[*Cols]]", {"Callable": Callable}, bindings)
+    for row in (Row, bindings["Row"]):
+        cols, p = row.__type_params__
+        assert row.__parameters__ == (Unpack[cols], p)
+        assert row.__value__ == Callable[p, tuple[*cols]]
+        assert row[int, [str]].__origin__ is row
+        assert row[int, [str]].__args__ == (int, [str])
+    assert Row.__type_params__[0] is not bindings["Row"].__type_params__[0]
+    try:
+        compile("if False:\n    type Bad[*T, **T] = int", "params.py", "exec")
+    except SyntaxError as exc:
+        assert exc.msg == "duplicate type parameter 'T'" and exc.lineno == 2
+    else:
+        raise AssertionError("accepted duplicate alias parameters")
     print("lazy type aliases")
