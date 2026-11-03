@@ -62,7 +62,7 @@ def current():
         assert child.returncode == 47 and child.stdout.closed
 
     parent_groups = os.getgroups()
-    report_groups = [sys.executable, "-c", "import os; print(*sorted(os.getgroups()))"]
+    report_groups = [sys.executable, "-c", "import os; print(os.getgroups())"]
     for groups in (None, [], [os.getegid()]):
         try:
             output = subprocess.check_output(report_groups, extra_groups=groups)
@@ -71,5 +71,5 @@ def current():
         else:
             if groups is None or sys.platform == "linux":
                 expected = parent_groups if groups is None else groups
-                assert list(map(int, output.split())) == sorted(expected)
+                assert output == (str(expected) + "\n").encode()
         assert os.getgroups() == parent_groups
