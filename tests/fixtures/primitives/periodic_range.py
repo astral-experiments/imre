@@ -39,3 +39,7 @@ print(discarded_product(1 << 32, (1 << 32) + 2048))
 for initial in [1 << 100, -(1 << 100), -(1 << 62) - 2000]:
     print(fold(0, 4097, initial))
     print(initial)
+
+# A short prefix can fit even when 1,022 weighted terms overflow a tagged subtotal.
+for length in [6, 7, 8, 1021, 1022, 1023, 4097]:
+    print(fold(1 << 52, (1 << 52) + length, 0))

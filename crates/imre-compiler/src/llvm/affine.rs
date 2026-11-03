@@ -330,15 +330,11 @@ impl Emitter<'_, '_> {
         {
             return;
         }
-        let count = 1023 / plan.cycle.period * plan.cycle.period;
-        let max_start = plan.max_ordinal - count;
-        let scale = i64::from(plan.increment.scale) * count;
-        let Some(offset) = (count / plan.cycle.period)
-            .checked_mul(plan.cycle.count)
-            .and_then(|x| {
-                x.checked_add(i64::from(plan.increment.offset) * count + scale * (count - 1) / 2)
-            })
-        else {
+        let period = plan.cycle.period;
+        let max_start = plan.max_ordinal - period;
+        let scale = i64::from(plan.increment.scale) * period;
+        let constant = i64::from(plan.increment.offset) * period + scale * (period - 1) / 2;
+        let Some(offset) = constant.checked_add(plan.cycle.count) else {
             return;
         };
         let Some(sum) = plan.sum else {
@@ -347,7 +343,7 @@ impl Emitter<'_, '_> {
         let at = self.borrow_slot(cursor);
         let end = self.borrow_slot(stop);
         let total = self.borrow_slot(sum);
-        let (helper, definition, extent) = if count == 1023 {
+        let (helper, definition, extent) = if period == 1 {
             (
                 "imre_affine_fixed_prefix",
                 AFFINE_FIXED_PREFIX,
@@ -357,12 +353,24 @@ impl Emitter<'_, '_> {
             (
                 "imre_affine_range_prefix",
                 AFFINE_RANGE_PREFIX,
-                format!("i64 {count}, "),
+                format!("i64 {period}, i64 {}, ", 1023 / period),
             )
         };
         self.output
             .local_helper("imre_affine_checked_prefix", AFFINE_CHECKED_PREFIX);
         self.output.local_helper(helper, definition);
+        let resume = self.label();
+        // Even the most negative tagged initial value has at most i64::MAX room.
+        // Later periods only grow, so bypass the helper when one cannot fit.
+        if let Some(limit) = (i64::MAX - offset).checked_div(scale)
+            && limit < max_start
+        {
+            let in_range =
+                self.instruction(format!("icmp ule i64 {}, {}", at.operand, 2 * limit + 1));
+            let check = self.label();
+            self.branch(&in_range, &check, &resume);
+            self.start(&check);
+        }
         let prefix = self.instruction(format!(
             "call {{i64,i64}} @{helper}(i64 {}, i64 {}, i64 {}, {extent}i64 {scale}, i64 {offset}, i64 {max_start})",
             at.operand, end.operand, total.operand
@@ -370,7 +378,6 @@ impl Emitter<'_, '_> {
         let next = self.instruction(format!("extractvalue {{i64,i64}} {prefix}, 0"));
         let skip = self.instruction(format!("icmp ne i64 {next}, 0"));
         let fast = self.label();
-        let resume = self.label();
         self.branch(&skip, &fast, &resume);
         self.start(&fast);
         let partial = self.instruction(format!("extractvalue {{i64,i64}} {prefix}, 1"));
@@ -392,25 +399,61 @@ impl Emitter<'_, '_> {
 }
 
 const AFFINE_FIXED_PREFIX: &str = r"
-; Each block spans at most 1,023 iterations. The scalar body publishes the final ordinal.
-; max_start leaves room for the whole block and keeps every scalar expression tagged.
-; The chunk subtotal is computed in i128 before narrowing to a tagged integer.
-; Keep the usual fixed extent constant when this module also emits shorter periods.
+; The scalar body publishes live locals after each prefix. Keep the unit period
+; constant even in modules that also emit longer periods.
 define internal {i64,i64} @imre_affine_fixed_prefix(i64 %at, i64 %end, i64 %total, i64 %scale, i64 %offset, i64 %max_start) noinline nounwind {
-  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 1023, i64 %scale, i64 %offset, i64 %max_start)
+  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 1, i64 1023, i64 %scale, i64 %offset, i64 %max_start)
   ret {i64,i64} %result
 }
 ";
 
 const AFFINE_RANGE_PREFIX: &str = r"
-define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset, i64 %max_start) noinline nounwind {
-  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset, i64 %max_start)
+define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i64 %period, i64 %periods_per_poll, i64 %scale, i64 %offset, i64 %max_start) noinline nounwind {
+  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %period, i64 %periods_per_poll, i64 %scale, i64 %offset, i64 %max_start)
   ret {i64,i64} %result
 }
 ";
 
-const AFFINE_CHECKED_PREFIX: &str = r"
-define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset, i64 %max_start) alwaysinline nounwind {
+const AFFINE_CHECKED_PREFIX: &str = r#"
+; Sum n consecutive period contributions. n spans fewer than 2^30 rows, so its triangular count fits in i64.
+define internal i128 @imre_affine_period_sum(i64 %n, i128 %initial, i128 %first, i128 %difference) alwaysinline nounwind memory(none) {
+  %previous = sub i64 %n, 1
+  %product = mul i64 %n, %previous
+  %pairs = lshr i64 %product, 1
+  %count = zext i64 %n to i128
+  %weight = zext i64 %pairs to i128
+  %linear = mul i128 %count, %first
+  %quadratic = mul i128 %weight, %difference
+  %delta = add i128 %linear, %quadratic
+  %sum = add i128 %initial, %delta
+  ret i128 %sum
+}
+
+; Return the first pending poll, or zero when all polls were clear. Keeping the
+; subtotal outside this loop prevents strength reduction from rebuilding it here.
+; Unrolling reduces loop branches while preserving every volatile poll.
+define internal i64 @imre_affine_poll_prefix(i64 %polls) noinline nounwind {
+entry:
+  %none = icmp eq i64 %polls, 0
+  br i1 %none, label %complete, label %poll
+poll:
+  %number = phi i64 [ 1, %entry ], [ %next, %clear ]
+  %tripped = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
+  %pending = icmp ne i8 %tripped, 0
+  br i1 %pending, label %interrupt, label %clear
+clear:
+  %next = add i64 %number, 1
+  %all = icmp eq i64 %number, %polls
+  br i1 %all, label %complete, label %poll, !llvm.loop !2
+interrupt:
+  ret i64 %number
+complete:
+  ret i64 0
+}
+
+!2 = distinct !{!2, !{!"llvm.loop.unroll.count", i32 8}}
+
+define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %period, i64 %periods_per_poll, i64 %scale, i64 %offset, i64 %max_start) alwaysinline nounwind {
   %tags = and i64 %at, %end
   %small = trunc i64 %tags to i1
   %tagged = trunc i64 %total to i1
@@ -420,7 +463,7 @@ define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %to
   %unboxed = ashr i64 %total, 1
   %sum = select i1 %tagged, i64 %unboxed, i64 0
   %bounded = icmp ule i64 %i, %max_start
-  %last = add i64 %i, %count
+  %last = add i64 %i, %period
   %within = icmp slt i64 %last, %stop
   %valid = and i1 %small, %bounded
   %chunk = and i1 %valid, %within
@@ -432,32 +475,58 @@ check_sum:
   %linear = mul i128 %x, %a
   %delta = add i128 %linear, %b
   %initial = sext i64 %sum to i128
-  %partial = add i128 %initial, %delta
-  %fits = icmp sle i128 %partial, 4611686018427387903
-  %extent = zext i64 %count to i128
+  %first_sum = add i128 %initial, %delta
+  %first_fits = icmp sle i128 %first_sum, 4611686018427387903
+  br i1 %first_fits, label %range, label %fallback
+range:
+  %extent = zext i64 %period to i128
   %difference = mul i128 %a, %extent
-  br i1 %fits, label %chunks, label %fallback
-; Adjacent blocks have subtotals that differ by count * scale. Keep the last
-; representable prefix so overflow resumes at the first uncommitted block.
-chunks:
-  %ordinal = phi i64 [ %last, %check_sum ], [ %next, %poll ]
-  %subtotal = phi i128 [ %partial, %check_sum ], [ %next_total, %poll ]
-  %contribution = phi i128 [ %delta, %check_sum ], [ %next_delta, %poll ]
-  %next = add i64 %ordinal, %count
-  %in_range = icmp slt i64 %next, %stop
-  %in_bounds = icmp ule i64 %ordinal, %max_start
-  %next_delta = add i128 %contribution, %difference
-  %next_total = add i128 %subtotal, %next_delta
-  %in_tag = icmp sle i128 %next_total, 4611686018427387903
-  %room = and i1 %in_bounds, %in_range
-  %can_advance = and i1 %room, %in_tag
-  br i1 %can_advance, label %poll, label %success
-; Leave signal dispatch to the loop header after the scalar body publishes its locals.
-poll:
-  %tripped = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
-  %clear = icmp eq i8 %tripped, 0
-  br i1 %clear, label %chunks, label %success
+  %max_end = add i64 %max_start, %period
+  %last_index = sub i64 %stop, 1
+  %range_first = icmp slt i64 %last_index, %max_end
+  %limit = select i1 %range_first, i64 %last_index, i64 %max_end
+  %span = sub i64 %limit, %i
+  %available = udiv i64 %span, %period
+  %max_periods = shl i64 %periods_per_poll, 20
+  %short = icmp ult i64 %available, %max_periods
+  %capped = select i1 %short, i64 %available, i64 %max_periods
+  ; Every later contribution is at least the first. Use the remaining room to
+  ; avoid repeated halvings when only a few large contributions fit.
+  %room = sub i64 4611686018427387903, %sum
+  %first = trunc i128 %delta to i64
+  %positive = icmp ne i64 %first, 0
+  %divisor = select i1 %positive, i64 %first, i64 1
+  %capacity = udiv i64 %room, %divisor
+  %less = icmp ult i64 %capacity, %capped
+  %limited = and i1 %positive, %less
+  %candidate = select i1 %limited, i64 %capacity, i64 %capped
+  br label %bound
+; Terms are nonnegative, so the final subtotal bounds every earlier prefix.
+; Fewer than 2^30 rows with i32 coefficients and tagged ordinals fit in i128.
+bound:
+  %periods = phi i64 [ %candidate, %range ], [ %half, %shrink ]
+  %planned = call i128 @imre_affine_period_sum(i64 %periods, i128 %initial, i128 %delta, i128 %difference)
+  %fits = icmp sle i128 %planned, 4611686018427387903
+  br i1 %fits, label %ready, label %shrink
+shrink:
+  %half = lshr i64 %periods, 1
+  %empty = icmp eq i64 %half, 0
+  br i1 %empty, label %fallback, label %bound
+ready:
+  %before_last = sub i64 %periods, 1
+  %polls = udiv i64 %before_last, %periods_per_poll
+  %interrupted = call i64 @imre_affine_poll_prefix(i64 %polls)
+  %clear = icmp eq i64 %interrupted, 0
+  br i1 %clear, label %success, label %interrupt
+interrupt:
+  %done = mul i64 %interrupted, %periods_per_poll
+  %partial = call i128 @imre_affine_period_sum(i64 %done, i128 %initial, i128 %delta, i128 %difference)
+  br label %success
 success:
+  %length = phi i64 [ %periods, %ready ], [ %done, %interrupt ]
+  %subtotal = phi i128 [ %planned, %ready ], [ %partial, %interrupt ]
+  %distance = mul i64 %length, %period
+  %ordinal = add i64 %i, %distance
   %tag = shl i64 %ordinal, 1
   %new_at = or i64 %tag, 1
   %n = trunc i128 %subtotal to i64
@@ -475,4 +544,4 @@ finish:
 fallback:
   ret {i64,i64} zeroinitializer
 }
-";
+"#;
