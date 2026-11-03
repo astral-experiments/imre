@@ -372,7 +372,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("math.{name}"))
         }
         ("enum", "auto") => ctx.enum_auto_class()?,
-        ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
+        ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
             ctx.builtin("enum.Enum.__deepcopy__");
             ctx.builtin("enum.Enum.__reduce_ex__");

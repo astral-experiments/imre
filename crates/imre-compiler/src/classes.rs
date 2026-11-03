@@ -214,19 +214,20 @@ impl Classes {
                     {
                         continue;
                     }
-                    // A runtime server subclass also uses its mixins as Python classes.
-                    // Select its provider before inferring fixed layouts for those mixins.
-                    if let Some(base) =
-                        node.arguments
-                            .iter()
-                            .flat_map(|args| &args.args)
-                            .find(|base| {
-                                graph.resolve(module_id, base)
-                                    == Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS))
-                            })
+                    // Select the boxed base before inferring fixed layouts for any mixins.
+                    if let Some((base, name)) = node
+                        .arguments
+                        .iter()
+                        .flat_map(|args| &args.args)
+                        .find_map(|base| {
+                            let Binding::Intrinsic(intrinsic) = graph.resolve(module_id, base)?
+                            else {
+                                return None;
+                            };
+                            Some((base, intrinsic.scoped_class_base()?))
+                        })
                     {
-                        let error =
-                            module.error(base, "socketserver base class requires object lowering");
+                        let error = module.error(base, &format!("{name} requires object lowering"));
                         return Err(graph.require_object_class_layout(error));
                     }
                     ids.insert(definition, source_nodes.len());

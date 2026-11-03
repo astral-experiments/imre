@@ -379,7 +379,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
 pub(super) fn is_enum_base(name: &str) -> bool {
     matches!(
         name,
-        "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
+        "enum.Enum" | "enum.Flag" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
     )
 }
 

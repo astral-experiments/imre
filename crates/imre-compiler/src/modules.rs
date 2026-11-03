@@ -1023,6 +1023,14 @@ pub(crate) enum Intrinsic {
 
 impl Intrinsic {
     pub(crate) const REGEX_DEBUG: Self = Self::ScopedObjectExport("re.DEBUG");
+    pub(crate) fn scoped_class_base(self) -> Option<&'static str> {
+        match self {
+            Self::SOCKETSERVER_CLASS => Some("socketserver base class"),
+            Self::ScopedObjectExport("enum.Flag") => Some("enum.Flag"),
+            _ => None,
+        }
+    }
+
     pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
@@ -1563,6 +1571,7 @@ impl IntrinsicModule {
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
             (Self::Tomli, "load") => Intrinsic::TomliLoad,
             (Self::TomliW, "dump") => Intrinsic::TomliDump,
+            (Self::Enum, "Flag") => Intrinsic::ScopedObjectExport("enum.Flag"),
             (Self::Enum, "Enum") => Intrinsic::StandardEnum,
             (Self::Dataclasses, "is_dataclass") => Intrinsic::IsDataclass,
             (Self::Subprocess, "__all__") if cfg!(unix) => {
