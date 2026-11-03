@@ -83,3 +83,53 @@ done
 The native runs on the managed worker compiled the emitted LLVM with the specified Clang. Where the complete emitted IR and option were identical to a previously compiled object in the same toolchain, the worker reused the verified object and linked the selected archive. The source inputs and per-build backend mode, IR, object and executable hashes identify each native result.
 
 The raw stdout digest includes the absolute test-module path printed by the managed worker. The unittest stderr includes elapsed time. Compare the recorded callback sequence, occurrence and signed exit when replaying from another directory.
+
+## Ordinary file entry
+
+The ordinary build of `fourteen.py` stopped before registration at `dis.py:284:13` on both O0 and O3 at `160f4543`, where the imported module declares a namedtuple with keyword options. After the graph-only compiler change at `f0ca793c`, all 14 originals passed separately and in the two selections on both levels. These builds used the default file entry without `--runtime-imports`. The earlier boxed results cover the same 14 occurrences.
+
+A second driver, `patma.py`, used `unittest.defaultTestLoader.loadTestsFromTestCase(test_patma.TestInheritance)` on the unchanged four-method class. Stock, ordinary O0 and ordinary O3 each registered four tests, ran all four and exited zero. This class-loader process is separate from the explicit four-method selection in `fourteen.py`.
+
+The per-process receipts in `ordinary.json` include measured sources, native build exits, product hashes, callbacks and signed child exits. For each occurrence, `callbacks_json_stream` selects the exact lines in that parent's `individual_callback_streams` from `callbacks.json`. The stock and both ordinary stdout digests match byte for byte for all individual methods and both explicit selections. The class-loader runs print different absolute module paths, then the same callback lines as the explicit four-method selection. These entry-mode results leave the case counts unchanged.
+
+### Reproduce
+
+Use the pinned CPython tree, stock interpreter, stage, clean environment and `parents` function from the Linux commands above. Copy `patma.py` from this directory into the stage. With the compiler and archive built from the graph change, run the following.
+
+```bash
+"$PYTHON" -B "$stage/patma.py"
+for level in 0 3; do
+    for driver in fourteen patma; do
+        "$IMRE" build "$stage/$driver.py" --module-root "$stage" --no-cache \
+            --opt-level "$level" --runtime "$RUNTIME" --clang "$CLANG" \
+            -o "$stage/$driver-O$level"
+    done
+    parents "$stage/fourteen-O$level"
+    "$stage/patma-O$level"
+done
+```
+
+The measured frontend was compiled with Rust 1.98.1 using the release profile with `profile.release.package.imre-compiler.opt-level=0` and `debug=0`. Its runtime source, Cargo inputs and linked archive match the earlier integration build. The selected native executables use the requested LLVM O0 or O3. The fourteen-method entry reused verified objects after new ordinary compilation emitted identical IR at each level. The class-loader entry compiled new objects at both levels.
+
+To reconstruct the measured crate sources, start from the staged reconstruction tree `ee63ce4286f62e9582f7f02726bc39606f07f065` in **Rebuild the native pair** above. The reviewed public graph change at `63fa08a9` includes two formatting wraps after `26f079c2`. Its base adds a command-finalizer field reference and an allocation-tracing entry branch. The commands below project that port onto the measured base. The final crate tree must match the recorded hash before building.
+
+```bash
+graph_base=bfcdcb727b9b00d8da4697a02b389e868d82e3da
+graph_head=26f079c2faf0ae72c6b8000295cc12822e66ca5b
+git fetch origin refs/pull/4749/head
+git cat-file -e "$graph_head^{commit}"
+tmp=$(mktemp -d)
+for file in $(git diff --name-only "$graph_base" "$graph_head" -- crates/); do
+    git show "$graph_base:$file" > "$tmp/base"
+    git show "$graph_head:$file" > "$tmp/graph"
+    git merge-file -p --ours "$file" "$tmp/base" "$tmp/graph" > "$tmp/merged"
+    sed 's/class_body_error/class_layout_error/g; s/ObjectOperation::ClassBody(/ObjectOperation::ClassLayout(/g' \
+        "$tmp/merged" > "$file"
+    git add -- "$file"
+done
+tree=$(git write-tree)
+test "$(git rev-parse "$tree:crates")" = 4fcca3698adc0e55c5a2c8a19c5285d6b342c493
+cargo +1.98.1 --config 'profile.release.package.imre-compiler.opt-level=0' \
+    --config 'profile.release.package.imre-compiler.debug=0' build \
+    --locked --release -p imre-compiler -p imre-runtime
+```
