@@ -105,7 +105,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `threading` | Yes | No API example recorded. | — | — | — |
 | `time` | Yes | Read the clock, sleep, and convert a local `struct_time` to epoch seconds with `mktime`. [Evidence](../benchmarks/cpython_stdlib/full/time/README.md) | [0 / 63](../benchmarks/cpython_stdlib/full/time/) | 4 | 0 |
 | `token` | Yes | No API example recorded. | — | — | — |
-| `tomllib` | Yes | Read selected TOML table keys with `load` on a binary stream. [Evidence](../tests/fixtures/paths/toml_discovery.py) | — | — | — |
+| `tomllib` | Yes | Parse nested TOML tables and arrays from a binary stream with `load` or from a string with `loads`. [Evidence](../tests/fixtures/paths/toml_document.py) | — | — | — |
 | `traceback` | Yes | No API example recorded. | — | — | — |
 | `types` | Yes | Fixed-layout `SimpleNamespace` construction and attributes. [Evidence](../benchmarks/cpython_stdlib/full/types/README.md) | [0 / 129](../benchmarks/cpython_stdlib/full/types/) | 3 | 0 |
 | `typing` | Yes | Use selected annotations and aliases; register, look up and clear overloads for supported named functions. [Evidence](../benchmarks/cpython_stdlib/full/typing/README.md) | [0 / 712](../benchmarks/cpython_stdlib/full/typing/) | 3 | 2 |

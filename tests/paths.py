@@ -17,12 +17,6 @@ import files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "paths"
 IMPORT = "from pathlib import Path\n"
 REJECTED = {
-    "tomllib_document_escape": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    value = tomllib.load(f)",
-    "tomllib_text_file": "import tomllib\nwith open(Path('x'), 'r', encoding='utf-8') as f:\n    value = tomllib.load(f).keys()",
-    "tomllib_mutable_keys": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nkeys.add('x')",
-    "tomllib_key_repr": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(repr(keys))",
-    "tomllib_key_equality": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(keys == keys)",
-    "tomllib_key_argument": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys('x')",
     "missing_nested_walk_option": "def option(required: bool) -> bool:\n    return required\nPath('a').relative_to(walk_up=option())",
     "missing_nested_constructor_value": "def required(x: int) -> int:\n    return x\nPath(wrong=required())",
     "missing_nested_fspath_value": "import os\ndef required(x: int) -> str:\n    return 'a'\nos.fspath(required())",

@@ -642,6 +642,23 @@ def capture(items):
         raise AssertionError("an unhashable element must stop the comprehension")
 
 
+def source_dictcomp():
+    namespace = {}
+    exec("""
+def collect(rows):
+    events = []
+    def mark(value):
+        events.append(value)
+        return value
+    key = "outer"
+    result = {mark(key): mark(value) for key, value in rows if key}
+    return result, events, key
+""", namespace)
+    result, events, original = namespace["collect"]([("a", 1), ("", 2), ("b", 3), ("a", 4)])
+    assert list(result.items()) == [("a", 4), ("b", 3)]
+    assert events == ["a", 1, "b", 3, "a", 4] and original == "outer"
+
+
 def named_bindings():
     namespace = {}
     exec("""def recipe(values):
@@ -1020,6 +1037,7 @@ def current():
     source_genexpr()
     source_listcomp()
     source_setcomp()
+    source_dictcomp()
     source_match()
     check_scope_directives()
     relative_import_hooks()

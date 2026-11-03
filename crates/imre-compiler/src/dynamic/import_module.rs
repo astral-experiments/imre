@@ -545,6 +545,10 @@ fn stdlib_package_source(name: &str) -> Option<(&'static str, &'static str)> {
         "multiprocessing.spawn" => source!("multiprocessing/spawn.py"),
         "multiprocessing.synchronize" => source!("multiprocessing/synchronize.py"),
         "multiprocessing.util" => source!("multiprocessing/util.py"),
+        "tomllib" => source!("tomllib/__init__.py"),
+        "tomllib._parser" => source!("tomllib/_parser.py"),
+        "tomllib._re" => source!("tomllib/_re.py"),
+        "tomllib._types" => source!("tomllib/_types.py"),
         _ => None,
     }
 }

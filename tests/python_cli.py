@@ -2082,6 +2082,11 @@ def main():
             "except FileExistsError as error:\n    print(str(error))",
             "py_compile", native_timeout=300,
         )
+        compare(
+            "-IB", "-c",
+            'from tomllib import loads; print(loads("[tool]\\nport = 8000")["tool"]["port"])',
+            native_timeout=300,
+        )
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
             "-IB", "-c",

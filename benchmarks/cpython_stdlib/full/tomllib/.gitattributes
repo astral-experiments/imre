@@ -1,0 +1,2 @@
+upstream/** -text linguist-vendored=true
+upstream/Lib/test/test_tomllib/data/** whitespace=-blank-at-eol
