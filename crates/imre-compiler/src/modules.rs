@@ -2284,8 +2284,8 @@ pub(crate) struct SourceModule {
     pub(crate) type_guards: Vec<usize>,
     /// Entry bindings and guards that run during initialization, before later definitions.
     pub(crate) entry_globals: Vec<usize>,
-    /// Guarded standard-library imports that run in source order through the object importer.
-    pub(crate) optional_imports: HashMap<TextRange, String>,
+    /// Names that may be bound by each optional import when the object importer executes it.
+    pub(crate) optional_imports: HashMap<TextRange, Vec<String>>,
     /// First assignment of each module value that needs a rebindable cell.
     pub(crate) rebound_values: HashSet<usize>,
     /// Mutable intrinsic exports read at the source from-import, keyed by statement.
@@ -3834,14 +3834,17 @@ impl<'a> Loader<'a> {
                     if (id == 0 || self.partial_source(id))
                         && !executable
                         && self.modules[id].entry_globals.is_empty()
-                        && let Some((module, name)) =
+                        && let Some((module, names)) =
                             optional_stdlib_import(&self.modules, id, guard) =>
                 {
                     self.reject_stdlib_shadow(module)?;
-                    self.bind(id, name, Binding::ConditionalValue, statement)?;
-                    self.modules[id]
-                        .optional_imports
-                        .insert(statement.range(), name.to_owned());
+                    for name in &names {
+                        self.bind(id, name, Binding::ConditionalValue, statement)?;
+                    }
+                    self.modules[id].optional_imports.insert(
+                        statement.range(),
+                        names.into_iter().map(str::to_owned).collect(),
+                    );
                     self.modules[id].executable.push(index);
                 }
                 _ if self.alias_declaration(id, statement)? => {
@@ -4989,14 +4992,16 @@ fn stdlib_top_level(name: &str) -> bool {
         || vendored.is_file(format!("stdlib/{name}/__init__.pyi").as_str())
 }
 
-/// A source module can probe a standard library module before its next import.
+/// Recognize an optional import and any bindings initialized by its probe.
+/// The object importer executes the original try, including partial bindings on failure.
 fn optional_stdlib_import<'a>(
     modules: &[SourceModule],
     module: ModuleId,
     guard: &'a ast::StmtTry,
-) -> Option<(&'a str, &'a str)> {
-    let module_name = match guard.body.as_slice() {
-        [ast::Stmt::Import(import)] => {
+) -> Option<(&'a str, Vec<&'a str>)> {
+    let (first, rest) = guard.body.split_first()?;
+    let module_name = match first {
+        ast::Stmt::Import(import) if rest.is_empty() || !import.is_lazy => {
             let [alias] = import.names.as_slice() else {
                 return None;
             };
@@ -5005,36 +5010,106 @@ fn optional_stdlib_import<'a>(
             }
             alias.name.as_str()
         }
-        [ast::Stmt::ImportFrom(import)] if import.level == 0 => import.module.as_ref()?.as_str(),
+        ast::Stmt::ImportFrom(import) if import.level == 0 && rest.is_empty() => {
+            import.module.as_ref()?.as_str()
+        }
         _ => return None,
     };
-    let name = single_import_binding(&guard.body)?;
-    let [fallback] = import_error_fallback(modules, module, guard)? else {
+    let primary = single_import_binding(std::slice::from_ref(first))?;
+    let fallback = import_error_fallback(modules, module, guard, !rest.is_empty())?;
+    let top = module_name.split('.').next()?;
+    if rest.is_empty() {
+        let [assignment] = fallback else { return None };
+        return (stdlib_top_level(top)
+            && matches!(assignment, ast::Stmt::Assign(_))
+            && value_name(assignment) == Some(primary)
+            && matches!(module_value(assignment), Some(ast::Expr::NoneLiteral(_))))
+        .then_some((module_name, vec![primary]));
+    }
+    // Optional extension modules can belong to the standard library without a typeshed stub.
+    if !stdlib_top_level(top)
+        && !ruff_python_stdlib::sys::is_known_standard_library(crate::version::LANGUAGE.minor, top)
+    {
         return None;
-    };
-    (stdlib_top_level(module_name.split('.').next()?)
-        && matches!(fallback, ast::Stmt::Assign(_))
-        && value_name(fallback) == Some(name)
-        && matches!(module_value(fallback), Some(ast::Expr::NoneLiteral(_))))
-    .then_some((module_name, name))
+    }
+    let mut names = vec![primary];
+    match rest {
+        [assignment @ ast::Stmt::Assign(probe)] => {
+            let result = value_name(assignment)?;
+            if !crate::narrowing::expression_assignments(&probe.value).is_empty() {
+                return None;
+            }
+            let [otherwise] = fallback else { return None };
+            if !matches!(otherwise, ast::Stmt::Assign(_))
+                || value_name(otherwise) != Some(result)
+                || !module_value(otherwise).is_some_and(literal_export)
+            {
+                return None;
+            }
+            names.push(result);
+        }
+        [ast::Stmt::ImportFrom(import)]
+            if !import.is_lazy
+                && import.level == 0
+                && import.module.as_ref()?.as_str() == module_name =>
+        {
+            for alias in &import.names {
+                if alias.name.as_str() == "*" {
+                    return None;
+                }
+                names.push(alias.asname.as_ref().unwrap_or(&alias.name).as_str());
+            }
+            for stmt in fallback {
+                let ast::Stmt::Assign(assignment) = stmt else {
+                    return None;
+                };
+                for target in &assignment.targets {
+                    if !names.contains(&target.as_name_expr()?.id.as_str()) {
+                        return None;
+                    }
+                }
+                let value = &*assignment.value;
+                if !literal_export(value)
+                    && !value.is_name_expr()
+                    && !matches!(value, ast::Expr::Attribute(attr) if attr.value.is_name_expr())
+                {
+                    return None;
+                }
+            }
+        }
+        _ => return None,
+    }
+    Some((module_name, names))
 }
 
 fn import_error_fallback<'a>(
     modules: &[SourceModule],
     module: ModuleId,
     guard: &'a ast::StmtTry,
+    allow_attribute_error: bool,
 ) -> Option<&'a [ast::Stmt]> {
     let [ast::ExceptHandler::ExceptHandler(handler)] = guard.handlers.as_slice() else {
         return None;
     };
     let exception = handler.type_.as_deref()?;
+    let builtin = |expr: &ast::Expr, name: &str| {
+        matches!(expr, ast::Expr::Name(n) if n.id.as_str() == name)
+            && resolve_binding(modules, module, expr).is_none()
+    };
+    let catches_import = match exception {
+        ast::Expr::Tuple(tuple) if allow_attribute_error && tuple.elts.len() == 2 => {
+            ["ImportError", "AttributeError"]
+                .iter()
+                .all(|name| tuple.elts.iter().any(|expr| builtin(expr, name)))
+        }
+        _ => builtin(exception, "ImportError"),
+    };
     (!guard.is_star
         && guard.orelse.is_empty()
         && guard.finalbody.is_empty()
         && handler.name.is_none()
-        && matches!(exception, ast::Expr::Name(n) if n.id.as_str() == "ImportError")
-        && resolve_binding(modules, module, exception).is_none())
-    .then_some(&handler.body)
+        && catches_import)
+        .then_some(&handler.body)
 }
 
 /// Both arms bind one name. The source importer runs the selected imports and
@@ -5045,7 +5120,7 @@ fn conditional_import<'a>(
     statement: &'a ast::Stmt,
 ) -> Option<&'a str> {
     if let ast::Stmt::Try(guard) = statement {
-        let fallback = import_error_fallback(modules, module, guard)?;
+        let fallback = import_error_fallback(modules, module, guard, false)?;
         let name = single_import_binding(&guard.body)?;
         return (single_import_binding(fallback)? == name).then_some(name);
     }

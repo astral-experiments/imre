@@ -4611,6 +4611,7 @@ impl<'a> Checker<'a> {
             self.graph.modules[self.module]
                 .optional_imports
                 .values()
+                .flatten()
                 .any(|alias| alias == name.id.as_str())
         })
     }
