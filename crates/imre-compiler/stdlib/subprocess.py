@@ -311,6 +311,7 @@ class Popen:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
             self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
             self._replacement_output = None
+            self._input = None
             self._execute_child(args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
                                 startupinfo, creationflags, shell, *fds, restore_signals,
                                 gid, gids, uid, umask, start_new_session,
@@ -473,22 +474,27 @@ class Popen:
             self._stdin_ref is not None and self._stdin_ref() is self.stdin)
         if self._replacement_output is not None or (not self._communication_started and not same_stdin):
             return self._communicate_replaced_stdin(input, endtime, orig_timeout)
-        if self.text_mode:
-            if self.stdin is None or self._communication_started:
-                input = None
-            if input is not None:
-                # A false input closes stdin before encoding. A BOM produced
-                # from an empty string is still validated, but the pipe is closed.
+        if self.stdin is not None and self._input is None:
+            if input is not None and self.text_mode:
+                # A false input closes stdin before encoding, even for a codec
+                # that produces a BOM from the empty string.
                 if not input:
                     try:
                         self.stdin.close()
                     except BrokenPipeError:
                         pass
                 input = input.encode(self.stdin.encoding, self.stdin.errors)
-                if not input:
-                    input = None
-                elif not isinstance(input, (bytes, bytearray)):
-                    input = memoryview(input)
+            self._input = input
+
+        # Retain the exporter for retries, but only pin its storage while this
+        # call is using it. The native pipe loop owns the byte offset.
+        input = self._input
+        if not input:
+            input = None
+        elif isinstance(input, memoryview):
+            input = input.cast("B")
+        elif type(input) is not bytes:
+            input = memoryview(input)
         timeout = None if endtime is None else endtime - _time()
         out, err, expired = _process.communicate(self._handle, input, timeout, use_select)
         if expired:

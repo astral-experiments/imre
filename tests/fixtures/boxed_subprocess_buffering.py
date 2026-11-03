@@ -130,6 +130,18 @@ def current():
             raise
         assert child.returncode == 0
 
+    # A timed-out exchange retains the caller's input until the retry writes it.
+    with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe) as child:
+        data = bytearray(b"before")
+        try:
+            child.communicate(memoryview(data), timeout=0)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            raise AssertionError("zero timeout completed the pipe write")
+        data[:] = b"after!"
+        assert child.communicate(timeout=5) == (b"after!", None)
+
     # communicate sends input to the replacement and leaves the original open.
     with subprocess.Popen(["/bin/true"], stdin=pipe, stdout=pipe) as child:
         original = child.stdin

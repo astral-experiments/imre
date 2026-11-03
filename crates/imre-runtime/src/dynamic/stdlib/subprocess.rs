@@ -632,6 +632,14 @@ fn report_status(ctx: &mut Context, handle: Id, status: Option<i32>) -> Id {
     ctx.int(i64::from(code))
 }
 
+fn communication_input(ctx: &Context, input: Id) -> Result<&[u8]> {
+    if input == NONE {
+        Ok(&[])
+    } else {
+        ctx.bytes_like(input)
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -717,13 +725,13 @@ pub(super) fn call(
         ("communicate", &[input, seconds, use_select]) => {
             let seconds = timeout(ctx, seconds)?;
             let use_select = ctx.truth(use_select)?;
-            let input = if input == NONE {
-                &[][..]
-            } else {
-                ctx.bytes_like(input)?
-            };
-            let pending = child.begin_communication(input, seconds, use_select)?;
-            let exchange = child.finish_communication(pending, || ctx.dispatch_signals())?;
+            let mut pending =
+                child.begin_communication(communication_input(ctx, input)?, seconds, use_select)?;
+            while pending.interrupted() {
+                ctx.dispatch_signals()?;
+                child.resume_communication(&mut pending, communication_input(ctx, input)?)?;
+            }
+            let exchange = child.finish_communication(pending);
             let [stdout, stderr] = exchange
                 .streams
                 .map(|stream| stream.map_or(NONE, |data| ctx.alloc(Value::Bytes(data))));
