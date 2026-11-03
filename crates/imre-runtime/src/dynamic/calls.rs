@@ -1042,7 +1042,10 @@ impl Context {
                 return Ok(self.alloc(Value::Method {
                     callable,
                     receiver,
-                    explicit: matches!(self.heap.get(value), Value::Cached { .. }),
+                    explicit: matches!(
+                        self.heap.get(value),
+                        Value::Cached { .. } | Value::Partial { .. }
+                    ),
                 }));
             }
         }
@@ -2936,8 +2939,10 @@ impl Context {
                 return Ok(self.builtin(&format!("generator.{name}")));
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "classmethod" | "staticmethod")
-                    && name == "__get__" =>
+                if matches!(
+                    class.as_str(),
+                    "classmethod" | "staticmethod" | "functools.partial"
+                ) && name == "__get__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__get__")));
             }
@@ -6620,6 +6625,9 @@ impl Context {
             }
             Value::Native(name) if name == "super.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "super", &args, &kwargs)
+            }
+            Value::Native(name) if name == "functools.partial.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "functools.partial", &args, &kwargs)
             }
             Value::Native(name) if name == "classmethod.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)

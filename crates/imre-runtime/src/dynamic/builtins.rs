@@ -868,11 +868,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
         }
-        Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
-            if attr == "__get__" =>
-        {
-            "function"
-        }
+        Value::Function { .. } | Value::Cached { .. } if attr == "__get__" => "function",
+        Value::Partial { .. } if attr == "__get__" => "functools.partial",
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
             "_contextvars.ContextVar"
         }

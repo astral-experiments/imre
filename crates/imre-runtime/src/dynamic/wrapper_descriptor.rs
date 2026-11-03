@@ -280,6 +280,7 @@ impl BuiltinDescriptor {
             "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
+            "functools.partial.__get__" => ("functools.partial", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
             "str.__str__" => ("str", "__str__"),
@@ -411,6 +412,7 @@ impl BuiltinDescriptor {
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
+            "functools.partial" => matches!(ctx.heap.get(receiver), Value::Partial { .. }),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
@@ -813,6 +815,7 @@ pub(super) fn descriptor_get(
     let slot = match ctx.heap.get(payload) {
         Value::Super { .. } if class == "super" => None,
         Value::ClassMethod { .. } if class == "classmethod" => None,
+        Value::Partial { .. } if class == "functools.partial" => None,
         Value::HeapTypeMethod { name, .. }
             if class
                 == if matches!(*name, "__repr__" | "__str__") {
