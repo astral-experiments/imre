@@ -847,7 +847,9 @@ impl Context {
             .get(owner)
             .heap_type()
             .expect("native heap type method");
-        if self.heap.get(receiver).instance_class() == Some(owner) {
+        if self.heap.get(receiver).instance_class() == Some(owner)
+            || (declaring == value::SSL_ERROR_TYPE && self.instance_of(receiver, owner))
+        {
             return Ok(());
         }
         let actual = self.type_name(receiver);
@@ -1346,7 +1348,7 @@ impl Context {
                     ..
                 } => "method-wrapper",
                 Value::HeapTypeMethod {
-                    name: "__repr__", ..
+                    name: "__repr__" | "__str__", ..
                 } => "method-wrapper",
                 Value::Native(_)
                 | Value::IoOpen { .. }
@@ -1724,7 +1726,7 @@ impl Context {
     }
 
     /// Materialize native exception arguments before their backing fields can change.
-    fn exception_argument_tuple(&mut self, obj: Id, error: Error) -> Id {
+    pub(super) fn exception_argument_tuple(&mut self, obj: Id, error: Error) -> Id {
         if let Some(args) = error.args {
             return args;
         }
@@ -2954,6 +2956,9 @@ impl Context {
                         }
                     }
                     match name {
+                        "__doc__" if method == "__str__" => return Ok(self.text("Return str(self).")),
+                        "__text_signature__" if method == "__str__" => return Ok(self.text("($self, /)")),
+                        "__objclass__" if method == "__str__" => return Ok(owner),
                         "__name__" => return Ok(self.text(method)),
                         "__qualname__" if method == "md5" => return Ok(self.text(method)),
                         "__qualname__" => {
@@ -3163,13 +3168,15 @@ impl Context {
                 {
                     return Ok(value);
                 }
+                "__doc__" if member == "__str__" => return Ok(self.text("Return str(self).")),
+                "__text_signature__" if member == "__str__" => return Ok(self.text("($self, /)")),
                 "__name__" => return Ok(self.text(member)),
                 "__objclass__" => return Ok(owner),
                 "__qualname__" => {
                     return Ok(self.text(format!("{}.{member}", self.class_name(owner))));
                 }
                 "__get__" => {
-                    let callable = self.builtin(if member == "__repr__" {
+                    let callable = self.builtin(if matches!(member, "__repr__" | "__str__") {
                         "wrapper_descriptor.__get__"
                     } else {
                         "method_descriptor.__get__"
@@ -3193,6 +3200,7 @@ impl Context {
                     | super::deque::CLASS
                     | "typing.Union"
                     | "typing.TypeAliasType"
+                    | "_ssl.MemoryBIO"
                     | stdlib::hashlib::md5::CLASS
                     | stdlib::datetime::isocalendar::CLASS
             ) || HashState::is_provider_class(owner)
@@ -3229,6 +3237,7 @@ impl Context {
                                 "int"
                                     | "typing.Union"
                                     | "typing.TypeAliasType"
+                                    | "_ssl.MemoryBIO"
                                     | stdlib::hashlib::md5::CLASS
                                     | stdlib::datetime::isocalendar::CLASS
                             )
@@ -5730,10 +5739,12 @@ impl Context {
                 ),
             ));
         }
-        if self.heap.get(class).heap_type() == Some(stdlib::datetime::isocalendar::CLASS) {
+        if let Some(name @ ("_ssl.MemoryBIO" | stdlib::datetime::isocalendar::CLASS)) =
+            self.heap.get(class).heap_type()
+        {
             return Err(Error::new(
                 "TypeError",
-                "object.__new__(datetime.IsoCalendarDate) is not safe, use datetime.IsoCalendarDate.__new__()",
+                format!("object.__new__({name}) is not safe, use {name}.__new__()"),
             ));
         }
         if let Some(name) = self.heap.get(class).hash_type() {
@@ -5961,6 +5972,10 @@ impl Context {
                 _ => self.type_name(callable),
             };
             return Err(non_callable_error(name));
+        }
+        #[cfg(unix)]
+        if self.heap.get(callable).heap_type() == Some(stdlib::ssl::provider::bio::CLASS) {
+            return stdlib::ssl::provider::bio::construct(self, callable, &args, &kwargs);
         }
         if let Some(name) = self.heap.get(callable).hash_type() {
             return Err(Error::new(
@@ -6216,6 +6231,14 @@ impl Context {
             Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::HeapTypeMethod { owner, name } => {
+                #[cfg(unix)]
+                if self.heap.get(owner).heap_type() == Some(value::SSL_ERROR_TYPE) {
+                    return stdlib::ssl::provider::objects::error_str(self, owner, &args, &kwargs);
+                }
+                #[cfg(unix)]
+                if self.heap.get(owner).heap_type() == Some(stdlib::ssl::provider::bio::CLASS) {
+                    return stdlib::ssl::provider::bio::call(self, owner, name, &args, &kwargs);
+                }
                 if self.heap.get(owner).heap_type() == Some(stdlib::datetime::isocalendar::CLASS) {
                     stdlib::datetime::isocalendar::call(self, owner, name, &args, &kwargs)
                 } else {

@@ -56,6 +56,8 @@ pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 const EMPTY_TUPLE: Id = 5;
 
+pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
+
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const REGEX_SCANNER_TYPE: &str = "_sre.SRE_Scanner";
@@ -571,7 +573,10 @@ impl Context {
             Value::Partial { .. } => "partial",
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::KeyWrapper { .. } => "functools.KeyWrapper",
-            Value::Raised(error) => &error.kind,
+            Value::Raised(error) => error
+                .class()
+                .and_then(|class| self.heap.get(class).heap_type())
+                .unwrap_or(&error.kind),
             Value::Module {
                 constructor: None, ..
             } => "module",
@@ -845,12 +850,13 @@ impl std::ops::Deref for BoxedTextFile {
 pub(super) enum NativeModuleState {
     LocaleError(Id),
     IsoCalendarDate(Id),
+    SslError(Id),
 }
 
 impl NativeModuleState {
     fn class(self) -> Id {
         match self {
-            Self::LocaleError(class) | Self::IsoCalendarDate(class) => class,
+            Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => class,
         }
     }
 }
@@ -925,6 +931,8 @@ pub(super) enum Value {
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
+    #[cfg(unix)]
+    MemoryBio(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::Bio>>),
     #[cfg(unix)]
     TlsContext(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::Context>>),
     #[cfg(unix)]
@@ -1284,6 +1292,8 @@ impl Value {
         Some(match self {
             Self::Selector(handle) => handle.borrow().class_name(),
             #[cfg(unix)]
+            Self::MemoryBio(_) => "_ssl.MemoryBIO",
+            #[cfg(unix)]
             Self::TlsContext(_) => "_imre_ssl.Context",
             #[cfg(unix)]
             Self::TlsSession(_) => "_imre_ssl.Session",
@@ -1304,7 +1314,7 @@ impl Value {
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
             Self::HeapTypeMethod {
-                name: "__repr__", ..
+                name: "__repr__" | "__str__", ..
             } => "wrapper_descriptor",
             Self::HeapTypeMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
@@ -1919,7 +1929,7 @@ impl Value {
             | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
-            Self::TlsContext(_) | Self::TlsSession(_) => {}
+            Self::MemoryBio(_) | Self::TlsContext(_) | Self::TlsSession(_) => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }

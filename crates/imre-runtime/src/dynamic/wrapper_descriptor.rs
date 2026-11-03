@@ -732,7 +732,7 @@ pub(super) fn descriptor_get(
         Value::ClassMethod { .. } if class == "classmethod" => None,
         Value::HeapTypeMethod { name, .. }
             if class
-                == if *name == "__repr__" {
+                == if matches!(*name, "__repr__" | "__str__") {
                     "wrapper_descriptor"
                 } else {
                     "method_descriptor"

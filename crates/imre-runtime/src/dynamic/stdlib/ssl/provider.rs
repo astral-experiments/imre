@@ -4,6 +4,7 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
+pub(in crate::dynamic) mod bio;
 pub(in crate::dynamic) mod objects;
 pub(in crate::dynamic) mod versions;
 
@@ -67,6 +68,15 @@ functions! {
     OBJ_nid2ln(c_int) -> *const c_char;
     OBJ_obj2txt(*mut c_char, c_int, Handle, c_int) -> c_int;
     ASN1_OBJECT_free(Handle) -> ();
+    BIO_s_mem() -> Handle;
+    BIO_new(Handle) -> Handle;
+    BIO_free(Handle) -> c_int;
+    BIO_ctrl_pending(Handle) -> usize;
+    BIO_ctrl(Handle, c_int, c_long, Handle) -> c_long;
+    BIO_set_flags(Handle, c_int) -> ();
+    BIO_clear_flags(Handle, c_int) -> ();
+    BIO_read(Handle, *mut c_void, c_int) -> c_int;
+    BIO_write(Handle, *const c_void, c_int) -> c_int;
     TLS_client_method() -> Handle;
     TLS_server_method() -> Handle;
     SSL_CTX_set_default_passwd_cb(Handle, PasswordCallback) -> ();
