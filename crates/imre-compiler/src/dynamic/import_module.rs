@@ -142,7 +142,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     // Python-visible setter on their type.
                     let descriptors = section(
                         "def ismethoddescriptor(object):",
-                        "if hasattr(types, 'MemberDescriptorType'):",
+                        "if hasattr(types, 'GetSetDescriptorType'):",
                     )
                     .replace(
                         "or hasattr(tp, \"__delete__\")",
@@ -192,6 +192,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
                         section("def getmro(cls):", "def indentsize(line):"),
+                        section("def _findclass(func):", "def cleandoc(doc):"),
                         section("GEN_CREATED = ", "def getgeneratorlocals("),
                         section("CORO_CREATED = ", "def getcoroutinelocals("),
                         section("def formatannotation(", "def formatannotationrelativeto("),
