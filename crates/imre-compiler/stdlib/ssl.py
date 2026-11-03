@@ -501,6 +501,43 @@ def create_default_context(purpose=Purpose.SERVER_AUTH, *, cafile=None, capath=N
 _create_default_https_context = create_default_context
 
 
+def cert_time_to_seconds(cert_time):
+    """Return the time in seconds since the Epoch, given the timestring
+    representing the "notBefore" or "notAfter" date from a certificate
+    in ``"%b %d %H:%M:%S %Y %Z"`` strptime format (C locale).
+
+    "notBefore" or "notAfter" dates must use UTC (RFC 5280).
+
+    Month is one of: Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec
+    UTC should be specified as GMT (see ASN1_TIME_print())
+    """
+    from _strptime import _strptime
+    from calendar import timegm
+
+    months = (
+        "Jan","Feb","Mar","Apr","May","Jun",
+        "Jul","Aug","Sep","Oct","Nov","Dec"
+    )
+    time_format = ' %d %H:%M:%S %Y GMT' # NOTE: no month, fixed GMT
+    try:
+        month = cert_time[:3]
+        # Titlecasing a plain binary value cannot match a text month.
+        month_type = type(month)
+        if month_type is not bytes and month_type is not bytearray:
+            month = month.title()
+        month_number = months.index(month) + 1
+    except ValueError:
+        raise ValueError('time data %r does not match '
+                         'format "%%b%s"' % (cert_time, time_format))
+    else:
+        # found valid month
+        # _strptime_time wraps these same fields in struct_time.
+        tt = _strptime(cert_time[3:], time_format)[0]
+        # return an integer, the previous mktime()-based implementation
+        # returned a float (fractional seconds are always zero here).
+        return timegm((tt[0], month_number) + tt[2:6])
+
+
 PEM_HEADER = "-----BEGIN CERTIFICATE-----"
 PEM_FOOTER = "-----END CERTIFICATE-----"
 
