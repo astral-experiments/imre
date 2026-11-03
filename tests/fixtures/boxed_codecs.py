@@ -275,6 +275,16 @@ def check_incremental_decoder_factory():
         entry.incrementaldecoder = IncrementalDecoder
 
 
+def check_utf8_error_handler():
+    def replace_surrogate(error):
+        return "?", error.end
+
+    codecs.register_error("test.utf8_scalar", replace_surrogate)
+    for encoding in ("utf-8", "utf-8-sig"):
+        assert "é東🚉".encode(encoding, "test.utf8_scalar") == "é東🚉".encode(encoding)
+        assert "A\ud800B".encode(encoding, "test.utf8_scalar") == "A?B".encode(encoding)
+
+
 def check_utf8_buffer_slice():
     from array import array
 
@@ -290,6 +300,7 @@ def check_utf8_buffer_slice():
 
 
 def current():
+    check_utf8_error_handler()
     check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
     check_incremental_decoder_factory()
