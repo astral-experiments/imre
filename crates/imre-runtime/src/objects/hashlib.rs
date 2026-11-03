@@ -449,30 +449,42 @@ pub(super) fn clear_algorithms() {
     GUARANTEED.with(RefCell::take);
 }
 
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
+/// Encode each input byte directly into two digits of the final ASCII string.
 pub(crate) fn hex_text(bytes: &[u8]) -> Result<Str> {
-    hex_with_separator(bytes, None, 0)
+    let length = bytes.len().checked_mul(2).ok_or_else(Error::allocation)?;
+    let mut text = Str::try_with_capacity(length).map_err(|_| Error::allocation())?;
+    // SAFETY: every write is an ASCII digit within the reserved capacity.
+    let space = unsafe { text.spare_capacity_mut() };
+    for (&byte, pair) in bytes.iter().zip(space[..length].chunks_exact_mut(2)) {
+        pair[0].write(HEX[usize::from(byte >> 4)]);
+        pair[1].write(HEX[usize::from(byte & 15)]);
+    }
+    // SAFETY: the loop initialized exactly two valid UTF-8 bytes per input byte.
+    unsafe { text.set_len(length) };
+    Ok(text)
 }
 
 pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32) -> Result<Str> {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
     let step = group.unsigned_abs() as usize;
-    let separator = separator.filter(|_| step > 0 && step < bytes.len());
-    let separators = separator.map_or(0, |_| (bytes.len() - 1) / step);
+    let Some(separator) = separator.filter(|_| step > 0 && step < bytes.len()) else {
+        return hex_text(bytes);
+    };
+    let separators = (bytes.len() - 1) / step;
     let capacity = bytes
         .len()
         .checked_mul(2)
         .and_then(|n| n.checked_add(separators))
         .ok_or_else(Error::allocation)?;
     let mut result = Str::try_with_capacity(capacity).map_err(|_| Error::allocation())?;
-    let mut next = if separator.is_some() && group > 0 {
+    let mut next = if group > 0 {
         (bytes.len() - 1) % step + 1
     } else {
         step
     };
     for (index, &byte) in bytes.iter().enumerate() {
-        if let Some(separator) = separator
-            && index == next
-        {
+        if index == next {
             result.push(char::from(separator));
             next += step;
         }

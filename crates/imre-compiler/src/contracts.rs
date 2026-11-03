@@ -432,6 +432,7 @@ impl Builtin {
             | Self::NegativeIntegerPower
             | Self::Decode
             | Self::DecodeAscii
+            | Self::BytesHex
             | Self::UrlsafeB64encode
             | Self::Base64Translate
             | Self::BinasciiAsciiInput
@@ -631,6 +632,7 @@ impl Builtin {
             | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
+            | Self::IntToBytes
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
             | Self::DequeNew
@@ -1273,6 +1275,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
+                | "imre_bytes_hex"
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
@@ -1306,6 +1309,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_hash_algorithms_available"
                 | "imre_hash_algorithms_guaranteed"
                 | "imre_toml_keys"
+                | "imre_int_to_bytes"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"
                 | "imre_binary_read"

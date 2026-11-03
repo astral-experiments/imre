@@ -10300,6 +10300,32 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::CodecWriter {
                 return self.codec_writer_method(receiver, attribute, call);
             }
+            if attribute.attr.as_str() == "to_bytes"
+                && (matches!(receiver.ty, Type::Int | Type::Bool)
+                    || self.types.is_bool_or_int(receiver.ty))
+            {
+                let receiver = if self.types.is_bool_or_int(receiver.ty) {
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::UnionProject, vec![receiver]),
+                    }
+                } else {
+                    powers::integer(receiver)
+                };
+                let params = [
+                    parameter("length", Type::Int, Some(Expr::integer(1))),
+                    parameter("byteorder", Type::Str, Some(unpacking::string("big"))),
+                    ParameterKind::KeywordOnly.parameter(
+                        "signed",
+                        Type::Bool,
+                        Some(Expr::boolean(false)),
+                    ),
+                ];
+                let args = self
+                    .arguments(call, &params, Some(receiver))
+                    .map_err(|_| self.object_runtime_export("int.to_bytes", call))?;
+                return Ok(self.ordered_builtin(Builtin::IntToBytes, Type::Bytes, args));
+            }
             if receiver.ty == Type::Hash {
                 return self.hash_method(receiver, attribute, call);
             }
@@ -10576,6 +10602,15 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty,
                     kind: ExprKind::Builtin(builtin, args),
+                });
+            }
+            if receiver.ty == Type::Bytes
+                && attribute.attr.as_str() == "hex"
+                && call.arguments.is_empty()
+            {
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::BytesHex, vec![receiver]),
                 });
             }
             if receiver.ty == Type::Bytes

@@ -6100,6 +6100,7 @@ impl Emitter<'_, '_> {
                 _ => unreachable!("bytes conversion was checked"),
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
+            Builtin::BytesHex => self.call("imre_bytes_hex", Type::Str, &[&args[0].value]),
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
             Builtin::CsvReader {
                 delimiter,
@@ -6569,6 +6570,16 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_zip_close", &[&args[0].value]);
                 none()
             }
+            Builtin::IntToBytes => self.call(
+                "imre_int_to_bytes",
+                Type::Bytes,
+                &[
+                    &args[0].value,
+                    &args[1].value,
+                    &args[2].value,
+                    &args[3].value,
+                ],
+            ),
             Builtin::BytesValidateUtf8 => {
                 self.call("imre_bytes_validate_utf8", Type::Bytes, &[&args[0].value])
             }
@@ -9426,6 +9437,7 @@ declare ptr @imre_bytes_repeat(ptr, i64)
 declare ptr @imre_str_encode(ptr)
 declare ptr @imre_str_encode_options(ptr, ptr, ptr)
 declare ptr @imre_bytes_decode_splitlines(ptr)
+declare ptr @imre_bytes_hex(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
 declare ptr @imre_urlsafe_b64encode(ptr)
@@ -9563,6 +9575,7 @@ declare i32 @imre_zip_info_is_dir(ptr)
 declare ptr @imre_zip_open(ptr)
 declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
+declare ptr @imre_int_to_bytes(i64, i64, ptr, i1)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
 declare ptr @imre_tempfile_new(ptr)
@@ -11526,6 +11539,14 @@ def transform(values: list[int], count: int) -> int:
         assert!(fast.contains("icmp ult i64"));
         assert!(fast.contains("getelementptr inbounds i64"));
         assert!(fast.contains("call i64 @imre_list_borrow_index("));
+    }
+
+    #[test]
+    fn lowers_integer_bytes_and_hex_conversions() {
+        let source = "def encode(value: int) -> str:\n    return value.to_bytes(16).hex()\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_int_to_bytes("));
+        assert!(llvm.contains("call ptr @imre_bytes_hex("));
     }
 
     #[test]
