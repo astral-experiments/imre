@@ -39,6 +39,25 @@ def current():
     assert f"[{field}{field}]" == "[formattedformatted]"
     assert specs == ["x", "", "", "", ""]
     assert format(Number(31)) == "count" and format(Number(31), "x") == "1f"
+
+    class NumberWithUnit(float):
+        def __format__(self, spec):
+            return super().__format__(spec) + "m"
+
+    assert "{:+.2E}".format(NumberWithUnit(12.0)) == "+1.20E+01m"
+    assert float.__format__(NumberWithUnit(12.0), ".2") == "1.2e+01"
+    assert format(1.0, "\x00") == "1.0"
+    assert format(12.0, "#.3") == "12.0"
+    assert format(1e20, "+#") == "+1.e+20"
+    assert format(1.2, "010,.2") == "0,000,001.2"
+    assert format(-123456.0, "013,.2f") == "-0,123,456.00"
+    assert format(float("inf"), "09,F") == "000000INF"
+    try:
+        format(NumberWithUnit(1.0), "s")
+    except ValueError as error:
+        assert str(error) == "Unknown format code 's' for object of type 'NumberWithUnit'"
+    else:
+        raise AssertionError("accepted string presentation on a float subclass")
     label = "abc"
     assert f"{label=}" == "label='abc'" and f"{label=:}" == "label=abc"
 

@@ -574,6 +574,11 @@ fn percent_numeric_field(field: &str, mut args: impl Iterator<Item = OwnedWord>)
     percent_value_in(field, &mut args, None).map(|(text, _)| text)
 }
 
+/// Apply a brace-format field to an unboxed binary64 operand.
+pub(crate) fn brace_float_field(spec: &str, value: f64, type_name: &str) -> Result<String> {
+    super::formatter::format_specifier(&float(value), spec, type_name)
+}
+
 /// Apply a brace-format field to a rooted native integer.
 pub(crate) fn brace_integer_field(spec: &str, value: Int, type_name: &str) -> Result<String> {
     super::formatter::format_specifier(&owned(value.into_raw(), 2), spec, type_name)
