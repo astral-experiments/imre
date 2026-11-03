@@ -68,7 +68,7 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.builtin(&format!("socket.{name}"));
         ctx.bind(scope, name, value);
     }
-    for name in ["getdefaulttimeout", "setdefaulttimeout"] {
+    for name in ["getdefaulttimeout", "setdefaulttimeout", "inet_pton"] {
         let function = ctx.builtin(&format!("_socket.{name}"));
         ctx.bind(scope, name, function);
     }
@@ -97,7 +97,12 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
         .iter()
         .map(|&(name, _)| name)
         .chain(RESOLVER_NAMES.iter().copied())
-        .chain(["timeout", "getdefaulttimeout", "setdefaulttimeout"])
+        .chain([
+            "timeout",
+            "getdefaulttimeout",
+            "setdefaulttimeout",
+            "inet_pton",
+        ])
     {
         match ctx.lookup_attr(low, name) {
             Ok(value) => ctx.bind(scope, name, value),
@@ -603,7 +608,7 @@ pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)
 }
 
 /// Parse a PyArg "s" argument as strict UTF-8 without calling str subclass methods.
-fn service_text(
+fn text_argument(
     ctx: &mut Context,
     name: &str,
     index: usize,
@@ -625,6 +630,54 @@ fn service_text(
         _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
     };
     text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+/// Parse a numeric IPv4 or IPv6 address using the platform's inet_pton.
+pub(super) fn inet_pton(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    unsafe extern "C" {
+        #[link_name = "inet_pton"]
+        fn c_inet_pton(
+            af: libc::c_int,
+            src: *const libc::c_char,
+            dst: *mut libc::c_void,
+        ) -> libc::c_int;
+    }
+
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "inet_pton() takes no keyword arguments",
+        ));
+    }
+    let [family, address] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "inet_pton() takes exactly 2 arguments ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let family = ctx.index_c_int(*family)?;
+    let address = text_argument(ctx, "inet_pton", 2, *address)?;
+    let mut packed = [0u8; 16];
+    // SAFETY: address is NUL-terminated and packed fits either supported address family.
+    let status = unsafe { c_inet_pton(family, address.as_ptr(), packed.as_mut_ptr().cast()) };
+    if status < 0 {
+        return Err(super::os_error(std::io::Error::last_os_error()));
+    }
+    if status == 0 {
+        return Err(Error::new(
+            "OSError",
+            "illegal IP address string passed to inet_pton",
+        ));
+    }
+    let bytes = match family {
+        libc::AF_INET => &packed[..4],
+        libc::AF_INET6 => &packed[..],
+        _ => return Err(Error::new("OSError", "unknown address family")),
+    };
+    Ok(ctx.alloc(Value::Bytes(bytes.to_vec())))
 }
 
 fn lookup_service(
@@ -655,14 +708,14 @@ fn lookup_service(
         Port(i32),
     }
     let query = if name == "getservbyname" {
-        Query::Name(service_text(ctx, name, 1, args[0])?)
+        Query::Name(text_argument(ctx, name, 1, args[0])?)
     } else {
         Query::Port(ctx.index_c_int(args[0])?)
     };
     // Parse the optional protocol before checking the converted port's 16-bit range.
     let proto = args
         .get(1)
-        .map(|&v| service_text(ctx, name, 2, v))
+        .map(|&v| text_argument(ctx, name, 2, v))
         .transpose()?;
     let audit_proto = proto
         .as_ref()

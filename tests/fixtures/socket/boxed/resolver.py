@@ -3,6 +3,16 @@ from _socket import getaddrinfo as raw_getaddrinfo, getservbyport as raw_getserv
 import socket
 from socket import AddressFamily, SocketKind, getaddrinfo, getservbyname
 
+assert socket.inet_pton is _socket.inet_pton
+assert socket.inet_pton(socket.AF_INET, "192.0.2.1") == b"\xc0\x00\x02\x01"
+assert _socket.inet_pton(socket.AF_INET6, "::ffff:192.0.2.1") == b"\x00" * 10 + b"\xff\xff\xc0\x00\x02\x01"
+try:
+    socket.inet_pton(socket.AF_INET, "127.1")
+except OSError as exc:
+    assert exc.errno is None
+else:
+    raise AssertionError("inet_pton accepted an abbreviated IPv4 address")
+
 assert socket.gaierror is _socket.gaierror
 assert issubclass(socket.gaierror, OSError)
 assert (socket.gaierror.__module__, socket.gaierror.__qualname__, socket.gaierror.__base__) == ("socket", "gaierror", OSError)
