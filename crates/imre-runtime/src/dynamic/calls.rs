@@ -5636,7 +5636,7 @@ impl Context {
         dictionary
     }
 
-    fn replace_instance_dictionary(&mut self, obj: Id, class: Id, new: Option<Id>) {
+    pub(super) fn replace_instance_dictionary(&mut self, obj: Id, class: Id, new: Option<Id>) {
         let removed = self.take_instance_fields(obj, class);
         let Value::Instance { namespace, .. } = self.heap.get_mut(obj) else {
             unreachable!()

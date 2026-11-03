@@ -2562,6 +2562,9 @@ pub(super) fn call(
     if name == "_pickle.dumps" {
         return pickle::dumps(ctx, args, kwargs);
     }
+    if name == "functools.partial.__setstate__" {
+        return functools::partial_setstate(ctx, args, kwargs);
+    }
     if name == "functools.partial.__call__" {
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(Error::new(

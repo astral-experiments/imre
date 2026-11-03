@@ -8,6 +8,84 @@ pub(in crate::dynamic) const PARTIAL_CLASS: &str = "functools.partial";
 pub(in crate::dynamic) const LRU_CACHE_CLASS: &str = "functools._lru_cache_wrapper";
 pub(in crate::dynamic) const COPY_METHODS: &[&str] = &["__reduce__", "__copy__", "__deepcopy__"];
 
+pub(super) fn partial_setstate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (receiver, rest) =
+        super::builtins::method_receiver_args(ctx, PARTIAL_CLASS, "__setstate__", args, kwargs)?;
+    let state = super::builtins::one_positional_arg("partial.__setstate__", rest, kwargs)?;
+    let invalid = || Error::new("TypeError", "invalid partial state");
+    let state = ctx.tuple_items(state)?.ok_or_else(invalid)?;
+    let &[function, args, keywords, namespace] = state.as_slice() else {
+        return Err(invalid());
+    };
+    let raw_args = ctx.tuple_items(args)?.ok_or_else(invalid)?;
+    if !ctx.callable(function)
+        || (keywords != NONE && ctx.dict_storage(keywords).is_none())
+        || (namespace != NONE && ctx.dict_storage(namespace).is_none())
+    {
+        return Err(invalid());
+    }
+    if raw_args
+        .last()
+        .is_some_and(|&arg| matches!(ctx.heap.get(arg), Value::PartialPlaceholder))
+    {
+        return Err(Error::new(
+            "TypeError",
+            "trailing Placeholders are not allowed",
+        ));
+    }
+
+    // Conversion may call Python code. Finish both conversions before replacing any state.
+    let tuple = ctx.builtin("tuple");
+    let args = ctx.call(tuple, vec![args], Vec::new())?;
+    let keywords = if keywords == NONE {
+        ctx.dict(Vec::new())
+    } else if matches!(ctx.heap.get(keywords), Value::Dict(_)) {
+        keywords
+    } else {
+        let storage = ctx
+            .dict_storage(keywords)
+            .expect("validated keyword dictionary");
+        super::builtins::copy_dict(ctx, keywords, storage)?
+    };
+    let storage = ctx.scalar_value(receiver);
+    let namespace = (namespace != NONE).then_some(namespace);
+    let dictionary = if let Value::Instance { class, .. } = *ctx.heap.get(receiver) {
+        ctx.replace_instance_dictionary(receiver, class, namespace);
+        None
+    } else {
+        namespace
+    };
+    let previous = std::mem::replace(
+        ctx.heap.get_mut(storage),
+        Value::Partial {
+            function,
+            args,
+            keywords,
+            dictionary,
+        },
+    );
+    let Value::Partial {
+        function,
+        args,
+        keywords,
+        dictionary,
+    } = previous
+    else {
+        unreachable!("validated partial receiver")
+    };
+    for old in [Some(function), Some(args), Some(keywords), dictionary]
+        .into_iter()
+        .flatten()
+    {
+        ctx.heap.weak_edge_removed(old);
+    }
+    Ok(NONE)
+}
+
 /// Argument Clinic accepts either one positional argument or its named equivalent.
 pub(in crate::dynamic) fn key_argument(
     name: &str,
