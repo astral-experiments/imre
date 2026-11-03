@@ -472,6 +472,14 @@ class SSLContext:
             _imre_ssl.raise_context_receiver_error("get_ciphers", self)
         return _call(_imre_ssl.get_ciphers, __class__._ctx.__get__(self))
 
+    def set_ecdh_curve(self, name, /):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("set_ecdh_curve", self)
+        result = _imre_ssl.set_ecdh_curve(__class__._ctx.__get__(self), name)
+        if result is False:
+            raise ValueError(f"unknown elliptic curve name {name!r}")
+        _check_context_result(result)
+
     def set_ciphers(self, cipherlist, /):
         _call(_imre_ssl.set_ciphers, self._ctx, cipherlist)
 

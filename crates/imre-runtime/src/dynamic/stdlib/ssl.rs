@@ -2,7 +2,7 @@
 
 use std::{cell::RefCell, ffi::CString, io, rc::Rc};
 
-use super::{Context, Error, Id, NONE, Result, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, Value};
 use crate::objects::{errno_error, socket};
 
 pub(crate) mod provider;
@@ -49,6 +49,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "set_post_handshake_auth",
         "get_ciphers",
         "set_ciphers",
+        "set_ecdh_curve",
         "load_verify_locations",
         "load_cert_chain",
         "wrap",
@@ -698,6 +699,15 @@ pub(super) fn call(
                 cadata,
             );
             trust_result(ctx, result)
+        }
+        ("set_ecdh_curve", &[handle, name]) => {
+            let path = super::posixpath::fspath(ctx, name)?;
+            let name = super::os::c_path(ctx, path, "embedded null byte")?;
+            let result = context(ctx, handle)?.borrow_mut().set_ecdh_curve(&name);
+            match result {
+                Ok(false) => Ok(FALSE),
+                result => trust_result(ctx, result.map(|_| ())),
+            }
         }
         ("get_ciphers", &[handle]) => provider::ciphers::get(ctx, handle),
         ("set_ciphers", &[handle, text]) => {
