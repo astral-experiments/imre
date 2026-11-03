@@ -617,6 +617,14 @@ pub(in crate::dynamic) fn encode_text(
     let errors = if let StrEncoder::Registered(codec) = encoder {
         match encode_error::registered(ctx, codec, errors) {
             Some(encode_error::Handler::Python(callback)) => {
+                // A scalar string already contains its valid UTF-8 encoding.
+                if matches!(codec, Codec::Utf8 { .. })
+                    && let Ok(text) = ctx.str_value(id)
+                {
+                    return encoder
+                        .encode_str(text, errors)
+                        .map_err(|error| ctx.encode_error(error, id));
+                }
                 let errors = errors.to_owned();
                 return encode_error::encode(ctx, id, codec, callback, &errors);
             }
