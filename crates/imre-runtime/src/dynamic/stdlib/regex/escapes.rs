@@ -19,13 +19,13 @@ pub(super) fn normalize(
     text: &str,
     bytes: bool,
     flags: i64,
-    diagnose_headers: bool,
+    diagnose_syntax: bool,
 ) -> std::result::Result<Option<Spelling>, (String, usize)> {
-    if !(diagnose_headers && text.contains("(?"))
-        && !text.as_bytes().windows(2).any(|pair| {
-            pair[0] == b'\\' && matches!(pair[1], b'N' | b'x' | b'u' | b'U' | b'0'..=b'9')
-        })
-    {
+    if !text.as_bytes().windows(2).any(|pair| match pair {
+        [b'\\', b'N' | b'x' | b'u' | b'U' | b'0'..=b'9'] => true,
+        [b'(', b'?'] | [b'{', b'0'..=b'9'] => diagnose_syntax,
+        _ => false,
+    }) {
         return Ok(None);
     }
     let leading = flags::parse(text.as_bytes(), flags, bytes);
@@ -48,7 +48,7 @@ pub(super) fn normalize(
             }
         });
     }
-    if diagnose_headers && let Some(open) = escapes.rejected_header {
+    if diagnose_syntax && let Some(open) = escapes.rejected_header {
         let at = skip + open;
         let byte = text.char_indices().nth(at).unwrap().0;
         if let Some((message, offset)) = flags::header_error(&text[byte..], bytes) {
