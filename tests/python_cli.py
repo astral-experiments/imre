@@ -2075,6 +2075,9 @@ def main():
             set_method.write_text("items = {1, 2}\nalias = items\n" + statement + "\nprint(sorted(alias))\n")
             compare("-B", set_method, native_args=("run", set_method, "--quiet"))
 
+        compare("-c", "print(2.0 * (3 + 4j), (3 + 4j) * 2.0, 2.0 / (3 + 4j), (3 + 4j) / 2.0)")
+        compare("-c", "z = complex(3, 4)\nprint(2.0 * z, z * 2.0, 2.0 / z, z / 2.0)")
+
         instance_check = root / "unittest_instance.py"
         for statement in (
             "case.assertIsSubclass(bool, int)",
