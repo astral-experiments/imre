@@ -883,6 +883,7 @@ fn namespace_class(
         methods: Vec::new(),
         method_kinds: Vec::new(),
         method_origins: Vec::new(),
+        storage_base: None,
         bases: Vec::new(),
         abstract_methods: Default::default(),
         toml_hash: false,

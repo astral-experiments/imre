@@ -72,7 +72,9 @@ pub(crate) struct Class {
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
-    /// Bases in lookup order. The first lineage supplies storage.
+    /// The parent whose field layout and initializer the receiver inherits.
+    pub(crate) storage_base: Option<usize>,
+    /// Ancestors in Python method lookup order.
     pub(crate) bases: Vec<usize>,
     pub(crate) abstract_methods: HashSet<String>,
     pub(crate) abc: bool,
@@ -1391,6 +1393,7 @@ fn collect_class(
         methods,
         method_kinds,
         method_origins,
+        storage_base: base.map(|(id, _)| id),
         bases,
         abstract_methods,
         abc,
