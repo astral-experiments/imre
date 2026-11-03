@@ -532,6 +532,7 @@ pub(crate) enum IntrinsicModule {
     Marshal,
     Gc,
     Pickle,
+    PickleNative,
     Struct,
     AnnotationLib,
     AnnotationFormat,
@@ -1074,6 +1075,7 @@ impl IntrinsicModule {
             "marshal" => Some(Self::Marshal),
             "gc" => Some(Self::Gc),
             "pickle" => Some(Self::Pickle),
+            "_pickle" => Some(Self::PickleNative),
             "struct" => Some(Self::Struct),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
@@ -1316,6 +1318,16 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_codecs.unregister")
             }
             (Self::Pickle, "Pickler") => Intrinsic::PICKLER,
+            (Self::PickleNative, "dumps") => Intrinsic::ScopedObjectExport("_pickle.dumps"),
+            (Self::PickleNative, "PickleError") => {
+                Intrinsic::ScopedObjectExport("_pickle.PickleError")
+            }
+            (Self::PickleNative, "PicklingError") => {
+                Intrinsic::ScopedObjectExport("_pickle.PicklingError")
+            }
+            (Self::PickleNative, "UnpicklingError") => {
+                Intrinsic::ScopedObjectExport("_pickle.UnpicklingError")
+            }
             (Self::Tempfile, "gettempdir") => Intrinsic::ScopedObjectExport("tempfile.gettempdir"),
             (Self::Tempfile, "gettempdirb") => {
                 Intrinsic::ScopedObjectExport("tempfile.gettempdirb")
