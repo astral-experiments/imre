@@ -1,5 +1,5 @@
 import inspect
-from functools import partial, update_wrapper
+from functools import partial, partialmethod, update_wrapper
 from inspect import CO_ASYNC_GENERATOR, CO_COROUTINE, CO_GENERATOR
 from inspect import cleandoc, iscoroutinefunction, markcoroutinefunction
 
@@ -37,6 +37,9 @@ class Views:
     async def deferred(self):
         pass
 
+    deferred_partial = partialmethod(deferred)
+    sync_partial = partialmethod(sync)
+
     async def __call__(self):
         pass
 
@@ -48,11 +51,17 @@ def make():
 
 
 views = Views()
+assert iscoroutinefunction(Views.deferred_partial)
+assert iscoroutinefunction(views.deferred_partial)
+assert not iscoroutinefunction(Views.sync_partial)
+assert not iscoroutinefunction(views.sync_partial)
 before = views.sync
 wrapped = partial(before)
 for callback in (view, async_generator, factory, views, views.deferred, partial(views.deferred), wrapped, None):
     print(iscoroutinefunction(obj=callback))
 print(markcoroutinefunction(func=before) is Views.sync)
+assert not iscoroutinefunction(Views.sync_partial)
+assert iscoroutinefunction(views.sync_partial)
 print(iscoroutinefunction(before), iscoroutinefunction(views.sync), iscoroutinefunction(wrapped))
 factory._is_coroutine_marker = True
 print(iscoroutinefunction(factory))
