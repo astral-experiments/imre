@@ -105,6 +105,7 @@ impl Emitter<'_, '_> {
             FdOperation::Dup2 => "dup2",
             FdOperation::Isatty => "isatty",
             FdOperation::DeviceEncoding => "device_encoding",
+            FdOperation::TcGetPgrp => "tcgetpgrp",
             FdOperation::GetBlocking => "get_blocking",
             FdOperation::SetBlocking => "set_blocking",
             FdOperation::GetInheritable => "get_inheritable",

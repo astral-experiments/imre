@@ -44,6 +44,30 @@ def check_ttyname():
     expect_errno(ttyname, (slave,), errno.EBADF)
 
 
+def check_tcgetpgrp():
+    import subprocess
+    from os import tcgetpgrp
+
+    assert tcgetpgrp is os.tcgetpgrp and tcgetpgrp is posix.tcgetpgrp
+    master, slave = os.openpty()
+    try:
+        # A new session leader acquires the slave as its controlling terminal on open.
+        command = ["/bin/sh", "-c", 'exec 3<"$1"; echo ready; read line', "sh", os.ttyname(slave)]
+        with subprocess.Popen(command, start_new_session=True, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE) as child:
+            try:
+                assert child.stdout.readline() == b"ready\n"
+                assert tcgetpgrp(Index(master)) == child.pid
+                expect_errno(tcgetpgrp, (child.stdin.fileno(),), errno.ENOTTY)
+            finally:
+                child.communicate(b"done\n")
+            assert child.returncode == 0
+    finally:
+        os.close(slave)
+        os.close(master)
+    expect_errno(tcgetpgrp, (slave,), errno.EBADF)
+
+
 def check_sync(sync):
     with tempfile.TemporaryFile() as file:
         fd = file.fileno()
@@ -288,6 +312,7 @@ def current():
         assert fdatasync is os.fdatasync and fdatasync is posix.fdatasync
         check_sync(fdatasync)
         check_ttyname()
+        check_tcgetpgrp()
         check_tmpfile()
         check_copy_file_range()
         check_sendfile()
