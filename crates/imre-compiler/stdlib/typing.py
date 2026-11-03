@@ -2023,6 +2023,43 @@ class _GenericAlias:
         return _specialize_generic_alias(self, args)
 
 
+class _UnionGenericAliasMeta(type):
+    def __instancecheck__(self, inst: object) -> bool:
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return isinstance(inst, Union)
+
+    def __subclasscheck__(self, inst: type) -> bool:
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return issubclass(inst, Union)
+
+    def __eq__(self, other):
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        if other is _UnionGenericAlias or other is Union:
+            return True
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(Union)
+
+
+class _UnionGenericAlias(metaclass=_UnionGenericAliasMeta):
+    """Compatibility hack.
+
+    A class named _UnionGenericAlias used to be used to implement
+    typing.Union. This class exists to serve as a shim to preserve
+    the meaning of some code that used to use _UnionGenericAlias
+    directly.
+
+    """
+    def __new__(cls, self_cls, parameters, /, *, name=None):
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return Union[parameters]
+
+
 def _concatenate_copy_with(self, params):
     if isinstance(params[-1], (list, tuple)):
         return (*params[:-1], *params[-1])
