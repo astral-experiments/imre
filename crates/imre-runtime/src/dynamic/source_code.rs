@@ -90,6 +90,13 @@ enum FunctionKind {
     Generator,
     GeneratorLambda,
     Coroutine,
+    AsyncGenerator,
+}
+
+impl FunctionKind {
+    fn is_async(self) -> bool {
+        matches!(self, Self::Coroutine | Self::AsyncGenerator)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -151,6 +158,10 @@ enum Instruction {
         end: usize,
     },
     Iter(ast::Expr),
+    AsyncIter(Option<ast::Expr>),
+    AsyncNext,
+    BindAsyncItem(ast::Expr),
+    EndAsyncFor,
     Await(Option<ast::Expr>),
     SaveCallOperand(Option<ast::Expr>),
     SaveCallMethod(ast::ExprAttribute),
@@ -543,7 +554,7 @@ fn unsupported(what: impl std::fmt::Display) -> Error {
 struct SharedConstants<'a> {
     text: HashMap<Cow<'a, str>, Id>,
     surrogate_text: HashMap<Vec<u32>, Id>,
-    string_tuples: HashMap<Vec<Id>, Id>,
+    literal_tuples: HashMap<Vec<Id>, Id>,
 }
 
 /// One literal segment can span multiple adjacent template tokens, including raw ones.
@@ -637,13 +648,13 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(id)
     }
 
-    /// Template strings and equivalent tuple displays load the same code constant.
-    fn string_tuple(&mut self, range: ruff_text_size::TextRange, items: Vec<Id>) -> Result<()> {
-        let id = if let Some(&id) = self.shared.string_tuples.get(&items) {
+    /// Template strings and immutable tuple displays share the same code constant.
+    fn tuple_constant(&mut self, items: Vec<Id>) -> Result<Id> {
+        let id = if let Some(&id) = self.shared.literal_tuples.get(&items) {
             id
         } else {
             self.shared
-                .string_tuples
+                .literal_tuples
                 .try_reserve(1)
                 .map_err(|_| crate::Error::allocation())?;
             let mut tuple = Vec::new();
@@ -652,10 +663,49 @@ impl<'a> CompiledStrings<'a, '_> {
                 .map_err(|_| crate::Error::allocation())?;
             tuple.extend_from_slice(&items);
             let id = self.heap.packed_tuple(tuple, true);
-            self.shared.string_tuples.insert(items, id);
+            self.shared.literal_tuples.insert(items, id);
             id
         };
-        self.constant(range, id)
+        Ok(id)
+    }
+
+    /// Build constants at compilation, including nested tuples whose first evaluation may be later.
+    fn literal(&mut self, expr: &'a ast::Expr) -> Result<Id> {
+        match expr {
+            ast::Expr::NoneLiteral(_) => Ok(NONE),
+            ast::Expr::EllipsisLiteral(_) => Ok(value::ELLIPSIS),
+            ast::Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
+            ast::Expr::StringLiteral(v) => self.literal_text(v),
+            ast::Expr::BytesLiteral(v) => Ok(self.heap.bytes_from_data(v.value.bytes().collect())),
+            ast::Expr::NumberLiteral(v) => {
+                let number = match &v.value {
+                    ast::Number::Float(n) => Value::Float(*n),
+                    ast::Number::Complex { real, imag } => {
+                        Value::Complex(super::complex::Complex {
+                            real: *real,
+                            imag: *imag,
+                        })
+                    }
+                    ast::Number::Int(n) => {
+                        let n = crate::parse_integer_literal(&n.to_string())
+                            .ok_or_else(|| Error::new("ValueError", "invalid integer"))?;
+                        Value::Int(crate::Int::new(n))
+                    }
+                };
+                Ok(self.heap.alloc(number))
+            }
+            ast::Expr::Tuple(tuple) => {
+                let mut items = Vec::new();
+                items
+                    .try_reserve_exact(tuple.elts.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                for item in &tuple.elts {
+                    items.push(self.literal(item)?);
+                }
+                self.tuple_constant(items)
+            }
+            _ => unreachable!("only immutable literal elements form code constants"),
+        }
     }
 
     /// Pool template text by its original Python code points.
@@ -747,7 +797,8 @@ impl<'a> CompiledStrings<'a, '_> {
             .try_reserve(1)
             .map_err(|_| crate::Error::allocation())?;
         items.push(self.template_text(segment)?);
-        self.string_tuple(template.range(), items)
+        let id = self.tuple_constant(items)?;
+        self.constant(template.range(), id)
     }
 
     /// Root a literal for later evaluation at its source position.
@@ -881,10 +932,6 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.visit_expr(elt);
                     continue;
                 }
-                ast::Expr::StringLiteral(literal) => {
-                    let id = self.literal_text(literal)?;
-                    self.constant(literal.range(), id)?;
-                }
                 ast::Expr::FString(formatted) => {
                     for part in formatted.value.iter() {
                         match part {
@@ -898,29 +945,13 @@ impl<'a> CompiledStrings<'a, '_> {
                     }
                 }
                 ast::Expr::TString(template) => self.template_strings(template)?,
-                ast::Expr::Tuple(tuple)
-                    if !tuple.elts.is_empty()
-                        && tuple.elts.iter().all(ast::Expr::is_string_literal_expr) =>
-                {
-                    let mut items = Vec::new();
-                    items
-                        .try_reserve_exact(tuple.elts.len())
-                        .map_err(|_| crate::Error::allocation())?;
-                    for literal in tuple
-                        .elts
-                        .iter()
-                        .filter_map(ast::Expr::as_string_literal_expr)
-                    {
-                        items.push(self.literal_text(literal)?);
-                    }
-                    self.string_tuple(tuple.range(), items)?;
+                ast::Expr::NoneLiteral(_)
+                | ast::Expr::BooleanLiteral(_)
+                | ast::Expr::EllipsisLiteral(_) => {}
+                _ if imre_ast::literal_tuple_element(expr) => {
+                    let id = self.literal(expr)?;
+                    self.constant(expr.range(), id)?;
                     continue;
-                }
-                ast::Expr::BytesLiteral(literal) => {
-                    let id = self
-                        .heap
-                        .alloc(Value::Bytes(literal.value.bytes().collect()));
-                    self.constant(literal.range(), id)?;
                 }
                 _ => {}
             }
@@ -1140,7 +1171,9 @@ impl Program {
                         }
                     }
                 }
-                Instruction::AsyncWithMethods(Some(context)) => strings.visit_expr(context),
+                Instruction::BindAsyncItem(target) => strings.visit_expr(target),
+                Instruction::AsyncWithMethods(Some(context))
+                | Instruction::AsyncIter(Some(context)) => strings.visit_expr(context),
                 Instruction::EnterAsyncWith {
                     target: Some(target),
                     ..
@@ -1288,6 +1321,9 @@ impl Program {
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
                 | Instruction::AsyncWithMethods(None)
+                | Instruction::AsyncIter(None)
+                | Instruction::AsyncNext
+                | Instruction::EndAsyncFor
                 | Instruction::EnterAsyncWith { target: None, .. }
                 | Instruction::ExitWith
                 | Instruction::CallAsyncExit
@@ -1731,7 +1767,7 @@ impl Program {
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) if !function => {
                 return Err(Error::new("SyntaxError", "'yield' outside function"));
             }
-            ast::Expr::Await(a) if self.kind == FunctionKind::Coroutine => {
+            ast::Expr::Await(a) if self.kind.is_async() => {
                 let value = match *a.value {
                     ast::Expr::Call(call) if Self::has_awaited_call_arguments(&call) => {
                         self.lower_awaited_call(call, line);
@@ -1744,8 +1780,7 @@ impl Program {
                 return Ok(None);
             }
             ast::Expr::Call(call)
-                if self.kind == FunctionKind::Coroutine
-                    && Self::has_awaited_call_arguments(&call) =>
+                if self.kind.is_async() && Self::has_awaited_call_arguments(&call) =>
             {
                 self.lower_awaited_call(call, line);
                 return Ok(None);
@@ -1757,7 +1792,9 @@ impl Program {
             }
             value => return Ok(Some(value)),
         };
-        self.kind = FunctionKind::Generator;
+        if self.kind != FunctionKind::AsyncGenerator {
+            self.kind = FunctionKind::Generator;
+        }
         self.instructions.push((line, op));
         Ok(None)
     }
@@ -2104,10 +2141,11 @@ impl Program {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
-                        if imre_ast::code_flags::is_generator(&s.body) {
-                            return Err(unsupported("async generator function"));
-                        }
-                        child.kind = FunctionKind::Coroutine;
+                        child.kind = if imre_ast::code_flags::is_generator(&s.body) {
+                            FunctionKind::AsyncGenerator
+                        } else {
+                            FunctionKind::Coroutine
+                        };
                     }
                     child.lower_namespace(s.body, lines, true)?;
                     for param in s.parameters.iter() {
@@ -2248,27 +2286,56 @@ impl Program {
                     Instruction::Jump(current.head)
                 }
                 Stmt::For(_) | Stmt::While(_) => {
+                    let mut async_target = None;
                     let (body, orelse, guard) = match stmt {
-                        Stmt::For(s) if !s.is_async => {
+                        Stmt::For(s) => {
                             self.declare_target(&s.target)?;
-                            self.instructions.push((line, Instruction::Iter(*s.iter)));
-                            (s.body, s.orelse, Instruction::Next(Some(*s.target), 0))
+                            let guard = if s.is_async {
+                                if !self.kind.is_async() {
+                                    return Err(Error::new(
+                                        "SyntaxError",
+                                        "'async for' outside async function",
+                                    ));
+                                }
+                                let iterable = self.lower_suspension(*s.iter, line, function)?;
+                                self.instructions
+                                    .push((line, Instruction::AsyncIter(iterable)));
+                                async_target = Some(*s.target);
+                                Instruction::EnterExcept { handler: 0, end: 0 }
+                            } else {
+                                self.instructions.push((line, Instruction::Iter(*s.iter)));
+                                Instruction::Next(Some(*s.target), 0)
+                            };
+                            (s.body, s.orelse, guard)
                         }
                         Stmt::While(s) => (s.body, s.orelse, Instruction::Unless(*s.test, 0)),
-                        _ => return Err(unsupported("async for")),
+                        _ => unreachable!("loop statement"),
                     };
                     let head = self.instructions.len();
                     let mut current = LoopJumps {
                         head,
-                        has_iterator: matches!(guard, Instruction::Next(..)),
+                        has_iterator: async_target.is_some()
+                            || matches!(guard, Instruction::Next(..)),
                         breaks: Vec::new(),
                     };
                     self.instructions.push((line, guard));
+                    if let Some(target) = async_target {
+                        // Only GET_ANEXT and its await are protected by END_ASYNC_FOR.
+                        self.instructions.push((line, Instruction::AsyncNext));
+                        self.instructions.push((line, Instruction::Delegate));
+                        self.instructions
+                            .push((line, Instruction::BindAsyncItem(target)));
+                    }
                     self.lower(body, lines, function, Some(&mut current))?;
                     self.instructions.push((line, Instruction::Jump(head)));
                     let other = self.instructions.len();
                     match &mut self.instructions[head].1 {
                         Instruction::Next(_, end) | Instruction::Unless(_, end) => *end = other,
+                        Instruction::EnterExcept { handler, end } => {
+                            *handler = other;
+                            *end = other + 1;
+                            self.instructions.push((line, Instruction::EndAsyncFor));
+                        }
                         _ => unreachable!("loop guard"),
                     }
                     self.lower(orelse, lines, function, active.as_deref_mut())?;
@@ -2283,7 +2350,7 @@ impl Program {
                     continue;
                 }
                 Stmt::With(s) => {
-                    if s.is_async && self.kind != FunctionKind::Coroutine {
+                    if s.is_async && !self.kind.is_async() {
                         return Err(Error::new(
                             "SyntaxError",
                             "'async with' outside async function",
@@ -3013,6 +3080,7 @@ impl Context {
                     imre_ast::code_flags::GENERATOR
                 }
                 FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
+                FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
                 FunctionKind::Plain => 0,
             },
             flags_complete: false,
@@ -3562,6 +3630,8 @@ impl Context {
             Ok(if kind == FunctionKind::Coroutine {
                 let origin = self.coroutine_origin();
                 self.alloc(Value::Coroutine { frame, origin })
+            } else if kind == FunctionKind::AsyncGenerator {
+                self.async_generator(frame)
             } else {
                 frame
             })
@@ -3757,6 +3827,28 @@ impl Context {
         }
     }
 
+    fn source_frame_error(&mut self, error: Error, code: Id) -> Error {
+        match &self.code_object(code).body {
+            // Unlike generator defs and genexprs, generator lambdas have no StopIteration handler.
+            Body::Source(program) if program.kind == FunctionKind::GeneratorLambda => error,
+            Body::Source(program) if program.kind == FunctionKind::AsyncGenerator => {
+                let message = if self.is_builtin_error(&error, "StopAsyncIteration") {
+                    "async generator raised StopAsyncIteration"
+                } else if self.is_builtin_error(&error, "StopIteration") {
+                    "async generator raised StopIteration"
+                } else {
+                    return error;
+                };
+                let cause = self.raised_instance(error);
+                let mut converted = Error::new("RuntimeError", message);
+                converted.tracing().cause = Some(cause);
+                converted.context = cause;
+                converted
+            }
+            _ => self.frame_error(error, code),
+        }
+    }
+
     /// Resume one frame, retaining its running state while a delegated child executes.
     fn resume_source_frame(
         &mut self,
@@ -3818,15 +3910,10 @@ impl Context {
                     && cursor.thrown.is_none();
                 self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             })
-            .map_err(|error| {
-                // CPython emits the StopIteration handler for generator defs and genexprs,
-                // but a lambda that yields lets the original exception escape.
-                if matches!(&self.code_object(code).body, Body::Source(p) if p.kind == FunctionKind::GeneratorLambda) {
-                    error
-                } else {
-                    self.frame_error(error, code)
-                }
-            });
+            .map_err(|error| self.source_frame_error(error, code));
+        // The public async-generator object owns its first-iteration/finalization hooks.
+        let async_generator =
+            self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
         let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
             if matches!(&self.code_object(code).body, Body::Source(program)
                 if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate)))));
@@ -3853,7 +3940,7 @@ impl Context {
                 *offset = Some(ip);
                 *iterators = active;
                 *protected = blocks;
-                if needs_finalizer {
+                if needs_finalizer && !async_generator {
                     self.heap.register_finalizer(id);
                 }
                 return Ok(step);
@@ -4002,6 +4089,8 @@ impl Context {
                             | Instruction::Await(None)
                             | Instruction::SaveCallOperand(None)
                             | Instruction::AsyncWithMethods(None)
+                            | Instruction::AsyncIter(None)
+                            | Instruction::BindAsyncItem(_)
                             | Instruction::CallAsyncEnter
                             | Instruction::AwaitWithResult(_)
                             | Instruction::EnterAsyncWith { .. }
@@ -4108,6 +4197,22 @@ impl Context {
                                 destination: end,
                                 pop_iter: false,
                             }
+                        }
+                        Instruction::EndAsyncFor => {
+                            let block = cursor.protected.pop().expect("async for guard");
+                            let Some(Transfer::Raise(exception)) = block.pending else {
+                                unreachable!("async for exception handler");
+                            };
+                            let iter = cursor.iterators.pop().expect("async iterator");
+                            self.release_loop_iterator(iter);
+                            self.heap.weak_edge_removed(iter);
+                            let Value::Raised(error) = self.heap.get(exception) else {
+                                unreachable!("raised iteration error");
+                            };
+                            if self.is_builtin_error(error, "StopAsyncIteration") {
+                                continue;
+                            }
+                            Transfer::Raise(exception)
                         }
                         Instruction::EndFinally => cursor
                             .protected
@@ -4639,8 +4744,24 @@ impl Context {
             | Instruction::EnterExcept { .. }
             | Instruction::StartFinally
             | Instruction::EndFinally
+            | Instruction::EndAsyncFor
             | Instruction::Jump(_)
             | Instruction::Break(_) => unreachable!("source control instruction"),
+            Instruction::AsyncIter(expr) => {
+                let iterable = match expr {
+                    Some(expr) => eval(self, expr)?,
+                    None => std::mem::replace(sent, NONE),
+                };
+                iterators.push(self.async_for_iter(iterable)?);
+            }
+            Instruction::AsyncNext => {
+                let iter = *iterators.last().expect("async iterator");
+                iterators.push(self.async_for_next(iter)?);
+            }
+            Instruction::BindAsyncItem(target) => {
+                cursor.protected.pop().expect("completed async for pull");
+                self.bind_target(code, scope, target, *sent)?;
+            }
             Instruction::Iter(e) => {
                 let value = eval(self, e)?;
                 iterators.push(self.iterator(value)?);
@@ -4741,7 +4862,14 @@ impl Context {
                     .transpose()?
                     .unwrap_or(NONE);
                 return Ok(Some(if matches!(op, Instruction::Yield(_)) {
-                    Step::Yield(v, *ip)
+                    // An await suspends through Delegate. Only a value explicitly yielded by
+                    // the async generator completes its pending __anext__ or asend operation.
+                    let item = if code.kind == FunctionKind::AsyncGenerator {
+                        self.wrap_async_generator_yield(v)
+                    } else {
+                        v
+                    };
+                    Step::Yield(item, *ip)
                 } else {
                     Step::Return(v)
                 }));
@@ -5577,7 +5705,9 @@ impl Context {
                 }
                 Ok(value)
             }
-            Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
+            Expr::StringLiteral(_) | Expr::BytesLiteral(_) | Expr::NumberLiteral(_) => {
+                Ok(code.literals[&expr.range()])
+            }
             Expr::FString(fstring) => {
                 let mark = self.heap.temporary_mark();
                 let mut parts = Vec::new();
@@ -5627,23 +5757,6 @@ impl Context {
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::EllipsisLiteral(_) => Ok(value::ELLIPSIS),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
-            Expr::NumberLiteral(v) => {
-                let value = match &v.value {
-                    ast::Number::Float(value) => Value::Float(*value),
-                    ast::Number::Complex { real, imag } => {
-                        Value::Complex(super::complex::Complex {
-                            real: *real,
-                            imag: *imag,
-                        })
-                    }
-                    ast::Number::Int(n) => {
-                        let n = crate::parse_integer_literal(&n.to_string())
-                            .ok_or_else(|| Error::new("ValueError", "invalid integer"))?;
-                        Value::Int(crate::Int::new(n))
-                    }
-                };
-                Ok(self.alloc(value))
-            }
             Expr::List(v) => {
                 let items = self.source_sequence_items(code, scope, &v.elts)?;
                 Ok(self.alloc(Value::List(items)))

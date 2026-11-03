@@ -20,6 +20,7 @@ pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let class_name = match ctx.heap.get(class).io_kind() {
         Some("BufferedReader") => "_io.BufferedReader",
         Some("BufferedWriter") => "_io.BufferedWriter",
+        Some("BufferedRandom") => "_io.BufferedRandom",
         _ => ctx.class_name(class),
     }
     .to_owned();

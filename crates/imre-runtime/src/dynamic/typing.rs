@@ -689,7 +689,7 @@ fn callable_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>)
     alias(ctx, kind, origin, actual)
 }
 
-fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
+pub(super) fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
     let method = ctx.module_value("typing", name).ok_or_else(|| {
         Error::new(
             "AttributeError",
@@ -787,6 +787,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     | "tuple"
                     | "set"
                     | "frozenset"
+                    | "mappingproxy"
                     | "type"
                     | super::value::REGEX_PATTERN_TYPE
                     | super::value::REGEX_MATCH_TYPE
@@ -3040,7 +3041,9 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
-            if let Some(name) = self.heap.get(base).heap_type() {
+            if let Some(name) = self.heap.get(base).heap_type()
+                && name != super::value::SSL_ERROR_TYPE
+            {
                 return Err(Error::new(
                     "TypeError",
                     format!("type '{name}' is not an acceptable base type"),

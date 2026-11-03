@@ -66,11 +66,15 @@ pub struct CommandFlags {
     /// A missing override lets the runtime select the mode from the startup locale.
     pub utf8_mode: Option<bool>,
     pub warn_default_encoding: bool,
+    /// Command-line or environment warning options make file finalization observable.
+    pub has_warning_options: bool,
     /// Warning options supplied on the command line.
     pub warnoptions: Vec<String>,
     /// Ordered command-line operands used to construct sys._xoptions.
     pub xoptions: Vec<String>,
     pub faulthandler: bool,
+    /// Number of Python frames retained per allocation. Zero disables startup tracing.
+    pub tracemalloc: u16,
 }
 
 /// The in-memory entry and launcher used by a Python-style `-c` invocation.
@@ -310,14 +314,23 @@ fn object_fallback<T>(
         .map(boxed)
         .ok_or_else(|| "could not compile the module entry".to_owned());
     }
+    let tracing = options
+        .python_startup()
+        .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut ordered_command_import = false;
-    let (error, graph) =
+    let (error, graph, traced_typed_entry) =
         match options.load_graph(path, module_root, filesystem, &mut ordered_command_import) {
             Ok(mut graph) => match lower(&mut graph) {
-                Ok(value) => return Ok(value),
-                Err(error) => (error, Some(graph)),
+                Ok(value) if !tracing => return Ok(value),
+                // Typed code passed its ordinary checks. Re-emit its allocations through the heap.
+                Ok(_) => (
+                    "allocation tracing requires a boxed entry".to_owned(),
+                    Some(graph),
+                    true,
+                ),
+                Err(error) => (error, Some(graph), false),
             },
-            Err(error) => (error, None),
+            Err(error) => (error, None, false),
         };
     // Python invocations and explicit object imports enforce annotated calls in
     // the boxed runtime, where their TypeError can be caught by the program.
@@ -331,7 +344,9 @@ fn object_fallback<T>(
         return Err(error);
     }
     let operation = graph.as_ref().and_then(|g| {
-        if g.class_body_error.borrow().as_ref() == Some(&error) {
+        if traced_typed_entry {
+            Some(dynamic::ObjectOperation::TracedEntry)
+        } else if g.class_body_error.borrow().as_ref() == Some(&error) {
             Some(dynamic::ObjectOperation::ClassBody(g))
         } else {
             g.object_builtin_errors

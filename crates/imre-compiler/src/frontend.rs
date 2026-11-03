@@ -302,7 +302,7 @@ impl ClassInfo {
             if class.abstract_methods.is_empty() && !class.bases.is_empty() {
                 types.add_concrete_subclass(id, &class.bases);
             }
-            if let Some(&base) = class.bases.first()
+            if let Some(base) = class.storage_base
                 && !fields[id].starts_with(&fields[base])
             {
                 return Err(graph.modules[class.definition.module].error(
@@ -2396,7 +2396,7 @@ struct Checker<'a> {
     class_receiver: Option<String>,
     /// Earlier assignments in the executing class body shadow module definitions.
     class_lexical: HashSet<String>,
-    super_method_base: Option<usize>,
+    super_method_owner: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
     exception_formatter: Option<bool>,
@@ -2468,7 +2468,7 @@ impl<'a> Checker<'a> {
             class: None,
             class_receiver: None,
             class_lexical: HashSet::new(),
-            super_method_base: None,
+            super_method_owner: None,
             iterator_source: None,
             super_initializer: None,
             exception_formatter: None,
@@ -5700,6 +5700,14 @@ impl<'a> Checker<'a> {
                             .or_else(|| self.fixed_testcase_failure_kind(target))
                         {
                             return Ok(kind);
+                        }
+                        if let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                            name @ ("_pickle.PickleError"
+                            | "_pickle.PicklingError"
+                            | "_pickle.UnpicklingError"),
+                        ))) = self.resolve(target)
+                        {
+                            return Err(self.scoped_builtin_error(name, target));
                         }
                         Err(error(
                             self.source,
@@ -8948,7 +8956,15 @@ impl<'a> Checker<'a> {
             if method.attr.as_str() == "__init__" {
                 return self.call_super_initializer(call);
             }
-            if let Some(base) = self.super_method_base {
+            if let Some(owner) = self.super_method_owner
+                && let Some(storage) = self.classes.declarations.definitions[owner].storage_base
+            {
+                let first = self.classes.declarations.definitions[owner].bases[0];
+                let base = if self.classes.methods[first].contains_key(method.attr.as_str()) {
+                    first
+                } else {
+                    storage
+                };
                 return self.call_super_method(call, method, base);
             }
         }
@@ -11512,6 +11528,17 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
+        // Sealed file handles close on drop without running Python's warning machinery.
+        if !gzip
+            && self
+                .graph
+                .command_startup
+                .as_ref()
+                .is_some_and(|(flags, _)| flags.has_warning_options)
+            && self.unshadowed_builtin(&call.func, "open")
+        {
+            return Err(self.object_builtin_error("open with startup warning filters", call));
+        }
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")
             && args.find_argument_value("opener", 7).is_some()

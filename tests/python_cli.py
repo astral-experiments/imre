@@ -957,6 +957,48 @@ def check_os_abort(imre, run):
     assert result.returncode == -signal.SIGABRT, result
 
 
+def check_tracemalloc_startup(imre, run):
+    probe = (
+        "import sys, tracemalloc; "
+        "print(sys._xoptions, tracemalloc.is_tracing(), tracemalloc.get_traceback_limit())"
+    )
+    for flags, setting in (
+        (("-X", "tracemalloc=2", "-X", "tracemalloc=5"), "3"),
+        (("-E",), "invalid"),
+        (("-I", "-X", "tracemalloc"), "invalid"),
+        (("-X", "tracemalloc=1"), "invalid"),
+        (("-X", "tracemalloc=-1"), ""),
+    ):
+        env = {"PYTHONTRACEMALLOC": setting}
+        expected = run(sys.executable, *flags, "-c", probe, extra=env)
+        actual = run(imre, *flags, "-c", probe, extra=env, timeout=600)
+        assert (actual.returncode, actual.stdout, actual.stderr) == (
+            expected.returncode, expected.stdout, expected.stderr
+        )
+
+    # Reject an out-of-range runtime limit before reading or compiling the entry.
+    if sys.platform.startswith("linux"):
+        for args in (("-c", "if:"), ("missing-tracemalloc-script.py",)):
+            expected = run(sys.executable, "-Xtracemalloc=65536", *args)
+            actual = run(imre, "-Xtracemalloc=65536", *args)
+            assert actual.returncode == expected.returncode == 1 and actual.stdout == expected.stdout == b""
+            # The fatal diagnostic includes the reporting process's thread ID and name.
+            assert actual.stderr.partition(b"Current thread 0x")[0] == expected.stderr.partition(b"Current thread 0x")[0]
+            assert actual.stderr.endswith(b"  <no Python frame>\n"), actual.stderr
+
+    # The ordinary compiler enforces annotated return types before selecting the traced runtime.
+    wrong_return = "def f() -> int:\n    return 'bad'\nprint(f())"
+    ordinary = run(imre, "-c", wrong_return)
+    traced = run(imre, "-Xtracemalloc=1", "-c", wrong_return)
+    assert traced.returncode == ordinary.returncode == 1
+    assert b"annotations are enforced contracts" in ordinary.stderr and traced.stderr == ordinary.stderr
+
+    # This import normally specializes to the typed representation.
+    spec = "from importlib.machinery import ModuleSpec; print(ModuleSpec('sample', None).name)"
+    traced = run(imre, "-Xtracemalloc=1", "-c", spec, timeout=600)
+    assert (traced.returncode, traced.stdout, traced.stderr) == (0, b"sample\n", b"")
+
+
 def check_faulthandler(imre, root, env):
     import resource
     import select
@@ -1249,6 +1291,7 @@ def main():
                 timeout=timeout,
             )
 
+        check_tracemalloc_startup(imre, run)
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
@@ -1314,6 +1357,19 @@ def main():
             assert actual.stdout == "'one\\r'\n''\n'λ'\nEOF\n".encode()
 
         check_command_stdin(imre, run)
+
+        # The Python CLI reports each unclosed file once during interpreter cleanup.
+        resource = root / "resource_warning.py"
+        resource.write_text(
+            "with open(__file__, 'rb') as closed: closed.read(1)\n"
+            "f = open(__file__, 'r+b')\n"
+        )
+        for args in (("-Wd", "-c", f"f = open({str(resource)!r})"), ("-Wd", resource)):
+            expected = run(sys.executable, *args)
+            actual = run(imre, *args, timeout=300)
+            assert expected.returncode == actual.returncode == 0
+            assert expected.stderr.startswith(b"<sys>:0: ResourceWarning: unclosed file ")
+            assert actual.stderr == expected.stderr, (expected.stderr, actual.stderr)
 
         # The binary buffer must work from an ordinary -c command on its own.
         for stream in ("stdout", "stderr"):
@@ -2517,6 +2573,8 @@ def report(text):
             extra={"TZ": "EST5"},
         )
         compare("-IB", fixtures / "boxed_pickle_writer.py")
+        for first in ("_pickle", "pickle"):
+            compare("-IB", fixtures / "pickle_accelerator_writer.py", first, native_timeout=600)
         compare("-IB", "-c", "import io, logging; print(repr(logging.StreamHandler(io.StringIO())))")
         compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); print(bytes(b.getbuffer()))")
         compare(
@@ -2623,8 +2681,25 @@ def report(text):
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         syslog = fixtures / "logging_syslog_datagram.py"
         compare("-IB", syslog, native_args=("run", syslog, "--quiet"), native_timeout=600)
+        if sys.platform in ("linux", "darwin") and importlib.util.find_spec("_ssl"):
+            import ctypes
+            try:
+                ctypes.CDLL("libssl.3.dylib" if sys.platform == "darwin" else "libssl.so.3")
+            except OSError:
+                pass
+            else:
+                bio = fixtures / "ssl_memory_bio.py"
+                compare("-IB", bio, native_args=("run", bio, "--quiet"), native_timeout=600)
         queue_exports = fixtures / "logging_queue_exports.py"
         compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
+        thread_hook_exports = root / "thread_hook_exports.py"
+        thread_hook_exports.write_text(
+            "from threading import ExceptHookArgs, __excepthook__, excepthook\n"
+            "print(ExceptHookArgs((None, None, None, None)).thread is None, excepthook is __excepthook__)\n"
+        )
+        compare("-IB", thread_hook_exports, native_args=("run", thread_hook_exports, "--quiet"), native_timeout=300)
+        plugin.write_bytes((fixtures / "boxed_threading_except_hook.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.current()", native_timeout=300)
         # A from-import elsewhere in the same program would already select the boxed runtime.
         queue_lookup = root / "queue_lookup.py"
         for statement, name in (("import logging.handlers", "logging.handlers"),
@@ -2866,6 +2941,7 @@ for name in ("md4", "ripemd160"):
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
+            "boxed_inspect_getmembers.py",
             "boxed_inspect_getmodule.py",
             "boxed_inspect_stack.py",
             "boxed_inspect_unwrap.py",
@@ -3086,6 +3162,7 @@ for name in ("md4", "ripemd160"):
             "boxed_warning_categories.py",
             "boxed_warnings.py",
             "boxed_warnings_accelerator.py",
+            "boxed_tracemalloc.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_type_namespace.py",
@@ -3267,6 +3344,7 @@ for name in ("md4", "ripemd160"):
             "boxed_source_coroutine.py",
             "boxed_coroutine_origin.py",
             "boxed_anext.py",
+            "boxed_source_async_generator.py",
             "boxed_source_async_with.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",

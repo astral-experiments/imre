@@ -559,7 +559,8 @@ impl Wrapper {
                 if (!line || input.decoded_chunk_nonempty == Some(true))
                     && let Some(part) = input.take(limit, line, w.newline.get(), false)?
                 {
-                    return Ok(ctx.text(part));
+                    drop(input);
+                    return Ok(ctx.alloc(part));
                 }
                 if line && input.decoded_chunk_nonempty == Some(true) {
                     // A consumed line chunk is discarded. An empty decoder result
@@ -637,11 +638,12 @@ impl Wrapper {
             if end {
                 let part = input
                     .take(limit, line, w.newline.get(), true)?
-                    .unwrap_or_default();
+                    .expect("read at EOF returns remaining text");
                 if all {
                     input.after_read_all();
                 }
-                return Ok(ctx.text(part));
+                drop(input);
+                return Ok(ctx.alloc(part));
             }
         }
     }
@@ -686,9 +688,12 @@ fn decode_chunk(
             decoded
         }
     };
+    let storage = ctx
+        .string_storage(decoded)
+        .ok_or_else(|| Error::new("TypeError", "expected str"))?;
     input
         .borrow_mut()
-        .append(ctx.str_value(decoded)?, newline, end)
+        .append(ctx.heap.get(storage), newline, end)
 }
 
 /// Advance the concrete text iterator. Only an empty line restores telling at EOF.

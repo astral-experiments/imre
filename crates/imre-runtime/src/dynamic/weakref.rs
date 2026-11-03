@@ -243,7 +243,7 @@ impl Context {
         }) {
             return;
         }
-        let descriptor = self.alloc(Value::WeakrefDescriptor(class));
+        let descriptor = self.alloc(Value::LayoutDescriptor(class, "__weakref__"));
         self.bind(scope, "__weakref__", descriptor);
     }
 
@@ -296,6 +296,7 @@ impl Context {
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Generator { .. }
+            | Value::AsyncGenerator { .. }
             | Value::Module { .. }
             | Value::Method { .. }
             | Value::Code(_)
@@ -394,7 +395,7 @@ pub(super) fn call(
             let Some((&descriptor, rest)) = args.split_first() else {
                 unreachable!()
             };
-            let Value::WeakrefDescriptor(owner) = *ctx.heap.get(descriptor) else {
+            let Value::LayoutDescriptor(owner, field) = *ctx.heap.get(descriptor) else {
                 unreachable!()
             };
             let name = function.rsplit('.').next().unwrap();
@@ -407,10 +408,14 @@ pub(super) fn call(
             match (name, rest) {
                 ("__get__", [NONE] | [NONE, NONE]) => Err(error("__get__(None, None) is invalid")),
                 ("__get__", [NONE, _]) => Ok(descriptor),
-                ("__get__", [receiver] | [receiver, _]) => ctx.weakref_list(owner, *receiver),
-                ("__set__", [receiver, _]) | ("__delete__", [receiver]) => {
-                    ctx.weakref_list(owner, *receiver)?;
-                    Err(ctx.readonly_weakref(owner))
+                ("__get__", [receiver] | [receiver, _]) => ctx.read_layout_descriptor(owner, field, *receiver),
+                ("__set__", [receiver, value]) => {
+                    ctx.write_layout_descriptor(owner, field, *receiver, Some(*value))?;
+                    Ok(NONE)
+                }
+                ("__delete__", [receiver]) => {
+                    ctx.write_layout_descriptor(owner, field, *receiver, None)?;
+                    Ok(NONE)
                 }
                 _ => {
                     let expected = match name {

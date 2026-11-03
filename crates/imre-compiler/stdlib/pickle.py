@@ -1,6 +1,5 @@
 # Adapted from CPython 3.14.5, Lib/pickle.py (5607950ef232dad16d75c0cf53101d9649d89115).
-# See stdlib/docstrings/LICENSE. The native initializer supplies PickleError,
-# HIGHEST_PROTOCOL and dumps. This module implements the reading side.
+# See stdlib/docstrings/LICENSE. This module implements the reading side.
 
 from copyreg import _inverted_registry, _extension_cache
 import sys
@@ -14,6 +13,20 @@ bytes_types = (bytes, bytearray)
 
 _NoValue = object()
 
+HIGHEST_PROTOCOL = 5
+DEFAULT_PROTOCOL = 5
+
+class PickleError(Exception):
+    """A common base class for the other pickling exceptions."""
+    pass
+
+class PicklingError(PickleError):
+    """This exception is raised when an unpicklable object is passed to the
+    dump() method.
+
+    """
+    pass
+
 class UnpicklingError(PickleError):
     """This exception is raised when there is a problem unpickling an object,
     such as a security violation.
@@ -23,7 +36,7 @@ class UnpicklingError(PickleError):
     and IndexError.
 
     """
-    __module__ = "_pickle"
+    pass
 
 # Pickle opcodes.  See pickletools.py for extensive docs.  The listing
 # here is in kind-of alphabetical order of 1-character pickle code.

@@ -1650,6 +1650,12 @@ def TypeAlias(self, parameters):
     raise TypeError(f"{self} is not subscriptable")
 
 
+def _type_repr(arg):
+    if isinstance(arg, tuple):
+        return '[' + ', '.join(_type_repr(item) for item in arg) + ']'
+    return _annotation_type_repr(arg)
+
+
 def _type_convert(arg, module=None, *, allow_special_forms=False, owner=None):
     if arg is None:
         return type(None)

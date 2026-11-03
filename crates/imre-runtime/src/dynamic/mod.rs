@@ -2,7 +2,9 @@
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
 mod abstract_class;
+mod allocation_traces;
 mod array;
+mod async_generator;
 mod atexit;
 mod builtins;
 mod calls;
@@ -139,6 +141,8 @@ pub(crate) struct Context {
     // Container ancestors visible to a reentrant Python __repr__.
     repr_ancestors: Vec<Id>,
     repr_sequence_words: Option<usize>,
+    // Python alias frames represented by a renderer suspended in a tuple argument callback.
+    suspended_typing_frames: usize,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
@@ -674,6 +678,7 @@ impl Context {
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
                 | Value::ANextAwaitable { .. }
+                | Value::AsyncGeneratorOperation { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -841,6 +846,7 @@ impl Context {
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
                 | Value::ANextAwaitable { .. }
+                | Value::AsyncGeneratorOperation { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -1144,6 +1150,9 @@ impl Context {
             }
             return self.with_weak_target(target, |ctx| ctx.next_item(target));
         }
+        if matches!(self.heap.get(id), Value::AsyncGeneratorOperation { .. }) {
+            return self.call_async_generator_op(id, "__next__", &[]).map(Some);
+        }
         if matches!(self.heap.get(id), Value::ANextAwaitable { .. }) {
             return self.call_anext_method("__next__", &[id]).map(Some);
         }
@@ -1433,6 +1442,7 @@ impl Context {
             Value::AstWalk { .. }
                 | Value::Template { .. }
                 | Value::ANextAwaitable { .. }
+                | Value::AsyncGeneratorOperation { .. }
                 | Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
@@ -2130,6 +2140,10 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == "object" {
+            let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
+            self.builtins.insert("object.__class__".into(), descriptor);
+        }
         if name == "super" {
             let mut entries = Vec::new();
             for name in ["__new__", "__repr__", "__getattribute__", "__init__", "__get__"] {
@@ -2931,6 +2945,9 @@ impl Context {
                     "get_terminal_size",
                     "lockf",
                     "posix_fadvise",
+                    "posix_openpt",
+                    "grantpt",
+                    "unlockpt",
                     "ptsname",
                     "preadv",
                     "pwritev",
@@ -3044,6 +3061,9 @@ impl Context {
                     }
                     for attr in [
                         "get_terminal_size",
+                        "posix_openpt",
+                        "grantpt",
+                        "unlockpt",
                         "ptsname",
                         "preadv",
                         "pwritev",
@@ -3122,7 +3142,7 @@ impl Context {
                 self.bind(scope, "pi", pi);
             }
             #[cfg(unix)]
-            "_ssl" if source.is_none() => stdlib::ssl::provider::objects::install(self, scope)?,
+            "_ssl" if source.is_none() => stdlib::ssl::provider::objects::install(self, module, scope)?,
             #[cfg(unix)]
             "_imre_ssl" if source.is_none() => stdlib::ssl::install(self, scope)?,
             "_hashlib" if source.is_none() => {
@@ -3150,10 +3170,10 @@ impl Context {
                 };
                 let compare = self.lookup_attr(module, attr)?;
                 self.bind(scope, "compare_digest", compare);
-                for member in ["new", "HMAC"] {
-                    let value = stdlib::attribute(self, name, member)?;
-                    self.bind(scope, member, value);
-                }
+                let new = self.alloc(Value::Native("hmac.new".into()));
+                self.bind(scope, "new", new);
+                let hmac = self.builtin("hmac.HMAC");
+                self.bind(scope, "HMAC", hmac);
                 let digest = self.builtin("hmac._digest_native");
                 self.bind(scope, "_digest_native", digest);
             }
@@ -3275,9 +3295,10 @@ impl Context {
             }
             "_locale" => stdlib::locale::install(self, module, scope)?,
             "_warnings" => stdlib::warnings_accel::install(self, module, scope)?,
+            "_tracemalloc" => stdlib::tracemalloc::install(self, module, scope),
             "time" => stdlib::time::install_timezone(self, scope)?,
             "struct" => stdlib::structure::install(self, scope)?,
-            "pickle" => stdlib::pickle::install(self, scope)?,
+            "_pickle" => stdlib::pickle::install(self, module, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),
             "ast" => stdlib::ast::install(self, scope),

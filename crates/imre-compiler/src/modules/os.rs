@@ -283,6 +283,11 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "SEEK_HOLE" => Intrinsic::DescriptorConstant("seek_hole"),
         "dup" => Intrinsic::Fd(FdOperation::Dup),
         "dup2" => Intrinsic::Fd(FdOperation::Dup2),
+        "posix_openpt" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.posix_openpt")
+        }
+        "grantpt" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.grantpt"),
+        "unlockpt" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.unlockpt"),
         "ptsname" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::PtsName),
         "tcgetpgrp" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::TcGetPgrp),
         "ttyname" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.ttyname"),

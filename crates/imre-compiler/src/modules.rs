@@ -162,6 +162,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_opcode_metadata.py",
             include_str!("../stdlib/_opcode_metadata.py"),
         )),
+        "tracemalloc" => Some(("tracemalloc.py", include_str!("../stdlib/tracemalloc.py"))),
         "warnings" => Some((
             "warnings.py",
             include_str!(
@@ -531,6 +532,7 @@ pub(crate) enum IntrinsicModule {
     Marshal,
     Gc,
     Pickle,
+    PickleNative,
     Struct,
     AnnotationLib,
     AnnotationFormat,
@@ -565,6 +567,8 @@ pub(crate) enum IntrinsicModule {
     Time,
     Warnings,
     WarningsNative,
+    Tracemalloc,
+    TracemallocNative,
     Tomli,
     TomliW,
     Shutil,
@@ -1071,6 +1075,7 @@ impl IntrinsicModule {
             "marshal" => Some(Self::Marshal),
             "gc" => Some(Self::Gc),
             "pickle" => Some(Self::Pickle),
+            "_pickle" => Some(Self::PickleNative),
             "struct" => Some(Self::Struct),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
@@ -1093,6 +1098,8 @@ impl IntrinsicModule {
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
             "_warnings" => Some(Self::WarningsNative),
+            "tracemalloc" => Some(Self::Tracemalloc),
+            "_tracemalloc" => Some(Self::TracemallocNative),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
@@ -1311,6 +1318,16 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_codecs.unregister")
             }
             (Self::Pickle, "Pickler") => Intrinsic::PICKLER,
+            (Self::PickleNative, "dumps") => Intrinsic::ScopedObjectExport("_pickle.dumps"),
+            (Self::PickleNative, "PickleError") => {
+                Intrinsic::ScopedObjectExport("_pickle.PickleError")
+            }
+            (Self::PickleNative, "PicklingError") => {
+                Intrinsic::ScopedObjectExport("_pickle.PicklingError")
+            }
+            (Self::PickleNative, "UnpicklingError") => {
+                Intrinsic::ScopedObjectExport("_pickle.UnpicklingError")
+            }
             (Self::Tempfile, "gettempdir") => Intrinsic::ScopedObjectExport("tempfile.gettempdir"),
             (Self::Tempfile, "gettempdirb") => {
                 Intrinsic::ScopedObjectExport("tempfile.gettempdirb")
@@ -1428,6 +1445,10 @@ impl IntrinsicModule {
                 "cache" => crate::ir::LinecacheOperation::Cache,
                 _ => return None,
             }),
+            (Self::Inspect, "getmembers") => Intrinsic::ScopedObjectExport("inspect.getmembers"),
+            (Self::Inspect, "getmembers_static") => {
+                Intrinsic::ScopedObjectExport("inspect.getmembers_static")
+            }
             (Self::Inspect, "isdatadescriptor") => {
                 Intrinsic::ScopedObjectExport("inspect.isdatadescriptor")
             }

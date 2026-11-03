@@ -215,8 +215,34 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
-pub(super) const MAPPING_PROXY_METHODS: &[&str] =
-    &["keys", "values", "items", "get", "copy", "__reversed__"];
+pub(super) const MAPPING_PROXY_METHODS: &[&str] = &[
+    "keys",
+    "values",
+    "items",
+    "get",
+    "copy",
+    "__reversed__",
+    "__class_getitem__",
+];
+
+pub(super) const MAPPING_PROXY_SLOTS: &[&str] = &[
+    "__lt__",
+    "__le__",
+    "__eq__",
+    "__ne__",
+    "__gt__",
+    "__ge__",
+    "__contains__",
+    "__getitem__",
+    "__hash__",
+    "__iter__",
+    "__len__",
+    "__or__",
+    "__ior__",
+    "__repr__",
+    "__ror__",
+    "__str__",
+];
 
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
@@ -225,6 +251,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
         owner,
         "object"
             | "dict"
+            | "mappingproxy"
             | "float"
             | "function"
             | "cell"
@@ -277,6 +304,7 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
                 | "ellipsis"
                 | "code"
                 | "coroutine"
+                | "async_generator"
                 | "cell"
                 | "function"
                 | "module"
@@ -326,6 +354,8 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "generator"
             | "coroutine_wrapper"
             | "anext_awaitable"
+            | "async_generator_asend"
+            | "async_generator_athrow"
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
@@ -650,6 +680,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
+        Value::AsyncGenerator { .. } if super::async_generator::method("async_generator", attr) => {
+            "async_generator"
+        }
+        Value::AsyncGeneratorOperation { kind, .. }
+            if super::async_generator::method(kind.type_name(), attr) =>
+        {
+            kind.type_name()
+        }
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine { .. }
             if super::generator_protocol::coroutine_method("coroutine", attr) =>
@@ -1303,6 +1341,9 @@ pub(super) fn call(
         ctx.add_exception_note(exception, note)?;
         return Ok(NONE);
     }
+    if name == "mappingproxy.__class_getitem__" {
+        return collections::method(ctx, name, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("mappingproxy.")
         && MAPPING_PROXY_METHODS.contains(&method)
     {
@@ -1402,9 +1443,20 @@ pub(super) fn call(
             | "object.__repr__"
             | "object.__str__"
             | "object.__ne__"
+            | "mappingproxy.__lt__"
+            | "mappingproxy.__le__"
+            | "mappingproxy.__eq__"
+            | "mappingproxy.__ne__"
+            | "mappingproxy.__gt__"
+            | "mappingproxy.__ge__"
             | "mappingproxy.__hash__"
             | "mappingproxy.__repr__"
             | "mappingproxy.__str__"
+            | "mappingproxy.__iter__"
+            | "mappingproxy.__len__"
+            | "mappingproxy.__or__"
+            | "mappingproxy.__ror__"
+            | "mappingproxy.__ior__"
             | "super.__repr__"
     ) {
         let (owner, method) = name.split_once('.').unwrap();
@@ -1426,17 +1478,40 @@ pub(super) fn call(
                 "wrapper {method}() takes no keyword arguments"
             )));
         }
-        if method == "__ne__" {
+        let comparison = super::operators::comparison_op(method);
+        if comparison.is_some() || matches!(method, "__or__" | "__ror__" | "__ior__") {
             let [other] = rest else {
                 return Err(type_error(format!(
                     "expected 1 argument, got {}",
                     rest.len()
                 )));
             };
-            return ctx.with_slot_depth(
-                "maximum recursion depth exceeded while calling a Python object",
-                |ctx| ctx.object_ne(receiver, *other),
-            );
+            if owner == "object" {
+                return ctx.with_slot_depth(
+                    "maximum recursion depth exceeded while calling a Python object",
+                    |ctx| ctx.object_ne(receiver, *other),
+                );
+            }
+            if method == "__ior__" {
+                return Err(type_error(
+                    "'|=' is not supported by mappingproxy; use '|' instead",
+                ));
+            }
+            let Value::MappingProxy(mapping) = *ctx.heap.get(receiver) else {
+                unreachable!("validated mapping proxy slot")
+            };
+            if let Some(op) = comparison {
+                return ctx.binary(op, mapping, *other);
+            }
+            let other = match *ctx.heap.get(*other) {
+                Value::MappingProxy(backing) => backing,
+                _ => *other,
+            };
+            return if method == "__ror__" {
+                ctx.binary("|", other, mapping)
+            } else {
+                ctx.binary("|", mapping, other)
+            };
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
@@ -1445,6 +1520,12 @@ pub(super) fn call(
             )));
         }
         if owner == "mappingproxy" {
+            if method == "__iter__" {
+                return ctx.iterator(receiver);
+            }
+            if method == "__len__" {
+                return call(ctx, "len", &[receiver], &[]);
+            }
             if method == "__hash__" {
                 let hash = ctx.dictionary_hash(receiver)?;
                 return Ok(ctx.int(hash));
@@ -1580,6 +1661,29 @@ pub(super) fn call(
                     }
                     1 | 3 => Ok(NONE),
                     _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
+                }
+            }
+            "async_generator" | "async_generator_asend" | "async_generator_athrow"
+                if super::async_generator::method(owner, method) =>
+            {
+                positional(name, kwargs)?;
+                let (min, max) = match method {
+                    "send" | "asend" => (2, 2),
+                    "throw" => (2, 4),
+                    "athrow" => (1, usize::MAX),
+                    _ => (1, 1),
+                };
+                arity(name, args, min, max)?;
+                if ctx.heap.get(args[0]).intrinsic_type_name() != Some(owner) {
+                    return Err(type_error(format!(
+                        "descriptor '{method}' requires a '{owner}' object but received a '{}'",
+                        ctx.type_name(args[0])
+                    )));
+                }
+                if owner == "async_generator" {
+                    ctx.call_async_generator(args[0], method, &args[1..])
+                } else {
+                    ctx.call_async_generator_op(args[0], method, &args[1..])
                 }
             }
             "anext_awaitable" => {
@@ -1732,8 +1836,10 @@ pub(super) fn call(
                     return Ok(receiver);
                 }
                 let value = match ctx.heap.get(storage) {
-                    Value::Bytes(bytes) if bytes.len() <= 1 => return Ok(storage),
-                    Value::Bytes(bytes) => Value::Bytes(super::copy_ids(bytes)?),
+                    Value::Bytes(bytes) => {
+                        let bytes = super::copy_ids(bytes)?;
+                        return Ok(ctx.heap.bytes_from_data(bytes));
+                    }
                     Value::Complex(number) => Value::Complex(*number),
                     _ => unreachable!("descriptor receiver has checked native layout"),
                 };
@@ -1884,7 +1990,7 @@ pub(super) fn call(
             }
             "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
-            "function" | "cell" if method == "__new__" => {
+            "function" | "cell" | "mappingproxy" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
                     return Err(type_error(format!(
                         "{owner}.__new__(): not enough arguments"

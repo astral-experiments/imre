@@ -56,6 +56,8 @@ pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 const EMPTY_TUPLE: Id = 5;
 
+pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
+
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const REGEX_SCANNER_TYPE: &str = "_sre.SRE_Scanner";
@@ -282,13 +284,7 @@ impl Context {
                 continue;
             }
             let code = self.code_object(frame.code);
-            let line = match (frame.expression, &code.body) {
-                (ExpressionPosition::Line(line), _) => line,
-                (ExpressionPosition::Source { offset, .. }, Body::Source(program)) => {
-                    program.expression_line(offset).unwrap_or(location.line)
-                }
-                _ => location.line,
-            };
+            let line = frame.line(&self.heap, location);
             let (file, name) = (code.filename, code.name);
             let line = self.int(i64::from(line));
             frames.push(self.alloc(Value::Tuple(vec![file, line, name])));
@@ -590,7 +586,10 @@ impl Context {
             Value::Partial { .. } => "partial",
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::KeyWrapper { .. } => "functools.KeyWrapper",
-            Value::Raised(error) => &error.kind,
+            Value::Raised(error) => error
+                .class()
+                .and_then(|class| self.heap.get(class).heap_type())
+                .unwrap_or(&error.kind),
             Value::Module {
                 constructor: None, ..
             } => "module",
@@ -864,12 +863,23 @@ impl std::ops::Deref for BoxedTextFile {
 pub(super) enum NativeModuleState {
     LocaleError(Id),
     IsoCalendarDate(Id),
+    SslError(Id),
+    PickleWriter {
+        pickling_error: Id,
+        dispatch_table: Id,
+    },
 }
 
 impl NativeModuleState {
-    fn class(self) -> Id {
+    fn references(self, visit: &mut MarkQueue<'_>) {
         match self {
-            Self::LocaleError(class) | Self::IsoCalendarDate(class) => class,
+            Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => {
+                visit.push(class)
+            }
+            Self::PickleWriter {
+                pickling_error,
+                dispatch_table,
+            } => visit.extend([pickling_error, dispatch_table]),
         }
     }
 }
@@ -944,6 +954,8 @@ pub(super) enum Value {
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
+    #[cfg(unix)]
+    MemoryBio(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::Bio>>),
     #[cfg(unix)]
     TlsContext(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::Context>>),
     #[cfg(unix)]
@@ -1022,6 +1034,18 @@ pub(super) enum Value {
         origin: Id,
     },
     CoroutineWrapper(Id),
+    AsyncGenerator {
+        frame: Id,
+        running: bool,
+        closed: bool,
+        finalizer: Option<Id>,
+    },
+    AsyncGeneratorOperation {
+        generator: Id,
+        kind: super::async_generator::Operation,
+        state: super::async_generator::State,
+    },
+    AsyncGeneratorYield(Id),
     ANextAwaitable {
         wrapped: Id,
         default: Id,
@@ -1131,7 +1155,7 @@ pub(super) enum Value {
         dictionary: Id,
     },
     Property(super::property::Property),
-    WeakrefDescriptor(Id),
+    LayoutDescriptor(Id, &'static str),
     GetSetDescriptor {
         get: Id,
         set: Option<Id>,
@@ -1305,6 +1329,8 @@ impl Value {
         Some(match self {
             Self::Selector(handle) => handle.borrow().class_name(),
             #[cfg(unix)]
+            Self::MemoryBio(_) => "_ssl.MemoryBIO",
+            #[cfg(unix)]
             Self::TlsContext(_) => "_imre_ssl.Context",
             #[cfg(unix)]
             Self::TlsSession(_) => "_imre_ssl.Session",
@@ -1325,7 +1351,7 @@ impl Value {
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
             Self::HeapTypeMethod {
-                name: "__repr__", ..
+                name: "__repr__" | "__str__", ..
             } => "wrapper_descriptor",
             Self::HeapTypeMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
@@ -1377,6 +1403,9 @@ impl Value {
             Self::Generator { .. } => "generator",
             Self::Coroutine { .. } => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
+            Self::AsyncGenerator { .. } => "async_generator",
+            Self::AsyncGeneratorOperation { kind, .. } => kind.type_name(),
+            Self::AsyncGeneratorYield(_) => "async_generator_wrapped_value",
             Self::ANextAwaitable { .. } => "anext_awaitable",
             Self::NoDefault => "NoDefaultType",
             Self::TypeAlias { .. } => "typing.TypeAliasType",
@@ -1400,7 +1429,7 @@ impl Value {
             },
             Self::StaticMethod { .. } => "staticmethod",
             Self::Property(_) => "property",
-            Self::GetSetDescriptor { .. } | Self::WeakrefDescriptor(_) => "getset_descriptor",
+            Self::GetSetDescriptor { .. } | Self::LayoutDescriptor(..) => "getset_descriptor",
             Self::Traceback { .. } => "traceback",
             Self::PythonFrame { .. } => "frame",
             _ => return None,
@@ -1669,13 +1698,30 @@ impl Value {
                 ..
             } => {
                 visit.push(*scope);
-                visit.extend(module_state.map(NativeModuleState::class));
+                if let Some(state) = module_state {
+                    state.references(visit);
+                }
                 visit.extend(origin);
                 visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
             Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
             Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
+            Self::AsyncGenerator {
+                frame, finalizer, ..
+            } => {
+                visit.push(*frame);
+                visit.extend(finalizer);
+            }
+            Self::AsyncGeneratorOperation {
+                generator, kind, ..
+            } => {
+                visit.push(*generator);
+                if let Some(argument) = kind.argument() {
+                    visit.push(argument);
+                }
+            }
+            Self::AsyncGeneratorYield(item) => visit.push(*item),
             Self::ANextAwaitable { wrapped, default } => visit.extend([*wrapped, *default]),
             Self::Function {
                 closure,
@@ -1853,7 +1899,7 @@ impl Value {
             } => visit.extend([*callable, *dictionary]),
             Self::Property(property) => property.children(visit),
             Self::Weak(wr) => visit.push(wr.callback),
-            Self::WeakrefDescriptor(owner) => visit.push(*owner),
+            Self::LayoutDescriptor(owner, _) => visit.push(*owner),
             Self::GetSetDescriptor { get, set, .. } => {
                 visit.push(*get);
                 visit.extend(*set);
@@ -1956,7 +2002,7 @@ impl Value {
             | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
-            Self::TlsContext(_) | Self::TlsSession(_) => {}
+            Self::MemoryBio(_) | Self::TlsContext(_) | Self::TlsSession(_) => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
@@ -2373,10 +2419,13 @@ impl CycleSet {
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
     slots: Vec<Slot>,
+    pub(super) allocation_traces: super::allocation_traces::AllocationTraces,
+    pub(super) loading_linked_constant: bool,
     // Keep the collector's links contiguous so it can scan marks without loading every Value.
     traces: Vec<Cell<usize>>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
+    short_bytes: HashMap<Option<u8>, Id>,
     full_collection: Option<CycleSet>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
@@ -2460,6 +2509,21 @@ struct Frame {
 }
 
 impl Frame {
+    fn line(&self, heap: &Heap, location: &Location) -> u32 {
+        match self.expression {
+            ExpressionPosition::Line(line) => line,
+            ExpressionPosition::Source { offset, .. } => {
+                if let Value::Code(code) = heap.get(self.code)
+                    && let Body::Source(program) = &code.body
+                {
+                    return program.expression_line(offset).unwrap_or(location.line);
+                }
+                location.line
+            }
+            ExpressionPosition::Statement => location.line,
+        }
+    }
+
     fn new(scope: Id, code: Id, owner: FrameOwner, inherited: Id) -> Self {
         Self {
             owner,
@@ -2573,9 +2637,12 @@ impl Heap {
         let mut heap = Self {
             traces: vec![Cell::new(UNMARKED); slots.len()],
             slots,
+            allocation_traces: Default::default(),
+            loading_linked_constant: false,
             gc_order: GcOrder::EMPTY,
             full_collection: None,
             linked_string_constants: HashMap::new(),
+            short_bytes: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
             abc_subclass_cache: HashMap::new(),
@@ -2792,9 +2859,13 @@ impl Heap {
         if let Value::Str(text) = &value
             && let Some(owner) = crate::objects::short_string(text)
         {
-            return self.intern_literal(owner);
+            return self.intern_literal(owner, true);
         }
-        self.alloc_slot(value)
+        match value {
+            Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
+            Value::Tuple(items) if items.is_empty() => EMPTY_TUPLE,
+            value => self.alloc_slot(value),
+        }
     }
 
     /// Linked code owns these immutable constants for the lifetime of its context.
@@ -2832,6 +2903,21 @@ impl Heap {
         id
     }
 
+    /// Reuse CPython's empty and one-byte singletons when copying known byte data.
+    /// Allocating an uninitialized one-byte result (for example, bytes(1)) is distinct.
+    pub(super) fn bytes_from_data(&mut self, bytes: Vec<u8>) -> Id {
+        if bytes.len() > 1 {
+            return self.alloc_slot(Value::Bytes(bytes));
+        }
+        let byte = bytes.first().copied();
+        if let Some(&id) = self.short_bytes.get(&byte) {
+            return id;
+        }
+        let id = self.alloc_slot_with_trace(Value::Bytes(bytes), false);
+        self.short_bytes.insert(byte, id);
+        id
+    }
+
     /// Allocate a distinct string result even when its value is a cached Latin-1 character.
     pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
         debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
@@ -2862,6 +2948,13 @@ impl Heap {
     }
 
     fn alloc_slot(&mut self, value: Value) -> Id {
+        self.alloc_slot_with_trace(value, true)
+    }
+
+    fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
+        let trace = trace
+            && self.allocation_traces.is_tracing()
+            && !matches!(&value, Value::Int(n) if matches!(n.as_small(), Some(-5..=256)));
         let has_gc_header = value.has_gc_header(self);
         let index = if self.free_head != END {
             let index = self.free_head;
@@ -2892,19 +2985,32 @@ impl Heap {
         }
         self.slots[index].finalization = Finalization::None;
         let id = index as Id;
+        if trace {
+            if self.loading_linked_constant {
+                self.allocation_traces.record_linked(id);
+            } else {
+                self.allocation_traces.record(
+                    id,
+                    self.frames.iter().rev().filter_map(|frame| {
+                        let location = frame.location.as_ref()?;
+                        Some((location.file.as_ref(), frame.line(self, location)))
+                    }),
+                );
+            }
+        }
         self.keep(id);
         id
     }
 
     /// A code literal and every occurrence of a Latin-1 character share their Python handle.
-    fn intern_literal(&mut self, owner: crate::StrOwner) -> Id {
+    fn intern_literal(&mut self, owner: crate::StrOwner, static_character: bool) -> Id {
         if let Some(entry) = self.interned.get_mut(&owner) {
             entry.literal = true;
             let id = entry.id;
             self.keep(id);
             return id;
         }
-        let id = self.alloc_slot(Value::Str(owner.to_string()));
+        let id = self.alloc_slot_with_trace(Value::Str(owner.to_string()), !static_character);
         self.interned
             .insert(owner, InternedString { id, literal: true });
         id
@@ -2918,12 +3024,19 @@ impl Heap {
             self.keep(id);
             return id;
         }
-        self.intern_literal(crate::sys::intern_owner(&crate::objects::literal_string(
-            text,
-        )))
+        if let Some(owner) = crate::objects::short_string(text) {
+            return self.intern_literal(owner, true);
+        }
+        self.intern_literal(
+            crate::sys::intern_owner(&crate::objects::literal_string(text)),
+            false,
+        )
     }
 
     pub fn string_literal(&mut self, text: &str) -> Result<Id> {
+        if let Some(owner) = crate::objects::short_string(text) {
+            return Ok(self.intern_literal(owner, true));
+        }
         let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
         if intern && let Some(entry) = self.interned.get_mut(text) {
             entry.literal = true;
@@ -3537,6 +3650,7 @@ impl Heap {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_string_constants.values().copied());
+        pending.extend(self.short_bytes.values().copied());
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned
@@ -3720,6 +3834,26 @@ impl Heap {
             }
         }
         if remaining == 0 {
+            return Ok(None);
+        }
+        // Closing a bound text stream can leave its wrapper, buffer and raw file alive.
+        // Re-read both native edges and the frame binding before ruling out finalization.
+        if remaining <= 3
+            && self.ordinary_finalizers.iter().any(|&owner| {
+                !stdin.is_some_and(|input| input.contains(&owner))
+                    && super::stdlib::io::text_descriptor_chain(self, owner).is_some_and(|chain| {
+                        self.ordinary_finalizers.iter().all(|id| {
+                            chain.contains(id) || stdin.is_some_and(|input| input.contains(id))
+                        }) && (self.bound_in_active_frame(owner)
+                            || self.frames.iter().any(|frame| {
+                                // Materialized scopes can retain additional native local names.
+                                matches!(self.get(frame.scope), Value::Scope(scope)
+                                    if scope.namespace.is_some()
+                                        && scope.names.values().any(|&bound| bound == owner))
+                            }))
+                    })
+            })
+        {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
@@ -3979,20 +4113,47 @@ impl Heap {
     /// A prompt collection models a reference decrement. Preserve cycles until
     /// an automatic or explicit full collection, including cycles created in callbacks.
     pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<WeakCallbacks> {
-        let Ok(mut cycles) = CycleSet::new(self.slots.len()) else {
+        self.mark_reference_roots(globals, None);
+        let small = self.small_unreachable();
+        let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
+        let Ok(mut cycles) = CycleSet::new(size) else {
+            for trace in &self.traces {
+                trace.set(UNMARKED);
+            }
             self.collect_next_statement = true;
             return None;
         };
-        self.mark_reference_survivors(globals, &mut cycles, None);
+        if let Some(slots) = small {
+            self.mark_cycles(
+                &mut cycles,
+                |index| slots[index],
+                |slot| {
+                    slots
+                        .binary_search(&slot)
+                        .expect("unmarked child is a candidate")
+                },
+            );
+        } else {
+            self.mark_cycles(&mut cycles, std::convert::identity, std::convert::identity);
+        }
         self.sweep()
     }
 
-    fn mark_reference_survivors(
-        &self,
-        globals: impl Iterator<Item = Id>,
-        cycles: &mut CycleSet,
-        releasing: Option<Id>,
-    ) {
+    /// Keep cycle scratch proportional to the garbage when most occupied slots are reachable.
+    fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
+        let mut slots = smallvec::SmallVec::new();
+        for (id, trace) in self.traces.iter().enumerate() {
+            if trace.get() == UNMARKED && self.slots[id].value.is_some() {
+                if slots.len() == 256 {
+                    return None;
+                }
+                slots.push(id);
+            }
+        }
+        Some(slots)
+    }
+
+    fn mark_reference_roots(&self, globals: impl Iterator<Item = Id>, releasing: Option<Id>) {
         // A weakref callback can drop an unrelated owner. Keep its graph intact
         // for Python dispatch when this sweep releases temporary callback roots.
         self.mark(
@@ -4003,11 +4164,29 @@ impl Heap {
                     .filter(|id| Some(*id) != releasing),
             ),
         );
-        self.identify_cycles(cycles);
+    }
+
+    fn mark_reference_survivors(
+        &self,
+        globals: impl Iterator<Item = Id>,
+        cycles: &mut CycleSet,
+        releasing: Option<Id>,
+    ) {
+        self.mark_reference_roots(globals, releasing);
+        self.mark_cycles(cycles, std::convert::identity, std::convert::identity);
+    }
+
+    fn mark_cycles(
+        &self,
+        cycles: &mut CycleSet,
+        slot_at: impl Fn(usize) -> usize,
+        index_of: impl Fn(usize) -> usize,
+    ) {
+        self.identify_indexed_cycles(cycles, &slot_at, index_of);
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
-        for id in cycles.members() {
-            self.traces[id as usize].set(END);
+        for index in cycles.members() {
+            self.traces[slot_at(index as usize)].set(END);
         }
     }
 
@@ -4115,6 +4294,15 @@ impl Heap {
     /// dead objects that refcounting alone would release from the Python GC count.
     /// The incoming counts must start at zero.
     fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
+        self.identify_indexed_cycles(cycles, std::convert::identity, std::convert::identity)
+    }
+
+    fn identify_indexed_cycles(
+        &self,
+        cycles: &mut CycleSet,
+        slot_at: impl Fn(usize) -> usize,
+        index_of: impl Fn(usize) -> usize,
+    ) -> Option<Id> {
         let mut first_finalizer = None;
         let CycleSet {
             incoming,
@@ -4122,13 +4310,14 @@ impl Heap {
             ..
         } = cycles;
         unowned.clear();
-        for (id, slot) in self.slots.iter().enumerate() {
+        for index in 0..incoming.len() {
+            let id = slot_at(index);
             if self.traces[id].get() == UNMARKED
-                && let Some(value) = &slot.value
+                && let Some(value) = &self.slots[id].value
             {
                 // Count the candidate itself so that zero denotes a vacant or reachable slot.
-                incoming[id] += 1;
-                self.unreachable_children(value, |child| incoming[child] += 1);
+                incoming[index] += 1;
+                self.unreachable_children(value, |child| incoming[index_of(child)] += 1);
             }
         }
         for (id, count) in incoming.iter_mut().enumerate() {
@@ -4139,11 +4328,13 @@ impl Heap {
                 }
             }
         }
-        while let Some(id) = unowned.pop() {
+        while let Some(index) = unowned.pop() {
+            let id = slot_at(index);
             if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
                 first_finalizer = Some(id as Id);
             }
             self.unreachable_children(self.slots[id].value.as_ref().unwrap(), |child| {
+                let child = index_of(child);
                 incoming[child] -= 1;
                 if incoming[child] == 0 {
                     unowned.push(child);
@@ -4459,6 +4650,8 @@ impl Heap {
             self.traces[owner as usize].get() != UNMARKED
                 && self.traces[member as usize].get() != UNMARKED
         });
+        self.allocation_traces
+            .retain_live(|id| self.traces[id as usize].get() != UNMARKED);
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for id in 0..self.slots.len() {
@@ -4488,6 +4681,27 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reusing_an_object_slot_replaces_its_allocation_trace() {
+        let mut heap = Heap::new();
+        heap.allocation_traces.start(1);
+        let mut location = Location {
+            file: "test.py".into(),
+            line: 1,
+            span: None,
+        };
+        heap.publish_statement(&[], location.clone(), NONE);
+        let first = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(heap.allocation_traces.get(first).unwrap()[0].1, 1);
+        location.line = 2;
+        heap.publish_statement(&[], location, NONE);
+        heap.collect(std::iter::empty());
+        assert!(heap.allocation_traces.get(first).is_none());
+        let next = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(next, first);
+        assert_eq!(heap.allocation_traces.get(next).unwrap()[0].1, 2);
+    }
 
     #[test]
     fn removing_heap_slots_preserves_collection_order() {
@@ -4826,6 +5040,47 @@ mod reachability_tests {
         }
         heap.begin_collection(std::iter::empty(), 2).unwrap();
         assert_eq!(heap.finish_full_collection(std::iter::empty()).0, 3);
+    }
+
+    #[test]
+    fn prompt_cycles_preserve_descendants_and_release_acyclic_peers_at_both_sizes() {
+        for garbage in [4, 256, 257] {
+            let mut heap = Heap::new();
+            let mark = heap.temporary_mark();
+            let dead: Vec<_> = (0..garbage)
+                .map(|_| heap.alloc(Value::List(Vec::new())))
+                .collect();
+            let cycle = dead[0];
+            let child = dead[1];
+            let root = dead[2];
+            let peer = dead[3];
+            let Value::List(edges) = heap.get_mut(cycle) else {
+                unreachable!()
+            };
+            edges.extend([cycle, child, child]);
+            let Value::List(edges) = heap.get_mut(peer) else {
+                unreachable!()
+            };
+            edges.extend([root, root]);
+            heap.release_temporaries_since(mark);
+            heap.collect(std::iter::empty());
+            assert!(heap.slots[cycle as usize].value.is_some());
+            assert!(heap.slots[child as usize].value.is_some());
+            assert!(
+                dead[2..]
+                    .iter()
+                    .all(|&slot| heap.slots[slot as usize].value.is_none())
+            );
+
+            // A former cycle may lose its last back edge between prompt collections.
+            let Value::List(edges) = heap.get_mut(cycle) else {
+                unreachable!()
+            };
+            edges.clear();
+            heap.collect(std::iter::empty());
+            assert!(heap.slots[cycle as usize].value.is_none());
+            assert!(heap.slots[child as usize].value.is_none());
+        }
     }
 
     #[test]

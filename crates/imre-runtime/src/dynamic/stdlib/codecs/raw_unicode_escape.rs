@@ -19,7 +19,7 @@ pub(super) fn encode(ctx: &mut Context, input: Id) -> Result<Id> {
             )));
         }
     };
-    Ok(ctx.alloc(Value::Bytes(output)))
+    Ok(ctx.heap.bytes_from_data(output))
 }
 
 fn encode_points(points: impl Iterator<Item = u32>) -> Result<Vec<u8>> {

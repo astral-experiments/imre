@@ -5,13 +5,11 @@
 //! addition per iteration. Its accumulator identity carries the resulting
 //! induction proof; ordinary interval widening is never treated as that proof.
 
-use std::collections::HashMap;
-
 use crate::ir::{
     Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
 };
 use crate::list_bounds::block_readonly;
-use crate::ranges::{IntRange, RangeFacts};
+use crate::ranges::{IntRange, IntegerFacts};
 
 const MIN_SMALL: i128 = -(1_i128 << 62);
 const MAX_SMALL: i128 = (1_i128 << 62) - 1;
@@ -33,111 +31,72 @@ impl Initial {
     }
 }
 
-/// Plans against one immutable range snapshot, then installs checked versions.
-/// Expression-scoped loops remain unchanged; private comprehension helpers use
-/// ordinary statement regions and need no broader expression-flow inference.
+/// Rewrites eligible statement loops using the integer bounds of their original addends.
+/// Expression-scoped loops do not have statement-level entry facts.
 pub(crate) fn specialize(module: &mut Module) {
-    let ranges = crate::ranges::analyze(module);
-    let mut plans = HashMap::new();
-    for function in module.functions.iter().chain([&module.entry]) {
+    let ranges = crate::ranges::analyze(module).into_original_integers();
+    for function in module.functions.iter_mut().chain([&mut module.entry]) {
         if function.expression_rebound().into_iter().any(|value| value) {
             continue;
         }
-        collect(
-            &function.body,
+        rewrite(
+            &mut function.body,
             &mut vec![Initial::Unknown; function.locals.len()],
             &ranges,
-            &mut plans,
         );
-    }
-    drop(ranges);
-    for function in module.functions.iter_mut().chain([&mut module.entry]) {
-        install(&mut function.body, &mut plans);
     }
 }
 
-fn collect(
-    body: &[Statement],
-    initial: &mut [Initial],
-    ranges: &RangeFacts<'_>,
-    plans: &mut HashMap<*const Statement, Statement>,
-) {
+/// Tracks incoming local values and visits each original loop before its children.
+fn rewrite(body: &mut [Statement], initial: &mut [Initial], ranges: &IntegerFacts) {
     for statement in body {
         match statement {
             Statement::Assign(slot, value) => {
+                let slot = *slot;
                 let value = initial_value(value, initial);
                 invalidate(std::slice::from_ref(statement), initial);
-                initial[*slot] = value;
+                initial[slot] = value;
             }
             Statement::Move(target, source) => {
+                let target = *target;
                 let value = initial[*source];
                 invalidate(std::slice::from_ref(statement), initial);
-                initial[*target] = value;
+                initial[target] = value;
             }
             Statement::Scope { body, clear } => {
-                collect(body, initial, ranges, plans);
-                for &slot in clear {
+                rewrite(body, initial, ranges);
+                for &slot in clear.iter() {
                     invalidate_slot(slot, initial);
                 }
             }
             Statement::If(test, yes, no) => {
                 invalidate(&[Statement::Expr(test.clone())], initial);
                 let mut other = initial.to_vec();
-                collect(yes, initial, ranges, plans);
-                collect(no, &mut other, ranges, plans);
+                rewrite(yes, initial, ranges);
+                rewrite(no, &mut other, ranges);
                 for (left, right) in initial.iter_mut().zip(other) {
                     if *left != right {
                         *left = Initial::Unknown;
                     }
                 }
             }
-            Statement::While(_, body, orelse) => {
-                if let Some(version) = version(statement, initial, ranges) {
-                    plans.insert(std::ptr::from_ref(statement), version);
+            Statement::While(..) | Statement::For { .. } | Statement::Try { .. } => {
+                let replacement = version(statement, initial, ranges);
+                if matches!(statement, Statement::Try { .. }) {
+                    initial.fill(Initial::Unknown);
+                } else {
+                    invalidate(std::slice::from_ref(statement), initial);
                 }
-                collect(
-                    body,
-                    &mut vec![Initial::Unknown; initial.len()],
-                    ranges,
-                    plans,
-                );
-                collect(
-                    orelse,
-                    &mut vec![Initial::Unknown; initial.len()],
-                    ranges,
-                    plans,
-                );
-                invalidate(std::slice::from_ref(statement), initial);
-            }
-            Statement::For { body, orelse, .. } => {
-                for body in [body, orelse] {
-                    collect(
-                        body,
-                        &mut vec![Initial::Unknown; initial.len()],
-                        ranges,
-                        plans,
-                    );
+                if let Some((guard, fast)) = replacement {
+                    let fallback = std::mem::replace(statement, Statement::Break);
+                    *statement = Statement::If(guard, vec![fast], vec![fallback]);
+                } else {
+                    crate::ir::statement_children_mut(statement, |child| {
+                        if let crate::ir::ChildMut::Suite(body) = child {
+                            rewrite(body, &mut vec![Initial::Unknown; initial.len()], ranges);
+                        }
+                    });
                 }
-                invalidate(std::slice::from_ref(statement), initial);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                for body in [body, orelse, finalbody]
-                    .into_iter()
-                    .chain(handlers.iter().map(|handler| &handler.body))
-                {
-                    collect(
-                        body,
-                        &mut vec![Initial::Unknown; initial.len()],
-                        ranges,
-                        plans,
-                    );
-                }
-                initial.fill(Initial::Unknown);
             }
             _ => invalidate(std::slice::from_ref(statement), initial),
         }
@@ -190,8 +149,8 @@ fn initial_value(value: &Expr, initial: &[Initial]) -> Initial {
 fn version(
     statement: &Statement,
     initial: &[Initial],
-    ranges: &RangeFacts<'_>,
-) -> Option<Statement> {
+    ranges: &IntegerFacts,
+) -> Option<(Expr, Statement)> {
     let Statement::While(test, body, _) = statement else {
         return None;
     };
@@ -232,7 +191,7 @@ fn version(
     };
     prove_prefix_reads(&mut body[..advance], source, cursor);
     bound_accumulator(body, *accumulator, bounds);
-    Some(Statement::If(
+    Some((
         Expr {
             ty: Type::Bool,
             kind: ExprKind::Compare(
@@ -240,8 +199,7 @@ fn version(
                 vec![Compare::LessEqual],
             ),
         },
-        vec![fast],
-        vec![statement.clone()],
+        fast,
     ))
 }
 
@@ -263,67 +221,20 @@ fn prove_prefix_reads(body: &mut [Statement], source: usize, cursor: usize) {
             return;
         }
         match &mut value.kind {
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression(value, source, cursor);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression(key, source, cursor);
-                    expression(value, source, cursor);
-                }
-            }
-            ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression(value, source, cursor),
             ExprKind::Scope { body, value, .. } => {
                 prove_prefix_reads(body, source, cursor);
                 expression(value, source, cursor);
             }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression(left, source, cursor);
-                expression(right, source, cursor);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression(test, source, cursor);
-                expression(yes, source, cursor);
-                expression(no, source, cursor);
-            }
-            ExprKind::Exception {
-                message: Some(message),
-                ..
-            } => expression(message, source, cursor),
-            // Calls and expression rebinding were rejected before versioning.
-            // Other leaves contain no access to specialize.
-            _ => {}
+            // Bound-method captures are outside the index proof.
+            ExprKind::Callable { .. } => {}
+            _ => crate::ir::children_mut(value, |child| expression(child, source, cursor)),
         }
     }
     for statement in body {
-        match statement {
-            Statement::Assign(_, value)
-            | Statement::Expr(value)
-            | Statement::Return(value)
-            | Statement::Assert(value)
-            | Statement::Raise(Some(value)) => expression(value, source, cursor),
-            Statement::Scope { body, .. } => prove_prefix_reads(body, source, cursor),
-            Statement::If(test, yes, no) => {
-                expression(test, source, cursor);
-                prove_prefix_reads(yes, source, cursor);
-                prove_prefix_reads(no, source, cursor);
-            }
-            // Nested loops, mutation, and try regions cannot pass the proof.
-            // Cleanup and terminal control statements contain no expressions.
-            _ => {}
-        }
+        crate::ir::statement_children_mut(statement, |child| match child {
+            crate::ir::ChildMut::Expression(value) => expression(value, source, cursor),
+            crate::ir::ChildMut::Suite(body) => prove_prefix_reads(body, source, cursor),
+        });
     }
 }
 
@@ -384,7 +295,7 @@ fn find_accumulators(
     initial: &[Initial],
     writes: &[usize],
     cursor: usize,
-    ranges: &RangeFacts<'_>,
+    ranges: &IntegerFacts,
     output: &mut Vec<(usize, IntRange)>,
 ) {
     for statement in body {
@@ -394,7 +305,7 @@ fn find_accumulators(
             {
                 if let ExprKind::Binary(Binary::Add, left, right) = &expression.kind
                     && matches!(left.kind, ExprKind::Local(source) if source == *slot)
-                    && let Some(term) = ranges.integer(right)
+                    && let Some(term) = ranges.get(right)
                 {
                     output.push((*slot, term));
                 }
@@ -462,20 +373,6 @@ pub(crate) fn contains_continue(body: &[Statement]) -> bool {
         }
     });
     found
-}
-
-fn install(body: &mut [Statement], plans: &mut HashMap<*const Statement, Statement>) {
-    for statement in body {
-        if let Some(version) = plans.remove(&std::ptr::from_ref(statement)) {
-            *statement = version;
-            continue;
-        }
-        crate::ir::statement_children_mut(statement, |child| {
-            if let crate::ir::ChildMut::Suite(body) = child {
-                install(body, plans);
-            }
-        });
-    }
 }
 
 fn list_length(value: &Expr) -> Option<usize> {

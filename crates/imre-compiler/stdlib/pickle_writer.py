@@ -1,6 +1,6 @@
 # Adapted from CPython 3.14.5, Lib/pickle.py (5607950ef232dad16d75c0cf53101d9649d89115).
 # See stdlib/docstrings/LICENSE. This source shares the boxed pickle module's
-# opcode constants, native exceptions, and reader helpers.
+# opcode constants, exceptions, and reader helpers.
 
 from types import FunctionType
 from copyreg import dispatch_table, _extension_registry
@@ -1011,6 +1011,10 @@ def _load(file, *, fix_imports=True, encoding="ASCII", errors="strict",
 
 Pickler, Unpickler = _Pickler, _Unpickler
 dump, load = _dump, _load
+try:
+    from _pickle import PickleError, PicklingError, UnpicklingError, dumps
+except ImportError:
+    dumps = _dumps
 
 __all__ = ["PickleError", "PicklingError", "UnpicklingError", "Pickler",
            "Unpickler", "dump", "dumps", "load", "loads"]

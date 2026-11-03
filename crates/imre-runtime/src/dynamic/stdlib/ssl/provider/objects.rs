@@ -5,7 +5,7 @@ use std::ptr::{self, NonNull};
 use super::Api;
 use crate::dynamic::{
     Context, builtins, stdlib,
-    value::{Error, Id, NONE, Result, Value},
+    value::{Error, Id, NONE, NativeModuleState, Result, SSL_ERROR_TYPE, Value},
 };
 
 #[repr(C)]
@@ -18,12 +18,125 @@ unsafe extern "C" {
     fn imre_ssl_options(version: std::ffi::c_ulong, count: *mut usize) -> *const OptionEntry;
 }
 
+pub(in crate::dynamic) fn ssl_error(ctx: &Context, module: Id, message: &str) -> Error {
+    let Value::Module {
+        module_state: Some(NativeModuleState::SslError(class)),
+        ..
+    } = *ctx.heap.get(module)
+    else {
+        unreachable!("a MemoryBIO type retains its _ssl module")
+    };
+    let mut error = Error::new("SSLError", message);
+    error.class = class;
+    error
+}
+
+fn install_ssl_error(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
+    let fields = ctx.scope("ssl", None);
+    for (name, value) in [
+        ("__module__", "ssl"),
+        ("__doc__", "An error occurred in the SSL implementation."),
+    ] {
+        let value = ctx.text(value);
+        ctx.bind(fields, name, value);
+    }
+    let base = ctx.builtin("OSError");
+    let class = ctx.allocate_class("SSLError".into(), fields, vec![base])?;
+    let Value::Class { heap_type, .. } = ctx.heap.get_mut(class) else {
+        unreachable!()
+    };
+    *heap_type = Some(SSL_ERROR_TYPE);
+    let Value::Scope(frame) = ctx.heap.get_mut(fields) else {
+        unreachable!()
+    };
+    let namespace = frame.class_namespace.as_mut().unwrap();
+    namespace.immutable_type = true;
+    namespace.defining_module = Some(module);
+    let slot = ctx.alloc(Value::HeapTypeMethod {
+        owner: class,
+        name: "__str__",
+    });
+    ctx.bind(fields, "__str__", slot);
+    let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
+        unreachable!()
+    };
+    *module_state = Some(NativeModuleState::SslError(class));
+    ctx.bind(scope, "SSLError", class);
+    Ok(())
+}
+
+pub(in crate::dynamic) fn error_str(
+    ctx: &mut Context,
+    owner: Id,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "descriptor '__str__' of 'ssl.SSLError' object needs an argument",
+        ));
+    };
+    if !ctx.instance_of(receiver, owner) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '__str__' requires a 'ssl.SSLError' object but received a '{}'",
+                ctx.type_name(receiver),
+            ),
+        ));
+    }
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "wrapper __str__() takes no keyword arguments",
+        ));
+    }
+    if !rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("expected 0 arguments, got {}", rest.len()),
+        ));
+    }
+    if let Some(message) = ctx.os_attribute(receiver, "strerror")?
+        && ctx.string_storage(message).is_some()
+    {
+        return Ok(message);
+    }
+    let Value::Raised(error) = ctx.heap.get(receiver) else {
+        return Err(Error::new("TypeError", "expected an SSLError instance"));
+    };
+    let args = ctx.exception_argument_tuple(receiver, error.clone());
+    let text = ctx.checked_format(args, false)?;
+    Ok(ctx.text(text))
+}
+
 fn api() -> Result<&'static Api> {
     super::api().ok_or_else(|| Error::new("ImportError", "system TLS provider unavailable"))
 }
 
-pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
+pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
     let api = api()?;
+    // Extension functions retain the module that first installed them.
+    if matches!(
+        ctx.heap.get(module),
+        Value::Module {
+            module_state: None,
+            ..
+        }
+    ) {
+        for name in ["txt2obj", "nid2obj", "get_default_verify_paths"] {
+            let callable = ctx.builtin(&format!("_ssl.{name}"));
+            let function = ctx.alloc(Value::Method {
+                callable,
+                receiver: module,
+                explicit: false,
+            });
+            ctx.bind(scope, name, function);
+        }
+    }
+    install_ssl_error(ctx, module, scope)?;
+    super::bio::install(ctx, module, scope)?;
     // SAFETY: both functions read constants from the process-lifetime loaded provider.
     let (version, number) = unsafe {
         (
@@ -74,10 +187,6 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     }
     let flag = ctx.int(i64::from(super::HOSTFLAG_NEVER_CHECK_SUBJECT));
     ctx.bind(scope, "HOSTFLAG_NEVER_CHECK_SUBJECT", flag);
-    for name in ["txt2obj", "nid2obj"] {
-        let function = ctx.builtin(&format!("_ssl.{name}"));
-        ctx.bind(scope, name, function);
-    }
     let mut count = 0;
     // SAFETY: the header shim returns a nonempty static table with count entries.
     let options = unsafe { imre_ssl_options(number as std::ffi::c_ulong, &mut count) };
@@ -163,13 +272,82 @@ fn unknown_text(text: &CStr) -> Error {
     )
 }
 
+pub(in crate::dynamic) fn function_metadata(symbol: &str, attribute: &str) -> Option<&'static str> {
+    Some(match (symbol, attribute) {
+        ("_ssl.get_default_verify_paths", "__text_signature__") => "($module, /)",
+        ("_ssl.nid2obj", "__text_signature__") => "($module, nid, /)",
+        ("_ssl.txt2obj", "__text_signature__") => "($module, /, txt, name=False)",
+        ("_ssl.get_default_verify_paths", "__doc__") => concat!(
+            "Return search paths and environment vars that are used by ",
+            "SSLContext's set_default_verify_paths() to load default CAs.\n\n",
+            "The values are 'cert_file_env', 'cert_file', 'cert_dir_env', 'cert_dir'."
+        ),
+        ("_ssl.nid2obj", "__doc__") => {
+            "Lookup NID, short name, long name and OID of an ASN1_OBJECT by NID."
+        }
+        ("_ssl.txt2obj", "__doc__") => concat!(
+            "Lookup NID, short name, long name and OID of an ASN1_OBJECT.\n\n",
+            "By default objects are looked up by OID. With name=True short and\n",
+            "long name are also matched."
+        ),
+        _ => return None,
+    })
+}
+
 pub(in crate::dynamic) fn call(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let Some((&module, args)) = args.split_first() else {
+        return Err(Error::new("TypeError", "expected an _ssl module receiver"));
+    };
+    if !matches!(
+        ctx.heap.get(module),
+        Value::Module {
+            module_state: Some(NativeModuleState::SslError(_)),
+            ..
+        }
+    ) {
+        return Err(Error::new("TypeError", "expected an _ssl module receiver"));
+    }
     let api = api()?;
+    if name == "get_default_verify_paths" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_ssl.get_default_verify_paths() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "_ssl.get_default_verify_paths() takes no arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        }
+        let parts = [
+            api.X509_get_default_cert_file_env,
+            api.X509_get_default_cert_file,
+            api.X509_get_default_cert_dir_env,
+            api.X509_get_default_cert_dir,
+        ]
+        .map(|get| {
+            // SAFETY: each getter returns a borrowed, terminated provider string or NULL.
+            let path = unsafe { get() };
+            if path.is_null() {
+                NONE
+            } else {
+                // SAFETY: the non-null provider string lives for the lifetime of the module.
+                let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
+                ctx.text_codepoints(crate::objects::interpreter_stdlib::fsdecode(bytes).collect())
+            }
+        });
+        return Ok(ctx.alloc(Value::Tuple(parts.into())));
+    }
     let obj = match name {
         "txt2obj" => {
             let [text, named] =

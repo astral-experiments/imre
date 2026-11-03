@@ -10,6 +10,13 @@ fn flag(v: bool) -> Id {
 }
 
 impl Context {
+    fn linked_constant<T>(&mut self, build: impl FnOnce(&mut Self) -> T) -> T {
+        let old = std::mem::replace(&mut self.heap.loading_linked_constant, true);
+        let value = build(self);
+        self.heap.loading_linked_constant = old;
+        value
+    }
+
     /// Call with packed operands and drop their temporary roots after a successful return.
     fn call_packed(
         &mut self,
@@ -196,9 +203,10 @@ impl Context {
             }
             "linked_string_tuple" => {
                 let items = self.items(a)?;
-                Ok(self
-                    .heap
-                    .linked_string_constant(b, |heap| heap.packed_tuple(items, true)))
+                Ok(self.linked_constant(|ctx| {
+                    ctx.heap
+                        .linked_string_constant(b, |heap| heap.packed_tuple(items, true))
+                }))
             }
             "linked_string" => Ok(self.heap.linked_string_constant(b, |_| a)),
             "match_class" => self.match_class(a, b, c),
@@ -337,7 +345,11 @@ impl Context {
             "dict" => Ok(self.dict(Vec::new())),
             "tuple" | "constant_tuple" => {
                 let items = self.items(a)?;
-                Ok(self.heap.packed_tuple(items, op == "constant_tuple"))
+                Ok(if op == "constant_tuple" {
+                    self.linked_constant(|ctx| ctx.heap.packed_tuple(items, true))
+                } else {
+                    self.heap.packed_tuple(items, false)
+                })
             }
             "append" => {
                 match self.heap.get_mut(a) {
@@ -735,6 +747,18 @@ pub(super) fn new_context<S: Into<String>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
+    let heap = Heap::new();
+    if let Some(depth @ 1..=65535) = config["tracemalloc"].as_u64() {
+        heap.allocation_traces.start_at_startup(depth as usize);
+    }
+    new_context_with_heap(config, args, heap)
+}
+
+pub(super) fn new_context_with_heap<S: Into<String>>(
+    config: serde_json::Value,
+    args: impl IntoIterator<Item = S>,
+    heap: Heap,
+) -> Context {
     let launcher = config["executable"].as_str();
     let helper_executable =
         launcher.map_or_else(crate::objects::python_executable_text, str::to_owned);
@@ -743,7 +767,7 @@ pub(super) fn new_context<S: Into<String>>(
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
     let mut ctx = Context {
-        heap: Heap::new(),
+        heap,
         threads: Default::default(),
         workers: Default::default(),
         config,
@@ -762,6 +786,7 @@ pub(super) fn new_context<S: Into<String>>(
         repr_ancestors: Vec::new(),
         // Measure the execution thread before entering the native Python evaluator.
         repr_sequence_words: super::operators::remaining_repr_words(),
+        suspended_typing_frames: 0,
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,
@@ -1054,6 +1079,10 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 ) -> Id {
     // SAFETY: the emitter supplies a valid context and a constant of exactly len bytes.
     let (ctx, data) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    ctx.linked_constant(|ctx| load_linked_literal(ctx, kind, data))
+}
+
+fn load_linked_literal(ctx: &mut Context, kind: i32, data: &[u8]) -> Id {
     // Each literal roots its value and the returned handle; metadata roots every name.
     let roots = if kind == 5 {
         data.iter()
@@ -1118,13 +1147,14 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
         }
         2 => {
             let mut bytes = Vec::new();
-            bytes
+            let result = bytes
                 .try_reserve_exact(data.len())
                 .map(|()| {
                     bytes.extend_from_slice(data);
-                    Value::Bytes(bytes)
+                    ctx.heap.bytes_from_data(bytes)
                 })
-                .map_err(|_| crate::Error::memory_error().into())
+                .map_err(|_| crate::Error::memory_error().into());
+            return finish(ctx, result);
         }
         3 => data
             .try_into()

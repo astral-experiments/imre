@@ -71,6 +71,7 @@ pub(super) mod structure;
 mod subprocess;
 mod system_size;
 pub(super) mod traceback;
+pub(super) mod tracemalloc;
 pub(super) mod urllib;
 mod warnings;
 pub(super) mod warnings_accel;
@@ -450,7 +451,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_frame_locals" | "_tb_position" | "clear_frames" | "format_exc" | "format_exception"
             | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
-        ("struct", "Struct") | ("hmac", "HMAC") | ("functools", "partial") => {
+        ("struct", "Struct") | ("functools", "partial") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
@@ -736,9 +737,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
-        | ("pickle", "dumps")
         | ("hashlib", "file_digest")
-        | ("hmac", "new")
         | (
             "re",
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
@@ -949,6 +948,9 @@ pub(super) fn call(
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     if name == "_locale.nl_langinfo" {
         return locale::nl_langinfo(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_tracemalloc.") {
+        return tracemalloc::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("_warnings.") {
         return warnings_accel::call(ctx, method, args, kwargs);
@@ -1702,7 +1704,9 @@ pub(super) fn call(
         return os::stat::construct(ctx, layout, args, kwargs);
     }
     #[cfg(target_os = "linux")]
-    if let Some(op @ ("pipe2" | "ptsname")) = name.strip_prefix("posix.") {
+    if let Some(op @ ("pipe2" | "posix_openpt" | "grantpt" | "unlockpt" | "ptsname")) =
+        name.strip_prefix("posix.")
+    {
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
@@ -2455,7 +2459,7 @@ pub(super) fn call(
     if name == "marshal.loads" {
         return marshal::loads(ctx, args, kwargs);
     }
-    if name == "pickle.dumps" {
+    if name == "_pickle.dumps" {
         return pickle::dumps(ctx, args, kwargs);
     }
     if name == "functools.partial" {

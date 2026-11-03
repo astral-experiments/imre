@@ -1,6 +1,6 @@
-# Seven pending Linux `re` omission decisions
+# Evidence for seven Linux `re` omissions
 
-The seven proposals below each require an individual policy decision. The policy snapshot contains 14 approved omissions and 10 decisions to retain an original, with no entry for these seven keys. The ordinary-profile ledger records 147 of 165 paired originals across historical revisions. Two additional originals pass with provisioned locales. Each pending proposal earns zero credit and keeps its registration in the denominator. [Proposal register](pending-omissions-linux.tsv)
+The campaign accepted these seven originals as CPython implementation details. Each stays in the denominator and earns zero passes. The ordinary-profile ledger at review time had 147 of 165 paired originals. Two more passed with provisioned locales. The proposal register preserves the original submission. [Individual decisions](../../../../docs/stdlib-omissions.md#re) · [Proposal register](pending-omissions-linux.tsv)
 
 Each heading gives the registration ordinal. All originals and paired counterparts are occurrence 1. Pinned CPython 3.14.5 and ordinary native O0 and O3 ran the unchanged module under `LC_ALL=C.UTF-8` with `LOCPATH` unset. The processes running the seven proposed originals exited 0, 1 and 1 respectively. The individual callbacks appear under each decision. The tested Imre revision was `606353950adc0b51d450769a83706ddee2522029`. [Pinned module](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)
 

@@ -129,12 +129,14 @@ enum FormatLookup {
     Repr,
     Str,
     MethodName,
+    TypingTuple(usize),
 }
 
 enum FormatPart {
     Value(Id, bool),
     Cursor(Id),
     CursorEnd,
+    TypingArgument(Id),
     TypeArgument(Id, bool),
     TypeList(Id, usize, usize),
     TypeEnd(Id, &'static str, bool),
@@ -172,6 +174,7 @@ impl FormatPart {
         match self {
             Self::Value(id, _)
             | Self::Cursor(id)
+            | Self::TypingArgument(id)
             | Self::TypeArgument(id, _)
             | Self::TypeList(id, _, _)
             | Self::TypeEnd(id, _, _)
@@ -1484,7 +1487,7 @@ impl Context {
     ) -> Result<Option<String>> {
         let calendar_repr = matches!(lookup, FormatLookup::Repr)
             && super::stdlib::datetime::render::python_repr(self, id);
-        if !matches!(lookup, FormatLookup::MethodName)
+        if matches!(lookup, FormatLookup::Repr | FormatLookup::Str)
             && !calendar_repr
             && self.format_slot(id, "__repr__").is_none()
             && (matches!(lookup, FormatLookup::Repr) || self.format_slot(id, "__str__").is_none())
@@ -1510,6 +1513,12 @@ impl Context {
             FormatLookup::Repr => self.repr_override(id),
             FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
             FormatLookup::MethodName => self.bound_method_name(id),
+            FormatLookup::TypingTuple(frames) => {
+                self.suspended_typing_frames += frames;
+                let result = typing::typing_alias_helper(self, "_type_repr", vec![id]);
+                self.suspended_typing_frames -= frames;
+                result.map(Some)
+            }
         };
         self.repr_sequence_words = previous;
         let result = converted.and_then(|value| {
@@ -1829,6 +1838,41 @@ impl Context {
                     }
                     append_rendered_text(&mut output, end)?;
                 }
+                Part::TypingArgument(id) => {
+                    if !matches!(ctx.heap.get(id), Value::Tuple(_))
+                        && !ctx
+                            .builtins
+                            .get("tuple")
+                            .is_some_and(|&ty| ctx.instance_of(id, ty))
+                    {
+                        push_frame(&mut work, Part::TypeArgument(id, false))?;
+                        continue;
+                    }
+                    if let Some(text) = element_repr(
+                        &mut ctx,
+                        id,
+                        // Of this alias's three modeled frames, only __repr__ is suspended.
+                        // The callback enters _type_repr and its callees as real Python frames.
+                        FormatLookup::TypingTuple(typing_frames - 2),
+                        &mut work,
+                        &active,
+                        remaining_sequence_words,
+                    )? {
+                        append_rendered_text(&mut output, &text)?;
+                    } else if let Some(items) = ctx.tuple_items(id)? {
+                        // Internal diagnostics render stored tuple elements without calling Python.
+                        append_rendered_text(&mut output, "[")?;
+                        push_frame(&mut work, Part::Text("]"))?;
+                        for (i, item) in items.into_iter().enumerate().rev() {
+                            push_frame(&mut work, Part::TypingArgument(item))?;
+                            if i != 0 {
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                        }
+                    } else {
+                        push_frame(&mut work, Part::TypeArgument(id, false))?;
+                    }
+                }
                 Part::TypeArgument(id, direct_list) => {
                     if direct_list && let Value::List(items) = ctx.heap.get(id) {
                         append_rendered_text(&mut output, "[")?;
@@ -2127,10 +2171,11 @@ impl Context {
                                 work.push(Part::Text("()"));
                             }
                             for (index, &arg) in args.iter().enumerate().rev() {
-                                work.push(Part::TypeArgument(
-                                    arg,
-                                    alias.kind == AliasKind::Builtin,
-                                ));
+                                work.push(if python {
+                                    Part::TypingArgument(arg)
+                                } else {
+                                    Part::TypeArgument(arg, alias.kind == AliasKind::Builtin)
+                                });
                                 if callable && index + 1 == args.len() {
                                     work.push(Part::Text("], "));
                                 } else if index != 0 {
@@ -2823,9 +2868,9 @@ impl Context {
             {
                 format!("<attribute '{name}' of '{owner}' objects>")
             }
-            Value::WeakrefDescriptor(owner) => format!(
-                "<attribute '__weakref__' of '{}' objects>",
-                self.weakref_descriptor_owner(*owner)
+            Value::LayoutDescriptor(owner, name) => format!(
+                "<attribute '{name}' of '{}' objects>",
+                self.class_name(*owner)
             ),
             Value::Class { scope, .. } => {
                 format!("<class '{}'>", self.qualified_class_name(id, *scope))
@@ -2853,7 +2898,7 @@ impl Context {
             }
             Value::HeapTypeMethod { name, owner } => {
                 let class = self.heap.get(*owner).heap_type().unwrap();
-                let kind = if *name == "__repr__" {
+                let kind = if matches!(*name, "__repr__" | "__str__") {
                     "slot wrapper"
                 } else {
                     "method"
@@ -2868,8 +2913,8 @@ impl Context {
                     format!("<built-in function {name}>")
                 } else if *name == "__new__" {
                     format!("<built-in method __new__ of type object at {receiver:#x}>")
-                } else if *name == "__repr__" {
-                    format!("<method-wrapper '__repr__' of {class} object at {receiver:#x}>")
+                } else if matches!(*name, "__repr__" | "__str__") {
+                    format!("<method-wrapper '{name}' of {class} object at {receiver:#x}>")
                 } else {
                     format!("<built-in method {name} of {class} object at {receiver:#x}>")
                 }
@@ -3350,8 +3395,8 @@ impl Context {
         }
         Ok(false)
     }
-    fn slice(&mut self, obj: Id, parts: [Id; 3]) -> Result<Id> {
-        let obj = self.scalar_value(obj);
+    fn slice(&mut self, receiver: Id, parts: [Id; 3]) -> Result<Id> {
+        let obj = self.scalar_value(receiver);
         if let Value::Range(range) = self.heap.get(obj) {
             return super::slice::range(self, parts, range.clone());
         }
@@ -3418,6 +3463,13 @@ impl Context {
                     sliced_text(text.chars().rev().skip(skip), stride, count)?
                 };
                 Value::Str(value)
+            }
+            Value::Bytes(data) if step == 1 => {
+                if receiver == obj && count == len {
+                    return Ok(obj);
+                }
+                let bytes = sliced_values(data, positions, count)?;
+                return Ok(self.heap.bytes_from_data(bytes));
             }
             Value::Bytes(data) => Value::Bytes(sliced_values(data, positions, count)?),
             Value::ByteArray(data) => Value::ByteArray(sliced_values(data, positions, count)?),
@@ -4766,6 +4818,19 @@ impl Context {
     }
 }
 
+/// Return the comparison performed by a rich comparison slot.
+pub(super) fn comparison_op(slot: &str) -> Option<&'static str> {
+    Some(match slot {
+        "__lt__" => "<",
+        "__le__" => "<=",
+        "__eq__" => "==",
+        "__ne__" => "!=",
+        "__gt__" => ">",
+        "__ge__" => ">=",
+        _ => return None,
+    })
+}
+
 /// Special-method names for the two operands of a Python binary expression.
 fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> {
     Some(match op {
@@ -5121,6 +5186,25 @@ impl Context {
         {
             return deque::compare(self, op, a, b).map(|result| Some(builtins::boolean(result)));
         }
+        if matches!(op, "<" | "<=" | ">" | ">=")
+            && (matches!(self.heap.get(a), Value::MappingProxy(_))
+                || matches!(self.heap.get(b), Value::MappingProxy(_)))
+        {
+            return self
+                .with_proxy_operands(a, b, |ctx| {
+                    let left = ctx.mapping_proxy_target(a);
+                    let right = ctx.mapping_proxy_target(b);
+                    if b == right {
+                        return ctx.binary(op, left, b);
+                    }
+                    let (forward, reflected, _) = binary_slots(op).unwrap();
+                    if let Some(result) = ctx.operator_slot(left, forward, b)? {
+                        return Ok(result);
+                    }
+                    ctx.binary(comparison_op(reflected).unwrap(), right, left)
+                })
+                .map(Some);
+        }
         let (a, b) = if matches!(op, "==" | "!=") {
             let left = self.mapping_proxy_target(a);
             let right = self.mapping_proxy_target(b);
@@ -5307,6 +5391,9 @@ impl Context {
         if target != a {
             let right = self.weak_proxy_target(b)?;
             return self.with_proxy_operands(target, right, |ctx| ctx.inplace(op, target, right));
+        }
+        if op == "|" && matches!(self.heap.get(a), Value::MappingProxy(_)) {
+            return builtins::call(self, "mappingproxy.__ior__", &[a, b], &[]);
         }
         if let Some((_, _, slot)) = binary_slots(op)
             && let Some(result) = self.operator_slot(a, slot, b)?

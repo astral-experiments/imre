@@ -24,25 +24,47 @@ def rows(path):
         return list(csv.DictReader(stream, delimiter="\t"))
 
 
-def native_children():
-    from_archive = ROOT / "dfe0f18e-children"
-    validate = runpy.run_path(str(from_archive / "audit.py"))["validate_group"]
+def native_children(receipt, label, head):
+    tools = ROOT / "dfe0f18e-children/audit.py"
+    validate = runpy.run_path(str(tools))["validate_group"]
+    tag = "public-" + head[:8]
     with tempfile.TemporaryDirectory() as scratch:
-        for archive in (BASE / "raw.tar.gz", from_archive / "raw.tar.gz"):
+        for archive in (BASE / "raw.tar.gz", ROOT / receipt / "raw.tar.gz"):
             with tarfile.open(archive) as raw:
                 raw.extractall(scratch, filter="data")
-        return validate(scratch, "public-dfe0f18e", "selected_children",
-                        "dfe0f18ebecfc5b302a5747f79079d48b9eb86eb")
+        result = validate(scratch, tag, label, head)
+        if label != "selected_children":
+            audit = runpy.run_path(str(ROOT / receipt / "workloads.py"))["verify"]
+            audit(Path(scratch), tag, label, result)
+        return result
 
 
-def child_row(previous, result):
-    row = dict(previous, receipt="dfe0f18e-children")
+def child_row(previous, result, receipt):
+    row = dict(previous, receipt=receipt)
     row["disposition"] = "paired" if result["paired"] else "native-child-nonpass"
     for mode in ("stock", "O0", "O3"):
         record = result[mode]
         row[mode] = record["result"]
         labels = ("REGISTER", "START", record["result"], "STOP")
         row[mode + "_lines"] = "/".join(str(record["lines"][name]) for name in labels)
+    return row
+
+
+def environment_children():
+    with tempfile.TemporaryDirectory() as scratch:
+        with tarfile.open(ROOT / "58f847de/raw.tar.gz") as packet:
+            packet.extractall(scratch, filter="data")
+        audit = runpy.run_path(str(ROOT / "58f847de/audit.py"))["verify"]
+        verified = audit(Path(scratch))
+        assert verified["public_head"] == "58f847de7c7c1630fd19446a538058b99673a571"
+        return {(r["id"], r["occurrence"]): r["receipts"] for r in verified["parents"]}
+
+
+def replayed_child_row(previous, receipts):
+    row = dict(previous, receipt="58f847de", disposition="paired")
+    for mode in ("stock", "O0", "O3"):
+        row[mode] = "PASS"
+        row[mode + "_lines"] = "/".join(map(str, receipts[mode]["lines"]))
     return row
 
 
@@ -53,12 +75,29 @@ def main():
     current = rows(ROOT / "parents.tsv")
     assert len(current) == len(baseline) == 187
     selected = []
-    children = native_children()
+    children = native_children("dfe0f18e-children", "selected_children",
+                               "dfe0f18ebecfc5b302a5747f79079d48b9eb86eb")
+    shutdown = native_children("061b0196", "selected_shutdown_children",
+                               "061b01963d06311f964de28ecf655176265f66c0")
+    assert len(shutdown) == 2 and all(r["paired"] for r in shutdown.values())
+    traced = native_children("76aed745", "selected_tracemalloc",
+                             "76aed745516103a63aea7e19fb4f22bf5b0fc774")
     assert set(children) == {r["id"] for r in baseline if r["disposition"] == "requires-native-child"}
+    replayed = environment_children()
+    assert len(replayed) == 4 and all(k in children and n == 1 for k, n in replayed)
     for prior, row in zip(baseline, current):
         assert all(row[k] == prior[k] for k in ("ordinal", "id", "occurrence"))
         if prior["id"] in children:
-            assert row == child_row(prior, children[prior["id"]])
+            first = child_row(prior, children[prior["id"]], "dfe0f18e-children")
+            key = (prior["id"], int(prior["occurrence"]))
+            if first["disposition"] != "paired" and key in replayed:
+                assert row == replayed_child_row(first, replayed[key])
+            elif first["disposition"] != "paired" and prior["id"] in shutdown:
+                assert row == child_row(first, shutdown[prior["id"]], "061b0196")
+            elif first["disposition"] != "paired" and prior["id"] in traced:
+                assert row == child_row(first, traced[prior["id"]], "76aed745")
+            else:
+                assert row == first
         elif row["receipt"] == "dfe0f18e":
             assert all(row[k] == value for k, value in prior.items())
         else:

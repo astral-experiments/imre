@@ -22,6 +22,19 @@ fn is_builtin(name: &str) -> bool {
     matches!(
         name,
         "_blake2"
+            | "_frozen_importlib"
+            | "_frozen_importlib_external"
+            | "_json"
+            | "_socket"
+            | "abc"
+            | "array"
+            | "ast"
+            | "contextlib"
+            | "email"
+            | "importlib.machinery"
+            | "importlib.util"
+            | "locale"
+            | "urllib"
             | "_md5"
             | "_sha3"
             | "_datetime"
@@ -30,6 +43,7 @@ fn is_builtin(name: &str) -> bool {
             | "operator"
             | "_operator"
             | "_opcode"
+            | "_pickle"
             | "atexit"
             | "builtins"
             | "errno"
@@ -43,8 +57,9 @@ fn is_builtin(name: &str) -> bool {
             | "json"
             | "subprocess"
             | "warnings"
+            | "_tracemalloc"
             | "_warnings"
-    ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
+    ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal" | "zipimport"))
         || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
         || has_lazy_attributes(name)
 }
@@ -52,7 +67,7 @@ fn is_builtin(name: &str) -> bool {
 /// These providers synthesize attributes on lookup. Their module dictionaries
 /// alone do not enumerate their exports.
 pub fn has_lazy_attributes(name: &str) -> bool {
-    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport")
+    if cfg!(unix) && name == "_imre_zipimport"
         || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
         || cfg!(target_os = "linux") && matches!(name, "resource" | "fcntl")
     {
@@ -65,8 +80,6 @@ pub fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_thread"
             | "threading"
             | "_thread"
-            | "abc"
-            | "array"
             | "_typing"
             | "_collections"
             | "codecs"
@@ -74,11 +87,9 @@ pub fn has_lazy_attributes(name: &str) -> bool {
             | "types"
             | "_io"
             | "_weakref"
-            | "locale"
             | "_locale"
             | "traceback"
             | "sysconfig"
-            | "ast"
             | "os"
             | "posix"
             | "posixpath"
@@ -99,14 +110,12 @@ pub fn has_lazy_attributes(name: &str) -> bool {
             | "binascii"
             | "math"
             | "unicodedata"
-            | "_json"
             | "_imre_subprocess"
             | "_imre_dataclasses"
             | "gc"
             | "marshal"
             | "pickle"
             | "zlib"
-            | "email"
             | "email.utils"
             | "tempfile"
             | "_imre_tempfile"
@@ -116,10 +125,6 @@ pub fn has_lazy_attributes(name: &str) -> bool {
             | "hashlib"
             | "re"
             | "importlib"
-            | "importlib.machinery"
-            | "importlib.util"
-            | "_frozen_importlib"
-            | "_frozen_importlib_external"
             | "_imre_importlib"
             | "functools"
             | "_string"
@@ -128,11 +133,8 @@ pub fn has_lazy_attributes(name: &str) -> bool {
             | "_collections_abc"
             | "enum"
             | "typing"
-            | "contextlib"
             | "contextvars"
             | "_contextvars"
             | "socket"
-            | "_socket"
-            | "urllib"
     )
 }
