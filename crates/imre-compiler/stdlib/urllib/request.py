@@ -26,7 +26,7 @@ __all__ = [
     "HTTPPasswordMgr", "HTTPPasswordMgrWithDefaultRealm", "HTTPPasswordMgrWithPriorAuth",
     "AbstractBasicAuthHandler", "HTTPBasicAuthHandler",
     "AbstractDigestAuthHandler", "HTTPDigestAuthHandler",
-    "ProxyHandler", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
+    "ProxyHandler", "HTTPCookieProcessor", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
     "pathname2url", "url2pathname", "getproxies",
 ]
@@ -448,6 +448,25 @@ class BaseHandler:
             # classes which are not aware of handler_order).
             return True
         return self.handler_order < other.handler_order
+
+
+class HTTPCookieProcessor(BaseHandler):
+    def __init__(self, cookiejar=None):
+        import http.cookiejar
+        if cookiejar is None:
+            cookiejar = http.cookiejar.CookieJar()
+        self.cookiejar = cookiejar
+
+    def http_request(self, request):
+        self.cookiejar.add_cookie_header(request)
+        return request
+
+    def http_response(self, request, response):
+        self.cookiejar.extract_cookies(response, request)
+        return response
+
+    https_request = http_request
+    https_response = http_response
 
 
 class HTTPErrorProcessor(BaseHandler):

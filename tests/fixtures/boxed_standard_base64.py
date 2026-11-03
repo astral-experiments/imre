@@ -27,3 +27,9 @@ def current():
         except (AssertionError, TypeError) as exc:
             print(type(exc).__name__, str(exc))
     print(base64.urlsafe_b64decode(base64.urlsafe_b64encode(b"\xfb\xff")))
+    for data in (b"", b"x", b"x" * 57, bytearray(b"x" * 58)):
+        print(base64.encodebytes(data))
+    try:
+        base64.encodebytes("text")
+    except TypeError as exc:
+        print(str(exc))

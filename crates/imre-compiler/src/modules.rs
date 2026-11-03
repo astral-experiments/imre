@@ -411,10 +411,23 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "string/templatelib.py",
             include_str!("../stdlib/string/templatelib.py"),
         )),
+        "email" => Some((
+            "email/__init__.py",
+            include_str!("../stdlib/email/__init__.py"),
+        )),
+        "email.parser" => Some(("email/parser.py", include_str!("../stdlib/email/parser.py"))),
+        "email.feedparser" => Some((
+            "email/feedparser.py",
+            include_str!("../stdlib/email/feedparser.py"),
+        )),
+        "email._policybase" => Some((
+            "email/_policybase.py",
+            include_str!("../stdlib/email/_policybase.py"),
+        )),
         "email.message" => Some((
             "email/message.py",
             concat!(
-                include_str!("../stdlib/email/message.py"),
+                include_str!("../stdlib/email/parser_message.py"),
                 "\n",
                 include_str!("../stdlib/email/boxed_message.py"),
             ),
@@ -448,6 +461,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 }),
             ))
         }
+        "http.cookiejar" => Some((
+            "http/cookiejar.py",
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/cookiejar.py"
+            ),
+        )),
         "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
         "locale" => Some(("locale.py", include_str!("../stdlib/locale.py"))),
         "_imre_gettext_locale" => Some((
@@ -602,7 +621,9 @@ pub(crate) enum IntrinsicModule {
     UrllibRequest,
     UrllibError,
     Email,
+    EmailFeedParser,
     EmailHeaderValueParser,
+    EmailParser,
     EmailUtils,
     Collections,
     CollectionsNative,
@@ -1150,6 +1171,8 @@ impl IntrinsicModule {
             "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
             "email._header_value_parser" => Some(Self::EmailHeaderValueParser),
+            "email.feedparser" => Some(Self::EmailFeedParser),
+            "email.parser" => Some(Self::EmailParser),
             "email.utils" => Some(Self::EmailUtils),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
@@ -1278,11 +1301,17 @@ impl IntrinsicModule {
                 Self::JsonDecoder
             }));
         }
-        if self == Self::Email && name == "_header_value_parser" {
-            return Some(Binding::IntrinsicModule(Self::EmailHeaderValueParser));
-        }
-        if self == Self::Email && name == "utils" {
-            return Some(Binding::IntrinsicModule(Self::EmailUtils));
+        if self == Self::Email {
+            let child = match name {
+                "_header_value_parser" => Some(Self::EmailHeaderValueParser),
+                "feedparser" => Some(Self::EmailFeedParser),
+                "parser" => Some(Self::EmailParser),
+                "utils" => Some(Self::EmailUtils),
+                _ => None,
+            };
+            if let Some(child) = child {
+                return Some(Binding::IntrinsicModule(child));
+            }
         }
         if self == Self::Urllib {
             let child = match name {
@@ -1990,6 +2019,7 @@ impl IntrinsicModule {
             (Self::Hashlib, "shake_128") => Intrinsic::NamedHash("shake_128"),
             (Self::Hashlib, "shake_256") => Intrinsic::NamedHash("shake_256"),
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
+            (Self::Base64, "encodebytes") => Intrinsic::ScopedObjectExport("base64.encodebytes"),
             (Self::Base64, "b64encode") => Intrinsic::Base64Encode,
             (Self::Base64, "b64decode") => Intrinsic::Base64Decode,
             (Self::Binascii, "unhexlify") => Intrinsic::BinasciiUnhexlify("binascii.unhexlify"),
@@ -2282,6 +2312,9 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "AbstractDigestAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.AbstractDigestAuthHandler")
             }
+            (Self::UrllibRequest, "HTTPCookieProcessor") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPCookieProcessor")
+            }
             (Self::UrllibRequest, "HTTPDigestAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPDigestAuthHandler")
             }
@@ -2331,6 +2364,16 @@ impl IntrinsicModule {
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
             (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
             (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
+            (Self::Email, "message_from_string") => {
+                Intrinsic::ScopedObjectExport("email.message_from_string")
+            }
+            (Self::EmailFeedParser, "FeedParser") => {
+                Intrinsic::ScopedObjectExport("email.feedparser.FeedParser")
+            }
+            (Self::EmailParser, "FeedParser") => {
+                Intrinsic::ScopedObjectExport("email.parser.FeedParser")
+            }
+            (Self::EmailParser, "Parser") => Intrinsic::ScopedObjectExport("email.parser.Parser"),
             (Self::EmailUtils, "formatdate") => Intrinsic::EmailFormatDate,
             (Self::UrllibParse, "urljoin") => Intrinsic::UrlJoin,
             (Self::UrllibParse, "parse_qsl") => Intrinsic::ParseQsl,
