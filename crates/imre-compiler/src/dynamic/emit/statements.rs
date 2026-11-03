@@ -770,7 +770,7 @@ impl Function<'_, '_> {
         }
         if matches!(body, Body::Generator(..)) {
             // generator() binds the implicit .0 argument without calling the step function.
-            signature["co_argcount"] = json!(1);
+            signature["positional"] = json!([".0"]);
         }
         if let Body::Namespace(stmts, _) = &body {
             signature["postponed_annotations"] = json!(
