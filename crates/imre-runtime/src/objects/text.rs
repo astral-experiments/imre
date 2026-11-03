@@ -951,7 +951,7 @@ fn search_start(source: &str, start: Option<&Int>) -> Option<(usize, usize)> {
 /// Returns the first matching Unicode-scalar position, or -1 when absent.
 ///
 /// # Safety
-/// Both strings and the optional Int remain rooted; raw zero means start=None.
+/// Both strings are rooted native string owners. A nonzero start is a rooted Int.
 /// The returned canonical Int is owned and reports Unicode-scalar offsets.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_find(
@@ -963,6 +963,17 @@ pub unsafe extern "C" fn imre_str_find(
     let (source, needle) = unsafe { (&*value, &*needle) };
     // SAFETY: a nonzero start is an exact canonical integer handle.
     let start = (start != 0).then(|| unsafe { Int::borrow(start) });
+    if source.len() >= crate::string_cursor::MIN_BYTES
+        && let Some(at) = start.as_deref().and_then(Int::as_small)
+        && at > 0
+        && let Ok(at) = usize::try_from(at)
+    {
+        // SAFETY: the caller owns the strong reference. Only a weak observer persists.
+        let owner = ManuallyDrop::new(unsafe { StrOwner::from_raw(value) });
+        return crate::string_cursor::find(&owner, needle, at)
+            .map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)
+            .into_raw();
+    }
     find_text(source, needle, start.as_deref(), None, false).into_raw()
 }
 
