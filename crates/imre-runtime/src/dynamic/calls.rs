@@ -376,6 +376,7 @@ impl Context {
                         | "module"
                         | super::thread_local::CLASS
                         | weakref::PROXY_TYPE
+                        | weakref::CALLABLE_PROXY_TYPE
                         | weakref::REFERENCE_TYPE
                 ) || (kind == super::deque::CLASS && super::deque::owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
@@ -760,9 +761,10 @@ impl Context {
         }
         let class = match self.heap.get(object) {
             Value::Weak(wr)
-                if wr.kind == weakref::Kind::Proxy && weakref::PROXY_METHODS.contains(&name) =>
+                if name == "__repr__"
+                    || (wr.kind == weakref::Kind::Proxy && weakref::PROXY_METHODS.contains(&name)) =>
             {
-                self.builtin(weakref::PROXY_TYPE)
+                self.builtin(wr.kind.class())
             }
             value => match value.instance_class() {
                 Some(class) => class,
@@ -3872,7 +3874,9 @@ impl Context {
             Value::Native(ref class)
                 if (class == weakref::REFERENCE_TYPE
                     && weakref::REFERENCE_METHODS.contains(&name))
-                    || (class == weakref::PROXY_TYPE && weakref::PROXY_METHODS.contains(&name)) =>
+                    || (class == weakref::PROXY_TYPE && weakref::PROXY_METHODS.contains(&name))
+                    || (class == weakref::CALLABLE_PROXY_TYPE
+                        && weakref::CALLABLE_PROXY_METHODS.contains(&name)) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }

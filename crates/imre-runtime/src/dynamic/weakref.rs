@@ -3,7 +3,9 @@ use super::Context;
 use super::value::{Error, Id, NONE, NOT_IMPLEMENTED, Result, Value};
 
 pub(super) const PROXY_TYPE: &str = "weakref.ProxyType";
-pub(super) const PROXY_METHODS: &[&str] = &["__bytes__", "__reversed__"];
+pub(super) const PROXY_METHODS: &[&str] = &["__bytes__", "__repr__", "__reversed__"];
+pub(super) const CALLABLE_PROXY_TYPE: &str = "weakref.CallableProxyType";
+pub(super) const CALLABLE_PROXY_METHODS: &[&str] = &["__repr__"];
 pub(super) const REFERENCE_HASH: &str = "weakref.ReferenceType.__hash__";
 pub(super) const REFERENCE_TYPE: &str = "weakref.ReferenceType";
 pub(super) const REFERENCE_METHODS: &[&str] = &[
@@ -22,7 +24,7 @@ impl Kind {
         match self {
             Self::Reference => REFERENCE_TYPE,
             Self::Proxy => PROXY_TYPE,
-            Self::CallableProxy => "weakref.CallableProxyType",
+            Self::CallableProxy => CALLABLE_PROXY_TYPE,
         }
     }
 }
@@ -81,13 +83,20 @@ impl Reference {
     }
 
     fn repr(self, ctx: &mut Context, owner: Id) -> Result<Id> {
+        let kind = if self.kind == Kind::Reference {
+            "weakref"
+        } else {
+            "weakproxy"
+        };
         let Some(target) = self.target else {
-            return Ok(ctx.text(format!("<weakref at {owner:#x}; dead>")));
+            return Ok(ctx.text(format!("<{kind} at {owner:#x}; dead>")));
         };
         ctx.with_weak_target(target, |ctx| {
             let class = ctx.exact_type(target)?;
             // Resolve the optional name on the type, bypassing instance-level attribute hooks.
-            let name = if let Some(slot) = ctx.class_attr(class, "__name__") {
+            let name = if self.kind != Kind::Reference {
+                None
+            } else if let Some(slot) = ctx.class_attr(class, "__name__") {
                 Some(ctx.bind_attribute(slot, target, class)?)
             } else {
                 match ctx.heap.get(target) {
@@ -107,7 +116,7 @@ impl Reference {
                 }
             };
             let class_name = super::stdlib::qualified_type(ctx, class)?;
-            let prefix = ctx.text(format!("<weakref at {owner:#x}; to '"));
+            let prefix = ctx.text(format!("<{kind} at {owner:#x}; to '"));
             let mut text = ctx.concat_strings(prefix, class_name)?;
             let address = ctx.text(format!("' at {target:#x}"));
             text = ctx.concat_strings(text, address)?;
@@ -165,6 +174,8 @@ impl Context {
                 ),
             ));
         }
+        // A proxy can be constructed without first importing its type from _weakref.
+        self.builtin(kind.class());
         let wrapper = subclass.map(|class| self.instance(class, None));
         self.heap
             .new_weak_reference(target, callback, kind, wrapper)
@@ -468,15 +479,17 @@ pub(super) fn call(
         }
         "weakref.ReferenceType.__call__"
         | "weakref.ReferenceType.__repr__"
+        | "weakref.ProxyType.__repr__"
+        | "weakref.CallableProxyType.__repr__"
         | "weakref.ReferenceType.__init__"
         | "weakref.ReferenceType.__eq__"
         | "weakref.ReferenceType.__ne__" => {
-            let name = function.rsplit('.').next().unwrap();
+            let (class, name) = function.rsplit_once('.').unwrap();
             let Some((&owner, rest)) = args.split_first() else {
                 return Err(Error::new(
                     "TypeError",
                     format!(
-                        "descriptor '{name}' of 'weakref.ReferenceType' object needs an argument"
+                        "descriptor '{name}' of '{class}' object needs an argument"
                     ),
                 ));
             };
@@ -485,12 +498,12 @@ pub(super) fn call(
                 .get(owner)
                 .weak_reference()
                 .copied()
-                .filter(|r| r.kind == Kind::Reference)
+                .filter(|r| r.kind.class() == class)
             else {
                 return Err(Error::new(
                     "TypeError",
                     format!(
-                        "descriptor '{name}' requires a 'weakref.ReferenceType' object but received a '{}'",
+                        "descriptor '{name}' requires a '{class}' object but received a '{}'",
                         ctx.type_name(owner)
                     ),
                 ));
