@@ -111,6 +111,13 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "POSIX_SPAWN_CLOSEFROM" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.POSIX_SPAWN_CLOSEFROM")
         }
+        #[cfg(target_os = "linux")]
+        "GRND_RANDOM" => Intrinsic::IntConstant(i64::from(libc::GRND_RANDOM)),
+        #[cfg(target_os = "linux")]
+        "GRND_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::GRND_NONBLOCK)),
+        "getrandom" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.getrandom")
+        }
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),

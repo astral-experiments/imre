@@ -270,6 +270,23 @@ fn execv(ctx: &mut Context, args: &[Id]) -> Result<Id> {
     Err(arguments.execv(&executable).into())
 }
 
+/// Obtain random bytes with the caller's Linux getrandom flags.
+#[cfg(target_os = "linux")]
+pub(super) fn getrandom(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(size), flags] =
+        builtins::bind_builtin_arguments("getrandom", args, kwargs, ["size", "flags"], 1)?
+    else {
+        unreachable!()
+    };
+    let size = ssize_t(ctx, size)?;
+    let flags = flags
+        .map(|value| c_int(ctx, value))
+        .transpose()?
+        .unwrap_or(0);
+    let bytes = native::getrandom(size, flags, || ctx.dispatch_signals())?;
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
 /// Read cryptographically secure bytes from the operating system.
 pub(super) fn urandom(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {

@@ -674,6 +674,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posix", "_create_environ" | "putenv" | "unsetenv") => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", "getrandom") => ctx.builtin("posix.getrandom"),
         ("os" | "posix", "abort" | "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -1806,6 +1808,10 @@ pub(super) fn call(
         };
         let code = os::c_int(ctx, *code)?;
         return Ok(ctx.text_codepoints(crate::sys::strerror(code)?));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.getrandom" {
+        return os::getrandom(ctx, args, kwargs);
     }
     if name == "posix.urandom" {
         return os::urandom(ctx, args, kwargs);

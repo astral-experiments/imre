@@ -3587,6 +3587,8 @@ else:
             compare("-B", "-c", imports + "arithmetic.current()",
                     extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_spawn.py").read_bytes())
             libc, version = platform.libc_ver()
             child_callbacks = libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 32)
