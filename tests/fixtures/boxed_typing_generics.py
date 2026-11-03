@@ -1,3 +1,4 @@
+import sys
 from sys import path
 from types import GenericAlias
 import typing as t
@@ -230,6 +231,22 @@ class ArgumentTuple(tuple):
 assert repr(t.Literal[(ArgumentTuple((int,)),)]) == "typing.Literal[[float]]"
 assert repr(list[((int, str),)]) == "list[(<class 'int'>, <class 'str'>)]"
 assert repr(cabc.Callable[..., ()]) == "collections.abc.Callable[..., ()]"
+
+nested = int
+for _ in range(18):
+    nested = t.Literal[((nested,),)]
+saved_limit = sys.getrecursionlimit()
+try:
+    sys.setrecursionlimit(80)
+    try:
+        repr(nested)
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("tuple arguments lost their enclosing alias frames")
+    assert repr(callback) == f"{__name__}.Callback[[int, list[str]], bool]"
+finally:
+    sys.setrecursionlimit(saved_limit)
 
 
 class PlainCallable(t.Callable):

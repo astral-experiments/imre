@@ -129,7 +129,7 @@ enum FormatLookup {
     Repr,
     Str,
     MethodName,
-    TypingTuple,
+    TypingTuple(usize),
 }
 
 enum FormatPart {
@@ -1515,8 +1515,11 @@ impl Context {
             FormatLookup::Repr => self.repr_override(id),
             FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
             FormatLookup::MethodName => self.bound_method_name(id),
-            FormatLookup::TypingTuple => {
-                typing::typing_alias_helper(self, "_type_repr", vec![id]).map(Some)
+            FormatLookup::TypingTuple(frames) => {
+                self.suspended_typing_frames += frames;
+                let result = typing::typing_alias_helper(self, "_type_repr", vec![id]);
+                self.suspended_typing_frames -= frames;
+                result.map(Some)
             }
         };
         self.repr_sequence_words = previous;
@@ -1850,7 +1853,9 @@ impl Context {
                     if let Some(text) = element_repr(
                         &mut ctx,
                         id,
-                        FormatLookup::TypingTuple,
+                        // Of this alias's three modeled frames, only __repr__ is suspended.
+                        // The callback enters _type_repr and its callees as real Python frames.
+                        FormatLookup::TypingTuple(typing_frames - 2),
                         &mut work,
                         &active,
                         remaining_sequence_words,
