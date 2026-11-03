@@ -30,6 +30,16 @@ def current():
     assert re.fullmatch(r"\$ [$] $", "$$", flags)
     assert re.search(r"a $", "a\nb", re.VERBOSE) is None
     assert re.search(r"a $", "a\n", re.VERBOSE).span() == (0, 1)
+    # Reduced from the key and delimiter in http.cookies._CookiePattern.
+    delimiter = re.compile(r"([#\w]+) ( ; | $ )", re.ASCII | re.VERBOSE)
+    assert delimiter.match("#id;").groups() == ("#id", ";")
+    assert delimiter.match("#id\n").span(2) == (3, 3)
+    assert delimiter.match("#id!") is None
+    for source, newline in [(r"($)\n", "\n"), (rb"($)\n", b"\n")]:
+        assert re.fullmatch(source, newline).span(1) == (0, 0)
+        assert re.match(source, newline * 2) is None
+
+    assert re.fullmatch(r"(?:(a)|(b))+($)", "ab").lastindex == 3
     scanner = re.Scanner([(r"a $ \n b", "pair"), ("a", "single")], flags)
     assert scanner.scan("a\nb!") == (["pair"], "!")
     assert scanner.scan("ab!") == (["single"], "b!")
