@@ -253,6 +253,31 @@ def current():
 
     from io import BytesIO
     sample = array('i', [0x12345678])
+    loaded = array('i', [-9])
+    assert array.frombytes(loaded, memoryview(sample).cast('B')) is None
+    with memoryview(loaded) as view:
+        assert view.format == 'i' and view.itemsize == sample.itemsize
+        assert loaded.frombytes(b'') is None
+        for buf, kind in ((sample, TypeError), (b'x', ValueError),
+                          (sample.tobytes(), BufferError), (memoryview(b'abc')[::2], BufferError)):
+            try:
+                loaded.frombytes(buf)
+            except kind:
+                pass
+            else:
+                raise AssertionError("invalid array buffer was accepted")
+        assert view.tobytes() == array('i', [-9, 0x12345678]).tobytes()
+    loaded.frombytes(bytearray(sample.tobytes()))
+    assert loaded.tolist() == [-9, 0x12345678, 0x12345678]
+    one_byte = array('B', [1])
+    try:
+        one_byte.frombytes(one_byte)
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("array grew during a self-export")
+    assert one_byte.tolist() == [1]
+
     source = BytesIO(sample.tobytes())
     appended = array('i')
     try:
