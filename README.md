@@ -135,7 +135,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `pathlib` | 974 | 1,369 | 1 | Four more `glob` and `rglob` tests passed with recursive symlinks after complete discovery of all 1,369 originals. All three owners exited cleanly, and filesystem observations confirmed the links and teardown in all twelve fixtures. |
 | `re` | 147 | 165 | 7 | Seven CPython compiler and bytecode checks have explicit omissions. The 147 paired originals include focused and complete runs. |
 | `shutil` | 154 | 223 | 0 | Stock and public native O0/O3 each discovered all 223 originals and ran the same 49 additional tests. All three owners exited 0 with identical parent callbacks and four successful subtests. |
-| `socket` | 67 | 746 | 0 | All ten descriptor ownership and duplication originals passed on stock and public Imre at O0 and O3. The socket.dup original adds one new paired pass. |
+| `socket` | 67 | 746 | 0 | All ten descriptor ownership and duplication originals passed on stock and public Imre at O0 and O3. The new ledger entry is `GeneralModuleTests.test_socket_fileno`. |
 | `subprocess` | 302 | 353 | 3 | Both original empty-environment cases passed on stock and on public Imre at O0 and O3. They exercise child execution when the supplied environment has no PATH. |
 | `tempfile` | 110 | 118 | 2 | All three runs registered the same 118 original parents. CPython passed 112 and skipped six. Public Imre passed 110 and skipped eight at both levels. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
