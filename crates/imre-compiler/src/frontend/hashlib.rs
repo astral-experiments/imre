@@ -56,8 +56,8 @@ impl Checker<'_> {
                 .args
                 .first()
                 .or_else(|| call.arguments.find_keyword("name").map(|kw| &kw.value));
-            // A runtime-selected digest can be MD5, whose provider depends on the
-            // imported hashlib module and the OpenSSL security policy.
+            // Keep object dispatch available for mutable provider modules and buffer
+            // types the typed constructor cannot lower.
             if name.is_some_and(|expr| match expr {
                 ast::Expr::StringLiteral(lit) => {
                     let name = lit.value.to_str();
@@ -68,11 +68,6 @@ impl Checker<'_> {
                 _ => true,
             }) {
                 self.graph.needs_object_runtime.set(true);
-                return Err(self.classified_error(
-                    FailureKind::ObjectOperation,
-                    call,
-                    "runtime digest selection requires native object dispatch",
-                ));
             }
         }
         if matches!(

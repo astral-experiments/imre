@@ -374,6 +374,7 @@ socket_constants! {
     imre_socket_af_inet = libc::AF_INET,
     imre_socket_sock_stream = libc::SOCK_STREAM,
     imre_socket_sol_socket = libc::SOL_SOCKET,
+    imre_socket_so_type = libc::SO_TYPE,
     imre_socket_so_reuseaddr = libc::SO_REUSEADDR,
     imre_socket_ipproto_tcp = libc::IPPROTO_TCP,
     imre_socket_tcp_nodelay = libc::TCP_NODELAY,

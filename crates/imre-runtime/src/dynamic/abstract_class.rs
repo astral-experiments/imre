@@ -306,14 +306,60 @@ impl Context {
         }
     }
 
-    /// Inspect own declarations raw and resolve inherited abstract names on the new class.
-    fn compute_abstract_methods(&mut self, class: Id, scope: Id) -> Result<()> {
-        let methods = self.alloc(Value::Set {
-            entries: Default::default(),
-            frozen: true,
-        });
-        self.heap.keep(methods);
+    /// Snapshot observable declarations from the native namespace before running their markers.
+    fn add_scope_abstract_methods(&mut self, class: Id, scope: Id, methods: Id) -> Result<bool> {
+        let Value::Class { metaclass, .. } = *self.heap.get(class) else {
+            return Ok(false);
+        };
+        if metaclass.is_some_and(|meta| {
+            self.class_attr(meta, "__getattribute__").is_some()
+                || self.class_attr(meta, "__dict__").is_some()
+        }) || self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .is_some_and(|ns| ns.dictionary.is_some())
+        {
+            return Ok(false);
+        }
 
+        // The default class dictionary omits __qualname__. Exact scalar values cannot
+        // acquire abstract markers or run finalizers when a callback removes a binding.
+        let declarations: Vec<_> = self
+            .scope_data(scope)
+            .names
+            .iter()
+            .filter(|(name, value)| {
+                name.as_str() != "__qualname__"
+                    && !matches!(
+                        self.heap.get(**value),
+                        Value::None
+                            | Value::Bool(_)
+                            | Value::Int(_)
+                            | Value::Float(_)
+                            | Value::Complex(_)
+                            | Value::Str(_)
+                            | Value::Bytes(_)
+                    )
+            })
+            .map(|(name, &value)| (name.clone(), value))
+            .collect();
+        for &(_, value) in &declarations {
+            self.heap.keep(value);
+        }
+        let step = self.heap.temporary_mark();
+        for (name, value) in declarations {
+            if self.is_abstract_method(value)? {
+                let key = self.text(name);
+                super::builtins::set_add(self, methods, key)?;
+            }
+            self.heap.release_temporaries_since(step);
+        }
+        Ok(true)
+    }
+
+    /// Read an already materialized dictionary or one supplied by a metaclass.
+    fn add_mapping_abstract_methods(&mut self, class: Id, methods: Id) -> Result<()> {
         // Snapshot the item pairs, not just their names: reading a marker can replace
         // or remove the next declaration. A metaclass may supply the namespace.
         let namespace = self.lookup_attr(class, "__dict__")?;
@@ -349,6 +395,20 @@ impl Context {
                 super::builtins::set_add(self, methods, *key)?;
             }
             self.heap.release_temporaries_since(step);
+        }
+        Ok(())
+    }
+
+    /// Inspect own declarations raw and resolve inherited abstract names on the new class.
+    fn compute_abstract_methods(&mut self, class: Id, scope: Id) -> Result<()> {
+        let methods = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: true,
+        });
+        self.heap.keep(methods);
+
+        if !self.add_scope_abstract_methods(class, scope, methods)? {
+            self.add_mapping_abstract_methods(class, methods)?;
         }
 
         let bases = self.lookup_attr(class, "__bases__")?;

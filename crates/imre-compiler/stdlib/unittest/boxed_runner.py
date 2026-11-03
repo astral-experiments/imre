@@ -274,7 +274,7 @@ class _StreamWrite:
 
 
 def _streamAttribute(self, name):
-    if name in ("stream", "__getstate__"):
+    if name in ("stream", "_memory", "__getstate__"):
         raise AttributeError(name)
     return getattr(self.stream, name)
 
@@ -282,8 +282,6 @@ def _streamAttribute(self, name):
 def _boxedRunnerInit(self, stream=None, descriptions=True, verbosity=1, failfast=False,
                      buffer=False, resultclass=None, warnings=None, *, tb_locals=False,
                      durations=None):
-    if tb_locals:
-        raise NotImplementedError("native TextTestRunner does not yet support local variables in tracebacks")
     self.stream = _WritelnDecorator(sys.stderr if stream is None else stream)
     self.descriptions = descriptions
     self.verbosity = verbosity

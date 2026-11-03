@@ -2576,6 +2576,8 @@ pub(super) struct Heap {
     file_writers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // Weak class handles, compacted before the collector recycles their slots.
+    classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
     pub(super) discarded_shutdown_write: Option<bool>,
     // Non-owning positions of a frame, its bound-method operand, and a receiver field.
@@ -2785,6 +2787,7 @@ impl Heap {
             collect_next_statement: false,
             file_writers: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            classes: Vec::new(),
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
         };
@@ -2997,6 +3000,11 @@ impl Heap {
         match value {
             Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
             Value::Tuple(items) if items.is_empty() => EMPTY_TUPLE,
+            Value::Class { .. } => {
+                let id = self.alloc_slot(value);
+                self.classes.push(id);
+                id
+            }
             value => self.alloc_slot(value),
         }
     }
@@ -3901,11 +3909,11 @@ impl Heap {
     /// Every live descendant, including unbound local classes, with parents before children.
     pub(super) fn class_hierarchy(&self, class: Id) -> Vec<Id> {
         let mut affected = Vec::new();
-        for (index, slot) in self.slots.iter().enumerate() {
-            if let Some(Value::Class { ancestors, .. }) = slot.value.as_ref()
-                && (index as Id == class || ancestors.contains(&class))
+        for &id in &self.classes {
+            if let Value::Class { ancestors, .. } = self.get(id)
+                && (id == class || ancestors.contains(&class))
             {
-                affected.push((ancestors.len(), index as Id));
+                affected.push((ancestors.len(), id));
             }
         }
         affected.sort_unstable();
@@ -4853,6 +4861,8 @@ impl Heap {
             }
         }
         self.ordinary_finalizers
+            .retain(|&id| self.traces[id as usize].get() != UNMARKED);
+        self.classes
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.file_writers.retain(|&id| {
             let slot = &self.slots[id as usize];

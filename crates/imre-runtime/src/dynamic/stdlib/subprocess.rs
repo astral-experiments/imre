@@ -632,14 +632,11 @@ fn report_status(ctx: &mut Context, handle: Id, status: Option<i32>) -> Id {
     ctx.int(i64::from(code))
 }
 
-enum StopWait {
-    Assigned,
-    Raised(Error),
-}
-
-impl From<crate::Error> for StopWait {
-    fn from(error: crate::Error) -> Self {
-        Self::Raised(error.into())
+fn communication_input(ctx: &Context, input: Id) -> Result<&[u8]> {
+    if input == NONE {
+        Ok(&[])
+    } else {
+        ctx.bytes_like(input)
     }
 }
 
@@ -713,28 +710,11 @@ pub(super) fn call(
         ("pid", []) => Ok(ctx.int(i64::from(child.pid()))),
         // Python asks again only after its public status was cleared. A real
         // second wait would get ECHILD, which Popen reports as zero.
-        ("poll", []) | ("wait", [_, _]) if reported => Ok(ctx.int(0)),
+        ("poll" | "wait", []) if reported => Ok(ctx.int(0)),
         ("poll", []) => Ok(report_status(ctx, handle, child.poll()?)),
-        ("wait", &[seconds, owner]) => {
-            let seconds = timeout(ctx, seconds)?;
-            match child.wait(seconds, || {
-                ctx.dispatch_signals().map_err(StopWait::Raised)?;
-                // A timed wait checks public status between polls. A blocking
-                // waitpid resumes after a returning handler and reports its reap.
-                if seconds.is_some() {
-                    let status = ctx
-                        .lookup_attr(owner, "returncode")
-                        .map_err(StopWait::Raised)?;
-                    if status != NONE {
-                        return Err(StopWait::Assigned);
-                    }
-                }
-                Ok(())
-            }) {
-                Ok(code) => Ok(report_status(ctx, handle, code)),
-                Err(StopWait::Assigned) => Ok(NONE),
-                Err(StopWait::Raised(error)) => Err(error),
-            }
+        ("wait", []) => {
+            let code = child.wait(|| ctx.dispatch_signals())?;
+            Ok(report_status(ctx, handle, code))
         }
         ("signal", &[number]) => {
             // os.kill converts its signal to Py_ssize_t before narrowing for POSIX.
@@ -745,13 +725,13 @@ pub(super) fn call(
         ("communicate", &[input, seconds, use_select]) => {
             let seconds = timeout(ctx, seconds)?;
             let use_select = ctx.truth(use_select)?;
-            let input = if input == NONE {
-                &[][..]
-            } else {
-                ctx.bytes_like(input)?
-            };
-            let pending = child.begin_communication(input, seconds, use_select)?;
-            let exchange = child.finish_communication(pending, || ctx.dispatch_signals())?;
+            let mut pending =
+                child.begin_communication(communication_input(ctx, input)?, seconds, use_select)?;
+            while pending.interrupted() {
+                ctx.dispatch_signals()?;
+                child.resume_communication(&mut pending, communication_input(ctx, input)?)?;
+            }
+            let exchange = child.finish_communication(pending);
             let [stdout, stderr] = exchange
                 .streams
                 .map(|stream| stream.map_or(NONE, |data| ctx.alloc(Value::Bytes(data))));

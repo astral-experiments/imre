@@ -1,6 +1,6 @@
 from inspect import signature
 from unittest import TestCase
-from unittest.mock import NonCallableMagicMock, call, create_autospec, seal
+from unittest.mock import InvalidSpecError, NonCallableMagicMock, call, create_autospec, seal
 
 
 class Version:
@@ -21,7 +21,7 @@ class Client:
     sink = Sink()
 
     def __init__(self, host):
-        pass
+        self.host = host
 
     def send(self, value, /, *, retry=False):
         pass
@@ -46,6 +46,18 @@ assert isinstance(instance, NonCallableMagicMock) and not callable(instance)
 with check.assertRaises(AttributeError):
     instance.extra = 1
 
+live = create_autospec(Client("localhost"), spec_set=True)
+assert isinstance(live, Client) and not callable(live)
+assert isinstance(live.host, str)
+with check.assertRaises(AttributeError):
+    live.extra = 1
+live.send("payload", retry=True)
+with check.assertRaises(TypeError):
+    live.send(value="payload")
+live.send.assert_called_once_with("payload", retry=True)
+with check.assertRaises(InvalidSpecError):
+    create_autospec(live)
+
 client = create_autospec(Client, instance=True)
 assert isinstance(client, NonCallableMagicMock) and not callable(client)
 with check.assertRaises(TypeError):
@@ -69,6 +81,24 @@ for method in (client.Codec.encode, client.Codec.decode):
     method.assert_not_called()
     method.return_value = "encoded"
     assert method("data") == "encoded"
+
+for name in ("encode", "decode"):
+    descriptor = Client.Codec.__dict__[name]
+    descriptor.label = name
+    assert ("__call__" in dir(descriptor)) == isinstance(descriptor, staticmethod)
+    method = create_autospec(descriptor, spec_set=True)
+    method.label = "updated"
+    with check.assertRaises(AttributeError):
+        method.__code__ = None
+    assert method.__class__ is type(descriptor)
+    assert signature(method) == signature(getattr(Client.Codec, name))
+    with check.assertRaises(TypeError):
+        method()
+    with check.assertRaises(TypeError):
+        method(None, "data")
+    method.assert_not_called()
+    method("data")
+    method.assert_called_once_with(value="data")
 
 seal(client)
 assert client.extra == 1 and client.Codec.encode("more") == "encoded"

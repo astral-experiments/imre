@@ -42,6 +42,25 @@ def check_inheritance():
     assert Child.__required_keys__ == {"left", "shared"} and not Child.__optional_keys__
     assert Child.__annotations__ == {"left": bool, "shared": bytes}
 
+    from annotationlib import Format
+    from types import new_class
+
+    formats = []
+
+    def annotate(format):
+        formats.append(format)
+        return {"note": str}
+
+    def add_fields(namespace):
+        namespace["__annotate_func__"] = annotate
+
+    Patch = new_class("Patch", (Child,), {"total": False}, add_fields)
+    assert len(formats) == 1 and formats[0] is Format.FORWARDREF
+    assert Patch.__bases__ == (dict,) and Patch.__orig_bases__ == (Child,)
+    assert Patch.__required_keys__ == Child.__required_keys__ and Patch.__optional_keys__ == {"note"}
+    assert Patch.__annotations__ == {**Child.__annotations__, "note": str}
+    assert type(Patch(note="ready")) is dict
+
     class ObserveNamespace:
         def __set_name__(self, owner, name):
             assert "__orig_bases__" not in owner.__dict__

@@ -610,8 +610,8 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
     }
 }
 
-/// Parse a decimal field or item index, including Python's Unicode decimal digits.
-pub(super) fn format_index(name: &str) -> crate::Result<Option<usize>> {
+/// Parse a decimal format width or field index using Python's Unicode decimal digits.
+pub(crate) fn format_index(name: &str) -> crate::Result<Option<usize>> {
     let mut index = 0isize;
     // A decimal prefix can overflow before a nondigit makes this a named field.
     for ch in name.chars() {

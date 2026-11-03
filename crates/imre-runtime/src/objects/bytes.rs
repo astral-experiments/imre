@@ -147,6 +147,97 @@ pub unsafe extern "C" fn imre_byte_output_finish(output: *const Object) -> *cons
     finish(result, std::ptr::null())
 }
 
+/// Encode an integer at a fixed width after Python argument conversion.
+pub(crate) fn integer_bytes(value: &Int, size: isize, little: bool, signed: bool) -> Result<Bytes> {
+    if size < 0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            "length argument must be non-negative",
+        ));
+    }
+    let size = size as usize;
+    if size > crate::MAX_BYTES_LEN {
+        return Err(Error::new(Kind::OverflowError, "byte string is too large"));
+    }
+    // CPython allocates the result before checking whether the integer fits.
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(size)
+        .map_err(|_| Error::memory_error())?;
+    let value = value.big();
+    let negative = value.sign() == num_bigint::Sign::Minus;
+    if negative && !signed {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "can't convert negative int to unsigned",
+        ));
+    }
+    let bits = value.bits();
+    // At a signed boundary the negative power of two already includes its sign bit.
+    let sign_bit = signed && bits != 0 && !(negative && value.trailing_zeros() == Some(bits - 1));
+    if (bits + u64::from(sign_bit)).div_ceil(8) > size as u64 {
+        return Err(Error::new(Kind::OverflowError, "int too big to convert"));
+    }
+    output.resize(size, 0u8);
+    for (byte, source) in output
+        .iter_mut()
+        .zip(value.iter_u32_digits().flat_map(u32::to_le_bytes))
+    {
+        *byte = source;
+    }
+    if negative {
+        let mut carry = true;
+        for byte in &mut output {
+            (*byte, carry) = (!*byte).overflowing_add(u8::from(carry));
+        }
+    }
+    if !little {
+        output.reverse();
+    }
+    Ok(output)
+}
+
+/// Convert exact typed operands using the same width and sign rules as boxed int.to_bytes.
+///
+/// # Safety
+/// The caller roots both integer words and the byte order string throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_to_bytes(
+    value: usize,
+    length: usize,
+    order: *const Str,
+    signed: bool,
+) -> *const Bytes {
+    // SAFETY: generated code holds all three owners until the call returns.
+    let (value, length, order) = unsafe { (Int::borrow(value), Int::borrow(length), &*order) };
+    let result = (|| {
+        let size = length
+            .to_i64()
+            .and_then(|n| isize::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+        let little = match order.as_str() {
+            "big" => false,
+            "little" => true,
+            _ => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "byteorder must be either 'little' or 'big'",
+                ));
+            }
+        };
+        let bytes = integer_bytes(&value, size, little, signed)?;
+        crate::BytesOwner::try_new(bytes)
+            .map(crate::BytesOwner::into_raw)
+            .map_err(|_| Error::memory_error())
+    })();
+    finish(result, std::ptr::null())
+}
+
 /// Converts a Python index-sized argument without truncating large integers.
 pub(super) fn native_size(value: &Int) -> Result<isize> {
     value
@@ -230,6 +321,17 @@ pub unsafe extern "C" fn imre_bytes_release(value: *const Bytes) {
         // SAFETY: the caller transfers one exact crate::BytesOwner reference.
         unsafe { crate::release_bytes(value) };
     }
+}
+
+/// Encodes exact bytes as lowercase hexadecimal digits.
+///
+/// # Safety
+/// The caller roots the immutable bytes through the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_hex(value: *const Bytes) -> *const Str {
+    // SAFETY: the input remains rooted until encoding finishes.
+    let text = super::hash_hex(unsafe { &*value }).and_then(crate::checked_owned_str);
+    finish(text, std::ptr::null())
 }
 
 /// # Safety

@@ -903,6 +903,13 @@ pub(crate) fn tcgetpgrp(fd: i32) -> Result<libc::pid_t> {
     checked(unsafe { libc::tcgetpgrp(fd) })
 }
 
+/// Set the foreground process group on the borrowed terminal descriptor.
+#[cfg(target_os = "linux")]
+pub(crate) fn tcsetpgrp(fd: i32, pgid: libc::pid_t) -> Result<()> {
+    // SAFETY: tcsetpgrp takes two integers and reports failures through errno.
+    checked(unsafe { libc::tcsetpgrp(fd, pgid) }).map(|_| ())
+}
+
 /// Resolve a terminal descriptor with Linux's reentrant, caller-buffer interface.
 #[cfg(target_os = "linux")]
 pub(crate) fn ttyname(fd: i32) -> Result<Vec<u8>> {
@@ -982,6 +989,13 @@ pub extern "C" fn imre_os_tcgetpgrp(fd: usize) -> usize {
             .map(|group| Int::from_usize(group as usize).into_raw()),
         0,
     )
+}
+
+/// Convert both Python integers before changing the foreground group.
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_tcsetpgrp(fd: usize, pgid: usize) {
+    finish(c_int(fd).and_then(|fd| tcsetpgrp(fd, c_int(pgid)?)), ());
 }
 
 /// A terminal follows UTF-8 mode or the current character locale. Other fds have no encoding.

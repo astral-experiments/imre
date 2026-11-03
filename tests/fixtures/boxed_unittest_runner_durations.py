@@ -1,4 +1,5 @@
 import io
+import pickle
 import unittest
 
 
@@ -27,8 +28,10 @@ def current():
 
     result.collectedDurations = [("hidden", 0), ("slower", 2), ("faster", 1)]
     stream = io.StringIO()
-    unittest.TextTestRunner(stream=stream, durations=2)._printDurations(result)
+    runner = unittest.TextTestRunner(stream=stream, durations=2)
+    runner._printDurations(result)
     text = stream.getvalue()
+    assert pickle.loads(pickle.dumps(runner)).stream.getvalue() == text
     assert 0 <= text.find("slower") < text.find("faster") and "hidden" not in text
 
     class Writer:

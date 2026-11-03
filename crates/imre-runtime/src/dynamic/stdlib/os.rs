@@ -8,6 +8,8 @@ pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
 #[cfg(target_os = "linux")]
+mod timerfd;
+#[cfg(target_os = "linux")]
 mod vectored;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) use spawn_child::available as fork_available;
@@ -671,6 +673,12 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 "copy_file_range"
                     | "get_terminal_size"
                     | "tcgetpgrp"
+                    | "tcsetpgrp"
+                    | "timerfd_create"
+                    | "timerfd_gettime"
+                    | "timerfd_gettime_ns"
+                    | "timerfd_settime"
+                    | "timerfd_settime_ns"
                     | "ttyname"
                     | "preadv"
                     | "pwritev"
@@ -1082,6 +1090,10 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    #[cfg(target_os = "linux")]
+    if name.starts_with("timerfd_") {
+        return timerfd::call(ctx, name, args, kwargs);
+    }
     if name == "device_encoding" {
         let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
             unreachable!("device_encoding requires a descriptor");
@@ -1400,6 +1412,17 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "tcsetpgrp" {
+        let [fd, pgid] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("tcsetpgrp expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        native::tcsetpgrp(c_int(ctx, *fd)?, c_int(ctx, *pgid)?)?;
+        return Ok(NONE);
     }
     #[cfg(target_os = "linux")]
     if name == "get_terminal_size" {

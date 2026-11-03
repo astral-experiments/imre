@@ -81,6 +81,22 @@ def current():
     assert pair[int].__origin__ is pair and pair[int].__args__ == (int,)
     assert list[pair].__parameters__ == (k, v)
     assert make_alias().__type_params__[0] is not k
+    exec("""def factory():
+    T = None
+    def make(value):
+        type Local[T, *Ts] = tuple[T, late, Local]
+        late = value
+        return Local
+    return make
+""", scope)
+    make = scope["factory"]()
+    assert make.__closure__ is None
+    for value in (int, bytes):
+        local = make(value)
+        param, pack = local.__type_params__
+        assert local.__value__.__args__ == (param, value, local)
+        assert type(pack) is TypeVarTuple
+
     # Separate exec locals receive the declaration; the evaluator sees parameters and globals.
     namespace = {"__name__": "other", "Key": str, "late": int}
     bindings = {"late": float}

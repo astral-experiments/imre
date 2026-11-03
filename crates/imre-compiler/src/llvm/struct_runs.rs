@@ -108,6 +108,42 @@ fn mark_indexed_reads_in_bounds(module: &Module, term: &mut Expr, list: usize, i
 }
 
 impl Emitter<'_, '_> {
+    /// Evaluate a validated, total float projection on one borrowed dictionary payload.
+    /// Field-only methods can use the same projection on their receiver without boxing it.
+    fn dictionary_projection(&mut self, term: &Expr, payload: &str) -> Value {
+        match &term.kind {
+            ExprKind::Float(_) => self.expr(term),
+            ExprKind::Field(receiver, field) => {
+                let row = Value {
+                    ty: receiver.ty,
+                    operand: payload.to_owned(),
+                    small_integer: false,
+                };
+                let pointer = self.field_pointer(&row, *field);
+                self.field_value(&pointer, term.ty)
+            }
+            ExprKind::Negate(inner) => {
+                let value = self.dictionary_projection(inner, payload);
+                Value {
+                    operand: self.instruction(format!("fneg double {}", value.operand)),
+                    ..value
+                }
+            }
+            ExprKind::Binary(op, left, right) => {
+                let left = self.dictionary_projection(left, payload);
+                let right = self.dictionary_projection(right, payload);
+                self.binary(*op, &left, &right)
+            }
+            ExprKind::Call(id, _) => {
+                let [Statement::Return(result)] = self.module.functions[*id].body.as_slice() else {
+                    unreachable!()
+                };
+                self.dictionary_projection(result, payload)
+            }
+            _ => unreachable!("validated dictionary projection"),
+        }
+    }
+
     /// Fold in-bounds modular lookups across runs of the same immutable row.
     /// Publish the final index and loop target of each bounded chunk before polling again.
     pub(super) fn uniform_indexed_sum(
@@ -204,7 +240,59 @@ impl Emitter<'_, '_> {
         let scalar = self.label();
         let planned = self.label();
         let unplanned = self.instruction(format!("icmp slt i64 {count}, 0"));
-        self.branch(&unplanned, &scalar, &planned);
+        if pure_term(
+            Some(self.module),
+            term,
+            &|e| indexed_list(self.module, e, *index) == Some(list),
+            None,
+        ) {
+            let (dictionary, project, publish, resume) =
+                (self.label(), self.label(), self.label(), self.label());
+            self.branch(&unplanned, &dictionary, &planned);
+            self.start(&dictionary);
+            let view = self.entry_alloca("{ [2 x ptr], ptr, i64 }");
+            let alternate = self.instruction(format!(
+                "call i64 @imre_struct_binary_prefix(ptr {}, ptr {view})",
+                receiver.operand
+            ));
+            let found = self.instruction(format!("icmp sge i64 {alternate}, 0"));
+            self.branch(&found, &project, &scalar);
+            self.start(&project);
+            let terms = [0, 1].map(|i| {
+                let entry = self.instruction(format!("getelementptr ptr, ptr {view}, i64 {i}"));
+                let payload = self.instruction(format!("load ptr, ptr {entry}"));
+                self.dictionary_projection(term, &payload).operand
+            });
+            self.output.local_helper(
+                "imre_bitmap_indexed_sum",
+                include_str!("bitmap_indexed_sum.ll"),
+            );
+            let initial = self.borrow_slot(*sum);
+            let result = self.instruction(format!("call {{ double, i64 }} @imre_bitmap_indexed_sum(ptr {view}, i64 {start}, i64 {stop}, i64 {modulus}, i64 {}, i64 {alternate}, i64 {scale}, i64 {offset}, double {}, double {}, double {})", length.operand, initial.operand, terms[0], terms[1]));
+            let end = self.instruction(format!("extractvalue {{ double, i64 }} {result}, 1"));
+            let advanced = self.instruction(format!("icmp ne i64 {end}, {start}"));
+            self.branch(&advanced, &publish, &resume);
+            self.start(&publish);
+            let subtotal = self.instruction(format!("extractvalue {{ double, i64 }} {result}, 0"));
+            self.line(format!("store double {subtotal}, ptr %local{sum}"));
+            let last = self.instruction(format!("sub i64 {end}, 2"));
+            let at = self.instruction(format!("call i64 @imre_bounded_modular_index(i64 {last}, i64 {scale}, i64 {offset}, i64 {modulus})"));
+            for (slot, operand) in [(target, last), (*index, at), (cursor, end)] {
+                self.store(
+                    slot,
+                    &Value {
+                        ty: Type::Int,
+                        operand,
+                        small_integer: true,
+                    },
+                );
+            }
+            self.jump(&resume);
+            self.start(&resume);
+            self.jump(&ordinary);
+        } else {
+            self.branch(&unplanned, &scalar, &planned);
+        }
         for (entry, single_rows) in [(scalar, true), (planned, false)] {
             self.start(&entry);
             let condition = self.label();

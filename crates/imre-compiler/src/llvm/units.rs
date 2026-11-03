@@ -140,16 +140,6 @@ impl Output {
         self.used(self.function_owner(id), self.adapter_name(id, bound))
     }
 
-    pub fn shared_global(&mut self, name: &str, ty: &str, value: &str) {
-        if self.units.len() > 1 {
-            self.users.insert(
-                name.to_owned(),
-                (0..self.units.len()).filter(|&u| u != self.entry).collect(),
-            );
-        }
-        writeln!(self.global(self.entry, name, "global", ty), "{value}").unwrap();
-    }
-
     pub fn global(
         &mut self,
         owner: usize,
@@ -279,6 +269,48 @@ mod tests {
             assert_eq!(uses > 0, unit.name == "loops");
             assert_eq!(definitions, usize::from(uses > 0));
             assert!(!unit.llvm_ir.contains("@imre_repeat_fadd"));
+        }
+    }
+
+    #[test]
+    fn sequence_layout_follows_inline_reads() {
+        let options = crate::CompileOptions::default();
+        assert!(
+            !crate::compile("print(42)", &options)
+                .unwrap()
+                .contains("@sequence_layout")
+        );
+
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(&entry, "from lists import nonempty\nfrom spare import answer\nprint(nonempty([0.5]))\nprint(answer())\n").unwrap();
+        fs::write(
+            temp.path().join("lists.py"),
+            "def nonempty(values: list[float]) -> bool:\n    return bool(values)\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("spare.py"),
+            "def answer() -> int:\n    return 42\n",
+        )
+        .unwrap();
+        let units = crate::compile_file_units(&entry, None, &options)
+            .unwrap()
+            .units;
+        assert_eq!(units.len(), 3);
+        for unit in units {
+            let ir = unit.llvm_ir;
+            assert_eq!(
+                ir.contains("define internal i32 @sequence_header"),
+                unit.name == "lists"
+            );
+            match unit.name.as_str() {
+                "lists" => assert!(ir.contains("@sequence_layout = external hidden global")),
+                "main" => {
+                    assert!(ir.contains("call void @imre_typed_start(i32 0, ptr @sequence_layout)"))
+                }
+                _ => assert!(!ir.contains("@sequence_layout")),
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 use crate::objects::HashState;
 
+use super::stdlib::functools::LRU_CACHE_CLASS;
 use super::wrapper_descriptor::BuiltinDescriptor;
 use super::*;
 
@@ -21,16 +22,18 @@ fn nonconstructible_result_type(name: &str) -> bool {
     )
 }
 
+#[derive(Clone, Copy)]
 pub(super) enum MappingOperation {
     Copy,
     Update,
     Unpack,
-    Keywords(Id),
+    Keywords(Option<Id>),
 }
 
 #[derive(Default)]
 struct InstanceLayout {
     dictionary: bool,
+    materialize_dictionary_on_write: bool,
     declared_slot: bool,
     active_slot: bool,
 }
@@ -658,7 +661,10 @@ impl Context {
     }
 
     /// CPython reports the qualified callable in errors while unpacking its keywords.
-    pub(super) fn keyword_callable(&mut self, callable: Id) -> Result<String> {
+    pub(super) fn keyword_callable(&mut self, callable: Option<Id>) -> Result<String> {
+        let Some(callable) = callable else {
+            return Ok("__build_class__()".into());
+        };
         let name = match self.lookup_attr(callable, "__qualname__") {
             Ok(id) => {
                 let name = builtins::call(self, "str", &[id], &[])?;
@@ -679,6 +685,32 @@ impl Context {
             Err(e) if self.is_attribute_error(&e) => Ok(format!("{name}()")),
             Err(e) => Err(e),
         }
+    }
+
+    /// Merge mapping entries, rejecting duplicate keys when constructing call arguments.
+    pub(super) fn merge_mapping(
+        &mut self,
+        target: Id,
+        input: Id,
+        operation: MappingOperation,
+    ) -> Result<Id> {
+        let mapping =
+            self.for_each_mapping_item(input, target, operation, |ctx, key, value, hash| {
+                ctx.set_dictionary_key(target, key, value, hash, true)
+                    .map(|_| ())
+            })?;
+        if !mapping {
+            let message = match operation {
+                MappingOperation::Keywords(callable) => format!(
+                    "{} argument after ** must be a mapping, not {}",
+                    self.keyword_callable(callable)?,
+                    self.type_name(input)
+                ),
+                _ => "expected a mapping".into(),
+            };
+            return Err(Error::new("TypeError", message));
+        }
+        Ok(target)
     }
 
     /// Dict copying uses raw entries for a dict with its original iterator.
@@ -1042,7 +1074,10 @@ impl Context {
                 return Ok(self.alloc(Value::Method {
                     callable,
                     receiver,
-                    explicit: matches!(self.heap.get(value), Value::Cached { .. }),
+                    explicit: matches!(
+                        self.heap.get(value),
+                        Value::Cached { .. } | Value::Partial { .. }
+                    ),
                 }));
             }
         }
@@ -1280,6 +1315,23 @@ impl Context {
         self.own_class_attr(owner, "mapping")
     }
 
+    /// Resolve numeric fields on exact scalar values and their builtin classes.
+    /// Subclasses find these descriptors through their normal method resolution order.
+    fn builtin_numeric_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        let kind = match self.heap.get(obj) {
+            Value::Native(kind) => kind.as_str(),
+            Value::Int(_) | Value::Bool(_) => "int",
+            Value::Float(_) => "float",
+            _ => return None,
+        };
+        let owner = match (kind, name) {
+            ("int" | "bool", "numerator" | "denominator") => self.builtin("int"),
+            ("float", "real" | "imag") => self.builtin("float"),
+            _ => return None,
+        };
+        self.own_class_attr(owner, name)
+    }
+
     fn equal_class(&self, a: Id, b: Id) -> bool {
         a == b
             || matches!((self.heap.get(a),self.heap.get(b)),(Value::Native(x),Value::Native(y)) if x==y)
@@ -1373,7 +1425,7 @@ impl Context {
             Value::Module { .. } => self.type_name(obj),
             Value::DefaultDict { .. } => "collections.defaultdict",
             Value::Partial { .. } => "functools.partial",
-            Value::Cached { .. } => "functools._lru_cache_wrapper",
+            Value::Cached { .. } => LRU_CACHE_CLASS,
             Value::KeyWrapper { .. } => KEY_WRAPPER,
             Value::BytesIoBuffer { .. } => "_io._BytesIOBuffer",
             Value::PartialPlaceholder => "functools._PlaceholderType",
@@ -1451,7 +1503,7 @@ impl Context {
                             | "mappingproxy"
                             | KEY_WRAPPER
                             | "functools._PlaceholderType"
-                            | "functools._lru_cache_wrapper"
+                            | LRU_CACHE_CLASS
                             | "functools.partial"
                             | HashState::CLASS
                             | HashState::XOF_CLASS
@@ -1666,7 +1718,7 @@ impl Context {
             | ("_contextvars.ContextVar", Value::ContextVar { .. })
             | ("_contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
-            | ("functools._lru_cache_wrapper", Value::Cached { .. })
+            | (LRU_CACHE_CLASS, Value::Cached { .. })
             | ("_contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
@@ -2049,26 +2101,17 @@ impl Context {
         {
             return Ok(value);
         }
-        if name == "mapping"
-            && let Some(descriptor) = self.dict_view_mapping_member(obj)
-        {
+        let builtin_member = match name {
+            "mapping" => self.dict_view_mapping_member(obj),
+            "numerator" | "denominator" | "real" | "imag" => self.builtin_numeric_member(obj, name),
+            _ => None,
+        };
+        if let Some(descriptor) = builtin_member {
             if matches!(self.heap.get(obj), Value::Native(_)) {
                 return Ok(descriptor);
             }
             let class = self.exact_type(obj)?;
             return self.bind_attribute(descriptor, obj, class);
-        }
-        if matches!(name, "numerator" | "denominator") {
-            let receiver = match self.heap.get(obj) {
-                Value::Int(_) | Value::Bool(_) => Some(obj),
-                Value::Native(kind) if matches!(kind.as_str(), "int" | "bool") => Some(NONE),
-                _ => None,
-            };
-            if let Some(receiver) = receiver {
-                let owner = self.builtin("int");
-                let descriptor = self.own_class_attr(owner, name).unwrap();
-                return self.bind_attribute(descriptor, receiver, owner);
-            }
         }
         if matches!(
             self.heap.get(obj),
@@ -2401,6 +2444,10 @@ impl Context {
                 }
                 if let Some(value) = self.dictionary_field(Some(dictionary), name)? {
                     return Ok(value);
+                }
+                let class = self.builtin(LRU_CACHE_CLASS);
+                if let Some(member) = self.class_attr(class, name) {
+                    return self.bind_attribute(member, obj, class);
                 }
                 if matches!(name, "cache_clear" | "cache_info") {
                     let callable = self.builtin(&format!("functools._lru_cache_wrapper.{name}"));
@@ -2944,7 +2991,15 @@ impl Context {
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "classmethod" | "staticmethod")
-                    && name == "__get__" =>
+                    && name == "__text_signature__" =>
+            {
+                return Ok(self.text("(function, /)"));
+            }
+            Value::Native(ref class)
+                if matches!(
+                    class.as_str(),
+                    "classmethod" | "staticmethod" | "functools.partial"
+                ) && name == "__get__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__get__")));
             }
@@ -3067,6 +3122,19 @@ impl Context {
             Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
                 return Ok(self.readonly_member("coroutine", "cr_origin"));
+            }
+            Value::Coroutine { frame, .. } if name == "cr_running" => {
+                return self.default_get_attr(frame, "gi_running");
+            }
+            Value::Coroutine { frame, .. } if name == "cr_suspended" => {
+                return self.default_get_attr(frame, "gi_suspended");
+            }
+            Value::Coroutine { frame, .. } if name == "cr_frame" => {
+                if !self.audit_hooks.is_empty() {
+                    let attribute = self.text(name);
+                    stdlib::audit::event(self, "object.__getattr__", &[obj, attribute])?;
+                }
+                return self.generator_frame(frame);
             }
             Value::Coroutine { frame, .. } if name == "cr_code" => {
                 let Value::Generator { code, .. } = *self.heap.get(frame) else {
@@ -3429,6 +3497,7 @@ impl Context {
             } if matches!(
                 owner,
                 "int"
+                    | "float"
                     | super::deque::CLASS
                     | "typing.Union"
                     | "typing.TypeAliasType"
@@ -3455,6 +3524,10 @@ impl Context {
                     "__doc__" if owner == super::deque::CLASS => {
                         return Ok(self.text("maximum size of a deque or None if unbounded"));
                     }
+                    "__doc__" if owner == "float" => {
+                        let part = if field == "real" { "real" } else { "imaginary" };
+                        return Ok(self.text(format!("the {part} part of a complex number")));
+                    }
                     "__doc__" if owner == "int" => {
                         return Ok(
                             self.text(format!("the {field} of a rational number in lowest terms"))
@@ -3470,6 +3543,7 @@ impl Context {
                             || matches!(
                                 owner,
                                 "int"
+                                    | "float"
                                     | "typing.Union"
                                     | "typing.TypeAliasType"
                                     | "_ssl.MemoryBIO"
@@ -3546,7 +3620,7 @@ impl Context {
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
                         | KEY_WRAPPER
-                        | "functools._lru_cache_wrapper"
+                        | LRU_CACHE_CLASS
                         | HashState::CLASS
                         | HashState::XOF_CLASS
                         | super::namedtuple::GETTER
@@ -3561,6 +3635,11 @@ impl Context {
                     && let Some(value) = self.own_class_attr(obj, name)
                 {
                     return Ok(value);
+                }
+                if class == LRU_CACHE_CLASS
+                    && let Some(member) = self.class_attr(obj, name)
+                {
+                    return Ok(member);
                 }
                 if class == "array.array" && super::array::has_method(name) {
                     return Ok(self.builtin(&format!("array.array.{name}")));
@@ -3815,26 +3894,21 @@ impl Context {
                     .ok_or_else(|| Error::new("ImportError", "native _io module is unavailable"));
             }
             Value::Native(ref symbol)
-                if let Some((owner, "__new__")) = symbol.rsplit_once('.')
-                    && (matches!(owner, super::namespace::CLASS | "mappingproxy")
-                        || stdlib::itertools::cursor_type(owner).is_some()
-                        || super::deque::iterator_class(owner).is_some())
-                    && matches!(name, "__doc__" | "__text_signature__") =>
-            {
-                return Ok(self.text(match name {
-                    "__doc__" => {
-                        "Create and return a new object.  See help(type) for accurate signature."
-                    }
-                    _ => "($type, *args, **kwargs)",
-                }));
-            }
-            Value::Native(ref symbol)
                 if matches!(
                     name,
-                    "__self__" | "__name__" | "__qualname__" | "__module__"
+                    "__doc__"
+                        | "__text_signature__"
+                        | "__self__"
+                        | "__name__"
+                        | "__qualname__"
+                        | "__module__"
                 ) && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(match name {
+                    "__doc__" => self.text(
+                        "Create and return a new object.  See help(type) for accurate signature.",
+                    ),
+                    "__text_signature__" => self.text("($type, *args, **kwargs)"),
                     "__self__" => match self.builtins.get(owner) {
                         Some(&class) => class,
                         None => {
@@ -5078,12 +5152,16 @@ impl Context {
         };
         let mut shadowed = false;
         for &base in std::iter::once(&class).chain(ancestors) {
+            let base = self.heap.get(base);
             let Value::Class {
                 scope, name: owner, ..
-            } = self.heap.get(base)
+            } = base
             else {
                 continue;
             };
+            // In-memory I/O pickle state distinguishes a missing dictionary from an emptied one.
+            layout.materialize_dictionary_on_write |=
+                matches!(base.io_kind(), Some("BytesIO" | "StringIO"));
             let frame = self.scope_data(*scope);
             shadowed |= self.namespace_binding(frame, name).is_some();
             let Some(slots) = frame
@@ -5146,11 +5224,13 @@ impl Context {
         if name == "mapping" && matches!(self.heap.get(obj), Value::DictView { .. }) {
             return self.dict_view_mapping_member(obj);
         }
-        if matches!(name, "numerator" | "denominator")
-            && matches!(self.heap.get(obj), Value::Int(_) | Value::Bool(_))
+        if matches!(name, "numerator" | "denominator" | "real" | "imag")
+            && matches!(
+                self.heap.get(obj),
+                Value::Int(_) | Value::Bool(_) | Value::Float(_)
+            )
         {
-            let owner = self.builtin("int");
-            return self.own_class_attr(owner, name);
+            return self.builtin_numeric_member(obj, name);
         }
         if let Value::NamedTuple {
             class: Some(owner), ..
@@ -6024,8 +6104,10 @@ impl Context {
             }
             if !layout.active_slot {
                 let storage = namespace.or_else(|| {
-                    (layout.declared_slot || self.has_namedtuple_field(class, name))
-                        .then(|| self.instance_dictionary(obj, class))
+                    (layout.materialize_dictionary_on_write
+                        || layout.declared_slot
+                        || self.has_namedtuple_field(class, name))
+                    .then(|| self.instance_dictionary(obj, class))
                 });
                 if let Some(storage) = storage {
                     return self.update_dictionary_field(obj, storage, name, Some(value));
@@ -6623,6 +6705,9 @@ impl Context {
             Value::Native(name) if name == "super.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "super", &args, &kwargs)
             }
+            Value::Native(name) if name == "functools.partial.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "functools.partial", &args, &kwargs)
+            }
             Value::Native(name) if name == "classmethod.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)
             }
@@ -6761,6 +6846,7 @@ impl Context {
                                 | "set"
                                 | "int"
                                 | "_int_getset"
+                                | "_float_getset"
                                 | "_dictview_mapping"
                                 | "frozenset"
                                 | "tuple"

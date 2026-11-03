@@ -1,4 +1,4 @@
-from _imre_metadata import dedent, filenames as _filenames, zip_names as _zip_names, zip_open as _zip_open, zip_read as _zip_read
+from _imre_metadata import filenames as _filenames, zip_names as _zip_names, zip_open as _zip_open, zip_read as _zip_read
 import abc
 from importlib.abc import MetaPathFinder
 from os import fspath

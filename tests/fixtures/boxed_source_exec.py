@@ -164,6 +164,53 @@ class Case(Base):
     assert case().label() == ("base", "global")
     assert case.describe() == "Case"
     assert case.__firstlineno__ == 5
+
+    exec("""class Entry:
+    def __mro_entries__(self, original):
+        events.append(('resolve', original))
+        return (list,)
+entry = Entry()
+def pack():
+    events.append('unpack')
+    yield entry
+    yield Base
+def record(label, value):
+    events.append(label)
+    return value
+class Meta(type):
+    @classmethod
+    def __prepare__(mcls, name, bases, **kw):
+        events.append(('prepare', bases, kw))
+        return {}
+    def __new__(mcls, name, bases, ns, **kw):
+        events.append(('new', kw))
+        return type.__new__(mcls, name, bases, ns)
+class Expanded(tag=record('named', 1), *pack(), **record('mapping', {'metaclass': Meta, 'extra': 2})):
+    events.append('body')
+""", namespace)
+    expanded = namespace["Expanded"]
+    orig = (namespace["entry"], namespace["Base"])
+    resolved = (list, namespace["Base"])
+    kw = {"tag": 1, "extra": 2}
+    assert events[-7:] == ["unpack", "named", "mapping", ("resolve", orig),
+                           ("prepare", resolved, kw), "body", ("new", kw)]
+    assert expanded.__bases__ == resolved and expanded.__orig_bases__ == orig
+    assert type(expanded) is namespace["Meta"]
+
+    for header, message in [
+        ("*42", "Value after * must be an iterable, not int"),
+        ("**42", "__build_class__() argument after ** must be a mapping, not int"),
+        ("metaclass=type, **{'metaclass': type}, later=record('late', 1)",
+         "__build_class__() got multiple values for keyword argument 'metaclass'"),
+        ("**{1: 2}", "keywords must be strings"),
+    ]:
+        try:
+            exec(f"class Invalid({header}): events.append('invalid body')", namespace)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError(f"accepted invalid class header {header}")
+        assert "Invalid" not in namespace and events[-1] == ("new", kw)
     try:
         deep_code = compile("class Deep:\n    total = 1" + "+1" * 8192, "deep_class.py", "exec")
     except RecursionError:
@@ -252,6 +299,82 @@ def source_generic_classes():
     ref = row.__annotations__["item"]
     assert ref.__owner__ is row and ref.__forward_module__ == row.__module__
     assert get_type_hints(row)["item"] is row.__type_params__[0]
+
+
+def source_annotated_targets():
+    events = []
+
+    def mark(label, value):
+        events.append(label)
+        return value
+
+    class Box:
+        pass
+
+    target = Box()
+    items = {}
+    namespace = {"mark": mark, "target": target, "items": items}
+    exec("""mark("object", target).value: mark("annotation", int) = mark("value", 3)
+class C:
+    mark("items", items)[mark("key", "x")]: mark("annotation", int) = mark("item", 4)
+""", namespace)
+    assert events == ["value", "object", "item", "items", "key"]
+    assert target.value == 3 and items == {"x": 4}
+    assert not namespace["C"].__annotations__
+
+
+def source_generic_functions():
+    from typing import ParamSpec, TypeVar, TypeVarTuple, get_type_hints
+
+    ns = {"events": []}
+    exec("""from __future__ import annotations
+def decorate(value):
+    events.append(value)
+    def apply(func):
+        events.append(func.__type_params__)
+        return func
+    return apply
+
+class Host:
+    T = int
+    @decorate(T)
+    def method[T, *Ts, **P](self, value: T = T, *, other=T):
+        return value, other, (T, Ts, P)
+
+def factory(T):
+    def nested[T](value: T = T):
+        return value, T
+    return nested
+""", ns)
+    host = ns["Host"]
+    method = host.method
+    params = method.__type_params__
+    assert tuple(map(type, params)) == (TypeVar, TypeVarTuple, ParamSpec)
+    assert ns["events"] == [int, params]
+    assert host().method() == (int, int, params)
+    assert get_type_hints(method)["value"] is params[0]
+
+    first, second = ns["factory"](str), ns["factory"](bytes)
+    assert first() == (str, first.__type_params__[0])
+    assert second() == (bytes, second.__type_params__[0])
+    assert first.__type_params__[0] is not second.__type_params__[0]
+
+    exec("""T = bytes
+class Base:
+    def value(self): return self
+class Lazy(Base):
+    T = int
+    K = str
+    def method[T, __U](self, x: T, y: __U, z: K): return super().value(), __U
+""", ns)
+    lazy = ns["Lazy"]
+    del lazy.T
+    lazy.K = bool
+    private = lazy.method.__type_params__[1]
+    assert private.__name__ == "__U"
+    assert lazy.method.__annotations__ == {"x": bytes, "y": private, "z": bool}
+    instance = lazy()
+    assert instance.method(None, None, None) == (instance, private)
 
 
 def module_annotations():
@@ -1049,6 +1172,7 @@ def current():
     method_argument_lifetime()
     named_bindings()
     source_annotations()
+    source_annotated_targets()
     module_annotations()
     source_genexpr()
     source_listcomp()
@@ -1060,6 +1184,7 @@ def current():
     source_name_deletion()
     source_classes()
     source_generic_classes()
+    source_generic_functions()
     source_test_cases()
     source_nested_functions()
     check_source_lambdas()

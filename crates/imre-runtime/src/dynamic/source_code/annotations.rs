@@ -212,12 +212,16 @@ impl<'a> CompiledStrings<'a, '_> {
 
 impl Context {
     /// Method providers consult their live class dictionary before lexical or global names.
-    fn source_annotation_scope(&mut self, scope: Id, program: &Program) -> Id {
+    fn source_annotation_scope(&mut self, scope: Id, defining_scope: Id, program: &Program) -> Id {
         let parent = self.scope_data(scope);
         if parent.class_body.is_none() || !program.reads.contains("__classdict__") {
-            return scope;
+            return defining_scope;
         }
-        let parent_scope = parent.parent.expect("class definition scope");
+        let parent_scope = if defining_scope == scope {
+            parent.parent.expect("class definition scope")
+        } else {
+            defining_scope
+        };
         let class_cell = parent.class_cell;
         let dict_cell = self.class_annotation_dict_cell(scope);
         let mut names = vec!["__classdict__".to_owned()];
@@ -236,8 +240,9 @@ impl Context {
         program: &Rc<Program>,
         function_code: Id,
         scope: Id,
+        defining_scope: Id,
     ) -> Result<Id> {
-        let scope = self.source_annotation_scope(scope, program);
+        let scope = self.source_annotation_scope(scope, defining_scope, program);
         // Annotation code is constant for this definition, even across calls to its factory.
         let code = if let Some((_, id)) = self
             .code_object(function_code)
@@ -297,7 +302,7 @@ impl Context {
             scope
         };
         if let Some(provider) = provider {
-            let annotate = self.source_annotator(provider, owner, globals)?;
+            let annotate = self.source_annotator(provider, owner, globals, globals)?;
             self.bind_source_name(scope, "__annotate__", annotate)?;
         }
         self.setup_module_annotations(scope, code.string_annotations())

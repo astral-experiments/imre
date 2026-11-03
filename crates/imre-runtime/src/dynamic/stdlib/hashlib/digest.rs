@@ -6,7 +6,7 @@ use super::{
     Context, Error, HashState, Id, NONE, Result, Value, buffer, builtins, data_argument, openssl,
 };
 use crate::Int;
-use crate::objects::hash_hex;
+use crate::objects::{exceptions, hash_hex};
 
 pub(crate) const NAMES: &[&str] = &["md5", "sha1", "sha224", "sha256", "sha384", "sha512"];
 
@@ -29,7 +29,7 @@ impl SharedHash {
 
 #[expect(
     clippy::large_enum_variant,
-    reason = "the shared mutex already heap-allocates the portable hash state"
+    reason = "both typed handles and boxed hash handles already heap-allocate the state"
 )]
 pub(crate) enum State {
     Portable(HashState),
@@ -78,14 +78,73 @@ impl State {
         matches!(self, Self::Portable(hash) if hash.is_xof())
     }
 
-    pub(super) fn copy(&self) -> Result<SharedHash> {
-        Ok(SharedHash::from_state(match self {
-            Self::Portable(hash) => Self::Portable(hash.clone()),
-            Self::OpenSsl(hash) => Self::OpenSsl(hash.try_copy()?),
-        }))
+    /// Select the same public provider as hashlib.new for a typed string and bytes.
+    pub(crate) fn public(
+        name: &str,
+        data: &[u8],
+        used_for_security: bool,
+    ) -> exceptions::Result<Self> {
+        let provider = HashState::provider(name)?;
+        if provider.name != "md5" {
+            return Ok(Self::Portable(
+                provider.create(HashState::public_constructor(name), data),
+            ));
+        }
+        if let Some(ssl) = openssl::provider() {
+            match ssl
+                .digest_with_security("md5", used_for_security)
+                .and_then(|digest| Self::openssl("md5", &digest, data))
+            {
+                Ok(state) => return Ok(state),
+                Err(error)
+                    if !matches!(
+                        error.kind.as_ref(),
+                        super::UNSUPPORTED_DIGEST | "ValueError"
+                    ) =>
+                {
+                    return Err(native_error(error));
+                }
+                Err(_) if !matches!(name, "md5" | "MD5") => {
+                    return Err(exceptions::Error::new(
+                        exceptions::Kind::ValueError,
+                        format!("unsupported hash type {name}"),
+                    ));
+                }
+                Err(_) => {}
+            }
+        }
+        Ok(Self::Portable(
+            provider.create(Some(super::md5::CLASS), data),
+        ))
     }
 
-    pub(crate) fn update(&mut self, data: &[u8]) -> Result<()> {
+    /// Initialize the EVP stream under the digest's selected OpenSSL policy.
+    fn openssl(name: &'static str, digest: &openssl::Digest, data: &[u8]) -> Result<Self> {
+        let mut hash = openssl::Stream::new(name, digest)?;
+        if !data.is_empty() {
+            hash.update(data)?;
+        }
+        Ok(Self::OpenSsl(hash))
+    }
+
+    /// Copy the streaming context without sharing subsequent writes.
+    pub(crate) fn try_copy(&self) -> exceptions::Result<Self> {
+        Ok(match self {
+            Self::Portable(hash) => Self::Portable(hash.clone()),
+            Self::OpenSsl(hash) => Self::OpenSsl(hash.try_copy().map_err(native_error)?),
+        })
+    }
+
+    pub(super) fn copy(&self) -> Result<SharedHash> {
+        Ok(SharedHash::from_state(self.try_copy()?))
+    }
+
+    /// Project native provider errors into the typed runtime's exception representation.
+    pub(crate) fn update_native(&mut self, data: &[u8]) -> exceptions::Result<()> {
+        self.update(data).map_err(native_error)
+    }
+
+    pub(in crate::dynamic) fn update(&mut self, data: &[u8]) -> Result<()> {
         match self {
             Self::Portable(hash) => {
                 hash.update(data);
@@ -93,6 +152,31 @@ impl State {
             }
             Self::OpenSsl(hash) => hash.update(data),
         }
+    }
+
+    /// Finalize a snapshot, borrowing the digest only until the caller consumes it.
+    pub(crate) fn fixed_digest<T>(
+        &self,
+        method: &str,
+        result: impl FnOnce(&[u8]) -> exceptions::Result<T>,
+    ) -> exceptions::Result<T> {
+        match self {
+            Self::Portable(hash) => hash.fixed_digest(method, result),
+            Self::OpenSsl(hash) => result(&hash.digest().map_err(native_error)?),
+        }
+    }
+
+    /// A runtime-selected algorithm may turn out to have a fixed output size.
+    pub(crate) fn xof(&self, method: &str, length: &Int) -> exceptions::Result<Vec<u8>> {
+        if let Self::Portable(hash) = self
+            && hash.is_xof()
+        {
+            return hash.xof_digest(length);
+        }
+        Err(exceptions::Error::new(
+            exceptions::Kind::TypeError,
+            format!("HASH.{method}() takes no arguments (1 given)"),
+        ))
     }
 
     pub(super) fn digest(&self, method: &str, length: Option<&Int>) -> Result<Value> {
@@ -195,9 +279,16 @@ pub(in crate::dynamic) fn construct(
             format!("unsupported hash type {lookup}"),
         )
     })?;
-    let mut hash = openssl::Stream::new(name, &digest)?;
-    if !data.is_empty() {
-        hash.update(data)?;
-    }
-    Ok(ctx.alloc(Value::Hash(SharedHash::from_state(State::OpenSsl(hash)))))
+    let state = State::openssl(name, &digest, data)?;
+    Ok(ctx.alloc(Value::Hash(SharedHash::from_state(state))))
+}
+
+/// EVP stream operations report Python value or allocation errors.
+fn native_error(error: Error) -> exceptions::Error {
+    let kind = if error.kind == "MemoryError" {
+        exceptions::Kind::MemoryError
+    } else {
+        exceptions::Kind::ValueError
+    };
+    exceptions::Error::new(kind, error.message)
 }

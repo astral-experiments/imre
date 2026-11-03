@@ -182,6 +182,12 @@ def _callable(value):
     return getattr(value, "__call__", callable(value) or None) is not None
 
 
+def _instance_callable(spec):
+    if isinstance(spec, type):
+        return any(base.__dict__.get("__call__") is not None for base in spec.__mro__)
+    return getattr(spec, "__call__", None) is not None
+
+
 class NonCallableMock(_FixedMock):
     _mock_sealed = False
     _mock_methods = None
@@ -193,7 +199,8 @@ class NonCallableMock(_FixedMock):
         # Give each mock its own class for special-method lookup.
         return object.__new__(type(cls.__name__, (cls,), {}))
 
-    def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return, **attrs):
+    def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
+                 _new_parent=None, _new_name="", **attrs):
         methods = spec_set if spec_set is not None else spec
         if _is_instance_mock(methods):
             raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
@@ -215,6 +222,9 @@ class NonCallableMock(_FixedMock):
         object.__setattr__(self, "_mock_methods", methods)
         object.__setattr__(self, "_mock_strict", spec_set is not None)
         super().__init__(name=name)
+        if _new_parent is not None:
+            suffix = _new_name if _new_name == "()" else "." + _new_name
+            _new_parent._attach(self._node, suffix)
         self.mock_calls = _CallList()
         self.method_calls = _CallList()
         self.side_effect = side_effect
@@ -316,7 +326,7 @@ class NonCallableMock(_FixedMock):
     def _get_child_mock(self, /, **kwargs):
         # Each instance has a private subclass for its own protocol slots.
         factory = type(self).__mro__[1]
-        if not issubclass(factory, Mock):
+        if not issubclass(factory, CallableMixin):
             factory = MagicMock if issubclass(factory, NonCallableMagicMock) else Mock
         return factory(**kwargs)
 
@@ -372,8 +382,11 @@ class NonCallableMock(_FixedMock):
     def return_value(self):
         if self._mock_sealed and self._node._result == -1:
             raise AttributeError(self._mock_path() + ".return_value")
-        child = super().return_value
-        return getattr(child._node, "_configured_return", child)
+        index = self._return_index()
+        node = self._nodes[index]
+        if hasattr(node, "_configured_return"):
+            return node._configured_return
+        return self._at(index)
 
     @return_value.setter
     def return_value(self, value):
@@ -381,8 +394,7 @@ class NonCallableMock(_FixedMock):
             self._node._result = -1
             return
         self._adopt(value, "()")
-        child = super().return_value
-        child._node._configured_return = value
+        self._nodes[self._return_index()]._configured_return = value
 
     def reset_mock(self, visited=None, *, return_value=False, side_effect=False):
         if visited is None:
@@ -534,7 +546,7 @@ class _MagicSlot:
         return child
 
 
-class Mock(NonCallableMock):
+class CallableMixin:
     def __call__(self, /, *args, **kwargs):
         node = self._node
         signature = getattr(node, "_spec_signature", None)
@@ -583,8 +595,12 @@ class Mock(NonCallableMock):
         return self.return_value
 
 
+class Mock(CallableMixin, NonCallableMock):
+    pass
+
+
 class MagicMock(Mock):
-    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__iter__", "__next__")
+    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__setitem__", "__iter__", "__next__")
 
 
 class NonCallableMagicMock(NonCallableMock):
@@ -619,8 +635,12 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
     if is_class:
         if not as_instance:
             target = partial(spec.__init__, None)
-        elif any("__call__" in base.__dict__ for base in spec.__mro__):
+        elif _instance_callable(spec):
             target = _autospec_target(spec, "__call__", spec.__call__)
+    elif isinstance(spec, classmethod):
+        target = partial(spec.__func__, None)
+    elif isinstance(spec, staticmethod):
+        target = spec.__func__
     elif target is None and callable(spec):
         target = spec
     if target is not None and iscoroutinefunction(target):
@@ -664,7 +684,7 @@ def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwa
     from inspect import isroutine
     if _is_instance_mock(spec):
         raise InvalidSpecError("Cannot autospec a Mock object")
-    if isroutine(spec):
+    if isroutine(spec) and not isinstance(spec, (classmethod, staticmethod)):
         raise NotImplementedError("create_autospec does not yet support standalone routines")
     if not unsafe:
         for typo in ("autospect", "auto_spec", "set_spec"):

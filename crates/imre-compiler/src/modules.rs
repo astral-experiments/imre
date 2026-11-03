@@ -50,6 +50,10 @@ fn stat_mode_source() -> Option<&'static str> {
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "unittest.main" => Some((
+            "unittest/main.py",
+            include_str!("../stdlib/unittest/main.py"),
+        )),
         "unittest.result" => Some((
             "unittest/result.py",
             include_str!("../stdlib/unittest/result.py"),
@@ -57,6 +61,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "unittest.runner" => Some((
             "unittest/runner.py",
             include_str!("../stdlib/unittest/runner.py"),
+        )),
+        "unittest.suite" => Some((
+            "unittest/suite.py",
+            include_str!("../stdlib/unittest/suite.py"),
         )),
         "unittest.signals" => Some((
             "unittest/signals.py",
@@ -91,6 +99,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
         "_colorize" => Some(("_colorize.py", include_str!("../stdlib/_colorize.py"))),
+        // CPython 3.14.5 Lib/_pyio.py. See licenses/CPython.txt.
+        "_pyio" => Some(("_pyio.py", include_str!("../stdlib/_pyio.py"))),
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
         "_strptime" => Some(("_strptime.py", include_str!("../stdlib/_strptime.py"))),
         "calendar" => Some(("calendar.py", include_str!("../stdlib/calendar.py"))),
@@ -237,13 +247,46 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
         "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
-        "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
+        "base64" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some((
+                "base64.py",
+                SOURCE.get_or_init(|| {
+                    const UPSTREAM: &str = include_str!(
+                        "../../../benchmarks/cpython_stdlib/full/base64/upstream/Lib/base64.py"
+                    );
+                    let section = |start: &str, end: &str| {
+                        let start = UPSTREAM.find(start).expect("pinned base64 section");
+                        let (section, _) = UPSTREAM[start..]
+                            .split_once(end)
+                            .expect("pinned base64 section end");
+                        section
+                    };
+                    [
+                        "import binascii\nimport struct\n",
+                        // The runtime supplies the URL-safe codecs.
+                        section("bytes_types =", "_urlsafe_encode_translation ="),
+                        section("# Base32 encoding/decoding", "# RFC 3548, Base 16"),
+                        include_str!("../stdlib/base85_encode.py"),
+                        section("def a85decode(", "# The following code is originally taken"),
+                        section("def b85decode(", "def main():"),
+                    ]
+                    .join("\n")
+                }),
+            ))
+        }
         // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
         "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
         "encodings" => Some((
             "encodings/__init__.py",
             include_str!("../stdlib/encodings/__init__.py"),
+        )),
+        "encodings.aliases" => Some((
+            "encodings/aliases.py",
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/encodings/aliases.py"
+            ),
         )),
         "encodings.ascii" => Some((
             "encodings/ascii.py",
@@ -1499,6 +1542,10 @@ impl IntrinsicModule {
             (Self::Inspect, "getinnerframes") => {
                 Intrinsic::ScopedObjectExport("inspect.getinnerframes")
             }
+            (Self::Inspect, "Attribute") => Intrinsic::ScopedObjectExport("inspect.Attribute"),
+            (Self::Inspect, "classify_class_attrs") => {
+                Intrinsic::ScopedObjectExport("inspect.classify_class_attrs")
+            }
             (Self::Inspect, "getmembers") => Intrinsic::ScopedObjectExport("inspect.getmembers"),
             (Self::Inspect, "getmembers_static") => {
                 Intrinsic::ScopedObjectExport("inspect.getmembers_static")
@@ -1531,6 +1578,16 @@ impl IntrinsicModule {
             (Self::Warnings, "resetwarnings") => Intrinsic::WarningReset,
             (Self::Warnings, "formatwarning") => Intrinsic::WarningDisplay { show: false },
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
+            #[cfg(target_os = "linux")]
+            (Self::Time, "CLOCK_REALTIME") => {
+                Intrinsic::IntConstant(i64::from(libc::CLOCK_REALTIME))
+            }
+            #[cfg(target_os = "linux")]
+            (Self::Time, "clock_gettime") => Intrinsic::ObjectRuntimeExport("time.clock_gettime"),
+            #[cfg(target_os = "linux")]
+            (Self::Time, "clock_gettime_ns") => {
+                Intrinsic::ObjectRuntimeExport("time.clock_gettime_ns")
+            }
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal | Self::SignalNative, "signal") if cfg!(unix) => {
@@ -1894,6 +1951,7 @@ impl IntrinsicModule {
                 "IPPROTO_UDP" => "_socket.IPPROTO_UDP",
                 "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
                 "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
+                "SO_TYPE" => "_socket.SO_TYPE",
                 "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
                 "SO_REUSEPORT" => "_socket.SO_REUSEPORT",
                 "SO_SNDBUF" => "_socket.SO_SNDBUF",
@@ -1997,6 +2055,7 @@ impl IntrinsicModule {
                 "AF_INET" => "af_inet",
                 "SOCK_STREAM" => "sock_stream",
                 "SOL_SOCKET" => "sol_socket",
+                "SO_TYPE" => "so_type",
                 "SO_REUSEADDR" => "so_reuseaddr",
                 "IPPROTO_TCP" => "ipproto_tcp",
                 "TCP_NODELAY" => "tcp_nodelay",
@@ -2026,10 +2085,26 @@ impl IntrinsicModule {
             (Self::Hashlib, "sha3_512") => Intrinsic::NamedHash("sha3_512"),
             (Self::Hashlib, "shake_128") => Intrinsic::NamedHash("shake_128"),
             (Self::Hashlib, "shake_256") => Intrinsic::NamedHash("shake_256"),
+            (Self::Base64, "a85encode") => Intrinsic::ScopedObjectExport("base64.a85encode"),
+            (Self::Base64, "a85decode") => Intrinsic::ScopedObjectExport("base64.a85decode"),
+            (Self::Base64, "b85encode") => Intrinsic::ScopedObjectExport("base64.b85encode"),
+            (Self::Base64, "b85decode") => Intrinsic::ScopedObjectExport("base64.b85decode"),
+            (Self::Base64, "z85encode") => Intrinsic::ScopedObjectExport("base64.z85encode"),
+            (Self::Base64, "z85decode") => Intrinsic::ScopedObjectExport("base64.z85decode"),
+            (Self::Base64, "standard_b64decode") => {
+                Intrinsic::ScopedObjectExport("base64.standard_b64decode")
+            }
+            (Self::Base64, "urlsafe_b64decode") => {
+                Intrinsic::ScopedObjectExport("base64.urlsafe_b64decode")
+            }
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Base64, "encodebytes") => Intrinsic::ScopedObjectExport("base64.encodebytes"),
             (Self::Base64, "b64encode") => Intrinsic::Base64Encode,
             (Self::Base64, "b64decode") => Intrinsic::Base64Decode,
+            (Self::Base64, "b32encode") => Intrinsic::ScopedObjectExport("base64.b32encode"),
+            (Self::Base64, "b32decode") => Intrinsic::ScopedObjectExport("base64.b32decode"),
+            (Self::Base64, "b32hexencode") => Intrinsic::ScopedObjectExport("base64.b32hexencode"),
+            (Self::Base64, "b32hexdecode") => Intrinsic::ScopedObjectExport("base64.b32hexdecode"),
             (Self::Binascii, "unhexlify") => Intrinsic::BinasciiUnhexlify("binascii.unhexlify"),
             (Self::Binascii, "a2b_hex") => Intrinsic::BinasciiUnhexlify("binascii.a2b_hex"),
             (Self::Binascii, "a2b_base64") => Intrinsic::BinasciiDecode,
@@ -2483,6 +2558,7 @@ pub(crate) fn boxed_mock_export(name: &str) -> bool {
             | "DEFAULT"
             | "ANY"
             | "MagicMock"
+            | "CallableMixin"
             | "NonCallableMock"
             | "NonCallableMagicMock"
             | "PropertyMock"
@@ -3214,7 +3290,7 @@ impl SourceGraph {
             return Err(error.into());
         }
         let source = String::from_utf8(bytes)
-            .map_err(|_| format!("{}: stream did not contain valid UTF-8", path.display()))?;
+            .map_err(|error| crate::script_decode_error(&filename, error))?;
         let root = entry
             .parent()
             .ok_or("script has no parent directory")?
@@ -4756,6 +4832,23 @@ impl<'a> Loader<'a> {
         Ok(module)
     }
 
+    /// Look for a source file on the project search path before using a bundled fallback.
+    fn has_project_source(&mut self, name: &str) -> bool {
+        let roots = std::iter::once(&self.root)
+            .skip(usize::from(self.skip_current_root))
+            .chain(&self.search_roots[..self.archive_roots]);
+        for root in roots {
+            let base = root.join(name);
+            for path in [base.join("__init__.py"), base.with_extension("py")] {
+                if self.fs.is_file(&path) {
+                    return true;
+                }
+                self.inputs.missing.push(path);
+            }
+        }
+        false
+    }
+
     fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
         if self.allow_imports && !self.skip_current_root {
             for base in [
@@ -4847,6 +4940,7 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "_pyio" if self.allow_imports && self.has_project_source(name) => None,
             // Fixed-layout Decimal values use the scalar methods. Rich comparisons use the
             // complete provider on the boxed route, where Python dispatches equality and hashing.
             "decimal" => Some((

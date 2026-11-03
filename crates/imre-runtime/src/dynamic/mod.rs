@@ -1,6 +1,8 @@
 //! Object operations for native Python functions with dynamically loaded modules.
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
+pub(crate) use stdlib::hashlib::digest::State as DigestState;
+
 mod abstract_class;
 mod allocation_traces;
 mod array;
@@ -325,6 +327,7 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("array.array", Value::Array(_))
+            | (stdlib::functools::LRU_CACHE_CLASS, Value::Cached { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
@@ -384,31 +387,72 @@ impl Context {
         })
     }
 
-    /// Find the Python acquisition slot, keeping native base descriptors in MRO order.
-    fn python_buffer_method(&self, object: Id) -> Result<Option<Id>> {
+    /// A native buffer descriptor in the MRO takes precedence over a later Python definition.
+    fn buffer_slot(&self, object: Id, name: &str) -> Option<Option<Id>> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
+            return None;
+        };
+        self.find_in_mro(*class, |base| match self.heap.get(base) {
+            Value::Class { .. } => self.own_class_attr(base, name).map(Some),
+            Value::Native(base)
+                if matches!(base.as_str(), "array.array" | "bytearray")
+                    || (base == "bytes" && name == "__buffer__") =>
+            {
+                Some(None)
+            }
+            _ => None,
+        })
+    }
+
+    fn python_buffer_method(&self, object: Id, scoped: bool) -> Result<Option<Id>> {
+        let Some(method) = self.buffer_slot(object, "__buffer__") else {
             return Ok(None);
         };
-        let slot = |name| {
-            self.find_in_mro(*class, |base| match self.heap.get(base) {
-                Value::Class { .. } => self.own_class_attr(base, name).map(Some),
-                Value::Native(base)
-                    if matches!(base.as_str(), "array.array" | "bytearray")
-                        || (base == "bytes" && name == "__buffer__") =>
-                {
-                    Some(None)
-                }
-                _ => None,
-            })
-        };
-        let Some(method) = slot("__buffer__") else {
-            return Ok(None);
-        };
-        // A Python release hook must run even when the last derived view dies in GC.
-        if slot("__release_buffer__").flatten().is_some() {
+        // A long-lived view needs a Python release hook even if its last reference dies in GC.
+        if (!scoped || method.is_none())
+            && self
+                .buffer_slot(object, "__release_buffer__")
+                .flatten()
+                .is_some()
+        {
             return Err(Self::unsupported_buffer_hooks());
         }
         Ok(method)
+    }
+
+    fn call_buffer_hook(&mut self, object: Id, method: Id, arg: Id) -> Result<Id> {
+        let class = self.exact_type(object)?;
+        let method = self.bind_attribute(method, object, class)?;
+        self.call(method, vec![arg], vec![])
+    }
+
+    fn acquire_python_buffer(&mut self, object: Id, method: Id, flags: i64) -> Result<Id> {
+        let flags = self.int(flags);
+        let view = self.call_buffer_hook(object, method, flags)?;
+        if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                "__buffer__ returned non-memoryview object",
+            ));
+        }
+        Ok(view)
+    }
+
+    /// Release a synchronous Python export after its consumer has dropped the view's export.
+    fn release_python_buffer(&mut self, object: Id, view: Id) {
+        if matches!(self.heap.get(view), Value::MemoryView { owner: Some(owner), lease: None, .. } if *owner == object)
+        {
+            return;
+        }
+        if let Some(method) = self.buffer_slot(object, "__release_buffer__").flatten()
+            && let Err(error) = self.call_buffer_hook(object, method, view)
+        {
+            let message = format!(
+                "Exception ignored in __release_buffer__ of {}",
+                self.type_name(object)
+            );
+            unraisable::report(self, error, false, None, &message);
+        }
     }
 
     fn unsupported_buffer_hooks() -> Error {
@@ -419,7 +463,7 @@ impl Context {
     }
 
     fn check_buffer_exporter(&self, object: Id) -> Result<()> {
-        if self.python_buffer_method(object)?.is_some() {
+        if self.python_buffer_method(object, false)?.is_some() {
             return Err(Self::unsupported_buffer_hooks());
         }
         Ok(())
@@ -530,18 +574,9 @@ impl Context {
     }
 
     fn new_memoryview(&mut self, object: Id) -> Result<Id> {
-        if let Some(method) = self.python_buffer_method(object)? {
-            let class = self.exact_type(object)?;
-            let method = self.bind_attribute(method, object, class)?;
+        if let Some(method) = self.python_buffer_method(object, false)? {
             // PyMemoryView_FromObject requests PyBUF_FULL_RO, including shape and strides.
-            let flags = self.int(0x11c);
-            let view = self.call(method, vec![flags], vec![])?;
-            if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
-                return Err(Error::new(
-                    "TypeError",
-                    "__buffer__ returned non-memoryview object",
-                ));
-            }
+            let view = self.acquire_python_buffer(object, method, 0x11c)?;
             let outer = self.new_memoryview(view)?;
             let wrapper = self.alloc(Value::BufferWrapper);
             let export = self.alloc(Value::PythonBufferLease {
@@ -2250,6 +2285,41 @@ impl Context {
         true
     }
 
+    /// Register a builtin number's read-only fields and expose the declaring descriptors.
+    fn install_numeric_dictionary(
+        &mut self,
+        class: Id,
+        owner: &'static str,
+        methods: &[&str],
+        fields: [&'static str; 2],
+    ) {
+        for field in fields {
+            let get = self.builtin(&format!("_{owner}_getset.{field}"));
+            let descriptor = self.alloc(Value::GetSetDescriptor {
+                owner,
+                name: field,
+                get,
+                set: None,
+            });
+            self.builtins.insert(format!("{owner}.{field}"), descriptor);
+        }
+        let members = methods
+            .iter()
+            .chain(builtins::real_methods(owner))
+            .copied()
+            .chain(["__new__"])
+            .chain((owner == "int").then_some("__sizeof__"))
+            .chain(fields);
+        let entries = members
+            .map(|member| {
+                let key = self.heap.code_name(member);
+                (key, self.builtin(&format!("{owner}.{member}")))
+            })
+            .collect();
+        let dictionary = self.dict(entries);
+        self.native_type_dicts.insert(class, dictionary);
+    }
+
     fn builtin(&mut self, name: &str) -> Id {
         if let Some(&value) = self.builtins.get(name) {
             return value;
@@ -2281,6 +2351,19 @@ impl Context {
                 let field = self.readonly_member("super", name);
                 entries.push((self.heap.code_name(name), field));
             }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
+        if name == stdlib::functools::LRU_CACHE_CLASS {
+            let mut entries = Vec::new();
+            for &member in stdlib::functools::COPY_METHODS {
+                let method = self.builtin(&format!("{name}.{member}"));
+                entries.push((self.heap.code_name(member), method));
+            }
+            entries.push((
+                self.heap.code_name("__module__"),
+                self.heap.code_name("functools"),
+            ));
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
@@ -2359,27 +2442,15 @@ impl Context {
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
-            "int" => {
-                for field in ["numerator", "denominator"] {
-                    let get = self.builtin(&format!("_int_getset.{field}"));
-                    let descriptor = self.alloc(Value::GetSetDescriptor {
-                        owner: "int",
-                        name: field,
-                        get,
-                        set: None,
-                    });
-                    self.builtins.insert(format!("int.{field}"), descriptor);
-                }
-                &[
-                    "__add__",
-                    "__index__",
-                    "bit_length",
-                    "from_bytes",
-                    "to_bytes",
-                    "__format__",
-                    "__repr__",
-                ]
-            }
+            "int" => &[
+                "__add__",
+                "__index__",
+                "bit_length",
+                "from_bytes",
+                "to_bytes",
+                "__format__",
+                "__repr__",
+            ],
             "float" => &[
                 "__format__",
                 "__getformat__",
@@ -2413,21 +2484,12 @@ impl Context {
         {
             self.builtin(&format!("{name}.{method}"));
         }
-        if name == "int" {
-            // A type dictionary exposes the declaring descriptors before binding.
-            let members = methods
-                .iter()
-                .chain(builtins::real_methods(name))
-                .copied()
-                .chain(["__new__", "__sizeof__", "numerator", "denominator"]);
-            let entries = members
-                .map(|member| {
-                    let key = self.heap.code_name(member);
-                    (key, self.builtin(&format!("int.{member}")))
-                })
-                .collect();
-            let dictionary = self.dict(entries);
-            self.native_type_dicts.insert(value, dictionary);
+        match name {
+            "int" => {
+                self.install_numeric_dictionary(value, "int", methods, ["numerator", "denominator"])
+            }
+            "float" => self.install_numeric_dictionary(value, "float", methods, ["real", "imag"]),
+            _ => {}
         }
         value
     }
@@ -2934,11 +2996,30 @@ impl Context {
     ) -> Result<()> {
         #[cfg(target_os = "linux")]
         if source.is_none() && matches!(name, "os" | "posix") {
-            for name in ["major", "minor", "makedev", "mknod"] {
+            stdlib::os::eventfd::initialize(self, scope);
+            for name in [
+                "major",
+                "minor",
+                "makedev",
+                "mknod",
+                "timerfd_create",
+                "timerfd_gettime",
+                "timerfd_gettime_ns",
+                "timerfd_settime",
+                "timerfd_settime_ns",
+            ] {
                 let function = self.builtin(&format!("posix.{name}"));
                 self.bind(scope, name, function);
             }
-            stdlib::os::eventfd::initialize(self, scope);
+            for (name, flag) in [
+                ("TFD_CLOEXEC", libc::TFD_CLOEXEC),
+                ("TFD_NONBLOCK", libc::TFD_NONBLOCK),
+                ("TFD_TIMER_ABSTIME", libc::TFD_TIMER_ABSTIME),
+                ("TFD_TIMER_CANCEL_ON_SET", libc::TFD_TIMER_CANCEL_ON_SET),
+            ] {
+                let value = self.int(i64::from(flag));
+                self.bind(scope, name, value);
+            }
             if stdlib::os::fork_available() {
                 for attr in ["fork", "register_at_fork"] {
                     let function = self.builtin(&format!("posix.{attr}"));
@@ -2999,6 +3080,8 @@ impl Context {
                 "fdatasync",
                 #[cfg(target_os = "linux")]
                 "tcgetpgrp",
+                #[cfg(target_os = "linux")]
+                "tcsetpgrp",
                 #[cfg(target_os = "linux")]
                 "ttyname",
                 "getegid",
@@ -3496,6 +3579,8 @@ impl Context {
                 self.bind(scope, "_xoptions", xoptions);
                 if self.threads.system_module.is_none() {
                     self.bind(scope, "modules", self.modules);
+                    let version = stdlib::sys_version(self)?;
+                    self.bind(scope, "version", version);
                 }
                 let byteorder = self.text(if cfg!(target_endian = "little") {
                     "little"
@@ -3711,6 +3796,8 @@ impl Context {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
                     ("accumulate", "itertools.accumulate"),
+                    ("cycle", "itertools.cycle"),
+                    ("filterfalse", "itertools.filterfalse"),
                     ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),

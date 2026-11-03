@@ -37,7 +37,7 @@ if sys.platform == "linux":
     from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
     from posix import O_NOCTTY, grantpt, posix_openpt, ptsname, unlockpt
-    from posix import get_terminal_size, pipe2, readv, tcgetpgrp, ttyname, writev
+    from posix import get_terminal_size, pipe2, readv, tcgetpgrp, tcsetpgrp, ttyname, writev
     for _name in vars(_posix):
         if _name.startswith(("RTLD_", "POSIX_SPAWN_", "SCHED_")) or _name in (
             "sched_getscheduler", "sched_param",
@@ -53,6 +53,10 @@ if sys.platform == "linux":
         POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,
     )
     from posix import major, makedev, minor, mknod
+    from posix import (
+        TFD_CLOEXEC, TFD_NONBLOCK, TFD_TIMER_ABSTIME, TFD_TIMER_CANCEL_ON_SET,
+        timerfd_create, timerfd_gettime, timerfd_gettime_ns, timerfd_settime, timerfd_settime_ns,
+    )
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
 
 if sys.platform == "linux":

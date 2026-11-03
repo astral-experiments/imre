@@ -33,6 +33,23 @@ pub(super) fn capture(
     uses.direct
 }
 
+/// Methods look through the class namespace to read their enclosing cells.
+pub(super) fn method_class_reads(
+    body: &[ast::Stmt],
+    string_annotations: bool,
+) -> Option<BTreeSet<String>> {
+    if !body
+        .iter()
+        .all(|stmt| matches!(stmt, ast::Stmt::Pass(_) | ast::Stmt::FunctionDef(_)))
+    {
+        return None;
+    }
+    let mut uses = Uses::new(string_annotations);
+    uses.visit_body(body);
+    uses.direct.append(&mut uses.nested);
+    Some(uses.direct)
+}
+
 /// Reads in a nested lambda or comprehension bypass the enclosing class's namespace.
 pub(super) fn annotation_reads(
     entries: &[(&str, &ast::Expr)],

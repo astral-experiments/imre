@@ -46,13 +46,11 @@ class UUID(_UUIDValue):
 
     @property
     def hex(self) -> str:
-        # A leading 1 keeps all 32 digits, including the UUID's leading zeroes.
-        return f"{(1 << 128) | _number(self._value):x}"[1:]
+        return self.bytes.hex()
 
     @property
     def bytes(self):
-        value = _number(self._value)
-        return bytes([(value >> shift) & 0xff for shift in range(120, -1, -8)])
+        return self.int.to_bytes(16)
 
     @property
     def variant(self) -> str:

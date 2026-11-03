@@ -323,6 +323,14 @@ fn compiler_version(ctx: &Context) -> String {
         .to_owned()
 }
 
+pub(super) fn sys_version(ctx: &mut Context) -> Result<Id> {
+    Ok(ctx.text(format!(
+        "{} (Imre {})",
+        full_version(ctx)?,
+        compiler_version(ctx)
+    )))
+}
+
 fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
     path.to_str()
         .map(|value| ctx.text(value))
@@ -370,9 +378,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isnan" | "isqrt") => {
-            ctx.builtin(&format!("math.{name}"))
-        }
+        (
+            "math",
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isinf" | "isnan" | "isqrt",
+        ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
@@ -430,8 +439,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | (
             "_imre_dataclasses",
-            "make_type"
-            | "is_defaultdict"
+            "is_defaultdict"
             | "loaded_module"
             | "members"
             | "native_iterator"
@@ -545,11 +553,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
+        #[cfg(target_os = "linux")]
+        ("time", "CLOCK_REALTIME") => ctx.int(i64::from(libc::CLOCK_REALTIME)),
+        #[cfg(target_os = "linux")]
+        ("time", "clock_gettime" | "clock_gettime_ns") => ctx.builtin(&format!("time.{name}")),
         (
             "time",
             "get_clock_info" | "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter"
-            | "sleep" | "gmtime" | "localtime" | "mktime" | "strftime" | "ctime" | "struct_time"
-            | "tzset",
+            | "perf_counter_ns" | "sleep" | "gmtime" | "localtime" | "mktime" | "strftime"
+            | "ctime" | "struct_time" | "tzset",
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
@@ -611,11 +623,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         } else {
             std::env::consts::OS
         }),
-        ("sys", "version") => ctx.text(format!(
-            "{} (Imre {})",
-            full_version(ctx)?,
-            compiler_version(ctx)
-        )),
         ("sys", "hash_info") => fixed_structseq::current_hash_info(ctx),
         ("sys", "version_info") => version_info(ctx, &full_version(ctx)?)?,
         ("sys", "implementation") => {
@@ -2177,19 +2184,6 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
-            ("make_type", [name, bases, members], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
-                if name.contains('\0') {
-                    return Err(Error::new(
-                        "ValueError",
-                        "type name must not contain null characters",
-                    ));
-                }
-                let bases = ctx
-                    .tuple_items(*bases)?
-                    .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
-                return ctx.make_dataclass_type(name, bases, *members);
-            }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
                 return Ok(if ctx.defaultdict_factory(*obj).is_some() {
@@ -2637,6 +2631,23 @@ pub(super) fn call(
             ));
         }
         return Ok(receiver);
+    }
+    if let Some((functools::LRU_CACHE_CLASS, method)) = name.rsplit_once('.')
+        && functools::COPY_METHODS.contains(&method)
+    {
+        if method == "__reduce__" {
+            let wrapper = builtins::noargs_method_receiver(
+                ctx,
+                functools::LRU_CACHE_CLASS,
+                method,
+                args,
+                kwargs,
+            )?;
+            return ctx.lookup_attr(wrapper, "__qualname__");
+        }
+        let (wrapper, _) =
+            builtins::method_receiver_args(ctx, functools::LRU_CACHE_CLASS, method, args, kwargs)?;
+        return Ok(wrapper);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);

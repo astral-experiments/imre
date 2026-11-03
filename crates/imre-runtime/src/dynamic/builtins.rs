@@ -553,6 +553,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "splitlines",
     "startswith",
     "strip",
+    "upper",
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
@@ -578,6 +579,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "startswith",
     "strip",
     "translate",
+    "upper",
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
@@ -868,11 +870,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
         }
-        Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
-            if attr == "__get__" =>
-        {
-            "function"
-        }
+        Value::Function { .. } | Value::Cached { .. } if attr == "__get__" => "function",
+        Value::Partial { .. } if attr == "__get__" => "functools.partial",
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
             "_contextvars.ContextVar"
         }
@@ -1870,7 +1869,9 @@ pub(super) fn call(
                 {
                     ctx.check_heap_method_receiver(class, field, values[0])?;
                     true
-                } else if owner == "int" || Context::dict_view_owner(owner).is_some() {
+                } else if matches!(owner, "int" | "float")
+                    || Context::dict_view_owner(owner).is_some()
+                {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))
@@ -1900,6 +1901,7 @@ pub(super) fn call(
                 Ok(ctx.alloc(Value::MappingProxy(dict)))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
+            "_float_getset" => float::component(ctx, method, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
@@ -1939,16 +1941,24 @@ pub(super) fn call(
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
-            "bytes" if method == "lower" => {
+            _ if matches!(name, "bytes.lower" | "bytes.upper" | "bytearray.upper") => {
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 let storage = ctx.scalar_value(receiver);
                 let bytes = ctx.bytes_like(storage)?;
-                if bytes.is_empty() {
+                if owner == "bytes" && bytes.is_empty() {
                     return Ok(storage);
                 }
                 let mut result = super::copy_ids(bytes)?;
-                result.make_ascii_lowercase();
-                Ok(ctx.alloc(Value::Bytes(result)))
+                if method == "lower" {
+                    result.make_ascii_lowercase();
+                } else {
+                    result.make_ascii_uppercase();
+                }
+                Ok(ctx.alloc(if owner == "bytes" {
+                    Value::Bytes(result)
+                } else {
+                    Value::ByteArray(result)
+                }))
             }
             "bytes" | "bytearray" if method == "hex" => text::bytes_hex(ctx, owner, args, kwargs),
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),

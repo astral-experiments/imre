@@ -48,6 +48,7 @@ def current():
 
     check_result_formatter(test)
     check_real_traceback(test)
+    check_runner_locals()
 
 
 def check_result_formatter(test):
@@ -133,3 +134,29 @@ def check_real_traceback(test):
     lines = with_cause.splitlines()
     assert lines.index("ValueError: visible cause") < lines.index(direct)
     assert direct not in suppressed
+
+
+def check_runner_locals():
+    class CutTail:
+        def __repr__(self):
+            self.head.tb_next = None
+            return "cut tail"
+
+    def inner():
+        raise ValueError("application error")
+
+    class Case(unittest.TestCase):
+        def runTest(self):
+            cut = CutTail()
+            try:
+                inner()
+            except ValueError as exc:
+                cut.head = exc.__traceback__
+                raise
+
+    stream = io.StringIO()
+    result = unittest.TextTestRunner(stream=stream, tb_locals=True).run(Case())
+    [(case, report)] = result.errors
+    assert result.tb_locals and "    cut = cut tail" in report.splitlines()
+    assert report in stream.getvalue()
+    assert not any(line.endswith(", in inner") for line in report.splitlines())

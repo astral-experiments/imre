@@ -7,6 +7,7 @@ from warnings import warn as _warn
 import io
 import selectors
 import sys
+import time
 
 __all__ = ["Popen", "PIPE", "STDOUT", "call", "check_call", "getstatusoutput",
            "getoutput", "check_output", "run", "CalledProcessError", "DEVNULL",
@@ -310,6 +311,7 @@ class Popen:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
             self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
             self._replacement_output = None
+            self._input = None
             self._execute_child(args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
                                 startupinfo, creationflags, shell, *fds, restore_signals,
                                 gid, gids, uid, umask, start_new_session,
@@ -384,25 +386,41 @@ class Popen:
         try:
             return self._wait(timeout=timeout)
         except KeyboardInterrupt:
-            self._wait_after_keyboard_interrupt(endtime)
+            self._wait_after_keyboard_interrupt(endtime, timeout)
             raise
 
+    def _remaining_time(self, endtime):
+        return None if endtime is None else endtime - _time()
+
     def _wait(self, timeout):
-        if self.returncode is None:
-            result = _process.wait(self._handle, timeout, self)
-            if result is not None:
-                self.returncode = result
-            elif self.returncode is None:
+        if self.returncode is not None:
+            return self.returncode
+        if timeout is None:
+            self.returncode = _process.wait(self._handle)
+            return self.returncode
+
+        endtime = _time() + timeout
+        delay = 0.0005
+        while self.returncode is None:
+            # Reap under the native PID lock before checking the deadline.
+            status = _process.poll(self._handle)
+            if status is not None:
+                self.returncode = status
+                break
+            remaining = self._remaining_time(endtime)
+            if remaining <= 0:
                 raise TimeoutExpired(self.args, timeout)
+            delay = min(delay * 2, remaining, 0.05)
+            time.sleep(delay)
         return self.returncode
 
-    def _wait_after_keyboard_interrupt(self, endtime):
+    def _wait_after_keyboard_interrupt(self, endtime, timeout):
         # The child may also have received SIGINT. Share one brief wait with
         # __exit__ and respect the caller's original deadline.
         grace = self._sigint_wait_secs
+        if timeout is not None:
+            grace = min(grace, self._remaining_time(endtime))
         self._sigint_wait_secs = 0
-        if endtime is not None:
-            grace = min(grace, endtime - _time())
         try:
             self._wait(timeout=grace)
         except TimeoutExpired:
@@ -437,7 +455,7 @@ class Popen:
         try:
             stdout, stderr = self._communicate(input, endtime, timeout)
         except KeyboardInterrupt:
-            self._wait_after_keyboard_interrupt(endtime)
+            self._wait_after_keyboard_interrupt(endtime, timeout)
             raise
         finally:
             self._communication_started = True
@@ -456,22 +474,27 @@ class Popen:
             self._stdin_ref is not None and self._stdin_ref() is self.stdin)
         if self._replacement_output is not None or (not self._communication_started and not same_stdin):
             return self._communicate_replaced_stdin(input, endtime, orig_timeout)
-        if self.text_mode:
-            if self.stdin is None or self._communication_started:
-                input = None
-            if input is not None:
-                # A false input closes stdin before encoding. A BOM produced
-                # from an empty string is still validated, but the pipe is closed.
+        if self.stdin is not None and self._input is None:
+            if input is not None and self.text_mode:
+                # A false input closes stdin before encoding, even for a codec
+                # that produces a BOM from the empty string.
                 if not input:
                     try:
                         self.stdin.close()
                     except BrokenPipeError:
                         pass
                 input = input.encode(self.stdin.encoding, self.stdin.errors)
-                if not input:
-                    input = None
-                elif not isinstance(input, (bytes, bytearray)):
-                    input = memoryview(input)
+            self._input = input
+
+        # Retain the exporter for retries, but only pin its storage while this
+        # call is using it. The native pipe loop owns the byte offset.
+        input = self._input
+        if not input:
+            input = None
+        elif isinstance(input, memoryview):
+            input = input.cast("B")
+        elif type(input) is not bytes:
+            input = memoryview(input)
         timeout = None if endtime is None else endtime - _time()
         out, err, expired = _process.communicate(self._handle, input, timeout, use_select)
         if expired:

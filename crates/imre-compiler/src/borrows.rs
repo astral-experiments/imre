@@ -112,7 +112,7 @@ pub(crate) fn written(function: &Function) -> Vec<bool> {
     written_except(function, |_| false)
 }
 
-fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
+pub(crate) fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
     let mut written = vec![false; function.locals.len()];
     ir::walk_writes(&function.body, |slot, value| {
         written[slot] |= !value.is_some_and(&permitted);

@@ -1,8 +1,8 @@
-//! Decode a negotiated X.509 certificate into Python's peer certificate dictionary.
+//! Decode X.509 certificates into Python certificate dictionaries.
 use std::ffi::c_int;
 use std::{mem, ptr, slice};
 
-use super::super::provider_error;
+use super::super::{context, provider_error};
 use super::{Api, Handle};
 use crate::dynamic::{
     Context,
@@ -11,6 +11,31 @@ use crate::dynamic::{
 use crate::objects::Codec;
 
 mod extensions;
+
+pub(in crate::dynamic::stdlib::ssl) fn ca_certs(
+    ctx: &mut Context,
+    handle: Id,
+    binary: bool,
+) -> Result<Id> {
+    let snapshot = context(ctx, handle)?
+        .borrow()
+        .store_snapshot()
+        .ok_or_else(|| Error::new("MemoryError", "failed to query cert store"))?;
+    let mut certificates = Vec::new();
+    for cert in snapshot.authorities() {
+        let item = if binary {
+            let der = snapshot
+                .api
+                .encode_certificate(cert)
+                .map_err(|e| provider_error(ctx, e))?;
+            ctx.alloc(Value::Bytes(der))
+        } else {
+            decode(ctx, snapshot.api, cert)?
+        };
+        certificates.push(item);
+    }
+    Ok(ctx.alloc(Value::List(certificates)))
+}
 
 fn utf8(ctx: &mut Context, bytes: &[u8]) -> Result<String> {
     Codec::Utf8 { signature: false }
