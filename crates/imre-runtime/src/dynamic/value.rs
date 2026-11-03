@@ -3716,6 +3716,14 @@ impl Heap {
     }
 
     /// Return whether a buffered file could need collecting at a target boundary.
+    /// A strong path to every tracked owner makes an operand-release sweep unnecessary.
+    pub(super) fn finalizers_kept_by(&self, roots: &[Id]) -> bool {
+        self.file_writers
+            .iter()
+            .chain(&self.ordinary_finalizers)
+            .all(|owner| roots.contains(owner))
+    }
+
     pub(super) fn tracks_finalizers(&self) -> bool {
         !self.file_writers.is_empty() || self.has_ordinary_finalizers()
     }
