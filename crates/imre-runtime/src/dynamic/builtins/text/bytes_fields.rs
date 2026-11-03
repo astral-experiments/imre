@@ -43,6 +43,31 @@ fn binary_operand(ctx: &mut Context, value: Id) -> Result<&[u8]> {
     )))
 }
 
+/// Convert a single byte or an index to the raw byte inserted by `%c`.
+fn character_operand(ctx: &mut Context, value: Id) -> Result<u8> {
+    let scalar = ctx.scalar_value(value);
+    if let Value::Bytes(bytes) | Value::ByteArray(bytes) = ctx.heap.get(scalar) {
+        return match bytes.as_slice() {
+            [byte] => Ok(*byte),
+            _ => Err(type_error(format!(
+                "%c requires an integer in range(256) or a single byte, not a {} object of length {}",
+                ctx.type_name(scalar),
+                bytes.len()
+            ))),
+        };
+    }
+    if let Some(index) = ctx.index_value(value)? {
+        return index
+            .to_i64()
+            .and_then(|i| u8::try_from(i).ok())
+            .ok_or_else(|| Error::new("OverflowError", "%c arg not in range(256)"));
+    }
+    let name = percent_type_name(ctx, value)?;
+    Err(type_error(format!(
+        "%c requires an integer in range(256) or a single byte, not {name}"
+    )))
+}
+
 /// CPython consumes starred quantities even when the conversion character is invalid.
 pub(super) fn consume_pending_stars(
     ctx: &Context,
@@ -66,7 +91,7 @@ pub(super) fn consume_pending_stars(
     Ok(())
 }
 
-/// Width and precision count bytes. Both conversions space-pad and ignore numeric flags.
+/// Space-pad binary fields, applying precision only to variable-length operands.
 pub(super) fn append(
     ctx: &mut Context,
     spec: &CFormatSpec,
@@ -80,8 +105,14 @@ pub(super) fn append(
     let value = args
         .next()
         .ok_or_else(|| type_error("not enough arguments for format string"))?;
-    let data = binary_operand(ctx, value)?;
-    let data = &data[..precision.map_or(data.len(), |n| n.min(data.len()))];
+    let byte;
+    let data = if spec.format_char == 'c' {
+        byte = character_operand(ctx, value)?;
+        std::slice::from_ref(&byte)
+    } else {
+        let data = binary_operand(ctx, value)?;
+        &data[..precision.map_or(data.len(), |n| n.min(data.len()))]
+    };
     let padding = width.saturating_sub(data.len());
     output
         .try_reserve(width.max(data.len()).saturating_add(remaining))

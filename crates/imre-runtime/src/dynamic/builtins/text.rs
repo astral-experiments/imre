@@ -1084,7 +1084,7 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
                 });
             }
         };
-        if matches!(spec.format_char, 's' | 'b') {
+        if matches!(spec.format_char, 's' | 'b' | 'c') {
             let end = input.peek().map_or(format.len(), |&(i, _)| i);
             bytes_fields::append(ctx, &spec, &mut args, &mut output, format.len() - end)?;
             continue;
@@ -1164,6 +1164,16 @@ fn percent_layout(
     Ok((width, precision))
 }
 
+/// Render the operand type name used by CPython's character conversion diagnostics.
+fn percent_type_name(ctx: &mut Context, arg: Id) -> Result<&str> {
+    if let Some(class) = ctx.heap.get(arg).instance_class() {
+        let name = super::super::stdlib::qualified_type(ctx, class)?;
+        ctx.str_value(name)
+    } else {
+        Ok(ctx.type_name(arg))
+    }
+}
+
 /// Convert a Unicode `%c` argument without invoking string-subclass overrides.
 fn percent_char(ctx: &mut Context, arg: Id) -> Result<Id> {
     if let Some(storage) = ctx.string_storage(arg) {
@@ -1190,12 +1200,7 @@ fn percent_char(ctx: &mut Context, arg: Id) -> Result<Id> {
             Ok(ctx.text_codepoints(vec![point]))
         }
         Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
-            let name = if let Some(class) = ctx.heap.get(arg).instance_class() {
-                let name = super::super::stdlib::qualified_type(ctx, class)?;
-                ctx.str_value(name)?
-            } else {
-                ctx.type_name(arg)
-            };
+            let name = percent_type_name(ctx, arg)?;
             Err(type_error(format!(
                 "%c requires an int or a unicode character, not {name}"
             )))
