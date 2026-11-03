@@ -5,12 +5,23 @@ use std::path::Path;
 use super::{Context, Id, NONE, Result, TRUE, Value};
 
 impl Context {
+    /// Map the launcher's absolute bundle entry to its compiled source registry.
+    pub(super) fn registry_root<'a>(&'a self, path: &'a Path) -> &'a Path {
+        if self.config["bundle_entry"].as_str().map(Path::new) == Some(path)
+            && let Some(bundle) = self.config["bundled_root"].as_str()
+        {
+            Path::new(bundle)
+        } else {
+            path
+        }
+    }
+
     /// Pin a compiled search directory when the path hook creates its finder.
     pub(super) fn registered_path(&mut self, path: Id) -> Result<Id> {
         let Ok(path) = self.str_value(path) else {
             return Ok(NONE);
         };
-        let path = Path::new(path);
+        let path = self.registry_root(Path::new(path));
         let bundle = self.config["bundled_root"].as_str().map(Path::new);
         // The finder exposes this spelling in ModuleSpec.origin and __file__.
         let root = if path.is_absolute() || bundle.is_some_and(|dir| path.starts_with(dir)) {

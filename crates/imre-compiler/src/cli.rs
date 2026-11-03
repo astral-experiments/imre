@@ -136,6 +136,17 @@ impl BuildOptions {
                 options.compile.script_startup = Some((flags, executable));
             }
         }
+        let (_, executable) = options.compile.python_startup().expect("Python invocation");
+        let version = imre_compiler::PYTHON_VERSION;
+        let layout = imre_ast::layout::InterpreterLayout::new(
+            executable.as_ref(),
+            (version.major, version.minor),
+        )
+        .map_err(|e| e.to_string())?;
+        options.compile.system_site = layout
+            .path("posix_prefix", "purelib", true)
+            .map(PathBuf::from)
+            .filter(|p| p.is_dir());
         Ok(options)
     }
 
