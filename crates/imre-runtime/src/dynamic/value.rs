@@ -2135,6 +2135,7 @@ struct Slot {
     untracked_tuple: Cell<bool>,
     may_have_buffer_views: bool,
     finalization: Finalization,
+    generation: u8,
 }
 
 impl Slot {
@@ -2146,6 +2147,7 @@ impl Slot {
             untracked_tuple: Cell::new(false),
             may_have_buffer_views: false,
             finalization: Finalization::None,
+            generation: 0,
         }
     }
 
@@ -2693,6 +2695,7 @@ impl Heap {
             self.free_count -= 1;
             self.slots[index].value = Some(value);
             self.slots[index].may_have_buffer_views = false;
+            self.slots[index].generation = 0;
             index
         } else {
             if self.reserve_slot().is_err() {
@@ -3763,6 +3766,7 @@ impl Heap {
         }
         if cycles_due && automatic_gc {
             self.mark(globals);
+            self.promote_generation(2);
             self.sweep()
         } else {
             self.collect(globals)
@@ -3881,7 +3885,13 @@ impl Heap {
     /// A child found after its position was passed moves to the end. In
     /// particular, a tuple reachable only through its parent can remain
     /// tracked for one more collection than the same tuple held in a local.
-    fn mark_full(&mut self, globals: impl Iterator<Item = Id>, passed: &mut Vec<usize>) {
+    fn mark_full(
+        &mut self,
+        globals: impl Iterator<Item = Id>,
+        passed: &mut Vec<usize>,
+        generation: u8,
+        newly_reachable: Option<&[usize]>,
+    ) {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
@@ -3905,7 +3915,9 @@ impl Heap {
                 next: END,
                 ordered: Some(&mut scan),
             });
-            if !slot.untracked_tuple.get()
+            if slot.generation <= generation
+                && newly_reachable.is_none_or(|cohort| cohort[id] != 0)
+                && !slot.untracked_tuple.get()
                 && let Value::Tuple(items) = self.get(id as Id)
             {
                 slot.untracked_tuple
@@ -3968,14 +3980,54 @@ impl Heap {
         first_finalizer
     }
 
+    /// Age participating slots before Python callbacks can allocate into a recycled slot.
+    fn promote_generation(&mut self, generation: u8) {
+        let next = (generation + 1).min(2);
+        for slot in &mut self.slots {
+            if slot.generation <= generation {
+                slot.generation = next;
+            }
+        }
+    }
+
     /// Clear weakrefs to the initial cyclic isolate before running Python callbacks.
-    pub(super) fn begin_full_collection(
+    pub(super) fn begin_collection(
         &mut self,
         globals: impl Iterator<Item = Id>,
+        generation: u8,
     ) -> Result<WeakCallbacks> {
         let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark_full(globals, &mut cycles.work);
+        self.mark_full(globals, &mut cycles.work, generation, None);
         self.identify_cycles(&mut cycles);
+        if generation < 2 {
+            // A cycle outside the collected generations can own younger objects. An
+            // unreachable acyclic owner would already have been released by refcounting.
+            let mut found_older = false;
+            for id in cycles.members() {
+                let index = id as usize;
+                let slot = &self.slots[index];
+                if slot.generation > generation && slot.gc_tracked(self) {
+                    self.traces[index].set(END);
+                    found_older = true;
+                }
+            }
+            if found_older {
+                // Younger tuples held only by these older objects can now be untracked.
+                // Tuples reached from ordinary roots were already considered once.
+                self.mark_full(
+                    std::iter::empty(),
+                    &mut cycles.work,
+                    generation,
+                    Some(&cycles.incoming),
+                );
+                for (count, trace) in cycles.incoming.iter_mut().zip(&self.traces) {
+                    if trace.get() != UNMARKED {
+                        *count = 0;
+                    }
+                }
+            }
+        }
+        self.promote_generation(generation);
         let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
@@ -4507,6 +4559,23 @@ mod reachability_tests {
     use super::{Heap, Value};
 
     #[test]
+    fn recycled_slot_starts_in_the_young_generation() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let original = heap.alloc(Value::List(Vec::new()));
+        heap.begin_collection(std::iter::empty(), 2).unwrap();
+        heap.finish_full_collection(std::iter::empty());
+        heap.end_full_collection();
+        assert_eq!(heap.slots[original as usize].generation, 2);
+
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let reused = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(original, reused);
+        assert_eq!(heap.slots[reused as usize].generation, 0);
+    }
+
+    #[test]
     fn full_collection_rechecks_resurrected_roots_and_excludes_new_cycles() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -4525,7 +4594,7 @@ mod reachability_tests {
         heap.release_temporaries_since(mark);
 
         assert!(
-            heap.begin_full_collection(std::iter::empty())
+            heap.begin_collection(std::iter::empty(), 2)
                 .unwrap()
                 .is_empty()
         );
@@ -4545,7 +4614,7 @@ mod reachability_tests {
         for owner in [survivor, child, new_cycle] {
             assert!(heap.slots[owner as usize].value.is_some());
         }
-        heap.begin_full_collection(std::iter::empty()).unwrap();
+        heap.begin_collection(std::iter::empty(), 2).unwrap();
         assert_eq!(heap.finish_full_collection(std::iter::empty()).0, 3);
     }
 

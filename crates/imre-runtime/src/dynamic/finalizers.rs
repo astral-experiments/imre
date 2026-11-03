@@ -12,7 +12,7 @@ impl Context {
         }) {
             super::builtins::remove_table_entry(self, self.modules, index)?;
         }
-        self.collect_full()?;
+        self.collect_generation(2)?;
         Ok(())
     }
 
