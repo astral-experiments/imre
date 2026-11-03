@@ -3037,6 +3037,7 @@ impl Context {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
                 for name in [
+                    "getrandom",
                     "get_terminal_size",
                     "lockf",
                     "posix_fadvise",
@@ -3056,6 +3057,8 @@ impl Context {
                 let getgrouplist = self.builtin("posix.getgrouplist");
                 self.bind(scope, "getgrouplist", getgrouplist);
                 for (attr, flag) in [
+                    ("GRND_NONBLOCK", libc::GRND_NONBLOCK),
+                    ("GRND_RANDOM", libc::GRND_RANDOM),
                     ("SPLICE_F_MOVE", libc::SPLICE_F_MOVE),
                     ("SPLICE_F_NONBLOCK", libc::SPLICE_F_NONBLOCK),
                     ("SPLICE_F_MORE", libc::SPLICE_F_MORE),
@@ -3155,6 +3158,9 @@ impl Context {
                         }
                     }
                     for attr in [
+                        "getrandom",
+                        "GRND_NONBLOCK",
+                        "GRND_RANDOM",
                         "get_terminal_size",
                         "posix_openpt",
                         "grantpt",

@@ -577,6 +577,37 @@ pub(crate) fn sendfile<E: From<Error>>(
     )
 }
 
+/// Issue getrandom even for an empty request, returning any successful short read.
+#[cfg(target_os = "linux")]
+pub(crate) fn getrandom<E: From<Error>>(
+    size: isize,
+    flags: i32,
+    dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<Vec<u8>, E> {
+    let length = usize::try_from(size)
+        .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
+    if length > crate::MAX_BYTES_LEN {
+        return Err(Error::memory_error().into());
+    }
+    let mut bytes = Vec::<u8>::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| Error::memory_error())?;
+    let count = transfer(
+        || {
+            // SAFETY: the kernel writes at most length bytes into the reserved buffer.
+            let count =
+                unsafe { libc::syscall(libc::SYS_getrandom, bytes.as_mut_ptr(), length, flags) };
+            transferred(count as isize)
+        },
+        dispatch,
+    )?;
+    // SAFETY: a successful return reports exactly the number of bytes the kernel initialized.
+    unsafe { bytes.set_len(count) };
+    crate::compact_bytes(&mut bytes);
+    Ok(bytes)
+}
+
 /// Read from the shared file position, or leave it untouched when given an offset.
 pub(crate) fn read<E: From<Error>>(
     fd: i32,

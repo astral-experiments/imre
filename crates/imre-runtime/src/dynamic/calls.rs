@@ -2703,6 +2703,12 @@ impl Context {
                     "__text_signature__" if symbol == "posix.sched_getscheduler" => {
                         return Ok(self.text("($module, pid, /)"));
                     }
+                    "__doc__" if symbol == "posix.getrandom" => {
+                        return Ok(self.text("Obtain a series of random bytes."));
+                    }
+                    "__text_signature__" if symbol == "posix.getrandom" => {
+                        return Ok(self.text("($module, /, size, flags=0)"));
+                    }
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
                     }
