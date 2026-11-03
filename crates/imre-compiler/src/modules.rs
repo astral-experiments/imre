@@ -2227,6 +2227,21 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "OpenerDirector") => {
                 Intrinsic::ScopedObjectExport("urllib.request.OpenerDirector")
             }
+            (Self::UrllibRequest, "HTTPPasswordMgr") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPPasswordMgr")
+            }
+            (Self::UrllibRequest, "HTTPPasswordMgrWithDefaultRealm") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPPasswordMgrWithDefaultRealm")
+            }
+            (Self::UrllibRequest, "HTTPPasswordMgrWithPriorAuth") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPPasswordMgrWithPriorAuth")
+            }
+            (Self::UrllibRequest, "AbstractBasicAuthHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.AbstractBasicAuthHandler")
+            }
+            (Self::UrllibRequest, "HTTPBasicAuthHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPBasicAuthHandler")
+            }
             (Self::UrllibRequest, "Request") => {
                 Intrinsic::ScopedObjectExport("urllib.request.Request")
             }
