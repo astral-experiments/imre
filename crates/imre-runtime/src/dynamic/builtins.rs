@@ -30,6 +30,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
         "socket.gaierror" => Some(Kind::GaiError),
         "socket.herror" => Some(Kind::HError),
         "zlib.error" => Some(Kind::ZlibError),
+        "gzip.BadGzipFile" => Some(Kind::BadGzipFile),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),

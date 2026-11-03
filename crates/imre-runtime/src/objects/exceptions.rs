@@ -731,7 +731,11 @@ impl Error {
 
     /// Preserve the native exception class and its formatted Python message.
     pub(crate) fn into_parts(self) -> (&'static str, Rendered) {
-        let kind = self.kind.name();
+        let kind = match self.kind {
+            Kind::BadGzipFile => "gzip.BadGzipFile",
+            Kind::ZlibError => "zlib.error",
+            kind => kind.name(),
+        };
         let error = self.into_object();
         // SAFETY: the local owner keeps the exception payload alive throughout the read.
         let message = unsafe { error.0.with(Storage::exception_message) };

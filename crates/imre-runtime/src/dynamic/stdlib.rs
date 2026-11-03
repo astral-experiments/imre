@@ -28,6 +28,7 @@ mod formatters;
 pub(super) mod functools;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) mod grp;
+mod gzip;
 pub(super) mod hashlib;
 mod hmac;
 mod inspect;
@@ -393,6 +394,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_imre_tempfile",
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "finalize_at_shutdown",
         ) => ctx.builtin(&format!("{module}.{name}")),
+        ("_imre_gzip", "open" | "read" | "readline" | "fileno" | "close") => {
+            ctx.builtin(&format!("{module}.{name}"))
+        }
+        ("_imre_gzip", "BadGzipFile") => ctx.builtin("gzip.BadGzipFile"),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
         ("_locale", "LC_COLLATE") => ctx.int(libc::LC_COLLATE.into()),
@@ -2446,6 +2451,9 @@ pub(super) fn call(
         && crate::objects::HashState::algorithms().any(|name| name == algorithm)
     {
         return hashlib::hash(ctx, algorithm, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imre_gzip.") {
+        return gzip::call(ctx, method, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("_imre_tempfile.") {
         return tempfile::path_operation(ctx, name, args, kwargs);

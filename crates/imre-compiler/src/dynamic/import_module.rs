@@ -282,6 +282,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/pathlib/types.py"),
         )),
         "glob" => Some(("glob.py", include_str!("../../stdlib/glob.py"))),
+        "gzip" => Some(("gzip.py", include_str!("../../stdlib/gzip.py"))),
         "ntpath" => Some(("ntpath.py", include_str!("../../stdlib/ntpath.py"))),
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => Some(("shutil.py", include_str!("../../stdlib/shutil.py"))),
