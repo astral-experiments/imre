@@ -395,8 +395,43 @@ def check_list_subclass_reducer():
     assert type(clone) is NoInit and clone is not empty and clone[0] is clone
 
 
+def check_dict_subclass_reducer():
+    events = []
+    class Pairs:
+        def __iter__(self):
+            events.append("iter")
+            return cursor
+
+    class Mapping(dict):
+        def __getstate__(self):
+            events.append("state")
+            return self.__dict__
+
+        def items(self):
+            events.append("items")
+            return Pairs()
+
+    class WithArgs(Mapping):
+        def __getnewargs__(self):
+            events.append("args")
+            return ()
+
+    for cls, before_state in ((Mapping, []), (WithArgs, ["args"])):
+        value = cls()
+        value["raw"] = 1
+        for protocol in (2, 3, 4, 5):
+            cursor = iter((("from override", 2),))
+            events.clear()
+            constructor, args, state, items, pairs = value.__reduce_ex__(protocol)
+            assert constructor is copyreg.__newobj__ and args == (cls,)
+            assert state is value.__dict__ and items is None and pairs is cursor
+            assert events == before_state + ["state", "items", "iter"]
+            assert list(pairs) == [("from override", 2)]
+
+
 def check_object_reducer():
     check_list_subclass_reducer()
+    check_dict_subclass_reducer()
     class Child(WithoutProtocol):
         def reduce_from_super(self):
             return super().__reduce_ex__(4)
