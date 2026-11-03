@@ -1138,7 +1138,7 @@ pub(super) enum Value {
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
-    ThreadHandle(std::rc::Rc<super::thread_worker::Handle>),
+    ThreadHandle(std::sync::Arc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
     Traceback {
