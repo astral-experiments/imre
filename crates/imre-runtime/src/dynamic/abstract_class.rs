@@ -1,6 +1,5 @@
 //! Abstract method declarations on the bundled ABC and its subclasses.
 
-use std::collections::BTreeSet;
 use std::ffi::c_long;
 
 use super::Context;
@@ -246,8 +245,11 @@ impl Context {
     pub(super) fn is_abstract_method(&mut self, value: Id) -> Result<bool> {
         self.with_slot_depth("maximum recursion depth exceeded", |ctx| {
             match ctx.lookup_attr(value, "__isabstractmethod__") {
-                Ok(marker) => ctx.truth(marker),
-                Err(error) if error.kind == "AttributeError" => Ok(false),
+                Ok(marker) => {
+                    ctx.heap.keep(marker);
+                    ctx.truth(marker)
+                }
+                Err(error) if ctx.is_attribute_error(&error) => Ok(false),
                 Err(error) => Err(error),
             }
         })
@@ -263,42 +265,16 @@ impl Context {
         {
             return Ok(());
         }
-        let mut names: BTreeSet<String> = self
-            .scope_bindings(scope)
-            .map(|(name, _)| name.to_owned())
-            .collect();
-        let bases = self
-            .scope_data(scope)
-            .class_namespace
-            .as_ref()
-            .expect("class bases")
-            .bases;
-        let Value::Tuple(bases) = self.heap.get(bases) else {
-            unreachable!()
-        };
-        for &base in bases {
-            if let Some(methods) = self.own_class_attr(base, "__abstractmethods__")
-                && let Value::Set { entries, .. } = self.heap.get(methods)
-            {
-                for &(key, _) in entries.iter() {
-                    names.insert(self.str_value(key)?.to_owned());
-                }
+        let roots = self.heap.temporary_mark();
+        self.heap.keep(class);
+        let result = self.compute_abstract_methods(class, scope);
+        self.heap.release_temporaries_since(roots);
+        if let Err(error) = result {
+            for root in error.roots() {
+                self.heap.keep(root);
             }
+            return Err(error);
         }
-        let methods = self.alloc(Value::Set {
-            entries: Default::default(),
-            frozen: true,
-        });
-        for name in names {
-            let Some(value) = self.class_attr(class, &name) else {
-                continue;
-            };
-            if self.is_abstract_method(value)? {
-                let key = self.text(name);
-                super::builtins::set_add(self, methods, key)?;
-            }
-        }
-        self.set_abstract_methods(scope, methods)?;
 
         let Some(marker) = self.own_class_attr(class, "__abc_tpflags__") else {
             return Ok(());
@@ -328,6 +304,85 @@ impl Context {
                 "Python int too large to convert to C long",
             )),
         }
+    }
+
+    /// Inspect own declarations raw and resolve inherited abstract names on the new class.
+    fn compute_abstract_methods(&mut self, class: Id, scope: Id) -> Result<()> {
+        let methods = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: true,
+        });
+        self.heap.keep(methods);
+
+        // Snapshot the item pairs, not just their names: reading a marker can replace
+        // or remove the next declaration. A metaclass may supply the namespace.
+        let namespace = self.lookup_attr(class, "__dict__")?;
+        self.heap.keep(namespace);
+        let items = self.lookup_attr(namespace, "items")?;
+        let items = self.call(items, Vec::new(), Vec::new())?;
+        self.heap.keep(items);
+        let items = if matches!(self.heap.get(items), Value::List(_)) {
+            items
+        } else {
+            super::builtins::call(self, "list", &[items], &[])?
+        };
+        self.heap.keep(items);
+        let step = self.heap.temporary_mark();
+        let mut index = 0;
+        loop {
+            let Value::List(pairs) = self.heap.get(items) else {
+                unreachable!()
+            };
+            let Some(&pair) = pairs.get(index) else { break };
+            index += 1;
+            self.heap.keep(pair);
+            let pair = self.items(pair)?;
+            let [key, value] = pair.as_slice() else {
+                return Err(Error::new(
+                    "TypeError",
+                    "items() returned item which size is not 2",
+                ));
+            };
+            self.heap.keep(*key);
+            self.heap.keep(*value);
+            if self.is_abstract_method(*value)? {
+                super::builtins::set_add(self, methods, *key)?;
+            }
+            self.heap.release_temporaries_since(step);
+        }
+
+        let bases = self.lookup_attr(class, "__bases__")?;
+        self.heap.keep(bases);
+        let bases = self
+            .tuple_items(bases)?
+            .ok_or_else(|| Error::new("TypeError", "__bases__ is not tuple"))?;
+        let base_roots = self.heap.temporary_mark();
+        for base in bases {
+            self.heap.release_temporaries_since(base_roots);
+            let Some(inherited) = self.optional_attr(base, "__abstractmethods__")? else {
+                continue;
+            };
+            self.heap.keep(inherited);
+            let iter = self.iterator(inherited)?;
+            self.heap.keep(iter);
+            let step = self.heap.temporary_mark();
+            while let Some(key) = self.next_item(iter)? {
+                self.heap.keep(key);
+                let name = super::builtins::attribute_name(self, key)?;
+                match self.lookup_named_attr(class, &name, Some(key)) {
+                    Ok(value) => {
+                        self.heap.keep(value);
+                        if self.is_abstract_method(value)? {
+                            super::builtins::set_add(self, methods, key)?;
+                        }
+                    }
+                    Err(error) if self.is_attribute_error(&error) => {}
+                    Err(error) => return Err(error),
+                }
+                self.heap.release_temporaries_since(step);
+            }
+        }
+        self.set_abstract_methods(scope, methods)
     }
 
     pub(super) fn set_abstract_methods(&mut self, scope: Id, methods: Id) -> Result<()> {

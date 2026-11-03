@@ -148,6 +148,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         "or hasattr(tp, \"__delete__\")",
                         "or hasattr(tp, \"__delete__\") or _native_data_descriptor(object)",
                     );
+                    // Keep CPython's class-creation checks and read Imre's abstract flag.
+                    let abstract_predicate = section("def isabstract(object):", "def _getmembers(")
+                        .replace("object.__flags__", "_abstract_flags(object)");
                     // Load the parser dependencies on first signature inspection. The boxed
                     // list iterator exposes next() but has no Python-visible __next__ method.
                     let text_signatures = section(
@@ -175,11 +178,12 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
-                        "import collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _frame_position",
-                        section("def ismodule(object):", "def ismethoddescriptor(object):"),
+                        "import abc\nimport collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _abstract_flags, _frame_position",
+                        section("TPFLAGS_IS_ABSTRACT =", "def ismethoddescriptor(object):"),
                         &descriptors,
                         section("def isfunction(object):", "# A marker for markcoroutinefunction"),
                         section("def isasyncgenfunction(obj):", "def isabstract(object):"),
+                        &abstract_predicate,
                         section("def _getmembers(", "Attribute = namedtuple("),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "def getcomments(object):"),

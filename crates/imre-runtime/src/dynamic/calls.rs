@@ -4357,6 +4357,12 @@ impl Context {
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
                 }
+                // type.__abstractmethods__ exposes only this class's stored value.
+                if name == "__abstractmethods__" && metaclass_member.is_none() {
+                    return self
+                        .own_class_attr(obj, name)
+                        .ok_or_else(|| self.missing_attribute(obj, name));
+                }
                 if matches!(name, "__annotations__" | "__annotate__")
                     && metaclass_member.is_none()
                     && self.has_class_annotation_provider(scope)

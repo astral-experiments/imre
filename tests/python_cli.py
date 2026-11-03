@@ -3106,6 +3106,7 @@ for name in ("md4", "ripemd160"):
             "boxed_inspect_stack.py",
             "boxed_inspect_unwrap.py",
             "boxed_inspect_isroutine.py",
+            "boxed_inspect_isabstract.py",
             "boxed_numeric_repr.py",
             "boxed_decimal_hash.py",
             "boxed_recursive_repr.py",
