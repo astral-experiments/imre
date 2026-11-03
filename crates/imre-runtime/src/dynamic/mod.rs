@@ -2383,6 +2383,19 @@ impl Context {
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
+        if name == stdlib::functools::PARTIAL_CLASS {
+            let mut entries = Vec::new();
+            for method in ["__new__", "__call__", "__get__"] {
+                let slot = self.builtin(&format!("{name}.{method}"));
+                entries.push((self.heap.code_name(method), slot));
+            }
+            for field in ["func", "args", "keywords"] {
+                let member = self.readonly_member(stdlib::functools::PARTIAL_CLASS, field);
+                entries.push((self.heap.code_name(field), member));
+            }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == stdlib::functools::LRU_CACHE_CLASS {
             let mut entries = Vec::new();
             for &member in stdlib::functools::COPY_METHODS {

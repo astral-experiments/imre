@@ -2558,7 +2558,41 @@ pub(super) fn call(
     if name == "_pickle.dumps" {
         return pickle::dumps(ctx, args, kwargs);
     }
-    if name == "functools.partial" {
+    if name == "functools.partial.__call__" {
+        let Some((&receiver, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "descriptor '__call__' of 'functools.partial' object needs an argument",
+            ));
+        };
+        let partial = ctx.scalar_value(receiver);
+        if !matches!(ctx.heap.get(partial), Value::Partial { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__call__' requires a 'functools.partial' object but received a '{}'",
+                    ctx.type_name(receiver)
+                ),
+            ));
+        }
+        return ctx.call(partial, rest.to_vec(), kwargs.to_vec());
+    }
+    if matches!(name, functools::PARTIAL_CLASS | "functools.partial.__new__") {
+        let base = ctx.builtin(functools::PARTIAL_CLASS);
+        let (class, args) = if name == "functools.partial.__new__" {
+            let Some((&class, rest)) = args.split_first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    "functools.partial.__new__(): not enough arguments",
+                ));
+            };
+            if !ctx.direct_subclass(class, base) {
+                return Err(ctx.invalid_new_subtype(functools::PARTIAL_CLASS, class));
+            }
+            (class, rest)
+        } else {
+            (base, args)
+        };
         let Some((&function, bound)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
@@ -2580,7 +2614,16 @@ pub(super) fn call(
                 "trailing Placeholders are not allowed",
             ));
         }
-        let (function, mut args, keywords) = match ctx.heap.get(function).clone() {
+        // Flatten a nested partial only until its own instance dictionary is materialized.
+        let inner = match ctx.heap.get(function) {
+            Value::Instance {
+                scalar: Some(storage),
+                namespace: None,
+                ..
+            } => *storage,
+            _ => function,
+        };
+        let (function, mut args, keywords) = match ctx.heap.get(inner).clone() {
             Value::Partial {
                 function,
                 args,
@@ -2615,12 +2658,21 @@ pub(super) fn call(
             let name = ctx.text(name);
             ctx.put_item(keywords, name, *value)?;
         }
-        return Ok(ctx.alloc(Value::Partial {
+        let partial = ctx.alloc(Value::Partial {
             function,
             args,
             keywords,
             dictionary: None,
-        }));
+        });
+        if class == base {
+            return Ok(partial);
+        }
+        let object = ctx.instance(class, None);
+        let Value::Instance { scalar, .. } = ctx.heap.get_mut(object) else {
+            unreachable!()
+        };
+        *scalar = Some(partial);
+        return Ok(object);
     }
     if let Some(method @ ("digest" | "hexdigest")) = name.strip_prefix("hash.") {
         return hashlib::digest(ctx, method, args, kwargs);

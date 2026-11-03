@@ -494,6 +494,7 @@ impl Context {
                                 | "reversed"
                                 | "itertools.count"
                                 | "itertools.repeat"
+                                | super::stdlib::functools::PARTIAL_CLASS
                                 | super::deque::CLASS
                         )
                 }
@@ -526,7 +527,12 @@ impl Context {
                         }
                         Value::Native(name) => {
                             super::stdlib::datetime::members(name).is_some()
-                                || matches!(name.as_str(), "module" | super::deque::CLASS)
+                                || matches!(
+                                    name.as_str(),
+                                    "module"
+                                        | super::deque::CLASS
+                                        | super::stdlib::functools::PARTIAL_CLASS
+                                )
                                 || super::builtins::is_iterator_type(name)
                                 || (name != "object"
                                     && super::builtins::is_exported_type(name)
@@ -610,10 +616,13 @@ impl Context {
                 Value::Native(name) => Some(name.as_str()),
                 _ => None,
             });
+        let partial_base = native == Some(super::stdlib::functools::PARTIAL_CLASS);
         let mut dictionary = self.class_instances_have_dict(base)
+            || partial_base
             || matches!(native, Some("classmethod" | "staticmethod" | "module"))
             || native.is_some_and(super::builtins::is_exception);
         let mut weakref = self.class_instances_support_weakref(base)
+            || partial_base
             || matches!(
                 native,
                 Some("set" | "frozenset" | "module" | super::deque::CLASS)

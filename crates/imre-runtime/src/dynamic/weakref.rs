@@ -44,7 +44,7 @@ impl Value {
 
     fn is_weakrefable_native_base(&self) -> bool {
         matches!(self, Self::Native(name)
-            if matches!(name.as_str(), "set" | "frozenset" | super::deque::CLASS))
+            if matches!(name.as_str(), "set" | "frozenset" | super::deque::CLASS | super::stdlib::functools::PARTIAL_CLASS))
     }
 
     /// Return the reference payload for an exact ref, proxy, or Python reference subclass.

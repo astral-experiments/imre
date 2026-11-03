@@ -287,6 +287,7 @@ impl BuiltinDescriptor {
             "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
+            "functools.partial.__call__" => ("functools.partial", "__call__"),
             "functools.partial.__get__" => ("functools.partial", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
@@ -422,7 +423,12 @@ impl BuiltinDescriptor {
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
-            "functools.partial" => matches!(ctx.heap.get(receiver), Value::Partial { .. }),
+            stdlib::functools::PARTIAL_CLASS => {
+                matches!(
+                    ctx.heap.get(ctx.scalar_value(receiver)),
+                    Value::Partial { .. }
+                )
+            }
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
@@ -827,7 +833,7 @@ pub(super) fn descriptor_get(
             format!("descriptor '__get__' of '{class}' object needs an argument"),
         ));
     };
-    let payload = if class == "super" {
+    let payload = if matches!(class, "super" | stdlib::functools::PARTIAL_CLASS) {
         ctx.scalar_value(descriptor)
     } else {
         descriptor
@@ -876,6 +882,17 @@ pub(super) fn descriptor_get(
         )),
         [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
         [receiver] | [receiver, _] => {
+            if class == stdlib::functools::PARTIAL_CLASS {
+                return Ok(if receiver == NONE {
+                    descriptor
+                } else {
+                    ctx.alloc(Value::Method {
+                        callable: descriptor,
+                        receiver,
+                        explicit: true,
+                    })
+                });
+            }
             if let Value::Super {
                 start,
                 receiver: bound,
