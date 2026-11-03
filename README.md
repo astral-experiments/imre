@@ -109,8 +109,8 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **11,357 of 16,159 tests (70.3%)** across the 43 standard library module families tracked below.
-The first table covers the original 25 families and the second covers 18 additional families.
+As of November 3, 2026, Imre has a paired pass for **11,365 of 16,202 tests (70.1%)** across the 44 standard library module families tracked below.
+The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -150,7 +150,7 @@ results and import coverage recorded in this repository.
 
 ### Additional module families
 
-CPython 3.14.5 discovers **2,832 test occurrences** across these 18 families on Linux. They use the same pairing rule and have a separate total.
+CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on Linux. They use the same pairing rule and have a separate total.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
@@ -164,6 +164,7 @@ CPython 3.14.5 discovers **2,832 test occurrences** across these 18 families on 
 | `inspect` | 178 | 362 | 0 | The frame and previous-frame originals both passed on stock CPython and public Imre at O0 and O3. Both are new to the ledger. |
 | `math` | 0 | 89 | 0 | Stock registered and ran 89 original parents. At the measured public revision, native module discovery stopped before any original parent passed. |
 | `ssl` | 48 | 195 | 0 | After the ECDH curve change, `test.test_ssl.ContextTests.test_set_ecdh_curve` (occurrence 1) passed on pinned CPython and public Imre at O0 and O3. |
+| `struct` | 8 | 43 | 0 | The complete suite ran the same 43 original tests on all three engines. Stock CPython passed all 43. Public Imre O0 and O3 passed the same eight. |
 | `tokenize` | 53 | 130 | 0 | The unchanged test_max_indent passed on stock and public Imre at O0 and O3. It adds one new paired pass. |
 | `tomllib` | 17 | 17 | 0 | All 17 originals passed on stock and public O0/O3 through both the package entry point and the three explicit upstream test modules. |
 | `types` | 132 | 141 | 1 | The 29 UnionTests ran on all three builds, with 28 passes and one skip. One separate [CPython object-layout test](docs/stdlib-omissions.md#types) has an explicit omission decision. |
@@ -172,7 +173,7 @@ CPython 3.14.5 discovers **2,832 test occurrences** across these 18 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 200 | 383 | 0 | The core suite ran 324 originals on CPython and 318 at each native optimization level. Both native runs failed class setup for six cases on `struct.pack('<f', ...)`. All three passed 148 of the same originals, adding 141 to the cumulative count. |
 | `zoneinfo` | 41 | 261 | 0 | All 18 originals in WeirdZoneTest and CWeirdZoneTest passed on CPython and public Imre at O0 and O3 after LZMA decompression landed. The cumulative count includes the 23 previously passing properties. |
-| **Measured total (18 of 18 families)** | **1,724** | **2,832** | **8** |  |
+| **Measured total (19 of 19 families)** | **1,732** | **2,875** | **8** |  |
 
 ## Design
 
