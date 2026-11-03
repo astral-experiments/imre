@@ -1109,9 +1109,12 @@ fn collect_class(
                     return Err(module.error(nested, "duplicate class binding"));
                 }
                 class_bindings.insert(name.to_owned());
-                graph.class_layout_error.borrow_mut().get_or_insert_with(|| {
-                    module.error(nested, "nested classes require native class construction")
-                });
+                graph
+                    .class_layout_error
+                    .borrow_mut()
+                    .get_or_insert_with(|| {
+                        module.error(nested, "nested classes require native class construction")
+                    });
             }
             ast::Stmt::Pass(_) => {}
             ast::Stmt::If(branch)

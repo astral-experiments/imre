@@ -2435,7 +2435,9 @@ impl SourceGraph {
     /// Select object class construction while preserving checked calls and typed module layouts.
     pub(crate) fn require_object_class_layout(&self, error: String) -> String {
         self.class_layout_error.replace(Some(error.clone()));
-        self.object_builtin_errors.borrow_mut().insert(error.clone());
+        self.object_builtin_errors
+            .borrow_mut()
+            .insert(error.clone());
         error
     }
 
