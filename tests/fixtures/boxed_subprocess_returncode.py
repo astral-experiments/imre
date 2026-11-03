@@ -14,9 +14,27 @@ class InvalidSignal:
         raise AssertionError("unexpected signal conversion")
 
 
+class Immediate:
+    def __init__(self):
+        self.calls = 0
+
+    def __radd__(self, start):
+        self.calls += 1
+        return start
+
+
 def current():
     child = subprocess.Popen(["/bin/cat"], stdin=subprocess.PIPE)
     try:
+        timeout = Immediate()
+        try:
+            child.wait(timeout)
+        except subprocess.TimeoutExpired as exc:
+            assert exc.timeout is timeout
+        else:
+            raise AssertionError("wait returned with the child's stdin still open")
+        assert timeout.calls == 2 and child.returncode is None
+
         for value in (False, 2**90, -(2**90), Marker()):
             child.returncode = value
             assert child.returncode is value and child.poll() is value
@@ -101,6 +119,7 @@ def current():
 
         child.send_signal(ReapDuringIndex())
         assert child.returncode == 0
+        assert child.wait(timeout) == 0 and timeout.calls == 3
     finally:
         child.returncode = None
         child.stdin.close()

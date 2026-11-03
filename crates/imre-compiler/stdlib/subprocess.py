@@ -7,6 +7,7 @@ from warnings import warn as _warn
 import io
 import selectors
 import sys
+import time
 
 __all__ = ["Popen", "PIPE", "STDOUT", "call", "check_call", "getstatusoutput",
            "getoutput", "check_output", "run", "CalledProcessError", "DEVNULL",
@@ -384,25 +385,41 @@ class Popen:
         try:
             return self._wait(timeout=timeout)
         except KeyboardInterrupt:
-            self._wait_after_keyboard_interrupt(endtime)
+            self._wait_after_keyboard_interrupt(endtime, timeout)
             raise
 
+    def _remaining_time(self, endtime):
+        return None if endtime is None else endtime - _time()
+
     def _wait(self, timeout):
-        if self.returncode is None:
-            result = _process.wait(self._handle, timeout, self)
-            if result is not None:
-                self.returncode = result
-            elif self.returncode is None:
+        if self.returncode is not None:
+            return self.returncode
+        if timeout is None:
+            self.returncode = _process.wait(self._handle)
+            return self.returncode
+
+        endtime = _time() + timeout
+        delay = 0.0005
+        while self.returncode is None:
+            # Reap under the native PID lock before checking the deadline.
+            status = _process.poll(self._handle)
+            if status is not None:
+                self.returncode = status
+                break
+            remaining = self._remaining_time(endtime)
+            if remaining <= 0:
                 raise TimeoutExpired(self.args, timeout)
+            delay = min(delay * 2, remaining, 0.05)
+            time.sleep(delay)
         return self.returncode
 
-    def _wait_after_keyboard_interrupt(self, endtime):
+    def _wait_after_keyboard_interrupt(self, endtime, timeout):
         # The child may also have received SIGINT. Share one brief wait with
         # __exit__ and respect the caller's original deadline.
         grace = self._sigint_wait_secs
+        if timeout is not None:
+            grace = min(grace, self._remaining_time(endtime))
         self._sigint_wait_secs = 0
-        if endtime is not None:
-            grace = min(grace, endtime - _time())
         try:
             self._wait(timeout=grace)
         except TimeoutExpired:
@@ -437,7 +454,7 @@ class Popen:
         try:
             stdout, stderr = self._communicate(input, endtime, timeout)
         except KeyboardInterrupt:
-            self._wait_after_keyboard_interrupt(endtime)
+            self._wait_after_keyboard_interrupt(endtime, timeout)
             raise
         finally:
             self._communication_started = True
