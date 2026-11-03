@@ -1358,6 +1358,15 @@ def main():
 
         check_command_stdin(imre, run)
 
+        # Native warning emission can need linecache before the program imports anything.
+        source = root / "buffering_warning"
+        source.write_text('with open(__file__, "rb", buffering=1) as stream: pass\n')
+        expected = run(sys.executable, "-Wd", source)
+        actual = run(imre, "-Wd", source, timeout=300)
+        assert actual.returncode == expected.returncode == 0
+        assert expected.stderr.endswith(b"  " + source.read_bytes())
+        assert actual.stderr == expected.stderr, (expected.stderr, actual.stderr)
+
         # The Python CLI reports each unclosed file once during interpreter cleanup.
         resource = root / "resource_warning.py"
         resource.write_text(
