@@ -152,7 +152,7 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `inspect` | 0 | 362 | Stock ran 362 originals, with 361 passes and one skip. On public revision `00755c8c`, native compilation stopped before discovery, and a compiled import stopped at `_pickle`. Separate replays passed 44 tests in renamed modules. |
 | `ssl` | 22 | 195 | Five MemoryBIO originals and 17 socket, context, and enumeration tests passed on stock and on the same public compiler at O0 and O3. Each run discovered all 195 originals. |
 | `types` | 118 | 141 | 118 of 141 originals passed on pinned stock and public native O0/O3. Seven new tests cover mapping-proxy methods, numeric operations and coroutine wrappers. All eleven originals in the coroutine class passed together. |
-| `warnings` | 177 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) records 158 in-process passes and 19 passes with native interpreter children at O0 and O3. Six parents skipped on stock. The other four passed on stock and skipped on Imre under CPython-only decorators. No warnings omissions. |
+| `warnings` | 177 | 187 | The [intact suite](benchmarks/cpython_stdlib/full/warnings/receipts/76aed745/intact/verify.py) finished all 187 originals. Stock passed 181 and skipped six. Native O0 and O3 each passed 177, shared the six stock skips, and skipped four CPython-only tests. All 18 subtests passed. No warnings omissions. |
 | `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. The added finalizer test ran its real shutdown child on stock and at both native levels. |
 | **Measured total (6 of 6 families)** | **623** | **1,217** |  |
 
