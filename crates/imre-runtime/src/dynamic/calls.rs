@@ -4150,7 +4150,8 @@ impl Context {
             Value::Native(ref builtin)
                 if (name == "__name__"
                     || (name == "__qualname__"
-                        && typing::ParameterClass::lookup(builtin).is_some()))
+                        && builtin.starts_with("typing.")
+                        && self.is_type_object(obj)))
                     && self.builtins.get(builtin) == Some(&obj) =>
             {
                 return Ok(self.text(builtin.rsplit('.').next().unwrap_or(builtin).to_owned()));
