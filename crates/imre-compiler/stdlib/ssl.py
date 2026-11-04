@@ -817,6 +817,7 @@ class _SSLReader(_io.RawIOBase):
     def __init__(self, sock):
         super().__init__()
         self._sock = sock
+        self._timeout_occurred = False
         sock._io_refs += 1
 
     def readable(self):
@@ -826,10 +827,16 @@ class _SSLReader(_io.RawIOBase):
 
     def readinto(self, buffer, /):
         self.readable()
+        if self._timeout_occurred:
+            raise OSError("cannot read from timed out object")
         view = memoryview(buffer).cast("B")
         if view.readonly:
             raise TypeError("readinto() argument must be a writable buffer")
-        data = self._sock.recv(len(view))
+        try:
+            data = self._sock.recv(len(view))
+        except TimeoutError:
+            self._timeout_occurred = True
+            raise
         view[:len(data)] = data
         return len(data)
 

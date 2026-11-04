@@ -1,5 +1,6 @@
 //! Blocking TLS connections using the optional system OpenSSL 3 library.
 use std::ffi::{CStr, CString, c_char, c_int, c_long, c_uint, c_ulong, c_void};
+use std::io;
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
@@ -1143,6 +1144,7 @@ impl Session {
     ) -> Result<usize, E> {
         let api = self.api;
         let ssl = self.handle.as_ptr();
+        let until = socket::deadline(self.socket());
         let mut sent_shutdown = false;
         loop {
             api.clear();
@@ -1183,21 +1185,35 @@ impl Session {
             let os_error = std::io::Error::last_os_error();
             // SAFETY: classify this exact return value immediately on the same thread.
             let kind = unsafe { (api.SSL_get_error)(ssl, rc) };
-            match kind {
-                SSL_ERROR_WANT_READ | SSL_ERROR_WANT_WRITE => {
-                    let events = if kind == SSL_ERROR_WANT_READ {
-                        libc::POLLIN
-                    } else {
-                        libc::POLLOUT
-                    };
-                    socket::wait_blocking(socket::fd(self.socket()), events)
-                        .map_err(Failure::Io)?;
-                }
-                SSL_ERROR_SYSCALL if os_error.kind() == std::io::ErrorKind::Interrupted => continue,
+            let events = match kind {
+                SSL_ERROR_WANT_READ => Some(libc::POLLIN),
+                SSL_ERROR_WANT_WRITE => Some(libc::POLLOUT),
+                SSL_ERROR_SYSCALL if os_error.kind() == io::ErrorKind::Interrupted => None,
                 SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
                     return Err(Failure::Io(os_error).into());
                 }
                 _ => return Err(failure(api, kind, label)),
+            };
+            let wait = match events {
+                _ if until.is_some_and(|end| end.remaining().is_zero()) => {
+                    Err(io::ErrorKind::TimedOut.into())
+                }
+                Some(events) => socket::poll_socket(socket::fd(self.socket()), events, until),
+                None => Ok(()),
+            };
+            if let Err(error) = wait {
+                if error.kind() != io::ErrorKind::TimedOut {
+                    return Err(Failure::Io(error).into());
+                }
+                let message = match operation {
+                    Operation::Accept | Operation::Connect => "The handshake operation timed out",
+                    Operation::Write(_) => "The write operation timed out",
+                    Operation::Shutdown if kind == SSL_ERROR_WANT_WRITE => {
+                        "The write operation timed out"
+                    }
+                    Operation::Read(_) | Operation::Shutdown => "The read operation timed out",
+                };
+                return Err(Failure::Io(io::Error::new(io::ErrorKind::TimedOut, message)).into());
             }
         }
     }
