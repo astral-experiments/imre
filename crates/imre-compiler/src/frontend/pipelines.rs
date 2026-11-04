@@ -2636,32 +2636,16 @@ impl Checker<'_> {
         } else {
             Compare::Greater
         };
-        if let [first, second, others @ ..] = call.arguments.args.as_ref() {
-            let best = self.hidden(Type::Int);
-            let next = self.hidden(Type::Int);
-            let mut body = vec![Statement::Assign(
-                best,
-                self.expr_expected(first, Type::Int)?,
-            )];
-            for value in std::iter::once(second).chain(others) {
-                body.push(Statement::Assign(
-                    next,
-                    self.expr_expected(value, Type::Int)?,
-                ));
-                // Comparing two exact integers is infallible and runs no user code.
-                body.push(Statement::If(
-                    compare(order, self.local(next), self.local(best)),
-                    vec![Statement::Assign(best, self.local(next))],
-                    Vec::new(),
-                ));
-            }
+        if call.arguments.args.len() >= 2 {
+            let args = call
+                .arguments
+                .args
+                .iter()
+                .map(|arg| self.expr_expected(arg, Type::Int))
+                .collect::<Result<_, _>>()?;
             return Ok(Expr {
                 ty: Type::Int,
-                kind: ExprKind::Scope {
-                    body,
-                    value: Box::new(self.local(best)),
-                    clear: vec![next, best],
-                },
+                kind: ExprKind::Builtin(Builtin::IntExtremum { minimum }, args),
             });
         }
         let [source @ ast::Expr::Generator(_)] = call.arguments.args.as_ref() else {

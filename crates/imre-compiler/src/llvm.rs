@@ -7068,6 +7068,26 @@ impl Emitter<'_, '_> {
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
             },
+            Builtin::IntExtremum { minimum } => {
+                let order = if *minimum {
+                    Compare::Less
+                } else {
+                    Compare::Greater
+                };
+                let mut best = args[0].value.clone();
+                for arg in &args[1..] {
+                    let next = &arg.value;
+                    let better = self.compare(order, next, &best);
+                    best.operand = self.instruction(format!(
+                        "select i1 {}, i64 {}, i64 {}",
+                        better.operand, next.operand, best.operand
+                    ));
+                    best.small_integer &= next.small_integer;
+                }
+                // The selected integer survives release of all the call arguments.
+                self.retain(&best);
+                best
+            }
             Builtin::IntSignAsFloat => {
                 let order = self.instruction(format!(
                     "call i32 @compare_int(i64 {}, i64 {})",

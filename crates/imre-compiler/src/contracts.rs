@@ -564,6 +564,7 @@ impl Builtin {
             | Self::FaultFrame { .. }
             | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
+            | Self::IntExtremum { .. }
             | Self::IntSignAsFloat
             | Self::FloatCopySign
             | Self::IsInstance(_)
@@ -875,6 +876,9 @@ impl Builtin {
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::IntExtremum { .. } => {
+                result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
+            }
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
