@@ -72,6 +72,10 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
                 function,
                 "getdefaulttimeout"
                     | "setdefaulttimeout"
+                    | "htonl"
+                    | "htons"
+                    | "ntohl"
+                    | "ntohs"
                     | "inet_aton"
                     | "inet_pton"
                     | "inet_ntoa"
@@ -2865,6 +2869,14 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "posix.getrandom" => {
                         return Ok(self.text("($module, /, size, flags=0)"));
+                    }
+                    "__text_signature__"
+                        if matches!(
+                            symbol.as_str(),
+                            "_socket.htons" | "_socket.ntohs" | "_socket.htonl" | "_socket.ntohl"
+                        ) =>
+                    {
+                        return Ok(self.text("($module, integer, /)"));
                     }
                     "__text_signature__" if symbol == "_socket.inet_aton" => {
                         return Ok(self.text("($module, ip_addr, /)"));

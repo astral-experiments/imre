@@ -2017,6 +2017,14 @@ impl IntrinsicModule {
             (Self::SocketNative, "SOCK_CLOEXEC") => {
                 Intrinsic::IntConstant(i64::from(libc::SOCK_CLOEXEC))
             }
+            (Self::Socket, "htonl") => Intrinsic::ScopedObjectExport("socket.htonl"),
+            (Self::Socket, "htons") => Intrinsic::ScopedObjectExport("socket.htons"),
+            (Self::Socket, "ntohl") => Intrinsic::ScopedObjectExport("socket.ntohl"),
+            (Self::Socket, "ntohs") => Intrinsic::ScopedObjectExport("socket.ntohs"),
+            (Self::SocketNative, "htonl") => Intrinsic::ScopedObjectExport("_socket.htonl"),
+            (Self::SocketNative, "htons") => Intrinsic::ScopedObjectExport("_socket.htons"),
+            (Self::SocketNative, "ntohl") => Intrinsic::ScopedObjectExport("_socket.ntohl"),
+            (Self::SocketNative, "ntohs") => Intrinsic::ScopedObjectExport("_socket.ntohs"),
             (Self::Socket, "timeout") => Intrinsic::ScopedObjectExport("socket.timeout"),
             (Self::SocketNative, "timeout") => Intrinsic::ScopedObjectExport("_socket.timeout"),
             (Self::SocketNative, "getdefaulttimeout") => {
@@ -4951,12 +4959,12 @@ impl<'a> Loader<'a> {
             ) || module == IntrinsicModule::SocketNative
                 && imports.is_none_or(|names| {
                     names.iter().any(|alias| {
-                        let name = alias.name.as_str();
-                        name != "timeout"
-                            && !matches!(
-                                module.symbol(name),
-                                Some(Binding::Intrinsic(Intrinsic::IntConstant(_)))
-                            )
+                        !matches!(
+                            module.symbol(alias.name.as_str()),
+                            Some(Binding::Intrinsic(
+                                Intrinsic::IntConstant(_) | Intrinsic::ScopedObjectExport(_)
+                            ))
+                        )
                     })
                 });
         }
