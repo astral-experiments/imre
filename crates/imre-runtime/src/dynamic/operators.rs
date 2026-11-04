@@ -3454,7 +3454,15 @@ impl Context {
             }
             Value::Str(text) => {
                 let stride = usize::try_from(step.unsigned_abs()).unwrap_or(usize::MAX);
-                let value = if step > 0 {
+                let value = if step == 1 && len == text.len() {
+                    // The normalized length never exceeds the character count.
+                    // Equality with the byte length proves every character is ASCII.
+                    let start = start as usize;
+                    let mut value = String::new();
+                    value.try_reserve_exact(count).map_err(slice_memory_error)?;
+                    value.push_str(&text[start..start + count]);
+                    value
+                } else if step > 0 {
                     sliced_text(text.chars().skip(start as usize), stride, count)?
                 } else {
                     let skip = (len as i64 - 1 - start) as usize;
