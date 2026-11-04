@@ -2857,9 +2857,9 @@ impl Heap {
             Slot::new(Value::NotImplemented),
             Slot::new(Value::Tuple(Vec::new())),
         ];
-        slots.extend(
-            (SMALL_INT_MIN..=SMALL_INT_MAX).map(|n| Slot::new(Value::Int(crate::Int::from(n)))),
-        );
+        for n in SMALL_INT_MIN..=SMALL_INT_MAX {
+            slots.push(Slot::new(Value::Int(crate::Int::from(n))));
+        }
         let mut heap = Self {
             traces: vec![Cell::new(END); slots.len()],
             scalar_leaves: slots
@@ -2883,7 +2883,7 @@ impl Heap {
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
-            next_collection: 4096,
+            next_collection: FIRST_DYNAMIC_SLOT + 4096,
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
@@ -5057,9 +5057,10 @@ impl Heap {
             }
         }
         // A refused growth request can lower the usual collection floor.
-        let floor = self.next_collection.min(4096);
-        self.next_collection = (self.slots.len() - self.free_count)
-            .saturating_mul(2)
+        let floor = self.next_collection.min(FIRST_DYNAMIC_SLOT + 4096);
+        let live = self.slots.len() - FIRST_DYNAMIC_SLOT - self.free_count;
+        self.next_collection = FIRST_DYNAMIC_SLOT
+            .saturating_add(live.saturating_mul(2))
             .max(floor);
         (!callbacks.is_empty()).then_some(callbacks)
     }
