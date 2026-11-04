@@ -283,7 +283,7 @@ impl Function<'_, '_> {
             |f, expr, yes, no| {
                 if yes == no {
                     let value = f.expr(expr);
-                    incoming.push(format!("[ {value}, %{} ]", f.block));
+                    incoming.push(format!("[ {value}, %{} ]", f.current_block()));
                     f.jump(&done);
                     return;
                 }
@@ -295,7 +295,7 @@ impl Function<'_, '_> {
                     f.branch(&truth, yes, no);
                     return;
                 }
-                incoming.push(format!("[ {value}, %{} ]", f.block));
+                incoming.push(format!("[ {value}, %{} ]", f.current_block()));
                 let discard = f.name("b");
                 let next = if yes == done {
                     f.branch(&truth, &done, &discard);
@@ -336,7 +336,7 @@ impl Function<'_, '_> {
                 if incoming.is_empty() {
                     return result;
                 }
-                incoming.push(format!("[ {result}, %{} ]", self.block));
+                incoming.push(format!("[ {result}, %{} ]", self.current_block()));
                 self.jump(&done);
             } else {
                 let truth = self.truth(&value);
@@ -345,7 +345,7 @@ impl Function<'_, '_> {
                 } else {
                     &value
                 };
-                incoming.push(format!("[ {result}, %{} ]", self.block));
+                incoming.push(format!("[ {result}, %{} ]", self.current_block()));
                 let next = self.name("b");
                 self.branch(&truth, &next, &done);
                 self.label(&next);
