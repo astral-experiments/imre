@@ -7408,6 +7408,9 @@ impl<'a> Checker<'a> {
                     });
                 }
                 let mut values = self.numeric_union_comparison(values);
+                if let Some(result) = text::slice_equality(self.types, &mut values, &compare.ops) {
+                    return Ok(result);
+                }
                 if let Some(result) =
                     calendar::equality(self.types, &mut values, compare.ops.as_ref())
                 {

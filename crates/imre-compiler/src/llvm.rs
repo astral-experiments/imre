@@ -7636,6 +7636,18 @@ impl Emitter<'_, '_> {
             Builtin::StringIntList => {
                 self.call("imre_str_int_list", Type::ListInt, &[&args[0].value])
             }
+            Builtin::StringSliceEqual => {
+                let equal = self.instruction(format!(
+                    "call i32 @imre_str_slice_equal(ptr {}, i64 {}, i64 {}, ptr {}, i64 {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand,
+                    args[3].value.operand, args[4].value.operand, args[5].value.operand,
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("icmp ne i32 {equal}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::Slice => self.call(
                 match returns {
                     Type::Str => "imre_str_slice",
@@ -10439,6 +10451,7 @@ declare i64 @imre_enum_find_int(i64, i64, i64)
 declare void @imre_http_enum_table(ptr)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
+declare i32 @imre_str_slice_equal(ptr, i64, i64, ptr, i64, i64)
 declare i32 @imre_str_compare(ptr, ptr)
 declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
