@@ -50,7 +50,7 @@ def verify(case: Subject, log: list[str]) -> None:
 
 
 class Override(unittest.TestCase):
-    def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    def assertIn(self, member: object, container: object, msg: str | None = None) -> None:
         print("override " + repr(member) + " " + repr(container))
 
     def assertNotIn(self, member: str, container: str, msg: str | None = None) -> None:
