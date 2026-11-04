@@ -6,6 +6,14 @@ import tempfile
 def current():
     assert hashlib.file_digest.__name__ == "file_digest"
     assert hashlib.file_digest.__module__ == "hashlib"
+    try:
+        hashlib.file_digest(digest="sha256", fileobj=None)
+    except TypeError as exc:
+        assert str(exc) == (
+            "file_digest() got some positional-only arguments passed as keyword arguments: 'fileobj, digest'"
+        )
+    else:
+        raise AssertionError("accepted positional-only parameters by keyword")
     # The CLI test owns this temporary module directory.
     path = tempfile.mkdtemp(dir=".") + "/data"
     data = b"a" * 8193 + b"bc"
