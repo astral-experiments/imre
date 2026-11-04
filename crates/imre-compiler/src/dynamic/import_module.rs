@@ -36,6 +36,13 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             );
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("http/server.py", SOURCE.get_or_init(|| {
+                // Boxed handlers can format arbitrary Python objects into header fields.
+                let send_header = |source: &str| {
+                    source.find("    def send_header(").unwrap()
+                        ..source.find("    def end_headers(").unwrap()
+                };
+                let mut base = include_str!("../../stdlib/http/server.py").to_owned();
+                base.replace_range(send_header(&base), &UPSTREAM[send_header(UPSTREAM)]);
                 let start = UPSTREAM.find("class SimpleHTTPRequestHandler(").unwrap();
                 let (handler, _) = UPSTREAM[start..]
                     .split_once("# Utilities for CGIHTTPRequestHandler")
@@ -45,8 +52,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     .replace("html.escape(displaypath, quote=False)", "_escape(displaypath)")
                     .replace("html.escape(displayname, quote=False)", "_escape(displayname)");
                 format!(
-                    "{}\nimport datetime\nimport email.utils\nimport io\nimport mimetypes\nimport os\nimport posixpath\nimport shutil\nimport urllib.parse\n\n{handler}",
-                    include_str!("../../stdlib/http/server.py")
+                    "{base}\nimport datetime\nimport email.utils\nimport io\nimport mimetypes\nimport os\nimport posixpath\nimport shutil\nimport urllib.parse\n\n{handler}",
                 )
             })))
         }

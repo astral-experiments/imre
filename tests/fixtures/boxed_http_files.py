@@ -37,3 +37,21 @@ with redirect_stderr(StringIO()) as output:
     else:
         raise AssertionError("expected an integer format argument")
 assert len(output.getvalue().splitlines()) == 1
+
+logger.request_version = "HTTP/1.1"
+logger.send_header("Content-Length", 17)
+logger.send_header(UserString("X-Label"), UserString("café"))
+assert logger._headers_buffer == [b"Content-Length: 17\r\n", b"X-Label: caf\xe9\r\n"]
+try:
+    logger.send_header("Connection", "snowman \u2603")
+except UnicodeEncodeError:
+    pass
+else:
+    raise AssertionError("header value must be Latin-1")
+try:
+    logger.send_header("Connection", 17)
+except AttributeError:
+    pass
+else:
+    raise AssertionError("Connection requires a value with lower()")
+assert logger._headers_buffer[2:] == [b"Connection: 17\r\n"]
