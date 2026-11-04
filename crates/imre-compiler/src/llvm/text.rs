@@ -195,9 +195,7 @@ impl Emitter<'_, '_> {
                     "null".into()
                 };
                 let pair = self.module.types.element(returns).unwrap();
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(pair)));
+                let layout = self.output.record_layout(pair);
                 self.checked_instruction(format!("call ptr @imre_parse_qsl(ptr {query}, i32 {bytes}, i32 {keep}, i32 {strict}, ptr {encoding}, ptr {errors}, i64 {max}, ptr {separator}, i32 {separator_bytes}, ptr @{layout})"))
             }
             TextOperation::UrlSplit => {

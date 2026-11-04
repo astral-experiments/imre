@@ -561,8 +561,8 @@ fn emit_program(
         )
         .unwrap();
     }
-    record_layouts(module, emitter.output);
     json::schemas(module, emitter.output);
+    record_layouts(module, emitter.output);
     callables::adapters(
         module,
         sanitize,
@@ -647,8 +647,8 @@ struct Emitter<'a, 'module> {
     uses_sequence_layout: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
-    async_frames: BTreeMap<usize, Type>,
-    async_invoke_frames: BTreeMap<usize, (Type, Type)>,
+    async_frames: BTreeMap<usize, String>,
+    async_invoke_frames: BTreeMap<usize, (String, Type)>,
     function_link_types: HashSet<Type>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
@@ -2900,9 +2900,7 @@ impl Emitter<'_, '_> {
                 } else {
                     let element = self.module.types.element(expression.ty).unwrap();
                     let op = if self.module.types.is_value_struct(element) {
-                        let layout = self
-                            .output
-                            .global_ref(format!("layout_{}", record_name(element)));
+                        let layout = self.output.record_layout(element);
                         format!("call ptr @imre_struct_list_new(ptr @{layout})")
                     } else {
                         format!(
@@ -5062,9 +5060,7 @@ impl Emitter<'_, '_> {
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::WarningFormat { entry, environment } => {
                 let line = self.optional_object_pointer(&args[5].value);
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(*entry)));
+                let layout = self.output.record_layout(*entry);
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_warning_format(ptr {}, ptr {}, ptr {}, ptr {}, i64 {}, ptr {line}, ptr {}, ptr {}, i32 {}, ptr @{layout})",
                     args[0].value.operand, args[1].value.operand, args[2].value.operand,
@@ -5168,9 +5164,7 @@ impl Emitter<'_, '_> {
                 self.unpack_word(word, returns)
             }
             Builtin::ClockParts(utc) => {
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self.output.record_layout(returns);
                 let stamp = &args[0].value;
                 let function = if stamp.ty == Type::Int {
                     "imre_clock_int_parts"
@@ -5682,7 +5676,8 @@ impl Emitter<'_, '_> {
                 let root = self.output.global_ref(format!("static_function_{name}"));
                 self.static_functions.insert(root.clone());
                 self.rooted_record(returns, &root, |emitter| {
-                    let value = emitter.record_with_layout(returns, "callable");
+                    let layout = emitter.output.global_ref("layout_callable".to_owned());
+                    let value = emitter.record_with_layout(returns, layout);
                     emitter.line(format!(
                         "store ptr @imre_{name}_callback, ptr {}",
                         value.operand
@@ -6056,18 +6051,14 @@ impl Emitter<'_, '_> {
                 process_argv,
             } => {
                 let pair_layout = if matches!(returns, Type::Tuple(_)) {
-                    format!(
-                        "@{}",
-                        self.output
-                            .global_ref(format!("layout_{}", record_name(returns)))
-                    )
+                    format!("@{}", self.output.record_layout(returns))
                 } else {
                     "null".to_owned()
                 };
                 let [schema, description, argv] = args.as_slice() else {
                     unreachable!()
                 };
-                let layout = self.output.global_ref(format!("layout_class_{namespace}"));
+                let layout = self.output.record_layout(Type::Class(*namespace));
                 let child_layouts = if children.is_empty() {
                     "null".to_owned()
                 } else {
@@ -6076,10 +6067,7 @@ impl Emitter<'_, '_> {
                     let layouts = children
                         .iter()
                         .map(|child| {
-                            format!(
-                                "ptr @{}",
-                                self.output.global_ref(format!("layout_class_{child}"))
-                            )
+                            format!("ptr @{}", self.output.record_layout(Type::Class(*child)))
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -6420,9 +6408,7 @@ impl Emitter<'_, '_> {
                     Op::Getline | Op::Getlines | Op::Update => {
                         let globals = if *op == Op::Getline { 2 } else { 1 };
                         let root = globals + 1;
-                        let layout = self
-                            .output
-                            .global_ref(format!("layout_{}", record_name(*entry)));
+                        let layout = self.output.record_layout(*entry);
                         let list = self.checked_instruction(format!(
                             "call ptr @imre_linecache_lines(ptr {}, ptr {}, ptr {}, ptr {}, i32 {}, i32 {}, ptr @{layout})",
                             pointer(0), pointer(globals), pointer(root), pointer(root+1), u32::from(*env), u32::from(*op == Op::Update)
@@ -6556,10 +6542,8 @@ impl Emitter<'_, '_> {
                 match operation {
                     Op::Newlines => {
                         let mut layout = |n| {
-                            self.output.global_ref(format!(
-                                "layout_{}",
-                                record_name(self.module.types.tuple(vec![Type::Str; n]))
-                            ))
+                            self.output
+                                .record_layout(self.module.types.tuple(vec![Type::Str; n]))
                         };
                         let pair = layout(2);
                         let triple = layout(3);
@@ -7364,9 +7348,7 @@ impl Emitter<'_, '_> {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
                 let word = self.word(source);
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self.output.record_layout(returns);
                 let operand = self.checked_pointer(format!(
                     "call ptr @imre_tee(i32 {mode}, i64 {word}, ptr @{layout})"
                 ));
@@ -7470,17 +7452,13 @@ impl Emitter<'_, '_> {
             Builtin::FormatCursor { split } => {
                 let (cursor, outer) = if *split {
                     let fields = self.module.types.fields(returns).unwrap();
-                    let layout = self
-                        .output
-                        .global_ref(format!("layout_{}", record_name(returns)));
+                    let layout = self.output.record_layout(returns);
                     (fields[1], Some(layout))
                 } else {
                     (returns, None)
                 };
                 let row = self.module.types.cursor_element(cursor).unwrap();
-                let row = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(row)));
+                let row = self.output.record_layout(row);
                 let input = &args[0].value.operand;
                 let operand = match outer {
                     Some(outer) => self.checked_pointer(format!("call ptr @imre_formatter_field_name_split(ptr {input}, ptr @{outer}, ptr @{row})")),
@@ -7812,9 +7790,7 @@ impl Emitter<'_, '_> {
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
             Builtin::CounterMostCommon => {
                 let pair = self.module.types.element(returns).unwrap();
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(pair)));
+                let layout = self.output.record_layout(pair);
                 let limit = self.word(&args[1].value);
                 let operand = self.checked_pointer(format!(
                     "call ptr @imre_counter_most_common(ptr {}, i64 {limit}, ptr @{layout})",
@@ -7914,7 +7890,7 @@ impl Emitter<'_, '_> {
                 }
                 let instruction = if let Builtin::SortedRecordRows { class, columns } = builtin {
                     let name = self.byte_array(columns.clone());
-                    let layout = self.output.global_ref(format!("layout_class_{class}"));
+                    let layout = self.output.record_layout(Type::Class(*class));
                     format!(
                         "call ptr @imre_sorted_record_rows(ptr {handles}, i64 {}, ptr @{layout}, ptr @{name})",
                         args.len()
@@ -8374,9 +8350,7 @@ impl Emitter<'_, '_> {
         roots: &mut Vec<Value>,
     ) -> Operand {
         let scratch = self.entry_alloca(format!("[{} x i64]", fields.len() + 2));
-        let layout = self
-            .output
-            .global_ref(format!("layout_{}", record_name(ty)));
+        let layout = self.output.record_layout(ty);
         let payload = self.instruction(format!(
             "call ptr @imre_tuple_probe(ptr {scratch}, ptr @{layout})"
         ));
@@ -8631,11 +8605,11 @@ impl Emitter<'_, '_> {
     /// The zeroed payload is safe to destroy before every initializer completes.
     /// The checked constructor cannot expose a partially initialized record.
     fn record(&mut self, ty: Type) -> Value {
-        self.record_with_layout(ty, &record_name(ty))
+        let layout = self.output.record_layout(ty);
+        self.record_with_layout(ty, layout)
     }
 
-    fn record_with_layout(&mut self, ty: Type, name: &str) -> Value {
-        let layout = self.output.global_ref(format!("layout_{name}"));
+    fn record_with_layout(&mut self, ty: Type, layout: String) -> Value {
         // A loop can produce many small, independently escaping ordinary tuples.
         // Batch only the layouts for which several records fit in one block.
         let allocate = if !self.loops.is_empty()
@@ -8678,9 +8652,7 @@ impl Emitter<'_, '_> {
         let write = self.label();
         self.branch(&empty, &allocate, &cached);
         self.start(&allocate);
-        let layout = self
-            .output
-            .global_ref(format!("layout_{}", record_name(previous.ty)));
+        let layout = self.output.record_layout(previous.ty);
         let fresh = self.checked_pointer(format!("call ptr @imre_record_try_new(ptr @{layout})"));
         let allocated = self.current.clone();
         self.jump(&write);
@@ -8707,9 +8679,9 @@ impl Emitter<'_, '_> {
     }
 
     fn field_pointer(&mut self, receiver: &Value, field: usize) -> String {
+        let name = self.output.record_type(receiver.ty);
         self.instruction(format!(
-            "getelementptr inbounds %{}, ptr {}, i32 0, i32 {field}",
-            record_name(receiver.ty),
+            "getelementptr inbounds %{name}, ptr {}, i32 0, i32 {field}",
             receiver.operand
         ))
     }
@@ -9122,56 +9094,35 @@ fn storage_type(ty: Type) -> &'static str {
 /// runtime tag or presence bitmap is needed: owning fields reserve zero until
 /// initialization, and their exact kinds are shared by every instance.
 fn record_layouts(module: &Module, output: &mut Output) {
-    let classes = module
-        .class_fields
-        .iter()
-        .enumerate()
-        .map(|(id, fields)| (Type::Class(id), fields.clone()));
-    let mut implementation = false;
-    let mut captures = std::collections::BTreeSet::from([(crate::ir::ProcessCapture::TEXT, None)]);
-    for function in module.functions.iter().chain([&module.entry]) {
-        for ty in function.locals.iter().chain([&function.returns]) {
-            implementation |= *ty == Type::SysImplementation;
-            if let Type::CompletedProcess(c, cmd) = ty {
-                captures.insert((*c, *cmd));
-            }
-        }
-        crate::ir::walk_expressions(&function.body, &mut |value| {
-            implementation |= value.ty == Type::SysImplementation;
-            if let Type::CompletedProcess(c, cmd) = value.ty {
-                captures.insert((c, cmd));
-            }
-        });
-    }
-    let processes = captures.into_iter().map(|(c, cmd)| {
-        (
-            Type::CompletedProcess(c, cmd),
-            vec![
+    let mut records: Vec<_> = std::mem::take(&mut output.record_types)
+        .into_iter()
+        .map(|(ty, descriptor)| (record_name(ty), ty, descriptor))
+        .collect();
+    records.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    for (name, ty, descriptor) in records {
+        let fields = match ty {
+            Type::Class(id) => module.class_fields[id].clone(),
+            Type::Tuple(_) => module.types.fields(ty).unwrap(),
+            Type::ModuleSpec(id) => module.types.module_spec_fields(id),
+            Type::SysImplementation => crate::version::implementation_fields(&module.types),
+            Type::CompletedProcess(capture, cmd) => vec![
                 module.types.completed_command(cmd),
                 Type::Int,
-                c.stream(true),
-                c.stream(false),
+                capture.stream(true),
+                capture.stream(false),
             ],
-        )
-    });
-    let implementation = implementation.then(|| {
-        (
-            Type::SysImplementation,
-            crate::version::implementation_fields(&module.types),
-        )
-    });
-    for (ty, fields) in classes
-        .chain(module.types.tuples())
-        .chain(module.types.module_spec_layouts())
-        .chain(processes)
-        .chain(implementation)
-    {
-        let name = record_name(ty);
+            Type::Callable(_) => continue, // Callable adapters define this shared layout.
+            _ => unreachable!("only fixed records have named LLVM types"),
+        };
         let storage = fields
             .iter()
             .map(|&ty| storage_type(ty))
             .collect::<Vec<_>>()
             .join(", ");
+        writeln!(output.common(), "%{name} = type {{ {storage} }}").unwrap();
+        if !descriptor {
+            continue;
+        }
         let extra = module.types.time_attributes(ty);
         let kind_count = fields.len() + extra.map_or(0, |tail| tail.len());
         let kinds = fields
@@ -9182,7 +9133,6 @@ fn record_layouts(module: &Module, output: &mut Output) {
             .collect::<Vec<_>>()
             .join(", ");
         let count = fields.len();
-        writeln!(output.common(), "%{name} = type {{ {storage} }}").unwrap();
         writeln!(
             output.entry_buffer(),
             "@kinds_{name} = private unnamed_addr constant [{kind_count} x i32] [{kinds}]"

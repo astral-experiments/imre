@@ -131,7 +131,8 @@ impl Emitter<'_, '_> {
                 }
             }
             ProcessOperation::Coroutine { function, result } => {
-                self.async_frames.insert(function, args[0].value.ty);
+                self.async_frames
+                    .insert(function, self.output.record_type(args[0].value.ty));
                 let kind = representation_kind(result, &self.module.types);
                 let thunk = self.output.used(
                     self.output.function_owner(function),
@@ -148,7 +149,8 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::ContextNew { function } => {
-                self.async_frames.insert(function, args[0].value.ty);
+                self.async_frames
+                    .insert(function, self.output.record_type(args[0].value.ty));
                 let thunk = self.output.used(
                     self.output.function_owner(function),
                     self.output.async_name(function),
@@ -220,8 +222,10 @@ impl Emitter<'_, '_> {
                 let Type::Callable(signature) = signature else {
                     unreachable!()
                 };
-                self.async_invoke_frames
-                    .insert(signature, (args[0].value.ty, result));
+                self.async_invoke_frames.insert(
+                    signature,
+                    (self.output.record_type(args[0].value.ty), result),
+                );
                 let kind = representation_kind(result, &self.module.types);
                 let thunk = self
                     .output
@@ -491,9 +495,7 @@ impl Emitter<'_, '_> {
                         let kind = if timeout.ty == Type::Int { 2 } else { 7 };
                         let (checked, descriptor) =
                             if matches!(operation, ProcessOperation::Run { .. }) {
-                                let name = self
-                                    .output
-                                    .global_ref(format!("layout_{}", record_name(returns)));
+                                let name = self.output.record_layout(returns);
                                 (args[14].value.operand.as_str(), format!("@{name}"))
                             } else {
                                 ("true", "null".to_owned())
@@ -578,9 +580,7 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::PopenCommunicate { text } => {
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self.output.record_layout(returns);
                 let input =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
                 let kind = if args[2].value.ty == Type::Int { 2 } else { 7 };
@@ -654,9 +654,7 @@ impl Emitter<'_, '_> {
                 self.unpack_word(word, returns)
             }
             ProcessOperation::AsyncCommunicate => {
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self.output.record_layout(returns);
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_async_process_communicate(ptr {}, ptr @{layout})",
                     args[0].value.operand,
@@ -787,9 +785,7 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::TreeErrorArgs => {
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self.output.record_layout(returns);
                 let ptr = self.checked_instruction(format!(
                     "call ptr @imre_shutil_tree_error_args(ptr {}, ptr @{layout})",
                     args[0].value.operand
@@ -825,9 +821,7 @@ impl Emitter<'_, '_> {
                         u32::from(self.module.types.set_element(ret).is_some()),
                     )
                 };
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(issue)));
+                let layout = self.output.record_layout(issue);
                 let operand = self.checked_instruction(format!(
                     "call i64 @imre_shutil_copytree(ptr {}, i32 {}, ptr {}, i32 {}, i32 {links}, i32 {stat}, i32 {dangling}, i32 {existing}, ptr @{layout}, ptr {target}, ptr {context}, i32 {repr}, ptr {ignore_target}, ptr {ignore_context}, i32 {ignore_set})",
                     src.value.operand, shutil_tag(src.value.ty), dst.value.operand, shutil_tag(dst.value.ty)));
@@ -838,9 +832,7 @@ impl Emitter<'_, '_> {
                     unreachable!()
                 };
                 let (stat, target, context, repr, tagged) = self.shutil_copier(copy);
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(issue)));
+                let layout = self.output.record_layout(issue);
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_shutil_move(ptr {}, i32 {}, ptr {}, i32 {}, i32 {stat}, ptr @{layout}, ptr {target}, ptr {context}, i32 {repr}, i32 {tagged})",
                     src.value.operand,shutil_tag(src.value.ty),dst.value.operand,shutil_tag(dst.value.ty)));

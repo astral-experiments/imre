@@ -19,9 +19,7 @@ impl Emitter<'_, '_> {
                 none()
             }
             PathOperation::Stat { lstat } => {
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self.output.record_layout(returns);
                 let follow = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_path_stat(ptr {}, i32 {follow}, i32 {}, ptr @{layout})",
@@ -300,9 +298,7 @@ impl Emitter<'_, '_> {
             }
             PathOperation::Walk => {
                 let row = self.module.types.cursor_element(returns).unwrap();
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(row)));
+                let layout = self.output.record_layout(row);
                 let top_down =
                     self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
                 let follow = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
