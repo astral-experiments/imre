@@ -9,7 +9,20 @@ def parity(key: int) -> int:
     return key % 2
 
 
+def selected_characters(text: str, keys: set[str]) -> str:
+    found = {ch for ch in text if ch in keys or ord(ch) < 32}
+    if found:
+        return "".join(sorted(found))
+    return ""
+
+
 def main() -> None:
+    keys = {"!", "é"}
+    print(selected_characters("plain.dat", keys) == "")
+    print(selected_characters("prefix文é!", keys) == "!é")
+    print(selected_characters("prefix\x1f", keys) == "\x1f")
+    keys.add("p")
+    print(selected_characters("plain.dat", keys) == "p")
     print(set(range(6)) == {0, 1, 2, 3, 4, 5})
     print(set(range(9, 0, -3)) == {3, 6, 9})
     print(len(set(range(0))))
