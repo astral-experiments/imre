@@ -214,6 +214,20 @@ impl Context {
         code
     }
 
+    /// Decode a function's parameter metadata on its first call.
+    fn parsed_parameters(&self, code: Id) -> Result<std::rc::Rc<serde_json::Value>> {
+        let code = self.code_object(code);
+        if let Some(parameters) = code.parsed_parameters.get() {
+            return Ok(std::rc::Rc::clone(parameters));
+        }
+        let parameters = serde_json::from_str(self.str_value(code.parameters)?)
+            .map_err(|error| Error::new("SystemError", error.to_string()))?;
+        Ok(std::rc::Rc::clone(
+            code.parsed_parameters
+                .get_or_init(|| std::rc::Rc::new(parameters)),
+        ))
+    }
+
     fn alloc(&mut self, value: Value) -> Id {
         let class = value.finalizer_class();
         let id = self.heap.alloc(value);

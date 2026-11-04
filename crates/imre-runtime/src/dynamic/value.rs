@@ -16,6 +16,8 @@ pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 pub(super) struct CodeObject {
     pub body: Body,
     pub parameters: Id,
+    /// Decoded argument metadata is shared by calls using this immutable code object.
+    pub parsed_parameters: std::cell::OnceCell<std::rc::Rc<serde_json::Value>>,
     pub name: Id,
     pub qualname: Id,
     pub doc: Id,
