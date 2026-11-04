@@ -59,6 +59,15 @@ class Case(IsolatedAsyncioTestCase):
         self.assertEqual(order, [2, 1])
         self.assertEqual(mock.await_args_list, [call(2), call(1)])
 
+        class Transport(AsyncMock):
+            pass
+
+        transport = Transport()
+        reply = await transport()
+        for child in (reply, transport.send):
+            self.assertIsInstance(child, AsyncMock)
+            self.assertNotIsInstance(child, Transport)
+
         state.set("test")
 
     async def asyncTearDown(self):

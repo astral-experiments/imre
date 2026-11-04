@@ -370,8 +370,9 @@ class NonCallableMock(_FixedMock):
         name = kwargs.get("_new_name")
         if name in self._spec_asyncs:
             factory = AsyncMock
-        elif issubclass(factory, AsyncMock) and (name in _mock_magics or name in (self._mock_methods or ())):
-            factory = MagicMock
+        elif issubclass(factory, AsyncMock):
+            is_sync = name in _mock_magics or name in (self._mock_methods or ())
+            factory = MagicMock if is_sync else AsyncMock
         elif not issubclass(factory, CallableMixin):
             factory = MagicMock if issubclass(factory, NonCallableMagicMock) else Mock
         return factory(**kwargs)
