@@ -36,6 +36,47 @@ declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
+// Keep repeated code-name loads and their error edge out of each caller.
+const NAMED_OP: &str = "\
+define internal i64 @imre_boxed_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value) noinline {
+entry:
+  %key = call i64 @imre_dyn_lit(ptr %ctx, i32 6, ptr %name, i64 %len)
+  %failed = call i1 @imre_dyn_failed(ptr %ctx)
+  br i1 %failed, label %error, label %apply
+error:
+  ret i64 0
+apply:
+  %result = tail call i64 @imre_dyn_op_at(ptr %ctx, ptr %op, i64 %receiver, i64 %key, i64 %value, ptr null)
+  ret i64 %result
+}
+";
+
+const GUARDED_NAMED_OP: &str = "\
+define internal i64 @imre_boxed_guarded_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value) noinline {
+entry:
+  %pending = call i1 @imre_dyn_failed(ptr %ctx)
+  br i1 %pending, label %error, label %apply
+error:
+  ret i64 0
+apply:
+  %result = tail call i64 @imre_boxed_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value)
+  ret i64 %result
+}
+";
+
+const GUARDED_LIT: &str = "\
+define internal i64 @imre_boxed_guarded_lit(ptr %ctx, i32 %kind, ptr %data, i64 %len) noinline {
+entry:
+  %pending = call i1 @imre_dyn_failed(ptr %ctx)
+  br i1 %pending, label %error, label %load
+error:
+  ret i64 0
+load:
+  %value = tail call i64 @imre_dyn_lit(ptr %ctx, i32 %kind, ptr %data, i64 %len)
+  ret i64 %value
+}
+";
+
 /// All module source has already been resolved. Import execution remains conditional.
 pub(crate) fn emit(
     modules: &[(String, PathBuf, String)],
@@ -335,6 +376,9 @@ enum StringConstant {
 struct Output {
     keep_docstrings: bool,
     declared_statement_line: bool,
+    emitted_named_op: bool,
+    emitted_guarded_lit: bool,
+    emitted_guarded_named_op: bool,
     string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -433,6 +477,7 @@ impl Output {
             ir: String::new(),
             block: "entry".into(),
             error: "failed".into(),
+            pending_check: None,
             scope: "%scope".into(),
             serial: 0,
             terminated: false,
@@ -538,6 +583,7 @@ struct Function<'a, 'p> {
     ir: String,
     block: String,
     error: String,
+    pending_check: Option<ErrorCheck>,
     scope: String,
     serial: usize,
     terminated: bool,
@@ -549,6 +595,12 @@ struct Function<'a, 'p> {
     caught: Vec<String>,
     simple_call: Option<ruff_text_size::TextRange>,
     expression_line: usize,
+}
+
+struct ErrorCheck {
+    handler: String,
+    failed: String,
+    next: String,
 }
 
 #[derive(Clone)]
@@ -585,6 +637,7 @@ impl Function<'_, '_> {
     }
 
     fn line(&mut self, line: &str) {
+        self.flush_check();
         writeln!(self.ir, "  {line}").unwrap();
     }
 
@@ -606,6 +659,7 @@ impl Function<'_, '_> {
     }
 
     fn label(&mut self, label: &str) {
+        self.flush_check();
         writeln!(self.ir, "{label}:").unwrap();
         self.block = label.into();
         self.terminated = false;
@@ -622,10 +676,36 @@ impl Function<'_, '_> {
     }
 
     fn check_error(&mut self) {
-        let failed = self.value("call i1 @imre_dyn_failed(ptr %ctx)");
-        let next = self.name("b");
-        self.branch(&failed, &self.error.clone(), &next);
-        self.label(&next);
+        self.pending_check = Some(ErrorCheck {
+            handler: self.error.clone(),
+            failed: self.name("%v"),
+            next: self.name("b"),
+        });
+    }
+
+    fn flush_check(&mut self) {
+        if let Some(ErrorCheck {
+            handler,
+            failed,
+            next,
+        }) = self.pending_check.take()
+        {
+            writeln!(self.ir, "  {failed} = call i1 @imre_dyn_failed(ptr %ctx)\n  br i1 {failed}, label %{handler}, label %{next}\n{next}:").unwrap();
+            self.block = next;
+        }
+    }
+
+    /// A guarded successor can deliver the first failure to the same handler.
+    fn take_matching_check(&mut self) -> bool {
+        self.pending_check
+            .take_if(|check| check.handler == self.error)
+            .is_some()
+    }
+
+    /// Publish the real predecessor before referring to it in a phi.
+    fn current_block(&mut self) -> &str {
+        self.flush_check();
+        &self.block
     }
 
     fn op(&mut self, name: &str, args: &[&str]) -> String {
@@ -633,6 +713,9 @@ impl Function<'_, '_> {
     }
 
     fn op_at(&mut self, name: &str, args: &[&str], span: Option<[usize; 4]>) -> String {
+        if name != "take_error" {
+            self.take_matching_check();
+        }
         let op = self.output.data(name.as_bytes());
         let arg = |index| *args.get(index).unwrap_or(&"0");
         let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
@@ -645,9 +728,18 @@ impl Function<'_, '_> {
     }
 
     fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
+        let loader = if self.take_matching_check() {
+            if !self.output.emitted_guarded_lit {
+                self.output.functions.push_str(GUARDED_LIT);
+                self.output.emitted_guarded_lit = true;
+            }
+            "@imre_boxed_guarded_lit"
+        } else {
+            "@imre_dyn_lit"
+        };
         let literal = self.output.data(bytes);
         self.checked(&format!(
-            "call i64 @imre_dyn_lit(ptr %ctx, i32 {kind}, ptr {literal}, i64 {})",
+            "call i64 {loader}(ptr %ctx, i32 {kind}, ptr {literal}, i64 {})",
             bytes.len()
         ))
     }
@@ -672,6 +764,30 @@ impl Function<'_, '_> {
         self.lit(0, n.to_string().as_bytes())
     }
 
+    /// Load a code name and use it as the second operand of a boxed operation.
+    fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
+        if !self.output.emitted_named_op {
+            self.output.functions.push_str(NAMED_OP);
+            self.output.emitted_named_op = true;
+        }
+        let operation = if self.take_matching_check() {
+            if !self.output.emitted_guarded_named_op {
+                self.output.functions.push_str(GUARDED_NAMED_OP);
+                self.output.emitted_guarded_named_op = true;
+            }
+            "@imre_boxed_guarded_named_op"
+        } else {
+            "@imre_boxed_named_op"
+        };
+        self.output.interned_identifiers.insert(name.to_owned());
+        let opcode = self.output.data(op.as_bytes());
+        let data = self.output.data(name.as_bytes());
+        self.checked(&format!(
+            "call i64 {operation}(ptr %ctx, ptr {opcode}, i64 {receiver}, ptr {data}, i64 {}, i64 {value})",
+            name.len()
+        ))
+    }
+
     fn lookup(&mut self, name: &str) -> String {
         let op = match &self.class_locals {
             Some(class) if self.annotation_lookup && class.globals.contains(name) => {
@@ -684,18 +800,15 @@ impl Function<'_, '_> {
             Some(class) if class.locals.contains(name) => "lookup_class_local",
             _ => "lookup",
         };
-        let name = self.code_name(name);
-        self.op(op, &[&self.scope.clone(), &name])
+        self.named_op(op, &self.scope.clone(), name, "0")
     }
 
     fn bind(&mut self, name: &str, value: &str) {
-        let name = self.code_name(name);
-        self.op("assign", &[&self.scope.clone(), &name, value]);
+        self.named_op("assign", &self.scope.clone(), name, value);
     }
 
     fn attr(&mut self, object: &str, name: &str) -> String {
-        let name = self.code_name(name);
-        self.op("attr", &[object, &name])
+        self.named_op("attr", object, name, "0")
     }
 
     fn truth(&mut self, value: &str) -> String {
@@ -727,11 +840,11 @@ impl Function<'_, '_> {
         self.branch_expr(condition, &yes, &no);
         self.label(&yes);
         let left = on_true(self);
-        let left_block = self.block.clone();
+        let left_block = self.current_block().to_owned();
         self.jump(&done);
         self.label(&no);
         let right = on_false(self);
-        let right_block = self.block.clone();
+        let right_block = self.current_block().to_owned();
         self.jump(&done);
         self.label(&done);
         self.value(&format!(

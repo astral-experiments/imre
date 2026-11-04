@@ -139,8 +139,7 @@ impl Function<'_, '_> {
                     Some(&self.source.private_names),
                 ) {
                     let receiver = self.expr(&field.value);
-                    let name = self.code_name(field.attr.as_str());
-                    self.op("method", &[&receiver, &name])
+                    self.named_op("method", &receiver, field.attr.as_str(), "0")
                 } else {
                     self.expr(&v.func)
                 };
@@ -284,7 +283,7 @@ impl Function<'_, '_> {
             |f, expr, yes, no| {
                 if yes == no {
                     let value = f.expr(expr);
-                    incoming.push(format!("[ {value}, %{} ]", f.block));
+                    incoming.push(format!("[ {value}, %{} ]", f.current_block()));
                     f.jump(&done);
                     return;
                 }
@@ -296,7 +295,7 @@ impl Function<'_, '_> {
                     f.branch(&truth, yes, no);
                     return;
                 }
-                incoming.push(format!("[ {value}, %{} ]", f.block));
+                incoming.push(format!("[ {value}, %{} ]", f.current_block()));
                 let discard = f.name("b");
                 let next = if yes == done {
                     f.branch(&truth, &done, &discard);
@@ -337,7 +336,7 @@ impl Function<'_, '_> {
                 if incoming.is_empty() {
                     return result;
                 }
-                incoming.push(format!("[ {result}, %{} ]", self.block));
+                incoming.push(format!("[ {result}, %{} ]", self.current_block()));
                 self.jump(&done);
             } else {
                 let truth = self.truth(&value);
@@ -346,7 +345,7 @@ impl Function<'_, '_> {
                 } else {
                     &value
                 };
-                incoming.push(format!("[ {result}, %{} ]", self.block));
+                incoming.push(format!("[ {result}, %{} ]", self.current_block()));
                 let next = self.name("b");
                 self.branch(&truth, &next, &done);
                 self.label(&next);
@@ -409,8 +408,12 @@ impl Function<'_, '_> {
                 };
                 while let Some(key) = keywords.next_if(|key| key.arg.is_some()) {
                     let value = self.expr(&key.value);
-                    let name = self.code_name(key.arg.as_ref().unwrap().as_str());
-                    self.op("keyword", &[&group, &name, &value]);
+                    self.named_op(
+                        "keyword",
+                        &group,
+                        key.arg.as_ref().unwrap().as_str(),
+                        &value,
+                    );
                 }
                 if unpacked {
                     self.op("keywords", &[&kwargs, &group, callable]);
