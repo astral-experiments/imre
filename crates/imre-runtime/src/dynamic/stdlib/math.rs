@@ -148,6 +148,9 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(result)));
     }
+    if operation == "isfinite" {
+        return Ok(builtins::boolean(as_double(ctx, value)?.is_finite()));
+    }
     if operation == "isinf" {
         return Ok(builtins::boolean(as_double(ctx, value)?.is_infinite()));
     }

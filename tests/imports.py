@@ -1852,6 +1852,7 @@ def main() -> None:
             (mock_setup, "def helper() -> None:\n    patch.object(Owner, 'value', 1)\n"),
             (mock_setup, "def helper() -> object:\n    return patch.object(Owner, 'value', 1)\n"),
             ("from math import exp\n", "def helper() -> float:\n    return exp(1.0)\n"),
+            ("from math import isfinite\n", "def helper() -> bool:\n    return isfinite(1.0)\n"),
             ("from math import sqrt\n", "def helper() -> float:\n    return sqrt(4.0)\n"),
             ("from socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
             ("from _socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
