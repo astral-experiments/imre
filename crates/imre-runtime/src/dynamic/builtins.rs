@@ -594,6 +594,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 
 pub(super) const STR_METHODS: &[&str] = &[
     "__eq__",
+    "__hash__",
     "__str__",
     "__format__",
     "__mod__",
