@@ -173,6 +173,14 @@ impl Checker<'_> {
             {
                 return Ok(self.replace_local(name, old, value.ty, value));
             }
+            let value = if context.is_none()
+                && let ast::Expr::Name(name) = target
+                && !self.names.contains_key(name.id.as_str())
+            {
+                self.consuming_lists.capture_split(target.range(), value)
+            } else {
+                value
+            };
             let statement = self.assign_value(target, value)?;
             return Ok(vec![statement]);
         }

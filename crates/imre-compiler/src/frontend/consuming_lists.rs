@@ -6,27 +6,54 @@ use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 struct Candidate {
     init: (usize, TextRange),
     consume: Option<(usize, TextRange)>,
+    split: bool,
     appended: bool,
     escaped: bool,
 }
 
-fn initialized(stmt: &ast::Stmt) -> Option<&ast::ExprName> {
-    let (target, value) = match stmt {
+/// Accumulator lists stay at the top level. A split may also capture text
+/// inside a context manager before the consuming loop.
+fn record<'a>(
+    stmt: &'a ast::Stmt,
+    index: usize,
+    nested: bool,
+    names: &mut HashMap<&'a str, Candidate>,
+) {
+    let (target, value, plain) = match stmt {
+        ast::Stmt::With(with) => {
+            for stmt in &with.body {
+                record(stmt, index, true, names);
+            }
+            return;
+        }
         ast::Stmt::Assign(assign) => {
             let [target] = assign.targets.as_slice() else {
-                return None;
+                return;
             };
-            (target, &*assign.value)
+            (target, &*assign.value, true)
         }
-        ast::Stmt::AnnAssign(assign) => (&*assign.target, assign.value.as_deref()?),
-        _ => return None,
+        ast::Stmt::AnnAssign(assign) => {
+            let Some(value) = assign.value.as_deref() else {
+                return;
+            };
+            (&*assign.target, value, false)
+        }
+        _ => return,
     };
-    if let ast::Expr::Name(name) = target
-        && matches!(value, ast::Expr::List(items) if items.elts.is_empty())
-    {
-        Some(name)
-    } else {
-        None
+    let ast::Expr::Name(name) = target else {
+        return;
+    };
+    let split = plain
+        && matches!(value, ast::Expr::Call(call)
+        if matches!(&*call.func, ast::Expr::Attribute(attr) if attr.attr.as_str() == "split"));
+    if split || (!nested && matches!(value, ast::Expr::List(items) if items.elts.is_empty())) {
+        names.entry(name.id.as_str()).or_insert(Candidate {
+            init: (index, name.range()),
+            consume: None,
+            split,
+            appended: false,
+            escaped: false,
+        });
     }
 }
 
@@ -76,7 +103,10 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
-        if matches!(expr, ast::Expr::Lambda(_)) {
+        if matches!(expr, ast::Expr::Lambda(_))
+            || matches!(expr, ast::Expr::Name(n) if matches!(n.id.as_str(), "locals" | "vars" | "eval" | "exec"))
+            || matches!(expr, ast::Expr::Attribute(a) if matches!(a.attr.as_str(), "_getframe" | "currentframe" | "f_locals"))
+        {
             self.indirect = true;
         } else if let ast::Expr::Name(name) = expr
             && let Some(use_) = self.names.get_mut(name.id.as_str())
@@ -90,23 +120,37 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
     }
 }
 
-/// The initializer and sole consuming loop are top-level statements: no
-/// backedge can restart its cursor over slots whose ownership was transferred.
-pub(super) fn find(body: &[ast::Stmt]) -> HashSet<TextRange> {
+#[derive(Default)]
+pub(super) struct Plan {
+    takes: HashSet<TextRange>,
+    split_sites: HashMap<TextRange, TextRange>,
+    pub(super) split_consumers: HashMap<TextRange, u8>,
+}
+
+impl Plan {
+    /// Preserve evaluation at the original assignment and activate the loop
+    /// only after the checker identifies the built-in, unlimited string split.
+    pub(super) fn capture_split(&mut self, target: TextRange, value: Expr) -> Expr {
+        if let Some(&consumer) = self.split_sites.get(&target)
+            && let Some((receiver, byte)) = pipelines::byte_split(&value)
+        {
+            self.split_consumers.insert(consumer, byte);
+            receiver.clone()
+        } else {
+            value
+        }
+    }
+}
+
+/// A top-level consuming loop has no enclosing backedge that could reuse its input.
+pub(super) fn find(body: &[ast::Stmt]) -> Plan {
     let mut uses = Uses {
         names: HashMap::new(),
         statement: 0,
         indirect: false,
     };
     for (index, stmt) in body.iter().enumerate() {
-        if let Some(name) = initialized(stmt) {
-            uses.names.entry(name.id.as_str()).or_insert(Candidate {
-                init: (index, name.range()),
-                consume: None,
-                appended: false,
-                escaped: false,
-            });
-        }
+        record(stmt, index, false, &mut uses.names);
         if let ast::Stmt::For(for_) = stmt {
             let sources = match &*for_.iter {
                 source @ ast::Expr::Name(_) => std::slice::from_ref(source),
@@ -118,6 +162,7 @@ pub(super) fn find(body: &[ast::Stmt]) -> HashSet<TextRange> {
             for source in sources {
                 if let ast::Expr::Name(name) = source
                     && let Some(use_) = uses.names.get_mut(name.id.as_str())
+                    && (!use_.split || matches!(&*for_.iter, ast::Expr::Name(_)))
                 {
                     use_.escaped |= use_.consume.replace((index, name.range())).is_some();
                 }
@@ -126,20 +171,26 @@ pub(super) fn find(body: &[ast::Stmt]) -> HashSet<TextRange> {
     }
     uses.names.retain(|_, c| c.consume.is_some() && !c.escaped);
     if uses.names.is_empty() {
-        return HashSet::new();
+        return Plan::default();
     }
     for (index, stmt) in body.iter().enumerate() {
         uses.statement = index;
         uses.visit_stmt(stmt);
         if uses.indirect {
-            return HashSet::new();
+            return Plan::default();
         }
     }
-    uses.names
-        .into_values()
-        .filter(|c| c.appended && !c.escaped)
-        .filter_map(|c| c.consume.map(|(_, range)| range))
-        .collect()
+    let mut plan = Plan::default();
+    for c in uses.names.into_values().filter(|c| !c.escaped) {
+        if let Some((_, at)) = c.consume {
+            if c.split && !c.appended {
+                plan.split_sites.insert(c.init.1, at);
+            } else if !c.split && c.appended {
+                plan.takes.insert(at);
+            }
+        }
+    }
+    plan
 }
 
 impl Checker<'_> {
@@ -147,7 +198,7 @@ impl Checker<'_> {
     /// the list's reference early. First-party records can own streams, tasks,
     /// bound callables and other resources indirectly, so retain them normally.
     pub(super) fn consumes_list(&self, ty: Type, range: TextRange) -> bool {
-        self.consuming_lists.contains(&range)
+        self.consuming_lists.takes.contains(&range)
             && matches!(ty, Type::List(_))
             && matches!(
                 self.types.element(ty),
@@ -158,6 +209,17 @@ impl Checker<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_private_single_pass_split_streams_its_fields() {
+        let source = include_str!("../../../../tests/fixtures/containers/assigned_split_fields.py");
+        let code = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(
+            code.matches("call ptr @imre_str_split_byte_iter(").count(),
+            2
+        );
+        assert_eq!(code.matches("call ptr @imre_str_split(").count(), 3);
+    }
+
     #[test]
     fn only_private_once_consumed_objects_transfer_their_owner() {
         let text = include_str!("../../../../tests/fixtures/containers/consuming_lists.py");

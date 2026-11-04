@@ -17,6 +17,11 @@ fn byte_split_source(source: &Iteration) -> Option<(&Expr, u8)> {
     else {
         return None;
     };
+    byte_split(iterable)
+}
+
+/// The immutable input and the exact byte consumed by the field cursor.
+pub(super) fn byte_split(iterable: &Expr) -> Option<(&Expr, u8)> {
     let ExprKind::Builtin(Builtin::Text(TextOperation::Split(false)), args) = &iterable.kind else {
         return None;
     };
