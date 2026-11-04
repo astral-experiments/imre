@@ -1,5 +1,6 @@
 use super::{Context, Error, Id, NONE, Result, Value, collections, type_error};
 use crate::dynamic::typing::{Alias, AliasKind, forwards_to_origin, literal_origin};
+use crate::dynamic::wrapper_descriptor::BuiltinDescriptor;
 use std::collections::BTreeSet;
 
 /// Apply the type's special method and sort a fresh list, preserving duplicates and comparison errors.
@@ -96,6 +97,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         Value::ParamSpec(_) => {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")
+        }
+        Value::Native(symbol) if let Some(descriptor) = BuiltinDescriptor::lookup(symbol) => {
+            ctx.builtin(descriptor.class())
         }
         Value::Native(_) | Value::Method { .. }
             if ctx.builtin_type_name(object) == Some("builtin_function_or_method") =>
@@ -458,6 +462,9 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             if matches!(
                 name.as_str(),
                 "builtin_function_or_method"
+                    | "method_descriptor"
+                    | "wrapper_descriptor"
+                    | "classmethod_descriptor"
                     | "function"
                     | "classmethod"
                     | "staticmethod"
@@ -510,6 +517,17 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     ],
                 ),
                 "method" => (&[], &["__call__", "__func__", "__get__", "__self__"]),
+                "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => (
+                    &[],
+                    &[
+                        "__call__",
+                        "__get__",
+                        "__name__",
+                        "__objclass__",
+                        "__qualname__",
+                        "__text_signature__",
+                    ],
+                ),
                 "builtin_function_or_method" => (
                     &[],
                     &[
