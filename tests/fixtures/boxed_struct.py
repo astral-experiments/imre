@@ -289,6 +289,21 @@ def current():
             else:
                 raise AssertionError("signed int overflow accepted")
 
+    half = struct.Struct(">e")
+    assert struct.calcsize("@Be") == struct.calcsize("@Bh")
+    assert half.pack(Double()) == b"\x3e\x00"
+    midpoint = 1.0 + 2.0**-11
+    assert half.pack(midpoint) == b"\x3c\x00"
+    assert half.pack(midpoint + 2.0**-52) == b"\x3c\x01"
+    for word in (b"\x00\x01", b"\x7b\xff", b"\x80\x00", b"\xfc\x01"):
+        assert half.pack(half.unpack(word)[0]) == word
+    try:
+        half.pack(65520.0)
+    except OverflowError as error:
+        assert str(error) == "float too large to pack with e format"
+    else:
+        raise AssertionError("half-float overflow accepted")
+
     sample = struct.Struct(">f")
     assert sample.pack(Double()) == b"\x3f\xc0\x00\x00"
     assert struct.unpack_from("<f", b"x\x00\x00\xc0\x3f", 1) == (1.5,)

@@ -81,7 +81,7 @@ impl StructFormat {
                 ),
                 b'L' | b'l' => (4, 1),
                 b'c' | b'b' | b'B' | b'?' => (1, 1),
-                b'h' | b'H' => (2, align_of::<u16>()),
+                b'h' | b'H' | b'e' => (2, align_of::<u16>()),
                 b'i' | b'I' => (4, align_of::<u32>()),
                 b'f' => (4, align_of::<f32>()),
                 b'd' => (8, align_of::<f64>()),
@@ -189,6 +189,19 @@ impl StructFormat {
         Ok(start..end)
     }
 
+    fn unpack_half(bits: u16) -> f64 {
+        let sign = u64::from(bits >> 15) << 63;
+        let exponent = (bits >> 10) & 0x1f;
+        let fraction = u64::from(bits & 0x03ff);
+        let magnitude = match exponent {
+            0 => ((fraction as f64) * 2f64.powi(-24)).to_bits(),
+            31 => f64::INFINITY.to_bits() | (fraction << 42),
+            // Rebase the exponent from bias 15 to 1023 and widen the significand.
+            _ => (u64::from(exponent + (1023 - 15)) << 52) | (fraction << 42),
+        };
+        f64::from_bits(sign | magnitude)
+    }
+
     fn unpack_single(&self, bits: u32) -> f64 {
         let single = f32::from_bits(bits);
         if !self.native && single.is_nan() {
@@ -233,6 +246,7 @@ impl StructFormat {
                     let shift = (8 - field.len()) * 8;
                     UnpackedField::Signed(((value << shift) as i64) >> shift)
                 }
+                b'e' => UnpackedField::Float(Self::unpack_half(value as u16)),
                 b'f' => UnpackedField::Float(self.unpack_single(value as u32)),
                 b'd' => UnpackedField::Float(f64::from_bits(value)),
                 _ => UnpackedField::Integer(value),
