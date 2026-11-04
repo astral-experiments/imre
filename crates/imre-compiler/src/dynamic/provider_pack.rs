@@ -4,7 +4,7 @@ use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::{fs, io};
 
-use super::{RUNTIME_PROVIDERS, bundled_module_source, emit, imports_for_module, resolve};
+use super::{RUNTIME_PROVIDERS, bundled_module_source, emit, imports_for_module};
 
 const STDLIB_NAMES: &str = include_str!("../../../imre-runtime/native/stdlib-module-names.txt");
 
@@ -38,9 +38,9 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         write_module(&name, file, &source).map_err(|err| err.to_string())?;
         let path = Path::new(file);
         if let Ok(imports) = imports_for_module(path, &source) {
-            let package = path.ends_with("__init__.py");
+            let package = crate::modules::import_package(&name, path.ends_with("__init__.py"));
             for (level, imported) in imports.names {
-                if let Some(resolved) = resolve(&name, package, level, &imported) {
+                if let Some(resolved) = crate::modules::resolve_import(package, level, &imported) {
                     for (dot, _) in resolved.match_indices('.') {
                         pending.push_back(resolved[..dot].to_owned());
                     }

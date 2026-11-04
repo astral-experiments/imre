@@ -29,6 +29,34 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
+/// Return the package used to resolve imports originating in this module.
+pub(crate) fn import_package(module: &str, is_package: bool) -> &str {
+    if is_package {
+        module
+    } else {
+        module.rsplit_once('.').map_or("", |(parent, _)| parent)
+    }
+}
+
+/// Resolve an import against its containing package, counting the leading dots in `level`.
+pub(crate) fn resolve_import(package: &str, level: u32, name: &str) -> Option<String> {
+    if level == 0 {
+        return Some(name.to_owned());
+    }
+    if package.is_empty() {
+        return None;
+    }
+    let mut base = package;
+    for _ in 1..level {
+        base = base.rsplit_once('.')?.0;
+    }
+    Some(if name.is_empty() {
+        base.to_owned()
+    } else {
+        format!("{base}.{name}")
+    })
+}
+
 /// Mode constants and operations from the target's POSIX stat provider.
 fn stat_mode_source() -> Option<&'static str> {
     macro_rules! modes {
@@ -3205,16 +3233,7 @@ impl SourceGraph {
     /// The import package of a linked source module; direct script entries have no package.
     pub(crate) fn module_package(&self, module: ModuleId) -> Option<&str> {
         let source = &self.modules[module];
-        (module != self.entry).then(|| {
-            if source.is_package {
-                source.name.as_str()
-            } else {
-                source
-                    .name
-                    .rsplit_once('.')
-                    .map_or("", |(parent, _)| parent)
-            }
-        })
+        (module != self.entry).then(|| import_package(&source.name, source.is_package))
     }
 
     /// Record only this call's overload diagnostic. Nested arguments still get
@@ -5178,27 +5197,10 @@ impl<'a> Loader<'a> {
 
     fn import_name(&self, id: ModuleId, import: &ast::StmtImportFrom) -> Result<String, String> {
         let suffix = import.module.as_ref().map_or("", |name| name.as_str());
-        if import.level == 0 {
-            return Ok(suffix.to_owned());
-        }
         let module = &self.modules[id];
-        let package = if module.is_package {
-            module.name.as_str()
-        } else {
-            module
-                .name
-                .rsplit_once('.')
-                .map_or("", |(parent, _)| parent)
-        };
-        let mut parts: Vec<_> = package.split('.').filter(|part| !part.is_empty()).collect();
-        if import.level as usize > parts.len() {
-            return Err("relative import goes beyond the first-party package root".into());
-        }
-        parts.truncate(parts.len() + 1 - import.level as usize);
-        if !suffix.is_empty() {
-            parts.push(suffix);
-        }
-        Ok(parts.join("."))
+        let package = import_package(&module.name, module.is_package);
+        resolve_import(package, import.level, suffix)
+            .ok_or_else(|| "relative import goes beyond the first-party package root".into())
     }
 
     fn partial_source(&self, id: ModuleId) -> bool {
