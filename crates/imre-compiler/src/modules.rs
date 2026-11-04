@@ -2900,6 +2900,7 @@ pub(crate) struct SourceGraph {
     reachable: Option<reachability::Reachable>,
     required_library: Option<(ModuleId, reachability::Reachable)>,
     pub(crate) inputs: crate::SourceInputs,
+    zip_files: Vec<(PathBuf, PathBuf, String)>,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
     pub(crate) entry: ModuleId,
@@ -3010,6 +3011,7 @@ impl SourceGraph {
             let (id, module) = modules.next().expect("one input per module");
             !module.bundled && !module.is_namespace() && !(id == self.entry && self.virtual_command)
         });
+        inputs.files.append(&mut self.zip_files);
         let paths = inputs
             .files
             .iter()
@@ -3414,7 +3416,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"), &[], None, FileSystem::default())?;
+        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], None, FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
@@ -3440,6 +3442,7 @@ impl SourceGraph {
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
+            &[],
             options.implicit_site().map(PathBuf::as_path),
             fs,
         )?;
@@ -3500,6 +3503,7 @@ impl SourceGraph {
         let mut loader = Loader::new(
             root,
             &options.extension_paths,
+            &options.python_archive_indices,
             options.implicit_site().map(PathBuf::as_path),
             fs,
         )?;
@@ -3587,7 +3591,7 @@ impl SourceGraph {
         let source = fs
             .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root, extension_paths, None, fs)?;
+        let mut loader = Loader::new(root, extension_paths, &[], None, fs)?;
         loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
@@ -3923,6 +3927,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
 pub(crate) enum EntryImportFailure {
     AfterStatement,
     MissingModule,
+    ZipImport,
 }
 
 struct Loader<'a> {
@@ -3932,6 +3937,8 @@ struct Loader<'a> {
     needs_object_imports: bool,
     wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
+    zip_files: Vec<(PathBuf, PathBuf, String)>,
+    zip_sources: HashMap<PathBuf, crate::zip_entry::ZipSources>,
     root: PathBuf,
     search_roots: Vec<PathBuf>,
     archive_roots: usize,
@@ -3956,11 +3963,23 @@ impl<'a> Loader<'a> {
     fn new(
         root: PathBuf,
         extension_paths: &[PathBuf],
+        python_archive_indices: &[usize],
         system_site: Option<&Path>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
-        for path in extension_paths {
+        let mut zip_sources = HashMap::new();
+        let mut zip_inputs = crate::SourceInputs::default();
+        for (index, path) in extension_paths.iter().enumerate() {
+            if python_archive_indices.contains(&index) {
+                let logical = std::path::absolute(path).map_err(|e| e.to_string())?;
+                if !zip_sources.contains_key(&logical) {
+                    let archive = crate::zip_entry::ZipSources::open(&logical, &mut zip_inputs)?;
+                    search_roots.push(logical.clone());
+                    zip_sources.insert(logical, archive);
+                }
+                continue;
+            }
             let directory = fs
                 .canonicalize(path)
                 .map_err(|e| format!("invalid extension path {}: {e}", path.display()))?;
@@ -3992,6 +4011,8 @@ impl<'a> Loader<'a> {
             session: Session::new(&root, &search_roots)?,
             search_roots,
             inputs,
+            zip_sources,
+            zip_files: zip_inputs.files,
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
             wildcard_import: None,
@@ -4196,6 +4217,7 @@ impl<'a> Loader<'a> {
             required_library: None,
             entry_filename,
             inputs: self.inputs,
+            zip_files: self.zip_files,
             session: self.session,
             ordered_bindings: self
                 .ordered_imports
@@ -5116,6 +5138,12 @@ impl<'a> Loader<'a> {
             .skip(usize::from(self.skip_current_root))
             .chain(&self.search_roots[..self.archive_roots]);
         for root in roots {
+            if let Some(archive) = self.zip_sources.get(root) {
+                if archive.package(name).is_some() {
+                    return true;
+                }
+                continue;
+            }
             let base = root.join(name);
             for path in [base.join("__init__.py"), base.with_extension("py")] {
                 if self.fs.is_file(&path) {
@@ -5383,11 +5411,20 @@ impl<'a> Loader<'a> {
         let roots = std::iter::once(&self.root).chain(&self.search_roots);
         let mut resolved = None;
         let mut portions = Vec::new();
+        let mut zip_import = false;
         for (root_index, root) in roots.enumerate() {
             if root_index == 0 && self.skip_current_root {
                 continue;
             }
             if parent_roots.is_some_and(|roots| !roots.contains(root_index)) {
+                continue;
+            }
+            if let Some(archive) = self.zip_sources.get(root) {
+                if archive.package(name).is_some() {
+                    zip_import = true;
+                    break;
+                }
+                zip_import |= archive.contains_namespace(name);
                 continue;
             }
             let base = root.join(&relative);
@@ -5447,6 +5484,10 @@ impl<'a> Loader<'a> {
             break;
         }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
+            if zip_import {
+                self.import_failure = Some(EntryImportFailure::ZipImport);
+                return Err(format!("module {name:?} requires the ZIP importer"));
+            }
             if portions.is_empty() {
                 self.import_failure = Some(EntryImportFailure::MissingModule);
                 return Err(format!(

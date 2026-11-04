@@ -1869,6 +1869,17 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         (later / "__init__.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
 
+        # Both path entries supply the imported module. Exercise the ordinary file loader.
+        mailapp = root / "mailapp.py"
+        mailapp.write_text("import quopri\nprint(quopri.encodestring(b'A=B'))\n")
+        codec = "def encodestring(data: bytes) -> bytes:\n    return %r + data\n"
+        with zipfile.ZipFile(archive, "a") as app:
+            app.writestr("quopri.py", codec % b"archive:")
+        (later.parent / "quopri.py").write_text(codec % b"directory:")
+        for roots in ((archive, later.parent), (later.parent, archive)):
+            compare("-B", mailapp, extra={"PYTHONPATH": os.pathsep.join(map(str, roots))},
+                    native_timeout=300)
+
         helper = root / "request_support.py"
         helper.write_text("from importlib.machinery import ModuleSpec\nspec = ModuleSpec('sample', None)\n")
         request_script = root / "request_entry.py"

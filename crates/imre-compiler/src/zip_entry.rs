@@ -75,15 +75,18 @@ impl ZipSources {
         })
     }
 
-    /// Follow zipimport's package-before-module and bytecode-before-source search.
-    /// Only collect import hints. The launch-time loader reports source and bytecode errors.
-    pub(crate) fn module(&mut self, name: &str) -> Option<(PathBuf, String, bool)> {
+    fn stem(&self, name: &str) -> String {
         let stem = name.replace('.', "/");
-        let stem = if self.prefix.is_empty() {
+        if self.prefix.is_empty() {
             stem
         } else {
             format!("{}/{stem}", self.prefix)
-        };
+        }
+    }
+
+    /// Follow zipimport's package-before-module and bytecode-before-source search.
+    fn module_member(&self, name: &str) -> Option<(String, bool)> {
+        let stem = self.stem(name);
         for (suffix, package) in [
             ("/__init__.pyc", true),
             ("/__init__.py", true),
@@ -91,15 +94,31 @@ impl ZipSources {
             (".py", false),
         ] {
             let member = format!("{stem}{suffix}");
-            if self.archive.index_for_name(&member).is_none() {
-                continue;
+            if self.archive.index_for_name(&member).is_some() {
+                return Some((member, package));
             }
-            if suffix.ends_with(".pyc") {
-                return None;
-            }
-            let source = read_source(&mut self.archive, &member)?;
-            return Some((member.into(), source, package));
         }
         None
+    }
+
+    /// Return whether the selected ZIP member is a package, even if it has no readable source.
+    pub(crate) fn package(&self, name: &str) -> Option<bool> {
+        self.module_member(name).map(|(_, package)| package)
+    }
+
+    /// An explicit directory entry can supply a namespace portion when no concrete member wins.
+    pub(crate) fn contains_namespace(&self, name: &str) -> bool {
+        let directory = format!("{}/", self.stem(name));
+        self.archive.index_for_name(&directory).is_some()
+    }
+
+    /// Only collect import hints. The launch-time loader reports source and bytecode errors.
+    pub(crate) fn module(&mut self, name: &str) -> Option<(PathBuf, String, bool)> {
+        let (member, package) = self.module_member(name)?;
+        if member.ends_with(".pyc") {
+            return None;
+        }
+        let source = read_source(&mut self.archive, &member)?;
+        Some((member.into(), source, package))
     }
 }

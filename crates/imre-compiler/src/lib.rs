@@ -117,6 +117,8 @@ pub struct CompileOptions {
     pub sitecustomize: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
+    /// Indices in extension_paths admitted as ZIPs from an ordinary Python file's PYTHONPATH.
+    pub python_archive_indices: Vec<usize>,
 }
 
 impl CompileOptions {
@@ -390,6 +392,7 @@ fn object_fallback<const SPLIT: bool, T>(
     let ordered_command_import = options.command.is_some()
         && import_failure == Some(modules::EntryImportFailure::AfterStatement);
     let runtime_imports = options.runtime_imports
+        || import_failure == Some(modules::EntryImportFailure::ZipImport)
         || (options.sitecustomize
             && import_failure == Some(modules::EntryImportFailure::MissingModule))
         || operation.is_some()
