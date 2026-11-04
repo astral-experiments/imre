@@ -249,11 +249,11 @@ fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut IncrementalCompiler>,
+    mut cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     let typed = |graph: &mut modules::SourceGraph| {
-        let (module, _) = checked_lower_with(graph, cache)?;
+        let (module, _) = checked_lower_with(graph, cache.as_deref_mut())?;
         verify_after(&module, "lowering")
     };
     object_fallback::<false, _>(path, module_root, options, filesystem, typed, |_| ())
@@ -305,8 +305,8 @@ fn object_fallback<const SPLIT: bool, T>(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    filesystem: watch::FileSystem<'_>,
-    lower: impl FnOnce(&mut modules::SourceGraph) -> Result<T, String>,
+    mut filesystem: watch::FileSystem<'_>,
+    mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<T, String>,
     boxed: impl FnOnce(UnitCompilation) -> T,
 ) -> Result<T, String> {
     if options.module_entry.is_some() {
@@ -318,20 +318,39 @@ fn object_fallback<const SPLIT: bool, T>(
         .python_startup()
         .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut ordered_command_import = false;
-    let (error, graph, traced_typed_entry) =
-        match options.load_graph(path, module_root, filesystem, &mut ordered_command_import) {
-            Ok(mut graph) => match lower(&mut graph) {
-                Ok(value) if !tracing => return Ok(value),
-                // Typed code passed its ordinary checks. Re-emit its allocations through the heap.
-                Ok(_) => (
+    let mut infer_sets = true;
+    let (error, graph, traced_typed_entry) = loop {
+        let mut graph = match options.load_graph(
+            path,
+            module_root,
+            filesystem.reborrow(),
+            &mut ordered_command_import,
+        ) {
+            Ok(graph) => graph,
+            Err(error) => break (error, None, false),
+        };
+        if !infer_sets {
+            graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
+        }
+        match lower(&mut graph) {
+            Ok(value) if !tracing => return Ok(value),
+            // Typed code passed its ordinary checks. Re-emit its allocations through the heap.
+            Ok(_) => {
+                break (
                     "allocation tracing requires a boxed entry".to_owned(),
                     Some(graph),
                     true,
-                ),
-                Err(error) => (error, Some(graph), false),
-            },
-            Err(error) => (error, None, false),
-        };
+                );
+            }
+            // A guessed layout must not turn a working object program into a type error,
+            // or mask a diagnostic that the ordinary checked-file path would have issued.
+            Err(_) if graph.set_layout_hint.get() == modules::SetLayoutHint::Applied => {
+                infer_sets = false;
+                ordered_command_import = false;
+            }
+            Err(error) => break (error, Some(graph), false),
+        }
+    };
     // Python invocations and explicit object imports enforce annotated calls in
     // the boxed runtime, where their TypeError can be caught by the program.
     let checked_file = options.python_startup().is_none() && !options.runtime_imports;
@@ -483,6 +502,7 @@ pub struct UnitCompilation {
 pub struct IncrementalCompiler {
     cache: analysis::AnalysisCache,
     callers: frontend::CallerCache,
+    cached_set_hint: bool,
 }
 
 impl IncrementalCompiler {
@@ -562,10 +582,10 @@ fn compile_file_units_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut IncrementalCompiler>,
+    mut cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
     let typed = |graph: &mut modules::SourceGraph| {
-        let (mut module, mut owners) = checked_lower_with(graph, cache)?;
+        let (mut module, mut owners) = checked_lower_with(graph, cache.as_deref_mut())?;
         for original in specialize(&mut module)? {
             owners.push(owners[original]);
         }
@@ -611,11 +631,19 @@ fn checked_lower_with(
     graph: &mut modules::SourceGraph,
     cache: Option<&mut IncrementalCompiler>,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
-    let Some(compiler) = cache else {
+    let Some(compiler) =
+        cache.filter(|_| graph.set_layout_hint.get() != modules::SetLayoutHint::Disabled)
+    else {
         return checked_lower(graph);
     };
     compiler.cache.restore_hints(graph)?;
-    let lowered = frontend::lower_with_caller_cache(graph, compiler.callers.prepare(graph));
+    let callers = compiler.callers.prepare(graph);
+    if callers.is_some() && compiler.cached_set_hint {
+        graph.set_layout_hint.set(modules::SetLayoutHint::Applied);
+    }
+    let lowered = frontend::lower_with_caller_cache(graph, callers);
+    compiler.cached_set_hint =
+        lowered.is_ok() && graph.set_layout_hint.get() == modules::SetLayoutHint::Applied;
     compiler.cache.retain_hints(graph, lowered.is_ok());
     let checked = lowered.and_then(|lowered| {
         let (skipped, overloads) = graph.diagnostic_scopes();
@@ -840,6 +868,48 @@ mod tests {
         };
         let error = super::check_file_with_options(&path, None, &options).unwrap_err();
         assert!(error.contains("expected int, got str"), "{error}");
+    }
+
+    #[test]
+    fn inferred_set_layout_preserves_checked_object_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        let gather = "def gather(text):\n    values = set()\n    for char in text:\n        values.add(char)\n    return sorted(values)\n";
+        let mut incremental = super::IncrementalCompiler::default();
+        for usage in [
+            "values = gather('ab')\nvalues.append(1)\nprint(len(values))\n",
+            "def integer(n: int) -> int:\n    return n\nprint(gather('a'), integer('x'))\n",
+            "def wrong() -> int:\n    return 'x'\nprint(gather('a'), wrong())\n",
+        ] {
+            std::fs::write(&path, format!("{gather}{usage}")).unwrap();
+            for runtime_imports in [false, true] {
+                let options = CompileOptions {
+                    runtime_imports,
+                    ..Default::default()
+                };
+                let ordinary = super::object_fallback::<false, _>(
+                    &path,
+                    None,
+                    &options,
+                    Default::default(),
+                    |graph| {
+                        graph
+                            .set_layout_hint
+                            .set(super::modules::SetLayoutHint::Disabled);
+                        let (module, _) = super::checked_lower(graph)?;
+                        super::verify_after(&module, "lowering")
+                    },
+                    |_| (),
+                );
+                assert_eq!(
+                    super::check_file_with_options(&path, None, &options),
+                    ordinary
+                );
+                if !runtime_imports {
+                    assert_eq!(incremental.check_file(&path, None), ordinary);
+                }
+            }
+        }
     }
 
     #[test]
