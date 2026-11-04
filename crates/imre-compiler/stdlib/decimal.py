@@ -157,10 +157,13 @@ class Decimal:
         return float(text)
 
     def __eq__(self, other: object):
-        if not isinstance(other, Decimal):
+        if isinstance(other, Decimal):
+            right = other._text
+        elif issubclass(type(other), int):
+            right = Decimal(other)._text
+        else:
             return NotImplemented
         left = self._text
-        right = other._text
         if left.lstrip("-").startswith("sNaN") or right.lstrip("-").startswith("sNaN"):
             raise InvalidOperation([InvalidOperation])
         if left.lstrip("-").startswith("NaN") or right.lstrip("-").startswith("NaN"):

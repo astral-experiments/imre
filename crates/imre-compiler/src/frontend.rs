@@ -7412,7 +7412,15 @@ impl<'a> Checker<'a> {
                     |value: &Expr| matches!(value.ty, Type::Class(id) if self.decimal_class(id));
                 if values.iter().any(decimal) {
                     for (pair, op) in values.windows(2).zip(compare.ops.iter()) {
-                        if pair.iter().any(decimal)
+                        let unsupported_numeric_op = match op {
+                            ast::CmpOp::Is | ast::CmpOp::IsNot => false,
+                            ast::CmpOp::Eq | ast::CmpOp::NotEq => {
+                                pair.iter().any(|v| v.ty == Type::Float)
+                            }
+                            _ => true,
+                        };
+                        if unsupported_numeric_op
+                            && pair.iter().any(decimal)
                             && pair.iter().all(|v| {
                                 decimal(v)
                                     || matches!(
@@ -7420,8 +7428,6 @@ impl<'a> Checker<'a> {
                                         Type::Int | Type::Bool | Type::Float | Type::IntEnum(_)
                                     )
                             })
-                            && !(pair.iter().all(decimal)
-                                && matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
                         {
                             return Err(error(
                                 self.source,

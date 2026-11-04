@@ -14,7 +14,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
 STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
     "decimal_ordering": 'from decimal import Decimal\nprint(Decimal("1.00") < Decimal(1))',
-    "decimal_mixed_equality": 'from decimal import Decimal\nprint(Decimal("1.00") == 1)',
+    "decimal_float_equality": 'from decimal import Decimal\nprint(Decimal("1.00") == 1.0)',
     "decimal_fallback_invalid_call": (
         "from decimal import Decimal\n"
         "def compare(): return Decimal('1') == '1'\n"
