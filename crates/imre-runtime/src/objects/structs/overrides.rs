@@ -1,4 +1,5 @@
 //! Store sparse exceptions by occupied block, or one alternate scalar row and a bitmap.
+mod spaced_writes;
 mod word_writes;
 
 use super::{Error, Result};
@@ -449,6 +450,9 @@ impl Binary {
         };
         let (done, last) = if distance < BLOCK && distance.is_power_of_two() {
             self.set_strided(at, distance, step == distance, n, writes, set)
+        } else if (2..=BLOCK / 4).contains(&distance) {
+            // At least four regularly spaced writes fit in a full word.
+            self.set_spaced(at, distance, step == distance, n, writes, set)
         } else if distance == BLOCK && n.is_multiple_of(BLOCK) {
             self.set_word_stride(at, step == BLOCK, n, writes, set)
         } else {
@@ -847,6 +851,12 @@ mod page_tests {
         for (n, step) in [
             (n, 2),
             (n, n - 2),
+            (n, 3),
+            (n, n - 3),
+            (4 * BLOCK, 5),
+            (4 * BLOCK, 4 * BLOCK - 5),
+            (n, 7),
+            (n, n - 15),
             (n, 4),
             (n, n - 4),
             (n, 8),
