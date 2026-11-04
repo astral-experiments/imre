@@ -546,10 +546,11 @@ class Popen:
         elif input:
             raise ValueError("Cannot send input after starting communication")
 
-        # A caller may mutate the buffer before retrying a timed-out exchange.
-        # Snapshot non-byte-format views in byte order for this call's offset.
         input_bytes = self._replacement_input
-        if not isinstance(input_bytes, (bytes, bytearray)):
+        if isinstance(input_bytes, memoryview):
+            # The write offset is in bytes. A strided view cannot be cast.
+            input_bytes = input_bytes.cast("B")
+        elif not isinstance(input_bytes, (bytes, bytearray)):
             input_bytes = bytes(memoryview(input_bytes))
         output = self._replacement_output
         with _PopenSelector() as selector:

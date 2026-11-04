@@ -180,6 +180,22 @@ def current():
             original.close()
             os.close(read_fd)
 
+    with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe) as child:
+        with os.fdopen(os.dup(child.stdin.fileno()), "wb") as writer:
+            child.stdin.close()
+            child.stdin = writer
+            for data in (memoryview(b"abcdef")[::2], None):
+                try:
+                    child.communicate(data, timeout=5)
+                except TypeError:
+                    pass
+                else:
+                    raise AssertionError("replacement stdin accepted a strided view")
+                assert not writer.closed
+            writer.write(b"still open")
+        assert child.stdout.read() == b"still open"
+        assert child.wait() == 0
+
     # Exercise the run_python_until_end pattern, including cleanup after wait.
     with subprocess.Popen(["/bin/sh", "-c", "cat; printf err >&2; exit 7"],
                           stdin=pipe, stdout=pipe, stderr=pipe,
