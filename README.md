@@ -171,12 +171,12 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `tokenize` | 53 | 130 | 0 | The unchanged test_max_indent passed on stock and public Imre at O0 and O3. It adds one new paired pass. |
 | `tomllib` | 17 | 17 | 0 | All 17 originals passed on stock and public O0/O3 through both the package entry point and the three explicit upstream test modules. |
 | `types` | 134 | 141 | 1 | Two Linux workers passed the integer and float locale-formatting originals at stock and both native levels with genuine en_US numeric data. |
-| `uuid` | 46 | 120 | 0 | On public [3a3eb999](https://github.com/astral-experiments/imre/commit/3a3eb999d49cfb957f003e056eb80ccc40cbe735), both native levels passed 45 of 120 registered cases, including 45 of 48 frozen CPython-positive cases. The cumulative row also includes an earlier pass for `test_ip_getnode`, which stock and native skipped on this host because the `ip` utility was unavailable. |
+| `uuid` | 46 | 120 | 1 | On public [3a3eb999](https://github.com/astral-experiments/imre/commit/3a3eb999d49cfb957f003e056eb80ccc40cbe735), both native levels passed 45 of 120 registered cases, including 45 of 48 frozen CPython-positive cases. The cumulative row also includes an earlier pass for `test_ip_getnode`, which stock and native skipped on this host because the `ip` utility was unavailable. One private enum layout check has a [documented omission decision](docs/stdlib-omissions.md#uuid). |
 | `warnings` | 181 | 187 | 0 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 252 | 383 | 0 | Across two public revisions, 249 distinct ZIP originals passed on stock and both native levels. Of those, 48 are new and 201 repeat earlier passes. Three earlier CLI passes failed in the later complete runs. The cumulative ledger contains 252 of 383. |
 | `zoneinfo` | 227 | 261 | 2 | One full public run passed 227 of 261 originals. A second machine verified 217 on the preceding public version and all ten additional cache originals on the newer one. Stock passed 233 and skipped 28. Two private-cache omissions remain in the denominator. |
-| **Measured total (19 of 19 families)** | **2,195** | **2,875** | **10** |  |
+| **Measured total (19 of 19 families)** | **2,195** | **2,875** | **11** |  |
 
 ### Whole-suite baselines for later additions
 
