@@ -100,6 +100,19 @@ def current():
         assert child.stdin.closed and child.stdout.read() == b""
         assert child.wait() == 0
 
+    with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe) as child:
+        child.stdin.write(b"prefix")
+        try:
+            child.communicate("not bytes")
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("binary stdin accepted text")
+        os.write(child.stdin.fileno(), b"tail")
+        child.stdin.close()
+        assert child.stdout.read() == b"prefixtail"
+        assert child.wait() == 0
+
     # A resumed exchange retains both the buffered prefix and the unsent input.
     with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe, stderr=pipe) as child:
         child.stdin.write(b"prefix")

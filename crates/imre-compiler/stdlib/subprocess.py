@@ -484,9 +484,8 @@ class Popen:
             self._stdin_ref is not None and self._stdin_ref() is self.stdin)
         if self._replacement_output is not None or (not self._communication_started and not same_stdin):
             return self._communicate_replaced_stdin(input, endtime, orig_timeout)
-        if not self._communication_started and isinstance(self.stdin, io.TextIOWrapper):
-            # The native exchange flushes the binary pipe. The text wrapper may
-            # still own encoded bytes from an earlier write to stdin.
+        if not self._communication_started and self.stdin is not None:
+            # Publish earlier writes even if converting the new input raises.
             _flush_stdin(self.stdin)
         if self.stdin is not None and self._input is None:
             if input is not None and self.text_mode:
