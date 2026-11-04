@@ -7,6 +7,18 @@ from _collections_abc import (
 )
 from types import GenericAlias
 
+__all__ = [
+    "Awaitable", "Coroutine",
+    "AsyncIterable", "AsyncIterator", "AsyncGenerator",
+    "Hashable", "Iterable", "Iterator", "Generator", "Reversible",
+    "Sized", "Container", "Callable", "Collection",
+    "Set", "MutableSet",
+    "Mapping", "MutableMapping",
+    "MappingView", "KeysView", "ItemsView", "ValuesView",
+    "Sequence", "MutableSequence",
+    "ByteString", "Buffer",
+]
+
 
 def _is_param_expr(obj):
     """Checks if obj matches either a list of types, ``...``, ``ParamSpec`` or
