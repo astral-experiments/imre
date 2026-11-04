@@ -267,10 +267,14 @@ fn checked(ret: i32) -> io::Result<i32> {
     }
 }
 
-fn retry<T>(mut call: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+fn retry<T>(until: Option<Deadline>, mut call: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     loop {
         match call() {
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                if until.is_some_and(|end| end.remaining().is_zero()) {
+                    return Err(timed_out());
+                }
+            }
             result => return result,
         }
     }
@@ -304,6 +308,10 @@ fn timed_out() -> io::Error {
 
 /// Wait without extending the deadline on a signal, spurious readiness or a long poll interval.
 fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()> {
+    retry(until, || poll_interruptible(fd, events, until))
+}
+
+fn poll_interruptible(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()> {
     let mut pollfd = libc::pollfd {
         fd,
         events,
@@ -317,11 +325,8 @@ fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()
                 .min(i32::MAX as u128) as i32
         });
         // SAFETY: poll may write revents on this one live descriptor record.
-        match checked(unsafe { libc::poll(&raw mut pollfd, 1, timeout) }) {
-            Ok(n) if n > 0 => return Ok(()),
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
+        if checked(unsafe { libc::poll(&raw mut pollfd, 1, timeout) })? != 0 {
+            return Ok(());
         }
         if until.is_some_and(|end| end.remaining().is_zero()) {
             return Err(timed_out());
@@ -342,13 +347,24 @@ fn socket_call<T>(
     until: Option<Deadline>,
     mut call: impl FnMut() -> io::Result<T>,
 ) -> io::Result<T> {
+    retry(until, || {
+        socket_call_interruptible(fd, event, until, &mut call)
+    })
+}
+
+/// Return EINTR from either readiness polling or the syscall to the caller.
+fn socket_call_interruptible<T>(
+    fd: RawFd,
+    event: i16,
+    until: Option<Deadline>,
+    mut call: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
     loop {
         // A negative fd is ignored by poll; the syscall itself must report EBADF.
         if fd >= 0 && until.is_some() {
-            poll_socket(fd, event, until)?;
+            poll_interruptible(fd, event, until)?;
         }
         match call() {
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) if until.is_some() && e.kind() == io::ErrorKind::WouldBlock => {}
             result => return result,
         }
@@ -1381,7 +1397,7 @@ fn connect(socket: &Object, addr: &SocketAddress) -> io::Result<()> {
     // can report EISCONN or start a different attempt. Observe the existing attempt.
     poll_socket(fd, libc::POLLOUT, until)?;
     // Retry the completion check itself on EINTR, without reconnecting.
-    retry(|| {
+    retry(None, || {
         let mut error: i32 = 0;
         let mut len = size_of_val(&error) as libc::socklen_t;
         // SAFETY: SO_ERROR fills one int and its initialized capacity.
@@ -1698,7 +1714,8 @@ unsafe fn receive(socket: &Object, buffer: *mut u8, len: usize, flags: i32) -> i
 }
 
 pub(crate) fn send(socket: &Object, bytes: &[u8], flags: i32) -> Result<usize> {
-    send_until(fd(socket), bytes, flags, deadline(socket))
+    let until = deadline(socket);
+    retry(until, || send_until(fd(socket), bytes, flags, until)).map_err(errno_error)
 }
 
 /// Send one message to a socket address using the socket's existing timeout policy.
@@ -1721,15 +1738,14 @@ pub(crate) fn send_to(
     .map_err(errno_error)
 }
 
-fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> Result<usize> {
+fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> io::Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
-    socket_call(raw, libc::POLLOUT, until, || {
+    socket_call_interruptible(raw, libc::POLLOUT, until, || {
         // SAFETY: the slice stays initialized and immovable across retries.
         let n = unsafe { libc::send(raw, bytes.as_ptr().cast(), bytes.len(), flags) };
         usize::try_from(n).map_err(|_| io::Error::last_os_error())
     })
-    .map_err(errno_error)
 }
 
 #[unsafe(no_mangle)]
@@ -1744,25 +1760,62 @@ pub extern "C" fn imre_socket_send(s: &Object, data: &Bytes, flags: usize) -> us
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_sendall(s: &Object, data: &Bytes, flags: usize) {
-    finish(c_int(flags).and_then(|flag| send_all(s, data, flag)), ());
+    finish(
+        c_int(flags).and_then(|flags| {
+            SendAll::run(s, flags, |send| {
+                let done = send.step(data)?;
+                super::stdlib::check_interrupt()?;
+                Ok(done)
+            })
+        }),
+        (),
+    );
 }
 
-pub(crate) fn send_all(s: &Object, data: &[u8], flags: i32) -> Result<()> {
-    let raw = fd(s);
-    let until = deadline(s);
-    let mut remaining = data;
-    // Empty input still makes one send: EBADF/EPIPE are observable.
-    loop {
-        let written = send_until(raw, remaining, flags, until)?;
-        remaining = &remaining[written..];
-        if remaining.is_empty() {
-            return Ok(());
+/// Preserve the byte offset and the original timeout across Python signal handlers.
+pub(crate) struct SendAll<'a> {
+    socket: &'a Object,
+    flags: i32,
+    until: Option<Deadline>,
+    sent: usize,
+}
+
+impl<'a> SendAll<'a> {
+    pub(crate) fn run<E: From<Error>>(
+        socket: &'a Object,
+        flags: i32,
+        mut attempt: impl FnMut(&mut Self) -> std::result::Result<bool, E>,
+    ) -> std::result::Result<(), E> {
+        let mut send = Self {
+            socket,
+            flags,
+            until: deadline(socket),
+            sent: 0,
+        };
+        while !attempt(&mut send)? {
+            if send.until.is_some_and(|end| end.remaining().is_zero()) {
+                return Err(errno_error(timed_out()).into());
+            }
         }
-        if until.is_some_and(|end| end.remaining().is_zero()) {
-            return Err(errno_error(timed_out()));
-        }
-        if written == 0 {
-            return Err(errno_error(io::Error::from_raw_os_error(libc::EPIPE)));
+        Ok(())
+    }
+
+    /// The caller checks signals after every successful send (even a partial one) or EINTR.
+    pub(crate) fn step(&mut self, data: &[u8]) -> Result<bool> {
+        // The buffer remains exported, but a handler can change its contents or close the socket.
+        let remaining = data
+            .get(self.sent..)
+            .ok_or_else(|| Error::new(Kind::SystemError, "exported socket buffer shrank"))?;
+        match send_until(fd(self.socket), remaining, self.flags, self.until) {
+            Ok(0) if !remaining.is_empty() => {
+                Err(errno_error(io::Error::from_raw_os_error(libc::EPIPE)))
+            }
+            Ok(n) => {
+                self.sent += n;
+                Ok(self.sent == data.len())
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => Ok(false),
+            Err(e) => Err(errno_error(e)),
         }
     }
 }
