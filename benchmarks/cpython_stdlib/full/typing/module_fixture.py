@@ -14,7 +14,10 @@ def choose(value: int = 8) -> int: return value
     story = """from typing import clear_overloads, get_overloads
 import left
 import right
+def increment(value): return value + 1
 def verify() -> None:
+    assert get_overloads(increment) == []
+    assert increment(2) == 3
     a = get_overloads(left.choose)
     b = get_overloads(right.choose)
     print(len(a))
