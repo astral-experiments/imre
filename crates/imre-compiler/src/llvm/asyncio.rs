@@ -11,7 +11,7 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
     } else {
         ""
     };
-    for (&id, &frame) in &emitter.async_frames {
+    for (&id, frame) in &emitter.async_frames {
         let function = &emitter.module.functions[id];
         let target = units.function_name(id);
         let thunk = units.async_name(id);
@@ -27,7 +27,7 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
             .collect();
         invoke(output, format!("@{target}"), args, function.returns);
     }
-    for (&id, &(frame, result)) in &emitter.async_invoke_frames {
+    for (&id, (frame, result)) in &emitter.async_invoke_frames {
         let output = units.function(
             units.entry,
             &format!("async_invoke_{id}"),
@@ -42,17 +42,16 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
         args.extend(params.iter().enumerate().map(|(index, &ty)| {
             load_arg(output, frame, index + 1, ty, resource_types.contains(&ty))
         }));
-        invoke(output, "%target".to_owned(), args, result);
+        invoke(output, "%target".to_owned(), args, *result);
     }
 }
 
-fn load_arg(output: &mut String, frame: Type, index: usize, ty: Type, transfer: bool) -> String {
+fn load_arg(output: &mut String, frame: &str, index: usize, ty: Type, transfer: bool) -> String {
     let llvm = ty.llvm();
     let storage = storage_type(ty);
     writeln!(
         output,
-        "  %field{index} = getelementptr %{}, ptr %frame, i32 0, i32 {index}",
-        record_name(frame)
+        "  %field{index} = getelementptr %{frame}, ptr %frame, i32 0, i32 {index}"
     )
     .unwrap();
     writeln!(output, "  %word{index} = load {storage}, ptr %field{index}").unwrap();

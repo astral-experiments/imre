@@ -230,7 +230,8 @@ fn coroutine_table(
 impl Emitter<'_, '_> {
     /// Borrow the target's adapter and context for the lifetime of its owning third word.
     pub(super) fn empty_partial(&mut self, target: &Value) -> Value {
-        let wrapper = self.record_with_layout(target.ty, "empty_partial");
+        let layout = self.output.global_ref("layout_empty_partial".to_owned());
+        let wrapper = self.record_with_layout(target.ty, layout);
         let prefix = self.instruction(format!("load %callable, ptr {}", target.operand));
         self.line(format!("store %callable {prefix}, ptr {}", wrapper.operand));
         let owner = self.instruction(format!("getelementptr ptr, ptr {}, i64 2", wrapper.operand));
@@ -284,6 +285,7 @@ impl Emitter<'_, '_> {
         } else {
             "callable"
         };
+        let layout = self.output.global_ref(format!("layout_{layout}"));
         let result = self.record_with_layout(ty, layout);
         let target = self.output.adapter_ref(function, receiver.is_some());
         self.line(format!("store ptr @{target}, ptr {}", result.operand));

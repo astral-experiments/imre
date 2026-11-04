@@ -273,7 +273,7 @@ impl Schemas<'_> {
                 (
                     7,
                     None,
-                    Some(format!("layout_class_{class}")),
+                    Some(self.output.record_layout(Type::Class(class))),
                     count,
                     Some(fields_name),
                 )

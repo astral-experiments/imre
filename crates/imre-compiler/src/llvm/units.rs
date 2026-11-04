@@ -6,6 +6,8 @@ use super::*;
 use crate::CodegenUnit;
 
 pub(super) struct Output {
+    /// Whether a reference to this named type also needs its destruction descriptor.
+    pub(super) record_types: HashMap<Type, bool>,
     units: Vec<String>,
     common: Option<String>,
     pub entry: usize,
@@ -29,6 +31,7 @@ impl Output {
             })
             .collect();
         Self {
+            record_types: HashMap::new(),
             units: vec![String::new(); count],
             common: split.then(|| "source_filename = \"imre-unit\"\n".to_owned()),
             entry,
@@ -111,6 +114,18 @@ impl Output {
                 .insert(self.current);
         }
         name
+    }
+
+    /// Record a named LLVM type used in a field access or allocation.
+    pub fn record_type(&mut self, ty: Type) -> String {
+        self.record_types.entry(ty).or_insert(false);
+        record_name(ty)
+    }
+
+    /// Reference the destruction descriptor from the current codegen unit.
+    pub fn record_layout(&mut self, ty: Type) -> String {
+        self.record_types.insert(ty, true);
+        self.global_ref(format!("layout_{}", record_name(ty)))
     }
 
     pub fn global_ref(&mut self, name: String) -> String {

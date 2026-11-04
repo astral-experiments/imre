@@ -152,9 +152,7 @@ impl Emitter<'_, '_> {
                 }
                 let list = self.borrow_slot(*list);
                 let row = self.borrow_slot(row);
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(item.ty)));
+                let layout = self.output.record_layout(item.ty);
                 self.instruction(format!("call i1 @imre_struct_try_fill_empty(ptr {}, ptr @{layout}, ptr {}, i64 {stop})", list.operand, row.operand))
             }
             _ => return,
@@ -271,9 +269,7 @@ impl Emitter<'_, '_> {
         let (stride, upper, modulus) = (word(stride), word(bound), word(modulus));
         let (list, row_value) = (self.borrow_slot(*list_slot), self.borrow_slot(*row_slot));
         let (at, stop) = (self.borrow_slot(*index), self.borrow_slot(stop));
-        let layout = self
-            .output
-            .global_ref(format!("layout_{}", record_name(row.ty)));
+        let layout = self.output.record_layout(row.ty);
         let last_index = self.entry_alloca("i64");
         let last = self.instruction(format!("call i64 @imre_struct_set_modular(ptr {}, ptr @{layout}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {stride}, i64 {upper}, i64 {modulus}, ptr {last_index})",list.operand,row_value.operand,current.operand,stop.operand,at.operand));
         let advanced = self.instruction(format!("icmp ne i64 {last}, 0"));
@@ -305,7 +301,7 @@ impl Emitter<'_, '_> {
         if !self.module.types.is_value_struct(item.ty) {
             return false;
         }
-        let name = record_name(item.ty);
+        let name = self.output.record_type(item.ty);
         let scratch = self.entry_alloca(format!("%{name}"));
         let layout = self.output.global_ref(format!("layout_{name}"));
         let values = self.call_operands(args);
@@ -336,7 +332,7 @@ impl Emitter<'_, '_> {
         let (op, args) = packed_get(item)?;
         let list = self.operand(&args[0]);
         let index = self.operand(&args[1]);
-        let name = record_name(item.ty);
+        let name = self.output.record_type(item.ty);
         let src = if matches!(op, Builtin::SequenceGetInBounds) {
             let ExprKind::Local(slot) = args[0].kind else {
                 unreachable!()
