@@ -219,6 +219,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "py_compile" => bundled_source!("py_compile.py"),
         "pyexpat" => bundled_source!("pyexpat.py"),
         "xml" => bundled_source!("xml/__init__.py"),
+        "xml.etree" => bundled_source!("xml/etree/__init__.py"),
+        "xml.etree.ElementPath" => bundled_source!("xml/etree/ElementPath.py"),
+        "xml.etree.ElementTree" => bundled_source!("xml/etree/ElementTree.py"),
         "xml.parsers" => bundled_source!("xml/parsers/__init__.py"),
         "xml.parsers.expat" => bundled_source!("xml/parsers/expat.py"),
         // CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
@@ -540,10 +543,6 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "optparse" => bundled_source!("optparse.py"),
         "gettext" => bundled_source!("gettext.py"),
         "uuid" => bundled_source!("uuid.py"),
-        "xml" => bundled_source!("xml/__init__.py"),
-        "xml.etree" => bundled_source!("xml/etree/__init__.py"),
-        "xml.etree.ElementPath" => bundled_source!("xml/etree/ElementPath.py"),
-        "xml.etree.ElementTree" => bundled_source!("xml/etree/ElementTree.py"),
         _ => None,
     }
 }
