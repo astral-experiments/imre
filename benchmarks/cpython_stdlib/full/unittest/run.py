@@ -67,6 +67,7 @@ EQUALITY_BLOCKERS = {
 }
 # Each entry has a reviewed native product operation and the original default fixture.
 DEFAULT_MOCK_METHODS = {
+    "test_reset_mock": "unittest.mock.Mock.reset_mock with an explicit parent, child mocks and return value",
     "test_assert_not_called": "unittest.mock.Mock.assert_not_called",
     "test_assert_called": "unittest.mock.Mock.assert_called",
     "test_assert_called_once": "unittest.mock.Mock.assert_called_once",
@@ -78,7 +79,6 @@ DEFAULT_MOCK_METHODS = {
     "test_assert_called_once_with": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_called_once_with",
 }
 MOCK_BLOCKERS = {
-    "test_reset_mock": (337, '9:35: Imre: unexpected keyword argument "parent"'),
     "test_reset_mock_recursion": (377, "8:9: Imre: properties are read-only"),
     "test_reset_sideeffect": (1890, '7:18: Imre: unexpected keyword argument "return_value"'),
 }
