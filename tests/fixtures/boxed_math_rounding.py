@@ -2,7 +2,7 @@
 
 import math
 from fractions import Fraction
-from math import ceil, copysign, cos, exp, floor, isinf, isnan, log, modf, sqrt, trunc
+from math import ceil, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
 from math import e, inf, nan, pi, tau
 
 
@@ -82,6 +82,14 @@ def current():
     math.pi = pi
     assert math.pi is pi
 
+    assert isfinite is math.isfinite
+    operand = FloatOnly()
+    assert isfinite(operand) is True and operand.calls == 1
+    for value in (-0.0, 5e-324, 2**1023, IndexOnly()):
+        assert isfinite(value) is True
+    for value in (inf, -inf, nan, FloatOverride("nan")):
+        assert isfinite(value) is False
+
     assert isinf is math.isinf
     assert isinf(float("inf")) is True
     assert isinf(FloatOverride("-inf")) is True
@@ -116,6 +124,8 @@ def current():
     assert isnan(exp(nan)) and isnan(sqrt(nan))
     for call, error_type, message in (
         (lambda: exp(710.0), OverflowError, "math range error"),
+        (lambda: isfinite(2**1024), OverflowError, "int too large to convert to float"),
+        (lambda: isfinite("1"), TypeError, "must be real number, not str"),
         (lambda: sqrt(-1.0), ValueError, "expected a nonnegative input, got -1.0"),
         (lambda: sqrt(-inf), ValueError, "expected a nonnegative input, got -inf"),
         (lambda: cos(float("inf")), ValueError, "expected a finite input, got inf"),
