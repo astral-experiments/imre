@@ -2645,6 +2645,8 @@ pub(super) struct Heap {
     file_writers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // Positions are hints. Each check reads the current binding and native stream edges.
+    finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
     // Weak class handles, compacted before the collector recycles their slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
@@ -2861,6 +2863,7 @@ impl Heap {
             collect_next_statement: false,
             file_writers: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            finalizer_bindings: Cell::new([None; 2]),
             classes: Vec::new(),
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
@@ -4107,23 +4110,53 @@ impl Heap {
         })
     }
 
+    /// Check the active bindings at previously successful positions and trace their live stream edges.
+    fn bound_finalizer_chains(&self) -> [Option<[Id; 3]>; 2] {
+        self.finalizer_bindings.get().map(|position| {
+            let (frame, slot) = position?;
+            let Value::Scope(scope) = self.get(self.frames.get(frame)?.scope) else {
+                return None;
+            };
+            let (_, &owner) = scope.names.get_index(slot)?;
+            Some(super::stdlib::io::text_descriptor_chain(self, owner).unwrap_or([owner; 3]))
+        })
+    }
+
+    /// Remember where a surviving local keeps the owner so subsequent checks can validate it directly.
+    fn find_finalizer_binding(&self, owner: Id) -> bool {
+        for (frame_index, frame) in self.frames.iter().enumerate().rev() {
+            let Value::Scope(scope) = self.get(frame.scope) else {
+                continue;
+            };
+            if let Some(slot) = scope.names.values().position(|&bound| bound == owner) {
+                let position = Some((frame_index, slot));
+                let [first, _] = self.finalizer_bindings.get();
+                if first != position {
+                    self.finalizer_bindings.set([position, first]);
+                }
+                return true;
+            }
+            if let Some(namespace) = scope.namespace
+                && matches!(self.get(namespace), Value::Dict(entries)
+                    if entries.iter().any(|&(_, bound)| bound == owner))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Check each registration against the surviving frame bindings and native stream edges.
     fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
-        let frame_keeps = |owner| {
-            self.bound_in_active_frame(owner)
-                || self.frames.iter().any(|frame| {
-                    // Materialized scopes can retain additional native local names.
-                    matches!(self.get(frame.scope), Value::Scope(scope)
-                        if scope.namespace.is_some()
-                            && scope.names.values().any(|&bound| bound == owner))
-                })
-        };
+        let chains = self.bound_finalizer_chains();
         self.ordinary_finalizers.iter().chain(writers).all(|owner| {
             stdin.is_some_and(|input| input.contains(owner))
-                || frame_keeps(*owner)
+                || chains.iter().flatten().any(|chain| chain.contains(owner))
+                || self.find_finalizer_binding(*owner)
                 || self.ordinary_finalizers.iter().any(|&stream| {
-                    super::stdlib::io::text_descriptor_chain(self, stream)
-                        .is_some_and(|chain| chain.contains(owner) && frame_keeps(stream))
+                    super::stdlib::io::text_descriptor_chain(self, stream).is_some_and(|chain| {
+                        chain.contains(owner) && self.find_finalizer_binding(stream)
+                    })
                 })
         })
     }
@@ -5227,6 +5260,22 @@ mod tests {
             unreachable!()
         };
         bindings.names.shift_remove("writer");
+        bindings.names.insert("replacement".into(), owner);
+        assert!(
+            !ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+        );
+
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names.insert("renamed".into(), writer);
+        assert!(
+            ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+        );
+        let replacement = ctx.scope("replacement", None);
+        ctx.heap.frames.last_mut().unwrap().scope = replacement;
         assert!(
             !ctx.heap
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
