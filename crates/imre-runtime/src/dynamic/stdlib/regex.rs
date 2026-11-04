@@ -1866,19 +1866,18 @@ fn findall(
             Ok(ctx.alloc(group_value(&text[span.range()], pattern.bytes)))
         }
     };
+    let groups = pattern.group_count();
     let mut found = Vec::new();
     loop {
-        let fields: Vec<_> = group_spans(captures).collect();
-        let value = match fields.as_slice() {
-            [one] | [_, one] => capture(ctx, *one)?,
-            [_, groups @ ..] => {
-                let values = groups
-                    .iter()
-                    .map(|&s| capture(ctx, s))
+        let value = match groups {
+            0 => capture(ctx, Some(span))?,
+            1 => capture(ctx, captures.get_group(1))?,
+            _ => {
+                let values = (1..=groups)
+                    .map(|i| capture(ctx, captures.get_group(i)))
                     .collect::<Result<_>>()?;
                 ctx.alloc(Value::Tuple(values))
             }
-            [] => unreachable!("every regex has an overall match"),
         };
         found.push(value);
         let Some(next) = split::next_span(pattern, text, span.end, Some(span), captures)
