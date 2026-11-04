@@ -1,21 +1,27 @@
 //! Adapt a boxed Python iterator to the row parser also used by typed readers.
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::dynamic::operators::surrogate_repr;
-use crate::objects::csv::{Dialect, Field, Row};
+use crate::objects::csv::{Dialect, Field, LineError, Row};
 use crate::objects::exceptions::{Kind, string_repr};
 
 fn character(ctx: &Context, id: Id) -> Result<u32> {
     if id == NONE {
         return Ok(u32::MAX);
     }
-    let mut chars = ctx.str_value(id)?.chars();
-    match (chars.next(), chars.next()) {
-        (Some(ch), None) => Ok(ch as u32),
-        _ => Err(Error::new(
-            "TypeError",
-            "expected one CSV dialect character",
-        )),
-    }
+    let point = match ctx.heap.get(ctx.scalar_value(id)) {
+        Value::SurrogateStr(points) => match points.as_slice() {
+            [point] => Some(*point),
+            _ => None,
+        },
+        _ => {
+            let mut chars = ctx.str_value(id)?.chars();
+            match (chars.next(), chars.next()) {
+                (Some(ch), None) => Some(u32::from(ch)),
+                _ => None,
+            }
+        }
+    };
+    point.ok_or_else(|| Error::new("TypeError", "expected one CSV dialect character"))
 }
 
 fn integer(ctx: &Context, id: Id) -> Result<i64> {
@@ -119,7 +125,15 @@ pub(super) fn read_row(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
                     }
                     _ => return Err(Error::new("TypeError", "expected str")),
                 };
-                if complete.map_err(parse_error)? {
+                if complete.map_err(|err| match err {
+                    LineError::Native(err) => parse_error(err),
+                    LineError::ExpectedDelimiter(points) => {
+                        let message = ctx.text_codepoints(points);
+                        let mut err = ctx.exception("_csv.Error", &[message]);
+                        err.class = error_class;
+                        err
+                    }
+                })? {
                     break;
                 }
             }

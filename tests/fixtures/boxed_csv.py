@@ -74,3 +74,18 @@ def current():
     assert next(rows) == [escaped_byte]
     assert next(rows) == [escaped_byte]
     assert first == [name, "tail"]
+
+    delimiter, quote, escape = chr(0xdcff), chr(0xdcfe), chr(0xdcfd)
+    lines = ["a" + delimiter + quote + "b" + delimiter + "c" + quote,
+             quote + "x" + quote + "!", escape + delimiter]
+    rows = csv.reader(lines, delimiter=delimiter, quotechar=quote, escapechar=escape, strict=True)
+    assert next(rows) == ["a", "b" + delimiter + "c"]
+    try:
+        next(rows)
+    except csv.Error as err:
+        message = "'" + delimiter + "' expected after '" + quote + "'"
+        assert err.args == (message,) and str(err) == message
+    else:
+        raise AssertionError("expected strict quote error with surrogate dialect characters")
+    assert next(rows) == [delimiter] and rows.line_num == 3
+    assert next(rows, None) is None
