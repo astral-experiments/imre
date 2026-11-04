@@ -225,9 +225,9 @@ pub(super) fn prepare_stdlib_archive(path: &Path) -> io::Result<()> {
         Err(err) => return Err(err),
     }
     let metadata = parent.symlink_metadata()?;
-    // SAFETY: geteuid takes no arguments and has no failure mode.
     if !metadata.is_dir()
         || metadata.mode() & 0o077 != 0
+        // SAFETY: geteuid takes no arguments and has no failure mode.
         || metadata.uid() != unsafe { libc::geteuid() }
     {
         return Err(io::Error::new(
