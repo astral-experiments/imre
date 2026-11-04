@@ -760,7 +760,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "struct.Struct"
         }
         Value::ZlibDecompressor { .. }
-            if matches!(attr, "decompress" | "flush" | "copy" | "__copy__") =>
+            if matches!(attr, "decompress" | "flush")
+                || value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&attr) =>
         {
             super::value::ZLIB_DECOMPRESS_TYPE
         }

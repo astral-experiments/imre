@@ -111,9 +111,11 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
-            Some((value::ZLIB_DECOMPRESS_TYPE, attr)) => {
-                Some((value::ZLIB_DECOMPRESS_TYPE, attr, &["copy", "__copy__"][..]))
-            }
+            Some((value::ZLIB_DECOMPRESS_TYPE, attr)) => Some((
+                value::ZLIB_DECOMPRESS_TYPE,
+                attr,
+                value::ZLIB_DECOMPRESS_COPY_METHODS,
+            )),
             Some((value::REGEX_PATTERN_TYPE, attr)) => {
                 Some((value::REGEX_PATTERN_TYPE, attr, value::REGEX_COPY_METHODS))
             }
@@ -590,6 +592,9 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__text_signature__" if self.owner == value::ZLIB_DECOMPRESS_TYPE && self.name == "__deepcopy__" => {
+                ctx.text("($self, memo, /)")
+            }
             "__text_signature__" if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => {
                 ctx.text(if self.name == "__copy__" { "($self, /)" } else { "($self, memo, /)" })
             }

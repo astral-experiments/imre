@@ -1802,8 +1802,9 @@ pub(super) fn call(
     if name == "zlib.decompressobj" {
         return zlib::decompressor(ctx, "new", args, kwargs);
     }
-    if let Some(method @ ("decompress" | "flush" | "copy" | "__copy__")) =
-        name.strip_prefix("zlib.Decompress.")
+    if let Some(method) = name.strip_prefix("zlib.Decompress.")
+        && (matches!(method, "decompress" | "flush")
+            || value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&method))
     {
         return zlib::decompressor(ctx, method, args, kwargs);
     }

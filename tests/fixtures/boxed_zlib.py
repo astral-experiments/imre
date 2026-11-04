@@ -68,7 +68,7 @@ def current():
         assert stream.decompress(packed[:1]) == b""
         assert stream.decompress(packed[1:] + b"tail", max_length=17) == data[:17]
         assert not stream.eof and stream.unconsumed_tail
-        for fork in (stream.copy(), copy.copy(stream)):
+        for fork in (stream.copy(), copy.copy(stream), copy.deepcopy(stream)):
             assert fork.unconsumed_tail is stream.unconsumed_tail
             assert fork.decompress(fork.unconsumed_tail + b"!") == data[17:]
             assert fork.eof and fork.unused_data == b"tail!"

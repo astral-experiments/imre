@@ -231,8 +231,16 @@ pub(in crate::dynamic) fn decompressor(
     };
     let (state, dictionary) = (state.clone(), *dictionary);
     let bytes = match name {
-        "copy" | "__copy__" => {
-            if !args.is_empty() || !kwargs.is_empty() {
+        name if super::value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&name) => {
+            if name == "__deepcopy__" {
+                if args.is_empty() && kwargs.len() <= 1 {
+                    return Err(Error::new(
+                        "TypeError",
+                        "__deepcopy__() takes exactly 1 positional argument (0 given)",
+                    ));
+                }
+                builtins::bind_method_arguments(name, args, kwargs, [""], 1)?;
+            } else if !args.is_empty() || !kwargs.is_empty() {
                 return Err(Error::new(
                     "TypeError",
                     format!("{name}() takes no arguments"),
