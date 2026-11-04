@@ -438,6 +438,7 @@ impl Builtin {
             | Self::BinasciiAsciiInput
             | Self::BinasciiDecode
             | Self::BinasciiEncode
+            | Self::Base85Encode { .. }
             | Self::BinasciiUnhexlify
             | Self::CodecLookup
             | Self::StrEncodeOptions
@@ -1286,6 +1287,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_binascii_ascii_input"
                 | "imre_binascii_decode"
                 | "imre_binascii_encode"
+                | "imre_base85_encode"
                 | "imre_binascii_unhexlify"
                 | "imre_codec_lookup"
                 | "imre_str_encode_options"

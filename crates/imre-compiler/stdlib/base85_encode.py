@@ -1,3 +1,5 @@
+from _imre_base85 import encode as _encode85
+
 # Index the alphabet directly instead of building a 7,225-entry table on first use.
 _a85alphabet = bytes(range(33, 118))
 _A85START = b"<~"
@@ -7,6 +9,10 @@ def _85encode(b, alphabet, pad=False, foldnuls=False, foldspaces=False):
     # Helper function for a85encode and b85encode
     if not isinstance(b, (bytes, bytearray)):
         b = memoryview(b).tobytes()
+
+    encoded = _encode85(b, alphabet, pad, foldnuls, foldspaces)
+    if encoded is not None:
+        return encoded
 
     padding = (-len(b)) % 4
     if padding:

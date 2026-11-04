@@ -100,6 +100,7 @@ pub fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_gzip"
             | "_imre_linecache"
             | "_imre_unittest"
+            | "_imre_base85"
             | "_imre_csv"
             | "_imre_tokenize"
             | "_imre_pkgutil"

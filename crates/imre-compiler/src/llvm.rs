@@ -6154,6 +6154,17 @@ impl Emitter<'_, '_> {
                 Type::Bytes,
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
+            Builtin::Base85Encode { alphabet, foldnuls } => {
+                let alphabet = self.byte_array(alphabet.to_vec());
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_base85_encode(ptr {}, ptr @{alphabet}, i1 {}, i1 {foldnuls}, i1 {})",
+                        args[0].value.operand, args[1].value.operand, args[2].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::BinasciiUnhexlify => {
                 self.call("imre_binascii_unhexlify", Type::Bytes, &[&args[0].value])
             }
@@ -9545,6 +9556,7 @@ declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
+declare ptr @imre_base85_encode(ptr, ptr, i1, i1, i1)
 declare ptr @imre_binascii_unhexlify(ptr)
 declare ptr @imre_sha1_hex(ptr)
 declare i1 @imre_hmac_compare_digest_bytes(ptr, ptr)
