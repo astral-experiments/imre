@@ -872,6 +872,8 @@ ACCEPTED = {
             "import fractions\n"
             "from numbers import Rational\n"
             "def total():\n"
+            "    assert fractions.Fraction(-3, 2).limit_denominator(1) == -2\n"
+            "    assert fractions.Fraction(-355, 113).limit_denominator(10) == fractions.Fraction(-22, 7)\n"
             "    value = fractions.Fraction(6, -8) + fractions.Fraction(1, 4)\n"
             "    return isinstance(value, Rational), value.numerator, value.denominator\n"
         ),

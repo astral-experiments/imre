@@ -3,14 +3,14 @@
 
 """Fraction, infinite-precision, rational numbers."""
 
-from _imre_fractions import _convergents
-
 import functools
 import math
 import numbers
 import operator
 import re
 import sys
+
+_convergents = __import__('_imre_fractions')._convergents
 
 __all__ = ['Fraction']
 
