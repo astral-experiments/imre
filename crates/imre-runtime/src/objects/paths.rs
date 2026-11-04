@@ -1218,6 +1218,10 @@ unsafe fn pull_path(iterator: *const Object) -> Result<*const Object> {
 
 pub(super) enum Pattern {
     Literal(Str),
+    Affixes {
+        text: Str,
+        stars: std::ops::Range<usize>,
+    },
     Wildcard(Vec<Token>),
 }
 
@@ -1250,8 +1254,17 @@ impl Pattern {
     }
 
     pub(super) fn component(pattern: &str) -> Self {
-        if !pattern.contains(['*', '?', '[']) {
+        let Some(first) = pattern.find(['*', '?', '[']) else {
             return Self::Literal(Str::from(pattern));
+        };
+        if pattern.as_bytes()[first] == b'*' {
+            let suffix = pattern[first..].trim_start_matches('*');
+            if !suffix.contains(['*', '?', '[']) {
+                return Self::Affixes {
+                    text: Str::from(pattern),
+                    stars: first..pattern.len() - suffix.len(),
+                };
+            }
         }
         let chars: Vec<_> = pattern.chars().collect();
         let mut tokens = Vec::new();
@@ -1284,6 +1297,13 @@ impl Pattern {
     pub(super) fn matches(&self, name: &str) -> bool {
         let tokens = match self {
             Self::Literal(text) => return text == name,
+            Self::Affixes { text, stars } => {
+                let prefix = &text[..stars.start];
+                let suffix = &text[stars.end..];
+                return name.len() >= prefix.len() + suffix.len()
+                    && name.starts_with(prefix)
+                    && name.ends_with(suffix);
+            }
             Self::Wildcard(tokens) => tokens,
         };
         let (mut token, mut at) = (0, 0);
