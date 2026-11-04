@@ -782,6 +782,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "listen"
                     | "accept"
                     | "connect"
+                    | "connect_ex"
                     | "getsockname"
                     | "getpeername"
                     | "detach"

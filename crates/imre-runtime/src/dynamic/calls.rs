@@ -4108,9 +4108,11 @@ impl Context {
             {
                 return Ok(self.heap.code_name("partial"));
             }
-            Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
-                return Ok(self.text("socket"));
-            }
+            Value::Native(ref class) if class == "socket.socket" => match name {
+                "__name__" => return Ok(self.text("socket")),
+                "connect_ex" => return Ok(self.builtin("socket.socket.connect_ex")),
+                _ => {}
+            },
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }

@@ -131,6 +131,7 @@ impl Checker<'_> {
                     ("value", int, None),
                 ],
             ),
+            "connect_ex" => return Err(self.scoped_builtin_error("socket.connect_ex", call)),
             "detach" => return Err(self.object_builtin_error("socket.detach", call)),
             _ => return Err(error(self.source, call, "unsupported socket method")),
         };

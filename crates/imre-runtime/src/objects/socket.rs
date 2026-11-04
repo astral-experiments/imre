@@ -1390,42 +1390,76 @@ pub extern "C" fn imre_socket_shutdown(s: &Object, how: usize) {
     finish(c_int(how).and_then(|n| shutdown(s, n)), ());
 }
 
-fn connect(socket: &Object, addr: &SocketAddress) -> io::Result<()> {
-    let fd = fd(socket);
-    let until = deadline(socket);
+/// Issue connect once. Keep the kernel result separate from exceptions raised by signal handlers.
+pub(crate) fn connect<E>(
+    socket: &Object,
+    addr: &SocketAddress,
+    mut check_signals: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<io::Result<()>, E> {
     let (ptr, len) = addr.raw_parts();
     // SAFETY: addr owns the complete socket address through the syscall.
-    let result = checked(unsafe { libc::connect(fd, ptr, len) });
-    match result {
-        Err(e)
-            if e.kind() == io::ErrorKind::Interrupted
-                && get_timeout(socket) != Some(Duration::ZERO) => {}
-        Err(e) if until.is_some() && e.raw_os_error() == Some(libc::EINPROGRESS) => {}
-        other => return other.map(|_| ()),
+    let Err(error) = checked(unsafe { libc::connect(fd(socket), ptr, len) }) else {
+        return Ok(Ok(()));
+    };
+    let interrupted = error.kind() == io::ErrorKind::Interrupted;
+    if interrupted {
+        check_signals()?;
     }
-    // An interrupted blocking connect is already in progress. Calling connect again
-    // can report EISCONN or start a different attempt. Observe the existing attempt.
-    poll_socket(fd, libc::POLLOUT, until)?;
-    // Retry the completion check itself on EINTR, without reconnecting.
-    retry(None, || {
-        let mut error: i32 = 0;
-        let mut len = size_of_val(&error) as libc::socklen_t;
-        // SAFETY: SO_ERROR fills one int and its initialized capacity.
-        checked(unsafe {
-            libc::getsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_ERROR,
-                (&raw mut error).cast(),
-                &raw mut len,
-            )
-        })?;
-        if error == 0 || error == libc::EISCONN {
-            Ok(())
-        } else {
-            Err(io::Error::from_raw_os_error(error))
+    let until = deadline(socket);
+    let wait = if interrupted {
+        get_timeout(socket) != Some(Duration::ZERO)
+    } else {
+        until.is_some() && error.raw_os_error() == Some(libc::EINPROGRESS)
+    };
+    if !wait {
+        return Ok(Err(error));
+    }
+
+    // Wait for the original attempt. A signal handler can close the socket.
+    'wait: loop {
+        if until.is_some_and(|end| end.remaining().is_zero()) {
+            return Ok(Err(timed_out()));
         }
-    })
+        let raw = fd(socket);
+        if raw >= 0
+            && let Err(error) = poll_interruptible(raw, libc::POLLOUT, until)
+        {
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Ok(Err(error));
+            }
+            check_signals()?;
+            continue;
+        }
+        loop {
+            match connect_result(fd(socket)) {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => check_signals()?,
+                Err(error) if until.is_some() && error.kind() == io::ErrorKind::WouldBlock => {
+                    continue 'wait;
+                }
+                result => return Ok(result),
+            }
+        }
+    }
+}
+
+fn connect_result(raw: RawFd) -> io::Result<()> {
+    let mut error: i32 = 0;
+    let mut len = size_of_val(&error) as libc::socklen_t;
+    // SAFETY: SO_ERROR fills one int and its initialized capacity.
+    checked(unsafe {
+        libc::getsockopt(
+            raw,
+            libc::SOL_SOCKET,
+            libc::SO_ERROR,
+            (&raw mut error).cast(),
+            &mut len,
+        )
+    })?;
+    if error == 0 || error == libc::EISCONN {
+        Ok(())
+    } else {
+        Err(io::Error::from_raw_os_error(error))
+    }
 }
 
 /// # Safety
@@ -1442,7 +1476,7 @@ pub unsafe extern "C" fn imre_socket_connect(s: &Object, pair: *const usize) {
 }
 
 pub(crate) fn connect_address(s: &Object, addr: &SocketAddress) -> Result<()> {
-    connect(s, addr).map_err(errno_error)
+    connect(s, addr, super::stdlib::check_interrupt)?.map_err(errno_error)
 }
 
 // Caller supplies the generated tuple descriptor so repr, projection and release

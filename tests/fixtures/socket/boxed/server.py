@@ -15,7 +15,18 @@ with create_server(("127.0.0.1", 0), backlog=2, reuse_port=True) as server:
         with peer:
             client.sendall(b"s")
             assert peer.recv(1) == b"s"
+    with socket.socket() as client:
+        status = client.connect_ex(address)
+        assert type(status) is int and status == 0
+        peer, source = server.accept()
+        with peer:
+            assert source == client.getsockname()
     if sys.platform == "linux":
+        # Darwin can drop the SYN while a TCP port is bound but not listening.
+        with socket.socket() as reserved, socket.socket() as refused:
+            reserved.bind(("127.0.0.1", 0))
+            status = refused.connect_ex(reserved.getsockname())
+            assert type(status) is int and status == errno.ECONNREFUSED
         kind = socket.SOCK_STREAM | socket.SOCK_NONBLOCK | socket.SOCK_CLOEXEC
         with socket.socket(socket.AF_INET, kind) as client:
             assert client.type == socket.SOCK_STREAM
