@@ -1,5 +1,6 @@
 use super::{Context, Error, Id, NONE, Result, Value, collections, type_error};
 use crate::dynamic::typing::{Alias, AliasKind, forwards_to_origin, literal_origin};
+use crate::dynamic::wrapper_descriptor::BuiltinDescriptor;
 use std::collections::BTreeSet;
 
 /// Apply the type's special method and sort a fresh list, preserving duplicates and comparison errors.
@@ -95,6 +96,20 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         }
         Value::ParamSpec(_) => {
             names.extend(super::super::paramspec::names().map(str::to_owned));
+            ctx.builtin("object")
+        }
+        Value::Native(symbol)
+            if let Some(descriptor) = BuiltinDescriptor::lookup(symbol)
+                && descriptor.class() == "method_descriptor" =>
+        {
+            names
+                .extend(["__get__", "__name__", "__objclass__", "__qualname__"].map(str::to_owned));
+            if descriptor
+                .attribute(ctx, "__text_signature__", None)
+                .is_some()
+            {
+                names.insert("__text_signature__".to_owned());
+            }
             ctx.builtin("object")
         }
         Value::Native(_) | Value::Method { .. }

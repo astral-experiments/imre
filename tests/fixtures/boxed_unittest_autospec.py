@@ -39,7 +39,52 @@ class Client:
             pass
 
 
+class Queue(list):
+    def publish(self, value):
+        pass
+
+
 check = TestCase()
+namespace = list.__dict__
+assert namespace["append"] is list.append and "__call__" not in namespace
+assert namespace["__len__"] is list.__len__ and namespace["__hash__"] is None
+with check.assertRaises(TypeError):
+    namespace["append"] = None
+queue = create_autospec(Queue, spec_set=True, instance=True)
+assert not callable(queue)
+queue.append("first")
+queue.append.assert_called_once_with("first")
+with check.assertRaises(TypeError):
+    queue.publish()
+for method in (list.append, [].append, set.add, set().add):
+    child = create_autospec(method)
+    child()
+    child(1, 2)
+    assert child.call_args_list == [call(), call(1, 2)]
+
+
+class Enqueue(Queue):
+    __call__ = list.append
+
+
+class Disabled(Enqueue):
+    __call__ = None
+
+
+enqueue = create_autospec(Enqueue, instance=True)
+enqueue("first")
+assert enqueue.call_args == call("first")
+with check.assertRaises(TypeError):
+    enqueue()
+with check.assertRaises(AssertionError):
+    enqueue.assert_called_once_with("first")
+with check.assertRaisesRegex(TypeError, "None is not a callable object"):
+    create_autospec(Disabled, instance=True)
+with check.assertRaisesRegex(TypeError, "None is not a callable object"):
+    create_autospec(Disabled())
+with check.assertRaisesRegex(TypeError, "the first argument must be callable"):
+    create_autospec(Disabled)
+
 factory = create_autospec(Client, spec_set=True)
 with check.assertRaises(TypeError):
     factory()

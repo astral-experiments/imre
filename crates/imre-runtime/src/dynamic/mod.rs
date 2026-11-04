@@ -2595,11 +2595,11 @@ impl Context {
             self.builtin(&format!("{name}.{method}"));
         }
         match name {
-            "dict" => {
+            "dict" | "list" => {
                 let mut entries = Vec::new();
                 for member in methods.iter().copied().chain(["__sizeof__"]) {
                     let key = self.heap.code_name(member);
-                    entries.push((key, self.builtin(&format!("dict.{member}"))));
+                    entries.push((key, self.builtin(&format!("{name}.{member}"))));
                 }
                 entries.push((self.heap.code_name("__hash__"), NONE));
                 let dictionary = self.dict(entries);
