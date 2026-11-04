@@ -708,6 +708,12 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
+    if config["no_site"] != true {
+        // site normally caches this value before the entry can change its environment.
+        config["initial_user_base"] = imre_ast::layout::InterpreterLayout::user_base()
+            .and_then(|base| base.into_os_string().into_string().ok())
+            .into();
+    }
     let ignore_environment = config["ignore_environment"].as_bool().unwrap_or(false)
         || config["isolated"].as_bool().unwrap_or(false);
     if config["faulthandler"].is_null() {
@@ -785,8 +791,10 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
+    let interpreter_layout = stdlib::interpreter_layout(&config, &executable);
     let mut ctx = Context {
         heap,
+        interpreter_layout,
         threads: Default::default(),
         workers: Default::default(),
         socket_default_timeout: Default::default(),

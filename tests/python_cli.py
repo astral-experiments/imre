@@ -194,6 +194,39 @@ def check_installed_site(imre, root, run):
     init.write_text("def value(): return 23\n")
     result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
+    check_symlinked_venv(launcher, site, root.resolve(), run)
+
+
+def check_symlinked_venv(launcher, base_site, root, run):
+    base = launcher.parent.parent
+    venv = root / "symlink-venv"
+    link = venv / "bin" / "venv-python"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(launcher)
+    local_site = venv / base_site.relative_to(base)
+    local_site.mkdir(parents=True)
+    decoy = root / "decoy-bin"
+    decoy.mkdir()
+    (decoy / link.name).write_text("not executable\n")
+    env = {"PATH": os.pathsep.join([str(decoy), str(link.parent), os.environ["PATH"]])}
+    code = (
+        "import importlib.util, site, sys\n"
+        "print(sys.executable == sys.argv[1], sys._base_executable == sys.argv[2], "
+        "sys.prefix == sys.exec_prefix == sys.argv[3], sys.base_prefix == sys.base_exec_prefix == sys.argv[4])\n"
+        "print(site.getsitepackages() == sys.argv[5:], site.ENABLE_USER_SITE, "
+        "importlib.util.find_spec('installed_example') is not None)\n"
+    )
+    for enabled, flag in [(True, "-sB"), (False, "-B")]:
+        (venv / "pyvenv.cfg").write_text(
+            f"home = {launcher.parent}\ninclude-system-site-packages = {str(enabled).lower()}\n"
+        )
+        expected_sites = [local_site, base_site] if enabled else [local_site]
+        result = run(link.name, flag, "-c", code, link, launcher, venv, base, *expected_sites,
+                     extra=env, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"True True True True\nTrue False " + str(enabled).encode() + b"\n", b"",
+        ), result
+
 
 
 def check_sysconfig_build(imre, root, run):
@@ -221,6 +254,42 @@ def check_sysconfig_build(imre, root, run):
         (modules / "Setup.local").touch()
         result = run(imre, "-B", fixture, project, home, empty, extra=extra)
         assert (result.returncode, result.stdout, result.stderr) == (0, b"build markers passed\n", b""), result
+
+
+def check_user_site(imre, root, run):
+    root = root.resolve()
+    version = json.loads(run(imre, "build-target").stdout)["python_version"]
+    base = root / "user_base"
+    packages = base / "lib" / f"python{version}" / "site-packages"
+    packages.mkdir(parents=True)
+    (packages / "user_site_probe.py").write_text("value = 73\n")
+    extras = root / "user_extras"
+    extras.mkdir()
+    (extras / "pth_probe.py").write_text("value = 51\n")
+    (packages / "extras.pth").write_text(str(extras) + "\n")
+    extra = {"PYTHONUSERBASE": str(base)}
+    code = (
+        "import importlib.util, site, sys\n"
+        "print(site.USER_BASE == site.getuserbase() == sys.argv[1], "
+        "site.USER_SITE == site.getusersitepackages() == sys.argv[2])\n"
+        "print(site.ENABLE_USER_SITE, sys.flags.no_user_site, "
+        "importlib.util.find_spec('user_site_probe') is not None, "
+        "importlib.util.find_spec('pth_probe') is not None)\n"
+    )
+    for flags, expected in [("-B", b"True 0 True True"), ("-sB", b"False 1 False False")]:
+        result = run(imre, flags, "-c", code, str(base), str(packages), extra=extra, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"True True\n" + expected + b"\n", b"",
+        ), result
+    imported = run(imre, "-B", "-c", "import user_site_probe; print(user_site_probe.value)", extra=extra, timeout=300)
+    assert (imported.returncode, imported.stdout, imported.stderr) == (0, b"73\n", b""), imported
+    lazy = run(
+        imre, "-SB", "-c",
+        "import site, sys; print(site.USER_BASE, site.USER_SITE, site.ENABLE_USER_SITE); "
+        "print(site.getuserbase() == sys.argv[1], site.getusersitepackages() == sys.argv[2], sys.argv[2] in sys.path)",
+        str(base), str(packages), extra=extra, timeout=300,
+    )
+    assert (lazy.returncode, lazy.stdout, lazy.stderr) == (0, b"None None None\nTrue True False\n", b""), lazy
 
 
 def check_script_sitecustomize(imre, root, run):
@@ -1511,6 +1580,7 @@ def main():
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
+            check_user_site(imre, root, run)
             check_script_sitecustomize(imre, root, run)
             check_explicit_site_directory(imre, root, run)
         if sys.platform.startswith("linux"):
