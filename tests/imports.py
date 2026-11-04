@@ -1699,6 +1699,7 @@ def main() -> None:
                 "        from io import BytesIO\n"
                 "        with open('members.gz', 'rb') as raw:\n"
                 "            with module.GzipFile(fileobj=raw) as reader:\n"
+                "                assert reader.peek(1).startswith(b'f') and reader.tell() == 0\n"
                 "                assert reader.read(3) == b'fir' and reader.rewind() is None\n"
                 "                assert reader.tell() == 0 and reader.read(5) == b'first'\n"
                 "            raw.seek(0)\n"
