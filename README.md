@@ -175,6 +175,16 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `zoneinfo` | 41 | 261 | 0 | All 18 originals in WeirdZoneTest and CWeirdZoneTest passed on CPython and public Imre at O0 and O3 after LZMA decompression landed. The cumulative count includes the 23 previously passing properties. |
 | **Measured total (19 of 19 families)** | **1,759** | **2,875** | **8** |  |
 
+### Whole-suite baselines for later additions
+
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module.
+
+| Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
+| --- | ---: | ---: | --- | --- |
+| `pyexpat` | 26 | 60 | 47 passed, 13 skipped | 26 passed, 20 errors, 14 skipped |
+
+The XML parser suite registered 60 tests. A class setup skipped one before its method ran, so unittest reported 59. Two independent Linux workers agreed on every outcome across [public revision 9917551a](https://github.com/astral-experiments/imre/commit/9917551a0e66b70a6170bd27e9d39588395c093d) and [public revision f4232093](https://github.com/astral-experiments/imre/commit/f4232093422470c62027647aa893635fb8ec0f5a).
+
 ## Design
 
 Types are part of Imre's compilation contract: variables, containers, and class
