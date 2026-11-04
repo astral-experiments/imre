@@ -34,6 +34,7 @@ declare void @imre_dyn_call_position(ptr, ptr)
 declare i64 @imre_dyn_contains_literal_tuple(ptr, i64, ptr, i64, i32)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
 declare i64 @imre_dyn_positional_method_at(ptr, i64, ptr, i64, i64, ptr, i64)
+declare i64 @imre_dyn_partition_field_at(ptr, i64, ptr, i32, ptr, i64, ptr, i64)
 declare i64 @imre_dyn_string_method_target(ptr, i64, ptr, ptr)
 declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
 declare void @imre_dyn_expression_line(ptr, i32)
@@ -583,6 +584,11 @@ enum CallArguments {
         count: usize,
         receiver_slot: bool,
     },
+    PartitionField {
+        array: &'static str,
+        index: u32,
+        get_position: String,
+    },
 }
 
 struct Function<'a, 'p> {
@@ -953,6 +959,14 @@ impl Function<'_, '_> {
         let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
         let scope = &self.scope;
         let (function, args) = match operands {
+            CallArguments::PartitionField {
+                array,
+                index,
+                get_position,
+            } => (
+                "imre_dyn_partition_field_at",
+                format!("ptr {array}, i32 {index}, ptr {get_position}"),
+            ),
             CallArguments::Packed { args, kwargs } => (
                 "imre_dyn_scoped_call_at",
                 format!("i64 {args}, i64 {kwargs}"),

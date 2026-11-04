@@ -19,13 +19,13 @@ impl Function<'_, '_> {
         let line = self.source.line(position);
         let previous = self.expression_line;
         if previous == line {
-            return self.expr_inner(expr);
+            return self.expr_inner(expr, None);
         }
         self.expression_line = line;
         self.line(&format!(
             "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
         ));
-        let value = self.expr_inner(expr);
+        let value = self.expr_inner(expr, None);
         self.expression_line = previous;
         if !self.terminated {
             self.line(&format!(
@@ -35,7 +35,37 @@ impl Function<'_, '_> {
         value
     }
 
-    fn expr_inner(&mut self, expr: &ast::Expr) -> String {
+    /// Select one field from a single-line partition call so both operations retain
+    /// their expression line. Other receivers still dispatch through their methods.
+    fn partition_index(&self, subscript: &ast::ExprSubscript) -> Option<u32> {
+        let ast::Expr::Call(call) = &*subscript.value else {
+            return None;
+        };
+        if self.source.line(subscript.start()) != self.source.line(subscript.end()) {
+            return None;
+        }
+        let field = imre_ast::direct_method(
+            call,
+            &self.source.method_imports,
+            Some(&self.source.private_names),
+        )?;
+        if !matches!(field.attr.as_str(), "partition" | "rpartition")
+            || !call.arguments.keywords.is_empty()
+            || !matches!(call.arguments.args.as_ref(), [arg] if !matches!(arg, ast::Expr::Starred(_)))
+        {
+            return None;
+        }
+        let ast::Expr::NumberLiteral(literal) = &*subscript.slice else {
+            return None;
+        };
+        let ast::Number::Int(index) = &literal.value else {
+            return None;
+        };
+        let index = u32::try_from(index.as_i64()?).ok()?;
+        (index < 3).then_some(index)
+    }
+
+    fn expr_inner(&mut self, expr: &ast::Expr, partition: Option<(u32, String)>) -> String {
         match expr {
             ast::Expr::NoneLiteral(_) => "0".into(),
             ast::Expr::EllipsisLiteral(_) => "3".into(),
@@ -55,6 +85,12 @@ impl Function<'_, '_> {
                 self.attr(&base, v.attr.as_str())
             }
             ast::Expr::Subscript(v) => {
+                if let Some(index) = self.partition_index(v) {
+                    let span = self.expression_span(expr, &v.value, b'[');
+                    let position =
+                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
+                    return self.expr_inner(&v.value, Some((index, position)));
+                }
                 let object = self.expr(&v.value);
                 let key = self.expr(&v.slice);
                 let span = self.expression_span(expr, &v.value, b'[');
@@ -176,10 +212,19 @@ impl Function<'_, '_> {
                         .chain(v.arguments.args.iter().map(|arg| self.expr(arg)))
                         .collect();
                     let (array, count) = self.handle_array(&values);
-                    CallArguments::Positional {
-                        array,
-                        count,
-                        receiver_slot: bound_receiver.is_some(),
+                    if let Some((index, get_position)) = partition {
+                        debug_assert!(bound_receiver.is_some() && count == 2);
+                        CallArguments::PartitionField {
+                            array,
+                            index,
+                            get_position,
+                        }
+                    } else {
+                        CallArguments::Positional {
+                            array,
+                            count,
+                            receiver_slot: bound_receiver.is_some(),
+                        }
                     }
                 };
                 let span = self.expression_span(expr, &v.func, b'(');

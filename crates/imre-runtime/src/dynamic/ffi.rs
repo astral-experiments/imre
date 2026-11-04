@@ -1326,6 +1326,65 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_method_at(
     }
 }
 
+/// Return a single field from an exact string partition, or index the result of a
+/// custom method using the ordinary subscription protocol.
+///
+/// # Safety
+/// The active caller roots both prepared operands and supplies null or static positions.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_partition_field_at(
+    context: *mut Context,
+    callable: Id,
+    operands: *const [Id; 2],
+    index: u32,
+    get_span: *const [u32; 4],
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
+    // SAFETY: the generated call supplies a receiver slot and exactly one argument.
+    let (ctx, [receiver, separator]) = unsafe { (&mut *context, *operands) };
+    if let Value::Native(symbol) = ctx.heap.get(callable)
+        && matches!(symbol.as_str(), "str.partition" | "str.rpartition")
+        && matches!(ctx.heap.get(receiver), Value::Str(_))
+        && matches!(ctx.heap.get(separator), Value::Str(_))
+    {
+        let reverse = symbol == "str.rpartition";
+        // SAFETY: the call position is null or static.
+        return scoped_call(ctx, unsafe { span.as_ref() }, |ctx| {
+            let fields = crate::objects::partition_text(
+                ctx.str_value(receiver)?,
+                ctx.str_value(separator)?,
+                reverse,
+            )?;
+            let selected = match (fields, index) {
+                (Some((left, _)), 0) => ctx.text(left.to_owned()),
+                (Some(_), 1) => separator,
+                (Some((_, right)), 2) => ctx.text(right.to_owned()),
+                (None, 0) if !reverse => receiver,
+                (None, 2) if reverse => receiver,
+                (None, 0..=2) => ctx.text(""),
+                _ => unreachable!("compiler emits indices in 0..=2"),
+            };
+            ctx.finish_call_operands(mark, selected);
+            ctx.check_call_return(selected)
+        });
+    }
+    // SAFETY: the receiver slot, argument and call position follow the prepared method ABI.
+    let result = unsafe {
+        imre_dyn_positional_method_at(context, callable, operands.cast(), 2, mark, span, scope)
+    };
+    // SAFETY: the call has returned, so its borrow of this context has ended.
+    let ctx = unsafe { &mut *context };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let key = ctx.int(i64::from(index));
+    let result = ctx.get_item(result, key);
+    // SAFETY: the subscript position is null or static.
+    finish_at(ctx, result, unsafe { get_span.as_ref() })
+}
+
 /// Invoke a call whose positional operands remain rooted in the caller's frame.
 ///
 /// # Safety
