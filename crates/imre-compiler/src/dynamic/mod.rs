@@ -853,7 +853,14 @@ pub(crate) fn compile<const SPLIT: bool>(
                 imports.add(0, "unittest.mock");
             }
             if uses_import_builtin || seen.contains("importlib") {
-                for name in ["_pyio", "configparser", "py_compile", "sysconfig", "uuid"] {
+                for name in [
+                    "_pyio",
+                    "configparser",
+                    "optparse",
+                    "py_compile",
+                    "sysconfig",
+                    "uuid",
+                ] {
                     if !seen.contains(name) {
                         imports.names.push((0, name.to_owned()));
                     }

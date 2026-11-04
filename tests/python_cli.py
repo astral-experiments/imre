@@ -3242,6 +3242,15 @@ def report(text):
             "print(address.addr_spec, options)\n",
             "email._header_value_parser", native_timeout=300,
         )
+        compare(
+            "-B", "-c",
+            "import importlib, sys\n"
+            "parser = importlib.import_module(sys.argv[1]).OptionParser()\n"
+            "parser.add_option('--file', action='append')\n"
+            "options, args = parser.parse_args(['--file=a', '--file', 'b', 'rest'])\n"
+            "print(options.file, args, '--file' in parser.format_help())\n",
+            "optparse", native_timeout=300,
+        )
         # A from-import elsewhere in the same program would already select the boxed runtime.
         queue_lookup = root / "queue_lookup.py"
         for statement, name in (("import logging.handlers", "logging.handlers"),
