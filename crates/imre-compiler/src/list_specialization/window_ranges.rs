@@ -217,33 +217,28 @@ fn bound_cursor_counters(narrow: &mut [Statement], cursor: usize) -> Vec<usize> 
     let Some(ready) = checked_pull_flag(body, cursor) else {
         return vec![];
     };
-    let mut writes = std::collections::BTreeMap::new();
-    ir::walk_writes(body, |slot, _| *writes.entry(slot).or_insert(0usize) += 1);
     let mut bounds = std::collections::BTreeMap::new();
-    visit_successful_pulls(body, ready, |statements| {
-        ir::walk_writes(statements, |slot, rhs| {
-            if writes[&slot] == 1
-                && let Some(Expr {
-                    kind: ExprKind::Binary(op, left, right),
-                    ty: Type::Int,
-                }) = rhs
-                && matches!(left.kind,ExprKind::Local(id) if id == slot)
-                && let ExprKind::Int(literal) = &right.kind
-                && let Ok(magnitude) = literal.parse::<i32>()
-            {
-                let step = match op {
-                    ir::Binary::Add => i64::from(magnitude),
-                    ir::Binary::Subtract => -i64::from(magnitude),
-                    _ => return,
-                };
-                let change = i128::from(HIGH) * i128::from(step);
-                let min = i128::from(LOW) + change.min(0);
-                let max = i128::from(HIGH) + change.max(0);
-                if min >= -(1_i128 << 62) && max < 1_i128 << 62 {
-                    bounds.insert(slot, (min as i64, max as i64));
-                }
+    visit_single_pull_writes(body, ready, |slot, rhs| {
+        if let Expr {
+            kind: ExprKind::Binary(op, left, right),
+            ty: Type::Int,
+        } = rhs
+            && matches!(left.kind,ExprKind::Local(id) if id == slot)
+            && let ExprKind::Int(literal) = &right.kind
+            && let Ok(magnitude) = literal.parse::<i32>()
+        {
+            let step = match op {
+                ir::Binary::Add => i64::from(magnitude),
+                ir::Binary::Subtract => -i64::from(magnitude),
+                _ => return,
+            };
+            let change = i128::from(HIGH) * i128::from(step);
+            let min = i128::from(LOW) + change.min(0);
+            let max = i128::from(HIGH) + change.max(0);
+            if min >= -(1_i128 << 62) && max < 1_i128 << 62 {
+                bounds.insert(slot, (min as i64, max as i64));
             }
-        });
+        }
     });
     fn rewrite(body: &mut [Statement], bounds: &std::collections::BTreeMap<usize, (i64, i64)>) {
         fn expr(value: &mut Expr, bounds: &std::collections::BTreeMap<usize, (i64, i64)>) {
@@ -274,7 +269,7 @@ fn bound_cursor_counters(narrow: &mut [Statement], cursor: usize) -> Vec<usize> 
 }
 
 /// Returns the success flag of a single cursor pull, reset on every iteration.
-fn checked_pull_flag(body: &[Statement], cursor: usize) -> Option<usize> {
+pub(super) fn checked_pull_flag(body: &[Statement], cursor: usize) -> Option<usize> {
     let mut ready = None;
     let mut pulls = 0;
     let mut clears = 0;
@@ -307,6 +302,26 @@ fn checked_pull_flag(body: &[Statement], cursor: usize) -> Option<usize> {
         return None;
     }
     Some(ready)
+}
+
+/// Visits single assignments dominated by a successful pull. Every other
+/// write, including moves and implicit cleanup, disqualifies that local.
+pub(super) fn visit_single_pull_writes(
+    body: &[Statement],
+    ready: usize,
+    mut visit: impl FnMut(usize, &Expr),
+) {
+    let mut writes = std::collections::BTreeMap::new();
+    ir::walk_writes(body, |slot, _| *writes.entry(slot).or_insert(0usize) += 1);
+    visit_successful_pulls(body, ready, |statements| {
+        ir::walk_writes(statements, |slot, value| {
+            if writes[&slot] == 1
+                && let Some(value) = value
+            {
+                visit(slot, value);
+            }
+        });
+    });
 }
 
 /// Visits statements that execute only after the iterator produced a scalar.

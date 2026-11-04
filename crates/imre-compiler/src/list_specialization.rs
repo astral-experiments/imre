@@ -2,6 +2,7 @@
 //! scanning for bounded integers. Without a range, each fast read checks its
 //! own tagged word. Runtime identity guards exclude aliases of append targets.
 
+pub(crate) mod cursor_indices;
 mod window_ranges;
 pub(crate) use window_ranges::{is_window_range_guard, reserved_append_window};
 

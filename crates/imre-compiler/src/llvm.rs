@@ -411,6 +411,7 @@ fn emit_program(
         uses_forward_cursors: false,
         append_windows: BTreeMap::new(),
         reserved_append_window: None,
+        cursor_index_proofs: BTreeSet::new(),
         uses_append_windows: false,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
@@ -446,6 +447,7 @@ fn emit_program(
         line_slots: Vec::new(),
         affine_literal_lengths: Vec::new(),
         cached_string_lengths: BTreeSet::new(),
+        cursor_scalar_lengths: Default::default(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
         guarded_integer_lists: Vec::new(),
@@ -667,6 +669,7 @@ struct Emitter<'a, 'module> {
     uses_forward_cursors: bool,
     append_windows: BTreeMap<usize, String>,
     reserved_append_window: Option<usize>,
+    cursor_index_proofs: BTreeSet<usize>,
     uses_append_windows: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
@@ -702,6 +705,7 @@ struct Emitter<'a, 'module> {
     line_slots: Vec<bool>,
     affine_literal_lengths: Vec<(usize, i32)>,
     cached_string_lengths: BTreeSet<usize>,
+    cursor_scalar_lengths: crate::list_specialization::cursor_indices::ScalarLengths,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
     guarded_integer_lists: Vec<(usize, String, String)>,
@@ -1389,6 +1393,37 @@ impl Emitter<'_, '_> {
             ordinary.operand
         ));
         Some(self.unpack_word(result, Type::Int))
+    }
+
+    /// Send an uncovered cursor span to the existing generic loop before reserving the append window.
+    fn guard_cursor_indices(
+        &mut self,
+        span: &crate::list_specialization::cursor_indices::Span,
+        bytes: &str,
+        length: &str,
+        fallback: &str,
+    ) {
+        self.line("; stable list covers cursor index span");
+        // Fewer than eight bytes cannot supply eight pulls to amortize the range check.
+        let check = self.label();
+        let long = self.instruction(format!("icmp uge i64 {bytes}, 8"));
+        self.branch(&long, &check, fallback);
+        self.start(&check);
+        let word = self.borrow_slot(span.counter).operand;
+        let tag = self.instruction(format!("trunc i64 {word} to i1"));
+        let start = self.instruction(format!("ashr i64 {word}, 1"));
+        let min = self.instruction(format!("add i64 {start}, {}", span.low));
+        let end = self.instruction(format!("add i64 {start}, {bytes}"));
+        let max = self.instruction(format!("add i64 {end}, {}", i64::from(span.high) - 1));
+        let short_budget = self.instruction(format!("icmp ule i64 {bytes}, 2147483647"));
+        let nonnegative = self.instruction(format!("icmp sge i64 {min}, 0"));
+        let covered = self.instruction(format!("icmp ult i64 {max}, {length}"));
+        let bounds = self.instruction(format!("and i1 {covered}, {nonnegative}"));
+        let small = self.instruction(format!("and i1 {tag}, {short_budget}"));
+        let guard = self.instruction(format!("and i1 {small}, {bounds}"));
+        let covered = self.label();
+        self.branch(&guard, &covered, fallback);
+        self.start(&covered);
     }
 
     fn load_list_word(&mut self, data: &str, index: &str) -> String {
@@ -2174,6 +2209,26 @@ impl Emitter<'_, '_> {
         self.append_windows.clear();
         let cursors = ir::private_string_cursors(function);
         let invariant = ir::invariant_string_cursors(function, &cursors);
+        self.cursor_scalar_lengths =
+            crate::list_specialization::cursor_indices::ScalarLengths::select(function, &invariant);
+        for source in self
+            .cursor_scalar_lengths
+            .cursors
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>()
+        {
+            writeln!(
+                self.entry_allocas,
+                "  %cursor_scalar_length{source} = alloca i64"
+            )
+            .unwrap();
+            writeln!(
+                self.entry_allocas,
+                "  store i64 9223372036854775807, ptr %cursor_scalar_length{source}"
+            )
+            .unwrap();
+        }
         let mut estimated = std::collections::BTreeSet::new();
         ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Builtin(Builtin::CursorScanBudget(slot), _) = value.kind {
@@ -2181,7 +2236,7 @@ impl Emitter<'_, '_> {
             }
         });
         for slot in cursors {
-            let start = invariant.contains(&slot).then(|| {
+            let start = invariant.contains_key(&slot).then(|| {
                 let start = self.entry_alloca("ptr");
                 writeln!(self.entry_allocas, "  store ptr null, ptr {start}").unwrap();
                 start
@@ -2840,10 +2895,10 @@ impl Emitter<'_, '_> {
                     self.forward_cursors
                         .get(&cursor)
                         .cloned()
-                        .map(|c| (slot, c))
+                        .map(|c| (slot, cursor, c))
                 });
                 let previous = self.reserved_append_window;
-                if let Some((slot, _)) = &reserve {
+                if let Some((slot, _, _)) = &reserve {
                     self.reserved_append_window = Some(*slot);
                 }
                 let condition = self.expr(test);
@@ -2864,11 +2919,31 @@ impl Emitter<'_, '_> {
                     let tagged = self.instruction(format!("trunc i64 {words} to i1"));
                     guard = self.instruction(format!("and i1 {guard}, {tagged}"));
                 }
-                if let Some((slot, cursor)) = reserve {
+                let span = if let Some((slot, id, cursor)) = reserve {
                     let check = self.label();
                     self.branch(&guard, &check, &no_label);
                     self.start(&check);
-                    let bytes = self.remaining_cursor_bytes(&cursor);
+                    let mut bytes = self.remaining_cursor_bytes(&cursor);
+                    let span = self
+                        .cursor_scalar_lengths
+                        .cursors
+                        .get(&id)
+                        .copied()
+                        .and_then(|source| {
+                            let span = crate::list_specialization::cursor_indices::span(yes, id)?;
+                            let (length, _) =
+                                self.guarded_list_buffer(&Expr::local(span.list, Type::ListInt))?;
+                            let count = self.instruction(format!(
+                                "load i64, ptr %cursor_scalar_length{source}"
+                            ));
+                            let tighter =
+                                self.instruction(format!("icmp ult i64 {count}, {bytes}"));
+                            bytes = self.instruction(format!(
+                                "select i1 {tighter}, i64 {count}, i64 {bytes}"
+                            ));
+                            self.guard_cursor_indices(&span, &bytes, &length, &no_label);
+                            Some(span)
+                        });
                     let list = self.borrow_slot(slot).operand;
                     let window = self.append_window(slot);
                     let success = self.instruction(format!(
@@ -2877,16 +2952,27 @@ impl Emitter<'_, '_> {
                     let opened = self.instruction(format!("icmp ne i32 {success}, 0"));
                     self.branch(&opened, &yes_label, &no_label);
                     self.reserved_append_window = Some(slot);
+                    span
                 } else {
                     self.branch(&guard, &yes_label, &no_label);
-                }
+                    None
+                };
                 self.start(&yes_label);
                 let prior = self.guarded_integer_lists.len();
                 self.borrow_guarded_integer_lists(test);
                 for slot in &slots {
                     self.small_locals[*slot] = true;
                 }
+                let prior_proofs = span.map(|span| {
+                    std::mem::replace(
+                        &mut self.cursor_index_proofs,
+                        span.indices.into_iter().collect(),
+                    )
+                });
                 self.block(yes);
+                if let Some(proofs) = prior_proofs {
+                    self.cursor_index_proofs = proofs;
+                }
                 self.reserved_append_window = previous;
                 for slot in slots {
                     self.small_locals[slot] = false;
@@ -7483,7 +7569,7 @@ impl Emitter<'_, '_> {
                 small(self.module.types.fields(args[0].value.ty).unwrap().len() as i64)
             }
             Builtin::Len => {
-                if let ExprKind::Local(slot) = expressions[0].kind
+                let length = if let ExprKind::Local(slot) = expressions[0].kind
                     && self.cached_string_lengths.contains(&slot)
                 {
                     self.cached_string_length(slot, &args[0].value)
@@ -7509,7 +7595,24 @@ impl Emitter<'_, '_> {
                         Type::Int,
                         &[&args[0].value],
                     )
+                };
+                if let Some(source) = self
+                    .cursor_scalar_lengths
+                    .reads
+                    .get(&(std::ptr::from_ref(&expressions[0]) as usize))
+                    .copied()
+                {
+                    let word = &length.operand;
+                    let small = self.instruction(format!("trunc i64 {word} to i1"));
+                    let count = self.instruction(format!("ashr i64 {word}, 1"));
+                    let bound = self.instruction(format!(
+                        "select i1 {small}, i64 {count}, i64 9223372036854775807"
+                    ));
+                    self.line(format!(
+                        "store i64 {bound}, ptr %cursor_scalar_length{source}"
+                    ));
                 }
+                length
             }
             Builtin::TupleGet => {
                 let tuple = &args[0].value;
@@ -7605,7 +7708,17 @@ impl Emitter<'_, '_> {
                 };
                 debug_assert!(min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62));
                 let in_bounds = matches!(builtin, Builtin::ListGetBoundedInBounds { .. });
-                let word = if in_bounds {
+                let word = if self
+                    .cursor_index_proofs
+                    .contains(&(std::ptr::from_ref(&expressions[1]) as usize))
+                {
+                    self.line("; cursor-proven list access");
+                    let (_, data) = self
+                        .guarded_list_buffer(&expressions[0])
+                        .expect("the span guard captured this stable buffer");
+                    let offset = self.instruction(format!("ashr i64 {}, 1", args[1].value.operand));
+                    self.load_list_word(&data, &offset)
+                } else if in_bounds {
                     let ExprKind::Local(slot) = expressions[0].kind else {
                         unreachable!("the in-bounds proof identifies the stable list local")
                     };
@@ -12293,6 +12406,22 @@ def transform(values: list[int], count: int) -> int:
         assert_eq!(slots(source), 2);
         let rebound = source.replace("        i += 1", "        b = a + b\n        i += 1");
         assert_eq!(slots(&rebound), 1);
+    }
+
+    #[test]
+    fn direct_cursor_indices_require_an_unchanged_ordinal() {
+        let source = include_str!("../../../tests/fixtures/iterables/scalar_index_spans.py")
+            .replace("\r\n", "\n");
+        let direct = "; cursor-proven list access";
+        let llvm = compile(&source, &CompileOptions::default()).unwrap();
+        assert!(llvm.matches(direct).count() >= 2);
+        let rebound = source.replacen(
+            "            ordinal = index\n",
+            "            ordinal = index\n            if ch == \"!\":\n                ordinal = len(data) + 10\n",
+            1,
+        );
+        let llvm = compile(&rebound, &CompileOptions::default()).unwrap();
+        assert!(!llvm.contains(direct));
     }
 
     #[test]
