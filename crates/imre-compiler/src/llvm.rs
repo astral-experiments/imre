@@ -2764,7 +2764,12 @@ impl Emitter<'_, '_> {
                     Vec::new()
                 };
                 let mut guard = condition.operand;
-                if let Some((first, rest)) = slots.split_first() {
+                let unchecked = slots
+                    .iter()
+                    .copied()
+                    .filter(|slot| !self.ranges.starts_small(statement, *slot))
+                    .collect::<Vec<_>>();
+                if let Some((first, rest)) = unchecked.split_first() {
                     let mut words = self.borrow_slot(*first).operand;
                     for slot in rest {
                         let word = self.borrow_slot(*slot).operand;
@@ -7555,7 +7560,7 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
-            Builtin::IntBounded { min, max } => {
+            Builtin::BoundedCursorValue { min, max } | Builtin::IntBounded { min, max } => {
                 debug_assert!(min <= max && *min >= -(1_i64 << 62) && *max < (1_i64 << 62));
                 debug_assert!(matches!(expressions[0].kind, ExprKind::Local(_)));
                 // Range analysis already uses the checked induction proof to
@@ -7582,6 +7587,28 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::IntFitsI32 => {
+                if self
+                    .ranges
+                    .integer(&expressions[0])
+                    .is_some_and(|r| r.min >= i64::from(i32::MIN) && r.max <= i64::from(i32::MAX))
+                {
+                    return Value {
+                        ty: Type::Bool,
+                        operand: "true".to_owned(),
+                        small_integer: false,
+                    };
+                }
+                let word = &args[0].value.operand;
+                let tag = self.instruction(format!("trunc i64 {word} to i1"));
+                let shift = self.instruction(format!("add i64 {word}, 4294967295"));
+                let fits = self.instruction(format!("icmp ule i64 {shift}, 8589934590"));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("and i1 {tag}, {fits}")),
+                    small_integer: false,
+                }
+            }
             Builtin::CursorScanBudget(slot) => {
                 let operand = if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
                     let next = self.instruction(format!("load ptr, ptr {}", cursor.next));
@@ -7589,10 +7616,13 @@ impl Emitter<'_, '_> {
                     let next = self.instruction(format!("ptrtoint ptr {next} to i64"));
                     let end = self.instruction(format!("ptrtoint ptr {end} to i64"));
                     let remaining = self.instruction(format!("sub i64 {end}, {next}"));
-                    let fits = self.instruction(format!("icmp ule i64 {remaining}, {}", i32::MAX));
+                    let fits = self.instruction(format!(
+                        "icmp ule i64 {remaining}, {}",
+                        i64::from(i32::MAX) + 1
+                    ));
                     let count = self.instruction(format!(
                         "select i1 {fits}, i64 {remaining}, i64 {}",
-                        i32::MAX
+                        i64::from(i32::MAX) + 1
                     ));
                     let tagged = self.instruction(format!("shl i64 {count}, 1"));
                     self.instruction(format!("or i64 {tagged}, 1"))

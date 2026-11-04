@@ -604,6 +604,31 @@ mod tests {
     }
 
     #[test]
+    fn bounds_integer_updates_after_successful_scalar_pulls() {
+        let source = include_str!("../../../tests/fixtures/iterables/scalar_cursor_counters.py");
+        let bounds_step_two = |source| {
+            let graph = crate::modules::SourceGraph::single(source).unwrap();
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            crate::specialize(&mut module).unwrap();
+            let mut bounded = false;
+            for function in &module.functions {
+                walk_expressions(&function.body, &mut |value| {
+                    bounded |= matches!(value.kind, ExprKind::Builtin(
+                        Builtin::BoundedCursorValue { max, .. }, _
+                    ) if max == 3 * i64::from(i32::MAX));
+                });
+            }
+            bounded
+        };
+        assert!(bounds_step_two(source));
+        let twice = source.replace(
+            "        counter += 2\n",
+            "        counter += 2\n        counter += 1\n",
+        );
+        assert!(!bounds_step_two(&twice));
+    }
+
+    #[test]
     fn buffers_only_unobserved_appends_to_one_stable_list() {
         let source = "def fill(data: list[int], out: list[int], text: str) -> None:\n    for c in text:\n        out.append(out[-1] + data[0] + data[1] + ord(c))\nfill([1, 2], [0], 'abc')\n";
         let operations = |source: &str| {

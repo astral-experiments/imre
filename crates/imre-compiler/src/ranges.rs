@@ -38,6 +38,7 @@ impl IntRange {
 pub(crate) struct RangeFacts<'ir> {
     intervals: IntegerFacts,
     cursors: HashMap<*const Statement, Interval>,
+    guarded_entries: HashMap<*const Statement, Vec<bool>>,
     module: PhantomData<&'ir Module>,
 }
 
@@ -51,6 +52,13 @@ impl IntegerFacts {
 }
 
 impl RangeFacts<'_> {
+    /// Records old owners known to be immediate on every incoming edge.
+    pub(crate) fn starts_small(&self, statement: &Statement, slot: usize) -> bool {
+        self.guarded_entries
+            .get(&std::ptr::from_ref(statement))
+            .is_some_and(|values| values[slot])
+    }
+
     pub(crate) fn integer(&self, expression: &Expr) -> Option<IntRange> {
         self.intervals.get(expression)
     }
@@ -179,6 +187,7 @@ pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
     RangeFacts {
         intervals: IntegerFacts(analyzer.intervals),
         cursors: analyzer.cursors,
+        guarded_entries: analyzer.guarded_entries,
         module: PhantomData,
     }
 }
@@ -485,6 +494,7 @@ impl Flow {
 struct Analyzer {
     intervals: HashMap<*const Expr, Interval>,
     cursors: HashMap<*const Statement, Interval>,
+    guarded_entries: HashMap<*const Statement, Vec<bool>>,
     cleared: Vec<Interval>,
 }
 
@@ -530,6 +540,24 @@ impl Analyzer {
     }
 
     fn statement(&mut self, statement: &Statement, mut state: State, record: bool) -> Flow {
+        if record
+            && let Statement::If(test, _, _) = statement
+            && crate::list_specialization::is_window_range_guard(test)
+        {
+            let small = state
+                .0
+                .iter()
+                .map(|value| value.small().is_some())
+                .collect::<Vec<_>>();
+            self.guarded_entries
+                .entry(std::ptr::from_ref(statement))
+                .and_modify(|entry| {
+                    for (old, new) in entry.iter_mut().zip(&small) {
+                        *old &= *new;
+                    }
+                })
+                .or_insert(small);
+        }
         match statement {
             Statement::Assign(slot, value) => {
                 state.0[*slot] = self.expression(value, &mut state, record)
@@ -969,6 +997,7 @@ impl Analyzer {
                     Builtin::GetBoundedInAppendWindow { min, max, .. }
                     | Builtin::ListGetBounded { min, max }
                     | Builtin::ListGetBoundedInBounds { min, max }
+                    | Builtin::BoundedCursorValue { min, max }
                     | Builtin::IntBounded { min, max } => {
                         Interval::bounded(i128::from(*min), i128::from(*max))
                     }
