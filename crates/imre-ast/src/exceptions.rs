@@ -47,6 +47,8 @@ macro_rules! exception_kinds {
 exception_kinds! {
     boxed_builtins {
         BaseException = 0,
+        BaseExceptionGroup = 95,
+        ExceptionGroup = 34,
         Exception = 1,
         RuntimeError = 10,
         RecursionError = 43,
@@ -122,7 +124,6 @@ exception_kinds! {
         TomlDecodeError = 30 => "TOMLDecodeError",
         JsonDecodeError = 31 => "JSONDecodeError",
         CancelledError = 33 => "CancelledError",
-        ExceptionGroup = 34 => "ExceptionGroup",
         BadZipFile = 36 => "BadZipFile",
         UnidiffParseError = 52 => "UnidiffParseError",
         ShutilError = 64 => "Error",
@@ -142,9 +143,10 @@ exception_kinds! {
 pub fn builtin_id(name: &str) -> Option<u32> {
     let kind = match name {
         "EnvironmentError" | "IOError" => Kind::OSError,
-        "ExceptionGroup" => Kind::ExceptionGroup,
         _ => match boxed_builtin_kind(name)? {
-            Kind::ChildProcessError | Kind::ProcessLookupError => return None,
+            Kind::ChildProcessError | Kind::ProcessLookupError | Kind::BaseExceptionGroup => {
+                return None;
+            }
             kind => kind,
         },
     };
@@ -172,6 +174,9 @@ impl Kind {
     pub fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
+            Self::BaseExceptionGroup => {
+                matches!(self, Self::BaseExceptionGroup | Self::ExceptionGroup)
+            }
             Self::Warning => WARNING_CATEGORIES.contains(&self),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::SyntaxError => matches!(
@@ -182,6 +187,7 @@ impl Kind {
             Self::Exception => !matches!(
                 self,
                 Self::BaseException
+                    | Self::BaseExceptionGroup
                     | Self::SystemExit
                     | Self::GeneratorExit
                     | Self::KeyboardInterrupt

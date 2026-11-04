@@ -83,6 +83,14 @@ pub(super) struct Location {
     pub span: Option<[u32; 3]>,
 }
 
+/// Immutable construction-time fields independent of BaseException.args.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct GroupData {
+    pub(super) message: Id,
+    pub(super) exceptions: Id,
+    pub(super) sequence_repr: Option<Id>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct Trace {
     // Pending activations precede the already exposed, mutable Python traceback.
@@ -93,6 +101,7 @@ pub(super) struct Trace {
     /// Live members belong to the exception instance across traceback clones.
     pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
     pub import_names: Option<[Id; 3]>,
+    pub group: Option<GroupData>,
     pub name_error_name: Option<Id>,
     pub dictionary: Option<Id>,
     stop_value: Id,
@@ -185,6 +194,17 @@ impl Error {
         self
     }
 
+    /// Read an exception group's retained message and immutable children.
+    pub(super) fn group(&self) -> Option<[Id; 2]> {
+        let group = self.trace.as_ref()?.group?;
+        Some([group.message, group.exceptions])
+    }
+
+    /// Reuse the custom input sequence's representation captured before iteration.
+    pub(super) fn group_sequence_repr(&self) -> Option<Id> {
+        self.trace.as_ref()?.group?.sequence_repr
+    }
+
     /// Read the independent StopIteration value without allocating exception metadata.
     pub(super) fn stop_value(&self) -> Id {
         self.trace.as_ref().map_or(NONE, |trace| trace.stop_value)
@@ -236,6 +256,11 @@ impl Error {
                             .flat_map(|fields| fields.iter().map(std::cell::Cell::get)),
                     )
                     .chain(trace.import_names.into_iter().flatten())
+                    .chain(trace.group.iter().flat_map(|group| {
+                        [group.message, group.exceptions]
+                            .into_iter()
+                            .chain(group.sequence_repr)
+                    }))
                     .chain(trace.name_error_name)
                     .chain(trace.dictionary)
                     .chain((trace.head != NONE).then_some(trace.head))

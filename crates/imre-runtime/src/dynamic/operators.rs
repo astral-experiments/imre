@@ -1254,6 +1254,7 @@ impl Context {
         let mut seen = std::collections::HashSet::new();
         while let Value::Raised(error) = self.heap.get(value) {
             if error.os_args.is_some()
+                || error.group().is_some()
                 || error.trace.as_ref().is_some_and(|trace| {
                     trace
                         .import_message
@@ -1533,8 +1534,43 @@ impl Context {
         let mut closing = 0;
         let mut seen = std::collections::HashSet::new();
         loop {
+            let name = error.kind.rsplit('.').next().unwrap_or(&error.kind);
+            if let Some([message, exceptions]) = error.group() {
+                push_frame(work, Part::Closing(closing))?;
+                if repr {
+                    append_rendered_text(output, name)?;
+                    append_rendered_text(output, "(")?;
+                    push_frame(work, Part::Text(")"))?;
+                    if let Some(saved) = error.group_sequence_repr() {
+                        push_frame(work, Part::Value(saved, false))?;
+                    } else if self
+                        .exception_arguments(error)
+                        .and_then(|args| args.get(1))
+                        .is_some_and(|&source| self.list_storage(source).is_some())
+                    {
+                        push_frame(work, Part::Text("]"))?;
+                        push_frame(work, Part::Sequence(exceptions, 0))?;
+                        push_frame(work, Part::Text("["))?;
+                    } else {
+                        push_frame(work, Part::Value(exceptions, true))?;
+                    }
+                    push_frame(work, Part::Text(", "))?;
+                } else {
+                    let Value::Tuple(children) = self.heap.get(exceptions) else {
+                        unreachable!("exception group children are stored as a tuple")
+                    };
+                    let count = children.len();
+                    let plural = if count == 1 { "" } else { "s" };
+                    push_frame(
+                        work,
+                        Part::Suffix(format!(" ({count} sub-exception{plural})")),
+                    )?;
+                }
+                push_frame(work, Part::Value(message, repr))?;
+                break;
+            }
             if repr {
-                append_rendered_text(output, error.kind.rsplit('.').next().unwrap_or(&error.kind))?;
+                append_rendered_text(output, name)?;
             } else if let Some(message) =
                 error.trace.as_ref().and_then(|trace| trace.import_message)
                 && let Value::Str(text) = self.heap.get(message)

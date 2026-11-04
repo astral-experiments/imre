@@ -1,6 +1,6 @@
 //! Linux scatter reads and gather writes over exported buffers.
 
-use super::{Context, Error, Id, Result, Value, is_sequence};
+use super::{Context, Error, Id, Result, Value};
 use std::{
     collections::{HashMap, TryReserveError, hash_map::Entry},
     ops::Range,
@@ -159,7 +159,7 @@ pub(super) fn transfer(
     if write {
         crate::initialize_io();
     }
-    if !is_sequence(ctx, buffers) {
+    if !ctx.is_sequence(buffers) {
         // CPython uses the v2 spelling only for preadv's sequence check.
         let name = if name == "preadv" { "preadv2" } else { name };
         return Err(Error::new(
