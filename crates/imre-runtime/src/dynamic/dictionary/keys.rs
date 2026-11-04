@@ -52,6 +52,20 @@ impl Probe {
             mask: size - 1,
         }
     }
+    /// Advance to the next live insertion position and its current dense entry.
+    fn next_entry(&mut self, entries: &Entries, index: &Index) -> Option<(usize, usize)> {
+        for bucket in self {
+            let position = index.slots[bucket];
+            if position == EMPTY {
+                return None;
+            }
+            if position != DUMMY {
+                let dense = entries.dense(position).expect("live dictionary slot");
+                return Some((position, dense));
+            }
+        }
+        unreachable!("the dictionary probe always yields a bucket")
+    }
 }
 
 impl Iterator for Probe {
@@ -119,15 +133,7 @@ impl KeyLookup {
                 return ControlFlow::Break(dense);
             }
         }
-        for bucket in &mut self.slots {
-            let position = index.slots[bucket];
-            if position == EMPTY {
-                return ControlFlow::Break(None);
-            }
-            if position == DUMMY {
-                continue;
-            }
-            let dense = entries.dense(position).expect("live dictionary slot");
+        while let Some((position, dense)) = self.slots.next_entry(entries, index) {
             let resident = entries[dense].0;
             if resident == self.key {
                 return ControlFlow::Break(Some(dense));
@@ -136,7 +142,7 @@ impl KeyLookup {
                 return ControlFlow::Continue((position, resident));
             }
         }
-        unreachable!("the dictionary probe always yields a bucket")
+        ControlFlow::Break(None)
     }
 }
 
@@ -200,6 +206,30 @@ impl Index {
 }
 
 impl Entries {
+    /// Look up an exact string without invoking Python equality or building an index.
+    pub(in super::super) fn exact_name_item(
+        &self,
+        heap: &crate::dynamic::value::Heap,
+        name: &str,
+    ) -> Option<Id> {
+        let exact = |&(key, value): &(Id, Id)| {
+            matches!(heap.get(key), Value::Str(text) if text == name).then_some(value)
+        };
+        let Some(index) = &self.index else {
+            return self.iter().find_map(exact);
+        };
+        let hash = crate::python_hash::text(name);
+        let mut probe = Probe::new(hash, index.slots.len());
+        while let Some((_, dense)) = probe.next_entry(self, index) {
+            if index.hashes[dense] == hash
+                && let Some(value) = exact(&self[dense])
+            {
+                return Some(value);
+            }
+        }
+        None
+    }
+
     /// Ordered iterators track node mutations separately from the size of the base dict.
     pub(in super::super) fn order_state(&self) -> usize {
         self.order.as_ref().map_or(0, |order| order.revision)

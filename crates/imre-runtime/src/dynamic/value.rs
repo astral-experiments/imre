@@ -2922,17 +2922,20 @@ impl Heap {
         }
     }
 
-    pub(super) fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
+    /// Return the storage with its optional key index, including for dict subclasses.
+    fn dict_table(&self, value: Id) -> Option<&super::dictionary::Entries> {
         match self.get(self.dict_storage(value)?) {
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
             _ => unreachable!("dictionary payload"),
         }
     }
 
+    pub(super) fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
+        self.dict_table(value).map(|entries| &entries[..])
+    }
+
     pub(super) fn dict_named_item(&self, dict: Id, name: &str) -> Option<Id> {
-        self.dict_entries(dict)?.iter().find_map(|&(key, value)| {
-            matches!(self.get(key), Value::Str(k) if k == name).then_some(value)
-        })
+        self.dict_table(dict)?.exact_name_item(self, name)
     }
 
     /// Look up native backing fields on either side of ordinary dictionary materialization.

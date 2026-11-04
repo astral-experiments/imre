@@ -40,6 +40,33 @@ def current():
     del fresh.answer
     assert "answer" not in bindings
 
+    # Name lookup follows live dictionary entries after collisions, deletion and growth.
+    class Collision:
+        def __hash__(self):
+            return hash("needle")
+
+        def __eq__(self, other):
+            return False
+
+    names = ModuleType("names")
+    entries = names.__dict__
+    collision = Collision()
+    entries[collision] = "other"
+    entries["needle"] = "first"
+    assert names.needle == "first"
+    del entries[collision]
+    for i in range(75):
+        entries[str(i)] = i
+    for i in range(0, 75, 2):
+        del entries[str(i)]
+    for name in ("needle", "café", "𐐀"):
+        entries[name] = name
+        assert getattr(names, name) == name
+        del entries[name]
+        assert not hasattr(names, name)
+        entries[name] = "new"
+        assert getattr(names, name) == "new"
+
     fresh.__annotate__ = lambda form: {"format": form}
     try:
         del fresh.__annotations__
