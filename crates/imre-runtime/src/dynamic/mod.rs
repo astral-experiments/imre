@@ -3485,8 +3485,16 @@ impl Context {
             }
             "random" if source.is_none() => stdlib::random::instance::install(self, scope)?,
             "math" if source.is_none() => {
-                let pi = self.alloc(Value::Float(std::f64::consts::PI));
-                self.bind(scope, "pi", pi);
+                for (name, number) in [
+                    ("pi", std::f64::consts::PI),
+                    ("e", std::f64::consts::E),
+                    ("tau", std::f64::consts::TAU),
+                    ("inf", f64::INFINITY),
+                    ("nan", f64::NAN.abs()),
+                ] {
+                    let value = self.alloc(Value::Float(number));
+                    self.bind(scope, name, value);
+                }
             }
             #[cfg(unix)]
             "_ssl" if source.is_none() => {
