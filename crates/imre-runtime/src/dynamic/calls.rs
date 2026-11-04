@@ -2129,18 +2129,22 @@ impl Context {
         Err(Error::new_static("TypeError", message))
     }
 
-    /// Resolve an ordinary string method before evaluating positional arguments.
-    /// Keep an exact string receiver alive if an argument rebinds its last owner.
-    pub(super) fn string_method_target(&mut self, receiver: Id, symbol: &str) -> Result<(Id, Id)> {
-        if matches!(
-            self.heap.get(receiver),
-            Value::Str(_) | Value::SurrogateStr(_)
-        ) {
+    /// Keep an exact built-in receiver alive across argument evaluation. Other receivers
+    /// resolve the attribute immediately so descriptors and overrides run in Python order.
+    pub(super) fn builtin_method_target(&mut self, receiver: Id, symbol: &str) -> Result<(Id, Id)> {
+        let descriptor = match self.heap.get(receiver) {
+            Value::Str(_) | Value::SurrogateStr(_) if symbol.starts_with("str.") => Some(symbol),
+            Value::Set { frozen: true, .. } if symbol.starts_with("frozenset.") => Some(symbol),
+            // The public frozenset methods also have descriptors on set.
+            Value::Set { frozen: false, .. } => symbol.strip_prefix("frozen"),
+            _ => None,
+        };
+        if let Some(descriptor) = descriptor {
             self.heap.reserve_temporaries(1)?;
             self.heap.keep(receiver);
-            return Ok((self.builtin(symbol), receiver));
+            return Ok((self.builtin(descriptor), receiver));
         }
-        let name = symbol.strip_prefix("str.").expect("compiled string method");
+        let (_, name) = symbol.split_once('.').expect("qualified built-in method");
         Ok((self.lookup_method(receiver, name)?, NONE))
     }
 

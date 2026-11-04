@@ -1278,14 +1278,13 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     })
 }
 
-/// Look up an immediate call before evaluating its arguments. Exact string methods
-/// can pass their receiver as the first positional operand without allocating a method.
+/// Resolve a positional method call and publish its exact built-in receiver, if any.
 ///
 /// # Safety
-/// The caller supplies the active context, a NUL-terminated ordinary str method symbol, and a
-/// writable receiver slot. The slot is initialized on successful lookup.
+/// The caller supplies the active context, a NUL-terminated qualified method symbol,
+/// and a writable slot for the receiver. The slot is initialized on success.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
+pub(super) unsafe extern "C" fn imre_dyn_builtin_method_target(
     ctx: *mut Context,
     receiver: Id,
     name: *const c_char,
@@ -1294,12 +1293,27 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
     // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
     let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
     let result = ctx
-        .string_method_target(receiver, name)
+        .builtin_method_target(receiver, name)
         .map(|(callable, receiver)| {
             *bound_receiver = receiver;
             callable
         });
     finish(ctx, result)
+}
+
+/// Accept string method lookups emitted by earlier compilers.
+///
+/// # Safety
+/// The arguments satisfy the same contract as `imre_dyn_builtin_method_target`.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
+    ctx: *mut Context,
+    receiver: Id,
+    name: *const c_char,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: the existing string lookup ABI supplies the same four arguments.
+    unsafe { imre_dyn_builtin_method_target(ctx, receiver, name, bound_receiver) }
 }
 
 /// Test a handle against the evaluated elements of a literal tuple.

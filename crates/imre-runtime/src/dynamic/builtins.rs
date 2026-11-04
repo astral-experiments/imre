@@ -490,22 +490,7 @@ pub(super) fn set_methods(owner: &str) -> &'static [&'static str] {
             "union",
             "update",
         ],
-        "frozenset" => &[
-            "__class_getitem__",
-            "__contains__",
-            "__iter__",
-            "__len__",
-            "__reduce__",
-            "__repr__",
-            "copy",
-            "difference",
-            "intersection",
-            "isdisjoint",
-            "issubset",
-            "issuperset",
-            "symmetric_difference",
-            "union",
-        ],
+        "frozenset" => imre_ast::FROZENSET_METHODS,
         _ => &[],
     }
 }

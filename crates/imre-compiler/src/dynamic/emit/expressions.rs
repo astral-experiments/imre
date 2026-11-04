@@ -189,14 +189,20 @@ impl Function<'_, '_> {
                 ) {
                     let receiver = self.expr(&field.value);
                     let name = field.attr.as_str();
-                    if direct
-                        && !name.starts_with('_')
-                        && imre_ast::strings::STR_METHODS.contains(&name)
-                    {
+                    let owner = if !direct || name.starts_with('_') {
+                        None
+                    } else if imre_ast::strings::STR_METHODS.contains(&name) {
+                        Some("str")
+                    } else if imre_ast::FROZENSET_METHODS.contains(&name) {
+                        Some("frozenset")
+                    } else {
+                        None
+                    };
+                    if let Some(owner) = owner {
                         self.output.interned_identifiers.insert(name.to_owned());
-                        let symbol = self.output.data(format!("str.{name}").as_bytes());
+                        let symbol = self.output.data(format!("{owner}.{name}").as_bytes());
                         self.max_live = self.max_live.max(1);
-                        let target = self.checked(&format!("call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"));
+                        let target = self.checked(&format!("call i64 @imre_dyn_builtin_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"));
                         // Nested calls can reuse the entry-block scratch space.
                         bound_receiver = Some(self.value("load i64, ptr %live"));
                         target
