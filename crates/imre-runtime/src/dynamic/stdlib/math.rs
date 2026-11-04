@@ -25,35 +25,32 @@ pub(super) fn fraction_limit_candidates(
             "_limit_candidates takes no keyword arguments",
         ));
     }
-    let small = |id| match ctx.heap.get(id) {
-        Value::Int(value) => value.as_small().map(i128::from),
+    let integer = |id| match ctx.heap.get(id) {
+        Value::Int(value) => Some(value.big().into_owned()),
         _ => None,
     };
-    let (Some(mut n), Some(mut d), Some(limit)) = (small(n), small(d), small(limit)) else {
+    let (Some(mut n), Some(mut d), Some(limit)) = (integer(n), integer(d), integer(limit)) else {
         return Ok(super::NONE);
     };
-    if limit < 1 || d <= limit {
+    if limit < BigInt::one() || d <= limit {
         return Ok(super::NONE);
     }
-    let (mut p0, mut q0, mut p1, mut q1) = (0, 1, 1, 0);
-    while d != 0 {
-        let a = n.div_euclid(d);
-        let q2 = q0 + a * q1;
+    let (mut p0, mut q0) = (BigInt::zero(), BigInt::one());
+    let (mut p1, mut q1) = (BigInt::one(), BigInt::zero());
+    while !d.is_zero() {
+        let (a, remainder) = n.div_mod_floor(&d);
+        let q2 = &q0 + &a * &q1;
         if q2 > limit {
-            let k = (limit - q0) / q1;
-            let (p2, q2) = (p0 + k * p1, q0 + k * q1);
-            // Both candidates fit the input magnitudes. The distance product
-            // can occupy twice as many bits and must stay exact for ties.
-            let distance = 2 * d * q2;
-            let distance = match i64::try_from(distance) {
-                Ok(value) => ctx.int(value),
-                Err(_) => ctx.alloc(Value::Int(crate::Int::new(BigInt::from(distance)))),
-            };
-            let [p1, q1, p2, q2] = [p1, q1, p2, q2].map(|v| ctx.int(v as i64));
-            return Ok(ctx.alloc(Value::Tuple(vec![p1, q1, p2, q2, distance])));
+            let k = (limit - &q0) / &q1;
+            let (p2, q2) = (p0 + &k * &p1, q0 + k * &q1);
+            let distance = (d * &q2) << 1;
+            let values =
+                [p1, q1, p2, q2, distance].map(|n| ctx.alloc(Value::Int(crate::Int::new(n))));
+            return Ok(ctx.alloc(Value::Tuple(values.into())));
         }
-        (p0, q0, p1, q1) = (p1, q1, p0 + a * p1, q2);
-        (n, d) = (d, n.rem_euclid(d));
+        let p2 = p0 + a * &p1;
+        (p0, q0, p1, q1) = (p1, q1, p2, q2);
+        (n, d) = (d, remainder);
     }
     // A mutated, non-reduced Fraction can exhaust the divisions before the bound.
     Ok(super::NONE)
