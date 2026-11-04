@@ -7472,40 +7472,40 @@ impl Context {
                     );
                 }
                 let (mut args, mut kwargs) = (args, kwargs);
-                if let Some(&decimal) = self.classes.get("decimal.Decimal")
+                let value = match (&mut args[..], &mut kwargs[..]) {
+                    ([value], []) => Some(value),
+                    ([], [(key, value)]) if key == "value" => Some(value),
+                    _ => None,
+                };
+                if let Some(value) = value
+                    && let Some(decimal) = std::iter::once(callable)
+                        .chain(ancestors.iter().copied())
+                        .find(|&base| self.is_bundled_decimal(base))
                     && (callable == decimal
-                        || (ancestors.contains(&decimal)
-                            && self.class_attr(callable, "__new__").is_none()
+                        || (self.class_attr(callable, "__new__").is_none()
                             && self.class_attr(callable, "__init__")
                                 == self.class_attr(decimal, "__init__")))
                 {
-                    let value = match (&mut args[..], &mut kwargs[..]) {
-                        ([value], []) => Some(value),
-                        ([], [(key, value)]) if key == "value" => Some(value),
-                        _ => None,
-                    };
-                    if let Some(value) = value {
-                        if let Value::Instance { class, .. } = self.heap.get(*value)
-                            && self.direct_subclass(*class, decimal)
-                        {
-                            if *class == decimal && callable == decimal {
-                                return Ok(*value);
-                            }
-                            if let Some(text) = self.raw_instance_field(*value, "_text") {
-                                *value = text;
-                            }
+                    if let Value::Instance { class, .. } = self.heap.get(*value)
+                        && self.direct_subclass(*class, decimal)
+                    {
+                        if *class == decimal && callable == decimal {
+                            return Ok(*value);
                         }
-                        if let Some(text) = self.string_storage(*value) {
+                        if let Some(text) = self.raw_instance_field(*value, "_text") {
                             *value = text;
-                        } else if matches!(
-                            self.heap.get(self.scalar_value(*value)),
-                            Value::Int(_) | Value::Bool(_)
-                        ) {
-                            let text =
-                                crate::integer_text::try_decimal_coefficient(&self.as_int(*value)?)
-                                    .ok_or_else(crate::Error::memory_error)?;
-                            *value = self.text(text.into_string());
                         }
+                    }
+                    if let Some(text) = self.string_storage(*value) {
+                        *value = text;
+                    } else if matches!(
+                        self.heap.get(self.scalar_value(*value)),
+                        Value::Int(_) | Value::Bool(_)
+                    ) {
+                        let text =
+                            crate::integer_text::try_decimal_coefficient(&self.as_int(*value)?)
+                                .ok_or_else(crate::Error::memory_error)?;
+                        *value = self.text(text.into_string());
                     }
                 }
                 if let Some(values) = self.enum_values(callable) {

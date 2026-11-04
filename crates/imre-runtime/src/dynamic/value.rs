@@ -849,6 +849,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
+    /// The Decimal class created by an execution of the registered bundled provider.
+    pub bundled_decimal: bool,
     /// Qualified name of an iterator type whose instances require private native cursor state.
     pub itertools_layout: Option<&'static str>,
     /// Attribute writes to the type object itself are forbidden, independently of its instance layout.

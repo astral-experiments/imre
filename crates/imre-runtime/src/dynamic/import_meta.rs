@@ -7,7 +7,7 @@ use super::{
     Context, SourceModule,
     importlib::SourceBody,
     stdlib,
-    value::{Error, Id, NONE, Result, Value},
+    value::{Code, Error, Id, NONE, Result, Value},
 };
 
 impl Context {
@@ -71,6 +71,28 @@ impl Context {
             .get(name)?
             .iter()
             .find(|s| s.path.starts_with(root))
+    }
+
+    /// Mark the class defined by the bundled body, including when a file loader executes it.
+    pub(super) fn register_decimal_class(&mut self, code: Id, entry: Code, scope: Id) {
+        if let Some(source) = self.bundled_registration("decimal")
+            && std::ptr::fn_addr_eq(source.code, entry)
+            && matches!(self.heap.get(self.code_object(code).filename), Value::Str(path) if source.path == Path::new(path))
+            && let Some(class) = self.scope_name(scope, "Decimal")
+            && let Value::Class {
+                scope: class_scope, ..
+            } = *self.heap.get(class)
+            && self.root_scope(class_scope) == scope
+            && let Value::Scope(frame) = self.heap.get_mut(class_scope)
+            && let Some(layout) = &mut frame.class_namespace
+        {
+            layout.bundled_decimal = true;
+        }
+    }
+
+    pub(super) fn is_bundled_decimal(&self, class: Id) -> bool {
+        matches!(self.heap.get(class), Value::Class { scope, .. }
+            if self.scope_data(*scope).class_namespace.as_ref().is_some_and(|layout| layout.bundled_decimal))
     }
 
     fn bundled_source(&self, name: &str) -> Option<(PathBuf, SourceBody)> {
