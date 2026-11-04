@@ -2996,6 +2996,23 @@ impl Context {
         mode: Id,
         strip_indent: bool,
     ) -> Result<Id> {
+        let inherited = match self.heap.get(self.heap.current_code()) {
+            Value::Code(caller) => {
+                caller.flags & (code_flags::FUTURE_ANNOTATIONS | code_flags::FUTURE_BARRY_AS_BDFL)
+            }
+            _ => 0,
+        };
+        self.compile_source_with_flags(source, filename, mode, strip_indent, inherited)
+    }
+
+    pub(super) fn compile_source_with_flags(
+        &mut self,
+        source: Id,
+        filename: Id,
+        mode: Id,
+        strip_indent: bool,
+        inherited: u32,
+    ) -> Result<Id> {
         use ruff_python_parser::Mode;
         let mode = self.str_value(mode)?;
         let interactive = mode == "single";
@@ -3131,10 +3148,7 @@ impl Context {
             return Err(error);
         }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
-        if let Value::Code(caller) = self.heap.get(self.heap.current_code()) {
-            code.scope_flags =
-                caller.flags & (code_flags::FUTURE_ANNOTATIONS | code_flags::FUTURE_BARRY_AS_BDFL);
-        }
+        code.scope_flags = inherited;
         code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;

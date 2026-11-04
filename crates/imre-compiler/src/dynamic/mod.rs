@@ -806,6 +806,7 @@ pub(crate) fn compile<const SPLIT: bool>(
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
     let mut computed_import = registered_imports.computed;
+    let mut source_only_provider = None;
     let mut bundled_only = false;
     let mut getters = VecDeque::new();
     let mut bundled_imports = VecDeque::new();
@@ -834,6 +835,10 @@ pub(crate) fn compile<const SPLIT: bool>(
             }
             // A runtime-selected decimal module in a standalone binary needs its private provider.
             if startup.is_none() && computed_import && !seen.contains("decimal") {
+                // Carry its source for relocation, but leave compilation until the name is chosen.
+                if !seen.contains("_pydecimal") {
+                    source_only_provider = Some("_pydecimal");
+                }
                 imports.add(0, "decimal");
             }
             if computed_import && !seen.contains("zoneinfo") {
@@ -1229,6 +1234,7 @@ pub(crate) fn compile<const SPLIT: bool>(
         Path::new(bundled_root),
         &providers,
         SPLIT,
+        source_only_provider,
     )?;
     inputs.boxed_imports = true;
     Ok(Some(UnitCompilation {

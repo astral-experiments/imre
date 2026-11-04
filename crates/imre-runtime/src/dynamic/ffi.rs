@@ -860,6 +860,50 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     // SAFETY: non-null text points to a static source constant with exactly len bytes.
     let bundled_text =
         (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
+    register_source(
+        ctx,
+        name,
+        file,
+        ModuleInitializer::Native(code),
+        bundled_text,
+    );
+}
+
+/// Register a bundled Python module whose loader compiles its source on request.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_bundled_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+) {
+    // SAFETY: the compiler supplies static UTF-8 source and module names.
+    let (ctx, name, file, bytes) = unsafe {
+        (
+            &mut *ctx,
+            cstr(name),
+            cstr(file),
+            std::slice::from_raw_parts(text, len as usize),
+        )
+    };
+    let source = std::str::from_utf8(bytes).expect("compiler-emitted Python is UTF-8");
+    register_source(
+        ctx,
+        name,
+        file,
+        ModuleInitializer::Source(source),
+        Some(bytes),
+    );
+}
+
+fn register_source(
+    ctx: &mut Context,
+    name: &str,
+    file: &str,
+    code: ModuleInitializer,
+    bundled_text: Option<&'static [u8]>,
+) {
     ctx.sources
         .entry(name.to_owned())
         .or_default()
