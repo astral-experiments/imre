@@ -4739,7 +4739,7 @@ impl<'a> Loader<'a> {
                         id,
                         local.as_str(),
                         Binding::Intrinsic(Intrinsic::ScopedObjectExport(
-                            "_imre_calendar._monthgrid",
+                            "imre._calendar.month_grid",
                         )),
                         alias,
                     );

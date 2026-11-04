@@ -104,6 +104,7 @@ impl Builtin {
                 matches!(
                     op,
                     crate::ir::CalendarOp::MonthGrid
+                        | crate::ir::CalendarOp::InstanceMonthGrid
                         | crate::ir::CalendarOp::SetFirstWeekday
                         | crate::ir::CalendarOp::Date
                         | crate::ir::CalendarOp::DateTime

@@ -1,4 +1,4 @@
-from calendar import firstweekday, monthcalendar, setfirstweekday
+from calendar import Calendar, TextCalendar, firstweekday, monthcalendar, setfirstweekday
 
 
 def record(order: list[int], value: int) -> int:
@@ -35,3 +35,17 @@ for start in [-1, 7, 10**100]:
     except ValueError as exc:
         print(str(exc))
         print(firstweekday())
+
+# Per-instance starts can be any integer and stay independent of the module default.
+cal = Calendar(firstweekday=10**100)
+text = TextCalendar(-1)
+for year in [0, 1900, 2000, 10**100]:
+    print(cal.monthdayscalendar(year, 2))
+    print(text.monthdayscalendar(year=year, month=2))
+cal.firstweekday = -10**100
+text.setfirstweekday(firstweekday=12)
+print(cal.getfirstweekday())
+print(text.firstweekday)
+print(firstweekday())
+print(cal.monthdayscalendar(2021, 5))
+print(text.monthdayscalendar(2021, 5))

@@ -39,6 +39,17 @@ pub unsafe extern "C" fn imre_calendar_setfirstweekday(value: usize) -> u8 {
     0
 }
 
+/// Map arbitrary-size signed Python integers onto a positive Gregorian or weekday cycle.
+fn cycle_index(value: &Int, period: i32) -> i32 {
+    if let Some(value) = value.to_i64() {
+        return value.rem_euclid(i64::from(period)) as i32;
+    }
+    (value.big().as_ref() % period)
+        .to_i32()
+        .unwrap()
+        .rem_euclid(period)
+}
+
 fn month_grid(year: &Int, month: &Int, firstweekday: i32) -> exceptions::Result<*const Object> {
     let Some(month @ 1..=12) = month.to_i64() else {
         return Err(argument_error(
@@ -49,16 +60,7 @@ fn month_grid(year: &Int, month: &Int, firstweekday: i32) -> exceptions::Result<
     };
     // Each Gregorian cycle has 146097 days, a whole number of weeks. Reduce
     // even unbounded Python years before entering the ordinary date arithmetic.
-    let cycle_year = year.to_i64().map_or_else(
-        || {
-            (year.big().as_ref() % 400_i32)
-                .to_i32()
-                .unwrap()
-                .rem_euclid(400)
-        },
-        |year| year.rem_euclid(400) as i32,
-    );
-    let year = 2000 + cycle_year;
+    let year = 2000 + cycle_index(year, 400);
     let month = month as i32;
     let first = ((ordinal(year, month, 1) - 1) % 7) as i32;
     let offset = (first - firstweekday).rem_euclid(7);
@@ -115,14 +117,8 @@ pub unsafe extern "C" fn imre_calendar_instance_grid(
             Int::borrow(firstweekday),
         )
     };
-    let firstweekday = firstweekday.to_i64().map_or_else(
-        || {
-            (firstweekday.big().as_ref() % 7_i32)
-                .to_i32()
-                .unwrap()
-                .rem_euclid(7)
-        },
-        |day| day.rem_euclid(7) as i32,
-    );
-    finish(month_grid(&year, &month, firstweekday), std::ptr::null())
+    finish(
+        month_grid(&year, &month, cycle_index(&firstweekday, 7)),
+        std::ptr::null(),
+    )
 }
