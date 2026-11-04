@@ -1351,7 +1351,8 @@ pub(crate) enum Builtin {
     StringListCopy,
     /// Select by up to two prefixes, optionally exclude one, then slice each match.
     StringListFilter(u32),
-    /// Collect characters in a set or below a Unicode scalar threshold.
+    /// Collect characters in a set or below a Unicode scalar threshold. An
+    /// optional result represents an empty selection as an absent set.
     FilterCharacterSet(u32),
     /// Stable sort by the suffix after a fixed number of Unicode code points.
     StringListSortSuffix(u32),
