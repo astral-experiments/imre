@@ -1214,6 +1214,11 @@ pub(crate) enum Builtin {
     ListGetI32,
     /// Reads a checked index from the stable buffer in a guarded loop body.
     ListGetStable,
+    /// Internal operations on the spare capacity of a single guarded leaf loop.
+    BeginListAppends(usize),
+    FinishListAppends(usize),
+    AppendInWindow(usize),
+    GetInAppendWindow(usize),
     /// Every call site and intervening operation preserve these exact element
     /// bounds. The access still checks its index and returns a tagged-small Int.
     ListGetBounded {

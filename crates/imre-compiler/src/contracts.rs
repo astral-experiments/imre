@@ -627,7 +627,13 @@ impl Builtin {
             | Self::BytesContains
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::Append | Self::JoinBufferAppend | Self::SortByKeys => {
+            Self::Append
+            | Self::AppendInWindow(_)
+            | Self::BeginListAppends(_)
+            | Self::FinishListAppends(_)
+            | Self::GetInAppendWindow(_)
+            | Self::JoinBufferAppend
+            | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
             }
             Self::SortByComparator => Contract::new(true, Unknown),
@@ -882,6 +888,9 @@ impl Builtin {
                     && index(&args[4])
             }
             Self::ListPresent => signature(&[Type::ListInt], Type::Bool),
+            Self::BeginListAppends(_) | Self::FinishListAppends(_) => signature(&[], Type::None),
+            Self::AppendInWindow(_) => signature(&[Type::ListInt, Type::Int], Type::None),
+            Self::GetInAppendWindow(_) => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),

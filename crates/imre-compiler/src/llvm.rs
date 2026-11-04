@@ -409,6 +409,8 @@ fn emit_program(
         mapping_words: 0,
         forward_cursors: BTreeMap::new(),
         uses_forward_cursors: false,
+        append_windows: BTreeMap::new(),
+        uses_append_windows: false,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
@@ -577,6 +579,12 @@ fn emit_program(
     record_layouts(module, emitter.output);
     callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
+    if emitter.uses_append_windows {
+        emitter
+            .output
+            .common()
+            .push_str(include_str!("llvm/list_append_window.ll"));
+    }
     if emitter.uses_forward_cursors {
         emitter
             .output
@@ -655,6 +663,8 @@ struct Emitter<'a, 'module> {
     mapping_words: usize,
     forward_cursors: BTreeMap<usize, ForwardCursor>,
     uses_forward_cursors: bool,
+    append_windows: BTreeMap<usize, String>,
+    uses_append_windows: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
@@ -2084,6 +2094,7 @@ impl Emitter<'_, '_> {
         }
         self.line_slots = line_views::select(function);
         self.forward_cursors.clear();
+        self.append_windows.clear();
         let cursors = ir::private_string_cursors(function);
         let invariant = ir::invariant_string_cursors(function, &cursors);
         for slot in cursors {
@@ -8395,6 +8406,32 @@ impl Emitter<'_, '_> {
             Builtin::JoinBufferFinish => {
                 self.call("imre_join_buffer_finish", Type::Str, &[&args[0].value])
             }
+            Builtin::BeginListAppends(output) => {
+                let window = self.append_window(*output);
+                self.line(format!("store ptr null, ptr {window}"));
+                none()
+            }
+            Builtin::FinishListAppends(output) => {
+                let window = self.append_window(*output);
+                self.line(format!("call void @finish_list_appends(ptr {window})"));
+                none()
+            }
+            Builtin::AppendInWindow(output) => {
+                let window = self.append_window(*output);
+                self.checked_status(format!(
+                    "call i32 @append_in_window(ptr {window}, ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
+            Builtin::GetInAppendWindow(output) => {
+                let window = self.append_window(*output);
+                let word = self.checked_instruction(format!(
+                    "call i64 @get_in_append_window(ptr {window}, ptr {})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, Type::Int)
+            }
             Builtin::Append | Builtin::JoinBufferAppend => {
                 if matches!(builtin, Builtin::JoinBufferAppend) {
                     self.checked_status(format!(
@@ -9083,6 +9120,17 @@ impl Emitter<'_, '_> {
         } else {
             self.release(&old);
         }
+    }
+
+    /// Keeps one native append window per guarded destination in this activation.
+    fn append_window(&mut self, output: usize) -> String {
+        if let Some(window) = self.append_windows.get(&output) {
+            return window.clone();
+        }
+        let window = self.entry_alloca("[3 x ptr]");
+        self.append_windows.insert(output, window.clone());
+        self.uses_append_windows = true;
+        window
     }
 
     fn append(&mut self, list: &Value, value: &Value) {
