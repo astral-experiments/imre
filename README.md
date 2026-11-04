@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 4, 2026, Imre has a paired pass for **11,787 of 16,202 tests (72.8%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,794 of 16,202 tests (72.8%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -142,11 +142,11 @@ It passed **15,161**, skipped 1,023, and reported 7 errors.
 | `subprocess` | 302 | 353 | 3 | Both original empty-environment cases passed on stock and on public Imre at O0 and O3. They exercise child execution when the supplied environment has no PATH. |
 | `tempfile` | 110 | 118 | 2 | All three runs registered the same 118 original parents. CPython passed 112 and skipped six. Public Imre passed 110 and skipped eight at both levels. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
-| `threading` | 85 | 228 | 1 | Event and lock reset after fork each pass on public builds at O0 and O3. An independent run also forked and waited for a real child. These two originals were previously uncredited. |
+| `threading` | 91 | 228 | 1 | The whole suite reported 92 paired successes. Four signal tests and two shutdown tests with successful native child assertions bring the verified total to 91. A seventh apparent gain accepted an unrelated child compiler failure and stays uncredited. |
 | `typing` | 710 | 712 | 1 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. |
 | `unittest` | 597 | 1,090 | 0 | Two public workers passed four additional mock-helper originals on stock and both native profiles. One covers dataclass hashing. The other three appeared in a complete 84-parent replay and an independent selected run. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,707** | **13,327** | **34** | **3 complete suites match stock on `main`** |
+| **Total** | **9,713** | **13,327** | **34** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -165,7 +165,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `glob` | 22 | 24 | 0 | On Linux, CPython and both native builds passed 22 of the 24 tests in the complete module, including the open-file stress test. All three skipped the two Windows tests. |
 | `gzip` | 68 | 75 | 0 | All 66 previous passes repeated. The public whole suite passed 69 of 75 at both native levels. The two new eligible originals cover peek and a file object without a name. A prior compiler failure keeps one CLI result under review. |
 | `inspect` | 185 | 362 | 0 | Two independent public builds passed all seven TestGetcallargsMethods originals. Four new keys cover plain, keyword-only, variable-keyword and mixed argument binding. |
-| `math` | 34 | 89 | 0 | The pinned exponential and square-root methods passed on stock and on clean public Imre at O0 and O3. The cumulative ledger contains 34 of 89. |
+| `math` | 35 | 89 | 0 | The public whole suite passed 35 of 89 originals at both native levels. All 34 earlier passes repeated. `test.test_math.MathTests.test_exceptions` (occurrence 1) checks exponential underflow, overflow and the square-root domain error. |
 | `ssl` | 49 | 195 | 0 | Stock and public Imre at O0 and O3 passed `test.test_ssl.ContextTests.test_load_dh_params` (occurrence 1). The source qualification also exercised real TLS handshakes using the loaded parameters. |
 | `struct` | 8 | 43 | 0 | The complete suite ran the same 43 original tests on all three engines. Stock CPython passed all 43. Public Imre O0 and O3 passed the same eight. |
 | `tokenize` | 53 | 130 | 0 | The unchanged test_max_indent passed on stock and public Imre at O0 and O3. It adds one new paired pass. |
@@ -176,7 +176,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 252 | 383 | 0 | Across two public revisions, 249 distinct ZIP originals passed on stock and both native levels. Of those, 48 are new and 201 repeat earlier passes. Three earlier CLI passes failed in the later complete runs. The cumulative ledger contains 252 of 383. |
 | `zoneinfo` | 227 | 261 | 2 | One full public run passed 227 of 261 originals. A second machine verified 217 on the preceding public version and all ten additional cache originals on the newer one. Stock passed 233 and skipped 28. Two private-cache omissions remain in the denominator. |
-| **Measured total (19 of 19 families)** | **2,080** | **2,875** | **10** |  |
+| **Measured total (19 of 19 families)** | **2,081** | **2,875** | **10** |  |
 
 ### Whole-suite baselines for later additions
 
