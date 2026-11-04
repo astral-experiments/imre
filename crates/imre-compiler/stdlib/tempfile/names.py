@@ -232,6 +232,7 @@ def mkdtemp(suffix=None, prefix=None, dir=None):
     names = _get_candidate_names()
     for _ in range(TMP_MAX):
         path = _candidate_path(dir, prefix, suffix, next(names), output_type)
+        _sys.audit("tempfile.mkdtemp", path)
         try:
             _mkdir(path)
         except FileExistsError:
