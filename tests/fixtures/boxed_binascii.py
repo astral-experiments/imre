@@ -24,6 +24,18 @@ class DropIndex:
 
 
 def current():
+    from binascii import a2b_qp
+
+    print(a2b_qp("tag_name=5F=FF", header=True))
+    print(a2b_qp(memoryview(b".=00==z=\rdiscard\n!")[1:-1]))
+    raw = bytearray(b"=41")
+    try:
+        a2b_qp(raw, header=Resize(raw))
+    except BufferError as error:
+        print(str(error))
+    raw.append(33)
+    print(a2b_qp(raw))
+
     for decode in (binascii.a2b_hex, binascii.unhexlify):
         print(repr(decode), decode.__name__, decode.__qualname__, decode.__module__,
               decode.__text_signature__, decode.__self__ is binascii)
