@@ -12,6 +12,7 @@ mod argparse;
 mod args;
 pub(crate) use args::python_executable_text;
 mod asyncio;
+pub(crate) mod base32;
 mod base85;
 pub(crate) use base85::encode as base85_encode;
 mod binascii;

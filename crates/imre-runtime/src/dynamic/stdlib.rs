@@ -781,6 +781,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
+        | ("_imre_base32", "encode" | "decode")
         | ("_imre_base85", "encode")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
@@ -1985,6 +1986,9 @@ pub(super) fn call(
     }
     if name == "_imre_tokenize.scan" {
         return tokenize::scan(ctx, args, kwargs);
+    }
+    if matches!(name, "_imre_base32.encode" | "_imre_base32.decode") {
+        return binascii::base32(ctx, args, kwargs, name == "_imre_base32.decode");
     }
     if name == "_imre_base85.encode" {
         return binascii::encode85(ctx, args, kwargs);

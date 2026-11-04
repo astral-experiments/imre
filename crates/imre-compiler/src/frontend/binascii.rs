@@ -10,12 +10,14 @@ fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
 }
 
 impl Checker<'_> {
-    /// Lower exact bytes and boolean options. Formatting and custom protocols use the bundled wrapper.
-    pub(super) fn base85_encode(
+    /// Bind in source order and keep the checked object provider for unsupported callers and protocols.
+    fn exact_base_codec_args(
         &mut self,
         call: &ast::ExprCall,
         name: &'static str,
-    ) -> Result<Expr, String> {
+        params: &[calls::Parameter],
+        accepts_text: bool,
+    ) -> Result<(calls::ArgumentScope, Vec<Expr>), String> {
         let short = name.strip_prefix("base64.").unwrap();
         if !self
             .graph
@@ -24,6 +26,68 @@ impl Checker<'_> {
         {
             return Err(self.scoped_builtin_error(name, call));
         }
+        let args = self
+            .arguments_with(call, params, None, |checker, _, node| {
+                checker.evaluated_argument(node)
+            })
+            .map_err(|_| self.scoped_builtin_error(name, call))?;
+        let input = args.values[args.order[0]].ty;
+        let text = accepts_text && matches!(input, Type::Str | Type::StrLiteral(_));
+        if (input != Type::Bytes && !text)
+            || params[1..]
+                .iter()
+                .zip(&args.order[1..])
+                .any(|(param, &i)| args.values[i].ty != param.ty)
+        {
+            return Err(self.scoped_builtin_error(name, call));
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let values: Vec<_> = args
+            .values
+            .into_iter()
+            .map(|v| scope.hold(self, v))
+            .collect();
+        self.graph.needs_object_runtime.set(true);
+        self.graph.require_fallback_calls();
+        Ok((
+            scope,
+            args.order.iter().map(|&i| values[i].clone()).collect(),
+        ))
+    }
+
+    pub(super) fn base32_codec(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &'static str,
+    ) -> Result<Expr, String> {
+        let decode = matches!(name, "base64.b32decode" | "base64.b32hexdecode");
+        let hex = matches!(name, "base64.b32hexencode" | "base64.b32hexdecode");
+        let kind = ParameterKind::PositionalOrKeyword;
+        let mut params = vec![kind.parameter("s", Type::Bytes, None)];
+        if decode {
+            params.push(kind.parameter("casefold", Type::Bool, Some(Expr::boolean(false))));
+        }
+        if name == "base64.b32decode" {
+            params.push(kind.parameter("map01", Type::None, Some(Expr::none())));
+        }
+        let (scope, args) = self.exact_base_codec_args(call, name, &params, decode)?;
+        let mut values = vec![args[0].clone(), Expr::boolean(hex)];
+        let op = if decode {
+            values.push(args[1].clone());
+            Builtin::Base32Decode
+        } else {
+            Builtin::Base32Encode
+        };
+        Ok(scope.finish(bytes_op(op, values)))
+    }
+
+    /// Lower exact bytes and boolean options. Formatting and custom protocols use the bundled wrapper.
+    pub(super) fn base85_encode(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &'static str,
+    ) -> Result<Expr, String> {
+        let short = name.strip_prefix("base64.").unwrap();
         let positional = ParameterKind::PositionalOrKeyword;
         let ascii = short == "a85encode";
         let mut params = vec![positional.parameter(
@@ -46,34 +110,8 @@ impl Checker<'_> {
                 Some(Expr::boolean(false)),
             ));
         }
-        let args = self
-            .arguments_with(call, &params, None, |checker, _, node| {
-                checker.evaluated_argument(node)
-            })
-            .map_err(|_| self.scoped_builtin_error(name, call))?;
-        if args.values[args.order[0]].ty != Type::Bytes
-            || args.order[1..]
-                .iter()
-                .any(|&i| args.values[i].ty != Type::Bool)
-        {
-            return Err(self.scoped_builtin_error(name, call));
-        }
-        let mut scope = calls::ArgumentScope::default();
-        let values: Vec<_> = args
-            .values
-            .into_iter()
-            .map(|value| scope.hold(self, value))
-            .collect();
-        let input = values[args.order[0]].clone();
-        let option = |i| {
-            args.order
-                .get(i)
-                .map_or_else(|| Expr::boolean(false), |&at: &usize| values[at].clone())
-        };
-        // This call formerly selected the checked object provider. Keep it available
-        // if a later operation in the same program needs boxed values.
-        self.graph.needs_object_runtime.set(true);
-        self.graph.require_fallback_calls();
+        let (scope, args) = self.exact_base_codec_args(call, name, &params, false)?;
+        let option = |i: usize| args.get(i).cloned().unwrap_or_else(|| Expr::boolean(false));
         let alphabet: &[u8; 85] = match short {
             "a85encode" => br##"!"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstu"##,
             "b85encode" => b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~",
@@ -85,7 +123,7 @@ impl Checker<'_> {
                 alphabet,
                 foldnuls: ascii,
             },
-            vec![input, option(1), option(2)],
+            vec![args[0].clone(), option(1), option(2)],
         )))
     }
 

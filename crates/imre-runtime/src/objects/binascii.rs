@@ -264,23 +264,29 @@ pub(crate) fn base64_decode(data: &[u8], urlsafe: bool) -> Result<Bytes> {
     decode(data, false, urlsafe)
 }
 
-/// # Safety
-/// The caller roots the immutable string throughout validation and copying.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_binascii_ascii_input(value: *const Str) -> *const Bytes {
-    // SAFETY: the caller supplied an exact str owner.
-    let data = unsafe { (&*value).as_bytes() };
-    let result = if data.is_ascii() {
-        allocate(data.len()).map(|mut bytes| {
-            bytes.extend_from_slice(data);
-            owned(bytes)
-        })
+/// Borrow the ASCII input accepted by Python's public binary-to-text decoders.
+pub(super) fn ascii_bytes(text: &str) -> Result<&[u8]> {
+    if text.is_ascii() {
+        Ok(text.as_bytes())
     } else {
         Err(Error::new(
             Kind::ValueError,
             "string argument should contain only ASCII characters",
         ))
-    };
+    }
+}
+
+/// # Safety
+/// The caller roots the immutable string throughout validation and copying.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_binascii_ascii_input(value: *const Str) -> *const Bytes {
+    // SAFETY: the caller supplied an exact str owner.
+    let data = ascii_bytes(unsafe { &*value });
+    let result = data.and_then(|data| {
+        let mut bytes = allocate(data.len())?;
+        bytes.extend_from_slice(data);
+        Ok(owned(bytes))
+    });
     finish(result, std::ptr::null())
 }
 

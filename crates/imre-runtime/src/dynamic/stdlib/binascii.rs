@@ -25,6 +25,50 @@ fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
     })
 }
 
+/// Leave subclass operations, unfamiliar alphabets and custom truth tests to the Python helper.
+pub(super) fn base32(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    decode: bool,
+) -> Result<Id> {
+    use crate::objects::base32::{ALPHABETS, decode as decode32, encode};
+    let (data, alphabet, casefold) = match (args, decode) {
+        ([data, alphabet], false) if kwargs.is_empty() => (*data, *alphabet, false),
+        ([data, alphabet, flag], true) if kwargs.is_empty() => {
+            let Value::Bool(flag) = ctx.heap.get(*flag) else {
+                return Ok(super::NONE);
+            };
+            (*data, *alphabet, *flag)
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                "unexpected arguments to Base32 codec",
+            ));
+        }
+    };
+    let (Value::Bytes(data) | Value::ByteArray(data)) = ctx.heap.get(data) else {
+        return Ok(super::NONE);
+    };
+    let Value::Bytes(alphabet) = ctx.heap.get(alphabet) else {
+        return Ok(super::NONE);
+    };
+    let hex = if alphabet.as_slice() == ALPHABETS[0] {
+        false
+    } else if alphabet.as_slice() == ALPHABETS[1] {
+        true
+    } else {
+        return Ok(super::NONE);
+    };
+    let output = if decode {
+        decode32(data, hex, casefold)?
+    } else {
+        encode(data, hex)?
+    };
+    Ok(ctx.alloc(Value::Bytes(output)))
+}
+
 /// Return None when Python must run an overridden buffer operation or truth test.
 pub(super) fn encode85(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [buffer, alphabet, pad, foldnuls, foldspaces] = args else {

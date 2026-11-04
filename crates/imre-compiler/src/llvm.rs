@@ -6228,6 +6228,23 @@ impl Emitter<'_, '_> {
                 Type::Bytes,
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
+            Builtin::Base32Encode => self.call(
+                "imre_base32_encode",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::Base32Decode => {
+                let function = if args[0].value.ty == Type::Bytes {
+                    "imre_base32_decode"
+                } else {
+                    "imre_base32_decode_text"
+                };
+                self.call(
+                    function,
+                    Type::Bytes,
+                    &[&args[0].value, &args[1].value, &args[2].value],
+                )
+            }
             Builtin::Base85Encode { alphabet, foldnuls } => {
                 let alphabet = self.byte_array(alphabet.to_vec());
                 Value {
@@ -9733,6 +9750,9 @@ declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
+declare ptr @imre_base32_encode(ptr, i1)
+declare ptr @imre_base32_decode(ptr, i1, i1)
+declare ptr @imre_base32_decode_text(ptr, i1, i1)
 declare ptr @imre_base85_encode(ptr, ptr, i1, i1, i1)
 declare ptr @imre_binascii_unhexlify(ptr)
 declare ptr @imre_sha1_hex(ptr)
