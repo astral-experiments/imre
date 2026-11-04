@@ -1802,8 +1802,11 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth_operands(mark, self.modules) && !self.can_skip_finalizer_sweep()
+        if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
+            || self.can_skip_finalizer_sweep()
         {
+            self.heap.release_temporaries_since(mark);
+        } else if self.heap.discard_truth_operands(mark, self.modules) {
             self.collect_unreachable();
         }
     }
