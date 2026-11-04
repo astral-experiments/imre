@@ -86,7 +86,59 @@ fn glob_matches(
     if sensitive && !pattern.contains(['*', '?', '[']) {
         return Ok(path == pattern);
     }
+    if let Some(matched) = match_literal_components(path, pattern, sensitive, recursive, sep) {
+        return Ok(matched);
+    }
     Ok(glob_regex(pattern, sensitive, recursive, sep)?.is_match(path))
+}
+
+/// A single run of stars between literal affixes has only one possible match
+/// for each affix. Compare the borrowed components without compiling a regex.
+fn match_literal_components(
+    path: &str,
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Option<bool> {
+    // A bracket class can consume a separator. A recursive ** can consume
+    // several components, and non-ASCII case folding can change byte lengths.
+    if pattern.contains(['[', '?'])
+        || (!sensitive && !(path.is_ascii() && pattern.is_ascii()))
+        || (recursive && pattern.split(sep).any(|part| part == "**"))
+    {
+        return None;
+    }
+    let equal = |a: &[u8], b: &[u8]| {
+        if sensitive {
+            a == b
+        } else {
+            a.eq_ignore_ascii_case(b)
+        }
+    };
+    let mut names = path.split(sep);
+    for part in pattern.split(sep) {
+        let Some(name) = names.next() else {
+            return Some(false);
+        };
+        let name = name.as_bytes();
+        if let Some((prefix, tail)) = part.split_once('*') {
+            let suffix = tail.trim_start_matches('*');
+            if suffix.contains('*') {
+                return None;
+            }
+            if (part == "*" && name.is_empty())
+                || name.len() < prefix.len() + suffix.len()
+                || !equal(&name[..prefix.len()], prefix.as_bytes())
+                || !equal(&name[name.len() - suffix.len()..], suffix.as_bytes())
+            {
+                return Some(false);
+            }
+        } else if !equal(name, part.as_bytes()) {
+            return Some(false);
+        }
+    }
+    Some(names.next().is_none())
 }
 
 /// Compile once for a filesystem selector that checks many names against the same pattern.
