@@ -347,13 +347,13 @@ pub unsafe extern "C" fn imre_str_is_title(value: *const Str) -> u32 {
 }
 
 /// Returns whether the string has a cased character and every cased character is uppercase.
-pub(crate) fn python_isupper(text: &str) -> bool {
+pub(crate) fn python_isupper(chars: impl Iterator<Item = char>) -> bool {
     use icu_properties::{
         CodePointSetData,
         props::{Cased, Uppercase},
     };
     let mut seen = false;
-    for c in text.chars() {
+    for c in chars {
         if c.is_ascii_uppercase() {
             seen = true;
         } else if c.is_ascii_lowercase() || c == '\u{295}' {
@@ -379,7 +379,7 @@ pub(crate) fn python_isupper(text: &str) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
     // SAFETY: the caller supplies a rooted, exact UTF-8 string.
-    u32::from(python_isupper(unsafe { &*value }))
+    u32::from(python_isupper(unsafe { &*value }.chars()))
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.
