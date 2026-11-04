@@ -41,16 +41,20 @@ class IncrementalEncoder(codecs.IncrementalEncoder):
         self.order = 0 if state else _native_order
 
 
+def _decode_stream(input, errors, order, final):
+    text, consumed, order = _decode(input, errors, order, final)
+    if order == 0 and consumed >= _width:
+        raise UnicodeDecodeError(_name, input, 0, _width, 'Stream does not start with BOM')
+    return text, consumed, order
+
+
 class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
     def __init__(self, errors='strict'):
         super().__init__(errors)
         self.order = 0
 
     def _buffer_decode(self, input, errors, final):
-        text, consumed, order = _decode(input, errors, self.order, final)
-        if order == 0 and consumed >= _width:
-            raise UnicodeDecodeError(_name, input, 0, _width, 'Stream does not start with BOM')
-        self.order = order
+        text, consumed, self.order = _decode_stream(input, errors, self.order, final)
         return text, consumed
 
     def reset(self):
@@ -72,6 +76,18 @@ class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
             self.order = 0
 
 
+class StreamReader(codecs.StreamReader):
+    order = 0
+
+    def decode(self, input, errors='strict'):
+        text, consumed, self.order = _decode_stream(input, errors, self.order, False)
+        return text, consumed
+
+    def reset(self):
+        super().reset()
+        self.order = 0
+
+
 class StreamWriter(codecs.StreamWriter):
     def __init__(self, stream, errors='strict'):
         super().__init__(stream, errors)
@@ -91,4 +107,4 @@ def getregentry():
     return codecs.CodecInfo(name=_name, encode=encode, decode=decode,
                             incrementalencoder=IncrementalEncoder,
                             incrementaldecoder=IncrementalDecoder,
-                            streamwriter=StreamWriter)
+                            streamreader=StreamReader, streamwriter=StreamWriter)

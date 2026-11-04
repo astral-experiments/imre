@@ -209,3 +209,44 @@ for width, encode in ((2, codecs.utf_16_encode), (4, codecs.utf_32_encode)):
         prefix = ord('A').to_bytes(width, endian)
         replacement = (0xd800).to_bytes(width, sys.byteorder if width == 4 else endian)
         assert encode(text, 'surrogatepass', order) == (prefix + replacement, 2)
+
+
+class FallbackReader:
+    def __init__(self, stream, errors='strict'):
+        self.stream = stream
+        self.errors = errors
+
+    def read(self):
+        return self.stream.read().decode('utf-16', self.errors)
+
+
+def app_reader(name):
+    if name == 'app_wide_reader':
+        return encodings.search_function('utf_16') or codecs.CodecInfo(
+            None, None, streamreader=FallbackReader, name=name)
+
+
+codecs.register(app_reader)
+try:
+    info = codecs.lookup('app-wide-reader')
+    assert codecs.lookup('app_wide_reader') is info
+    assert info.streamreader(io.BytesIO('é'.encode('utf-16'))).read() == 'é'
+finally:
+    codecs.unregister(app_reader)
+
+for alias, codec, bom in (('u16', 'utf-16-be', codecs.BOM_UTF16_BE),
+                          ('u32', 'utf-32-be', codecs.BOM_UTF32_BE)):
+    factory = codecs.getreader(alias)
+    assert factory is codecs.lookup(alias).streamreader
+    reader = factory(io.BytesIO(bom + 'Aé\nΩ'.encode(codec)))
+    assert reader.read(1, 1) == 'A'
+    assert reader.readline() == 'é\n'
+    assert reader.read() == 'Ω'
+    reader.seek(0)
+    assert reader.read() == 'Aé\nΩ'
+    try:
+        factory(io.BytesIO(bytes(8))).read()
+    except UnicodeDecodeError as error:
+        assert error.reason == 'Stream does not start with BOM'
+    else:
+        raise AssertionError('stream reader accepted wide text without BOM')
