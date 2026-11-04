@@ -201,10 +201,7 @@ impl Calendar {
     }
 
     pub(crate) fn date(year: i32, month: i32, day: i32) -> Result<Self, Error> {
-        try_owner(Value::DateOnly(Civil::from_ordinal(checked_ordinal(
-            year, month, day,
-        )?)))
-        .map(Self)
+        date_only(year, month, day).map(Self)
     }
 
     /// Restore a discriminator-checked CPython pickle without normalizing its remaining bytes.

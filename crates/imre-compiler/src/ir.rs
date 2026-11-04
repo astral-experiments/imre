@@ -185,6 +185,7 @@ pub(crate) enum CalendarType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CalendarOp {
     Date,
+    DatePart,
     DateTime,
     Combine,
     Replace { timezone_supplied: bool },

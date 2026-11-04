@@ -80,6 +80,7 @@ impl Emitter<'_, '_> {
             _ => {
                 let name = match op {
                     Op::Date => "imre_calendar_date",
+                    Op::DatePart => "imre_calendar_date_part",
                     Op::DateTime => "imre_calendar_datetime",
                     Op::Combine => "imre_calendar_combine",
                     Op::Astimezone => "imre_calendar_astimezone",
