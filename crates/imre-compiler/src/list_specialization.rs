@@ -622,8 +622,8 @@ mod tests {
         };
         assert!(bounds_step_two(source));
         let twice = source.replace(
-            "        counter += 2\n",
-            "        counter += 2\n        counter += 1\n",
+            "        counter += 2",
+            "        counter += 2\n        counter += 1",
         );
         assert!(!bounds_step_two(&twice));
     }
