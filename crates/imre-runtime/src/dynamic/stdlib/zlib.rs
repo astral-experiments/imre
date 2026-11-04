@@ -70,8 +70,68 @@ pub(super) fn call(
 pub(in crate::dynamic) struct Decompressor {
     stream: Option<Stream>,
     eof: bool,
-    unused_data: Vec<u8>,
-    unconsumed_tail: Vec<u8>,
+    unused_data: Tail,
+    unconsumed_tail: Tail,
+}
+
+/// A tail owns one buffer. Returning it to Python transfers the buffer to an
+/// immutable bytes object, whose identity is stable until the stream changes it.
+enum Tail {
+    Buffer(Vec<u8>),
+    Published(Id),
+}
+
+impl Tail {
+    /// Borrows the bytes from their current owner without exposing the buffer.
+    fn as_slice<'a>(&'a self, ctx: &'a Context) -> &'a [u8] {
+        match self {
+            Self::Buffer(bytes) => bytes,
+            Self::Published(id) => {
+                let Value::Bytes(bytes) = ctx.heap.get(*id) else {
+                    unreachable!()
+                };
+                bytes
+            }
+        }
+    }
+
+    /// Transfers a private buffer on the first read and returns its Python owner.
+    fn expose(&mut self, ctx: &mut Context) -> Id {
+        match self {
+            Self::Published(id) => *id,
+            Self::Buffer(bytes) => {
+                let id = ctx.heap.bytes_from_data(std::mem::take(bytes));
+                *self = Self::Published(id);
+                id
+            }
+        }
+    }
+
+    /// Keeps private appends amortized and leaves every published snapshot intact.
+    fn append(&mut self, ctx: &Context, tail: &[u8]) -> Result<()> {
+        if tail.is_empty() {
+            return Ok(());
+        }
+        match self {
+            Self::Buffer(bytes) => {
+                bytes
+                    .try_reserve(tail.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                bytes.extend_from_slice(tail);
+            }
+            Self::Published(_) => {
+                let before = self.as_slice(ctx);
+                let mut bytes = Vec::new();
+                bytes
+                    .try_reserve_exact(before.len().saturating_add(tail.len()))
+                    .map_err(|_| crate::Error::allocation())?;
+                bytes.extend_from_slice(before);
+                bytes.extend_from_slice(tail);
+                *self = Self::Buffer(bytes);
+            }
+        }
+        Ok(())
+    }
 }
 
 fn copy_bytes(data: &[u8]) -> Result<Vec<u8>> {
@@ -135,8 +195,8 @@ pub(in crate::dynamic) fn decompressor(
         let state = Decompressor {
             stream: Some(stream),
             eof: false,
-            unused_data: Vec::new(),
-            unconsumed_tail: Vec::new(),
+            unused_data: Tail::Buffer(Vec::new()),
+            unconsumed_tail: Tail::Buffer(Vec::new()),
         };
         return state.allocate(ctx, dictionary);
     }
@@ -166,12 +226,12 @@ pub(in crate::dynamic) fn decompressor(
                     format!("{name}() takes no arguments"),
                 ));
             }
-            let copy = state.borrow_mut().snapshot()?;
+            let copy = state.borrow_mut().snapshot(ctx)?;
             return copy.allocate(ctx, dictionary);
         }
         "eof" => return Ok(builtins::boolean(state.borrow().eof)),
-        "unused_data" => copy_bytes(&state.borrow().unused_data)?,
-        "unconsumed_tail" => copy_bytes(&state.borrow().unconsumed_tail)?,
+        "unused_data" => return Ok(state.borrow_mut().unused_data.expose(ctx)),
+        "unconsumed_tail" => return Ok(state.borrow_mut().unconsumed_tail.expose(ctx)),
         "decompress" => {
             if args.is_empty() && kwargs.len() <= 2 {
                 return Err(Error::new(
@@ -189,6 +249,7 @@ pub(in crate::dynamic) fn decompressor(
                     .map_err(|_| Error::new("ValueError", "max_length must be non-negative"))?;
                 let limit = if limit == 0 { usize::MAX } else { limit };
                 state.borrow_mut().decode(
+                    ctx,
                     Some(buffer(ctx, data)?),
                     limit.min(16 * 1024),
                     limit,
@@ -204,7 +265,7 @@ pub(in crate::dynamic) fn decompressor(
             }
             state
                 .borrow_mut()
-                .decode(None, size as usize, usize::MAX, || Ok(None))?
+                .decode(ctx, None, size as usize, usize::MAX, || Ok(None))?
         }
         _ => unreachable!("registered decompressor operation"),
     };
@@ -212,13 +273,22 @@ pub(in crate::dynamic) fn decompressor(
 }
 
 impl Decompressor {
+    /// Keeps bytes reachable from the decompressor alive across boxed collections.
+    pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
+        for tail in [&self.unused_data, &self.unconsumed_tail] {
+            if let Tail::Published(id) = tail {
+                visit.push(*id);
+            }
+        }
+    }
+
     fn allocate(self, ctx: &mut Context, dictionary: Option<Id>) -> Result<Id> {
         let state = crate::Shared::try_new(std::cell::RefCell::new(self))
             .map_err(|_| crate::Error::allocation())?;
         Ok(ctx.alloc(Value::ZlibDecompressor { state, dictionary }))
     }
 
-    fn snapshot(&mut self) -> Result<Self> {
+    fn snapshot(&mut self, ctx: &mut Context) -> Result<Self> {
         let stream = self
             .stream
             .as_mut()
@@ -255,21 +325,22 @@ impl Decompressor {
                 raw,
             }),
             eof: self.eof,
-            unused_data: copy_bytes(&self.unused_data)?,
-            unconsumed_tail: copy_bytes(&self.unconsumed_tail)?,
+            unused_data: Tail::Published(self.unused_data.expose(ctx)),
+            unconsumed_tail: Tail::Published(self.unconsumed_tail.expose(ctx)),
         })
     }
 
     /// With no new input, flush drains the tail retained by the previous call.
     fn decode<'a>(
         &mut self,
+        ctx: &Context,
         data: Option<&[u8]>,
         initial_size: usize,
         limit: usize,
         dictionary: impl Fn() -> Result<Option<&'a [u8]>>,
     ) -> Result<Vec<u8>> {
         let flushing = data.is_none();
-        let input = data.unwrap_or(&self.unconsumed_tail);
+        let input = data.unwrap_or_else(|| self.unconsumed_tail.as_slice(ctx));
         let mut output: Vec<u8> = Vec::new();
         output
             .try_reserve_exact(initial_size)
@@ -278,7 +349,7 @@ impl Decompressor {
             if flushing {
                 return Ok(Vec::new());
             }
-            self.unconsumed_tail = copy_bytes(input)?;
+            self.unconsumed_tail = Tail::Buffer(copy_bytes(input)?);
             return Err(Error::new(
                 "zlib.error",
                 "Error -2 while decompressing data: inconsistent stream state",
@@ -320,13 +391,10 @@ impl Decompressor {
         };
         let tail = &input[pos..];
         if status == ReturnCode::StreamEnd {
-            self.unused_data
-                .try_reserve(tail.len())
-                .map_err(|_| crate::Error::allocation())?;
-            self.unused_data.extend_from_slice(tail);
+            self.unused_data.append(ctx, tail)?;
         }
-        if status != ReturnCode::StreamEnd || !self.unconsumed_tail.is_empty() {
-            self.unconsumed_tail = copy_bytes(tail)?;
+        if status != ReturnCode::StreamEnd || !self.unconsumed_tail.as_slice(ctx).is_empty() {
+            self.unconsumed_tail = Tail::Buffer(copy_bytes(tail)?);
         }
         if status == ReturnCode::StreamEnd {
             self.eof = true;
