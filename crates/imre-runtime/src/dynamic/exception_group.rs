@@ -5,6 +5,10 @@ use super::value::{Error, Id, NONE, Result, Value};
 
 pub(super) const METHODS: &[&str] = &["derive", "split", "subgroup"];
 
+pub(super) fn declares(name: &str) -> bool {
+    METHODS.contains(&name) || matches!(name, "message" | "exceptions" | "__class_getitem__")
+}
+
 enum Matcher {
     Types(Vec<Id>),
     Predicate(Id),

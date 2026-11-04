@@ -756,7 +756,10 @@ pub(super) fn method(
     }
     if matches!(
         name,
-        "set.__class_getitem__" | "frozenset.__class_getitem__" | "mappingproxy.__class_getitem__"
+        "set.__class_getitem__"
+            | "frozenset.__class_getitem__"
+            | "mappingproxy.__class_getitem__"
+            | "BaseExceptionGroup.__class_getitem__"
     ) {
         let Some((&owner, rest)) = args.split_first() else {
             return Err(type_error(format!(

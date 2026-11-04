@@ -7073,7 +7073,8 @@ impl<'a> Checker<'a> {
                 }
                 let Some(&slot) = self.names.get(name.id.as_str()) else {
                     let name = name.id.as_str();
-                    if imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+                    if (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+                        || imre_ast::exceptions::boxed_builtin_kind(name).is_some())
                         && self.unshadowed_builtin(expression, name)
                     {
                         return Err(self.scoped_builtin_error(name, expression));

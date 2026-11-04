@@ -1380,7 +1380,10 @@ pub(super) fn call(
         ctx.add_exception_note(exception, note)?;
         return Ok(NONE);
     }
-    if name == "mappingproxy.__class_getitem__" {
+    if matches!(
+        name,
+        "mappingproxy.__class_getitem__" | "BaseExceptionGroup.__class_getitem__"
+    ) {
         return collections::method(ctx, name, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("mappingproxy.")
