@@ -754,6 +754,10 @@ impl BuiltinDescriptor {
                     ("__getnewargs__", _) => "($self, /)",
                     ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",
                     ("count", _) if self.owner == "tuple" => "($self, value, /)",
+                    ("partition", "__doc__") if self.owner == "bytes" => {
+                        "Partition the bytes into three parts using the given separator.\n\nThis will search for the separator sep in the bytes. If the separator is found,\nreturns a 3-tuple containing the part before the separator, the separator\nitself, and the part after it.\n\nIf the separator is not found, returns a 3-tuple containing the original bytes\nobject and two empty bytes objects."
+                    }
+                    ("partition", _) if self.owner == "bytes" => "($self, sep, /)",
                     ("replace", "__doc__") if matches!(self.owner, "bytes" | "bytearray") => {
                         "Return a copy with all occurrences of substring old replaced by new.\n\n  count\n    Maximum number of occurrences to replace.\n    -1 (the default value) means replace all occurrences.\n\nIf the optional argument count is given, only the first count occurrences are\nreplaced."
                     }
