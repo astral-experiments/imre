@@ -101,9 +101,21 @@ pub(super) fn parse(ctx: &Context, format: Id) -> Result<(&str, StructFormat)> {
 }
 
 pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Result<Id> {
-    let fields = layout
-        .unpack(ctx.bytes_like(buffer)?)
-        .map_err(|message| format_error(ctx, message))?;
+    let decode = |ctx: &mut Context, view| {
+        layout
+            .unpack(ctx.native_buffer_bytes(view)?)
+            .map_err(|message| format_error(ctx, message))
+    };
+    let method = match ctx.heap.get(ctx.scalar_value(buffer)) {
+        // Preserve the native read for bytes and bytearray subclasses with only a release hook.
+        Value::Bytes(_) | Value::ByteArray(_) => ctx.buffer_slot(buffer, "__buffer__").flatten(),
+        _ => ctx.python_buffer_method(buffer, true)?,
+    };
+    let fields = if let Some(method) = method {
+        ctx.with_contiguous_python_buffer(buffer, method, 0, decode)
+    } else {
+        decode(ctx, buffer)
+    }?;
     Ok(unpacked_tuple(ctx, fields))
 }
 
