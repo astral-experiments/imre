@@ -32,7 +32,17 @@ def current():
                 print(decode(value))
             except (ValueError, TypeError) as error:
                 print(type(error).__name__, str(error))
-    from binascii import Error, Incomplete, a2b_base64, b2a_base64
+    from binascii import Error, Incomplete, a2b_base64, b2a_base64, crc32
+
+    assert crc32 is binascii.crc32 and crc32.__self__ is binascii
+    assert crc32(b"789", crc32(b"123456")) == 0xCBF43926
+    data = bytearray(b"abc")
+    try:
+        crc32(data, DropIndex(data))
+    except BufferError:
+        assert data == b"abc"
+    else:
+        raise AssertionError("resized the checksum input during seed conversion")
 
     print(type(a2b_base64) is type(len), a2b_base64 is binascii.a2b_base64)
     print(Error.__module__, Error.__name__, Error.__bases__ == (ValueError,))

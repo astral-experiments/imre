@@ -658,7 +658,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "binascii",
-            "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
+            "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify"
+            | "crc32",
         ) => ctx.builtin(&format!("binascii.{name}")),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
@@ -1813,7 +1814,7 @@ pub(super) fn call(
         return zlib::call(ctx, method, args, kwargs);
     }
     if let Some(method @ ("adler32" | "crc32")) = name.strip_prefix("zlib.") {
-        return binascii::checksum(ctx, method, args, kwargs);
+        return binascii::checksum(ctx, "zlib", method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);

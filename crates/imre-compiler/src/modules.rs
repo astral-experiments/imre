@@ -2228,6 +2228,7 @@ impl IntrinsicModule {
             (Self::Binascii, "a2b_hex") => Intrinsic::BinasciiUnhexlify("binascii.a2b_hex"),
             (Self::Binascii, "a2b_base64") => Intrinsic::BinasciiDecode,
             (Self::Binascii, "b2a_base64") => Intrinsic::BinasciiEncode,
+            (Self::Binascii, "crc32") => Intrinsic::ScopedObjectExport("binascii.crc32"),
             (Self::Binascii, "Error") => Intrinsic::BinasciiError,
             (Self::Binascii, "Incomplete") => Intrinsic::BinasciiIncomplete,
             (Self::Hashlib, "file_digest") => Intrinsic::HashFileDigest,
