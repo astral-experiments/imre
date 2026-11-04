@@ -3046,7 +3046,17 @@ unsafe fn filter_character_set(
         let text = &*text;
         object(allowed).0.with_mut(|storage| {
             let (keys, ascii) = storage.set_mut().character_keys();
-            let mut selected = text.chars().filter_map(|c| {
+            let mut remaining = text.as_str();
+            if omit_empty && let Some(members) = ascii {
+                // All preceding bytes were rejected ASCII, so the first candidate starts a scalar.
+                let Some(first) = remaining.as_bytes().iter().position(|&byte| {
+                    !byte.is_ascii() || u32::from(byte) < below || members[usize::from(byte)]
+                }) else {
+                    return Ok(std::ptr::null());
+                };
+                remaining = &remaining[first..];
+            }
+            let mut selected = remaining.chars().filter_map(|c| {
                 let mut buffer = [0; 4];
                 let key = c.encode_utf8(&mut buffer);
                 let present = u32::from(c) < below
