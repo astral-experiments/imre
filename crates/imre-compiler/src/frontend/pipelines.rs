@@ -2579,7 +2579,7 @@ impl Checker<'_> {
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned = before;
         self.narrowed = facts;
-        let (mut orelse, falls) = self.loop_else(orelse, breaks)?;
+        let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
         if !orelse.is_empty() {
             orelse = input
                 .clear
