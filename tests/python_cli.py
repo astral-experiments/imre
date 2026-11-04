@@ -3913,6 +3913,14 @@ else:
             )
             compare("-B", script)
 
+            script.write_text(
+                "import subprocess\n"
+                "cmd = ['/bin/printf', r'\\200']\n"
+                "print(subprocess.check_output(cmd, errors='backslashreplace'))\n"
+                "print(ascii(subprocess.run(cmd, capture_output=True, errors='surrogateescape').stdout))\n"
+            )
+            compare("-B", script)
+
             capture = (
                 "def capture() -> str:\n"
                 "    return subprocess.check_output(['/bin/printf', r'\\200'], encoding='cp1252')\n"

@@ -312,6 +312,13 @@ fn typed_pipe_encoding(value: &ast::Expr) -> bool {
             if matches!(s.value.to_str().to_ascii_lowercase().as_str(), "utf8" | "utf-8" | "utf_8"))
 }
 
+/// Error handlers represented by the typed subprocess stream flags.
+fn typed_pipe_errors(value: &ast::Expr) -> bool {
+    matches!(value, ast::Expr::NoneLiteral(_))
+        || matches!(value, ast::Expr::StringLiteral(s)
+            if matches!(s.value.to_str(), "strict" | "ignore" | "replace"))
+}
+
 /// Capture determines the returned layout. Ordinary stream expressions are
 /// evaluated in source order, including ones rejected by run/check_output.
 fn stream_plan(
@@ -354,8 +361,7 @@ fn stream_plan(
             Some("errors")
                 if (checked_output || run) && !matches!(value, ast::Expr::NoneLiteral(_)) =>
             {
-                if !matches!(value, ast::Expr::StringLiteral(v) if matches!(v.value.to_str(), "strict" | "ignore" | "replace"))
-                {
+                if !typed_pipe_errors(value) {
                     return Err("check_output errors requires strict, ignore, replace, or None");
                 }
                 text = true;
@@ -906,8 +912,13 @@ impl Checker<'_> {
             && matches!(api, LaunchApi::Run { .. } | LaunchApi::CheckOutput)
             && call
                 .arguments
-                .find_keyword("encoding")
-                .is_some_and(|kw| !typed_pipe_encoding(&kw.value))
+                .keywords
+                .iter()
+                .any(|kw| match kw.arg.as_deref() {
+                    Some("encoding") => !typed_pipe_encoding(&kw.value),
+                    Some("errors") => !typed_pipe_errors(&kw.value),
+                    _ => false,
+                })
         {
             // A discarded call still supplies the streams inspected in its exception handler.
             self.graph
