@@ -1,6 +1,8 @@
 """Socket helpers using the runtime's native socket operations."""
 
 import _socket
+import errno
+import io
 import os
 from _socket import close, error, has_ipv6, socket
 
@@ -29,6 +31,126 @@ if hasattr(_socket, "IPPROTO_IPV6"):
     IPPROTO_IPV6 = _socket.IPPROTO_IPV6
 if hasattr(_socket, "IPV6_V6ONLY"):
     IPV6_V6ONLY = _socket.IPV6_V6ONLY
+
+
+_blocking_errnos = {errno.EAGAIN, errno.EWOULDBLOCK}
+
+
+class SocketIO(io.RawIOBase):
+
+    """Raw I/O implementation for stream sockets.
+
+    This class supports the makefile() method on sockets.  It provides
+    the raw I/O interface on top of a socket object.
+    """
+
+    def __init__(self, sock, mode):
+        if mode not in ("r", "w", "rw", "rb", "wb", "rwb"):
+            raise ValueError("invalid mode: %r" % mode)
+        self._sock = sock
+        if "b" not in mode:
+            mode += "b"
+        self._mode = mode
+        self._reading = "r" in mode
+        self._writing = "w" in mode
+        self._timeout_occurred = False
+
+    def _checkClosed(self):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+
+    def _checkReadable(self):
+        if self.readable() is not True:
+            raise io.UnsupportedOperation("File or stream is not readable.")
+
+    def _checkWritable(self):
+        if self.writable() is not True:
+            raise io.UnsupportedOperation("File or stream is not writable.")
+
+    def readinto(self, b):
+        """Read up to len(b) bytes into the writable buffer *b* and return
+        the number of bytes read.  If the socket is non-blocking and no bytes
+        are available, None is returned.
+
+        If *b* is non-empty, a 0 return value indicates that the connection
+        was shutdown at the other end.
+        """
+        self._checkClosed()
+        self._checkReadable()
+        if self._timeout_occurred:
+            raise OSError("cannot read from timed out object")
+        try:
+            return self._sock.recv_into(b)
+        except timeout:
+            self._timeout_occurred = True
+            raise
+        except error as e:
+            if e.errno in _blocking_errnos:
+                return None
+            raise
+
+    def write(self, b):
+        """Write the given bytes or bytearray object *b* to the socket
+        and return the number of bytes written.  This can be less than
+        len(b) if not all data could be written.  If the socket is
+        non-blocking and no bytes could be written None is returned.
+        """
+        self._checkClosed()
+        self._checkWritable()
+        try:
+            return self._sock.send(b)
+        except error as e:
+            if e.errno in _blocking_errnos:
+                return None
+            raise
+
+    def readable(self):
+        """True if the SocketIO is open for reading.
+        """
+        if self.closed:
+            raise ValueError("I/O operation on closed socket.")
+        return self._reading
+
+    def writable(self):
+        """True if the SocketIO is open for writing.
+        """
+        if self.closed:
+            raise ValueError("I/O operation on closed socket.")
+        return self._writing
+
+    def seekable(self):
+        """True if the SocketIO is open for seeking.
+        """
+        if self.closed:
+            raise ValueError("I/O operation on closed socket.")
+        return super().seekable()
+
+    def fileno(self):
+        """Return the file descriptor of the underlying socket.
+        """
+        self._checkClosed()
+        return self._sock.fileno()
+
+    @property
+    def name(self):
+        if not self.closed:
+            return self.fileno()
+        else:
+            return -1
+
+    @property
+    def mode(self):
+        return self._mode
+
+    def close(self):
+        """Close the SocketIO object.  This doesn't close the underlying
+        socket, except if all references to it have disappeared.
+        """
+        if self.closed:
+            return
+        io.RawIOBase.close(self)
+        self._sock._decref_socketios()
+        self._sock = None
 
 
 def _intenum_converter(value, enum_klass):
