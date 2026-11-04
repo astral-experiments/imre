@@ -1,7 +1,8 @@
 use std::ffi::{OsStr, OsString};
-use std::io::{ErrorKind, Write};
+use std::fs::File;
+use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, ExitStatus};
+use std::process::{Command, ExitCode, ExitStatus, Stdio};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
@@ -247,10 +248,9 @@ fn run() -> Result<ExitCode, String> {
             .or_else(|| source_path.file_stem().map(PathBuf::from))
             .ok_or("Could not infer an executable name from the source path; pass -o OUTPUT.")?,
     };
+    let python_startup = options.python_startup().is_some();
     #[cfg(unix)]
-    let child_disposition = options
-        .python_startup()
-        .is_some()
+    let child_disposition = python_startup
         .then(run_program::CompileChildren::prepare)
         .transpose()
         .map_err(|error| format!("Could not prepare compiler child waits: {error}"))?;
@@ -482,6 +482,7 @@ fn run() -> Result<ExitCode, String> {
                 cache
                     .as_ref()
                     .filter(|_| stage.is_some() || !options.extension_paths.is_empty()),
+                python_startup,
                 |name, hit| progress.unit(name, hit),
             )?;
             progress.linking();
@@ -507,6 +508,7 @@ fn run() -> Result<ExitCode, String> {
         .args(&extension_archives)
         .arg(&runtime)
         .args(native_libraries);
+    let mut link_trace = None;
     if let Some(stage) = &stage {
         let mut depfile = OsString::from("--dependency-file=");
         depfile.push(stage.path().join("link.d"));
@@ -517,7 +519,8 @@ fn run() -> Result<ExitCode, String> {
         if native_lld.is_some()
             && let Ok(trace) = std::fs::File::create(stage.path().join("link.trace"))
         {
-            linker.arg("-Wl,--trace").stdout(trace);
+            linker.arg("-Wl,--trace");
+            link_trace = Some(trace);
         }
     }
     match target_os {
@@ -580,7 +583,7 @@ fn run() -> Result<ExitCode, String> {
         if link.verbose {
             eprintln!("{driver:?}");
         }
-        driver.status()
+        tool_status(driver, python_startup, link_trace.as_ref())
     };
     let status = match invoke(&mut linker) {
         Err(error)
@@ -628,6 +631,51 @@ fn run() -> Result<ExitCode, String> {
         return run_image(directory, boxed_imports);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// During Python startup a compiler outliving the launcher must not hold the program's stdio open.
+fn tool_status(
+    driver: &mut Command,
+    python_startup: bool,
+    link_trace: Option<&File>,
+) -> io::Result<ExitStatus> {
+    if let Some(trace) = link_trace {
+        driver.stdout(trace.try_clone()?);
+    }
+    if !python_startup {
+        return driver.status();
+    }
+
+    // Wait for the tool itself even if a compiler wrapper starts a background process.
+    let stdout = if link_trace.is_none() {
+        let (reader, writer) = tool_output_file()?;
+        driver.stdout(writer);
+        Some(reader)
+    } else {
+        None
+    };
+    let (stderr, writer) = tool_output_file()?;
+    let status = driver.stdin(Stdio::null()).stderr(writer).status()?;
+    if let Some(stdout) = stdout {
+        let mut dest = io::stdout().lock();
+        forward_tool_output(stdout, &mut dest)?;
+        dest.flush()?;
+    }
+    forward_tool_output(stderr, &mut io::stderr().lock())?;
+    Ok(status)
+}
+
+/// Return independent read and write offsets on the same unlinked temporary file.
+fn tool_output_file() -> io::Result<(File, File)> {
+    let reader = tempfile::NamedTempFile::new()?;
+    let writer = reader.reopen()?;
+    Ok((reader.into_file(), writer))
+}
+
+fn forward_tool_output(file: File, dest: &mut impl Write) -> io::Result<()> {
+    let len = file.metadata()?.len();
+    io::copy(&mut file.take(len), dest)?;
+    Ok(())
 }
 
 /// Read only library names, never arbitrary driver or linker options, from a wheel.
