@@ -27,6 +27,13 @@ def test_date_fromisoformat():
         raise AssertionError("accepted a nonexistent ISO week")
 
 
+def test_isoformat_field_widths():
+    stamp = dt(1, 2, 3, 4, 5, 6, 7, UTC)
+    sep = chr(0xD800)
+    assert stamp.isoformat(sep) == "0001-02-03" + sep + "04:05:06.000007+00:00"
+    assert stamp.timetz().isoformat(timespec="milliseconds") == "04:05:06.000+00:00"
+
+
 def test_date_isoformat():
     class Zone(tzinfo):
         def utcoffset(self, value):
@@ -1159,6 +1166,7 @@ def test_calendar_strftime():
 def current():
     test_date_fromisoformat()
     test_date_isoformat()
+    test_isoformat_field_widths()
     test_calendar_strftime()
     test_calendar_reduction()
     test_fixed_timezone_methods()
