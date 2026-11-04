@@ -117,7 +117,7 @@ pub struct CompileOptions {
     pub sitecustomize: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
-    /// Indices in extension_paths admitted as ZIPs from an ordinary Python file's PYTHONPATH.
+    /// Indices in extension_paths admitted as ZIPs from PYTHONPATH during Python startup.
     pub python_archive_indices: Vec<usize>,
 }
 

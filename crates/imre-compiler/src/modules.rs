@@ -3442,7 +3442,7 @@ impl SourceGraph {
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
-            &[],
+            &options.python_archive_indices,
             options.implicit_site().map(PathBuf::as_path),
             fs,
         )?;

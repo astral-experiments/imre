@@ -91,8 +91,12 @@ impl BuildOptions {
         if !flags.ignore_environment
             && let Some(paths) = env::var_os("PYTHONPATH").filter(|value| !value.is_empty())
         {
-            let file_entry = matches!(&invocation, Invocation::Script { path, .. }
-                if path.is_file() && !imre_compiler::is_zip_path(path));
+            let search_archives = match &invocation {
+                Invocation::Command(_) | Invocation::Module { .. } => true,
+                Invocation::Script { path, .. } => {
+                    path.is_file() && !imre_compiler::is_zip_path(path)
+                }
+            };
             for path in env::split_paths(&paths) {
                 let path = if path.as_os_str().is_empty() {
                     PathBuf::from(".")
@@ -100,7 +104,7 @@ impl BuildOptions {
                     path
                 };
                 if !path.is_dir() {
-                    if !file_entry || !imre_compiler::is_zip_path(&path) {
+                    if !search_archives || !imre_compiler::is_zip_path(&path) {
                         continue;
                     }
                     options
