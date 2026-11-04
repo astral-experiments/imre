@@ -911,8 +911,7 @@ impl Function<'_, '_> {
         for value in values {
             self.op("append", &[&args, value]);
         }
-        let kwargs = self.op("dict", &[]);
-        self.call_at(callable, &args, &kwargs, &mark, None)
+        self.call_at(callable, &args, "0", &mark, None)
     }
 
     /// Pass the caller's temporary root boundary and optional traceback position.

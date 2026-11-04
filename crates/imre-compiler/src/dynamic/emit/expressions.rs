@@ -380,7 +380,11 @@ impl Function<'_, '_> {
         syntax: &ast::Arguments,
         callable: &str,
     ) -> String {
-        let kwargs = self.op("dict", &[]);
+        let kwargs = if syntax.keywords.is_empty() {
+            "0".into()
+        } else {
+            self.op("dict", &[])
+        };
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
             if let ast::Expr::Starred(s) = arg {
