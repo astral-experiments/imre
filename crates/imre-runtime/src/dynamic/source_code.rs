@@ -235,6 +235,7 @@ struct SourceCase {
 }
 
 enum SourcePattern {
+    Singleton(Id),
     Value(Box<ast::Expr>),
     Class(Box<ast::Expr>),
     Wildcard,
@@ -1295,7 +1296,7 @@ impl Program {
                             SourcePattern::Value(expr) | SourcePattern::Class(expr) => {
                                 strings.visit_expr(expr)
                             }
-                            SourcePattern::Wildcard => {}
+                            SourcePattern::Singleton(_) | SourcePattern::Wildcard => {}
                         }
                         if let Some((_, guard)) = &case.guard {
                             strings.visit_expr(guard);
@@ -2784,6 +2785,13 @@ impl Program {
                     for case in s.cases {
                         let case_line = line_offset(case.pattern.start());
                         let pattern = match case.pattern {
+                            ast::Pattern::MatchSingleton(p) => {
+                                SourcePattern::Singleton(match p.value {
+                                    ast::Singleton::None => NONE,
+                                    ast::Singleton::False => FALSE,
+                                    ast::Singleton::True => TRUE,
+                                })
+                            }
                             ast::Pattern::MatchValue(p) => SourcePattern::Value(p.value),
                             ast::Pattern::MatchClass(p)
                                 if p.arguments.patterns.is_empty()
@@ -4861,6 +4869,7 @@ impl Context {
                 for (index, case) in cases.iter().enumerate() {
                     self.heap.set_statement_line(match_line + case.line_offset);
                     let matched = match &case.pattern {
+                        SourcePattern::Singleton(value) => subject == *value,
                         SourcePattern::Value(expr) => {
                             let pattern = eval(self, expr)?;
                             let comparison = self.binary("==", subject, pattern)?;

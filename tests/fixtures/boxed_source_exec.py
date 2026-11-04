@@ -832,6 +832,12 @@ def source_match():
     exec("""
 def choose(value, guard):
     match observe(value):
+        case True:
+            return "true"
+        case False:
+            return "false"
+        case None:
+            return "none"
         case Labels.first if observe(guard):
             return "first"
         case str():
@@ -847,6 +853,10 @@ def choose(value, guard):
     assert choose(5, False) == "other"
     assert calls == ["hit", True, "hit", False, 5]
     assert choose(ValueError("matched"), False) == "exception"
+    assert choose(True, False) == "true"
+    assert choose(False, False) == "false"
+    assert choose(None, False) == "none"
+    assert choose(1, False) == choose(0, False) == "other"
 
 
 def source_genexpr():
