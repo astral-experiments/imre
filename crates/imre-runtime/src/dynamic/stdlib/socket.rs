@@ -1277,6 +1277,18 @@ pub(super) fn call(
         };
         return Ok(ctx.int(i64::from(status)));
     }
+    if method == "set_inheritable" {
+        let [_, value] = super::required_arguments(
+            name,
+            ["self", "inheritable"],
+            std::iter::once(receiver).chain(args),
+            kwargs,
+        )?;
+        let fd = native::fd(&s);
+        let enabled = super::os::c_int(ctx, value)? != 0;
+        crate::objects::os::INHERITABLE.update(fd, enabled)?;
+        return Ok(NONE);
+    }
     if method == "getsockopt" {
         return getsockopt(ctx, &s, args, kwargs);
     }
