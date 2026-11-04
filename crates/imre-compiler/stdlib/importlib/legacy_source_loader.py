@@ -88,7 +88,7 @@ class _NativeImporter:
     def find_spec(cls, fullname, path=None, target=None):
         info = _native_spec_info(fullname, path, cls is _BundledImporter)
         if info is None:
-            if (cls is _BundledImporter and path is None and fullname == 'xml'
+            if (cls is _BundledImporter and path is None and fullname in ('xml', '_pydatetime')
                     and _bootstrap_external is not None):
                 return _bootstrap_external._installed_source_spec(fullname, '<imre stdlib>', target)
             return None

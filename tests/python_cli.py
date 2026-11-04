@@ -98,6 +98,12 @@ def check_installed_site(imre, root, run):
         "import xml; print(xml.__name__)", timeout=300,
     )
     assert (opaque.returncode, opaque.stdout, opaque.stderr) == (0, b"xml\n", b""), opaque
+    fallback = run(
+        launcher, "-IB", "-c",
+        "import sys; sys.modules['_datetime'] = None; from datetime import date; "
+        "print(date(2000, 2, 29).isoformat())", timeout=300,
+    )
+    assert (fallback.returncode, fallback.stdout, fallback.stderr) == (0, b"2000-02-29\n", b""), fallback
     assert not archive.exists()
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported

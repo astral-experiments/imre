@@ -11,7 +11,9 @@ def _installed_source_spec(fullname, registry_path, target):
     # A compiled package can have children in the installed archive. Only search
     # those children from their own virtual parent, preserving application shadows.
     parts = fullname.split('.')
-    if parts[0] != 'xml' or not all(part.isidentifier() for part in parts):
+    if fullname != '_pydatetime' and parts[0] != 'xml':
+        return None
+    if not all(part.isidentifier() for part in parts):
         return None
     parent = parts[:-1]
     if registry_path != _path_join('<imre stdlib>', *parent):

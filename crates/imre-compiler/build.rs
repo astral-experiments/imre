@@ -1,5 +1,5 @@
 //! Package the Python sources that the boxed importer loads on demand.
-use std::fs::{self, File};
+use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -14,6 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .last_modified_time(DateTime::default())
         .unix_permissions(0o644);
     for name in [
+        "_pydatetime.py",
         "xml/__init__.py",
         "xml/etree/__init__.py",
         "xml/etree/ElementPath.py",
@@ -24,9 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         archive.start_file(name, options)?;
         io::copy(&mut File::open(path)?, &mut archive)?;
     }
-    let license = "../../licenses/ElementTree.txt";
-    println!("cargo:rerun-if-changed={license}");
-    archive.set_comment(fs::read_to_string(license)?)?;
+    archive.set_comment(concat!(
+        include_str!("../../licenses/CPython.txt"),
+        "\n",
+        include_str!("../../licenses/ElementTree.txt")
+    ))?;
     archive.finish()?;
     Ok(())
 }
