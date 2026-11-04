@@ -2429,7 +2429,7 @@ struct Checker<'a> {
     /// Group dictionary locals whose complete set of reads resolves to capture slots.
     regex_fields: HashMap<usize, HashMap<String, usize>>,
     joined_lines: joined_lines::Plan,
-    consuming_lists: HashSet<TextRange>,
+    consuming_lists: consuming_lists::Plan,
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
@@ -2503,7 +2503,7 @@ impl<'a> Checker<'a> {
             regex_locals: HashMap::new(),
             regex_fields: HashMap::new(),
             joined_lines: joined_lines::Plan::default(),
-            consuming_lists: HashSet::new(),
+            consuming_lists: consuming_lists::Plan::default(),
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
             returns: Type::None,
@@ -3993,7 +3993,19 @@ impl<'a> Checker<'a> {
         {
             return self.groupby_iteration(loop_, call);
         }
-        let mut input = if let Some(items) = self.environ_items_loop(&loop_.iter)? {
+        let mut input = if let Some(&byte) = self
+            .consuming_lists
+            .split_consumers
+            .get(&loop_.iter.range())
+        {
+            let receiver = self.expr(&loop_.iter)?;
+            debug_assert_eq!(receiver.ty, Type::Str);
+            let cursor = Expr {
+                ty: Type::Iterator,
+                kind: ExprKind::Builtin(Builtin::SplitByteIter(byte), vec![receiver]),
+            };
+            Iteration::Prepared(self.prepare_cursor(cursor, Type::Str))
+        } else if let Some(items) = self.environ_items_loop(&loop_.iter)? {
             items
         } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
             input
