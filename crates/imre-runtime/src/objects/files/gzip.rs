@@ -30,6 +30,7 @@ enum Phase {
 /// Metadata reads and DEFLATE share unread bytes across gzip members. A new
 /// DEFLATE chunk starts at the current compressed position, even after a header.
 struct GzipInput<'a> {
+    on_header: &'a dyn Fn(u32),
     source: &'a mut dyn Read,
     block: &'a mut [u8],
     unread: &'a mut Range<usize>,
@@ -130,13 +131,23 @@ impl GzipDecoder {
         self.member.position
     }
 
+    /// A rewind keeps the last header time until another complete header is read.
+    pub(crate) fn rewind(&mut self) {
+        self.unread = 0..0;
+        self.member.position = 0;
+        self.member.decoder.reset(false);
+        self.member.crc.reset();
+        self.member.phase = Phase::Header;
+    }
+
     /// Decode from the caller's current position without retaining its transport.
     pub(crate) fn read(
         &mut self,
         source: &mut impl Read,
         out: &mut [MaybeUninit<u8>],
+        on_header: &dyn Fn(u32),
     ) -> io::Result<usize> {
-        self.decode(source, out, true)
+        self.decode(source, out, true, on_header)
     }
 
     pub(super) fn read_file(
@@ -144,7 +155,7 @@ impl GzipDecoder {
         source: &mut impl Read,
         out: &mut [MaybeUninit<u8>],
     ) -> io::Result<usize> {
-        self.decode(source, out, false)
+        self.decode(source, out, false, &|_| {})
     }
 
     fn decode(
@@ -152,8 +163,10 @@ impl GzipDecoder {
         source: &mut dyn Read,
         out: &mut [MaybeUninit<u8>],
         borrowed: bool,
+        on_header: &dyn Fn(u32),
     ) -> io::Result<usize> {
         let mut input = GzipInput {
+            on_header,
             source,
             block: &mut self.block,
             unread: &mut self.unread,
@@ -223,6 +236,9 @@ impl MemberDecoder {
         if flags & 2 != 0 {
             input.read_exact(&mut [0; 2])?;
         }
+        (input.on_header)(u32::from_le_bytes([
+            header[2], header[3], header[4], header[5],
+        ]));
         self.phase = Phase::Body { needs_input: true };
         Ok(true)
     }
