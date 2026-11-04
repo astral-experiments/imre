@@ -564,24 +564,6 @@ fn scan_imports(
     Ok(imports)
 }
 
-fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String> {
-    if level == 0 {
-        return Some(name.to_owned());
-    }
-    let mut parts: Vec<_> = owner.split('.').collect();
-    if !package {
-        parts.pop();
-    }
-    if level as usize > parts.len() {
-        return None;
-    }
-    parts.truncate(parts.len() + 1 - level as usize);
-    if !name.is_empty() {
-        parts.push(name);
-    }
-    Some(parts.join("."))
-}
-
 pub(crate) enum ObjectOperation {
     TracedEntry,
     Builtin,
@@ -945,8 +927,9 @@ pub(crate) fn compile<const SPLIT: bool>(
         {
             names.push((0, "json.decoder".to_owned()));
         }
+        let package_name = crate::modules::import_package(&owner, package);
         for (level, requested) in names {
-            let Some(name) = resolve(&owner, package, level, &requested) else {
+            let Some(name) = crate::modules::resolve_import(package_name, level, &requested) else {
                 continue;
             };
             // A frozen import never visits sys.path unless the program can disable

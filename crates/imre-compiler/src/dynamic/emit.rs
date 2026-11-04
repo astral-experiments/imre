@@ -208,11 +208,10 @@ impl Output {
             strings::check_docs(source, &parsed.syntax().body, &replacements)
                 .map_err(|error| format!("{}:{error}", path.display()))?;
         }
-        let package = if path.file_name().is_some_and(|file| file == "__init__.py") {
-            name
-        } else {
-            name.rsplit_once('.').map_or("", |(parent, _)| parent)
-        };
+        let package = crate::modules::import_package(
+            name,
+            path.file_name().is_some_and(|file| file == "__init__.py"),
+        );
         let docs = if self.keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {

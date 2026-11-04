@@ -1,4 +1,4 @@
-use super::{Expr, Visitor, ast, resolve, visitor};
+use super::{Expr, Visitor, ast, visitor};
 use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
 /// Prefer boxed module implementations over the common bundled sources.
@@ -667,7 +667,7 @@ fn target(call: &ast::ExprCall) -> Option<String> {
     let absolute = if level == 0 {
         name.to_owned()
     } else {
-        resolve(literal("package", 1)?.value.to_str(), true, level, rest)?
+        crate::modules::resolve_import(literal("package", 1)?.value.to_str(), level, rest)?
     };
     absolute
         .split('.')
