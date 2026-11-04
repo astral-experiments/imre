@@ -153,6 +153,11 @@ pub(super) fn call(
         } else {
             FALSE
         }),
+        ("set_namespace_prefixes", [resource, enabled], []) => {
+            let handle = handle(ctx, *resource)?;
+            handle.parser.set_namespace_prefixes(ctx.truth(*enabled)?);
+            Ok(NONE)
+        }
         ("get_reparse_deferral", [resource], []) => {
             Ok(if handle(ctx, *resource)?.defer_reparse.get() {
                 TRUE

@@ -21,6 +21,51 @@ def incremental():
     assert "".join(text) == "é"
 
 
+def namespace_prefixes():
+    for separator, value, first, second, attribute in (
+        ("|", [], "urn:p|item", "urn:p|next", "urn:p|id"),
+        ("|", [1], "urn:p|item|p", "urn:p|next|p", "urn:p|id|p"),
+        ("", [1], "urn:pitem", "urn:pnext", "urn:pid"),
+    ):
+        parser = expat.ParserCreate(namespace_separator=separator)
+        assert parser.namespace_prefixes is False
+        parser.namespace_prefixes = value
+        assert parser.namespace_prefixes is bool(value)
+        starts = []
+        ends = []
+        parser.StartElementHandler = lambda tag, attrs: starts.append((tag, attrs))
+        parser.EndElementHandler = ends.append
+        parser.Parse(b'<root xmlns="urn:d" xmlns:p="urn:p"><p:item p:id="1" id="2"/>', False)
+        parser.namespace_prefixes = not value
+        assert parser.namespace_prefixes is (not value)
+        parser.Parse(b"<p:next/></root>", True)
+        root = "urn:d" + separator + "root"
+        assert starts == [(root, {}), (first, {attribute: "1", "id": "2"}), (second, {})]
+        assert ends == [first, second, root]
+
+    error = ValueError("truth check")
+
+    class Invalid:
+        def __bool__(self):
+            raise error
+
+    parser = expat.ParserCreate()
+    parser.namespace_prefixes = True
+    try:
+        parser.namespace_prefixes = Invalid()
+    except ValueError as caught:
+        assert caught is error
+    else:
+        raise AssertionError("failed truth check was ignored")
+    try:
+        del parser.namespace_prefixes
+    except RuntimeError as caught:
+        assert str(caught) == "Cannot delete attribute"
+    else:
+        raise AssertionError("namespace_prefixes was deleted")
+    assert parser.namespace_prefixes is True
+
+
 def unknown_encodings():
     parser = expat.ParserCreate()
     parser.buffer_text = True
@@ -187,6 +232,7 @@ def malformed():
 
 
 incremental()
+namespace_prefixes()
 unknown_encodings()
 callback_exception()
 buffered_callback_exception()

@@ -81,7 +81,7 @@ _default_intern = object()
 class xmlparser:
     __slots__ = _handlers + (
         "_handle", "_intern", "_buffer_text", "_buffer_size",
-        "_ordered_attributes", "_specified_attributes",
+        "_ordered_attributes", "_specified_attributes", "_namespace_prefixes",
         "_character_handler", "_ignore_unhandled_text",
     )
 
@@ -125,6 +125,22 @@ class xmlparser:
     @property
     def intern(self):
         return self._intern
+
+    @property
+    def namespace_prefixes(self):
+        return self._namespace_prefixes
+
+    @namespace_prefixes.setter
+    def namespace_prefixes(self, value):
+        enabled = bool(value)
+        _native.set_namespace_prefixes(self._handle, enabled)
+        # Expat ignores this setting after parsing starts, but the getter
+        # still reports the last value assigned to the Python attribute.
+        self._namespace_prefixes = enabled
+
+    @namespace_prefixes.deleter
+    def namespace_prefixes(self):
+        raise RuntimeError("Cannot delete attribute")
 
     @property
     def ordered_attributes(self):
@@ -212,6 +228,7 @@ def ParserCreate(encoding=None, namespace_separator=None, intern=_default_intern
     parser._intern = intern
     parser._buffer_text = False
     parser._buffer_size = 8192
+    parser._namespace_prefixes = False
     parser._ordered_attributes = False
     parser._specified_attributes = False
     parser._clear_handlers()
