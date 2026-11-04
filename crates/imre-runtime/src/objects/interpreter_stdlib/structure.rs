@@ -11,6 +11,7 @@ struct Field {
 /// A value decoded from a struct record. Padding contributes no value.
 #[derive(Debug, PartialEq)]
 pub(crate) enum UnpackedField {
+    Bool(bool),
     Integer(u64),
     Signed(i64),
     Float(f64),
@@ -74,8 +75,8 @@ impl StructFormat {
                     align_of::<std::ffi::c_long>(),
                 ),
                 b'L' | b'l' => (4, 1),
-                b'b' | b'B' => (1, 1),
-                b'H' => (2, align_of::<u16>()),
+                b'b' | b'B' | b'?' => (1, 1),
+                b'h' | b'H' => (2, align_of::<u16>()),
                 b'i' | b'I' => (4, align_of::<u32>()),
                 b'f' => (4, align_of::<f32>()),
                 b'd' => (8, align_of::<f64>()),
@@ -214,7 +215,8 @@ impl StructFormat {
                 u64::from_be_bytes(word)
             };
             result.push(match code {
-                b'b' | b'i' | b'l' | b'q' => {
+                b'?' => UnpackedField::Bool(value != 0),
+                b'b' | b'h' | b'i' | b'l' | b'q' => {
                     // Move the field's sign bit into bit 63 before the arithmetic shift.
                     let shift = (8 - field.len()) * 8;
                     UnpackedField::Signed(((value << shift) as i64) >> shift)

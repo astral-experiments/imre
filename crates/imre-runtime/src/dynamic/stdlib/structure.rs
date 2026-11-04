@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
-use super::super::builtins::bind_builtin_arguments;
+use super::super::builtins::{bind_builtin_arguments, boolean};
 use super::{
     Context, Error, Id, NONE, Result, Value,
     system::{StructFormat, UnpackedField},
@@ -111,6 +111,7 @@ fn unpacked_tuple(ctx: &mut Context, fields: Vec<UnpackedField>) -> Id {
     let items = fields
         .into_iter()
         .map(|field| match field {
+            UnpackedField::Bool(value) => boolean(value),
             UnpackedField::Integer(word) => ctx.alloc(Value::Int(crate::Int::new(word.into()))),
             UnpackedField::Signed(number) => ctx.int(number),
             UnpackedField::Float(number) => ctx.alloc(Value::Float(number)),
@@ -314,6 +315,7 @@ fn pack_word(
     little_endian: bool,
 ) -> Result<u64> {
     match code {
+        b'?' => ctx.truth(id).map(u64::from),
         b'f' => single_bits(ctx, id).map(u64::from),
         b'd' => float_value(ctx, id).map(f64::to_bits),
         _ => integer_field(ctx, id, code, width, little_endian),
@@ -368,7 +370,7 @@ fn integer_field(
     let value = ctx.index_value(id).and_then(|value| {
         value.ok_or_else(|| format_error(ctx, "required argument is not an integer"))
     });
-    if matches!(code, b'b' | b'i' | b'l' | b'q') {
+    if matches!(code, b'b' | b'h' | b'i' | b'l' | b'q') {
         let max = i64::MAX >> ((8 - width) * 8);
         let min = !max;
         let number = match value {
