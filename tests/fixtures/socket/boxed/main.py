@@ -6,6 +6,7 @@ import socketpair_transport
 import sendall_signals
 import unix_addresses
 import stream
+import buffered_writer
 import ipv6_stream
 import dualstack
 import datagram
