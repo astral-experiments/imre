@@ -27,7 +27,11 @@ impl Context {
         scope: Id,
     ) -> Result<Id> {
         let args = self.items(arguments)?;
-        let kwargs = self.keyword_args(keywords)?;
+        let kwargs = if keywords == NONE {
+            Vec::new()
+        } else {
+            self.keyword_args(keywords)?
+        };
         let result = self.call_in_scope(scope, callable, args, kwargs)?;
         if !self
             .heap
