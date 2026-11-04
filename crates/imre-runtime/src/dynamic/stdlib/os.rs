@@ -24,6 +24,7 @@ pub(super) mod statvfs;
 use std::ffi::CString;
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins, posixpath};
+use crate::dynamic::builtins::bind_two_positional;
 use crate::objects::os as native;
 
 /// Publish the supported POSIX operations from CPython's Lib/os.py capability tables whose
@@ -945,25 +946,6 @@ fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     }
     let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
     Ok(ctx.text_codepoints(codec.decode_filesystem(&target)?))
-}
-
-/// Bind two required positional-or-keyword operands followed by keyword-only options.
-fn bind_two_positional<const N: usize>(
-    name: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-    names: [&str; N],
-) -> Result<[Option<Id>; N]> {
-    if args.len() > 2 && args.len() + kwargs.len() <= N {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "{name}() takes exactly 2 positional arguments ({} given)",
-                args.len()
-            ),
-        ));
-    }
-    builtins::bind_builtin_arguments(name, args, kwargs, names, 2)
 }
 
 /// Test filesystem access using the credentials and link policy requested by the caller.

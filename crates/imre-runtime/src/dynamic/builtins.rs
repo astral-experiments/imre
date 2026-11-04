@@ -1059,6 +1059,25 @@ pub(super) fn bind_builtin_arguments<const N: usize>(
     bind_method_arguments(builtin, args, kwargs, names, N)
 }
 
+/// Bind two required positional-or-keyword operands followed by keyword-only options.
+pub(super) fn bind_two_positional<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    if args.len() > 2 && args.len() + kwargs.len() <= N {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() takes exactly 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    bind_builtin_arguments(name, args, kwargs, names, 2)
+}
+
 /// Bind the positional or named operands of `pow` before selecting its numeric operation.
 fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [Some(base), Some(exp), modulus] =

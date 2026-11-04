@@ -1056,6 +1056,9 @@ impl Checker<'_> {
                 "private native mock operations cannot be accessed directly",
             ));
         }
+        if attribute.attr.as_str() == "__float__" && self.decimal_class(class) {
+            return Err(self.scoped_builtin_error("Decimal.__float__", attribute));
+        }
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
@@ -1209,6 +1212,9 @@ impl Checker<'_> {
                 call,
                 "keyword argument unpacking is unsupported",
             ));
+        }
+        if attribute.attr.as_str() == "__float__" && self.decimal_class(class) {
+            return Err(self.scoped_builtin_error("Decimal.__float__", call));
         }
         if attribute.attr.starts_with("__")
             && !matches!(

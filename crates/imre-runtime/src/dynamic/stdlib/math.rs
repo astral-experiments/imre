@@ -7,13 +7,16 @@ use num_traits::{One, ToPrimitive, Zero};
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
-/// Dispatch the positional-only boxed math functions.
+/// Dispatch the boxed math functions.
 pub(super) fn call(
     ctx: &mut Context,
     operation: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if operation == "isclose" {
+        return isclose(ctx, args, kwargs);
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -158,6 +161,31 @@ pub(super) fn call(
     Ok(ctx.alloc(Value::Int(crate::Int::new(
         crate::floats::float_to_integer(rounded)?,
     ))))
+}
+
+fn isclose(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(a), Some(b), rel_tol, abs_tol] =
+        builtins::bind_two_positional("isclose", args, kwargs, ["a", "b", "rel_tol", "abs_tol"])?
+    else {
+        unreachable!("required isclose operands were checked");
+    };
+    let a = as_double(ctx, a)?;
+    let b = as_double(ctx, b)?;
+    let rel_tol = rel_tol.map_or(Ok(1e-9), |value| as_double(ctx, value))?;
+    let abs_tol = abs_tol.map_or(Ok(0.0), |value| as_double(ctx, value))?;
+    if rel_tol < 0.0 || abs_tol < 0.0 {
+        return Err(Error::new("ValueError", "tolerances must be non-negative"));
+    }
+    if a == b {
+        return Ok(builtins::boolean(true));
+    }
+    if a.is_infinite() || b.is_infinite() {
+        return Ok(builtins::boolean(false));
+    }
+    let diff = (b - a).abs();
+    Ok(builtins::boolean(
+        diff <= (rel_tol * b).abs() || diff <= (rel_tol * a).abs() || diff <= abs_tol,
+    ))
 }
 
 /// Take the log of an int's stored value, including those too large for a double.
