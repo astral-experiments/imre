@@ -1,4 +1,6 @@
+import copy
 import functools
+import pickle
 
 
 def current():
@@ -50,4 +52,29 @@ def current():
         else:
             raise AssertionError("malformed partial state accepted")
         check_state()
+    class Callback(functools.partial):
+        pass
+
+    for cls in (functools.partial, Callback):
+        callback = cls(len, [1])
+        reduction = functools.partial.__reduce__(callback)
+        assert callback.__reduce_ex__(4) == reduction
+        _, _, state = reduction
+        assert state[2] is callback.keywords and state[3] is None
+        namespace = callback.__dict__
+        assert callback.__reduce__()[2][3] is namespace
+        callback.label = []
+        shallow = copy.copy(callback)
+        deep = copy.deepcopy(callback)
+        assert type(shallow) is type(deep) is cls
+        assert shallow.args is callback.args and shallow.keywords is callback.keywords
+        assert shallow.label is callback.label
+        assert deep.args[0] is not callback.args[0] and deep.keywords is not callback.keywords
+        assert deep.label is not callback.label and deep() == 1
+
+    cycle = functools.partial(len)
+    cycle.__setstate__((len, (cycle,), {}, None))
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        restored = pickle.loads(pickle.dumps(cycle, protocol))
+        assert restored.args[0] is restored
     print("partial state restored")

@@ -2690,6 +2690,16 @@ pub(super) fn call(
         }
         return Ok(functools::placeholder(ctx));
     }
+    if name == "functools.partial.__reduce__" {
+        let receiver = builtins::noargs_method_receiver(
+            ctx,
+            functools::PARTIAL_CLASS,
+            "__reduce__",
+            args,
+            kwargs,
+        )?;
+        return functools::partial_reduce(ctx, receiver);
+    }
     if name == "functools.partial.__setstate__" {
         return functools::partial_setstate(ctx, args, kwargs);
     }
