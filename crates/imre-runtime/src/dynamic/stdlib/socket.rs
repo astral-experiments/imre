@@ -23,6 +23,8 @@ const CONSTANTS: &[(&str, i32)] = &[
 
 // socket.py imports these constants once, so deletion must not fall back to a native value.
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("AI_CANONNAME", libc::AI_CANONNAME),
     ("AI_NUMERICHOST", libc::AI_NUMERICHOST),
     ("AI_NUMERICSERV", libc::AI_NUMERICSERV),
     #[cfg(any(target_os = "linux", target_os = "macos"))]

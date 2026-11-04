@@ -1976,6 +1976,12 @@ impl IntrinsicModule {
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
             (Self::Socket, "MsgFlag") => Intrinsic::ScopedObjectExport("socket.MsgFlag"),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket, "AI_CANONNAME") => Intrinsic::ScopedObjectExport("socket.AI_CANONNAME"),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::SocketNative, "AI_CANONNAME") => {
+                Intrinsic::ScopedObjectExport("_socket.AI_CANONNAME")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             (Self::Socket, "AI_V4MAPPED") => Intrinsic::ScopedObjectExport("socket.AI_V4MAPPED"),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             (Self::SocketNative, "AI_V4MAPPED") => {
