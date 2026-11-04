@@ -6353,6 +6353,14 @@ impl<'a> Checker<'a> {
             return Ok((op, Type::Int));
         }
         if op == ast::Operator::Mult {
+            if [left, right]
+                .into_iter()
+                .any(|ty| matches!(ty, Type::Class(class) if self.decimal_class(class)))
+            {
+                return Err(
+                    self.object_builtin_error_with_checked_calls("Decimal multiplication", node)
+                );
+            }
             if matches!(left, Type::Deque(_)) || matches!(right, Type::Deque(_)) {
                 return Err(self.object_builtin_error("collections.deque repetition", node));
             }
@@ -6776,6 +6784,11 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::Base64Decode => {
                     return Err(self.scoped_builtin_error("base64.b64decode", expression));
+                }
+                Intrinsic::DECIMAL_CONTEXT => {
+                    return Err(
+                        self.object_builtin_error_with_checked_calls("decimal context", expression)
+                    );
                 }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
@@ -9791,6 +9804,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
             ))) => return self.base85_encode(call, name),
+            Some(Binding::Intrinsic(Intrinsic::DECIMAL_CONTEXT)) => {
+                return Err(self.object_builtin_error_with_checked_calls("decimal context", call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
