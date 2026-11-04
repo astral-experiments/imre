@@ -75,7 +75,7 @@ impl StructFormat {
                     align_of::<std::ffi::c_long>(),
                 ),
                 b'L' | b'l' => (4, 1),
-                b'b' | b'B' | b'?' => (1, 1),
+                b'c' | b'b' | b'B' | b'?' => (1, 1),
                 b'h' | b'H' => (2, align_of::<u16>()),
                 b'i' | b'I' => (4, align_of::<u32>()),
                 b'f' => (4, align_of::<f32>()),
@@ -202,7 +202,7 @@ impl StructFormat {
         let mut result = Vec::new();
         for (code, range) in self.items() {
             let field = &buffer[range];
-            if code == b's' {
+            if matches!(code, b'c' | b's') {
                 result.push(UnpackedField::Bytes(field.to_vec()));
                 continue;
             }
