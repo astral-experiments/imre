@@ -3781,6 +3781,11 @@ impl Context {
                 }
             }
             Value::Native(ref class)
+                if class == value::ZLIB_DECOMPRESS_TYPE && matches!(name, "copy" | "__copy__") =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
+            Value::Native(ref class)
                 if class == "tuple"
                     && matches!(name, "__new__" | "__getitem__" | "count" | "index") =>
             {

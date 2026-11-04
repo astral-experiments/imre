@@ -111,6 +111,9 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
+            Some((value::ZLIB_DECOMPRESS_TYPE, attr)) => {
+                Some((value::ZLIB_DECOMPRESS_TYPE, attr, &["copy", "__copy__"][..]))
+            }
             Some((value::REGEX_PATTERN_TYPE, attr)) => {
                 Some((value::REGEX_PATTERN_TYPE, attr, value::REGEX_COPY_METHODS))
             }
@@ -436,6 +439,9 @@ impl BuiltinDescriptor {
             "anext_awaitable" => matches!(ctx.heap.get(receiver), Value::ANextAwaitable { .. }),
             owner if typing::ParameterClass::lookup(owner).is_some() => {
                 ctx.builtin_type_name(receiver) == Some(owner)
+            }
+            value::ZLIB_DECOMPRESS_TYPE => {
+                matches!(ctx.heap.get(receiver), Value::ZlibDecompressor { .. })
             }
             "typing.TypeAliasType" => matches!(ctx.heap.get(receiver), Value::TypeAlias { .. }),
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),

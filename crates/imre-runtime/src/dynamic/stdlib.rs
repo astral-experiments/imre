@@ -1763,7 +1763,9 @@ pub(super) fn call(
     if name == "zlib.decompressobj" {
         return zlib::decompressor(ctx, "new", args, kwargs);
     }
-    if let Some(method @ ("decompress" | "flush")) = name.strip_prefix("zlib.Decompress.") {
+    if let Some(method @ ("decompress" | "flush" | "copy" | "__copy__")) =
+        name.strip_prefix("zlib.Decompress.")
+    {
         return zlib::decompressor(ctx, method, args, kwargs);
     }
     if let Some(method @ ("compress" | "decompress")) = name.strip_prefix("zlib.") {
