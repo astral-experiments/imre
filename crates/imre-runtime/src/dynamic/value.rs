@@ -4119,9 +4119,8 @@ impl Heap {
         };
     }
 
-    /// Look for a short strong path from a current frame to an owner. Recheck every edge:
-    /// assigning an instance field or releasing an operand can invalidate the whole path.
-    fn frame_keeps_instance_owner(&self, owner: Id) -> bool {
+    /// Recheck the stored strong edges, as instance fields and generator exits can change.
+    fn short_path_keeps_owner(&self, root: Id, owner: Id) -> bool {
         fn keeps(heap: &Heap, root: Id, owner: Id, budget: &mut usize) -> bool {
             if *budget == 0 {
                 return false;
@@ -4136,10 +4135,39 @@ impl Heap {
                     .values()
                     .take(*budget)
                     .any(|&value| keeps(heap, value, owner, budget)),
+                Value::Generator { protected, .. }
+                    if matches!(heap.get(owner), Value::Generator { .. }) =>
+                {
+                    protected
+                        .iter()
+                        .take(*budget)
+                        .flat_map(super::source_code::FinallyBlock::roots)
+                        .take(*budget)
+                        .any(|value| keeps(heap, value, owner, budget))
+                }
                 _ => false,
             }
         }
 
+        let mut budget = 16;
+        keeps(self, root, owner, &mut budget)
+    }
+
+    /// A suspended caller keeps its operands when the current frame releases temporaries.
+    fn caller_keeps_generator(&self, owner: Id) -> bool {
+        matches!(self.get(owner), Value::Generator { .. })
+            && self.frames.iter().rev().take(24).skip(1).any(|frame| {
+                // Context manager exits survive at the front of a caller's operands,
+                // even when recent expression temporaries fill the other end.
+                frame.live.iter().take(8).any(|id| {
+                    matches!(self.get(*id), Value::Method { .. })
+                        && self.short_path_keeps_owner(*id, owner)
+                })
+            })
+    }
+
+    /// Look for a short strong path from a current frame to an owner.
+    fn frame_keeps_instance_owner(&self, owner: Id) -> bool {
         self.frames.iter().rev().take(8).any(|frame| {
             let locals = match self.get(frame.scope) {
                 Value::Scope(scope) => Some(&scope.names),
@@ -4151,11 +4179,8 @@ impl Heap {
                 .rev()
                 .take(8)
                 .chain(locals.into_iter().flat_map(|names| names.values().take(8)))
-                .any(|&root| {
-                    let mut budget = 16;
-                    keeps(self, root, owner, &mut budget)
-                })
-        })
+                .any(|&root| self.short_path_keeps_owner(root, owner))
+        }) || self.caller_keeps_generator(owner)
     }
 
     /// Check the active bindings at previously successful positions and trace their live stream edges.
@@ -4243,12 +4268,17 @@ impl Heap {
         {
             return Ok(None);
         }
-        if remaining == 1
-            && let Some(&owner) = self
-                .ordinary_finalizers
-                .iter()
-                .find(|owner| !stdin.is_some_and(|chain| chain.contains(owner)))
-            && self.frame_keeps_instance_owner(owner)
+        let mut owners = self
+            .ordinary_finalizers
+            .iter()
+            .copied()
+            .filter(|id| !stdin.is_some_and(|chain| chain.contains(id)));
+        if (remaining == 1
+            || remaining <= MAX_FRAME_FINALIZERS
+                && owners
+                    .clone()
+                    .all(|id| matches!(self.get(id), Value::Generator { .. })))
+            && owners.all(|id| self.frame_keeps_instance_owner(id))
         {
             return Ok(None);
         }
@@ -4360,7 +4390,7 @@ impl Heap {
         self.file_writers
             .iter()
             .chain(&self.ordinary_finalizers)
-            .all(|owner| input.contains(owner))
+            .all(|owner| input.contains(owner) || self.caller_keeps_generator(*owner))
             || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
     }
 
