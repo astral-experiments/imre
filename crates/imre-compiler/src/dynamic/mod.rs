@@ -358,7 +358,7 @@ impl<'a> Visitor<'a> for Imports {
             self.add(0, "importlib");
             if matches!(
                 name.value.to_str().split('.').next(),
-                Some("pyexpat" | "xml" | "zoneinfo")
+                Some("decimal" | "_pydecimal" | "pyexpat" | "xml" | "zoneinfo")
             ) {
                 self.add(0, name.value.to_str());
             }
@@ -832,6 +832,10 @@ pub(crate) fn compile<const SPLIT: bool>(
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
+            // A runtime-selected decimal module in a standalone binary needs its private provider.
+            if startup.is_none() && computed_import && !seen.contains("decimal") {
+                imports.add(0, "decimal");
+            }
             if computed_import && !seen.contains("zoneinfo") {
                 imports.names.push((0, "zoneinfo".to_owned()));
             }
@@ -971,7 +975,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                 if prefix == "_imp" && !frozen_imports.names.is_empty() {
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
-                let bundled = bundled_module_source(&prefix);
+                let bundled = bundled_module_source(&prefix, startup.is_none());
                 let mut installed = if bundled.is_none() {
                     crate::zip_entry::installed_member(&prefix)
                 } else {
@@ -1310,8 +1314,14 @@ const RUNTIME_PROVIDERS: &[&str] = &[
 ];
 
 /// Return the effective source used for a discovered bundled module on this target.
-fn bundled_module_source(name: &str) -> Option<(&'static str, std::borrow::Cow<'static, str>)> {
-    let (file, source) = if name == "dataclasses" {
+fn bundled_module_source(
+    name: &str,
+    standalone: bool,
+) -> Option<(&'static str, std::borrow::Cow<'static, str>)> {
+    let (file, source) = if standalone && name == "_pydecimal" {
+        // Standalone executables can run without the Python launcher's installed stdlib ZIP.
+        ("_pydecimal.py", include_str!("../../stdlib/_pydecimal.py"))
+    } else if name == "dataclasses" {
         (
             "dataclasses.py",
             concat!(
