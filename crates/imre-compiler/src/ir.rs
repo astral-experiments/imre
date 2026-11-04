@@ -1097,6 +1097,7 @@ pub(crate) enum Builtin {
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
+    IntBitLength,
     IntSignAsFloat,
     Bool,
     Str,

@@ -7043,6 +7043,7 @@ impl Emitter<'_, '_> {
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
             },
+            Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::IntSignAsFloat => {
                 let order = self.instruction(format!(
                     "call i32 @compare_int(i64 {}, i64 {})",
@@ -9506,6 +9507,7 @@ declare void @imre_float_box_retain(i64)
 declare void @imre_float_box_release(i64)
 declare ptr @imre_float_str(double)
 declare void @imre_print_float(double)
+declare i64 @imre_int_bit_length(i64)
 declare double @imre_int_float(i64)
 declare i64 @imre_float_int(double)
 declare double @imre_float_parse(ptr)
@@ -10968,6 +10970,12 @@ print(show("x"))
             assert!(body.contains(operation), "{body}");
             assert!(!body.contains(retain), "{body}");
         }
+    }
+
+    #[test]
+    fn integer_bit_length_uses_the_canonical_integer_handle() {
+        let body = function_body("def bits(value: int) -> int:\n    return value.bit_length()\n");
+        assert!(body.contains("call i64 @imre_int_bit_length("), "{body}");
     }
 
     #[test]

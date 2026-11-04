@@ -67,11 +67,8 @@ pub(super) fn bit_length(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
             args.len()
         )));
     }
-    let bits = value.as_small().map_or_else(
-        || value.big().bits(),
-        |n| u64::from(u64::BITS - n.unsigned_abs().leading_zeros()),
-    );
-    Ok(ctx.alloc(Value::Int(crate::Int::from_usize(bits as usize))))
+    let bits = value.bit_length();
+    Ok(ctx.alloc(Value::Int(bits)))
 }
 
 fn byte_options(

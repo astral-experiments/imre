@@ -134,6 +134,15 @@ impl Int {
         }
     }
 
+    /// Counts magnitude bits, excluding the sign and leading zeroes.
+    fn bit_length(&self) -> Self {
+        let bits = self.as_small().map_or_else(
+            || self.big().bits(),
+            |n| u64::from(u64::BITS - n.unsigned_abs().leading_zeros()),
+        );
+        Self::from_usize(bits as usize)
+    }
+
     fn to_i64(&self) -> Option<i64> {
         self.as_small().or_else(|| self.big().to_i64())
     }
@@ -998,6 +1007,16 @@ fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
         ));
     }
     Ok(Int::new(value.as_ref() << shift as usize))
+}
+
+/// Returns the number of bits in the magnitude of a canonical integer.
+///
+/// # Safety
+/// The argument must be a rooted, canonical integer handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_bit_length(value: usize) -> usize {
+    // SAFETY: the caller roots the handle through this nonreentrant read.
+    unsafe { Int::borrow(value) }.bit_length().into_raw()
 }
 
 /// # Safety
