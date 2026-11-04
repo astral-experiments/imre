@@ -2004,7 +2004,7 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "__eq__" | "__mod__" | "__rmod__") | ("bytes", "__mod__")
+        ("str", "__eq__" | "__hash__" | "__mod__" | "__rmod__") | ("bytes", "__mod__")
     ) {
         let (&receiver, args) = args.split_first().ok_or_else(|| {
             type_error(format!(
@@ -2021,6 +2021,16 @@ pub(super) fn method(
             return Err(type_error(format!(
                 "wrapper {name}() takes no keyword arguments"
             )));
+        }
+        if name == "__hash__" {
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "expected 0 arguments, got {}",
+                    args.len()
+                )));
+            }
+            let hash = ctx.dictionary_hash(ctx.scalar_value(receiver))?;
+            return Ok(ctx.int(hash));
         }
         let &[other] = args else {
             return Err(type_error(format!(

@@ -82,6 +82,12 @@ impl SliceIndices {
         if step == 0 {
             return Err(Error::new(Kind::ValueError, "slice step cannot be zero"));
         }
+        // SAFETY: the caller roots both bounds and the zero step was rejected.
+        Ok(unsafe { Self::with_step(length, start, stop, step) })
+    }
+
+    /// Normalizes rooted optional integer bounds with a known nonzero step.
+    unsafe fn with_step(length: usize, start: usize, stop: usize, step: isize) -> Self {
         let reverse = step < 0;
         let length = length as isize;
         let (lower, upper) = if reverse {
@@ -108,12 +114,12 @@ impl SliceIndices {
         } else {
             0
         };
-        Ok(Self {
+        Self {
             at: if remaining == 0 { 0 } else { start as usize },
             stride,
             remaining,
             reverse,
-        })
+        }
     }
 }
 
@@ -219,25 +225,9 @@ pub unsafe extern "C" fn imre_str_slice(
         return StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(value as usize) });
     }
     let result = if !slice.reverse && slice.stride == 1 {
-        let selected = if slice.len() == 0 {
-            ""
-        } else if length == text.len() {
-            // Equal byte and code-point counts prove that every byte is ASCII.
-            &text[slice.at..slice.at + slice.len()]
-        } else {
-            let mut boundaries = text
-                .char_indices()
-                .map(|(offset, _)| offset)
-                .chain(std::iter::once(text.len()));
-            let start = boundaries.nth(slice.at).expect("normalized slice start");
-            let end = boundaries
-                .nth(slice.len() - 1)
-                .expect("normalized slice end");
-            &text[start..end]
-        };
         // A contiguous slice needs one copy, without decoding and appending
         // every selected character again. The result owns its UTF-8 bytes.
-        Str::new(selected)
+        Str::new(contiguous_slice(text, length, &slice))
     } else if slice.reverse && slice.len() != 0 {
         copy_string_slice(
             text.chars().rev(),
@@ -249,6 +239,55 @@ pub unsafe extern "C" fn imre_str_slice(
         copy_string_slice(text.chars(), slice.at, &slice, text.len())
     };
     StrOwner::into_raw(StrOwner::new(result))
+}
+
+/// Borrows the UTF-8 bytes of a normalized, forward unit-stride slice.
+fn contiguous_slice<'a>(text: &'a str, length: usize, slice: &SliceIndices) -> &'a str {
+    if slice.len() == 0 {
+        ""
+    } else if length == text.len() {
+        // Equal byte and code-point counts prove that every byte is ASCII.
+        &text[slice.at..slice.at + slice.len()]
+    } else {
+        let mut boundaries = text
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .chain(std::iter::once(text.len()));
+        let start = boundaries.nth(slice.at).expect("normalized slice start");
+        let end = boundaries
+            .nth(slice.len() - 1)
+            .expect("normalized slice end");
+        &text[start..end]
+    }
+}
+
+/// Compares contiguous slices without constructing either Python string.
+///
+/// # Safety
+/// Both strings and all four optional integer bounds must stay rooted through the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_slice_equal(
+    left: *const Str,
+    left_start: usize,
+    left_stop: usize,
+    right: *const Str,
+    right_start: usize,
+    right_stop: usize,
+) -> u32 {
+    /// Omitting both bounds borrows the whole string without counting code points.
+    unsafe fn region(text: &str, start: usize, stop: usize) -> &str {
+        if start == 0 && stop == 0 {
+            return text;
+        }
+        let length = text.chars().count();
+        // SAFETY: both bounds stay rooted and the stride is one.
+        let slice = unsafe { SliceIndices::with_step(length, start, stop, 1) };
+        contiguous_slice(text, length, &slice)
+    }
+    // SAFETY: the caller roots both immutable strings and their bounds.
+    unsafe {
+        u32::from(region(&*left, left_start, left_stop) == region(&*right, right_start, right_stop))
+    }
 }
 
 /// Copies integer owners into a distinct list, including for a full slice.
@@ -468,6 +507,50 @@ pub unsafe extern "C" fn imre_str_iter_next_codepoint(cursor: *const Object) -> 
         string_iter_next(cursor, |iter| {
             Int::small(i64::from(iter.next_character()? as u32)).map(Int::into_raw)
         })
+    }
+}
+
+/// Borrows the complete UTF-8 buffer of a freshly constructed forward cursor.
+///
+/// # Safety
+/// Root the exact forward string iterator until the final read from the view.
+/// The caller supplies a writable end pointer and tracks its own byte position.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_iter_bounds(
+    cursor: *const Object,
+    end: *mut *const u8,
+) -> *const u8 {
+    // SAFETY: the cursor owns an immutable string with a stable address.
+    unsafe {
+        object(cursor).0.with(|storage| {
+            let Storage::StringIterator(iter) = storage else {
+                unreachable!("exact string iterator")
+            };
+            debug_assert!(!iter.reverse);
+            let bytes = iter.owner.as_bytes().as_ptr_range();
+            end.write(bytes.end);
+            bytes.start
+        })
+    }
+}
+
+/// Advances a borrowed UTF-8 view over one non-ASCII scalar and returns its tagged value.
+///
+/// # Safety
+/// The pointers bound one live UTF-8 allocation. The writable position points
+/// to the start of a non-ASCII scalar strictly before the end.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_utf8_next_non_ascii(next: *mut *const u8, end: *const u8) -> usize {
+    // SAFETY: the current position is a scalar boundary in the rooted string.
+    unsafe {
+        let start = *next;
+        let bytes = std::slice::from_raw_parts(start, end.offset_from_unsigned(start));
+        let text = std::str::from_utf8_unchecked(bytes);
+        let ch = text.chars().next().expect("nonempty UTF-8 view");
+        next.write(start.add(ch.len_utf8()));
+        Int::small(i64::from(u32::from(ch)))
+            .expect("Unicode scalar fits")
+            .into_raw()
     }
 }
 
@@ -1072,6 +1155,25 @@ mod tests {
             }
         }
         assert_eq!(imre_error_pending(), 0);
+    }
+
+    #[test]
+    fn private_forward_view_uses_scalar_boundaries_in_the_rooted_string() {
+        let source = StrOwner::new(Str::new("\0é雪🙂"));
+        // SAFETY: the cursor roots the buffer after its caller drops the source.
+        unsafe {
+            let cursor = crate::ObjectOwner::from_raw(imre_str_iter(StrOwner::as_ptr(&source)));
+            drop(source);
+            let mut end = std::ptr::null();
+            let mut next = imre_str_iter_bounds(crate::ObjectOwner::as_ptr(&cursor), &mut end);
+            assert_eq!(*next, 0);
+            next = next.add(1);
+            for expected in ['é', '雪', '🙂'] {
+                let word = imre_utf8_next_non_ascii(&mut next, end);
+                assert_eq!(Int(word).as_small(), Some(i64::from(u32::from(expected))));
+            }
+            assert_eq!(next, end);
+        }
     }
 
     #[test]

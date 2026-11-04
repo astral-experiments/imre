@@ -25,6 +25,40 @@ fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
     })
 }
 
+/// Return None when Python must run an overridden buffer operation or truth test.
+pub(super) fn encode85(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [buffer, alphabet, pad, foldnuls, foldspaces] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "encode() requires five positional arguments",
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "encode() takes no keyword arguments",
+        ));
+    }
+    let (Value::Bytes(data) | Value::ByteArray(data)) = ctx.heap.get(*buffer) else {
+        return Ok(super::NONE);
+    };
+    let Value::Bytes(alphabet) = ctx.heap.get(*alphabet) else {
+        return Ok(super::NONE);
+    };
+    let Ok(alphabet) = alphabet.as_slice().try_into() else {
+        return Ok(super::NONE);
+    };
+    let (Value::Bool(pad), Value::Bool(foldnuls), Value::Bool(foldspaces)) = (
+        ctx.heap.get(*pad),
+        ctx.heap.get(*foldnuls),
+        ctx.heap.get(*foldspaces),
+    ) else {
+        return Ok(super::NONE);
+    };
+    let output = crate::objects::base85_encode(data, alphabet, *pad, *foldnuls, *foldspaces)?;
+    Ok(ctx.alloc(Value::Bytes(output)))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,

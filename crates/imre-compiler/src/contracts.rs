@@ -68,7 +68,7 @@ impl Builtin {
                     Len | RowLen | ViewLen(_) | ViewField(..) => Contract::new(false, PreservesLists),
                 }
             }
-            Self::SplitIntSource(_) => Contract::new(false, PreservesLists),
+            Self::SplitIntSource(_) | Self::StringSliceEqual => Contract::new(false, PreservesLists),
             Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
@@ -441,6 +441,7 @@ impl Builtin {
             | Self::BinasciiAsciiInput
             | Self::BinasciiDecode
             | Self::BinasciiEncode
+            | Self::Base85Encode { .. }
             | Self::BinasciiUnhexlify
             | Self::CodecLookup
             | Self::StrEncodeOptions
@@ -564,6 +565,8 @@ impl Builtin {
             | Self::FaultFrame { .. }
             | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
+            | Self::IntExtremum { .. }
+            | Self::IntBitLength
             | Self::IntSignAsFloat
             | Self::FloatCopySign
             | Self::IsInstance(_)
@@ -875,6 +878,10 @@ impl Builtin {
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::IntExtremum { .. } => {
+                result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
+            }
+            Self::IntBitLength => signature(&[Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
@@ -1290,6 +1297,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_binascii_ascii_input"
                 | "imre_binascii_decode"
                 | "imre_binascii_encode"
+                | "imre_base85_encode"
                 | "imre_binascii_unhexlify"
                 | "imre_codec_lookup"
                 | "imre_str_encode_options"

@@ -2458,18 +2458,24 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 .try_reserve_exact(length)
                 .map_err(|_| Error::allocation())?;
             if ascii_small {
+                // Every present small integer is odd. Accumulate its tag while
+                // copying, and turn missing entries into tagged integer zeros.
+                let mut present = 1;
                 for (slot, &character) in values.spare_capacity_mut()[..length]
                     .iter_mut()
                     .zip(text.as_bytes())
                 {
-                    // SAFETY: ascii_small proved this immutable text is ASCII,
-                    // so every byte indexes within the 128-entry lookup cache.
+                    // SAFETY: every byte in this immutable text is ASCII.
                     let word = *ascii.values.get_unchecked(usize::from(character));
-                    slot.write(Int(if word == 0 {
-                        missing(char::from(character))?
-                    } else {
-                        word
-                    }));
+                    present &= word;
+                    slot.write(Int(word | 1));
+                }
+                if present == 0 && mapping.missing != Missing::Zero {
+                    let character = text
+                        .bytes()
+                        .find(|&byte| ascii.values[usize::from(byte)] == 0)
+                        .expect("an ASCII key was missing");
+                    return Err(missing(char::from(character)).expect_err("missing key raises"));
                 }
                 // SAFETY: the equal-length zip initialized every slot. The
                 // cache proves all words are small integers, so an earlier
@@ -3007,13 +3013,40 @@ pub unsafe extern "C" fn imre_filter_character_set(
     allowed: *const Object,
     below: u32,
 ) -> *const Object {
+    // SAFETY: the caller roots both owners for the filter.
+    unsafe { filter_character_set(text, allowed, below, false) }
+}
+
+/// Collects matching characters only when the result is nonempty.
+///
+/// # Safety
+/// Both inputs are rooted native owners and the set contains exact strings.
+/// Null denotes an empty result or, with a pending exception, an allocation failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_filter_nonempty_character_set(
+    text: *const Str,
+    allowed: *const Object,
+    below: u32,
+) -> *const Object {
+    // SAFETY: the caller roots both owners for the filter.
+    unsafe { filter_character_set(text, allowed, below, true) }
+}
+
+/// Filters exact strings while the caller roots the inputs. Empty selections
+/// may use a null sentinel when the caller can prove their identity is private.
+unsafe fn filter_character_set(
+    text: *const Str,
+    allowed: *const Object,
+    below: u32,
+    omit_empty: bool,
+) -> *const Object {
     // SAFETY: both inputs stay rooted. Updating the private lookup and comparing
     // exact strings cannot reenter the set.
     let result = unsafe {
         let text = &*text;
         object(allowed).0.with_mut(|storage| {
             let (keys, ascii) = storage.set_mut().character_keys();
-            let selected = text.chars().filter_map(|c| {
+            let mut selected = text.chars().filter_map(|c| {
                 let mut buffer = [0; 4];
                 let key = c.encode_utf8(&mut buffer);
                 let present = u32::from(c) < below
@@ -3027,10 +3060,18 @@ pub unsafe extern "C" fn imre_filter_character_set(
                     })
                 })
             });
-            Set::string_set(selected, false)
+            if omit_empty {
+                let Some(first) = selected.next() else {
+                    return Ok(std::ptr::null());
+                };
+                Set::string_set(std::iter::once(first).chain(selected), false)
+                    .map(crate::ObjectOwner::into_raw)
+            } else {
+                Set::string_set(selected, false).map(crate::ObjectOwner::into_raw)
+            }
         })
     };
-    crate::finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
+    crate::finish(result, std::ptr::null())
 }
 
 /// # Safety

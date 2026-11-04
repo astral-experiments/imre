@@ -594,6 +594,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 
 pub(super) const STR_METHODS: &[&str] = &[
     "__eq__",
+    "__hash__",
     "__str__",
     "__format__",
     "__mod__",
@@ -744,6 +745,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "anext_awaitable"
         }
+        Value::ZlibCompressor(_) if super::value::ZLIB_COMPRESS_METHODS.contains(&attr) => {
+            super::value::ZLIB_COMPRESS_TYPE
+        }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::Complex(_) if super::complex::METHODS.contains(&attr) => "complex",
@@ -756,7 +760,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "struct.Struct"
         }
         Value::ZlibDecompressor { .. }
-            if matches!(attr, "decompress" | "flush" | "copy" | "__copy__") =>
+            if matches!(attr, "decompress" | "flush")
+                || value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&attr) =>
         {
             super::value::ZLIB_DECOMPRESS_TYPE
         }
@@ -784,6 +789,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "recvfrom"
                     | "recv_into"
                     | "makefile"
+                    | "_decref_socketios"
                     | "dup"
                     | "send"
                     | "sendall"
@@ -823,7 +829,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) | Value::NamedTuple { .. }
-            if matches!(attr, "__getitem__" | "__len__" | "count" | "index") =>
+            if matches!(
+                attr,
+                "__getitem__" | "__getnewargs__" | "__len__" | "count" | "index"
+            ) =>
         {
             "tuple"
         }
@@ -2056,6 +2065,18 @@ pub(super) fn call(
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
                 text::bytearray_method(ctx, name, method, args, kwargs)
+            }
+            "tuple" if method == "__getnewargs__" => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let payload = if matches!(ctx.heap.get(receiver), Value::Tuple(_)) {
+                    receiver
+                } else {
+                    let items = ctx
+                        .tuple_items(receiver)?
+                        .expect("validated tuple receiver");
+                    ctx.alloc(Value::Tuple(items))
+                };
+                Ok(ctx.alloc(Value::Tuple(vec![payload])))
             }
             "tuple" | "mappingproxy" if method == "__getitem__" => {
                 let (&receiver, args) = args.split_first().ok_or_else(|| {

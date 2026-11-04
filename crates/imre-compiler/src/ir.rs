@@ -648,7 +648,8 @@ pub(crate) fn reverse_slice(parts: &[Expr]) -> Option<(&Expr, i64, i64)> {
     Some((source, start, negative_component(step)?))
 }
 
-fn omitted(value: &Expr) -> bool {
+/// Whether a slice component is an omitted bound with no evaluation effects.
+pub(crate) fn omitted(value: &Expr) -> bool {
     matches!(&value.kind, ExprKind::Absent(inner) if matches!(inner.kind, ExprKind::None))
 }
 
@@ -1103,6 +1104,10 @@ pub(crate) enum Builtin {
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
+    IntExtremum {
+        minimum: bool,
+    },
+    IntBitLength,
     IntSignAsFloat,
     Bool,
     Str,
@@ -1259,6 +1264,10 @@ pub(crate) enum Builtin {
     BinasciiDecode,
     BinasciiEncode,
     BinasciiUnhexlify,
+    Base85Encode {
+        alphabet: &'static [u8; 85],
+        foldnuls: bool,
+    },
     CodecLookup,
     CodecName,
     StrEncodeOptions,
@@ -1320,6 +1329,8 @@ pub(crate) enum Builtin {
     BytesValidateUtf8,
     /// Receiver followed by three nullable integer words for start, stop, step.
     Slice,
+    /// Compare two contiguous regions of immutable strings without copying them.
+    StringSliceEqual,
     Append,
     Pop,
     ListClear,
@@ -1348,7 +1359,8 @@ pub(crate) enum Builtin {
     StringListCopy,
     /// Select by up to two prefixes, optionally exclude one, then slice each match.
     StringListFilter(u32),
-    /// Collect characters in a set or below a Unicode scalar threshold.
+    /// Collect characters in a set or below a Unicode scalar threshold. An
+    /// optional result represents an empty selection as an absent set.
     FilterCharacterSet(u32),
     /// Stable sort by the suffix after a fixed number of Unicode code points.
     StringListSortSuffix(u32),
@@ -2618,6 +2630,50 @@ pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut
             visit(value);
         }
     });
+}
+
+/// Finds forward string cursors whose only observable operation is a scalar pull.
+/// Clearing the cursor ends the borrow. Replacing it with a fresh string cursor
+/// starts a new borrow. A move, a read of the cursor itself, or another kind of
+/// pull requires the position stored in the runtime iterator.
+pub(crate) fn private_scalar_cursors(function: &Function) -> Vec<usize> {
+    let mut pulled = vec![false; function.locals.len()];
+    let mut created = vec![false; function.locals.len()];
+    let mut exposed = vec![false; function.locals.len()];
+    for &parameter in &function.params {
+        exposed[parameter] = true;
+    }
+    walk_nodes(&function.body, &mut |node| {
+        match &node {
+            Node::Statement(Statement::IterNext {
+                iterator,
+                kind: IterNextKind::CodePoint,
+                ..
+            }) => pulled[*iterator] = true,
+            Node::Statement(Statement::IterNext { iterator, .. }) => exposed[*iterator] = true,
+            Node::Expression(Expr {
+                kind: ExprKind::Local(slot),
+                ..
+            }) => exposed[*slot] = true,
+            // Scope cleanup clears owners without publishing a replacement cursor.
+            Node::Statement(Statement::Clear(_) | Statement::Scope { .. })
+            | Node::Expression(Expr {
+                kind: ExprKind::Scope { .. },
+                ..
+            }) => return,
+            _ => {}
+        }
+        node_writes(node, &mut |slot, value| {
+            if value.is_some_and(|v| matches!(v.kind, ExprKind::Builtin(Builtin::StringIter, _))) {
+                created[slot] = true;
+            } else {
+                exposed[slot] = true;
+            }
+        });
+    });
+    (0..pulled.len())
+        .filter(|&slot| pulled[slot] && created[slot] && !exposed[slot])
+        .collect()
 }
 
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.

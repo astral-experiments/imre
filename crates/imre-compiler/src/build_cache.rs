@@ -225,9 +225,9 @@ pub(super) fn prepare_stdlib_archive(path: &Path) -> io::Result<()> {
         Err(err) => return Err(err),
     }
     let metadata = parent.symlink_metadata()?;
-    // SAFETY: geteuid takes no arguments and has no failure mode.
     if !metadata.is_dir()
         || metadata.mode() & 0o077 != 0
+        // SAFETY: geteuid takes no arguments and has no failure mode.
         || metadata.uid() != unsafe { libc::geteuid() }
     {
         return Err(io::Error::new(
@@ -468,32 +468,23 @@ impl Cache {
         } else {
             None
         };
-        let recipe = serde_json::to_vec(&(
-            4,
-            module_objects,
-            (
-                file,
-                command_hash,
-                &options.module_entry,
-                options.path_entry,
-                options.python_startup(),
-                options.runtime_imports,
-                &options.extension_paths,
-                &options.system_site,
-                &options.stdlib_fallback,
-            ),
-            env::current_dir().ok()?.join(entry).into_os_string(),
-            module_root,
+        // A unit's full IR captures entry-specific codegen decisions. Identical
+        // IR can share an object across invocations using the same native tools.
+        let object_inputs = serde_json::to_vec(&(
+            1,
+            (env::consts::ARCH, env::consts::OS),
             opt.to_str()?,
             path.to_str()?,
             Stamp::read(&env::current_exe().ok()?)?,
             &runtime,
             Stamp::read(&toolchain.clang)?,
+            toolchain.bundle.is_some(),
             compiler_libraries,
             dpkg,
             loader_cache,
         ))
         .ok()?;
+        let object_recipe = blake3::hash(&object_inputs);
         let base = env::var_os("IMRE_CACHE_DIR")
             .map(PathBuf::from)
             .or_else(|| env::var_os("XDG_CACHE_HOME").map(|v| PathBuf::from(v).join("imre")))
@@ -517,17 +508,34 @@ impl Cache {
             }
         }
         let root = root.canonicalize().ok()?;
-        let object_recipe = blake3::hash(&recipe);
-        // Both switches only affect the final link. Equivalent flags from the
-        // environment and the command line lead to the same executable.
+        // Executable lookup runs before IR generation, so it also needs the
+        // source query, startup configuration, and final link inputs.
         let relro = match link.relro {
             crate::cli::Relro::Full => 0,
             crate::cli::Relro::Partial => 1,
             crate::cli::Relro::Off => 2,
         };
-        let link_inputs =
-            serde_json::to_vec(&(Stamp::read(toolchain.linker())?, link.keep_dead_code, relro))
-                .ok()?;
+        let link_inputs = serde_json::to_vec(&(
+            5,
+            module_objects,
+            (
+                file,
+                command_hash,
+                &options.module_entry,
+                options.path_entry,
+                options.python_startup(),
+                options.runtime_imports,
+                &options.extension_paths,
+                &options.system_site,
+                &options.stdlib_fallback,
+            ),
+            env::current_dir().ok()?.join(entry).into_os_string(),
+            module_root,
+            Stamp::read(toolchain.linker())?,
+            link.keep_dead_code,
+            relro,
+        ))
+        .ok()?;
         let link_recipe = blake3::keyed_hash(object_recipe.as_bytes(), &link_inputs);
         let manifest = root.join(format!("{}.json", link_recipe.to_hex()));
         let previous = fs::read(&manifest)

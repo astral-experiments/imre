@@ -224,7 +224,9 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
     let cursor = base.and_then(|base| ctx.itertools_layout(base).map(|name| (base, name)));
     if class == ctx.builtin("object")
         || (protocol >= 2
-            && (base == Some(ctx.builtin("list")) || base == Some(ctx.builtin("dict"))))
+            && (base == Some(ctx.builtin("list"))
+                || base == Some(ctx.builtin("dict"))
+                || base == Some(ctx.builtin("tuple"))))
         || cursor.is_some()
         || ctx.namedtuple_fields(class).is_some()
     {

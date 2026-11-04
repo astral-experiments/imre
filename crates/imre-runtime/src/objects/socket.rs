@@ -77,7 +77,7 @@ impl SocketInput {
         bytes
             .try_reserve_exact(SOCKET_BUFFER_SIZE)
             .map_err(|_| Error::memory_error())?;
-        state(&socket, |s| s.readers += 1);
+        retain_socketio(&socket);
         Ok(Self {
             socket: Some(socket),
             buffer: io::Cursor::new(bytes),
@@ -121,15 +121,25 @@ impl SocketInput {
         let Some(socket) = self.socket.take() else {
             return Ok(());
         };
-        state(&socket, |s| {
-            s.readers -= 1;
-            if s.close_requested && s.readers == 0 {
-                s.close_fd()
-            } else {
-                Ok(())
-            }
-        })
+        release_socketio(&socket)
     }
+}
+
+/// Keep the descriptor open across socket.close() while its file is open.
+pub(crate) fn retain_socketio(socket: &Object) {
+    state(socket, |s| s.readers += 1);
+}
+
+/// Direct SocketIO construction does not acquire a makefile reference.
+pub(crate) fn release_socketio(socket: &Object) -> io::Result<()> {
+    state(socket, |s| {
+        s.readers = s.readers.saturating_sub(1);
+        if s.close_requested && s.readers == 0 {
+            s.close_fd()
+        } else {
+            Ok(())
+        }
+    })
 }
 
 impl AsRawFd for SocketInput {

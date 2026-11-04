@@ -377,6 +377,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
+    if module == "zlib"
+        && let Some(value) = imre_ast::zlib::integer_constant(name)
+    {
+        return Ok(ctx.int(value));
+    }
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
         return ctx.module(&format!("{module}.{name}"));
     }
@@ -406,8 +411,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         (
             "math",
-            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "cos" | "gcd" | "isclose" | "isinf"
-            | "isnan" | "isqrt" | "lcm" | "log",
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "cos" | "gcd" | "isclose"
+            | "isinf" | "isnan" | "isqrt" | "lcm" | "log",
         ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
@@ -423,7 +428,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "_imre_gzip",
             "open" | "read" | "read1" | "readline" | "tell" | "fileno" | "close" | "writer"
-            | "compress" | "flush_writer" | "decoder" | "raw_tell" | "raw_read",
+            | "compress" | "flush_writer" | "decoder" | "raw_tell" | "raw_read" | "raw_mtime"
+            | "raw_rewind",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_gzip", "BadGzipFile") => ctx.builtin("gzip.BadGzipFile"),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
@@ -642,6 +648,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("lzma", "decompress") => ctx.builtin("lzma.decompress"),
         ("lzma", "LZMAError") => ctx.builtin("_lzma.LZMAError"),
+        ("zlib", "compressobj") => ctx.builtin("zlib.compressobj"),
+        ("zlib", "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => ctx.text(imre_ast::zlib::VERSION),
         ("lzma", "FORMAT_AUTO") => ctx.int(0),
         ("lzma", "FORMAT_XZ") => ctx.int(1),
         ("lzma", "FORMAT_ALONE") => ctx.int(2),
@@ -773,6 +781,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
+        | ("_imre_base85", "encode")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
         | (
@@ -816,7 +825,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
-        | ("hashlib", "file_digest")
         | (
             "re",
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
@@ -1784,14 +1792,21 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
+    if name == "zlib.compressobj" {
+        return zlib::compressor(ctx, "new", args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("zlib.Compress.") {
+        return zlib::compressor(ctx, method, args, kwargs);
+    }
     if name == "lzma.decompress" {
         return lzma::call(ctx, "decompress", args, kwargs);
     }
     if name == "zlib.decompressobj" {
         return zlib::decompressor(ctx, "new", args, kwargs);
     }
-    if let Some(method @ ("decompress" | "flush" | "copy" | "__copy__")) =
-        name.strip_prefix("zlib.Decompress.")
+    if let Some(method) = name.strip_prefix("zlib.Decompress.")
+        && (matches!(method, "decompress" | "flush")
+            || value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&method))
     {
         return zlib::decompressor(ctx, method, args, kwargs);
     }
@@ -1969,6 +1984,9 @@ pub(super) fn call(
     }
     if name == "_imre_tokenize.scan" {
         return tokenize::scan(ctx, args, kwargs);
+    }
+    if name == "_imre_base85.encode" {
+        return binascii::encode85(ctx, args, kwargs);
     }
     if name == "_imre_csv.read_row" {
         return csv::read_row(ctx, args, kwargs);
@@ -2777,8 +2795,10 @@ pub(super) fn call(
     if let Some(method @ ("digest" | "hexdigest")) = name.strip_prefix("hash.") {
         return hashlib::digest(ctx, method, args, kwargs);
     }
-    if name == "hashlib.file_digest" {
-        return hashlib::file_digest(ctx, args, kwargs);
+    if name == "hashlib._file_digest_readinto" {
+        let [file, digest, size] =
+            required_arguments(name, ["file", "digest", "size"], args, kwargs)?;
+        return hashlib::readinto(ctx, file, digest, size);
     }
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);

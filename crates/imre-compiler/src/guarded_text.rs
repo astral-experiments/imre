@@ -1,4 +1,6 @@
-//! Delay a total string operation past loop guards while eagerly owning its input.
+//! Specialize text operations whose results are consumed under a guard.
+
+mod filtered_sets;
 
 use crate::ir::{
     Builtin, Expr, ExprKind, Module, Statement, TextOperation, Type, walk_expressions,
@@ -9,18 +11,32 @@ pub(crate) fn specialize(module: &mut Module) {
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
         let mut reads = vec![0; function.locals.len()];
         let mut uses_unquote = false;
+        let mut uses_filter = false;
         walk_expressions(&function.body, &mut |expr| match expr.kind {
             ExprKind::Local(slot) => reads[slot] += 1,
             ExprKind::Builtin(Builtin::Text(TextOperation::Unquote), _) => uses_unquote = true,
+            ExprKind::Builtin(Builtin::FilterCharacterSet(_), _) => uses_filter = true,
             _ => {}
         });
-        if !uses_unquote {
+        if !uses_unquote && !uses_filter {
             continue;
         }
         let mut writes = vec![0; reads.len()];
         count_writes(&function.body, &mut writes);
         for &slot in &function.params {
             writes[slot] += 1;
+        }
+        if uses_filter {
+            filtered_sets::specialize(
+                &mut function.body,
+                &mut function.locals,
+                &module.types,
+                &reads,
+                &writes,
+            );
+        }
+        if !uses_unquote {
+            continue;
         }
         let private: Vec<_> = reads
             .iter()

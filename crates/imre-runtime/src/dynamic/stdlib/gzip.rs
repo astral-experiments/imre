@@ -1,8 +1,9 @@
 //! Boxed gzip access to the lazy path reader and incremental DEFLATE encoder.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io::{self, Read};
 
+use super::super::value::BoxedGzipDecoder;
 use super::{Context, Error, Id, NONE, Result, Value, os};
 use crate::objects::{FileState, GzipDecoder};
 
@@ -29,18 +30,39 @@ pub(super) fn call(
         return super::zlib::gzip_writer(ctx, name, args);
     }
     if name == "decoder" {
-        let state = crate::Shared::try_new(RefCell::new(Some(GzipDecoder::new())))
-            .map_err(|_| crate::Error::allocation())?;
+        let state = crate::Shared::try_new(BoxedGzipDecoder {
+            stream: RefCell::new(Some(GzipDecoder::new())),
+            last_mtime: Cell::new(None),
+        })
+        .map_err(|_| crate::Error::allocation())?;
         return Ok(ctx.alloc(Value::GzipDecoder(state)));
     }
-    if matches!(name, "raw_tell" | "raw_read") {
+    if matches!(name, "raw_tell" | "raw_read" | "raw_mtime" | "raw_rewind") {
         let Value::GzipDecoder(state) = ctx.heap.get(args[0]) else {
             return Err(Error::new("TypeError", "expected a gzip decoder"));
         };
         let state = state.clone();
         let reentrant = || Error::new("RuntimeError", "reentrant call inside gzip reader");
+        if name == "raw_mtime" {
+            let mtime = state.last_mtime.get();
+            return Ok(mtime.map_or(NONE, |seconds| ctx.int(i64::from(seconds))));
+        }
+        if name == "raw_rewind" {
+            state
+                .stream
+                .borrow_mut()
+                .as_mut()
+                .ok_or_else(reentrant)?
+                .rewind();
+            return Ok(NONE);
+        }
         if name == "raw_tell" {
-            let position = state.borrow().as_ref().ok_or_else(reentrant)?.position();
+            let position = state
+                .stream
+                .borrow()
+                .as_ref()
+                .ok_or_else(reentrant)?
+                .position();
             return Ok(ctx.alloc(Value::Int(crate::Int::new(position.into()))));
         }
         let size = usize::try_from(os::ssize_t(ctx, args[2])?)
@@ -51,14 +73,20 @@ pub(super) fn call(
         bytes
             .try_reserve_exact(size)
             .map_err(|_| crate::Error::allocation())?;
-        let mut decoder = state.borrow_mut().take().ok_or_else(reentrant)?;
+        let mut decoder = state.stream.borrow_mut().take().ok_or_else(reentrant)?;
         let mut source = Source {
             ctx,
             file: args[1],
             error: None,
         };
-        let count = decoder.read(&mut source, &mut bytes.spare_capacity_mut()[..size]);
-        *state.borrow_mut() = Some(decoder);
+        let count = decoder.read(
+            &mut source,
+            &mut bytes.spare_capacity_mut()[..size],
+            &|timestamp| {
+                state.last_mtime.set(Some(timestamp));
+            },
+        );
+        *state.stream.borrow_mut() = Some(decoder);
         if let Some(error) = source.error {
             return Err(error);
         }

@@ -1,6 +1,7 @@
 //! Dispatch synchronous Expat events to the Python parser that owns its handlers.
 use super::NativeParser;
-use super::expat::{Handlers, ParseError};
+use super::expat::{Encoding, Handlers, ParseError};
+use crate::dynamic::stdlib::codecs;
 use crate::dynamic::{Context, Error, Id, NONE, Result, Value};
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -27,12 +28,17 @@ impl Drop for ActiveCallback<'_> {
     }
 }
 
+enum CallbackError {
+    Listener(Error),
+    Encoding(Error),
+}
+
 struct Feed<'a> {
     ctx: &'a mut Context,
     owner: Id,
     handle: &'a NativeParser,
     installed: Listeners,
-    exception: Option<Error>,
+    exception: Option<CallbackError>,
 }
 
 const HANDLERS: [&str; 8] = [
@@ -47,6 +53,35 @@ const HANDLERS: [&str; 8] = [
 ];
 
 impl Feed<'_> {
+    fn run_callback<T>(&mut self, action: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let mark = self.ctx.heap.temporary_mark();
+        let result = catch_unwind(AssertUnwindSafe(|| action(self)))
+            .unwrap_or_else(|_| Err(Error::new("SystemError", "panic in Expat callback")));
+        self.ctx.heap.release_temporaries_since(mark);
+        if let Err(error) = &result {
+            for root in error.roots() {
+                self.ctx.heap.keep(root);
+            }
+        }
+        result
+    }
+
+    fn encoding(&mut self, name: *const c_char) -> Result<Encoding> {
+        let name = self.string(name)?;
+        let bytes = self.ctx.alloc(Value::Bytes((0..=255).collect()));
+        let replace = self.ctx.text("replace");
+        let decoded = codecs::decode_named(self.ctx, bytes, Some(name), Some(replace))?;
+        let points = self.ctx.string_codepoints(decoded)?;
+        let points = points
+            .as_ref()
+            .try_into()
+            .map_err(|_| Error::new("ValueError", "multi-byte encodings are not supported"))?;
+        let encoding = Encoding::single_byte(points);
+        // Looking up or running a registered Python codec can change listeners.
+        self.refresh_handlers()?;
+        Ok(encoding)
+    }
+
     fn handler_flags(&mut self) -> Result<Listeners> {
         let mut flags = [false; 8];
         for (flag, name) in flags.iter_mut().zip(HANDLERS) {
@@ -289,16 +324,33 @@ fn dispatch(user: *mut c_void, action: impl FnOnce(&mut Feed<'_>) -> Result<()>)
     if feed.exception.is_some() {
         return; // Expat can finish reporting an empty element after XML_StopParser.
     }
-    let mark = feed.ctx.heap.temporary_mark();
-    let result = catch_unwind(AssertUnwindSafe(|| action(feed)))
-        .unwrap_or_else(|_| Err(Error::new("SystemError", "panic in Expat callback")));
-    feed.ctx.heap.release_temporaries_since(mark);
-    if let Err(error) = result {
-        for root in error.roots() {
-            feed.ctx.heap.keep(root);
-        }
-        feed.exception = Some(error);
+    if let Err(error) = feed.run_callback(action) {
+        feed.exception = Some(CallbackError::Listener(error));
         feed.handle.parser.stop();
+    }
+}
+
+unsafe extern "C" fn unknown_encoding(
+    user: *mut c_void,
+    name: *const c_char,
+    info: *mut Encoding,
+) -> c_int {
+    // SAFETY: XML_Parse owns this feed for the entire synchronous callback.
+    let feed = unsafe { &mut *user.cast::<Feed<'_>>() };
+    if feed.exception.is_some() {
+        return 0;
+    }
+    match feed.run_callback(|feed| feed.encoding(name)) {
+        Ok(encoding) => {
+            // SAFETY: Expat provides writable storage for one XML_Encoding.
+            unsafe { info.write(encoding) };
+            1
+        }
+        Err(error) => {
+            // Returning XML_STATUS_ERROR lets Expat retain XML_ERROR_UNKNOWN_ENCODING.
+            feed.exception = Some(CallbackError::Encoding(error));
+            0
+        }
     }
 }
 
@@ -380,10 +432,18 @@ pub(super) fn parse(
     let user = (&raw mut feed).cast::<c_void>();
     // SAFETY: feed stays live here until parse has cleared the pointer, and the
     // installed trampolines capture dispatch errors before returning to C.
-    let parsed = unsafe { handle.parser.parse(bytes, final_chunk, user, &handlers) };
-    if let Some(error) = feed.exception.take() {
-        clear_handlers(feed.ctx, owner, &error);
-        return Err(error);
+    let parsed = unsafe {
+        handle
+            .parser
+            .parse(bytes, final_chunk, user, &handlers, unknown_encoding)
+    };
+    match feed.exception {
+        Some(CallbackError::Listener(error)) => {
+            clear_handlers(feed.ctx, owner, &error);
+            return Err(error);
+        }
+        Some(CallbackError::Encoding(error)) => return Err(error),
+        None => {}
     }
     if parsed.is_ok()
         && let Err(error) = feed.flush()

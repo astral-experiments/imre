@@ -1959,10 +1959,16 @@ impl Context {
         let dictionary = if let Some(&dictionary) = self.builtins.get(storage) {
             dictionary
         } else {
-            let mut entries = Vec::with_capacity(members.size_hint().0 + 1);
-            for name in members.chain(["__module__"]) {
+            let mut entries = Vec::with_capacity(members.size_hint().0);
+            for name in members {
                 let key = self.heap.code_name(name);
                 let value = self.lookup_attr(class, name)?;
+                let value = if matches!(self.heap.get(value), Value::Native(symbol) if symbol == "str.maketrans")
+                {
+                    method_decorator::static_method(self, value)?
+                } else {
+                    value
+                };
                 entries.push((key, value));
             }
             let dictionary = self.dict(entries);
@@ -2513,7 +2519,14 @@ impl Context {
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => &["__get__"],
-            "tuple" => &["__repr__", "__getitem__", "__len__", "count", "index"],
+            "tuple" => &[
+                "__repr__",
+                "__getitem__",
+                "__getnewargs__",
+                "__len__",
+                "count",
+                "index",
+            ],
             "set" | "frozenset" => builtins::set_methods(name),
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
@@ -3539,6 +3552,8 @@ impl Context {
             "hashlib" => {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
+                let readinto = self.builtin("hashlib._file_digest_readinto");
+                self.bind(scope, "_file_digest_readinto", readinto);
             }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "grp" => stdlib::grp::install(self, scope),
@@ -3745,7 +3760,7 @@ impl Context {
                     self.bind(scope, original, stream);
                     if stderr && self.threads.system_module.is_none() {
                         self.threads.system_module = Some(module);
-                        self.threads.default_stderr = Some(stream);
+                        self.heap.default_stderr = Some(stream);
                     }
                 }
                 let stdin = stdlib::io::standard_input(self)?;

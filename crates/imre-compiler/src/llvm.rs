@@ -400,6 +400,8 @@ fn emit_program(
         code: String::new(),
         entry_allocas: String::new(),
         mapping_words: 0,
+        forward_cursors: BTreeMap::new(),
+        uses_forward_cursors: false,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
@@ -568,6 +570,12 @@ fn emit_program(
     record_layouts(module, emitter.output);
     callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
+    if emitter.uses_forward_cursors {
+        emitter
+            .output
+            .common()
+            .push_str(include_str!("llvm/next_utf8_scalar.ll"));
+    }
     emitter.output.common().push_str(&integer_helpers());
     emitter
         .output
@@ -638,6 +646,8 @@ struct Emitter<'a, 'module> {
     code: String,
     entry_allocas: String,
     mapping_words: usize,
+    forward_cursors: BTreeMap<usize, (String, String)>,
+    uses_forward_cursors: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
@@ -2019,6 +2029,13 @@ impl Emitter<'_, '_> {
             self.line("store ptr null, ptr %directory_frame");
         }
         self.line_slots = line_views::select(function);
+        self.forward_cursors.clear();
+        for slot in ir::private_scalar_cursors(function) {
+            let next = self.entry_alloca("ptr");
+            let end = self.entry_alloca("ptr");
+            self.forward_cursors.insert(slot, (next, end));
+        }
+        self.uses_forward_cursors |= !self.forward_cursors.is_empty();
         if self
             .line_slots
             .iter()
@@ -2367,6 +2384,17 @@ impl Emitter<'_, '_> {
     fn statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(slot, expression) => {
+                if let Some((next, end)) = self.forward_cursors.get(slot).cloned() {
+                    // The cursor holds its immutable string until the normal scope cleanup.
+                    let cursor = self.expr(expression);
+                    let start = self.instruction(format!(
+                        "call ptr @imre_str_iter_bounds(ptr {}, ptr {end})",
+                        cursor.operand
+                    ));
+                    self.line(format!("store ptr {start}, ptr {next}"));
+                    self.store(*slot, &cursor);
+                    return;
+                }
                 if self.line_slots[*slot] {
                     self.assign_line(*slot, expression);
                     return;
@@ -4235,6 +4263,9 @@ impl Emitter<'_, '_> {
     }
 
     fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
+        if !and && let Some(value) = self.ascii_affix_alternatives(values) {
+            return value;
+        }
         let end = self.label();
         let mut incoming = Vec::new();
         for (i, expression) in values.iter().enumerate() {
@@ -6150,6 +6181,17 @@ impl Emitter<'_, '_> {
                 Type::Bytes,
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
+            Builtin::Base85Encode { alphabet, foldnuls } => {
+                let alphabet = self.byte_array(alphabet.to_vec());
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_base85_encode(ptr {}, ptr @{alphabet}, i1 {}, i1 {foldnuls}, i1 {})",
+                        args[0].value.operand, args[1].value.operand, args[2].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::BinasciiUnhexlify => {
                 self.call("imre_binascii_unhexlify", Type::Bytes, &[&args[0].value])
             }
@@ -7065,6 +7107,27 @@ impl Emitter<'_, '_> {
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
             },
+            Builtin::IntExtremum { minimum } => {
+                let order = if *minimum {
+                    Compare::Less
+                } else {
+                    Compare::Greater
+                };
+                let mut best = args[0].value.clone();
+                for arg in &args[1..] {
+                    let next = &arg.value;
+                    let better = self.compare(order, next, &best);
+                    best.operand = self.instruction(format!(
+                        "select i1 {}, i64 {}, i64 {}",
+                        better.operand, next.operand, best.operand
+                    ));
+                    best.small_integer &= next.small_integer;
+                }
+                // The selected integer survives release of all the call arguments.
+                self.retain(&best);
+                best
+            }
+            Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::IntSignAsFloat => {
                 let order = self.instruction(format!(
                     "call i32 @compare_int(i64 {}, i64 {})",
@@ -7572,6 +7635,18 @@ impl Emitter<'_, '_> {
             }
             Builtin::StringIntList => {
                 self.call("imre_str_int_list", Type::ListInt, &[&args[0].value])
+            }
+            Builtin::StringSliceEqual => {
+                let equal = self.instruction(format!(
+                    "call i32 @imre_str_slice_equal(ptr {}, i64 {}, i64 {}, ptr {}, i64 {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand,
+                    args[3].value.operand, args[4].value.operand, args[5].value.operand,
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("icmp ne i32 {equal}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::Slice => self.call(
                 match returns {
@@ -8291,10 +8366,21 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::FilterCharacterSet(below) => {
+                let optional = matches!(returns, Type::Optional(_));
+                let symbol = if optional {
+                    "imre_filter_nonempty_character_set"
+                } else {
+                    "imre_filter_character_set"
+                };
                 let operand = self.checked_instruction(format!(
-                    "call ptr @imre_filter_character_set(ptr {}, ptr {}, i32 {below})",
+                    "call ptr @{symbol}(ptr {}, ptr {}, i32 {below})",
                     args[0].value.operand, args[1].value.operand
                 ));
+                let operand = if optional {
+                    self.instruction(format!("ptrtoint ptr {operand} to i64"))
+                } else {
+                    operand
+                };
                 Value {
                     ty: returns,
                     operand,
@@ -8533,6 +8619,7 @@ impl Emitter<'_, '_> {
             debug_assert_ne!(key, value);
             debug_assert_ne!(ready, value);
         }
+        let forward = self.forward_cursors.get(&iterator).cloned();
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
             ir::IterNextKind::Generic => {
@@ -8555,7 +8642,15 @@ impl Emitter<'_, '_> {
                 } else {
                     "imre_str_iter_next_codepoint"
                 };
-                let word = self.instruction(format!("call i64 @{next}(ptr {})", iterator.operand));
+                let word = if let Some((next_byte, end)) = forward {
+                    debug_assert!(kind == ir::IterNextKind::CodePoint);
+                    let end = self.instruction(format!("load ptr, ptr {end}"));
+                    self.instruction(format!(
+                        "call i64 @next_utf8_scalar(ptr {next_byte}, ptr {end})"
+                    ))
+                } else {
+                    self.instruction(format!("call i64 @{next}(ptr {})", iterator.operand))
+                };
                 (
                     self.instruction(format!("icmp ne i64 {word}, 0")),
                     Some(word),
@@ -9529,6 +9624,7 @@ declare void @imre_float_box_retain(i64)
 declare void @imre_float_box_release(i64)
 declare ptr @imre_float_str(double)
 declare void @imre_print_float(double)
+declare i64 @imre_int_bit_length(i64)
 declare double @imre_int_float(i64)
 declare i64 @imre_float_int(double)
 declare double @imre_float_parse(ptr)
@@ -9575,6 +9671,7 @@ declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
+declare ptr @imre_base85_encode(ptr, ptr, i1, i1, i1)
 declare ptr @imre_binascii_unhexlify(ptr)
 declare ptr @imre_sha1_hex(ptr)
 declare i1 @imre_hmac_compare_digest_bytes(ptr, ptr)
@@ -9970,6 +10067,8 @@ declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)
 declare i64 @imre_str_iter_next_owned(ptr)
 declare i64 @imre_str_iter_next_codepoint(ptr)
+declare ptr @imre_str_iter_bounds(ptr, ptr)
+declare i64 @imre_utf8_next_non_ascii(ptr, ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)
@@ -9996,6 +10095,7 @@ declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
+declare i32 @imre_str_affix_ascii(ptr, i64, i64, i32)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
 declare ptr @imre_str_translate(ptr, ptr)
@@ -10022,6 +10122,7 @@ declare ptr @imre_str_matching_split_iter(ptr, ptr, i64, i8)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
 declare ptr @imre_filter_character_set(ptr, ptr, i32)
+declare ptr @imre_filter_nonempty_character_set(ptr, ptr, i32)
 declare ptr @imre_str_list_filter(ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_str_list_sorted_suffix(ptr, i32)
 declare i32 @imre_str_list_nonempty(ptr)
@@ -10350,6 +10451,7 @@ declare i64 @imre_enum_find_int(i64, i64, i64)
 declare void @imre_http_enum_table(ptr)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
+declare i32 @imre_str_slice_equal(ptr, i64, i64, ptr, i64, i64)
 declare i32 @imre_str_compare(ptr, ptr)
 declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
@@ -10976,6 +11078,21 @@ print(show("x"))
     }
 
     #[test]
+    fn ascii_affix_tuples_inspect_one_boundary() {
+        let body =
+            function_body("def check(s: str) -> bool:\n    return s.endswith((' ', '.', '@'))\n");
+        assert_eq!(body.matches("@imre_str_affix_ascii(").count(), 1);
+        assert!(!body.contains("@imre_str_affix("));
+
+        for tuple in ["('x', 'é')", "('x', 'ab')", "('x', '')", "('x', s)"] {
+            let body = function_body(&format!(
+                "def check(s: str) -> bool:\n    return s.startswith({tuple})\n"
+            ));
+            assert!(!body.contains("@imre_str_affix_ascii("), "{body}");
+        }
+    }
+
+    #[test]
     fn transient_literal_operands_borrow_the_pool_root() {
         for (source, operation, retain) in [
             (
@@ -10998,6 +11115,12 @@ print(show("x"))
             assert!(body.contains(operation), "{body}");
             assert!(!body.contains(retain), "{body}");
         }
+    }
+
+    #[test]
+    fn integer_bit_length_uses_the_canonical_integer_handle() {
+        let body = function_body("def bits(value: int) -> int:\n    return value.bit_length()\n");
+        assert!(body.contains("call i64 @imre_int_bit_length("), "{body}");
     }
 
     #[test]

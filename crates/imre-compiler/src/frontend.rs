@@ -6439,8 +6439,22 @@ impl<'a> Checker<'a> {
         )
     }
 
+    fn boxed_descriptor(&self, expression: &ast::Expr) -> Option<&'static str> {
+        if let ast::Expr::Attribute(attribute) = expression
+            && attribute.attr.as_str() == "__hash__"
+            && self.graph.session.is_known_class(
+                self.module,
+                &attribute.value,
+                ty_python_semantic::types::KnownClass::Str,
+            )
+        {
+            return Some("str.__hash__");
+        }
+        self.graph.boxed_pattern_method(self.module, expression)
+    }
+
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        if let Some(method) = self.graph.boxed_pattern_method(self.module, expression) {
+        if let Some(method) = self.boxed_descriptor(expression) {
             return Err(self.scoped_builtin_error(method, expression));
         }
         if let ast::Expr::Attribute(attribute) = expression
@@ -7410,6 +7424,9 @@ impl<'a> Checker<'a> {
                     });
                 }
                 let mut values = self.numeric_union_comparison(values);
+                if let Some(result) = text::slice_equality(self.types, &mut values, &compare.ops) {
+                    return Ok(result);
+                }
                 if let Some(result) =
                     calendar::equality(self.types, &mut values, compare.ops.as_ref())
                 {
@@ -8784,7 +8801,7 @@ impl<'a> Checker<'a> {
         {
             return Err(self.scoped_builtin_error("__import__", call));
         }
-        if let Some(method) = self.graph.boxed_pattern_method(self.module, &call.func) {
+        if let Some(method) = self.boxed_descriptor(&call.func) {
             return Err(self.scoped_builtin_error(method, call));
         }
         if let Some(local) = self.local_class(&call.func)?
@@ -9678,6 +9695,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
+            ))) => return self.base85_encode(call, name),
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
@@ -10504,7 +10524,11 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::CodecWriter {
                 return self.codec_writer_method(receiver, attribute, call);
             }
-            if attribute.attr.as_str() == "to_bytes"
+            let method = attribute.attr.as_str();
+            if (method == "to_bytes"
+                || (method == "bit_length"
+                    && call.arguments.args.is_empty()
+                    && call.arguments.keywords.is_empty()))
                 && (matches!(receiver.ty, Type::Int | Type::Bool)
                     || self.types.is_bool_or_int(receiver.ty))
             {
@@ -10516,6 +10540,12 @@ impl<'a> Checker<'a> {
                 } else {
                     powers::integer(receiver)
                 };
+                if method == "bit_length" {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::IntBitLength, vec![receiver]),
+                    });
+                }
                 let params = [
                     parameter("length", Type::Int, Some(Expr::integer(1))),
                     parameter("byteorder", Type::Str, Some(unpacking::string("big"))),

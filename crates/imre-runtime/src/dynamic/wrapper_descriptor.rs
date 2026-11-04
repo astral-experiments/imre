@@ -111,9 +111,11 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
-            Some((value::ZLIB_DECOMPRESS_TYPE, attr)) => {
-                Some((value::ZLIB_DECOMPRESS_TYPE, attr, &["copy", "__copy__"][..]))
-            }
+            Some((value::ZLIB_DECOMPRESS_TYPE, attr)) => Some((
+                value::ZLIB_DECOMPRESS_TYPE,
+                attr,
+                value::ZLIB_DECOMPRESS_COPY_METHODS,
+            )),
             Some((value::REGEX_PATTERN_TYPE, attr)) => {
                 Some((value::REGEX_PATTERN_TYPE, attr, value::REGEX_COPY_METHODS))
             }
@@ -267,6 +269,7 @@ impl BuiltinDescriptor {
             "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
             "str.__eq__" => ("str", "__eq__"),
+            "str.__hash__" => ("str", "__hash__"),
             "str.__format__" => ("str", "__format__"),
             "str.__mod__" => ("str", "__mod__"),
             "str.__rmod__" => ("str", "__rmod__"),
@@ -327,6 +330,7 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
+            "tuple.__getnewargs__" => ("tuple", "__getnewargs__"),
             "tuple.__len__" => ("tuple", "__len__"),
             "array.array.__getitem__" => ("array.array", "__getitem__"),
             "array.array.__setitem__" => ("array.array", "__setitem__"),
@@ -347,6 +351,7 @@ impl BuiltinDescriptor {
                     | "__subclasshook__"
                     | "__init_subclass__"
                     | "__sizeof__"
+                    | "__getnewargs__"
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
@@ -589,6 +594,9 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__text_signature__" if self.owner == value::ZLIB_DECOMPRESS_TYPE && self.name == "__deepcopy__" => {
+                ctx.text("($self, memo, /)")
+            }
             "__text_signature__" if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => {
                 ctx.text(if self.name == "__copy__" { "($self, /)" } else { "($self, memo, /)" })
             }
@@ -736,6 +744,8 @@ impl BuiltinDescriptor {
                     ("__replace__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /, **changes)",
                     ("__reduce__", "__doc__") if stdlib::os::stat::layout(self.owner).is_some() => return Some(NONE),
                     ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
+                    ("__getnewargs__", "__doc__") => return Some(NONE),
+                    ("__getnewargs__", _) => "($self, /)",
                     ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",
                     ("count", _) if self.owner == "tuple" => "($self, value, /)",
                     ("replace", "__doc__") if matches!(self.owner, "bytes" | "bytearray") => {

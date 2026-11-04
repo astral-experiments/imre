@@ -10,6 +10,7 @@ pub mod python_nodes;
 pub mod startup;
 pub mod strings;
 mod type_aliases;
+pub mod zlib;
 pub use type_aliases::{generic_class_arguments_error, type_alias_error};
 
 use std::cell::RefCell;

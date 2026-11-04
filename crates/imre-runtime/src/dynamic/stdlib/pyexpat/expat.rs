@@ -1,6 +1,6 @@
 //! Owned streaming parser from the system's narrow-character Expat library.
 use std::cell::Cell;
-use std::ffi::{CStr, c_char, c_int, c_long, c_ulong, c_void};
+use std::ffi::{CStr, c_char, c_int, c_long, c_void};
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
@@ -10,6 +10,27 @@ type Start = unsafe extern "C" fn(Raw, Name, *const Name);
 type OneName = unsafe extern "C" fn(Raw, Name);
 type TwoNames = unsafe extern "C" fn(Raw, Name, Name);
 type Text = unsafe extern "C" fn(Raw, Name, c_int);
+type UnknownEncoding = unsafe extern "C" fn(Raw, Name, *mut Encoding) -> c_int;
+
+/// The XML_Encoding layout from expat.h. A single-byte map has no owned data.
+#[repr(C)]
+pub(super) struct Encoding {
+    map: [c_int; 256],
+    data: Raw,
+    convert: Option<unsafe extern "C" fn(Raw, Name) -> c_int>,
+    release: Option<unsafe extern "C" fn(Raw)>,
+}
+
+impl Encoding {
+    pub(super) fn single_byte(points: &[u32; 256]) -> Self {
+        Self {
+            map: points.map(|c| if c == 0xfffd { -1 } else { c as c_int }),
+            data: ptr::null_mut(),
+            convert: None,
+            release: None,
+        }
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Handlers {
@@ -76,6 +97,7 @@ functions! {
     parse = c"XML_Parse": fn(Raw, Name, c_int, c_int) -> c_int;
     stop = c"XML_StopParser": fn(Raw, u8) -> c_int;
     set_encoding = c"XML_SetEncoding": fn(Raw, Name) -> c_int;
+    unknown_encoding = c"XML_SetUnknownEncodingHandler": fn(Raw, Option<UnknownEncoding>, Raw);
     user_data = c"XML_SetUserData": fn(Raw, Raw);
     elements = c"XML_SetElementHandler": fn(Raw, Option<Start>, Option<OneName>);
     namespaces = c"XML_SetNamespaceDeclHandler": fn(Raw, Option<TwoNames>, Option<OneName>);
@@ -84,17 +106,17 @@ functions! {
     pi = c"XML_SetProcessingInstructionHandler": fn(Raw, Option<TwoNames>);
     default_expand = c"XML_SetDefaultHandlerExpand": fn(Raw, Option<Text>);
     code = c"XML_GetErrorCode": fn(Raw) -> c_int;
-    line = c"XML_GetCurrentLineNumber": fn(Raw) -> c_ulong;
-    column = c"XML_GetCurrentColumnNumber": fn(Raw) -> c_ulong;
-    byte_index = c"XML_GetCurrentByteIndex": fn(Raw) -> c_long;
+    line = c"XML_GetCurrentLineNumber": fn(Raw) -> u64;
+    column = c"XML_GetCurrentColumnNumber": fn(Raw) -> u64;
+    byte_index = c"XML_GetCurrentByteIndex": fn(Raw) -> i64;
     specified = c"XML_GetSpecifiedAttributeCount": fn(Raw) -> c_int;
     message = c"XML_ErrorString": fn(c_int) -> Name;
 }
 
 impl Api {
     fn load() -> Option<Self> {
-        // XML_Size is unsigned long, or unsigned long long in XML_LARGE_SIZE
-        // builds. These have the same ABI on the supported LP64 platforms.
+        // XML_Size and XML_Index use C long or long long depending on XML_LARGE_SIZE.
+        // Both have the 64-bit ABI declared above on the LP64 targets we load.
         #[cfg(all(
             target_pointer_width = "64",
             any(target_os = "linux", target_os = "macos")
@@ -232,6 +254,7 @@ impl Parser {
         final_chunk: bool,
         user: Raw,
         handlers: &Handlers,
+        unknown_encoding: UnknownEncoding,
     ) -> Result<(), ParseError> {
         if self.parsing.replace(true) {
             return Err(ParseError {
@@ -245,6 +268,7 @@ impl Parser {
         // remains valid until XML_Parse returns and is cleared afterwards.
         let status = unsafe {
             (self.api.user_data)(p, user);
+            (self.api.unknown_encoding)(p, Some(unknown_encoding), user);
             self.set_handlers(handlers);
             // Bound each C int length, matching CPython's feed chunk size. Even
             // an empty final call goes through XML_Parse to validate end-of-input.
@@ -264,6 +288,7 @@ impl Parser {
                 }
                 input = &input[n..];
             };
+            (self.api.unknown_encoding)(p, None, ptr::null_mut());
             (self.api.user_data)(p, ptr::null_mut());
             status
         };
@@ -305,17 +330,17 @@ impl Parser {
 
     pub(super) fn line(&self) -> u64 {
         // SAFETY: self owns the parser, including while its callback observes the position.
-        unsafe { (self.api.line)(self.ptr.as_ptr()) as u64 }
+        unsafe { (self.api.line)(self.ptr.as_ptr()) }
     }
 
     pub(super) fn column(&self) -> u64 {
         // SAFETY: self owns the parser.
-        unsafe { (self.api.column)(self.ptr.as_ptr()) as u64 }
+        unsafe { (self.api.column)(self.ptr.as_ptr()) }
     }
 
     pub(super) fn byte_index(&self) -> i64 {
         // SAFETY: self owns the parser.
-        unsafe { (self.api.byte_index)(self.ptr.as_ptr()) as i64 }
+        unsafe { (self.api.byte_index)(self.ptr.as_ptr()) }
     }
 
     pub(super) fn error_code(&self) -> i32 {
