@@ -994,6 +994,16 @@ impl Context {
             stdlib::datetime::validate_classmethod_receiver(self, "dict", "fromkeys", owner)?;
             return Ok(self.bind_native_classmethod(value, owner));
         }
+        if matches!(self.heap.get(value), Value::Native(name) if name == "functools.partial.__class_getitem__")
+        {
+            stdlib::datetime::validate_classmethod_receiver(
+                self,
+                stdlib::functools::PARTIAL_CLASS,
+                "__class_getitem__",
+                owner,
+            )?;
+            return Ok(self.bind_native_classmethod(value, owner));
+        }
         if matches!(self.heap.get(value), Value::Native(name) if name == "float.fromhex") {
             stdlib::datetime::validate_classmethod_receiver(self, "float", "fromhex", owner)?;
         }
@@ -4642,6 +4652,9 @@ impl Context {
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
                 if let Some(method) = self.class_attr(obj, name) {
+                    if class == stdlib::functools::PARTIAL_CLASS && name == "__class_getitem__" {
+                        return Ok(self.bind_native_classmethod(method, obj));
+                    }
                     return Ok(method);
                 }
             }

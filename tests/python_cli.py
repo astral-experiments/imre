@@ -3687,6 +3687,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
             "boxed_functools_partial_state.py",
+            "boxed_functools_partial_generic_alias.py",
             "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",

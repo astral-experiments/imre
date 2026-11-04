@@ -2476,6 +2476,7 @@ impl Context {
                 "__new__",
                 "__call__",
                 "__get__",
+                "__class_getitem__",
                 "__reduce__",
                 "__setstate__",
             ] {
