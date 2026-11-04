@@ -147,6 +147,14 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         "binascii" if function == "crc32" => Some((module, function)),
         "zlib" if function == "compressobj" => Some((module, function)),
+        "_lzma"
+            if matches!(
+                function,
+                "_encode_filter_properties" | "_decode_filter_properties"
+            ) =>
+        {
+            Some((module, function))
+        }
         "lzma" if function == "decompress" => Some((module, function)),
         "zlib"
             if matches!(
@@ -1605,6 +1613,8 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | value::LZMA_COMPRESS_TYPE
+                            | value::LZMA_DECOMPRESS_TYPE
                             | value::ZLIB_COMPRESS_TYPE
                             | "socket.socket"
                             | "struct.Struct"
@@ -1790,6 +1800,8 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | (value::LZMA_COMPRESS_TYPE, Value::LzmaCompressor(_))
+            | (value::LZMA_DECOMPRESS_TYPE, Value::LzmaDecompressor(_))
             | (value::ZLIB_COMPRESS_TYPE, Value::ZlibCompressor(_))
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
@@ -2492,6 +2504,12 @@ impl Context {
                 "tb_lineno" => return Ok(self.int(lineno)),
                 _ => {}
             },
+            Value::Native(ref class)
+                if (class == value::LZMA_COMPRESS_TYPE && matches!(name, "compress" | "flush"))
+                    || (class == value::LZMA_DECOMPRESS_TYPE && name == "decompress") =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
             Value::Native(ref class)
                 if class == value::ZLIB_COMPRESS_TYPE
                     && value::ZLIB_COMPRESS_METHODS.contains(&name) =>
@@ -4341,6 +4359,11 @@ impl Context {
                 "size" => return Ok(self.int(layout.size as i64)),
                 _ => {}
             },
+            Value::LzmaDecompressor(_)
+                if matches!(name, "eof" | "check" | "needs_input" | "unused_data") =>
+            {
+                return stdlib::lzma::decompressor_attr(self, obj, name);
+            }
             Value::ZlibDecompressor { .. }
                 if matches!(name, "eof" | "unused_data" | "unconsumed_tail") =>
             {

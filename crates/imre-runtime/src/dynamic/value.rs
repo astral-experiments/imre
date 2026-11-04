@@ -61,6 +61,9 @@ pub(super) const EMPTY_TUPLE: Id = 5;
 /// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
 pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
 
+pub(super) const LZMA_COMPRESS_TYPE: &str = "_lzma.LZMACompressor";
+pub(super) const LZMA_DECOMPRESS_TYPE: &str = "_lzma.LZMADecompressor";
+
 pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
 pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
@@ -1392,6 +1395,8 @@ pub(super) enum Value {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
+    LzmaCompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Compressor>>),
+    LzmaDecompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Decompressor>>),
     ZlibCompressor(crate::Shared<std::cell::RefCell<super::stdlib::zlib::Compressor>>),
     RegexScanner {
         pattern: Id,
@@ -1508,6 +1513,8 @@ impl Value {
             Self::GzipDecoder(_) => "object",
             Self::GzipReader(_) => "object",
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
+            Self::LzmaCompressor(_) => LZMA_COMPRESS_TYPE,
+            Self::LzmaDecompressor(_) => LZMA_DECOMPRESS_TYPE,
             Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::MemoryIterator { .. } => "memory_iterator",
@@ -2183,6 +2190,8 @@ impl Value {
             | Self::ProcessPreparation(_)
             | Self::GzipReader(_)
             | Self::GzipDecoder(_)
+            | Self::LzmaCompressor(_)
+            | Self::LzmaDecompressor(_)
             | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]

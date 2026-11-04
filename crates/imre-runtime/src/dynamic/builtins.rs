@@ -706,6 +706,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "anext_awaitable"
         }
+        Value::LzmaCompressor(_) if matches!(attr, "compress" | "flush") => {
+            super::value::LZMA_COMPRESS_TYPE
+        }
+        Value::LzmaDecompressor(_) if attr == "decompress" => super::value::LZMA_DECOMPRESS_TYPE,
         Value::ZlibCompressor(_) if super::value::ZLIB_COMPRESS_METHODS.contains(&attr) => {
             super::value::ZLIB_COMPRESS_TYPE
         }

@@ -1,0 +1,35 @@
+//! Constants shared by the checked and boxed LZMA providers.
+
+pub fn integer_constant(name: &str) -> Option<i64> {
+    Some(match name {
+        "FORMAT_AUTO" => 0,
+        "FORMAT_XZ" => 1,
+        "FORMAT_ALONE" => 2,
+        "FORMAT_RAW" => 3,
+        "FILTER_LZMA1" => 0x4000_0000_0000_0001,
+        "FILTER_LZMA2" => 0x21,
+        "FILTER_DELTA" => 3,
+        "FILTER_X86" => 4,
+        "FILTER_POWERPC" => 5,
+        "FILTER_IA64" => 6,
+        "FILTER_ARM" => 7,
+        "FILTER_ARMTHUMB" => 8,
+        "FILTER_SPARC" => 9,
+        "CHECK_NONE" => 0,
+        "CHECK_CRC32" => 1,
+        "CHECK_CRC64" => 4,
+        "CHECK_SHA256" => 10,
+        "CHECK_ID_MAX" => 15,
+        "CHECK_UNKNOWN" => 16,
+        "MODE_FAST" => 1,
+        "MODE_NORMAL" => 2,
+        "MF_HC3" => 3,
+        "MF_HC4" => 4,
+        "MF_BT2" => 18,
+        "MF_BT3" => 19,
+        "MF_BT4" => 20,
+        "PRESET_DEFAULT" => 6,
+        "PRESET_EXTREME" => 1 << 31,
+        _ => return None,
+    })
+}
