@@ -981,7 +981,14 @@ ACCEPTED = {
         "after.py": "print('after')\n",
     },
     "wildcard_native_namespaces": {
-        "main.py": "import paths\nimport prepare\nimport codes\nimport computed\n",
+        "main.py": "import paths\nimport prepare\nimport codes\nimport computed\nimport collection_abcs\n",
+        "collection_abcs.py": (
+            "from collections.abc import *\nimport collections.abc as _abc\n"
+            "_names = [n for n in globals() if not n.startswith('_')]\n"
+            "assert _names == _abc.__all__\n"
+            "for _name in _names:\n    assert globals()[_name] is getattr(_abc, _name)\n"
+            "print(_names)\n"
+        ),
         "paths.py": (
             "import genericpath as _path\nfrom genericpath import *\n"
             "assert [n for n in globals() if not n.startswith('_')] == _path.__all__\n"
