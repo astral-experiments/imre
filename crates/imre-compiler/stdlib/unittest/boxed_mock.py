@@ -183,9 +183,25 @@ def _callable(value):
 
 
 def _instance_callable(spec):
-    if isinstance(spec, type):
-        return any(base.__dict__.get("__call__") is not None for base in spec.__mro__)
-    return getattr(spec, "__call__", None) is not None
+    if not isinstance(spec, type):
+        return getattr(spec, "__call__", None) is not None
+    from inspect import getattr_static
+
+    for base in spec.__mro__:
+        try:
+            namespace = base.__dict__
+        except AttributeError:
+            if type(base) is not type:
+                raise
+            # Native bases can expose descriptors without a Python namespace.
+            # The metaclass's __call__ describes calling the class itself.
+            call = getattr_static(base, "__call__", None)
+            if getattr(call, "__objclass__", None) is base:
+                return True
+        else:
+            if namespace.get("__call__") is not None:
+                return True
+    return False
 
 
 class NonCallableMock(_FixedMock):
@@ -665,11 +681,15 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
         target = partial(spec.__func__, None)
     elif isinstance(spec, staticmethod):
         target = spec.__func__
-    elif target is None and callable(spec):
+    elif target is None and _callable(spec):
         target = spec
+    cls = MagicMock if target is not None else NonCallableMagicMock
+    if target is not None and target is spec and not isinstance(spec, (FunctionType, MethodType)):
+        # Inspect the call wrapper, as in CPython. Some native routines have
+        # no visible wrapper and can still be mocked without checking arguments.
+        target = getattr(spec, "__call__", None)
     if target is not None and iscoroutinefunction(target):
         raise NotImplementedError("autospeccing async callables is not supported")
-    cls = MagicMock if target is not None else NonCallableMagicMock
     mock = cls(spec_set=spec, name=name) if strict else cls(spec=spec, name=name)
     if spec is not None:
         # Capture the original attributes now; build their mocks on first access.
@@ -713,9 +733,11 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
 def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwargs):
     """Create a mock of a class or instance, checking calls against the source signatures."""
     from inspect import isroutine
+    from types import BuiltinFunctionType, MethodDescriptorType
+
     if _is_instance_mock(spec):
         raise InvalidSpecError("Cannot autospec a Mock object")
-    if isroutine(spec) and not isinstance(spec, (classmethod, staticmethod)):
+    if isroutine(spec) and not isinstance(spec, (classmethod, staticmethod, BuiltinFunctionType, MethodDescriptorType)):
         raise NotImplementedError("create_autospec does not yet support standalone routines")
     if not unsafe:
         for typo in ("autospect", "auto_spec", "set_spec"):

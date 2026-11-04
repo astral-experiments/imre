@@ -38,6 +38,27 @@ class Client:
 
 
 check = TestCase()
+
+
+class Queue(list):
+    def publish(self, item):
+        pass
+
+
+queue = create_autospec(Queue, spec_set=True).return_value
+assert not callable(queue)
+queue.append("first")
+queue.append.assert_called_once_with("first")
+for method in (create_autospec(list.append), create_autospec([].append)):
+    method()
+    method(1, 2)
+    assert method.call_args_list == [call(), call(1, 2)]
+with check.assertRaises(AttributeError):
+    queue.missing
+with check.assertRaises(TypeError):
+    queue.publish()
+queue.publish.assert_not_called()
+
 factory = create_autospec(Client, spec_set=True)
 with check.assertRaises(TypeError):
     factory()
