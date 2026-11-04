@@ -143,37 +143,28 @@ fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Locale, &'static str
         .into_iter()
         .find_map(|key| std::env::var_os(key).filter(|s| !s.is_empty()))
         .unwrap_or_else(|| "C".into());
-    let charset = locale_codeset(&locale);
-    // A rejected locale leaves a C program in its initial C locale.
-    let c_locale = locale == "C" || charset.is_none();
-    let legacy = c_locale || locale == "POSIX";
-    let utf8_mode = utf8.unwrap_or(legacy);
-    let coerce = (c_locale || (cfg!(target_os = "linux") && locale == "POSIX"))
-        && std::env::var_os("LC_ALL").is_none_or(|s| s.is_empty())
-        && (isolated || std::env::var("PYTHONCOERCECLOCALE").as_deref() != Ok("0"));
-    let coerced = coerce.then(|| {
-        ["C.UTF-8", "C.utf8", "UTF-8"]
-            .into_iter()
-            .find_map(|name| locale_codeset(name).map(|codeset| (OsString::from(name), codeset)))
+    // Select LC_CTYPE and read its codeset under the same lock. Probing with a
+    // temporary locale first would load the same locale data twice at startup.
+    let (coerced_ctype, codeset, legacy) = locked_locale(|| {
+        let charset = install_ctype(&locale);
+        let c_locale = locale == "C" || charset.is_none();
+        let legacy = c_locale || locale == "POSIX";
+        let coerce = (c_locale || (cfg!(target_os = "linux") && locale == "POSIX"))
+            && std::env::var_os("LC_ALL").is_none_or(|s| s.is_empty())
+            && (isolated || std::env::var("PYTHONCOERCECLOCALE").as_deref() != Ok("0"));
+        if coerce {
+            for name in ["C.UTF-8", "C.utf8", "UTF-8"] {
+                if let Some(codeset) = install_ctype(name) {
+                    return (Some(OsString::from(name)), codeset, legacy);
+                }
+            }
+        }
+        let codeset = charset
+            .or_else(|| install_ctype("C"))
+            .unwrap_or_else(|| "utf-8".to_owned());
+        (None, codeset, legacy)
     });
-    let coerced = coerced.flatten();
-    let coerced_ctype = coerced.as_ref().map(|(name, _)| name.clone());
-    let (ctype_name, codeset) = coerced
-        .or_else(|| charset.map(|codeset| (locale.clone(), codeset)))
-        .unwrap_or_else(|| {
-            (
-                "C".into(),
-                locale_codeset("C").unwrap_or_else(|| "utf-8".to_owned()),
-            )
-        });
-    // Python starts in the environment's character locale. Other categories
-    // retain the C library defaults until the program changes them.
-    if let Ok(name) = CString::new(ctype_name.as_bytes()) {
-        locked_locale(|| {
-            // SAFETY: the name was accepted by newlocale; locale changes hold the lock.
-            unsafe { libc::setlocale(libc::LC_CTYPE, name.as_ptr()) };
-        });
-    }
+    let utf8_mode = utf8.unwrap_or(legacy);
     let errors =
         if utf8_mode || legacy || matches!(locale.to_str(), Some("C.UTF-8" | "C.utf8" | "UTF-8")) {
             "surrogateescape"
@@ -190,23 +181,33 @@ fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Locale, &'static str
     )
 }
 
-/// Read the selected character set without changing the process locale.
-fn locale_codeset(name: impl AsRef<OsStr>) -> Option<String> {
-    with_ctype_locale(name, || {
-        // SAFETY: nl_langinfo returns the active locale's NUL-terminated codeset name.
-        let ptr = unsafe { libc::nl_langinfo(libc::CODESET) };
-        (!ptr.is_null())
-            .then(|| {
-                // SAFETY: the non-null codeset name is valid for this active locale.
-                unsafe { CStr::from_ptr(ptr) }
-                    .to_str()
-                    .ok()
-                    .map(str::to_owned)
-            })
+/// Install the startup character locale and copy its codeset while holding the locale lock.
+fn install_ctype(name: impl AsRef<OsStr>) -> Option<String> {
+    unsafe extern "C" {
+        fn imre_use_process_locale() -> libc::locale_t;
+    }
+    let name = CString::new(name.as_ref().as_bytes()).ok()?;
+    // SAFETY: the caller holds the locale lock and the name lives through setlocale.
+    if unsafe { libc::setlocale(libc::LC_CTYPE, name.as_ptr()) }.is_null() {
+        return None;
+    }
+    // Native callers may have installed a private thread locale. Copy the process
+    // codeset before restoring it, since uselocale can invalidate libc's pointer.
+    // SAFETY: the saved handle belongs to this thread and is restored below.
+    unsafe {
+        let previous = imre_use_process_locale();
+        if previous.is_null() {
+            return None;
+        }
+        let codeset = libc::nl_langinfo(libc::CODESET);
+        let codeset = (!codeset.is_null())
+            .then(|| CStr::from_ptr(codeset).to_str().ok())
             .flatten()
             .filter(|name| !name.is_empty())
-    })
-    .flatten()
+            .map(str::to_owned);
+        libc::uselocale(previous);
+        codeset
+    }
 }
 
 fn locked_locale<T>(operation: impl FnOnce() -> T) -> T {

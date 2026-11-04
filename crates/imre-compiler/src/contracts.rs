@@ -408,6 +408,9 @@ impl Builtin {
             },
             Self::RegexCapture { known, .. } => Contract::new(!known, PreservesLists),
             Self::Document(_) => Contract::new(true, Unknown),
+            Self::ByteArrayReverse => Contract::new(false, PreservesLists),
+            Self::ByteArrayNew => Contract::new(false, PreservesOwners),
+            Self::ByteArrayAppend | Self::ByteArrayExtend => Contract::new(true, PreservesLists),
             Self::Bytes => Contract::new(
                 args.first().is_none_or(|arg| arg.ty != Type::Bytes),
                 PreservesLists,
@@ -561,6 +564,7 @@ impl Builtin {
             | Self::FaultFrame { .. }
             | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
+            | Self::IntExtremum { .. }
             | Self::IntBitLength
             | Self::IntSignAsFloat
             | Self::FloatCopySign
@@ -873,6 +877,9 @@ impl Builtin {
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::IntExtremum { .. } => {
+                result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
+            }
             Self::IntBitLength => signature(&[Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
@@ -1251,6 +1258,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_list"
                 | "imre_bytes_contains_int"
                 | "imre_hmac_compare_digest_str"
+                | "imre_bytearray_snapshot"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"

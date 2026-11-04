@@ -359,6 +359,50 @@ impl Rows {
         }
     }
 
+    /// Make the replacement the default when a coprime walk covers all but a few rows.
+    /// The unvisited rows immediately precede the first store in the same cyclic order.
+    ///
+    /// # Safety
+    /// The caller roots an independent record of this layout throughout the replacement.
+    unsafe fn replace_modular_rows(
+        &mut self,
+        row: *const usize,
+        at: usize,
+        step: usize,
+        written: usize,
+    ) -> bool {
+        use num_integer::Integer;
+
+        // Inspect at most 64 survivors, and at most one sixty-fourth of the list.
+        let omitted = self.len.saturating_sub(written);
+        if omitted > (self.len / 64).min(64)
+            || !matches!(self.storage, RowStorage::Repeated(..))
+            || self.len.gcd(&step) != 1
+        {
+            return false;
+        }
+        // SAFETY: the typed loop roots this record until its new owner is acquired.
+        let base = unsafe { WordKind::new(6).acquire(row as usize) };
+        let mut replacement = self.with_default(base, self.len);
+        let mut previous = at;
+        for _ in 0..omitted {
+            previous = if previous >= step {
+                previous - step
+            } else {
+                self.len - (step - previous)
+            };
+            if replacement.set(previous, self.row(previous)).is_err() {
+                return false;
+            }
+        }
+        // Keep the original list and loop position until the complete result is ready.
+        if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+            return false;
+        }
+        *self = replacement;
+        true
+    }
+
     pub(super) fn slice(&self, indices: SliceIndices) -> Result<Words> {
         let len = indices.len();
         let mut out = Self::new(self.layout);
@@ -676,13 +720,18 @@ pub unsafe extern "C" fn imre_struct_set_modular(
             if n > rows.len || !std::ptr::eq(rows.layout, layout) {
                 return 0;
             }
+            let count = stop - current - 1;
+            let step = stride % n;
+            if n == rows.len && rows.replace_modular_rows(row, at, step, count + 1) {
+                let last = (at as u128 + count as u128 * step as u128) % n as u128;
+                last_index.write(2 * last as i64 + 1);
+                return 2 * stop as i64 - 1;
+            }
             let value = rows.payload(row);
             let RowStorage::Repeated(base, edits) = &mut rows.storage else {
                 return 0;
             };
             let base = base_row(base, rows.layout.length);
-            let count = stop - current - 1;
-            let step = stride % n;
             let Some(binary) = edits.for_modular_writes(at, value, base, n, step, count) else {
                 return 0;
             };

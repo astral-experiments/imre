@@ -4,6 +4,9 @@ use std::{ffi::CStr, mem::MaybeUninit};
 use zlib_rs::{DeflateConfig, DeflateFlush, InflateConfig, InflateFlush, ReturnCode};
 use zlib_rs::{c_api::z_stream, deflate, inflate};
 
+mod compressor;
+pub(in crate::dynamic) use compressor::{Compressor, compressor};
+
 fn buffer(ctx: &Context, data: Id) -> Result<&[u8]> {
     if let Value::Array(array) = ctx.heap.get(ctx.scalar_value(data)) {
         Ok(array.as_bytes())
@@ -42,7 +45,16 @@ pub(super) fn call(
                 .map(|id| os::c_int(ctx, id))
                 .transpose()?
                 .unwrap_or(15);
-            (Codec::Compress { level, wbits }, 32 * 1024)
+            (
+                Codec::Compress {
+                    config: DeflateConfig {
+                        level,
+                        window_bits: wbits,
+                        ..DeflateConfig::default()
+                    },
+                },
+                32 * 1024,
+            )
         } else {
             let size = match second {
                 Some(id) => crate::signed_index(&ctx.index_integer(id)?).ok_or_else(|| {
@@ -219,8 +231,16 @@ pub(in crate::dynamic) fn decompressor(
     };
     let (state, dictionary) = (state.clone(), *dictionary);
     let bytes = match name {
-        "copy" | "__copy__" => {
-            if !args.is_empty() || !kwargs.is_empty() {
+        name if super::value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&name) => {
+            if name == "__deepcopy__" {
+                if args.is_empty() && kwargs.len() <= 1 {
+                    return Err(Error::new(
+                        "TypeError",
+                        "__deepcopy__() takes exactly 1 positional argument (0 given)",
+                    ));
+                }
+                builtins::bind_method_arguments(name, args, kwargs, [""], 1)?;
+            } else if !args.is_empty() || !kwargs.is_empty() {
                 return Err(Error::new(
                     "TypeError",
                     format!("{name}() takes no arguments"),
@@ -413,57 +433,21 @@ impl Decompressor {
 /// advance one raw DEFLATE stream and return just its newly produced bytes.
 pub(super) fn gzip_writer(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     if name == "writer" {
-        let level = os::c_int(ctx, args[0])?;
-        if !(-1..=9).contains(&level) {
-            return Err(Error::new("ValueError", "Invalid initialization option"));
-        }
-        let stream = Stream::new(Codec::Compress { level, wbits: -15 })?;
-        let writer = crate::Shared::try_new(std::cell::RefCell::new(Some(stream)))
-            .map_err(|_| crate::Error::allocation())?;
-        return Ok(ctx.alloc(Value::GzipWriter(writer)));
-    }
-    let Value::GzipWriter(writer) = ctx.heap.get(args[0]) else {
-        return Err(Error::new("TypeError", "expected a gzip writer"));
-    };
-    let writer = writer.clone();
-    let (data, flush) = if name == "compress" {
-        ctx.check_buffer_exporter(args[1])?;
-        (buffer(ctx, args[1])?, DeflateFlush::NoFlush)
+        let wbits = ctx.int(-15);
+        compressor(ctx, "new", args, &[("wbits".to_owned(), wbits)])
     } else {
-        let mode = os::c_int(ctx, args[1])?;
-        let flush = DeflateFlush::try_from(mode).map_err(|_| {
-            Error::new(
-                "zlib.error",
-                "Error -2 while flushing: inconsistent stream state",
-            )
-        })?;
-        if flush == DeflateFlush::NoFlush {
-            return Ok(ctx.alloc(Value::Bytes(Vec::new())));
-        }
-        (&[][..], flush)
-    };
-    let mut writer = writer.borrow_mut();
-    let stream = writer.as_mut().ok_or_else(|| {
-        let action = if name == "compress" {
-            "compressing data"
+        let method = if name == "compress" {
+            "compress"
         } else {
-            "flushing"
+            "flush"
         };
-        Error::new(
-            "zlib.error",
-            format!("Error -2 while {action}: inconsistent stream state"),
-        )
-    })?;
-    let bytes = stream.process(data, Vec::new(), flush)?;
-    if flush == DeflateFlush::Finish {
-        *writer = None;
+        compressor(ctx, method, args, &[])
     }
-    Ok(ctx.alloc(Value::Bytes(bytes)))
 }
 
 #[derive(Clone, Copy)]
 enum Codec {
-    Compress { level: i32, wbits: i32 },
+    Compress { config: DeflateConfig },
     Decompress { wbits: i32 },
 }
 
@@ -527,14 +511,7 @@ impl Stream {
     fn new(codec: Codec) -> Result<Self> {
         let mut raw = z_stream::default();
         let status = match codec {
-            Codec::Compress { level, wbits } => deflate::init(
-                &mut raw,
-                DeflateConfig {
-                    level,
-                    window_bits: wbits,
-                    ..DeflateConfig::default()
-                },
-            ),
+            Codec::Compress { config } => deflate::init(&mut raw, config),
             Codec::Decompress { wbits } => {
                 inflate::init(&mut raw, InflateConfig { window_bits: wbits })
             }
@@ -628,7 +605,11 @@ impl Stream {
         if status == ReturnCode::MemError {
             return mem_error(self.codec);
         }
-        let detail = if self.raw.msg.is_null() {
+        stream_error(status, action, self.error_detail(status))
+    }
+
+    fn error_detail(&self, status: ReturnCode) -> &'static str {
+        if self.raw.msg.is_null() {
             match status {
                 ReturnCode::BufError => "incomplete or truncated stream",
                 ReturnCode::DataError => "invalid input data",
@@ -638,13 +619,16 @@ impl Stream {
         } else {
             // SAFETY: the backend's msg is a static NUL-terminated diagnostic string.
             unsafe { CStr::from_ptr(self.raw.msg) }.to_str().unwrap()
-        };
-        let separator = if detail.is_empty() { "" } else { ": " };
-        Error::new(
-            "zlib.error",
-            format!("Error {} while {action}{separator}{detail}", status as i32),
-        )
+        }
     }
+}
+
+fn stream_error(status: ReturnCode, action: &str, detail: &str) -> Error {
+    let separator = if detail.is_empty() { "" } else { ": " };
+    Error::new(
+        "zlib.error",
+        format!("Error {} while {action}{separator}{detail}", status as i32),
+    )
 }
 
 fn mem_error(codec: Codec) -> Error {

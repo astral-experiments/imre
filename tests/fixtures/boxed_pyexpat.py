@@ -21,6 +21,46 @@ def incremental():
     assert "".join(text) == "é"
 
 
+def unknown_encodings():
+    parser = expat.ParserCreate()
+    parser.buffer_text = True
+    events = []
+    parser.StartElementHandler = lambda name, attrs: events.append((name, attrs))
+    parser.CharacterDataHandler = events.append
+    parser.Parse(b'<?xml version="1.0" encoding="iso8859"?><r city="Z\xfcrich">caf', False)
+    assert events == [("r", {"city": "Zürich"}), "caf"]
+    parser.Parse(b"\xe9</r>", True)
+    assert events[-1] == "é"
+
+    parser = expat.ParserCreate("cp1252")
+    text = []
+    parser.CharacterDataHandler = text.append
+    parser.Parse(b"\n<r>\x80", False)
+    assert text == ["€"]
+    try:
+        parser.Parse(b"\x81</r>", True)
+    except expat.ExpatError as error:
+        assert (error.code, error.lineno, error.offset) == (4, 2, 4)
+    else:
+        raise AssertionError("undefined cp1252 byte accepted")
+
+    for encoding, kind, message in (
+        ("x-NoSuchCodec", LookupError, "unknown encoding: x-NoSuchCodec"),
+        ("shift_jis", ValueError, "multi-byte encodings are not supported"),
+    ):
+        parser = expat.ParserCreate(encoding)
+        handler = text.append
+        parser.CharacterDataHandler = handler
+        try:
+            parser.Parse(b"<r/>", True)
+        except kind as error:
+            assert str(error) == message
+            assert parser.ErrorCode == 18
+            assert parser.CharacterDataHandler is handler
+        else:
+            raise AssertionError(f"unexpectedly parsed {encoding}")
+
+
 def callback_exception():
     parser = expat.ParserCreate()
     seen = []
@@ -147,6 +187,7 @@ def malformed():
 
 
 incremental()
+unknown_encodings()
 callback_exception()
 buffered_callback_exception()
 replace_buffered_handler(False)

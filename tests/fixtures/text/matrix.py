@@ -75,6 +75,11 @@ for left in line_parts:
     for right in line_parts:
         print(repr((left + right).splitlines()))
         print(repr(("éλ🙂" + left + right + "\r\nlast").splitlines()))
+for text in ("", "?", "@", "\x00x", "x\x7f", "π!", "界", "aé"):
+    print(text.startswith(("\x00", "?", "@", "a", "\x7f")))
+    print(text.endswith(("!", "?", "@", "\x7f")))
+    print(text.startswith(("π", "a")))
+    print(text.endswith(("", "é")))
 for source in sources:
     for chars in characters:
         print(repr(source.strip(chars)))

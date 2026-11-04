@@ -430,9 +430,46 @@ def check_dict_subclass_reducer():
             assert list(pairs) == [("from override", 2)]
 
 
+def check_tuple_subclass_reducer():
+    class Values(tuple):
+        def __len__(self):
+            raise AssertionError("tuple reduction called __len__")
+        def __iter__(self):
+            raise AssertionError("tuple reduction called __iter__")
+        def __getitem__(self, key):
+            raise AssertionError("tuple reduction called __getitem__")
+
+    for raw in ((), ([],)):
+        args = raw.__getnewargs__()
+        assert type(args) is tuple and args == (raw,) and args[0] is raw
+        assert args is not raw.__getnewargs__()
+        value = Values(raw)
+        first, = value.__getnewargs__()
+        second, = value.__getnewargs__()
+        assert type(first) is tuple and first == raw
+        if raw:
+            assert first is not second and first[0] is raw[0]
+        else:
+            assert first is raw and second is raw
+        for protocol in (2, 3, 4, 5):
+            assert value.__reduce_ex__(protocol) == (
+                copyreg.__newobj__, (Values, raw), None, None, None)
+
+    class Tagged(Values):
+        def __new__(cls, *, tag):
+            return tuple.__new__(cls, (tag,))
+
+        def __getnewargs_ex__(self):
+            return (), {"tag": tuple.__getitem__(self, 0)}
+
+    assert Tagged(tag=17).__reduce_ex__(4) == (
+        copyreg.__newobj_ex__, (Tagged, (), {"tag": 17}), None, None, None)
+
+
 def check_object_reducer():
     check_list_subclass_reducer()
     check_dict_subclass_reducer()
+    check_tuple_subclass_reducer()
     class Child(WithoutProtocol):
         def reduce_from_super(self):
             return super().__reduce_ex__(4)

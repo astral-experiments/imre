@@ -3,6 +3,11 @@ def observe(value: int, visits: list[int]) -> int:
     return value
 
 
+def replace_item(values: list[int]) -> int:
+    values[0] = 0
+    return 1
+
+
 large = 1000000000000000000000000000000
 visits: list[int] = []
 print(min(observe(n, visits) for n in [large, -large, -large]))
@@ -29,3 +34,13 @@ visits = []
 print(max(observe(1, visits), observe(large, visits), observe(-large, visits)))
 print(min(observe(-large, visits), observe(-large, visits)))
 print(repr(visits))
+
+
+# The first argument must survive a mutation performed by the next argument.
+values = [-large - 1]
+print(min(values[0], replace_item(values)))
+visits = []
+try:
+    max(observe(1, visits), 1 // observe(0, visits), observe(7, visits))
+except ZeroDivisionError:
+    print(repr(visits))

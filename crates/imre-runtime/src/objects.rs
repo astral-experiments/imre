@@ -229,6 +229,7 @@ enum Storage {
     SplitFields(SplitFields),
     MatchingFields(matching_fields::MatchingFields),
     BytesIterator(bytes::BytesIterator),
+    ByteArray(Vec<u8>),
     ByteOutput(bytes::ByteOutput),
     TupleBuffer(Vec<OwnedWord>),
     SimpleNamespace(crate::ObjectOwner),

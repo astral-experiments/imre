@@ -293,6 +293,7 @@ impl Types {
             | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteArray
             | Type::ByteOutput
             | Type::TupleBuffer
             | Type::Exception

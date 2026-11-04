@@ -10,7 +10,8 @@ const KEY_WRAPPER: &str = "functools.KeyWrapper";
 fn nonconstructible_result_type(name: &str) -> bool {
     matches!(
         name,
-        HashState::CLASS
+        value::ZLIB_COMPRESS_TYPE
+            | HashState::CLASS
             | HashState::XOF_CLASS
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
@@ -136,6 +137,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
+        "zlib" if function == "compressobj" => Some((module, function)),
         "lzma" if function == "decompress" => Some((module, function)),
         "zlib"
             if matches!(
@@ -149,7 +151,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_imre_ssl" if !function.contains('.') => Some((module, function)),
         "_hashlib" if !function.contains('.') => Some((module, function)),
         "hashlib"
-            if matches!(function, "new" | "file_digest")
+            if function == "new"
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>
         {
             Some((module, function))
@@ -1561,6 +1563,7 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | value::ZLIB_COMPRESS_TYPE
                             | "socket.socket"
                             | "struct.Struct"
                             | value::ZLIB_DECOMPRESS_TYPE
@@ -1745,6 +1748,7 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | (value::ZLIB_COMPRESS_TYPE, Value::ZlibCompressor(_))
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
@@ -2447,6 +2451,12 @@ impl Context {
                 "tb_lineno" => return Ok(self.int(lineno)),
                 _ => {}
             },
+            Value::Native(ref class)
+                if class == value::ZLIB_COMPRESS_TYPE
+                    && value::ZLIB_COMPRESS_METHODS.contains(&name) =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
             Value::Native(ref class) if class == "frame" && name == "clear" => {
                 return Ok(self.builtin("frame.clear"));
             }
@@ -3790,13 +3800,17 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if class == value::ZLIB_DECOMPRESS_TYPE && matches!(name, "copy" | "__copy__") =>
+                if class == value::ZLIB_DECOMPRESS_TYPE
+                    && value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&name) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
                 if class == "tuple"
-                    && matches!(name, "__new__" | "__getitem__" | "count" | "index") =>
+                    && matches!(
+                        name,
+                        "__new__" | "__getitem__" | "__getnewargs__" | "count" | "index"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("tuple.{name}")));
             }
@@ -4230,7 +4244,21 @@ impl Context {
                 return self.native_class_dictionary(
                     obj,
                     "<collections.defaultdict namespace>",
-                    super::defaultdict::METHODS.iter().copied(),
+                    super::defaultdict::METHODS
+                        .iter()
+                        .copied()
+                        .chain(["__module__"]),
+                );
+            }
+            Value::Native(ref class) if class == "str" && name == "__dict__" => {
+                return self.native_class_dictionary(
+                    obj,
+                    "<str namespace>",
+                    builtins::STR_METHODS.iter().copied().chain([
+                        "__new__",
+                        "__sizeof__",
+                        "maketrans",
+                    ]),
                 );
             }
             Value::Native(ref class)
@@ -7627,7 +7655,8 @@ impl Context {
                     self.bind_argument(local, n, extra)?;
                 }
                 let mut extra = Vec::new();
-                for (n, v) in kwargs {
+                let mut keywords = kwargs.into_iter();
+                while let Some((n, v)) = keywords.next() {
                     if !posonly.contains(&n) && (pos.contains(&n) || kwonly.contains(&n)) {
                         if self.scope_data(local).names.contains_key(&n) {
                             return Err(Error::new(
@@ -7640,6 +7669,23 @@ impl Context {
                         let k = self.text(n);
                         extra.push((k, v));
                     } else {
+                        let conflicts: Vec<_> = posonly
+                            .iter()
+                            .filter(|param| {
+                                **param == n
+                                    || keywords.as_slice().iter().any(|(key, _)| key == *param)
+                            })
+                            .map(String::as_str)
+                            .collect();
+                        if !conflicts.is_empty() {
+                            return Err(Error::new(
+                                "TypeError",
+                                format!(
+                                    "{name}() got some positional-only arguments passed as keyword arguments: '{}'",
+                                    conflicts.join(", ")
+                                ),
+                            ));
+                        }
                         let candidates: Vec<_> = pos[posonly.len()..]
                             .iter()
                             .chain(&kwonly)

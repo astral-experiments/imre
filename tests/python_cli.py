@@ -1674,45 +1674,17 @@ with zipfile.ZipFile('stored.zip', 'w') as archive:
 with zipfile.ZipFile('stored.zip') as archive:
     print(archive.namelist(), archive.read('wheel/data'))""")
 
-        compare("-IB", "-c", """import os, zipfile, zlib
-path = 'zip-writer-capability.zip'
-try:
-    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('compressed', b'data')
-except NotImplementedError as exc:
-    from unittest import TestCase
-    assert not hasattr(zlib, 'compressobj')
-    assert str(exc) == 'Writing ZIP_DEFLATED requires zlib.compressobj'
-    assert not os.path.exists(path)
-    with open(path, 'wb') as stream:
-        stream.write(b'original')
-    with TestCase().assertRaises(NotImplementedError):
-        zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED)
-    with open(path, 'rb') as stream:
-        assert stream.read() == b'original'
+        compressor = Path(__file__).with_name("fixtures") / "zlib_compressobj.py"
+        for opt in ("0", "3"):
+            compare("-IB", compressor, native_args=("run", compressor, "--quiet", "--opt-level", opt))
 
-    def fields(member):
-        return (member.compress_type, member.compress_level, member.file_size,
-                member.compress_size, member.CRC, member.flag_bits, member.header_offset)
-
-    with zipfile.ZipFile(path, 'w') as archive:
-        archive.writestr('first', b'original')
-        member = archive.getinfo('first')
-        before = fields(member)
-        with TestCase().assertRaises(NotImplementedError):
-            archive.writestr(member, b'replacement', compress_type=zipfile.ZIP_DEFLATED, compresslevel=3)
-        assert fields(member) == before
-        assert archive.read('first') == b'original'
-        archive.writestr('later', b'added')
-    with zipfile.ZipFile(path) as archive:
-        assert archive.namelist() == ['first', 'later']
-        assert archive.read('first') == b'original' and archive.read('later') == b'added'
-else:
-    assert hasattr(zlib, 'compressobj')
-    with zipfile.ZipFile(path) as archive:
-        assert archive.getinfo('compressed').compress_type == zipfile.ZIP_DEFLATED
-        assert archive.read('compressed') == b'data'
-os.unlink(path)""")
+        written = run(imre, "-IB", "-c", """import zipfile
+with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr('compressed', b'data')""")
+        assert (written.returncode, written.stdout, written.stderr) == (0, b"", b""), written.stderr
+        with zipfile.ZipFile(root / "zip-writer-capability.zip") as archive:
+            assert archive.getinfo("compressed").compress_type == zipfile.ZIP_DEFLATED
+            assert archive.read("compressed") == b"data"
 
         archive = root / "application"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as app:
@@ -2417,6 +2389,22 @@ os.unlink(path)""")
             "    except NameError: print('unbound')\n",
         )
         compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
+        compare("-B", "-c", "print(str.__hash__('zone') == hash('zone'))")
+        compare("-B", "-c", "slot = str.__hash__; print(slot('zone') == hash('zone'))")
+        compare(
+            "-B", "-c",
+            "class Key(str):\n"
+            "    __hash__ = str.__hash__\n"
+            "print({Key('zone'): 1}['zone'])",
+        )
+        compare(
+            "-B", "-c",
+            "def make_key():\n"
+            "    class Key(str):\n"
+            "        __hash__ = str.__hash__\n"
+            "    return Key('zone')\n"
+            "print({'zone': 1}[make_key()])",
+        )
         if os.name == "posix":
             for base in ("list", "tuple"):
                 compare(
@@ -3059,6 +3047,11 @@ def report(text):
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
                 certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                dh_params = fixtures / "ssl_dh_params.py"
+                compare(
+                    "-IB", dh_params, certdata,
+                    native_args=("run", dh_params, "--quiet", "--", certdata), native_timeout=600,
+                )
                 object_io = fixtures / "ssl_object_io.py"
                 compare(
                     "-IB", object_io, certdata,
@@ -3409,6 +3402,7 @@ for name in ("md4", "ripemd160"):
             "boxed_float.py",
             "boxed_round.py",
             "boxed_math_rounding.py",
+            "boxed_math_acosh.py",
             "boxed_math_gcd.py",
             "boxed_math_isclose.py",
             "boxed_float_arithmetic.py",

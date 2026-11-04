@@ -110,6 +110,7 @@ impl Type {
             | Self::StringKeys
             | Self::Iterator
             | Self::Cursor(_)
+            | Self::ByteArray
             | Self::ByteOutput
             | Self::TupleBuffer
             | Self::Exception
@@ -405,6 +406,7 @@ fn emit_program(
         uses_sequence_layout: false,
         tuple_literals: BTreeMap::new(),
         static_functions: BTreeSet::new(),
+        callable_uses: callables::Uses::default(),
         async_frames: BTreeMap::new(),
         async_invoke_frames: BTreeMap::new(),
         function_link_types,
@@ -564,13 +566,7 @@ fn emit_program(
     }
     json::schemas(module, &emitter.json_schema_roots, emitter.output);
     record_layouts(module, emitter.output);
-    callables::adapters(
-        module,
-        sanitize,
-        &emitter.resource_types,
-        !emitter.function_link_types.is_empty(),
-        emitter.output,
-    );
+    callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
     emitter.output.common().push_str(&integer_helpers());
     emitter
@@ -648,6 +644,7 @@ struct Emitter<'a, 'module> {
     uses_sequence_layout: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
+    callable_uses: callables::Uses,
     async_frames: BTreeMap<usize, String>,
     async_invoke_frames: BTreeMap<usize, (String, Type)>,
     function_link_types: HashSet<Type>,
@@ -4015,6 +4012,7 @@ impl Emitter<'_, '_> {
                 | Type::CacheState(_)
                 | Type::Iterator
                 | Type::Cursor(_)
+                | Type::ByteArray
                 | Type::ByteOutput
                 | Type::TupleBuffer
                 | Type::Callable(_)
@@ -4237,6 +4235,9 @@ impl Emitter<'_, '_> {
     }
 
     fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
+        if !and && let Some(value) = self.ascii_affix_alternatives(values) {
+            return value;
+        }
         let end = self.label();
         let mut incoming = Vec::new();
         for (i, expression) in values.iter().enumerate() {
@@ -4296,6 +4297,7 @@ impl Emitter<'_, '_> {
         }
         if let Builtin::MarkCoroutine(id) = builtin {
             let function = self.expr(&expressions[0]);
+            self.callable_uses.marked.insert(*id);
             let marker = self.output.global_ref(format!("coroutine_mark_{id}"));
             self.line(format!("store i8 1, ptr @{marker}"));
             return function;
@@ -5252,10 +5254,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::EmptyPartial => self.empty_partial(&args[0].value),
             Builtin::CallableContext => {
-                let address = self.instruction(format!(
-                    "getelementptr %callable, ptr {}, i32 0, i32 1",
-                    args[0].value.operand
-                ));
+                let address = self.callable_context_slot(&args[0].value);
                 let value = Value {
                     ty: returns,
                     operand: self.instruction(format!("load ptr, ptr {address}")),
@@ -5694,7 +5693,7 @@ impl Emitter<'_, '_> {
                 let root = self.output.global_ref(format!("static_function_{name}"));
                 self.static_functions.insert(root.clone());
                 self.rooted_record(returns, &root, |emitter| {
-                    let layout = emitter.output.global_ref("layout_callable".to_owned());
+                    let layout = emitter.callable_layout("callable");
                     let value = emitter.record_with_layout(returns, layout);
                     emitter.line(format!(
                         "store ptr @imre_{name}_callback, ptr {}",
@@ -5704,7 +5703,7 @@ impl Emitter<'_, '_> {
                 })
             }
             Builtin::BuiltinsLen => {
-                let layout = self.output.global_ref("layout_callable".to_owned());
+                let layout = self.callable_layout("callable");
                 let value = Value {
                     ty: returns,
                     operand: self
@@ -6176,7 +6175,32 @@ impl Emitter<'_, '_> {
             Builtin::UrlsafeB64encode => {
                 self.call("imre_urlsafe_b64encode", Type::Bytes, &[&args[0].value])
             }
+            Builtin::ByteArrayNew => self.call("imre_bytearray_new", Type::ByteArray, &[]),
+            Builtin::ByteArrayReverse => {
+                self.line(format!(
+                    "call void @imre_bytearray_reverse(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            Builtin::ByteArrayAppend | Builtin::ByteArrayExtend => {
+                let (symbol, item_type) = if matches!(builtin, Builtin::ByteArrayAppend) {
+                    ("imre_bytearray_append", "i64")
+                } else if args[1].value.ty == Type::Bytes {
+                    ("imre_bytearray_extend_bytes", "ptr")
+                } else {
+                    ("imre_bytearray_extend", "ptr")
+                };
+                self.checked_status(format!(
+                    "call i32 @{symbol}(ptr {}, {item_type} {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::Bytes => match args[0].value.ty {
+                Type::ByteArray => {
+                    self.call("imre_bytearray_snapshot", Type::Bytes, &[&args[0].value])
+                }
                 Type::Bytes => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("imre_bytes_count", Type::Bytes, &[&args[0].value]),
                 Type::ListInt => self.call("imre_bytes_list", Type::Bytes, &[&args[0].value]),
@@ -6460,6 +6484,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
             Builtin::IsCoroutineFunction => {
+                self.callable_uses.inspected = true;
                 let table = self.output.global_ref("coroutine_targets".to_owned());
                 Value {
                     ty: Type::Bool,
@@ -7043,6 +7068,26 @@ impl Emitter<'_, '_> {
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
             },
+            Builtin::IntExtremum { minimum } => {
+                let order = if *minimum {
+                    Compare::Less
+                } else {
+                    Compare::Greater
+                };
+                let mut best = args[0].value.clone();
+                for arg in &args[1..] {
+                    let next = &arg.value;
+                    let better = self.compare(order, next, &best);
+                    best.operand = self.instruction(format!(
+                        "select i1 {}, i64 {}, i64 {}",
+                        better.operand, next.operand, best.operand
+                    ));
+                    best.small_integer &= next.small_integer;
+                }
+                // The selected integer survives release of all the call arguments.
+                self.retain(&best);
+                best
+            }
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::IntSignAsFloat => {
                 let order = self.instruction(format!(
@@ -7099,6 +7144,7 @@ impl Emitter<'_, '_> {
                         match args[0].value.ty {
                             Type::Str => "imre_str_len",
                             Type::Bytes => "imre_bytes_len",
+                            Type::ByteArray => "imre_bytearray_len",
                             Type::VarTuple(_) => "imre_tuple_len",
                             Type::ListInt => "imre_list_len",
                             Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
@@ -9530,6 +9576,13 @@ declare i64 @imre_bytes_get_index(ptr, i64)
 declare ptr @imre_bytes_slice(ptr, i64, i64, i64)
 declare ptr @imre_bytes_count(i64)
 declare ptr @imre_bytes_list(ptr)
+declare ptr @imre_bytearray_new()
+declare i32 @imre_bytearray_append(ptr, i64)
+declare i32 @imre_bytearray_extend(ptr, ptr)
+declare i32 @imre_bytearray_extend_bytes(ptr, ptr)
+declare void @imre_bytearray_reverse(ptr)
+declare i64 @imre_bytearray_len(ptr)
+declare ptr @imre_bytearray_snapshot(ptr)
 declare ptr @imre_byte_output_new()
 declare void @imre_byte_output_reserve_range(ptr, i64, i64, i64, i64)
 declare ptr @imre_byte_output_finish(ptr)
@@ -9968,6 +10021,7 @@ declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
+declare i32 @imre_str_affix_ascii(ptr, i64, i64, i32)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
 declare ptr @imre_str_translate(ptr, ptr)
@@ -10948,6 +11002,21 @@ print(show("x"))
     }
 
     #[test]
+    fn ascii_affix_tuples_inspect_one_boundary() {
+        let body =
+            function_body("def check(s: str) -> bool:\n    return s.endswith((' ', '.', '@'))\n");
+        assert_eq!(body.matches("@imre_str_affix_ascii(").count(), 1);
+        assert!(!body.contains("@imre_str_affix("));
+
+        for tuple in ["('x', 'é')", "('x', 'ab')", "('x', '')", "('x', s)"] {
+            let body = function_body(&format!(
+                "def check(s: str) -> bool:\n    return s.startswith({tuple})\n"
+            ));
+            assert!(!body.contains("@imre_str_affix_ascii("), "{body}");
+        }
+    }
+
+    #[test]
     fn transient_literal_operands_borrow_the_pool_root() {
         for (source, operation, retain) in [
             (
@@ -11630,6 +11699,13 @@ def transform(values: list[int], count: int) -> int:
             "def pair(x: int, y: float) -> tuple[float, float]:\n    return divmod(x, y)\n";
         let llvm = compile(source, &CompileOptions::default()).unwrap();
         assert_eq!(llvm.matches("call i32 @imre_float_divmod(").count(), 1);
+    }
+
+    #[test]
+    fn mutable_bytearray_operations_use_native_storage() {
+        let source = include_str!("../../../tests/fixtures/bytes/bytearray_builder.py");
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_bytearray_new()"));
     }
 
     #[test]

@@ -57,12 +57,16 @@ pub(super) const NOT_IMPLEMENTED: Id = 4;
 pub(super) const EMPTY_TUPLE: Id = 5;
 
 pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
+pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const REGEX_SCANNER_TYPE: &str = "_sre.SRE_Scanner";
 pub(super) const REGEX_COPY_METHODS: &[&str] = &["__copy__", "__deepcopy__"];
+pub(super) const ZLIB_COMPRESS_TYPE: &str = "zlib.Compress";
+pub(super) const ZLIB_COMPRESS_METHODS: &[&str] =
+    &["compress", "flush", "copy", "__copy__", "__deepcopy__"];
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
@@ -1346,11 +1350,11 @@ pub(super) enum Value {
     TextFile(BoxedTextFile),
     GzipReader(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
     GzipDecoder(crate::Shared<std::cell::RefCell<Option<crate::objects::GzipDecoder>>>),
-    GzipWriter(crate::Shared<std::cell::RefCell<Option<super::stdlib::zlib::Stream>>>),
     ZlibDecompressor {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
+    ZlibCompressor(crate::Shared<std::cell::RefCell<super::stdlib::zlib::Compressor>>),
     RegexScanner {
         pattern: Id,
         subject: Id,
@@ -1464,8 +1468,9 @@ impl Value {
             Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GzipDecoder(_) => "object",
-            Self::GzipReader(_) | Self::GzipWriter(_) => "object",
+            Self::GzipReader(_) => "object",
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
+            Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::MemoryIterator { .. } => "memory_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -2140,7 +2145,7 @@ impl Value {
             | Self::ProcessPreparation(_)
             | Self::GzipReader(_)
             | Self::GzipDecoder(_)
-            | Self::GzipWriter(_)
+            | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
             Self::MemoryBio(_)
@@ -2595,6 +2600,8 @@ pub(super) struct Heap {
     weak: HashMap<Id, Vec<Id>>,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
+    // Detached workers compare against the original stderr without keeping it alive.
+    pub(super) default_stderr: Option<Id>,
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
@@ -2813,6 +2820,7 @@ impl Heap {
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             borrowed_hooks: Vec::new(),
+            default_stderr: None,
             has_weak_values: false,
             collect_next_statement: false,
             file_writers: Vec::new(),
@@ -4896,6 +4904,9 @@ impl Heap {
         {
             self.discarded_shutdown_write = Some(true);
         }
+        self.default_stderr = self
+            .default_stderr
+            .filter(|&id| self.traces[id as usize].get() != UNMARKED);
         for id in &mut self.borrowed_hooks {
             if self.traces[*id as usize].get() == UNMARKED {
                 *id = NONE;

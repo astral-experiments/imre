@@ -349,10 +349,9 @@ fn object_fallback<T>(
         } else if g.class_layout_error.borrow().as_ref() == Some(&error) {
             Some(dynamic::ObjectOperation::ClassLayout)
         } else {
-            g.object_builtin_errors
-                .borrow()
-                .contains(&error)
-                .then_some(dynamic::ObjectOperation::Builtin)
+            (g.object_builtin_errors.borrow().contains(&error)
+                || g.has_native_bytearray.get() && !g.return_errors.borrow().contains(&error))
+            .then_some(dynamic::ObjectOperation::Builtin)
         }
     });
     let runtime_imports = options.runtime_imports
@@ -379,6 +378,7 @@ fn object_fallback<T>(
                     .any(|names| names.len() > 1)
             });
             let all_calls = !matches!(requested, analysis::FallbackCalls::None)
+                || checked_file && graph.has_native_bytearray.get()
                 || !entry.optional_imports.is_empty()
                 || compound_probe
                 || !graph.needs_object_runtime.get()
@@ -801,6 +801,40 @@ fn check_encoding(source: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn native_bytearray_construction_preserves_object_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        // Printing the mutable buffer directly uses its object implementation.
+        std::fs::write(
+            &path,
+            "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\n",
+        )
+        .unwrap();
+        super::check_file(&path, None).unwrap();
+
+        // Taking the object route must still enforce a typed callee's argument.
+        std::fs::write(
+            &path,
+            "def identity(x: int) -> int:\n    return x\n\nbuffer = bytearray()\nprint(identity('x'))\n",
+        )
+        .unwrap();
+        assert!(super::check_file(&path, None).is_err());
+
+        // Explicit runtime imports must also preserve annotated return errors.
+        std::fs::write(
+            &path,
+            "def build() -> int:\n    buffer = bytearray()\n    return 'bad'\n\nprint(build())\n",
+        )
+        .unwrap();
+        let options = super::CompileOptions {
+            runtime_imports: true,
+            ..Default::default()
+        };
+        let error = super::check_file_with_options(&path, None, &options).unwrap_err();
+        assert!(error.contains("expected int, got str"), "{error}");
+    }
 
     #[test]
     fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {

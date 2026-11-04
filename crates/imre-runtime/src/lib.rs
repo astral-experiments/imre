@@ -1704,6 +1704,31 @@ pub unsafe extern "C" fn imre_list_reverse(list: *const List) {
 /// The arguments must be live list and integer handles, respectively.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_list_get(list: *const List, at: usize) -> usize {
+    // A tagged integer fits isize, including on 32-bit targets.
+    // SAFETY: the caller roots the index for this access.
+    if let Some(index) = unsafe { Int::borrow(at) }.as_small() {
+        // SAFETY: the short read cannot invoke user code or resize the list.
+        let item = unsafe {
+            (&*list).0.with(|items| {
+                normalized_index(index as isize, items.len())
+                    .map_or(0, |index| items[index].clone().into_raw())
+            })
+        };
+        if item != 0 {
+            return item;
+        }
+    }
+    // SAFETY: both arguments retain the original subscript lifetime.
+    unsafe { list_get_slow(list, at) }
+}
+
+/// Handles heap integers and distinguishes overflow from an out-of-bounds index.
+///
+/// # Safety
+/// Both arguments must be rooted as in [`imre_list_get`].
+#[cold]
+#[inline(never)]
+unsafe fn list_get_slow(list: *const List, at: usize) -> usize {
     // SAFETY: the caller roots the index; conversion cannot call user code.
     let at = unsafe { Int::borrow(at) };
     let Some(at) = signed_index(&at) else {

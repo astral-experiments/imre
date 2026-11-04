@@ -370,6 +370,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/cp437.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
+        "encodings.iso8859_15" => Some((
+            "encodings/iso8859_15.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
         "encodings.koi8_u" => Some((
             "encodings/koi8_u.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
@@ -1355,6 +1359,11 @@ impl IntrinsicModule {
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
         }
+        if self == Self::Zlib
+            && let Some(value) = imre_ast::zlib::integer_constant(name)
+        {
+            return Some(Binding::Intrinsic(Intrinsic::IntConstant(value)));
+        }
         if self == Self::DatetimeNative {
             return Self::Datetime.symbol(name);
         }
@@ -2298,6 +2307,7 @@ impl IntrinsicModule {
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
             (Self::Math, "prod") => Intrinsic::MathProd,
@@ -2329,6 +2339,10 @@ impl IntrinsicModule {
             (Self::Lzma, "FORMAT_AUTO") => Intrinsic::IntConstant(0),
             (Self::Lzma, "FORMAT_XZ") => Intrinsic::IntConstant(1),
             (Self::Lzma, "FORMAT_ALONE") => Intrinsic::IntConstant(2),
+            (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
+            (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
+                Intrinsic::StringConstant(imre_ast::zlib::VERSION)
+            }
             (Self::Lzma, "LZMAError") => Intrinsic::ScopedObjectExport("lzma.LZMAError"),
             (Self::Lzma, "decompress") => Intrinsic::ScopedObjectExport("lzma.decompress"),
             (Self::Zlib, "decompressobj") => Intrinsic::ScopedObjectExport("zlib.decompressobj"),
@@ -2838,6 +2852,8 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
+    /// A reachable bytearray constructor keeps its object implementation available on typed failure.
+    pub(crate) has_native_bytearray: std::cell::Cell<bool>,
     pub(crate) check_fallback_calls: std::cell::Cell<FallbackCalls>,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
@@ -4137,6 +4153,7 @@ impl<'a> Loader<'a> {
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             float_components: Default::default(),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
+            has_native_bytearray: Default::default(),
             check_fallback_calls: Default::default(),
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),

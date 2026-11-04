@@ -19,6 +19,148 @@ pub(super) fn allocate(length: usize) -> Result<Bytes> {
     Ok(value)
 }
 
+/// Creates an empty mutable byte sequence for native bytearray operations.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_bytearray_new() -> *const Object {
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::ByteArray(Vec::new()),
+    ))))
+}
+
+impl Storage {
+    fn bytearray(&self) -> &[u8] {
+        let Self::ByteArray(bytes) = self else {
+            unreachable!()
+        };
+        bytes
+    }
+
+    fn bytearray_mut(&mut self) -> &mut Vec<u8> {
+        let Self::ByteArray(bytes) = self else {
+            unreachable!()
+        };
+        bytes
+    }
+}
+
+/// Reserves before mutation, including self-extension where the source can move.
+fn bytearray_reserve(bytes: &mut Vec<u8>, additional: usize) -> Result<()> {
+    bytes
+        .try_reserve(additional)
+        .map_err(|_| Error::new(Kind::MemoryError, "bytearray allocation failed"))
+}
+
+fn extend_bytearray(target: &mut Vec<u8>, source: &[u8]) -> Result<i32> {
+    bytearray_reserve(target, source.len())?;
+    target.extend_from_slice(source);
+    Ok(1)
+}
+
+/// # Safety
+/// The bytearray and canonical integer remain rooted throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytearray_append(output: *const Object, value: usize) -> i32 {
+    // All integers in range(256) have a small tag and fit in nine bits.
+    if (value ^ 1) & !0x1fe != 0 {
+        return finish(
+            Err(Error::new(
+                Kind::ValueError,
+                "byte must be in range(0, 256)",
+            )),
+            0,
+        );
+    }
+    // SAFETY: the source byte is independent of the rooted buffer; no callback runs.
+    let result = unsafe {
+        super::object(output)
+            .0
+            .with_mut(|s| extend_bytearray(s.bytearray_mut(), &[(value >> 1) as u8]))
+    };
+    finish(result, 0)
+}
+
+/// # Safety
+/// The mutable receiver and immutable bytes source are rooted and distinct.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytearray_extend_bytes(
+    output: *const Object,
+    source: *const Bytes,
+) -> i32 {
+    // SAFETY: an immutable bytes allocation cannot alias the mutable bytearray.
+    let result = unsafe {
+        super::object(output)
+            .0
+            .with_mut(|s| extend_bytearray(s.bytearray_mut(), &*source))
+    };
+    finish(result, 0)
+}
+
+/// # Safety
+/// Both arguments are rooted bytearrays and may refer to the same object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytearray_extend(
+    output: *const Object,
+    source: *const Object,
+) -> i32 {
+    // SAFETY: self-extension takes a single mutable borrow. Distinct objects hold distinct
+    // vectors; copying their bytes cannot reenter Python or expose a borrow.
+    let result = unsafe {
+        super::object(output).0.with_mut(|target| {
+            let target = target.bytearray_mut();
+            if output == source {
+                let len = target.len();
+                bytearray_reserve(target, len)?;
+                target.extend_from_within(..len);
+                Ok(1)
+            } else {
+                super::object(source)
+                    .0
+                    .with(|s| extend_bytearray(target, s.bytearray()))
+            }
+        })
+    };
+    finish(result, 0)
+}
+
+/// # Safety
+/// The caller roots the mutable bytearray for the duration of the reversal.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytearray_reverse(output: *const Object) {
+    // SAFETY: reversing byte values cannot reenter Python or expose a reference.
+    unsafe {
+        super::object(output)
+            .0
+            .with_mut(|s| s.bytearray_mut().reverse())
+    }
+}
+
+/// # Safety
+/// The caller roots the bytearray for the duration of this read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytearray_len(output: *const Object) -> usize {
+    // SAFETY: this read cannot reenter Python or return a storage borrow.
+    let length = unsafe { super::object(output).0.with(|s| s.bytearray().len()) };
+    Int::from_usize(length).into_raw()
+}
+
+/// Copies the bytearray so that later mutations cannot change an existing bytes value.
+///
+/// # Safety
+/// The caller roots the bytearray until the snapshot has been copied.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytearray_snapshot(output: *const Object) -> *const Bytes {
+    // SAFETY: allocation and copying cannot reenter Python or leak a storage borrow.
+    let result = unsafe {
+        super::object(output).0.with(|s| {
+            let bytes = s.bytearray();
+            let mut copy = allocate(bytes.len())?;
+            copy.extend_from_slice(bytes);
+            Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(copy)))
+        })
+    };
+    finish(result, std::ptr::null())
+}
+
 /// Private append-only integer list whose only consumer converts it to bytes.
 pub(super) struct ByteOutput {
     bytes: Vec<u8>,

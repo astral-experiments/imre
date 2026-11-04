@@ -483,6 +483,12 @@ class SSLContext:
     def set_ciphers(self, cipherlist, /):
         _call(_imre_ssl.set_ciphers, self._ctx, cipherlist)
 
+    def load_dh_params(self, path, /):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("load_dh_params", self)
+        result = _call(_imre_ssl.load_dh_params, __class__._ctx.__get__(self), path)
+        _check_context_result(result)
+
     def load_cert_chain(self, certfile, keyfile=None, password=None):
         if not issubclass(type(self), __class__):
             _imre_ssl.raise_context_receiver_error("load_cert_chain", self)
