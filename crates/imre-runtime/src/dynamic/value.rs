@@ -1,5 +1,7 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
+mod weak_roots;
+
 use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -2636,6 +2638,7 @@ pub(super) struct Heap {
     pub(super) gc_settings: Arc<GcSettings>,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
+    weak_roots: weak_roots::WeakRoots,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
     // Detached workers compare against the original stderr without keeping it alive.
@@ -2859,6 +2862,7 @@ impl Heap {
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
+            weak_roots: weak_roots::WeakRoots::default(),
             borrowed_hooks: Vec::new(),
             default_stderr: None,
             has_weak_values: false,
@@ -4318,9 +4322,11 @@ impl Heap {
             || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
     }
 
-    /// A single interpreter-owned weak reference and its registered module both survive.
-    /// A user-owned reference can itself disappear even while its target stays alive.
-    pub(super) fn weak_module_kept_by(&self, modules: Id, reference: Id) -> bool {
+    /// Both the weak reference and its target must keep a strong path from a surviving root.
+    pub(super) fn weak_values_kept_by(&self, modules: Id, reference: Id) -> bool {
+        if self.weak_roots.keeps_all(self, [modules, reference]) {
+            return true;
+        }
         if self.weak.len() != 1 {
             return self.weak.is_empty();
         }
