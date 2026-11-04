@@ -20,6 +20,7 @@ type VerifyCallback = Option<unsafe extern "C" fn(c_int, Handle) -> c_int>;
 // CPython 3.14.5 Modules/_ssl.c, PY_SSL_DEFAULT_CIPHER_STRING.
 const CIPHERS: &CStr =
     c"@SECLEVEL=2:ECDH+AESGCM:ECDH+CHACHA20:ECDH+AES:DHE+AES:!aNULL:!eNULL:!aDSS:!SHA1:!AESCCM";
+const SSL_CTRL_SET_TMP_DH: c_int = 3;
 const SSL_CTRL_SET_MIN_PROTO_VERSION: c_int = 123;
 const SSL_CTRL_SET_TLSEXT_HOSTNAME: c_int = 55;
 const TLS1_2_VERSION: c_long = 0x0303;
@@ -36,29 +37,35 @@ const SSL_ERROR_ZERO_RETURN: c_int = 6;
 // OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_UNEXPECTED_EOF_WHILE_READING).
 const UNEXPECTED_EOF: c_ulong = (20 << 23) | 294;
 
+// OpenSSL 3 builds can omit the deprecated DH entry points independently of TLS.
+macro_rules! symbol {
+    ($handle:ident, $name:ident($($arg:ty),*) -> $ret:ty) => {{
+        let name = concat!(stringify!($name), "\0");
+        // SAFETY: the live libssl handle includes its libcrypto dependency. The
+        // signature is from the OpenSSL headers; a missing symbol becomes None.
+        unsafe {
+            let ptr = libc::dlsym($handle.as_ptr(), name.as_ptr().cast());
+            std::mem::transmute::<Handle, Option<unsafe extern "C" fn($($arg),*) -> $ret>>(ptr)
+        }
+    }};
+}
+
 macro_rules! functions {
-    ($($name:ident($($arg:ty),*) -> $ret:ty;)+) => {
+    (optional { $($opt:ident($($oa:ty),*) -> $or:ty;)+ }
+     $($name:ident($($arg:ty),*) -> $ret:ty;)+) => {
         #[allow(non_snake_case)]
         struct Api {
             has_psk: bool,
+            $($opt: Option<unsafe extern "C" fn($($oa),*) -> $or>,)+
             $($name: unsafe extern "C" fn($($arg),*) -> $ret,)+
         }
         impl Api {
             fn symbols(handle: NonNull<c_void>) -> Option<Self> {
                 Some(Self {
-                    // OpenSSL omits this callback entry point in OPENSSL_NO_PSK builds.
                     // SAFETY: query the same live handle as the TLS entry points.
                     has_psk: !unsafe { libc::dlsym(handle.as_ptr(), c"SSL_CTX_set_psk_client_callback".as_ptr()) }.is_null(),
-                    $($name: {
-                        let name = concat!(stringify!($name), "\0");
-                        // SAFETY: the live libssl handle includes its libcrypto dependency.
-                        let addr = unsafe { libc::dlsym(handle.as_ptr(), name.as_ptr().cast()) };
-                        // SAFETY: these are the OpenSSL 3 C signatures, and successful loads
-                        // keep the library handle alive for the lifetime of the process.
-                        unsafe { std::mem::transmute::<Handle, unsafe extern "C" fn($($arg),*) -> $ret>(
-                            NonNull::new(addr)?.as_ptr()
-                        ) }
-                    },)+
+                    $($opt: symbol!(handle, $opt($($oa),*) -> $or),)+
+                    $($name: symbol!(handle, $name($($arg),*) -> $ret)?,)+
                 })
             }
         }
@@ -66,6 +73,10 @@ macro_rules! functions {
 }
 
 functions! {
+    optional {
+        PEM_read_DHparams(*mut libc::FILE, *mut Handle, PasswordCallback, Handle) -> Handle;
+        DH_free(Handle) -> ();
+    }
     OpenSSL_version(c_int) -> *const c_char;
     OpenSSL_version_num() -> c_ulong;
     OBJ_txt2obj(*const c_char, c_int) -> Handle;
@@ -760,6 +771,65 @@ impl Context {
         unsafe {
             (self.api.SSL_CTX_set_post_handshake_auth)(self.handle.as_ptr(), i32::from(enabled))
         };
+    }
+
+    /// Decode a PEM DH parameter block and install it on this live context.
+    pub(super) fn load_dh_params(&mut self, path: &CStr) -> Result<(), Failure> {
+        use std::os::fd::{AsRawFd, IntoRawFd};
+        use std::os::unix::ffi::OsStrExt;
+
+        let api = self.api;
+        let (Some(read_params), Some(free_params)) = (api.PEM_read_DHparams, api.DH_free) else {
+            return Err(Failure::Other(
+                "OpenSSL DH parameter loading is unavailable".into(),
+            ));
+        };
+        let file = std::fs::File::open(std::ffi::OsStr::from_bytes(path.to_bytes()))
+            .map_err(Failure::Io)?;
+        api.clear();
+        // SAFETY: fdopen borrows the valid descriptor on failure and hands it to
+        // the FILE on success. File::open made the descriptor non-inheritable.
+        let stream = NonNull::new(unsafe { libc::fdopen(file.as_raw_fd(), c"rb".as_ptr()) })
+            .ok_or_else(|| Failure::Io(std::io::Error::last_os_error()))?;
+        let _ = file.into_raw_fd();
+        clear_errno();
+        // SAFETY: OpenSSL borrows the live FILE and returns an owned DH object.
+        let params = unsafe {
+            read_params(
+                stream.as_ptr(),
+                ptr::null_mut(),
+                reject_password,
+                ptr::null_mut(),
+            )
+        };
+        let io_error = std::io::Error::last_os_error();
+        // SAFETY: the read is complete; fclose consumes both the FILE and its fd.
+        unsafe { libc::fclose(stream.as_ptr()) };
+        // SAFETY: SSL_CTX_set_tmp_dh retains its own reference on success. Capture
+        // the provider error before releasing the PEM decoder's reference.
+        let result = unsafe {
+            if let Some(params) = NonNull::new(params) {
+                let ok = (api.SSL_CTX_ctrl)(
+                    self.handle.as_ptr(),
+                    SSL_CTRL_SET_TMP_DH,
+                    0,
+                    params.as_ptr(),
+                );
+                let result = if ok == 1 {
+                    Ok(())
+                } else {
+                    Err(api.trust_error((api.ERR_peek_last_error)(), None))
+                };
+                free_params(params.as_ptr());
+                result
+            } else if io_error.raw_os_error() != Some(0) {
+                Err(Failure::Io(io_error))
+            } else {
+                Err(api.trust_error((api.ERR_peek_last_error)(), None))
+            }
+        };
+        api.clear();
+        result
     }
 
     /// Release the Python-visible context borrow before invoking any password callback.

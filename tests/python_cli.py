@@ -3059,6 +3059,11 @@ def report(text):
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
                 certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                dh_params = fixtures / "ssl_dh_params.py"
+                compare(
+                    "-IB", dh_params, certdata,
+                    native_args=("run", dh_params, "--quiet", "--", certdata), native_timeout=600,
+                )
                 object_io = fixtures / "ssl_object_io.py"
                 compare(
                     "-IB", object_io, certdata,

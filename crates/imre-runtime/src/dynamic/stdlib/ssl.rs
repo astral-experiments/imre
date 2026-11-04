@@ -51,6 +51,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "set_ciphers",
         "set_ecdh_curve",
         "load_verify_locations",
+        "load_dh_params",
         "load_cert_chain",
         "wrap",
         "is_session",
@@ -710,6 +711,35 @@ pub(super) fn call(
             }
         }
         ("get_ciphers", &[handle]) => provider::ciphers::get(ctx, handle),
+        ("load_dh_params", &[handle, path]) => {
+            let mode = ctx.text("rb");
+            let flags = ctx.int(0);
+            super::audit::event(ctx, "open", &[path, mode, flags])?;
+            let spelling = super::posixpath::fspath(ctx, path)?;
+            let filename = super::os::c_path(ctx, spelling, "embedded null byte")?;
+            let result = context(ctx, handle)?.borrow_mut().load_dh_params(&filename);
+            match result {
+                Ok(()) => Ok(NONE),
+                Err(provider::Failure::Io(error)) => {
+                    Err(ctx.with_errno_filename(errno_error(error).into(), path)?)
+                }
+                Err(provider::Failure::Trust {
+                    code,
+                    message,
+                    library,
+                    reason,
+                }) => {
+                    let fields = vec![
+                        ctx.int(code),
+                        ctx.text(message),
+                        library.map_or(NONE, |s| ctx.text(s)),
+                        reason.map_or(NONE, |s| ctx.text(s)),
+                    ];
+                    Ok(ctx.alloc(Value::Tuple(fields)))
+                }
+                Err(other) => Err(provider_error(ctx, other)),
+            }
+        }
         ("set_ciphers", &[handle, text]) => {
             let ciphers = CString::new(ctx.str_value(text)?)
                 .map_err(|_| Error::new("ValueError", "embedded null byte in cipher list"))?;
