@@ -2744,6 +2744,12 @@ impl Context {
                 }
             }
             Value::Native(ref symbol)
+                if name == "__doc__"
+                    && let Some(doc) = builtins::function_doc(symbol) =>
+            {
+                return Ok(self.text(doc));
+            }
+            Value::Native(ref symbol)
                 if builtins::is_builtin(symbol)
                     && !builtins::is_builtin_type(symbol)
                     && matches!(name, "__name__" | "__qualname__" | "__module__") =>

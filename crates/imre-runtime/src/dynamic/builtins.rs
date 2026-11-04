@@ -170,6 +170,31 @@ pub(super) fn is_builtin_function(name: &str) -> bool {
     BUILTIN_FUNCTIONS.contains(&name)
 }
 
+/// Documentation for bare native functions, from CPython's Python/bltinmodule.c.
+pub(super) fn function_doc(name: &str) -> Option<&'static str> {
+    match name {
+        "min" => Some(
+            "min(iterable, *[, default=obj, key=func]) -> value\n\
+             min(arg1, arg2, *args, *[, key=func]) -> value\n\
+             \n\
+             With a single iterable argument, return its smallest item. The\n\
+             default keyword-only argument specifies an object to return if\n\
+             the provided iterable is empty.\n\
+             With two or more positional arguments, return the smallest argument.",
+        ),
+        "max" => Some(
+            "max(iterable, *[, default=obj, key=func]) -> value\n\
+             max(arg1, arg2, *args, *[, key=func]) -> value\n\
+             \n\
+             With a single iterable argument, return its biggest item. The\n\
+             default keyword-only argument specifies an object to return if\n\
+             the provided iterable is empty.\n\
+             With two or more positional arguments, return the largest argument.",
+        ),
+        _ => None,
+    }
+}
+
 /// CPython compares built-in functions by their implementation and bound module.
 pub(super) fn native_implementation(symbol: &str) -> &str {
     match symbol {
