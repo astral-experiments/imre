@@ -454,6 +454,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__abs__",
             "__bool__",
             "__float__",
+            "__getnewargs__",
             "__int__",
             "__lt__",
             "__pow__",
@@ -1985,6 +1986,12 @@ pub(super) fn call(
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
             "_float_getset" => float::component(ctx, method, args, kwargs),
+            "int" if method == "__getnewargs__" => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let value = ctx.as_int(receiver)?;
+                let value = ctx.alloc(Value::Int(value));
+                Ok(ctx.alloc(Value::Tuple(vec![value])))
+            }
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),

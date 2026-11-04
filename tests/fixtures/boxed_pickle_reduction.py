@@ -542,6 +542,27 @@ def check_object_reducer():
     assert type(copy_of_text) is UserString and copy_of_text == text
     assert copy_of_text.items is not text.items and copy_of_text.items[0] is copy_of_text
 
+    class Number(int):
+        def __int__(self):
+            raise AssertionError("int reduction called the subclass conversion")
+
+    large = 1 << 100
+    exact, = large.__getnewargs__()
+    assert exact == large and exact is not large
+    assert int.__getnewargs__.__doc__ is None
+    number = Number(large)
+    number.items = []
+    args = number.__getnewargs__()
+    assert type(args[0]) is int and args == (large,)
+    for protocol in (2, 3, 4, 5):
+        assert number.__reduce_ex__(protocol) == (
+            copyreg.__newobj__, (Number, large), number.__dict__, None, None)
+    shallow = copy.copy(number)
+    deep = copy.deepcopy(number)
+    assert type(shallow) is type(deep) is Number
+    assert shallow == deep == number
+    assert shallow.items is number.items and deep.items is not number.items
+
     class Extended:
         def __getnewargs__(self):
             raise AssertionError("ordinary hook took precedence")
