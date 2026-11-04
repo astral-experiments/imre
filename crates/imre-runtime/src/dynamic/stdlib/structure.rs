@@ -188,6 +188,9 @@ pub(super) fn method(
             format!("Struct.{name}() takes no keyword arguments"),
         ));
     }
+    if name == "pack_into" {
+        return pack_into(ctx, &layout, args);
+    }
     if name == "unpack" {
         let [id] = args else {
             return Err(Error::new(
@@ -226,15 +229,95 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
             let length = target.len().min(bytes.len());
             target[..length].copy_from_slice(&bytes[..length]);
         } else {
-            let word = match code {
-                b'f' => u64::from(single_bits(ctx, id)?),
-                b'd' => float_value(ctx, id)?.to_bits(),
-                _ => integer_field(ctx, id, code, target.len(), layout.little_endian)?,
-            };
+            let word = pack_word(ctx, id, code, target.len(), layout.little_endian)?;
             layout.write_integer(target, word);
         }
     }
     Ok(ctx.alloc(Value::Bytes(output)))
+}
+
+pub(super) fn pack_into(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Result<Id> {
+    let [buffer, offset, values @ ..] = args else {
+        return Err(format_error(
+            ctx,
+            if args.is_empty() {
+                "pack_into expected buffer argument"
+            } else {
+                "pack_into expected offset argument"
+            },
+        ));
+    };
+    if values.len() != layout.item_count {
+        return Err(format_error(
+            ctx,
+            format!(
+                "pack_into expected {} items for packing (got {})",
+                layout.item_count,
+                values.len()
+            ),
+        ));
+    }
+    ctx.with_writable_byte_span(*buffer, |ctx, storage, span| {
+        let index = ctx.index_integer(*offset)?;
+        let offset = crate::signed_index(&index).ok_or_else(|| {
+            Error::new(
+                "IndexError",
+                format!(
+                    "cannot fit '{}' into an index-sized integer",
+                    ctx.type_name(*offset)
+                ),
+            )
+        })?;
+        let record = layout
+            .record_range(span.len(), offset, true)
+            .map_err(|e| format_error(ctx, e))?;
+        let start = span.start + record.start;
+        // Field conversion callbacks can observe the cleared record and any preceding writes.
+        ctx.writable_storage_bytes(storage)?[start..start + layout.size].fill(0);
+        for ((code, range), &id) in layout.items().zip(values) {
+            let pos = start + range.start;
+            if code == b's' {
+                let source = ctx.scalar_value(id);
+                if source == storage {
+                    let Value::ByteArray(bytes) = ctx.heap.get_mut(storage) else {
+                        return Err(format_error(ctx, "argument for 's' must be a bytes object"));
+                    };
+                    let count = range.len().min(bytes.len());
+                    bytes.copy_within(..count, pos);
+                } else {
+                    let Some((Value::Bytes(bytes) | Value::ByteArray(bytes), target)) =
+                        ctx.heap.source_and_target(source, storage)
+                    else {
+                        return Err(format_error(ctx, "argument for 's' must be a bytes object"));
+                    };
+                    let count = range.len().min(bytes.len());
+                    Context::mutable_storage_bytes(target)?[pos..pos + count]
+                        .copy_from_slice(&bytes[..count]);
+                }
+            } else {
+                let word = pack_word(ctx, id, code, range.len(), layout.little_endian)?;
+                layout.write_integer(
+                    &mut ctx.writable_storage_bytes(storage)?[pos..start + range.end],
+                    word,
+                );
+            }
+        }
+        Ok(NONE)
+    })
+}
+
+fn pack_word(
+    ctx: &mut Context,
+    id: Id,
+    code: u8,
+    width: usize,
+    little_endian: bool,
+) -> Result<u64> {
+    match code {
+        b'f' => single_bits(ctx, id).map(u64::from),
+        b'd' => float_value(ctx, id).map(f64::to_bits),
+        _ => integer_field(ctx, id, code, width, little_endian),
+    }
 }
 
 fn single_bits(ctx: &mut Context, id: Id) -> Result<u32> {

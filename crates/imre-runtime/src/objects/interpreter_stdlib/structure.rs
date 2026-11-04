@@ -142,14 +142,26 @@ impl StructFormat {
         buffer: &[u8],
         offset: isize,
     ) -> Result<Vec<UnpackedField>, String> {
-        let len = buffer.len();
+        let range = self.record_range(buffer.len(), offset, false)?;
+        self.unpack(&buffer[range])
+    }
+
+    /// Locate one record for pack_into or unpack_from, preserving their distinct diagnostics.
+    pub(crate) fn record_range(
+        &self,
+        len: usize,
+        offset: isize,
+        packing: bool,
+    ) -> Result<std::ops::Range<usize>, String> {
         let size = self.size;
         let start = if offset < 0 {
             let distance = offset.unsigned_abs();
             if size > distance {
-                return Err(format!(
-                    "not enough data to unpack {size} bytes at offset {offset}"
-                ));
+                return Err(if packing {
+                    format!("no space to pack {size} bytes at offset {offset}")
+                } else {
+                    format!("not enough data to unpack {size} bytes at offset {offset}")
+                });
             }
             len.checked_sub(distance)
                 .ok_or_else(|| format!("offset {offset} out of range for {len}-byte buffer"))?
@@ -158,10 +170,17 @@ impl StructFormat {
         };
         // Both the parsed size and the nonnegative offset fit in isize.
         let end = start + size;
-        let record = buffer.get(start..end).ok_or_else(|| format!(
-            "unpack_from requires a buffer of at least {end} bytes for unpacking {size} bytes at offset {start} (actual buffer size is {len})"
-        ))?;
-        self.unpack(record)
+        if end > len {
+            let (method, action) = if packing {
+                ("pack_into", "packing")
+            } else {
+                ("unpack_from", "unpacking")
+            };
+            return Err(format!(
+                "{method} requires a buffer of at least {end} bytes for {action} {size} bytes at offset {start} (actual buffer size is {len})"
+            ));
+        }
+        Ok(start..end)
     }
 
     fn unpack_single(&self, bits: u32) -> f64 {

@@ -806,7 +806,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
-        | ("struct", "calcsize" | "pack" | "unpack" | "unpack_from")
+        | ("struct", "calcsize" | "pack" | "pack_into" | "unpack" | "unpack_from")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | (
             "random",
@@ -1722,18 +1722,22 @@ pub(super) fn call(
     if name == "struct.unpack_from" {
         return structure::module_unpack_from(ctx, args, kwargs);
     }
-    if name == "struct.pack" {
+    if matches!(name, "struct.pack" | "struct.pack_into") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "_struct.pack() takes no keyword arguments",
+                format!("_{name}() takes no keyword arguments"),
             ));
         }
         let Some((&format, values)) = args.split_first() else {
             return Err(Error::new("TypeError", "missing format argument"));
         };
         let (_, layout) = structure::parse(ctx, format)?;
-        return structure::pack(ctx, &layout, values);
+        return if name == "struct.pack_into" {
+            structure::pack_into(ctx, &layout, values)
+        } else {
+            structure::pack(ctx, &layout, values)
+        };
     }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);

@@ -121,6 +121,23 @@ def current():
         else:
             raise AssertionError("invalid struct input accepted")
 
+    # A failed field conversion leaves the preceding fields written.
+    data = bytearray(b"abcdefgh")
+    class TooLarge:
+        def __index__(self):
+            assert data == b"a\x07\x00\x00efgh"
+            return 1 << 16
+
+    try:
+        struct.pack_into(">BH", data, 1, 7, TooLarge())
+    except struct.error:
+        assert data == b"a\x07\x00\x00efgh"
+    else:
+        raise AssertionError("field overflow accepted")
+    view = memoryview(data)[1:6]
+    assert struct.Struct(">H").pack_into(view, -2, 0x1234) is None
+    assert data == b"a\x07\x00\x00\x12\x34gh"
+
     # Read a signed field within a larger record from either end of a mutable buffer.
     field = struct.Struct(">l")
     data = bytearray(b"ab" + field.pack(-2) + b"c")
