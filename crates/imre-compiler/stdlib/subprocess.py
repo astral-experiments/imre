@@ -745,6 +745,14 @@ class CompletedProcess:
         self.stdout = stdout
         self.stderr = stderr
 
+    def __repr__(self):
+        fields = [f"args={self.args!r}", f"returncode={self.returncode!r}"]
+        if self.stdout is not None:
+            fields.append(f"stdout={self.stdout!r}")
+        if self.stderr is not None:
+            fields.append(f"stderr={self.stderr!r}")
+        return f"{type(self).__name__}({', '.join(fields)})"
+
     def check_returncode(self):
         if self.returncode:
             raise CalledProcessError(self.returncode, self.args, self.stdout, self.stderr)
