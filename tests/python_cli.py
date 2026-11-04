@@ -3251,6 +3251,13 @@ def report(text):
             "print(options.file, args, '--file' in parser.format_help())\n",
             "optparse", native_timeout=300,
         )
+        compare(
+            "-B", "-c",
+            "import importlib, sys\n"
+            "colors = importlib.import_module(sys.argv[1])\n"
+            "print(colors.rgb_to_hls(0.25, 0.5, 0.75))\n",
+            "colorsys", native_timeout=300,
+        )
         # A from-import elsewhere in the same program would already select the boxed runtime.
         queue_lookup = root / "queue_lookup.py"
         for statement, name in (("import logging.handlers", "logging.handlers"),

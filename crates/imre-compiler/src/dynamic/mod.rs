@@ -855,6 +855,7 @@ pub(crate) fn compile<const SPLIT: bool>(
             if uses_import_builtin || seen.contains("importlib") {
                 for name in [
                     "_pyio",
+                    "colorsys",
                     "configparser",
                     "optparse",
                     "py_compile",
