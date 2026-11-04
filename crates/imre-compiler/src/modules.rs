@@ -2014,6 +2014,14 @@ impl IntrinsicModule {
             (Self::SocketNative, "SOCK_CLOEXEC") => {
                 Intrinsic::IntConstant(i64::from(libc::SOCK_CLOEXEC))
             }
+            #[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
+            (Self::Socket, "getprotobyname") => {
+                Intrinsic::ScopedObjectExport("socket.getprotobyname")
+            }
+            #[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
+            (Self::SocketNative, "getprotobyname") => {
+                Intrinsic::ScopedObjectExport("_socket.getprotobyname")
+            }
             (Self::Socket, "htonl") => Intrinsic::ScopedObjectExport("socket.htonl"),
             (Self::Socket, "htons") => Intrinsic::ScopedObjectExport("socket.htons"),
             (Self::Socket, "ntohl") => Intrinsic::ScopedObjectExport("socket.ntohl"),

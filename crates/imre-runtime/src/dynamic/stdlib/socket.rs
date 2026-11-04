@@ -89,8 +89,10 @@ const RESOLVER_NAMES: &[&str] = &[
     "if_indextoname",
 ];
 
-const IMPORTED_FUNCTIONS: &[&str] = &[
+pub(in super::super) const IMPORTED_FUNCTIONS: &[&str] = &[
     "getdefaulttimeout",
+    #[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
+    "getprotobyname",
     "htonl",
     "htons",
     "ntohl",
@@ -679,12 +681,10 @@ fn text_argument(
         } else {
             ctx.type_name(value)
         };
+        let ty = &ty[..ty.floor_char_boundary(50)];
         let message = match index {
             Some(index) => format!("{name}() argument {index} must be str, not {ty}"),
-            None => {
-                let ty = &ty[..ty.floor_char_boundary(50)];
-                format!("{name}() argument must be str, not {ty}")
-            }
+            None => format!("{name}() argument must be str, not {ty}"),
         };
         Error::new("TypeError", message)
     })?;
@@ -693,6 +693,33 @@ fn text_argument(
         _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
     };
     text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+/// Look up a protocol number in the platform's protocol database.
+#[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
+pub(super) fn getprotobyname(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "getprotobyname() takes no keyword arguments",
+        ));
+    }
+    let [name] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "getprotobyname() takes exactly 1 argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let name = text_argument(ctx, "getprotobyname", Some(1), *name)?;
+    let number = native::protocol_by_name(&name)?;
+    Ok(ctx.int(i64::from(number)))
 }
 
 /// Convert an unsigned Python index between host and network byte order.

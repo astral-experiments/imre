@@ -42,7 +42,9 @@ pub(super) mod time;
 mod tokenize;
 mod unicodedata;
 pub(super) use files::{BinaryFile, ReadSource};
-pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
+pub(super) use socket::{
+    IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS, import_socket_constants, install_lowlevel_socket,
+};
 pub(super) mod io;
 mod json;
 mod lzma;
@@ -2524,6 +2526,10 @@ pub(super) fn call(
             }
             _ => codecs::builtin_handler(ctx, function, args, kwargs),
         };
+    }
+    #[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
+    if name == "_socket.getprotobyname" {
+        return socket::getprotobyname(ctx, args, kwargs);
     }
     if name == "_socket.getaddrinfo" {
         return socket::getaddrinfo(ctx, args, kwargs);

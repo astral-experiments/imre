@@ -819,6 +819,68 @@ pub(crate) fn getnameinfo(
     Ok((decode(&host)?, decode(&service)?))
 }
 
+/// Allocate aligned scratch space for a reentrant netdb lookup, doubling on ERANGE.
+#[cfg(target_os = "linux")]
+fn grow_netdb_buffer(buffer: &mut Vec<usize>) -> Result<&mut [std::mem::MaybeUninit<usize>]> {
+    let words = buffer
+        .capacity()
+        .checked_mul(2)
+        .ok_or_else(Error::memory_error)?
+        .max(1024 / size_of::<usize>());
+    buffer
+        .try_reserve_exact(words)
+        .map_err(|_| Error::memory_error())?;
+    Ok(buffer.spare_capacity_mut())
+}
+
+/// Look up a protocol number in the host database, including its configured aliases.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub(crate) fn protocol_by_name(name: &CStr) -> Result<i32> {
+    unsafe extern "C" {
+        fn getprotobyname_r(
+            name: *const libc::c_char,
+            entry: *mut libc::protoent,
+            buffer: *mut libc::c_char,
+            size: usize,
+            result: *mut *mut libc::protoent,
+        ) -> libc::c_int;
+    }
+
+    let mut entry = std::mem::MaybeUninit::uninit();
+    let mut buffer = Vec::new();
+    loop {
+        let scratch = grow_netdb_buffer(&mut buffer)?;
+        let mut result = ptr::null_mut();
+        // SAFETY: name is terminated and the entry and aligned scratch storage are writable.
+        let rc = unsafe {
+            getprotobyname_r(
+                name.as_ptr(),
+                entry.as_mut_ptr(),
+                scratch.as_mut_ptr().cast(),
+                size_of_val(scratch),
+                &raw mut result,
+            )
+        };
+        if rc == libc::ERANGE {
+            continue;
+        }
+        if rc != 0 || result.is_null() {
+            return Err(Error::new(Kind::OSError, "protocol not found"));
+        }
+        // SAFETY: a successful lookup with a non-null result initialized the entry.
+        return Ok(unsafe { (*result).p_proto });
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn protocol_by_name(name: &CStr) -> Result<i32> {
+    // SAFETY: Darwin keeps the netdb result for this thread. Copy the field before
+    // another protocol lookup can replace it.
+    unsafe { libc::getprotobyname(name.as_ptr()).as_ref() }
+        .map(|entry| entry.p_proto)
+        .ok_or_else(|| Error::new(Kind::OSError, "protocol not found"))
+}
+
 enum Service<'a> {
     Name(&'a CStr),
     Port(u16),
@@ -858,15 +920,11 @@ fn with_service<T>(
         }
 
         let mut entry = std::mem::MaybeUninit::uninit();
-        // NSS can need more space for aliases. Keep its scratch storage pointer-aligned.
-        let mut buffer = Vec::<usize>::new();
-        let mut words = 1024 / size_of::<usize>();
+        let mut buffer = Vec::new();
         loop {
-            buffer
-                .try_reserve_exact(words)
-                .map_err(|_| Error::memory_error())?;
-            let bytes = buffer.capacity() * size_of::<usize>();
-            let buf = buffer.as_mut_ptr().cast();
+            let scratch = grow_netdb_buffer(&mut buffer)?;
+            let bytes = size_of_val(scratch);
+            let buf = scratch.as_mut_ptr().cast();
             let mut result = ptr::null_mut();
             // SAFETY: both C strings are live or NULL, and the output and scratch storage
             // remain valid until the requested field has been copied.
@@ -891,10 +949,6 @@ fn with_service<T>(
                 }
             };
             if rc == libc::ERANGE {
-                words = buffer
-                    .capacity()
-                    .checked_mul(2)
-                    .ok_or_else(Error::memory_error)?;
                 continue;
             }
             if rc != 0 || result.is_null() {
