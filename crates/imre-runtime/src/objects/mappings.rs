@@ -9,6 +9,8 @@ use std::fmt::{self, Write};
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+#[cfg(target_arch = "x86_64")]
+mod ascii_gather;
 mod counters;
 mod ranking;
 mod record_hash;
@@ -179,9 +181,42 @@ trait TableKey {
     fn try_eq(&self, other: &Self) -> Result<bool, Error>;
 }
 
-impl<T: Eq + Hash> TableKey for T {
+/// Infallible table keys may choose how they feed the process-keyed hasher.
+trait InfallibleKey: Eq + Hash {
+    fn table_hash(&self) -> u64 {
+        HASHER.hash_one(self)
+    }
+}
+
+impl InfallibleKey for usize {}
+impl InfallibleKey for IntKey {}
+impl InfallibleKey for ObjectKey {}
+impl InfallibleKey for crate::BytesOwner {}
+
+impl InfallibleKey for StrOwner {
+    fn table_hash(&self) -> u64 {
+        string_hash(self.as_str())
+    }
+}
+
+/// Pack four through eight UTF-8 bytes into one keyed hash input. The 0xff
+/// terminator cannot occur in UTF-8, so different short strings stay distinct.
+fn string_hash(key: &str) -> u64 {
+    let bytes = key.as_bytes();
+    let shift = bytes.len().wrapping_sub(4);
+    if shift <= 4 {
+        let first = u32::from_le_bytes(*bytes.first_chunk::<4>().unwrap());
+        let last = u32::from_le_bytes(*bytes.last_chunk::<4>().unwrap());
+        let suffix = (u64::from(last) | (0xff << 32)) << (shift * 8);
+        HASHER.hash_one(u64::from(first) | suffix)
+    } else {
+        HASHER.hash_one(key)
+    }
+}
+
+impl<T: InfallibleKey> TableKey for T {
     fn try_hash(&self) -> Result<u64, Error> {
-        Ok(HASHER.hash_one(self))
+        Ok(self.table_hash())
     }
 
     fn try_eq(&self, other: &Self) -> Result<bool, Error> {
@@ -551,11 +586,11 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>>
     where
-        K: Eq + Hash,
+        K: InfallibleKey,
     {
         // SAFETY: the caller roots this table's exact key representation.
         let key = unsafe { K::borrow(word) };
-        self.position(HASHER.hash_one(&*key), &*key)
+        self.position(key.table_hash(), &*key)
             .map(|position| self.entries[position].as_ref().unwrap())
     }
 
@@ -839,8 +874,12 @@ impl AsciiIntCache {
         text: &[u8],
         output: &mut [std::mem::MaybeUninit<Int>],
     ) -> bool {
-        let mut present = 1;
-        for (&character, slot) in text.iter().zip(output) {
+        #[cfg(target_arch = "x86_64")]
+        let (start, mut present) =
+            ascii_gather::copy_prefix(&self.values, text, output).unwrap_or((0, 1));
+        #[cfg(not(target_arch = "x86_64"))]
+        let (start, mut present) = (0, 1);
+        for (&character, slot) in text[start..].iter().zip(&mut output[start..]) {
             // SAFETY: the caller proved that character indexes the ASCII table.
             let word = unsafe { *self.values.get_unchecked(usize::from(character)) };
             present &= word;
@@ -2543,7 +2582,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                     let mut key = Str::new("");
                     key.push(character);
                     table
-                        .position(HASHER.hash_one(&key), &key)
+                        .position(string_hash(&key), &key)
                         .map_or(0, |position| {
                             table.entries[position].as_ref().unwrap().value
                         })
@@ -3117,7 +3156,7 @@ unsafe fn filter_character_set(
                 let present = u32::from(c) < below
                     || match ascii {
                         Some(members) if c.is_ascii() => members[c as usize],
-                        _ => keys.position(HASHER.hash_one(&*key), &*key).is_some(),
+                        _ => keys.position(string_hash(key), &*key).is_some(),
                     };
                 present.then(|| {
                     super::text::try_owned_string(key).map(|key| {
