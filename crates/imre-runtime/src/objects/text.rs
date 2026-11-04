@@ -964,6 +964,20 @@ pub unsafe extern "C" fn imre_str_affix_ascii(
     u32::from(mask & (1_u64 << (byte % 64)) != 0)
 }
 
+/// Reject a prefix outside a literal set whose keys start with three ASCII bytes.
+///
+/// # Safety
+/// The caller roots the immutable native string during the lookup.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_excludes_ascii_prefix3(value: *const Str, mask: u64) -> u32 {
+    // SAFETY: the input stays rooted and immutable.
+    let bytes = unsafe { &*value }.as_bytes();
+    u32::from(match imre_ast::strings::ascii_case_prefix_bit(bytes) {
+        Some(bit) => mask & bit == 0,
+        None => bytes.len() < 3 && bytes.is_ascii(),
+    })
+}
+
 /// Negative search bounds count from the end. Keep positive bounds unclamped so
 /// an empty needle still fails to match when the start exceeds the string length.
 fn search_offset(start: Option<&Int>, length: impl FnOnce() -> usize) -> Option<usize> {
