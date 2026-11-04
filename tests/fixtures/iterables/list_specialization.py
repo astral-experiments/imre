@@ -10,6 +10,17 @@ def change(values: list[int]) -> None:
     values.append(-7)
 
 
+def append_characters(source: list[int], output: list[int], text: str, index: int) -> None:
+    for ch in text:
+        output.append(source[0] + source[index] + output[-1] + ord(ch))
+    else:
+        # The loop's borrow ends before this resize and subscript.
+        source.append(9)
+        print(source[0])
+        print(len(source))
+        print(output[-1])
+
+
 huge = 1 << 100
 for source in [
     [0, 1, 2, 8, 9],
@@ -119,3 +130,17 @@ while cursor < len(values):
         alias.append(-7)
     cursor += 1
 show(output)
+
+
+for position in [0, -1, 1, -5, huge, -huge]:
+    values = [huge, -7, 11]
+    output = [0]
+    try:
+        append_characters(values, output, "aé🦀", position)
+    except IndexError:
+        print("index failed")
+        print(output[-1])
+
+shared = [1]
+append_characters(shared, shared, "abcdefghijklmnop", 0)
+append_characters([], [0], "", 5)
