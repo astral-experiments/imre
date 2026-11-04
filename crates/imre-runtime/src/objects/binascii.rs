@@ -212,30 +212,54 @@ pub(crate) fn unhexlify(data: &[u8]) -> Result<Bytes> {
     let mut decoded = allocate(pairs.len())?;
     let (blocks, tail) = pairs.as_chunks::<16>();
     for block in blocks {
-        decoded.extend_from_slice(&decode_hex_block(block)?);
+        // Classify consecutive input bytes before combining adjacent nibbles.
+        let mut nibbles = [0; 32];
+        let mut seen = 0;
+        for (nibble, &byte) in nibbles.iter_mut().zip(block.as_flattened()) {
+            *nibble = super::text::hexadecimal(byte).unwrap_or(u8::MAX);
+            seen |= *nibble;
+        }
+        check_hex_digits(seen)?;
+        let mut bytes = [0; 16];
+        for (byte, &[high, low]) in bytes.iter_mut().zip(nibbles.as_chunks::<2>().0) {
+            *byte = high << 4 | low;
+        }
+        decoded.extend_from_slice(&bytes);
     }
-    for pair in tail {
-        decoded.extend_from_slice(&decode_hex_block(std::array::from_ref(pair))?);
+
+    // A partial block needs at most fifteen scalar pairs.
+    const DIGITS: [u8; 256] = {
+        let mut values = [u8::MAX; 256];
+        let mut byte = 0;
+        while byte < values.len() {
+            if let Some(value) = super::text::hexadecimal(byte as u8) {
+                values[byte] = value;
+            }
+            byte += 1;
+        }
+        values
+    };
+    let mut bytes = [0; 16];
+    let mut seen = 0;
+    for (byte, &[high, low]) in bytes.iter_mut().zip(tail) {
+        let high = DIGITS[usize::from(high)];
+        let low = DIGITS[usize::from(low)];
+        seen |= high | low;
+        *byte = high << 4 | low;
     }
+    check_hex_digits(seen)?;
+    decoded.extend_from_slice(&bytes[..tail.len()]);
     Ok(decoded)
 }
 
-/// Check the digits together so the compiler can decode a block in parallel.
-fn decode_hex_block<const N: usize>(pairs: &[[u8; 2]; N]) -> Result<[u8; N]> {
-    let mut digits = 0;
-    let bytes = pairs.map(|[high, low]| {
-        let high = super::text::hexadecimal(high).unwrap_or(u8::MAX);
-        let low = super::text::hexadecimal(low).unwrap_or(u8::MAX);
-        digits |= high | low;
-        high << 4 | low
-    });
-    if digits == u8::MAX {
+fn check_hex_digits(seen: u8) -> Result<()> {
+    if seen == u8::MAX {
         return Err(Error::new(
             Kind::BinasciiError,
             "Non-hexadecimal digit found",
         ));
     }
-    Ok(bytes)
+    Ok(())
 }
 
 /// Decode the hexadecimal data in a rooted immutable bytes object.

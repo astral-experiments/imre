@@ -1193,7 +1193,7 @@ pub unsafe extern "C" fn imre_str_partition(
 }
 
 /// Decodes one ASCII hexadecimal digit without accepting Unicode lookalikes.
-pub(crate) fn hexadecimal(byte: u8) -> Option<u8> {
+pub(crate) const fn hexadecimal(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
