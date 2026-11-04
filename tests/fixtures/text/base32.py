@@ -10,3 +10,10 @@ for decode in (b32decode, b32hexdecode):
         decode(b"ABCDEF==")
     except Error as exc:
         print(str(exc))
+
+class Encoded(str):
+    def encode(self, encoding):
+        print(encoding)
+        return b"MY======"
+
+print(b32decode(Encoded("π")))
