@@ -8568,6 +8568,21 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::SetCasePrefixPossible([lower, upper]) => {
+                let rejected = self.instruction(format!(
+                    "call i32 @imre_str_affix_ascii(ptr {}, i64 {lower}, i64 {upper}, i32 0)",
+                    args[1].value.operand
+                ));
+                let possible = self.instruction(format!("icmp eq i32 {rejected}, 0"));
+                // A module initializer can call a function before the set is bound.
+                let unbound =
+                    self.instruction(format!("icmp eq ptr {}, null", args[0].value.operand));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("or i1 {unbound}, {possible}")),
+                    small_integer: false,
+                }
+            }
             Builtin::SetCaseLengthPossible => {
                 let possible = self.instruction(format!(
                     "call i32 @imre_set_case_length_possible(ptr {}, ptr {})",

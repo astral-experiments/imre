@@ -200,7 +200,8 @@ impl Builtin {
             | Self::DictGetDefault
             | Self::DictTryGet(_)
             | Self::SetContains
-            | Self::SetCaseLengthPossible => Contract::new(true, PreservesLists),
+            | Self::SetCaseLengthPossible
+            | Self::SetCasePrefixPossible(_) => Contract::new(true, PreservesLists),
             Self::Socket(op) => Contract::new(
                 !matches!(
                     op,
