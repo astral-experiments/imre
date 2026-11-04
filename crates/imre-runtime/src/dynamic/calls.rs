@@ -149,7 +149,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_imre_ssl" if !function.contains('.') => Some((module, function)),
         "_hashlib" if !function.contains('.') => Some((module, function)),
         "hashlib"
-            if matches!(function, "new" | "file_digest")
+            if function == "new"
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>
         {
             Some((module, function))
@@ -7627,7 +7627,8 @@ impl Context {
                     self.bind_argument(local, n, extra)?;
                 }
                 let mut extra = Vec::new();
-                for (n, v) in kwargs {
+                let mut keywords = kwargs.into_iter();
+                while let Some((n, v)) = keywords.next() {
                     if !posonly.contains(&n) && (pos.contains(&n) || kwonly.contains(&n)) {
                         if self.scope_data(local).names.contains_key(&n) {
                             return Err(Error::new(
@@ -7640,6 +7641,23 @@ impl Context {
                         let k = self.text(n);
                         extra.push((k, v));
                     } else {
+                        let conflicts: Vec<_> = posonly
+                            .iter()
+                            .filter(|param| {
+                                **param == n
+                                    || keywords.as_slice().iter().any(|(key, _)| key == *param)
+                            })
+                            .map(String::as_str)
+                            .collect();
+                        if !conflicts.is_empty() {
+                            return Err(Error::new(
+                                "TypeError",
+                                format!(
+                                    "{name}() got some positional-only arguments passed as keyword arguments: '{}'",
+                                    conflicts.join(", ")
+                                ),
+                            ));
+                        }
                         let candidates: Vec<_> = pos[posonly.len()..]
                             .iter()
                             .chain(&kwonly)

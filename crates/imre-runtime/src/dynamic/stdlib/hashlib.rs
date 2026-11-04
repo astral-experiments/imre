@@ -257,102 +257,12 @@ pub(super) fn digest(
     Ok(ctx.alloc(value))
 }
 
-/// Bind the positional-only file and factory before touching either object.
-pub(super) fn file_digest(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let mut size = None;
-    for (key, value) in kwargs {
-        if key == "_bufsize" {
-            size = Some(*value);
-        } else {
-            let positional: Vec<_> = ["fileobj", "digest"]
-                .into_iter()
-                .filter(|name| kwargs.iter().any(|(key, _)| key == name))
-                .collect();
-            let message = if positional.is_empty() {
-                format!("file_digest() got an unexpected keyword argument '{key}'")
-            } else {
-                format!(
-                    "file_digest() got some positional-only arguments passed as keyword arguments: '{}'",
-                    positional.join(", ")
-                )
-            };
-            return Err(Error::new("TypeError", message));
-        }
-    }
-    let &[file, factory] = args else {
-        let message = match args.len() {
-            0 => "file_digest() missing 2 required positional arguments: 'fileobj' and 'digest'"
-                .to_owned(),
-            1 => "file_digest() missing 1 required positional argument: 'digest'".to_owned(),
-            n if size.is_some() => format!(
-                "file_digest() takes 2 positional arguments but {n} positional arguments (and 1 keyword-only argument) were given"
-            ),
-            n => format!("file_digest() takes 2 positional arguments but {n} were given"),
-        };
-        return Err(Error::new("TypeError", message));
-    };
-    let mark = ctx.heap.temporary_mark();
-    let result = update_from_file(ctx, file, factory, size);
-    ctx.heap.release_temporaries_since(mark);
-    match &result {
-        Ok(digest) => ctx.heap.keep(*digest),
-        Err(error) => {
-            for root in error.roots() {
-                ctx.heap.keep(root);
-            }
-        }
-    }
-    result
-}
-
-fn has_attr(ctx: &mut Context, obj: Id, attr: &str) -> Result<bool> {
-    match ctx.lookup_attr(obj, attr) {
-        Ok(_) => Ok(true),
-        Err(error) if ctx.is_attribute_error(&error) => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-fn update_from_file(ctx: &mut Context, file: Id, factory: Id, size: Option<Id>) -> Result<Id> {
-    let digest = if ctx.string_storage(factory).is_some() {
-        let module = ctx.module("hashlib")?;
-        let new = ctx.lookup_attr(module, "new")?;
-        ctx.call(new, vec![factory], Vec::new())?
-    } else {
-        ctx.call(factory, Vec::new(), Vec::new())?
-    };
-    ctx.heap.keep(digest);
-    if has_attr(ctx, file, "getbuffer")? {
-        let update = ctx.lookup_attr(digest, "update")?;
-        let getbuffer = ctx.lookup_attr(file, "getbuffer")?;
-        let data = ctx.call(getbuffer, Vec::new(), Vec::new())?;
-        ctx.call(update, vec![data], Vec::new())?;
-        return Ok(digest);
-    }
-    let storage = ctx.scalar_value(digest);
-    let native_hash = matches!(ctx.heap.get(storage), Value::Hash(_));
-    let readable = if has_attr(ctx, file, "readinto")? && has_attr(ctx, file, "readable")? {
-        let read = ctx.lookup_attr(file, "readable")?;
-        let value = ctx.call(read, Vec::new(), Vec::new())?;
-        ctx.truth(value)?
-    } else {
-        false
-    };
-    if !readable {
-        let repr = ctx.builtin("repr");
-        let value = ctx.call(repr, vec![file], Vec::new())?;
-        let text = ctx.str_value(value)?;
-        return Err(Error::new(
-            "ValueError",
-            format!("'{text}' is not a file-like object in binary reading mode."),
-        ));
-    }
-
-    let size = size.unwrap_or_else(|| ctx.int(1 << 18));
+/// Hash successive prefixes of a reusable, exported readinto buffer.
+pub(super) fn readinto(ctx: &mut Context, file: Id, digest: Id, size: Id) -> Result<Id> {
     let bytearray = ctx.builtin("bytearray");
     let buf = ctx.call(bytearray, vec![size], Vec::new())?;
     ctx.heap.keep(buf);
-    if native_hash {
+    if matches!(ctx.heap.get(ctx.scalar_value(digest)), Value::Hash(_)) {
         // Python sees the actual reusable bytearray. A native hash consumes
         // each prefix synchronously while resizing the exported buffer is blocked.
         return ctx.with_buffer_export(buf, |ctx| read_chunks(ctx, file, digest, buf, None));

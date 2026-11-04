@@ -816,7 +816,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
-        | ("hashlib", "file_digest")
         | (
             "re",
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
@@ -2777,8 +2776,10 @@ pub(super) fn call(
     if let Some(method @ ("digest" | "hexdigest")) = name.strip_prefix("hash.") {
         return hashlib::digest(ctx, method, args, kwargs);
     }
-    if name == "hashlib.file_digest" {
-        return hashlib::file_digest(ctx, args, kwargs);
+    if name == "hashlib._file_digest_readinto" {
+        let [file, digest, size] =
+            required_arguments(name, ["file", "digest", "size"], args, kwargs)?;
+        return hashlib::readinto(ctx, file, digest, size);
     }
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);

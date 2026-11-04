@@ -3539,6 +3539,8 @@ impl Context {
             "hashlib" => {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
+                let readinto = self.builtin("hashlib._file_digest_readinto");
+                self.bind(scope, "_file_digest_readinto", readinto);
             }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "grp" => stdlib::grp::install(self, scope),
