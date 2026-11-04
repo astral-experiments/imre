@@ -138,8 +138,10 @@ impl Projection {
         method: &str,
         points: &[u32],
     ) -> Result<Self> {
-        if !matches!(method, "search" | "match" | "fullmatch" | "findall" | "sub")
-            || !source.is_some_and(|s| can_project(s, matcher))
+        if !matches!(
+            method,
+            "search" | "match" | "fullmatch" | "findall" | "sub" | "split"
+        ) || !source.is_some_and(|s| can_project(s, matcher))
         {
             return Err(Error::new(
                 "NotImplementedError",
@@ -150,7 +152,10 @@ impl Projection {
     }
 
     pub(super) fn for_literals(method: &str, points: &[u32]) -> Result<Self> {
-        if !matches!(method, "match" | "search" | "fullmatch" | "findall") {
+        if !matches!(
+            method,
+            "match" | "search" | "fullmatch" | "findall" | "split"
+        ) {
             return Err(Error::new(
                 "NotImplementedError",
                 "unsupported method on a surrogate regular expression",

@@ -39,7 +39,9 @@ pub(super) fn split(
         ));
     };
     let pattern = Rc::clone(pattern);
-    let text = subject_bytes(ctx, string, pattern.bytes)?;
+    let pattern = pattern.for_subject(ctx, string);
+    let subject = SearchSubject::new(ctx, pattern, string, "split")?;
+    let text = subject.bytes(ctx)?;
     let length = text.len();
     let mut pieces = Vec::new();
     let mut cursor = 0;
@@ -47,35 +49,33 @@ pub(super) fn split(
     let mut count = 0;
     let mut caps = pattern.regex.create_captures();
     while limit == 0 || count < limit {
-        let span = match next_span(&pattern, text, 0, previous, &mut caps) {
+        let span = match next_span(pattern, text, 0, previous, &mut caps) {
             Ok(Some(span)) => span,
             Ok(None) => break,
             Err(message) => return Err(pattern.match_error(ctx, message)),
         };
         let eol = caps.group_info().to_index(PatternID::ZERO, "imre.eol");
-        pieces.push(Some(cursor..span.start));
-        pieces.extend(
-            (1..eol.unwrap_or(caps.group_len())).map(|i| caps.get_group(i).map(|s| s.range())),
-        );
+        pieces.push(Some(Span::from(cursor..span.start)));
+        pieces.extend((1..eol.unwrap_or(caps.group_len())).map(|i| caps.get_group(i)));
         cursor = span.end;
         previous = Some(span);
         count += 1;
     }
-    pieces.push(Some(cursor..length));
+    pieces.push(Some(Span::from(cursor..length)));
     let mut items = Vec::with_capacity(pieces.len());
     for piece in pieces {
         items.push(match piece {
             None => NONE,
             Some(span)
-                if span == (0..length)
-                    && matches!(ctx.heap.get(string), Value::Str(_) | Value::Bytes(_)) =>
+                if span.range() == (0..length)
+                    && matches!(
+                        ctx.heap.get(string),
+                        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+                    ) =>
             {
                 string
             }
-            Some(span) => {
-                let data = &subject_bytes(ctx, string, pattern.bytes)?[span];
-                ctx.alloc(group_value(data, pattern.bytes))
-            }
+            Some(span) => subject.slice(ctx, span)?,
         });
     }
     Ok(ctx.alloc(Value::List(items)))

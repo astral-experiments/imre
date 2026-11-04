@@ -33,6 +33,12 @@ def current():
     for source, text in [(r"(\n)??$", "\n"), (rb"(\n)??$", b"x\n")]:
         compiled = re.compile(source)
         print(compiled.findall(text), compiled.split(text))
+    text = "é\udcff x\ud800 z"
+    assert re.compile(r"(\s+)|(z)").split(text, 1) == ["é\udcff", " ", None, "x\ud800 z"]
+    assert re.compile("").split("\udcff") == ["", "\udcff", ""]
+    assert re.compile(":").split(text)[0] is text
+    assert re.compile(":").split(text, -1)[0] is text
+    assert re.compile("\udcff").split("\U000f00ff\udcff") == ["\U000f00ff", ""]
     long_value = "not a delimiter" * 10
     print(pattern.split(long_value)[0] is long_value)
     try:
