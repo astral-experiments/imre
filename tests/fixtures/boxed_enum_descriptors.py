@@ -28,6 +28,39 @@ def current():
     print(C.desc, C.A.desc, C.A.name2, C.static(17), C.A.static(19))
     print(type(C.setter).__name__, type(C.A.setter).__name__)
 
+    member = C.A
+    member.label = "active"
+    member._private = None
+    directory = dir(member)
+    assert {"name", "value", "label", "desc", "setter", "cls", "name2"} <= set(directory)
+    assert {"A", "B", "_private"}.isdisjoint(directory)
+
+    class Labels(Enum):
+        @property
+        def label(self):
+            raise AssertionError("dir called a property getter")
+
+    class Labeled(Labels):
+        label = 1
+        OTHER = 2
+
+    assert "label" in dir(Labeled.OTHER)
+
+    class Codes(IntEnum):
+        name = 1
+        value = 2
+        alias = 2
+
+    assert {"name", "value", "alias", "bit_length"} <= set(dir(Codes.alias))
+    assert Codes.alias.value == 2 and Codes.alias.name == "value"
+
+    class Explicit(Enum):
+        ITEM = 1
+        def __dir__(self):
+            return ["z", "a"]
+
+    assert dir(Explicit.ITEM) == ["a", "z"]
+
     # CPython test_enum.TestHelpers.test_is_descriptor sets each name on an instance.
     class Plain:
         pass
