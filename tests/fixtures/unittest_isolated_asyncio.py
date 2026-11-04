@@ -59,6 +59,10 @@ class Case(IsolatedAsyncioTestCase):
         self.assertEqual(order, [2, 1])
         self.assertEqual(mock.await_args_list, [call(2), call(1)])
 
+        wrapped = AsyncMock(wraps=double)
+        self.assertEqual(await wrapped(3), 6)
+        wrapped.assert_awaited_once_with(3)
+
         class Transport(AsyncMock):
             pass
 
