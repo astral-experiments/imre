@@ -375,18 +375,25 @@ pub(in crate::dynamic) fn next_accumulated(ctx: &mut Context, receiver: Id) -> R
     let Some(item) = ctx.next_result(source)? else {
         return Ok(None);
     };
-    // The source can reenter this cursor. Read the running total after
-    // pulling the item and keep both operands live across the binary call.
-    ctx.heap.keep(item);
+    // Fetch the total after the source returns since its __next__ can reenter us.
     let state = accumulator(ctx, receiver)?;
     let value = match (state.function, state.total) {
         (_, None) => item,
         (function, Some(total)) => {
-            ctx.heap.keep(total);
-            if function == NONE {
-                ctx.binary("+", total, item)?
+            if function == NONE
+                && let (Value::Int(left), Value::Int(right)) =
+                    (ctx.heap.get(total), ctx.heap.get(item))
+            {
+                let sum = crate::integer_binary(left, right, 0)?;
+                ctx.alloc(Value::Int(sum))
             } else {
-                ctx.call(function, vec![total, item], Vec::new())?
+                ctx.heap.keep(item);
+                ctx.heap.keep(total);
+                if function == NONE {
+                    ctx.binary("+", total, item)?
+                } else {
+                    ctx.call(function, vec![total, item], Vec::new())?
+                }
             }
         }
     };
