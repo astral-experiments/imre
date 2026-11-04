@@ -2,6 +2,7 @@
 
 import argparse
 import errno
+import gzip
 import importlib.util
 import json
 import os
@@ -1443,6 +1444,12 @@ def main():
             assert actual.stdout == "'one\\r'\n''\n'λ'\nEOF\n".encode()
 
         check_command_stdin(imre, run)
+
+        payload = b"first\x00" * 4096
+        members = gzip.compress(payload, mtime=0) + gzip.compress(b"last\xff", mtime=0)
+        result = run(imre, "-m", "gzip", "-d", stdin=members)
+        assert result.returncode == 0 and result.stderr == b"", result.stderr
+        assert result.stdout == payload + b"last\xff"
 
         # Native warning emission can need linecache before the program imports anything.
         source = root / "buffering_warning"
