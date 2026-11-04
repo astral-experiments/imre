@@ -15,6 +15,8 @@ from files import run_with_failing_output
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "bytes"
 
 REJECTED = {
+    "blake2_key_type": 'from hashlib import blake2b\nblake2b(key="text")\n',
+    "sha256_blake2_option": 'from hashlib import new\nnew("sha256", node_offset=1)\n',
     "bytes_unicode_literal": 'value = b"é"\n',
     "bytes_mixed_literal": 'value = b"a" "b"\n',
     "bytes_string_annotation": 'value: bytes = "wrong"\n',
