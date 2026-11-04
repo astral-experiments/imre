@@ -315,6 +315,7 @@ impl Context {
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
+            ("type", _) => self.is_type_object(object),
             (weakref::PROXY_TYPE | weakref::CALLABLE_PROXY_TYPE, Value::Weak(wr)) => {
                 wr.kind.class() == owner
             }
@@ -2585,7 +2586,7 @@ impl Context {
                 }
                 &[][..]
             }
-            "type" => &["mro", "__prepare__"][..],
+            "type" => &["mro", "__subclasses__", "__prepare__"][..],
             "object" => &[
                 "__hash__",
                 "__ne__",

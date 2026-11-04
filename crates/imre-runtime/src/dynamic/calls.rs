@@ -368,6 +368,9 @@ impl Context {
             Value::Native(kind) if kind == "type" && name == "__prepare__" => {
                 self.builtins.get("type.__prepare__").copied()
             }
+            Value::Native(kind) if kind == "type" && name == "__subclasses__" => {
+                self.builtins.get("type.__subclasses__").copied()
+            }
             Value::Native(kind) if kind == "type" && name == "mro" => {
                 self.builtins.get("type.mro").copied()
             }
@@ -4865,9 +4868,13 @@ impl Context {
             let prepare = self.builtin("type.__prepare__");
             return Ok(self.bind_native_classmethod(prepare, owner));
         }
-        if name == "mro" && self.is_type_object(obj) {
+        if matches!(name, "mro" | "__subclasses__") && self.is_type_object(obj) {
             let owner = self.builtin("type");
-            let descriptor = self.builtin("type.mro");
+            let descriptor = self.builtin(if name == "mro" {
+                "type.mro"
+            } else {
+                "type.__subclasses__"
+            });
             let receiver = if obj == owner { NONE } else { obj };
             return self.bind_attribute(descriptor, receiver, owner);
         }
@@ -7132,6 +7139,9 @@ impl Context {
             Value::Native(name) if name == "type.__new__" => self.type_new(&args, &kwargs),
             Value::Native(name) if name == "type.__prepare__" => Ok(self.dict(Vec::new())),
             Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
+            Value::Native(name) if name == "type.__subclasses__" => {
+                self.type_subclasses(&args, &kwargs)
+            }
             Value::Native(ref name)
                 if let Some((owner, "__new__")) = name.rsplit_once('.')
                     && let Some(owner) = stdlib::itertools::cursor_type(owner) =>
