@@ -1864,11 +1864,23 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
+        self.discard_temporaries(mark, None);
+    }
+
+    /// Release discarded operands and root their result before any weak callbacks or finalizers run.
+    pub(super) fn discard_temporaries(&mut self, mark: usize, result: Option<Id>) {
+        let collect = if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
             || self.can_skip_finalizer_sweep()
         {
             self.heap.release_temporaries_since(mark);
-        } else if self.heap.discard_truth_operands(mark, self.modules) {
+            false
+        } else {
+            self.heap.discard_truth_operands(mark, self.modules)
+        };
+        if let Some(result) = result {
+            self.heap.keep(result);
+        }
+        if collect {
             self.collect_unreachable();
         }
     }
