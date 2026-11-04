@@ -58,6 +58,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "operator" if stdlib::operator::Operation::named(function).is_some() => {
             Some(("_operator", function))
         }
+        "math" if stdlib::is_math_function(function) => Some((module, function)),
         "time" if stdlib::time::is_function(function) => Some((module, function)),
         "sys"
             if matches!(
