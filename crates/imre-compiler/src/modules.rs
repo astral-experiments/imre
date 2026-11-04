@@ -2829,7 +2829,16 @@ pub(crate) enum FloatComponents {
     Boxed,
 }
 
+/// Whether native lowering can speculate about an unannotated set's element layout.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SetLayoutHint {
+    Available,
+    Applied,
+    Disabled,
+}
+
 pub(crate) struct SourceGraph {
+    pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
@@ -4140,6 +4149,7 @@ impl<'a> Loader<'a> {
             float_components: Default::default(),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
             has_native_bytearray: Default::default(),
+            set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),

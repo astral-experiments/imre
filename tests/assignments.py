@@ -40,6 +40,7 @@ REJECTED = {
     "wrong_optional_type": "value: int | None = None\nprint((value := False))\n",
     "attribute_target": "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = 1\nitem = Item()\nprint((item.value := 2))\n",
     "builtin_target": "print((int := 1))\n",
+    "annotated_set_rebind": 'def bad() -> None:\n    values: set[str] = {"a"}\n    values = sorted(values)\n',
     "annotated_list_rebind": 'def bad() -> None:\n    values: list[str] = ["a"]\n    items = [b"b"]\n    values = items\n',
     "annotated_after_inferred_list": 'def bad() -> None:\n    values = ["a"]\n    values: list[str]\n    items = [b"b"]\n    values = items\n',
     "parameter_list_rebind": 'def bad(values: list[str]) -> None:\n    items = [b"b"]\n    values = items\n',

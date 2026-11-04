@@ -32,6 +32,11 @@ fn outcome<T, U>(result: &io::Result<T>, map: impl FnOnce(&T) -> U) -> Result<U,
 }
 
 impl FileSystem<'_> {
+    /// Record another graph load in the same watch snapshot.
+    pub(crate) fn reborrow(&mut self) -> FileSystem<'_> {
+        FileSystem(self.0.as_deref_mut())
+    }
+
     fn record(&mut self, path: &Path, fact: impl FnOnce() -> Fact) {
         if let Some(inputs) = &mut self.0 {
             inputs.0.push((path.to_owned(), fact()));

@@ -6,24 +6,38 @@ use ruff_python_ast::visitor::{Visitor, walk_stmt};
 
 use super::*;
 
+/// An element inserted into a local container and its direct iteration source, when known.
+struct Insertion<'a> {
+    value: &'a ast::Expr,
+    for_loop: Option<&'a ast::StmtFor>,
+}
+
 /// A direct element insertion in this lexical scope can supply a container layout hint.
 /// The ordinary checker still checks its operand and every other use of the list.
-pub(super) fn first_insertion<'ast>(
+fn first_insertion<'ast>(
     name: &str,
     method: &str,
     statements: &'ast [ast::Stmt],
-) -> Option<&'ast ast::Expr> {
+) -> Option<Insertion<'ast>> {
     struct Appends<'name, 'ast> {
         name: &'name str,
         method: &'name str,
-        value: Option<&'ast ast::Expr>,
+        insertion: Option<Insertion<'ast>>,
+        for_loop: Option<&'ast ast::StmtFor>,
     }
 
     impl<'ast> Visitor<'ast> for Appends<'_, 'ast> {
         fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
-            if self.value.is_some()
+            if self.insertion.is_some()
                 || matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))
             {
+                return;
+            }
+            if let ast::Stmt::For(loop_) = stmt {
+                let enclosing = self.for_loop.replace(loop_);
+                self.visit_body(&loop_.body);
+                self.for_loop = enclosing;
+                self.visit_body(&loop_.orelse);
                 return;
             }
             if let ast::Stmt::Expr(stmt) = stmt
@@ -34,7 +48,10 @@ pub(super) fn first_insertion<'ast>(
                 && let [value] = call.arguments.args.as_ref()
                 && call.arguments.keywords.is_empty()
             {
-                self.value = Some(value);
+                self.insertion = Some(Insertion {
+                    value,
+                    for_loop: self.for_loop,
+                });
             } else {
                 walk_stmt(self, stmt);
             }
@@ -46,13 +63,57 @@ pub(super) fn first_insertion<'ast>(
     let mut appends = Appends {
         name,
         method,
-        value: None,
+        insertion: None,
+        for_loop: None,
     };
     appends.visit_body(statements);
-    appends.value
+    appends.insertion
 }
 
 impl Checker<'_> {
+    /// A concrete insertion can determine the layout of a fresh list or set. A set
+    /// filled from an exact text iterator can also use its inferred element type.
+    pub(super) fn inserted_element(
+        &self,
+        name: &str,
+        set: bool,
+        later: &[ast::Stmt],
+    ) -> Option<Type> {
+        let insertion = first_insertion(name, if set { "add" } else { "append" }, later)?;
+        if let ast::Expr::Call(call) = insertion.value
+            && let Some(class) = self.class_reference(&call.func)
+        {
+            return Some(Type::Class(class));
+        }
+        if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
+            return Some(ty);
+        }
+        if !set || self.graph.set_layout_hint.get() == crate::modules::SetLayoutHint::Disabled {
+            return None;
+        }
+        let for_loop = insertion.for_loop?;
+        let item = for_loop.target.as_name_expr()?;
+        let source = for_loop.iter.as_name_expr()?;
+        let element = match self.locals[*self.names.get(source.id.as_str())?] {
+            Type::Str => Type::Str,
+            Type::Bytes | Type::ByteArray => Type::Int,
+            _ => return None,
+        };
+        if for_loop.is_async
+            || insertion.value.as_name_expr()?.id != item.id
+            || narrowing::assigned_names(&for_loop.body).contains(item.id.as_str())
+            || narrowing::assigned_names(later).contains(source.id.as_str())
+        {
+            return None;
+        }
+        // Later uses may need heterogeneous storage. A failed native attempt
+        // must recover the ordinary diagnostics and object fallback for set().
+        self.graph
+            .set_layout_hint
+            .set(crate::modules::SetLayoutHint::Applied);
+        Some(element)
+    }
+
     /// A later direct call can supply the same Callable context as an inline lambda.
     /// Its body and every use of the resulting local are still checked normally.
     pub(super) fn local_lambda_context(&self, local: &str, later: &[ast::Stmt]) -> Option<Type> {

@@ -150,17 +150,19 @@ impl Checker<'_> {
             });
             let previous = local.and_then(|name| {
                 let slot = *self.names.get(name.id.as_str())?;
-                self.inferred_lists
+                self.inferred_containers
                     .contains(&slot)
                     .then_some((name.id.as_str(), slot))
             });
             let context = self.target_context(target, Some(&assignment.value));
             let value = if let Some((_, old)) = previous {
-                // Keep the original literal context (e.g. for []) while allowing
-                // a list-producing operation to determine its own element type.
-                self.expr_expected_if(&assignment.value, self.locals[old], |c, ty| {
-                    c.types.element(ty).is_some()
-                })?
+                // An empty literal still needs the old context. Other container
+                // expressions can determine their own concrete result type.
+                self.expr_expected_if(
+                    &assignment.value,
+                    self.locals[old],
+                    Self::rebindable_container,
+                )?
             } else if let Some(expected) = context {
                 self.expr_expected(&assignment.value, expected)?
             } else {
@@ -172,14 +174,6 @@ impl Checker<'_> {
                 return Ok(self.replace_local(name, old, value.ty, value));
             }
             let statement = self.assign_value(target, value)?;
-            if context.is_none()
-                && let Some(name) = local
-            {
-                let slot = self.names[name.id.as_str()];
-                if self.types.element(self.locals[slot]).is_some() {
-                    self.inferred_lists.insert(slot);
-                }
-            }
             return Ok(vec![statement]);
         }
         let context = assignment

@@ -2433,8 +2433,8 @@ struct Checker<'a> {
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
-    /// Outermost plain assignments can give an inferred list a new invariant element type.
-    inferred_lists: HashSet<usize>,
+    /// Inferred containers can acquire a new storage layout at an outermost plain assignment.
+    inferred_containers: HashSet<usize>,
     nullable_assignments: HashMap<String, Type>,
     bound_flags: HashMap<String, usize>,
     omitted_assert_locals: HashMap<String, unbound_locals::Binding>,
@@ -2507,7 +2507,7 @@ impl<'a> Checker<'a> {
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
             returns: Type::None,
-            inferred_lists: HashSet::new(),
+            inferred_containers: HashSet::new(),
             nullable_assignments: HashMap::new(),
             bound_flags: HashMap::new(),
             omitted_assert_locals: HashMap::new(),
@@ -4614,23 +4614,17 @@ impl<'a> Checker<'a> {
                     && a.targets.iter().any(|target| matches!(target, ast::Expr::Subscript(sub)
                         if matches!(&*sub.slice, ast::Expr::Slice(_)) && self.assignment_context(target, None) == Some(self.types.list(documents::ANY)))))) {
                     Some(self.types.list(documents::ANY))
-                } else if (empty_list || empty_set)
-                    && let Some(value) = inference::first_insertion(name.id.as_str(), if empty_list { "append" } else { "add" }, later)
-                {
-                    let element = match value {
-                        ast::Expr::Call(call)
-                            if let Some(class) = self.class_reference(&call.func) =>
-                        {
-                            Some(Type::Class(class))
-                        }
-                        _ => self.graph.session.scalar_type(self.module, value),
-                    };
-                    element.map(|ty| if empty_list { self.types.list(ty) } else { self.types.set(ty) })
+                } else if empty_list || empty_set {
+                    self.inserted_element(name.id.as_str(), empty_set, later)
+                        .map(|ty| if empty_list { self.types.list(ty) } else { self.types.set(ty) })
                 } else {
                     None
                 };
                 if let Some(ty) = context {
-                    self.declare(name.id.as_str(), ty, name)?;
+                    let slot = self.declare(name.id.as_str(), ty, name)?;
+                    if empty_list || empty_set {
+                        self.remember_inferred_container(slot);
+                    }
                 }
             }
             self.reachable = reachable && falls_through;
@@ -4790,7 +4784,7 @@ impl<'a> Checker<'a> {
                     self.class,
                 )?;
                 if let Some(slot) = self.names.get(name.id.as_str()) {
-                    self.inferred_lists.remove(slot);
+                    self.inferred_containers.remove(slot);
                 }
                 // A new outermost annotation dominates every subsequent read.
                 // Evaluate its RHS with the old binding; closures and nested
@@ -6063,11 +6057,29 @@ impl<'a> Checker<'a> {
         Ok((no, falls))
     }
 
+    /// A call or expression can supply its own concrete collection layout.
+    fn rebindable_container(&self, ty: Type) -> bool {
+        ty == Type::Bytes
+            || self.types.element(ty).is_some()
+            || self.types.set_element(ty).is_some()
+    }
+
+    /// Record fresh, unannotated function locals, including tuple-unpacking targets.
+    fn remember_inferred_container(&mut self, slot: usize) {
+        if !self.module_scope
+            && self.block_depth == 1
+            && self.local_functions.is_empty()
+            && self.rebindable_container(self.locals[slot])
+        {
+            self.inferred_containers.insert(slot);
+        }
+    }
+
     /// A straight-line rebind publishes the new slot before releasing the old owner.
     fn replace_local(&mut self, name: &str, old: usize, ty: Type, value: Expr) -> Vec<Statement> {
         let slot = self.hidden(ty);
-        if self.inferred_lists.remove(&old) {
-            self.inferred_lists.insert(slot);
+        if self.inferred_containers.remove(&old) {
+            self.inferred_containers.insert(slot);
         }
         self.names.insert(name.to_owned(), slot);
         self.assigned_value(slot, &value);
@@ -6098,7 +6110,11 @@ impl<'a> Checker<'a> {
         } else {
             Self::inferred_stream(value)
         };
+        let fresh = !self.names.contains_key(name.id.as_str());
         let slot = self.declare(name.id.as_str(), value.ty, target)?;
+        if fresh {
+            self.remember_inferred_container(slot);
+        }
         self.assigned_value(slot, &value);
         Ok(Statement::Assign(slot, value))
     }
