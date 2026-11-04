@@ -3007,13 +3007,40 @@ pub unsafe extern "C" fn imre_filter_character_set(
     allowed: *const Object,
     below: u32,
 ) -> *const Object {
+    // SAFETY: the caller roots both owners for the filter.
+    unsafe { filter_character_set(text, allowed, below, false) }
+}
+
+/// Collects matching characters only when the result is nonempty.
+///
+/// # Safety
+/// Both inputs are rooted native owners and the set contains exact strings.
+/// Null denotes an empty result or, with a pending exception, an allocation failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_filter_nonempty_character_set(
+    text: *const Str,
+    allowed: *const Object,
+    below: u32,
+) -> *const Object {
+    // SAFETY: the caller roots both owners for the filter.
+    unsafe { filter_character_set(text, allowed, below, true) }
+}
+
+/// Filters exact strings while the caller roots the inputs. Empty selections
+/// may use a null sentinel when the caller can prove their identity is private.
+unsafe fn filter_character_set(
+    text: *const Str,
+    allowed: *const Object,
+    below: u32,
+    omit_empty: bool,
+) -> *const Object {
     // SAFETY: both inputs stay rooted. Updating the private lookup and comparing
     // exact strings cannot reenter the set.
     let result = unsafe {
         let text = &*text;
         object(allowed).0.with_mut(|storage| {
             let (keys, ascii) = storage.set_mut().character_keys();
-            let selected = text.chars().filter_map(|c| {
+            let mut selected = text.chars().filter_map(|c| {
                 let mut buffer = [0; 4];
                 let key = c.encode_utf8(&mut buffer);
                 let present = u32::from(c) < below
@@ -3027,10 +3054,18 @@ pub unsafe extern "C" fn imre_filter_character_set(
                     })
                 })
             });
-            Set::string_set(selected, false)
+            if omit_empty {
+                let Some(first) = selected.next() else {
+                    return Ok(std::ptr::null());
+                };
+                Set::string_set(std::iter::once(first).chain(selected), false)
+                    .map(crate::ObjectOwner::into_raw)
+            } else {
+                Set::string_set(selected, false).map(crate::ObjectOwner::into_raw)
+            }
         })
     };
-    crate::finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
+    crate::finish(result, std::ptr::null())
 }
 
 /// # Safety

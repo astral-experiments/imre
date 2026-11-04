@@ -8354,10 +8354,21 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::FilterCharacterSet(below) => {
+                let optional = matches!(returns, Type::Optional(_));
+                let symbol = if optional {
+                    "imre_filter_nonempty_character_set"
+                } else {
+                    "imre_filter_character_set"
+                };
                 let operand = self.checked_instruction(format!(
-                    "call ptr @imre_filter_character_set(ptr {}, ptr {}, i32 {below})",
+                    "call ptr @{symbol}(ptr {}, ptr {}, i32 {below})",
                     args[0].value.operand, args[1].value.operand
                 ));
+                let operand = if optional {
+                    self.instruction(format!("ptrtoint ptr {operand} to i64"))
+                } else {
+                    operand
+                };
                 Value {
                     ty: returns,
                     operand,
@@ -10099,6 +10110,7 @@ declare ptr @imre_str_matching_split_iter(ptr, ptr, i64, i8)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
 declare ptr @imre_filter_character_set(ptr, ptr, i32)
+declare ptr @imre_filter_nonempty_character_set(ptr, ptr, i32)
 declare ptr @imre_str_list_filter(ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_str_list_sorted_suffix(ptr, i32)
 declare i32 @imre_str_list_nonempty(ptr)
