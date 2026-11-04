@@ -26,6 +26,8 @@ fn case_input(value: &mut Expr) -> Option<&mut Expr> {
 /// input, so it disables prefix rejection.
 fn literal_prefix_mask(values: &[Expr]) -> Option<ir::SetCasePrefix> {
     let mut masks = [u64::MAX; 2];
+    const MAX_PREFIX_TAGS: usize = 8;
+    let mut tags = Vec::new();
     let mut hashes = Some(0_u64);
     for value in values {
         let ExprKind::Str(key) = &value.kind else {
@@ -33,7 +35,16 @@ fn literal_prefix_mask(values: &[Expr]) -> Option<ir::SetCasePrefix> {
         };
         let first = *key.as_bytes().first()?;
         hashes = hashes.and_then(|mask| {
-            imre_ast::strings::ascii_case_prefix_bit(key.as_bytes()).map(|bit| mask | bit)
+            let bytes = key.as_bytes();
+            let bit = imre_ast::strings::ascii_case_prefix_bit(bytes)?;
+            if tags.len() <= MAX_PREFIX_TAGS {
+                // Punctuation sharing the ASCII case bit may keep an extra candidate.
+                let tag = u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]) | 0x20_20_20;
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+            Some(mask | bit)
         });
         if first.is_ascii() {
             for byte in [first.to_ascii_uppercase(), first.to_ascii_lowercase()] {
@@ -41,8 +52,12 @@ fn literal_prefix_mask(values: &[Expr]) -> Option<ir::SetCasePrefix> {
             }
         }
     }
-    // Use three bytes only when at least three quarters of the hash buckets reject.
+    // A small switch compares the prefix values directly. For larger sets, use a
+    // hash mask only when at least three quarters of its buckets reject.
     Some(match hashes {
+        Some(mask) if (1..=MAX_PREFIX_TAGS).contains(&tags.len()) => {
+            ir::SetCasePrefix::ThreeByteValues { mask, tags }
+        }
         Some(mask) if (1..=16).contains(&mask.count_ones()) => {
             ir::SetCasePrefix::ThreeByteHashes(mask)
         }
@@ -51,7 +66,7 @@ fn literal_prefix_mask(values: &[Expr]) -> Option<ir::SetCasePrefix> {
 }
 
 /// Summaries of exact keys whose set is only used by read-only operations.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct LiteralSet {
     prefix: Option<ir::SetCasePrefix>,
     ascii_keys: Option<[u64; 2]>,
@@ -165,7 +180,7 @@ fn prefix_check(set: &Expr, source: &Expr, sets: &[LiteralSet]) -> Option<Expr> 
         return None;
     };
     Some(possible(
-        Builtin::SetCasePrefixPossible(sets[slot].prefix?),
+        Builtin::SetCasePrefixPossible(sets[slot].prefix.clone()?),
         set,
         prefix_local(source)?,
     ))
@@ -350,8 +365,14 @@ mod tests {
         };
         let abc = imre_ast::strings::ascii_case_prefix_bit(b"ABC").unwrap();
         assert!(
-            matches!(prefixes(&["Abc", "ABCD"]), Some(ir::SetCasePrefix::ThreeByteHashes(mask)) if mask == abc)
+            matches!(prefixes(&["Abc", "ABCD"]), Some(ir::SetCasePrefix::ThreeByteValues { mask, tags }) if mask == abc && tags == [0x61_62_63])
         );
+        assert!(matches!(
+            prefixes(&[
+                "aaa", "aab", "aac", "aad", "aae", "aaf", "aag", "aah", "aai"
+            ]),
+            Some(ir::SetCasePrefix::ThreeByteHashes(_))
+        ));
         for keys in [["abc", "ab"], ["abc", "ßss"]] {
             assert!(matches!(
                 prefixes(&keys),
