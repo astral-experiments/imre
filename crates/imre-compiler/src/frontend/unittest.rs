@@ -636,7 +636,7 @@ impl Checker<'_> {
         clear: &mut Vec<usize>,
     ) -> Result<(Option<usize>, Option<&'static str>), String> {
         let value = if matches!(arg, ast::Expr::StringLiteral(_)) {
-            self.fixed_regex(arg, false)?
+            self.fixed_regex(arg, 0)?
         } else {
             self.expr(arg)?
         };
