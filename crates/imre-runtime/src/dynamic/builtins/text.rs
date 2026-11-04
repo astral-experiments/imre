@@ -1873,11 +1873,12 @@ fn binary_replace(
     ))
 }
 
-/// Left-justify a binary sequence after converting the width, which may mutate either argument.
-fn binary_ljust(
+/// Justify a binary sequence after converting the width, which may mutate either argument.
+fn binary_justify(
     ctx: &mut Context,
     owner: &str,
     receiver: Id,
+    name: &str,
     width: usize,
     fill: Option<Id>,
 ) -> Result<Id> {
@@ -1888,7 +1889,7 @@ fn binary_ljust(
                 [byte] => *byte,
                 _ => {
                     return Err(type_error(format!(
-                        "ljust(): argument 2 must be a byte string of length 1, not a {} object of length {}",
+                        "{name}(): argument 2 must be a byte string of length 1, not a {} object of length {}",
                         ctx.type_name(storage),
                         bytes.len()
                     )));
@@ -1901,7 +1902,7 @@ fn binary_ljust(
                     ctx.type_name(id)
                 };
                 return Err(type_error(format!(
-                    "ljust() argument 2 must be a byte string of length 1, not {kind:.50}"
+                    "{name}() argument 2 must be a byte string of length 1, not {kind:.50}"
                 )));
             }
         }
@@ -1921,6 +1922,9 @@ fn binary_ljust(
     padded
         .try_reserve_exact(len)
         .map_err(|_| crate::Error::allocation())?;
+    if name == "rjust" {
+        padded.resize(len - source.len(), fill);
+    }
     padded.extend_from_slice(source);
     padded.resize(len, fill);
     Ok(ctx.alloc(if owner == "bytes" {
@@ -1957,7 +1961,7 @@ fn justify(
     }
     let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
     if owner != "str" {
-        return binary_ljust(ctx, owner, receiver, width, extra.first().copied());
+        return binary_justify(ctx, owner, receiver, name, width, extra.first().copied());
     }
     let fill = if let Some(&id) = extra.first() {
         match ctx.heap.get(ctx.scalar_value(id)) {
@@ -2193,7 +2197,9 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "center" | "ljust" | "rjust") | ("bytes" | "bytearray", "ljust")
+        ("str", "center" | "ljust" | "rjust")
+            | ("bytes", "ljust" | "rjust")
+            | ("bytearray", "ljust")
     ) {
         return justify(ctx, owner, original_receiver, name, args, kwargs);
     }

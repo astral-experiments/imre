@@ -6497,7 +6497,11 @@ impl<'a> Checker<'a> {
             return Some("str.__hash__");
         }
         if let ast::Expr::Attribute(attribute) = expression
-            && attribute.attr.as_str() == "partition"
+            && let Some(method) = match attribute.attr.as_str() {
+                "partition" => Some("bytes.partition"),
+                "rjust" => Some("bytes.rjust"),
+                _ => None,
+            }
             && (self.graph.session.is_known_class(
                 self.module,
                 &attribute.value,
@@ -6508,7 +6512,7 @@ impl<'a> Checker<'a> {
                 .scalar_type(self.module, &attribute.value)
                 == Some(Type::Bytes))
         {
-            return Some("bytes.partition");
+            return Some(method);
         }
         self.graph.boxed_pattern_method(self.module, expression)
     }

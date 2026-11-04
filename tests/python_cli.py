@@ -3462,6 +3462,13 @@ for name in ("md4", "ripemd160"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
+        padding = root / "bytes_rjust.py"
+        for body in (
+            "assert b'xy'.rjust(3, b'.') == b'.xy'",
+            "pad = bytes.rjust\nassert pad(b'xy', 3, b'.') == b'.xy'",
+        ):
+            padding.write_text(body + "\n")
+            compare("-B", padding)
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_compound.py",
