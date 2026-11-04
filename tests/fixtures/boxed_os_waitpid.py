@@ -1,6 +1,7 @@
 import errno
 import os
 import posix
+import signal
 import subprocess
 
 
@@ -15,6 +16,8 @@ class Index:
 def current():
     assert os.waitpid is posix.waitpid
     assert os.WNOHANG == posix.WNOHANG
+    assert os.WUNTRACED == posix.WUNTRACED
+    assert os.WSTOPSIG is posix.WSTOPSIG
     # The current process is never its own child.
     try:
         os.waitpid(Index(os.getpid()), Index(os.WNOHANG))
@@ -46,6 +49,16 @@ def current():
         assert pid == child.pid
         assert os.WIFSTOPPED(status=Index(status)) is False
         assert os.waitstatus_to_exitcode(status=Index(status)) == 23
+
+    with subprocess.Popen(["/bin/sh", "-c", "kill -STOP $$; exit 17"]) as child:
+        try:
+            pid, status = os.waitpid(child.pid, os.WUNTRACED)
+            assert pid == child.pid and os.WIFSTOPPED(status)
+            assert os.WSTOPSIG(status=Index(status)) == signal.SIGSTOP
+            child.send_signal(signal.SIGCONT)
+            assert child.wait(timeout=5) == 17
+        finally:
+            child.kill()
 
     for status, kind in ((1 << 100, OverflowError), (2.5, TypeError), (-1, ValueError)):
         try:

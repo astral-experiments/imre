@@ -6439,6 +6439,13 @@ impl<'a> Checker<'a> {
         self.scoped_builtin_error(name, node)
     }
 
+    fn checked_object_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
+        self.graph
+            .check_fallback_calls
+            .set(crate::analysis::FallbackCalls::FunctionBodies);
+        self.object_builtin_error(name, node)
+    }
+
     fn boxed_builtin_callable(&self, expression: &ast::Expr) -> Option<&'static str> {
         ["exec", "hex", "oct"]
             .into_iter()
@@ -6747,6 +6754,9 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::Base64Decode => {
                     return Err(self.scoped_builtin_error("base64.b64decode", expression));
+                }
+                Intrinsic::CheckedObjectExport(name) => {
+                    return Err(self.checked_object_builtin_error(name, expression));
                 }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
@@ -9731,6 +9741,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
             ))) => return self.base85_encode(call, name),
+            Some(Binding::Intrinsic(Intrinsic::CheckedObjectExport(name))) => {
+                return Err(self.checked_object_builtin_error(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }

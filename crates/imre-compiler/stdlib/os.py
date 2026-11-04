@@ -9,7 +9,7 @@ from posix import _exit, times, times_result
 from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG, WUNTRACED
 from types import GenericAlias
 from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, fchdir, fsync, open, rmdir, stat, truncate
 
@@ -327,7 +327,7 @@ def makedirs(name, mode=0o777, exist_ok=False):
             raise
 
 
-from posix import WIFSTOPPED, execv
+from posix import WIFSTOPPED, WSTOPSIG, execv
 
 
 # Adapted from CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.

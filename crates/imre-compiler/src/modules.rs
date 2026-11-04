@@ -1019,6 +1019,8 @@ pub(crate) enum Intrinsic {
     ObjectRuntimeExport(&'static str),
     /// Bind the object provider when this export is used, after checking typed calls.
     ScopedObjectExport(&'static str),
+    /// A scoped export that also checks user function bodies on direct script fallback.
+    CheckedObjectExport(&'static str),
     WeakProxy,
     WeakProxyClass {
         callable: bool,

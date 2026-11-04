@@ -1855,6 +1855,8 @@ def main() -> None:
             ("from math import sqrt\n", "def helper() -> float:\n    return sqrt(4.0)\n"),
             ("from socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
             ("from _socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
+            ("from os import WSTOPSIG\n", "def helper() -> int:\n    return WSTOPSIG(4991)\n"),
+            ("import posix\n", "def helper() -> int:\n    return posix.WSTOPSIG(4991)\n"),
         ):
             for before, after in ((invalid, consumer), (consumer, invalid)):
                 source = temporary / "boxed_call_order.py"
