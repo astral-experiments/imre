@@ -2339,6 +2339,7 @@ impl IntrinsicModule {
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
+            (Self::Math, "ldexp") => Intrinsic::ScopedObjectExport("math.ldexp"),
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Math, "sin") => Intrinsic::ScopedObjectExport("math.sin"),
             (Self::Math, "sqrt") => Intrinsic::ScopedObjectExport("math.sqrt"),

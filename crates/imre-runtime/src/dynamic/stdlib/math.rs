@@ -90,7 +90,7 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(result))));
     }
-    if matches!(operation, "atan2" | "copysign") {
+    if matches!(operation, "atan2" | "copysign" | "ldexp") {
         let &[first, second] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -98,11 +98,10 @@ pub(super) fn call(
             ));
         };
         let first = as_double(ctx, first)?;
-        let second = as_double(ctx, second)?;
-        let result = if operation == "atan2" {
-            first.atan2(second)
-        } else {
-            first.copysign(second)
+        let result = match operation {
+            "atan2" => first.atan2(as_double(ctx, second)?),
+            "copysign" => first.copysign(as_double(ctx, second)?),
+            _ => scale_by_power_of_two(ctx, first, second)?,
         };
         return Ok(ctx.alloc(Value::Float(result)));
     }
@@ -445,6 +444,32 @@ pub(super) fn as_double(ctx: &mut Context, value: Id) -> Result<f64> {
             Ok(x)
         }
     }
+}
+
+/// Scale by a power of two with a single rounding, including for subnormal results.
+fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
+    unsafe extern "C" {
+        safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
+    }
+    let exponent = ctx
+        .as_int(exponent)
+        .map_err(|_| Error::new("TypeError", "Expected an int as second argument to ldexp."))?;
+    if x == 0.0 || !x.is_finite() {
+        return Ok(x);
+    }
+    let exponent = exponent.big();
+    let exponent = exponent.to_i32().unwrap_or_else(|| {
+        if exponent.sign() == num_bigint::Sign::Minus {
+            i32::MIN
+        } else {
+            i32::MAX
+        }
+    });
+    let result = ldexp(x, exponent);
+    if result.is_infinite() {
+        return Err(Error::new("OverflowError", "math range error"));
+    }
+    Ok(result)
 }
 
 /// Split at the integer toward zero, preserving the sign and payload of either nonfinite case.
