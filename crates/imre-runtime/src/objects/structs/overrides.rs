@@ -470,6 +470,43 @@ impl Binary {
         }
     }
 
+    /// Complete the orbit starting at the only set bit, or restore its original state.
+    #[inline(never)]
+    fn fill_complete_orbit(
+        &mut self,
+        at: usize,
+        step: usize,
+        n: usize,
+        count: usize,
+    ) -> Option<(usize, usize)> {
+        let spacing = num_integer::gcd(n, step);
+        let period = n / spacing;
+        if count < period - 1 || spacing >= step.min(n - step) || !self.contains(at) {
+            return None;
+        }
+
+        // Exactly one residue class is reachable. Visit the other members in
+        // address order while the runtime owns the bitmap exclusively.
+        let (done, last) = self.set_modular(at, spacing, n, period - 1, true);
+        if done < period - 1 || crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+            // Reordered stores cannot expose a source-order prefix. Clear only
+            // the words the canonical walk reached, including its single wrap.
+            let (first_word, original) = position(at);
+            let (last_word, _) = position(last);
+            if last < at {
+                self.bits[first_word..n.div_ceil(BLOCK)].fill(0);
+                self.bits[..=last_word].fill(0);
+            } else {
+                self.bits[first_word..=last_word].fill(0);
+            }
+            self.bits[first_word] = original;
+            self.changed = 1;
+            return Some((0, at));
+        }
+        let last = (at as u128 + count as u128 * step as u128) % n as u128;
+        Some((count, last as usize))
+    }
+
     /// Apply scattered writes in index order and report the prefix completed before a signal.
     fn set_scattered(
         &mut self,
@@ -479,6 +516,12 @@ impl Binary {
         count: usize,
         set: bool,
     ) -> (usize, usize) {
+        if set
+            && self.changed == 1
+            && let Some(progress) = self.fill_complete_orbit(at, step, n, count)
+        {
+            return progress;
+        }
         let mut added = 0;
         let mut done = 0;
         while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -843,6 +886,33 @@ mod page_tests {
         assert!(sparse.put(62, &[1, 3]).is_ok());
         let run = sparse.span(60, 128, &default);
         assert_eq!((run.len, run.index_mask), (4, usize::MAX));
+    }
+
+    #[test]
+    fn complete_orbits_preserve_the_original_index_and_other_residues() {
+        for (n, at, step) in [
+            (1024usize, 1019usize, 94usize),
+            (1032, 1010, 1014),
+            (1056, 67, 99),
+        ] {
+            let period = n / num_integer::gcd(n, step);
+            for count in [period - 2, period - 1, period, 3 * period + 3] {
+                let mut binary = Binary::empty(&[7], n.div_ceil(BLOCK)).unwrap();
+                assert!(binary.insert(at));
+                let mut expected = vec![false; n];
+                let mut last = at;
+                expected[at] = true;
+                for _ in 0..count {
+                    last = (last + step) % n;
+                    expected[last] = true;
+                }
+                assert_eq!(binary.set_modular(at, step, n, count, true), (count, last));
+                assert_eq!(binary.changed, expected.iter().filter(|set| **set).count());
+                for (index, set) in expected.into_iter().enumerate() {
+                    assert_eq!(binary.contains(index), set);
+                }
+            }
+        }
     }
 
     #[test]
