@@ -348,9 +348,7 @@ fn object_fallback<T>(
         } else if g.class_layout_error.borrow().as_ref() == Some(&error) {
             Some(dynamic::ObjectOperation::ClassLayout)
         } else {
-            g.object_builtin_errors
-                .borrow()
-                .contains(&error)
+            (g.has_native_bytearray.get() || g.object_builtin_errors.borrow().contains(&error))
                 .then_some(dynamic::ObjectOperation::Builtin)
         }
     });
@@ -798,6 +796,19 @@ fn check_encoding(source: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn native_bytearray_construction_preserves_object_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        // Printing the mutable buffer directly uses its object implementation.
+        std::fs::write(
+            &path,
+            "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\n",
+        )
+        .unwrap();
+        super::check_file(&path, None).unwrap();
+    }
 
     #[test]
     fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {

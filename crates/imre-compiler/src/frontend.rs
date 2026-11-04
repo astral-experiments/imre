@@ -11613,6 +11613,9 @@ impl<'a> Checker<'a> {
                 if !args.is_empty() || !call.arguments.keywords.is_empty() {
                     return Err(self.object_builtin_error("bytearray", call));
                 }
+                // The scalar-default caller cache cannot replay object-provider eligibility.
+                self.default_reads = None;
+                self.graph.has_native_bytearray.set(true);
                 (Builtin::ByteArrayNew, Type::ByteArray)
             }
             "input" if args.is_empty() => (Builtin::Input, Type::Str),

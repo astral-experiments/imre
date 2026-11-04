@@ -2815,6 +2815,8 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
+    /// A reachable bytearray constructor keeps its object implementation available on typed failure.
+    pub(crate) has_native_bytearray: std::cell::Cell<bool>,
     pub(crate) check_fallback_calls: std::cell::Cell<FallbackCalls>,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
@@ -4114,6 +4116,7 @@ impl<'a> Loader<'a> {
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             float_components: Default::default(),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
+            has_native_bytearray: Default::default(),
             check_fallback_calls: Default::default(),
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
