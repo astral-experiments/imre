@@ -1,7 +1,7 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SysEncoding {
@@ -2717,8 +2717,11 @@ pub(crate) fn private_string_cursors(function: &Function) -> Vec<usize> {
 
 /// Find private cursors restarted from a parameter that is rooted throughout the
 /// containing loop. Every creation and pull must lie inside that same loop.
-pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -> BTreeSet<usize> {
-    let mut result = BTreeSet::new();
+pub(crate) fn invariant_string_cursors(
+    function: &Function,
+    private: &[usize],
+) -> BTreeMap<usize, usize> {
+    let mut result = BTreeMap::new();
     if private.is_empty() {
         return result;
     }
@@ -2755,9 +2758,9 @@ pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -
         }
     }
     // Lowering sometimes saves the source before initializing scalar loop counters.
-    fn parameter_source(before: &[Statement], source: usize, stable: &[bool]) -> bool {
+    fn parameter_source(before: &[Statement], source: usize, stable: &[bool]) -> Option<usize> {
         if stable[source] {
-            return true;
+            return Some(source);
         }
         for statement in before.iter().rev() {
             match statement {
@@ -2767,7 +2770,7 @@ pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -
                         kind: ExprKind::Local(origin),
                         ..
                     },
-                ) if *target == source => return stable[*origin],
+                ) if *target == source => return stable[*origin].then_some(*origin),
                 Statement::Assign(
                     target,
                     Expr {
@@ -2778,9 +2781,14 @@ pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -
                 _ => break,
             }
         }
-        false
+        None
     }
-    fn mark(suite: &[Statement], stable: &[bool], eligible: &[bool], result: &mut BTreeSet<usize>) {
+    fn mark(
+        suite: &[Statement],
+        stable: &[bool],
+        eligible: &[bool],
+        result: &mut BTreeMap<usize, usize>,
+    ) {
         for (index, statement) in suite.iter().enumerate() {
             if let Statement::Assign(
                 slot,
@@ -2791,9 +2799,9 @@ pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -
             ) = statement
                 && eligible[*slot]
                 && let ExprKind::Local(source) = args[0].kind
-                && parameter_source(&suite[..index], source, stable)
+                && let Some(parameter) = parameter_source(&suite[..index], source, stable)
             {
-                result.insert(*slot);
+                result.insert(*slot, parameter);
             }
             statement.suites(|nested| mark(nested, stable, eligible, result));
         }

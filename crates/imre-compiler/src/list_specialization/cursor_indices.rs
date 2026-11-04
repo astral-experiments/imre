@@ -1,7 +1,7 @@
 //! Bound stable list indices by the remaining pulls of a UTF-8 cursor.
 use super::window_ranges::{checked_pull_flag, visit_single_pull_writes};
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Every recorded index lies in this inclusive band relative to its counter at
 /// iteration entry. A successful pull leaves at most byte_budget - 1 prior pulls.
@@ -161,4 +161,57 @@ pub(crate) fn span(suite: &[Statement], cursor: usize) -> Option<Span> {
         .into_values()
         .filter(|s| s.indices.len() >= 2)
         .max_by_key(|s| s.indices.len())
+}
+
+/// Connects a length read to cursors over the same immutable string parameter.
+/// Only the part of the function after its last possible rebinding is eligible.
+#[derive(Default)]
+pub(crate) struct ScalarLengths {
+    pub(crate) reads: BTreeMap<usize, usize>,
+    pub(crate) cursors: BTreeMap<usize, usize>,
+}
+
+impl ScalarLengths {
+    /// Select reads before a loop that can use a stable index span. A conditional
+    /// read may be skipped, in which case the original byte budget still applies.
+    pub(crate) fn select(function: &ir::Function, invariant: &BTreeMap<usize, usize>) -> Self {
+        let mut result = Self::default();
+        for source in invariant.values().copied().collect::<BTreeSet<_>>() {
+            let mut start = 0;
+            for (index, stmt) in function.body.iter().enumerate() {
+                ir::walk_writes(std::slice::from_ref(stmt), |slot, _| {
+                    if slot == source {
+                        start = index + 1;
+                    }
+                });
+            }
+            let mut reads = Vec::new();
+            for stmt in &function.body[start..] {
+                let suite = std::slice::from_ref(stmt);
+                if !reads.is_empty() {
+                    ir::walk_statements(suite, &mut |stmt| {
+                        if let Statement::If(_, yes, _) = stmt
+                            && let Some((_, cursor)) = super::reserved_append_window(yes)
+                            && invariant.get(&cursor) == Some(&source)
+                            && span(yes, cursor).is_some()
+                        {
+                            result.cursors.insert(cursor, source);
+                            result
+                                .reads
+                                .extend(reads.iter().map(|&read| (read, source)));
+                        }
+                    });
+                }
+                ir::walk_expressions(suite, &mut |expr| {
+                    if let ExprKind::Builtin(Builtin::Len, args) = &expr.kind
+                        && let [receiver] = args.as_slice()
+                        && matches!(receiver.kind, ExprKind::Local(slot) if slot == source)
+                    {
+                        reads.push(std::ptr::from_ref(receiver) as usize);
+                    }
+                });
+            }
+        }
+        result
+    }
 }
