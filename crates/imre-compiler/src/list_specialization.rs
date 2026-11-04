@@ -3,7 +3,7 @@
 //! own tagged word. Runtime identity guards exclude aliases of append targets.
 
 mod window_ranges;
-pub(crate) use window_ranges::is_window_range_guard;
+pub(crate) use window_ranges::{is_window_range_guard, reserved_append_window};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -626,6 +626,22 @@ mod tests {
             "        counter += 2\n        counter += 1",
         );
         assert!(!bounds_step_two(&twice));
+    }
+
+    #[test]
+    fn opens_a_spare_append_window_only_for_one_write_per_pull() {
+        let source = include_str!("../../../tests/fixtures/iterables/scalar_append_windows.py");
+        let uses_spare_window = |source| {
+            crate::compile(source, &crate::CompileOptions::default())
+                .unwrap()
+                .contains("call i32 @imre_list_try_open_append_window(")
+        };
+        assert!(uses_spare_window(source));
+        let twice = source.replace(
+            "        out.append(value)",
+            "        out.append(value)\n        out.append(value)",
+        );
+        assert!(!uses_spare_window(&twice));
     }
 
     #[test]

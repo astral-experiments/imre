@@ -2043,6 +2043,40 @@ unsafe fn open_list_append_window(list: *const List, window: *mut ListAppendWind
     }
 }
 
+/// Opens the existing allocation only when it covers the loop's upper write bound.
+///
+/// # Safety
+/// The exact list must be rooted and the writable window closed. On success
+/// only immediate integers may be written before the initialized prefix is committed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_try_open_append_window(
+    list: *const List,
+    remaining: usize,
+    window: *mut ListAppendWindow,
+) -> i32 {
+    // SAFETY: the caller proves exclusive access for the duration of this window.
+    unsafe {
+        let Some(owner) = list.as_ref() else { return 0 };
+        owner.0.with_mut(|words| {
+            if words.capacity() - words.len() < remaining
+                || !words
+                    .last()
+                    .and_then(Int::as_small)
+                    .is_some_and(|value| i32::try_from(value).is_ok())
+            {
+                return 0;
+            }
+            let data = words.as_mut_ptr();
+            window.write(ListAppendWindow {
+                owner: list,
+                next: data.add(words.len()),
+                end: data.add(words.capacity()),
+            });
+            1
+        })
+    }
+}
+
 /// Appends through the ordinary list API, then borrows the resulting allocation.
 ///
 /// # Safety
