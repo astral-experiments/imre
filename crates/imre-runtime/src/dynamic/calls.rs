@@ -1854,7 +1854,11 @@ impl Context {
             let class = &class[..class.floor_char_boundary(100)];
             format!("type object '{class}' has no attribute '{name}'")
         } else {
-            format!("'{}' object has no attribute '{name}'", self.type_name(obj))
+            let class = match self.heap.get(obj) {
+                Value::Partial { .. } => stdlib::functools::PARTIAL_CLASS,
+                _ => self.type_name(obj),
+            };
+            format!("'{class}' object has no attribute '{name}'")
         };
         Error::new("AttributeError", message)
     }
@@ -4049,6 +4053,12 @@ impl Context {
                     }
                 }
             },
+            Value::Native(ref class)
+                if class == stdlib::functools::PARTIAL_CLASS
+                    && matches!(name, "__name__" | "__qualname__") =>
+            {
+                return Ok(self.heap.code_name("partial"));
+            }
             Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));
             }

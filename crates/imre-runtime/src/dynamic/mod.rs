@@ -2415,6 +2415,12 @@ impl Context {
                 let member = self.readonly_member(stdlib::functools::PARTIAL_CLASS, field);
                 entries.push((self.heap.code_name(field), member));
             }
+            let repr = self.builtin("functools.partial.__repr__");
+            entries.push((self.heap.code_name("__repr__"), repr));
+            let module = self.heap.code_name("functools");
+            entries.push((self.heap.code_name("__module__"), module));
+            let doc = self.text("Create a new function with partial application of the given arguments\nand keywords.");
+            entries.push((self.heap.code_name("__doc__"), doc));
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }

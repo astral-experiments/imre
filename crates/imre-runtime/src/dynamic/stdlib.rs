@@ -2619,6 +2619,16 @@ pub(super) fn call(
     if name == "functools.partial.__setstate__" {
         return functools::partial_setstate(ctx, args, kwargs);
     }
+    if name == "functools.partial.__repr__" {
+        let receiver = builtins::noargs_method_receiver(
+            ctx,
+            functools::PARTIAL_CLASS,
+            "__repr__",
+            args,
+            kwargs,
+        )?;
+        return functools::partial_repr(ctx, receiver);
+    }
     if name == "functools.partial.__call__" {
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(Error::new(

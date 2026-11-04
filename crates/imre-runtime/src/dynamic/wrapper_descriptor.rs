@@ -305,6 +305,7 @@ impl BuiltinDescriptor {
             "classmethod.__get__" => ("classmethod", "__get__"),
             "functools.partial.__call__" => ("functools.partial", "__call__"),
             "functools.partial.__get__" => ("functools.partial", "__get__"),
+            "functools.partial.__repr__" => (stdlib::functools::PARTIAL_CLASS, "__repr__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
             "str.__str__" => ("str", "__str__"),
