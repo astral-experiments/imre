@@ -248,3 +248,15 @@ pub fn find_docstring<'a, T>(
     docs.visit_body(body);
     docs.found
 }
+
+/// Select a bucket for three ASCII bytes, ignoring ASCII letter case.
+/// The compiler records literal key prefixes and the runtime tests input prefixes.
+#[inline]
+pub fn ascii_case_prefix_bit(bytes: &[u8]) -> Option<u64> {
+    let prefix = bytes.first_chunk::<3>()?;
+    if !prefix.is_ascii() {
+        return None;
+    }
+    let [a, b, c] = prefix.map(|byte| u32::from(byte.to_ascii_lowercase()));
+    Some(1_u64 << (((a * 31 + b) * 31 + c) & 63))
+}

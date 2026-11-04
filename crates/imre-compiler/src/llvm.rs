@@ -8577,11 +8577,16 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::SetCasePrefixPossible([lower, upper]) => {
-                let rejected = self.instruction(format!(
-                    "call i32 @imre_str_affix_ascii(ptr {}, i64 {lower}, i64 {upper}, i32 0)",
-                    args[1].value.operand
-                ));
+            Builtin::SetCasePrefixPossible(prefix) => {
+                let text = &args[1].value.operand;
+                let rejected = self.instruction(match prefix {
+                    ir::SetCasePrefix::ExcludedBytes([lower, upper]) => format!(
+                        "call i32 @imre_str_affix_ascii(ptr {text}, i64 {lower}, i64 {upper}, i32 0)"
+                    ),
+                    ir::SetCasePrefix::ThreeByteHashes(mask) => format!(
+                        "call i32 @imre_str_excludes_ascii_prefix3(ptr {text}, i64 {mask})"
+                    ),
+                });
                 let possible = self.instruction(format!("icmp eq i32 {rejected}, 0"));
                 // A module initializer can call a function before the set is bound.
                 let unbound =
@@ -10638,6 +10643,7 @@ declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
 declare i32 @imre_str_affix_ascii(ptr, i64, i64, i32)
+declare i32 @imre_str_excludes_ascii_prefix3(ptr, i64)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
 declare ptr @imre_str_translate(ptr, ptr)

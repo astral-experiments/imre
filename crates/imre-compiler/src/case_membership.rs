@@ -22,33 +22,43 @@ fn case_input(value: &mut Expr) -> Option<&mut Expr> {
     }
 }
 
-/// ASCII starts that cannot produce a key, even after changing case. An empty key
-/// could match a prefix truncated to zero bytes, regardless of its original start.
-fn excluded_starts(values: &[Expr]) -> Option<[u64; 2]> {
+/// Summarize literal key prefixes. An empty key can match after truncating any
+/// input, so it disables prefix rejection.
+fn literal_prefix_mask(values: &[Expr]) -> Option<ir::SetCasePrefix> {
     let mut masks = [u64::MAX; 2];
+    let mut hashes = Some(0_u64);
     for value in values {
         let ExprKind::Str(key) = &value.kind else {
             return None;
         };
         let first = *key.as_bytes().first()?;
+        hashes = hashes.and_then(|mask| {
+            imre_ast::strings::ascii_case_prefix_bit(key.as_bytes()).map(|bit| mask | bit)
+        });
         if first.is_ascii() {
             for byte in [first.to_ascii_uppercase(), first.to_ascii_lowercase()] {
                 masks[usize::from(byte / 64)] &= !(1_u64 << (byte % 64));
             }
         }
     }
-    Some(masks)
+    // Use three bytes only when at least three quarters of the hash buckets reject.
+    Some(match hashes {
+        Some(mask) if (1..=16).contains(&mask.count_ones()) => {
+            ir::SetCasePrefix::ThreeByteHashes(mask)
+        }
+        _ => ir::SetCasePrefix::ExcludedBytes(masks),
+    })
 }
 
 /// A single literal initializer describes the set for its lifetime only if every
 /// read is the receiver of membership. Assignments, calls and aliases disqualify it.
-fn constant_set_masks(module: &Module) -> Vec<Option<[u64; 2]>> {
+fn constant_set_masks(module: &Module) -> Vec<Option<ir::SetCasePrefix>> {
     #[derive(Clone, Default)]
     struct Uses {
         writes: usize,
         reads: usize,
         membership: usize,
-        masks: Option<[u64; 2]>,
+        masks: Option<ir::SetCasePrefix>,
     }
     let mut globals = vec![Uses::default(); module.globals.len()];
     for function in module.functions.iter().chain([&module.entry]) {
@@ -65,7 +75,7 @@ fn constant_set_masks(module: &Module) -> Vec<Option<[u64; 2]>> {
                         values,
                     } = &value.kind
                     {
-                        uses.masks = excluded_starts(values);
+                        uses.masks = literal_prefix_mask(values);
                     }
                 }
                 (Builtin::GlobalGet(slot), []) => globals[*slot].reads += 1,
@@ -123,7 +133,7 @@ fn prefix_local(value: &Expr) -> Option<usize> {
 }
 
 /// Tests the original string before computing a prefix when the lookup set is constant.
-fn prefix_check(set: &Expr, source: &Expr, masks: &[Option<[u64; 2]>]) -> Option<Expr> {
+fn prefix_check(set: &Expr, source: &Expr, masks: &[Option<ir::SetCasePrefix>]) -> Option<Expr> {
     let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = set.kind else {
         return None;
     };
@@ -159,7 +169,7 @@ fn independent(value: &Expr, target: usize) -> bool {
 
 /// A normalizer may return the converted spelling on a hit. On a definite
 /// miss, its final return bypasses the assignment without exposing the local.
-fn guard_return(function: &mut Function, types: &Types, masks: &[Option<[u64; 2]>]) {
+fn guard_return(function: &mut Function, types: &Types, masks: &[Option<ir::SetCasePrefix>]) {
     let [
         ..,
         assignment,
@@ -291,6 +301,31 @@ mod tests {
             });
         }
         count
+    }
+
+    #[test]
+    fn three_byte_prefixes_require_three_ascii_bytes_in_every_key() {
+        let prefixes = |keys: &[&str]| {
+            let values: Vec<_> = keys
+                .iter()
+                .map(|key| Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str((*key).to_owned()),
+                })
+                .collect();
+            literal_prefix_mask(&values)
+        };
+        let abc = imre_ast::strings::ascii_case_prefix_bit(b"ABC").unwrap();
+        assert!(
+            matches!(prefixes(&["Abc", "ABCD"]), Some(ir::SetCasePrefix::ThreeByteHashes(mask)) if mask == abc)
+        );
+        for keys in [["abc", "ab"], ["abc", "ßss"]] {
+            assert!(matches!(
+                prefixes(&keys),
+                Some(ir::SetCasePrefix::ExcludedBytes(_))
+            ));
+        }
+        assert!(prefixes(&["abc", ""]).is_none());
     }
 
     #[test]
