@@ -408,6 +408,7 @@ fn emit_program(
         async_frames: BTreeMap::new(),
         async_invoke_frames: BTreeMap::new(),
         function_link_types,
+        json_schema_roots: Vec::new(),
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -561,7 +562,7 @@ fn emit_program(
         )
         .unwrap();
     }
-    json::schemas(module, emitter.output);
+    json::schemas(module, &emitter.json_schema_roots, emitter.output);
     record_layouts(module, emitter.output);
     callables::adapters(
         module,
@@ -650,6 +651,7 @@ struct Emitter<'a, 'module> {
     async_frames: BTreeMap<usize, String>,
     async_invoke_frames: BTreeMap<usize, (String, Type)>,
     function_link_types: HashSet<Type>,
+    json_schema_roots: Vec<Type>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -5333,7 +5335,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::JsonEncoderEncode(schema) => {
-                let schema = self.output.global_ref(json::schema_name(*schema));
+                let schema = self.json_schema(*schema);
                 let word = self.word(&args[1].value);
                 Value {
                     ty: returns,
@@ -5405,7 +5407,7 @@ impl Emitter<'_, '_> {
                 } else {
                     "json"
                 };
-                let schema = self.output.global_ref(json::schema_name(*schema));
+                let schema = self.json_schema(*schema);
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
@@ -5418,11 +5420,11 @@ impl Emitter<'_, '_> {
             Builtin::JsonEncode(schema)
             | Builtin::JsonDumps(schema)
             | Builtin::JsonDump(schema) => {
-                let schema = self.output.global_ref(json::schema_name(*schema));
                 let word = self.word(&args[0].value);
                 let ascii = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 let indent = self.word(&args[1].value);
                 let operand = if matches!(builtin, Builtin::JsonEncode(_)) {
+                    let schema = self.json_schema(*schema);
                     self.checked_instruction(format!("call ptr @imre_json_encode(i64 {word}, ptr @{schema}, i64 {indent}, i32 {ascii})"))
                 } else {
                     let indent_ty = self
@@ -5436,7 +5438,8 @@ impl Emitter<'_, '_> {
                     let sort =
                         self.instruction(format!("zext i1 {} to i32", args[4].value.operand));
                     let separators = self.word(&args[5].value);
-                    let sep_schema = self.output.global_ref(json::schema_name(args[5].value.ty));
+                    let sep_schema = self.json_schema(args[5].value.ty);
+                    let schema = self.json_schema(*schema);
                     let common = format!(
                         "i64 {word}, ptr @{schema}, i64 {indent}, i32 {text_indent}, i32 {ascii}, i32 {nan}, i32 {sort}, i64 {separators}, ptr @{sep_schema}"
                     );
