@@ -824,6 +824,11 @@ class _SSLReader(_io.RawIOBase):
             raise ValueError("I/O operation on closed file.")
         return True
 
+    def fileno(self):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        return self._sock.fileno()
+
     def readinto(self, buffer, /):
         self.readable()
         view = memoryview(buffer).cast("B")

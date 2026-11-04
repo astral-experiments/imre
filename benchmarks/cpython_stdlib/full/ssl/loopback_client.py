@@ -69,19 +69,30 @@ def main():
                 assert chunk
                 response += chunk
             assert response.strip() == repr(binding).encode("ascii")
+            fd = peer.fileno()
+            assert fd >= 0
             with peer.makefile("rb") as reader:
                 with peer.makefile("rb", buffering=0) as raw_reader:
+                    assert raw_reader.fileno() == reader.fileno() == fd
                     assert peer.send(memoryview(b"X\n")) == 2
                     buf = bytearray(b"??")
                     assert raw_reader.readinto(memoryview(buf)[1:]) == 1
                     assert buf == b"?x" and raw_reader.read(1) == b"\n"
                 peer.sendall(b"LAST LINE\n")
                 peer.close()
+                assert reader.fileno() == fd
                 assert reader.read(2) == b"la"
                 assert reader.readline() == b"st line\n"
                 peer.sendall(b"over\n")
                 assert reader.read() == b""
             assert reader.closed
+            for stream in (raw_reader, reader):
+                try:
+                    stream.fileno()
+                except ValueError as exc:
+                    assert type(exc) is ValueError
+                else:
+                    raise AssertionError("closed TLS reader returned a descriptor")
             print("VERIFIED_ECHO", hostname)
         peer.close()
         assert peer.get_channel_binding() is None
