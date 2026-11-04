@@ -80,4 +80,11 @@ def current():
                 assert child.stdin.closed
             else:
                 raise AssertionError("invalid empty input accepted")
+
+    for suffix in ("fin", None):
+        with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe, encoding="latin-1") as child:
+            child.stdin.reconfigure(write_through=False)
+            child.stdin.write("pré:")
+            assert child.communicate(suffix) == ("pré:" + (suffix or ""), None)
+            assert child.returncode == 0
     print("Popen text pipes passed")
