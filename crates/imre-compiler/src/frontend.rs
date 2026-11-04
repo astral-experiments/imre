@@ -1919,6 +1919,7 @@ fn annotation_with_aliases(
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
             "bytes" => Ok(Type::Bytes),
+            "bytearray" => Ok(Type::ByteArray),
             "BaseException" | "Exception" => Ok(Type::Exception),
             "ImportError" => Ok(Type::ImportException),
             "object" => Ok(Type::ObjectValue),
@@ -10369,6 +10370,37 @@ impl<'a> Checker<'a> {
             ) {
                 return self.task_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::ByteArray {
+                let mut args = vec![receiver];
+                let method = match (
+                    attribute.attr.as_str(),
+                    call.arguments.args.as_ref(),
+                    call.arguments.keywords.as_ref(),
+                ) {
+                    ("append", [arg], []) => {
+                        let value = self.expr(arg)?;
+                        if !matches!(value.ty, Type::Int | Type::Bool | Type::IntEnum(_)) {
+                            return Err(self.object_builtin_error("bytearray.append", call));
+                        }
+                        args.push(self.index_value(value, arg)?);
+                        Builtin::ByteArrayAppend
+                    }
+                    ("extend", [arg], []) => {
+                        let value = self.expr(arg)?;
+                        if !matches!(value.ty, Type::Bytes | Type::ByteArray) {
+                            return Err(self.object_builtin_error("bytearray.extend", call));
+                        }
+                        args.push(value);
+                        Builtin::ByteArrayExtend
+                    }
+                    ("reverse", [], []) => Builtin::ByteArrayReverse,
+                    _ => return Err(self.object_builtin_error("bytearray method", call)),
+                };
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(method, args),
+                });
+            }
             if let Some(element) = self.types.deque_element(receiver.ty) {
                 return self.deque_method(call, attribute, receiver, element);
             }
@@ -11022,7 +11054,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "bytes accepts zero arguments or one int, bytes, integer list, or integer tuple argument",
+                        "bytes accepts zero arguments or one int, bytes, bytearray, integer list, or integer tuple argument",
                     ));
                 }
             };
@@ -11037,11 +11069,14 @@ impl<'a> Checker<'a> {
             } else {
                 value
             };
-            if !matches!(value.ty, Type::Int | Type::ListInt | Type::Bytes) {
+            if !matches!(
+                value.ty,
+                Type::Int | Type::ListInt | Type::Bytes | Type::ByteArray
+            ) {
                 return Err(error(
                     self.source,
                     call,
-                    "bytes expects an int, bytes, integer list, or integer tuple",
+                    "bytes expects an int, bytes, bytearray, integer list, or integer tuple",
                 ));
             }
             return Ok(Expr {
@@ -11074,13 +11109,16 @@ impl<'a> Checker<'a> {
             return Err(self.object_builtin_error("dir", call));
         }
         if let [operand] = args.as_slice()
-            && matches!(operand.ty, Type::Str | Type::StrLiteral(_) | Type::Bytes)
+            && matches!(
+                operand.ty,
+                Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::ByteArray
+            )
             && self.unshadowed_builtin(&call.func, "type")
         {
-            let class = if operand.ty == Type::Bytes {
-                "bytes"
-            } else {
-                "str"
+            let class = match operand.ty {
+                Type::Bytes => "bytes",
+                Type::ByteArray => "bytearray",
+                _ => "str",
             };
             return Ok(partials::after(
                 operand.clone(),
@@ -11572,7 +11610,10 @@ impl<'a> Checker<'a> {
         }
         let (builtin, ty) = match name.id.as_str() {
             "bytearray" if self.unshadowed_builtin(&call.func, "bytearray") => {
-                return Err(self.object_builtin_error("bytearray", call));
+                if !args.is_empty() || !call.arguments.keywords.is_empty() {
+                    return Err(self.object_builtin_error("bytearray", call));
+                }
+                (Builtin::ByteArrayNew, Type::ByteArray)
             }
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
             "chr" if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool) => {
@@ -11699,6 +11740,7 @@ impl<'a> Checker<'a> {
                         args[0].ty,
                         Type::Str
                             | Type::Bytes
+                            | Type::ByteArray
                             | Type::StringIterable
                             | Type::ListInt
                             | Type::List(_)

@@ -147,6 +147,7 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
             1 => !(*(word as *const Bytes)).is_empty(),
             2 => object(word as *const Object).0.with(|s| match s {
                 super::Storage::Set(set) => !set.is_empty(),
+                super::Storage::ByteArray(bytes) => !bytes.is_empty(),
                 super::Storage::ObjectValue(v) => f64::from_bits(v.word as u64) != 0.0,
                 _ => crate::finish(s.sequence().map(|words| !words.values.is_empty()), false),
             }),

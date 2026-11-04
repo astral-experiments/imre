@@ -373,6 +373,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ByteArray(left), Storage::ByteArray(right)) => {
+                    Comparison::Done(left == right)
+                }
                 (Storage::ModuleMember(left), Storage::ModuleMember(right)) => {
                     Comparison::Done(left.equal_member(right))
                 }
@@ -791,6 +794,12 @@ unsafe fn write_repr_with(
                         path @ Storage::Path { .. } => {
                             output.write_str("PosixPath(")?;
                             super::exceptions::write_quoted_repr(path.path(), output)?;
+                            output.write_char(')')?;
+                            Ok(None)
+                        }
+                        Storage::ByteArray(bytes) => {
+                            output.write_str("bytearray(")?;
+                            super::bytes::write_quoted_repr(output, bytes)?;
                             output.write_char(')')?;
                             Ok(None)
                         }

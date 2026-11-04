@@ -408,6 +408,9 @@ impl Builtin {
             },
             Self::RegexCapture { known, .. } => Contract::new(!known, PreservesLists),
             Self::Document(_) => Contract::new(true, Unknown),
+            Self::ByteArrayReverse => Contract::new(false, PreservesLists),
+            Self::ByteArrayNew => Contract::new(false, PreservesOwners),
+            Self::ByteArrayAppend | Self::ByteArrayExtend => Contract::new(true, PreservesLists),
             Self::Bytes => Contract::new(
                 args.first().is_none_or(|arg| arg.ty != Type::Bytes),
                 PreservesLists,
@@ -1247,6 +1250,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_list"
                 | "imre_bytes_contains_int"
                 | "imre_hmac_compare_digest_str"
+                | "imre_bytearray_snapshot"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"

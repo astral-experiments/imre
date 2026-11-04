@@ -786,6 +786,7 @@ impl Checker<'_> {
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::BytesIO | Type::StringIO | Type::BinaryIO))
+            || types == [Type::ByteArray; 2]
             || types == [Type::Hash; 2])
         {
             return Err(error(

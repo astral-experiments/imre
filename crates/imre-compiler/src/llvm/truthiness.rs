@@ -100,6 +100,13 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {bit}, 0"))
                 }
+                Type::ByteArray => {
+                    let len = self.instruction(format!(
+                        "call i64 @imre_bytearray_len(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i64 {len}, 1"))
+                }
                 Type::StringIterable => {
                     let length = self.instruction(format!(
                         "call i64 @imre_string_iterable_len(i64 {})",

@@ -368,6 +368,7 @@ impl Checker<'_> {
             Type::Bool => "bool",
             Type::Float => "float",
             Type::Bytes => "bytes",
+            Type::ByteArray => "bytearray",
             Type::PlainObject => "object",
             Type::List(_) | Type::ListInt | Type::ByteOutput => "list",
             Type::Set(_) => "set",

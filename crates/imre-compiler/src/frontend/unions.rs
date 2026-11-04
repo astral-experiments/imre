@@ -451,6 +451,7 @@ impl Checker<'_> {
                 "str" => InstanceType::Exact(Type::Str),
                 "type" => InstanceType::Exact(Type::BuiltinClass),
                 "bytes" => InstanceType::Exact(Type::Bytes),
+                "bytearray" => InstanceType::Exact(Type::ByteArray),
                 "int" => InstanceType::Exact(Type::Int),
                 "bool" => InstanceType::Exact(Type::Bool),
                 "float" => InstanceType::Exact(Type::Float),
