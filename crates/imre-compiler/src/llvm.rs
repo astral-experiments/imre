@@ -7839,6 +7839,14 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::StringIter => self.call("imre_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::SortedSplitByteIter(separator) => Value {
+                ty: Type::Iterator,
+                operand: self.checked_pointer(format!(
+                    "call ptr @imre_str_sorted_split_byte_iter(ptr {}, i8 {separator})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::SplitByteIter(separator) => Value {
                 ty: Type::Iterator,
                 operand: self.checked_instruction(format!(
@@ -8910,6 +8918,16 @@ impl Emitter<'_, '_> {
         let forward = self.forward_cursors.get(&iterator).cloned();
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
+            ir::IterNextKind::SplitField => {
+                let field = self.instruction(format!(
+                    "call i64 @imre_split_field_next(ptr {})",
+                    iterator.operand
+                ));
+                (
+                    self.instruction(format!("icmp ne i64 {field}, 0")),
+                    Some(field),
+                )
+            }
             ir::IterNextKind::Generic => {
                 self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
                 let value_output = if value.is_some() {
@@ -10378,6 +10396,7 @@ declare i64 @imre_str_iter_next_codepoint(ptr)
 declare ptr @imre_str_iter_bounds(ptr, ptr)
 declare i64 @imre_utf8_next_non_ascii(ptr, ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
+declare i64 @imre_split_field_next(ptr)
 declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)
 declare ptr @imre_str_repeat(ptr, i64)
@@ -10426,6 +10445,7 @@ declare i32 @imre_str_isdigit(ptr)
 declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_str_split_byte_iter(ptr, i8)
+declare ptr @imre_str_sorted_split_byte_iter(ptr, i8)
 declare ptr @imre_str_matching_split_iter(ptr, ptr, i64, i8)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)

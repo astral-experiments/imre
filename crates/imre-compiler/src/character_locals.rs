@@ -83,7 +83,7 @@ fn specialize_function(function: &mut Function) {
         }
         Statement::Move(target, source) => link(&mut uses, *target, *source),
         Statement::IterNext {
-            kind: IterNextKind::Generic,
+            kind: IterNextKind::Generic | IterNextKind::SplitField,
             key,
             value,
             ..

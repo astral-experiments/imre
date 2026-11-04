@@ -1254,6 +1254,7 @@ pub(crate) enum Builtin {
     SplitLinesIter,
     /// Iterates every field of a forward split by a literal ASCII separator.
     SplitByteIter(u8),
+    SortedSplitByteIter(u8),
     MatchingSplitIter(u8),
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,
@@ -2476,6 +2477,8 @@ pub(crate) struct ExceptHandler {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IterNextKind {
     Generic,
+    /// An owned field from a private single-byte split cursor.
+    SplitField,
     String,
     CodePoint,
     /// One unsigned UTF-8 byte. The loop lowerer creates a hidden string
