@@ -177,10 +177,12 @@ pub(super) fn call(
                 "mode" => return Ok(ctx.text(mode)),
                 _ => {}
             }
-        } else if name == "name"
-            && let Some(fd) = handle.socket_reader_name()
-        {
-            return Ok(ctx.int(i64::from(fd)));
+        } else if let Some(fd) = handle.socket_reader_name() {
+            match name {
+                "name" => return Ok(ctx.int(i64::from(fd))),
+                "mode" => return Ok(ctx.text("rb")),
+                _ => {}
+            }
         }
         return Err(Error::new(
             "AttributeError",
