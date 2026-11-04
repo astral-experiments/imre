@@ -903,7 +903,7 @@ impl Context {
             Value::MemoryView { .. } => return self.memoryview_iterator(id),
             Value::Array(_) => (id, "array.arrayiterator"),
             Value::List(_) => (id, "list_iterator"),
-            Value::Tuple(_) => (id, "tuple_iterator"),
+            Value::Tuple(_) | Value::NamedTuple { .. } => (id, "tuple_iterator"),
             Value::SurrogateStr(_) => (id, "str_iterator"),
             Value::Range(ref range) => {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
@@ -1039,11 +1039,12 @@ impl Context {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(self.scalar_value(*sequence)) {
-            Value::List(values) | Value::Tuple(values) if *reverse => {
-                IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
-            }
-            Value::List(values) | Value::Tuple(values) => {
-                IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
+            Value::List(values) | Value::Tuple(values) | Value::NamedTuple { values, .. } => {
+                if *reverse {
+                    IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
+                } else {
+                    IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
+                }
             }
             Value::SurrogateStr(points) if *reverse => {
                 IteratorSlice::ReversedCodepoints(&points[..*offset])
@@ -2537,6 +2538,7 @@ impl Context {
                 "__repr__",
                 "__getitem__",
                 "__getnewargs__",
+                "__iter__",
                 "__len__",
                 "count",
                 "index",
