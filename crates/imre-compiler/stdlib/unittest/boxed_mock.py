@@ -556,6 +556,8 @@ class _MagicSlot:
         setattr(self.parent, self.name, child)
         if self.name == "__exit__":
             child.return_value = False
+        elif self.name == "__hash__":
+            child.return_value = object.__hash__(self.parent)
         elif self.name == "__int__":
             child.return_value = 1
         elif self.name == "__iter__":
@@ -621,7 +623,7 @@ class Mock(CallableMixin, NonCallableMock):
 
 
 class MagicMock(Mock):
-    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__setitem__", "__int__", "__iter__", "__next__")
+    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__setitem__", "__hash__", "__int__", "__iter__", "__next__")
 
 
 class NonCallableMagicMock(NonCallableMock):
