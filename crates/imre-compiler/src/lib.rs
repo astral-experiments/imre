@@ -112,6 +112,8 @@ pub struct CompileOptions {
     pub stdlib_fallback: Option<PathBuf>,
     /// Existing pure-Python site directory of a Python-style launcher.
     pub system_site: Option<PathBuf>,
+    /// A source sitecustomize module is visible before the command path is prepended.
+    pub sitecustomize: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
 }
@@ -141,18 +143,20 @@ impl CompileOptions {
         path: &Path,
         module_root: Option<&Path>,
         filesystem: watch::FileSystem<'_>,
-        ordered_command_import: &mut bool,
+        import_failure: &mut Option<modules::EntryImportFailure>,
     ) -> Result<modules::SourceGraph, String> {
         if let Some(command) = &self.command {
-            return modules::SourceGraph::command(
-                command,
-                self,
-                filesystem,
-                ordered_command_import,
-            );
+            return modules::SourceGraph::command(command, self, filesystem, import_failure);
         }
         if let Some((flags, executable)) = &self.script_startup {
-            return modules::SourceGraph::script(path, flags, executable, self, filesystem);
+            return modules::SourceGraph::script(
+                path,
+                flags,
+                executable,
+                self,
+                filesystem,
+                import_failure,
+            );
         }
         modules::SourceGraph::load_with(
             path,
@@ -322,17 +326,18 @@ fn object_fallback<const SPLIT: bool, T>(
             .map(boxed)
             .ok_or_else(|| "could not compile the module entry".to_owned());
     }
-    let tracing = options
-        .python_startup()
-        .is_some_and(|(flags, _)| flags.tracemalloc > 0);
-    let mut ordered_command_import = false;
+    let boxed_startup = options.sitecustomize
+        || options
+            .python_startup()
+            .is_some_and(|(flags, _)| flags.tracemalloc > 0);
+    let mut import_failure = None;
     let mut infer_sets = true;
-    let (error, graph, traced_typed_entry) = loop {
+    let (error, graph, checked_entry) = loop {
         let mut graph = match options.load_graph(
             path,
             module_root,
             filesystem.reborrow(),
-            &mut ordered_command_import,
+            &mut import_failure,
         ) {
             Ok(graph) => graph,
             Err(error) => break (error, None, false),
@@ -341,11 +346,11 @@ fn object_fallback<const SPLIT: bool, T>(
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
         }
         match lower(&mut graph) {
-            Ok(value) if !tracing => return Ok(value),
-            // Typed code passed its ordinary checks. Re-emit its allocations through the heap.
+            Ok(value) if !boxed_startup => return Ok(value),
+            // Tracing and startup imports both need the same Python heap as the entry.
             Ok(_) => {
                 break (
-                    "allocation tracing requires a boxed entry".to_owned(),
+                    "Python startup requires a boxed entry".to_owned(),
                     Some(graph),
                     true,
                 );
@@ -354,7 +359,7 @@ fn object_fallback<const SPLIT: bool, T>(
             // or mask a diagnostic that the ordinary checked-file path would have issued.
             Err(_) if graph.set_layout_hint.get() == modules::SetLayoutHint::Applied => {
                 infer_sets = false;
-                ordered_command_import = false;
+                import_failure = None;
             }
             Err(error) => break (error, Some(graph), false),
         }
@@ -371,8 +376,8 @@ fn object_fallback<const SPLIT: bool, T>(
         return Err(error);
     }
     let operation = graph.as_ref().and_then(|g| {
-        if traced_typed_entry {
-            Some(dynamic::ObjectOperation::TracedEntry)
+        if checked_entry {
+            Some(dynamic::ObjectOperation::CheckedEntry)
         } else if g.class_layout_error.borrow().as_ref() == Some(&error) {
             Some(dynamic::ObjectOperation::ClassLayout)
         } else {
@@ -381,7 +386,11 @@ fn object_fallback<const SPLIT: bool, T>(
             .then_some(dynamic::ObjectOperation::Builtin)
         }
     });
+    let ordered_command_import = options.command.is_some()
+        && import_failure == Some(modules::EntryImportFailure::AfterStatement);
     let runtime_imports = options.runtime_imports
+        || (options.sitecustomize
+            && import_failure == Some(modules::EntryImportFailure::MissingModule))
         || operation.is_some()
         || graph
             .as_ref()

@@ -89,7 +89,7 @@ impl BuildOptions {
             )?;
         }
         if !flags.ignore_environment
-            && let Some(paths) = env::var_os("PYTHONPATH")
+            && let Some(paths) = env::var_os("PYTHONPATH").filter(|value| !value.is_empty())
         {
             for path in env::split_paths(&paths) {
                 let path = if path.as_os_str().is_empty() {
@@ -136,17 +136,28 @@ impl BuildOptions {
                 options.compile.script_startup = Some((flags, executable));
             }
         }
-        let (_, executable) = options.compile.python_startup().expect("Python invocation");
+        let (flags, executable) = options.compile.python_startup().expect("Python invocation");
         let version = imre_compiler::PYTHON_VERSION;
         let layout = imre_ast::layout::InterpreterLayout::new(
             executable.as_ref(),
             (version.major, version.minor),
         )
         .map_err(|e| e.to_string())?;
-        options.compile.system_site = layout
+        let system_site = layout
             .path("posix_prefix", "purelib", true)
             .map(PathBuf::from)
             .filter(|p| p.is_dir());
+        // site runs before Python prepends the script directory or command cwd.
+        options.compile.sitecustomize = !flags.no_site
+            && options
+                .compile
+                .extension_paths
+                .iter()
+                .chain(&system_site)
+                .any(|root| {
+                    root.join("sitecustomize.py").is_file() || root.join("sitecustomize").is_dir()
+                });
+        options.compile.system_site = system_site;
         Ok(options)
     }
 

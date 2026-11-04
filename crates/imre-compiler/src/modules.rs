@@ -3476,7 +3476,7 @@ impl SourceGraph {
         command: &crate::PythonCommand,
         options: &crate::CompileOptions,
         fs: FileSystem<'_>,
-        ordered_command_import: &mut bool,
+        import_failure: &mut Option<EntryImportFailure>,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let mut loader = Loader::new(
@@ -3496,14 +3496,7 @@ impl SourceGraph {
             &command.source,
             crate::SourceKind::Command,
         )?;
-        if let Err(error) = loader.scan(entry) {
-            // Only a valid command blocked at its own late import may switch to
-            // the boxed importer, which executes statements in source order.
-            *ordered_command_import = loader.late_entry_import
-                && loader.modules[entry].parsed.has_no_syntax_errors()
-                && loader.session.has_valid_semantic_syntax(entry);
-            return Err(error);
-        }
+        loader.scan_python_entry(entry, import_failure)?;
         let reachable_only = loader.reachable_only;
         let mut graph = loader.finish(
             entry,
@@ -3523,6 +3516,7 @@ impl SourceGraph {
         executable: &str,
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
+        import_failure: &mut Option<EntryImportFailure>,
     ) -> Result<Self, String> {
         let filename = std::env::current_dir()
             .map_err(|err| err.to_string())?
@@ -3555,7 +3549,7 @@ impl SourceGraph {
         let reachable = options.reachable_only || options.entry_profile.is_some();
         loader.reachable_only = reachable;
         let id = loader.add(entry.clone(), entry, "__main__".into(), false, &source)?;
-        loader.scan(id)?;
+        loader.scan_python_entry(id, import_failure)?;
         let mut graph = loader.finish(id, filename, reachable, options.entry_profile.as_deref())?;
         graph.command_startup = Some((flags.clone(), executable.to_owned()));
         Ok(graph)
@@ -3967,6 +3961,12 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     })
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum EntryImportFailure {
+    AfterStatement,
+    MissingModule,
+}
+
 struct Loader<'a> {
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
@@ -3985,7 +3985,7 @@ struct Loader<'a> {
     /// A from-import of a still-initializing module observes the value at that point.
     partial_value_imports: HashSet<DefinitionId>,
     ordered_imports: bool,
-    late_entry_import: bool,
+    import_failure: Option<EntryImportFailure>,
     import_depth: usize,
     allow_imports: bool,
     skip_current_root: bool,
@@ -4044,7 +4044,7 @@ impl<'a> Loader<'a> {
             loading: HashSet::new(),
             partial_value_imports: HashSet::new(),
             ordered_imports: false,
-            late_entry_import: false,
+            import_failure: None,
             import_depth: 0,
             allow_imports: true,
             skip_current_root: false,
@@ -4271,6 +4271,22 @@ impl<'a> Loader<'a> {
         Ok(graph)
     }
 
+    /// A valid Python entry may resolve certain failed imports when it executes.
+    fn scan_python_entry(
+        &mut self,
+        id: ModuleId,
+        failure: &mut Option<EntryImportFailure>,
+    ) -> Result<(), String> {
+        self.scan(id).inspect_err(|_| {
+            if self.import_failure.is_some()
+                && self.modules[id].parsed.has_no_syntax_errors()
+                && self.session.has_valid_semantic_syntax(id)
+            {
+                *failure = self.import_failure;
+            }
+        })
+    }
+
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
         let parsed = self.modules[id].parsed.clone();
         let mut imports = Vec::new();
@@ -4440,7 +4456,8 @@ impl<'a> Loader<'a> {
                                     || nested_source && matches!(stmt, ast::Stmt::Expr(_))
                             });
                         if id == 0 || !simple && !ordered {
-                            self.late_entry_import = id == 0;
+                            self.import_failure =
+                                (id == 0).then_some(EntryImportFailure::AfterStatement);
                             return Err(self.modules[id].error(
                                 statement,
                                 "imports must precede executable module statements",
@@ -5488,6 +5505,7 @@ impl<'a> Loader<'a> {
         }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
             if portions.is_empty() {
+                self.import_failure = Some(EntryImportFailure::MissingModule);
                 return Err(format!(
                     "cannot resolve first-party module {name:?} under {}",
                     self.root.display()

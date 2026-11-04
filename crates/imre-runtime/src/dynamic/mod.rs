@@ -2942,6 +2942,54 @@ impl Context {
         })
     }
 
+    /// Publish the initial main namespace before site imports any user code.
+    fn initialize_startup_site(&mut self) -> Result<()> {
+        let (main, scope, _, _) = self.allocate_import_module("__main__", &[], None)?;
+        self.bind(scope, "__doc__", NONE);
+        self.bind(scope, "__spec__", NONE);
+        let builtins = self.module("builtins")?;
+        self.bind(scope, "__builtins__", builtins);
+        let loader = self.lookup_attr(self.bootstrap_module, "_NativeImporter")?;
+        self.bind(scope, "__loader__", loader);
+        self.publish_module("__main__", main)?;
+        let site = self.module("site")?;
+        let hook = self.lookup_attr(site, "execsitecustomize")?;
+        self.call(hook, Vec::new(), Vec::new())?;
+        Ok(())
+    }
+
+    /// Prepend the CLI entry to the list currently installed as sys.path.
+    fn insert_startup_path0(&mut self) -> Result<()> {
+        let entry = if self.config["command_source"].is_string() {
+            String::new()
+        } else if self.config["module_entry"].is_string() && self.config["path_entry"] != true {
+            let Ok(cwd) = std::env::current_dir() else {
+                return Ok(());
+            };
+            cwd.to_string_lossy().into_owned()
+        } else {
+            self.config["paths"][0]
+                .as_str()
+                .expect("compiler path0")
+                .to_owned()
+        };
+        let path = self
+            .sys_binding("path")?
+            .ok_or_else(|| Error::new("RuntimeError", "unable to get sys.path"))?;
+        let storage = self
+            .list_storage(path)
+            .ok_or_else(|| Error::new("SystemError", "bad argument to internal function"))?;
+        let entry = self.text(entry);
+        let Value::List(items) = self.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        items
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        items.insert(0, entry);
+        Ok(())
+    }
+
     /// Before installing the registry, execute its dependencies and the script's explicit entry.
     fn load_bootstrap_module(
         &mut self,
@@ -3060,6 +3108,26 @@ impl Context {
         locations: &[PathBuf],
         source: Option<&(PathBuf, importlib::SourceBody)>,
     ) -> Result<(Id, Id, Id, Option<Id>)> {
+        // A startup hook can populate or replace __main__. Execute the application
+        // in its current namespace, leaving any bindings the hook installed intact.
+        if name == "__main__"
+            && self.config["sitecustomize"] == true
+            && let Some((path, _)) = source
+        {
+            let key = self.text(name);
+            if let Some(module) = self.public_registered_module(key)?
+                && let Value::Module { scope, .. } = *self.heap.get(module)
+            {
+                let origin = (self.config["command"] != true).then(|| {
+                    let file = self.text(path.to_string_lossy());
+                    if self.scope_name(scope, "__file__").is_none() {
+                        self.bind(scope, "__file__", file);
+                    }
+                    file
+                });
+                return Ok((module, scope, key, origin));
+            }
+        }
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
         let name_id = self.text(if name == "_collections_abc" {

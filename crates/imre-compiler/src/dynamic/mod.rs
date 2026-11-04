@@ -583,7 +583,7 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
 }
 
 pub(crate) enum ObjectOperation {
-    TracedEntry,
+    CheckedEntry,
     Builtin,
     OrderedCommandImport,
     ClassLayout,
@@ -909,7 +909,7 @@ pub(crate) fn compile<const SPLIT: bool>(
             && (!provider_script || owner == "__main__")
             && !through_getter
             && imports.needs_typed_machinery()
-            && !matches!(operation, Some(ObjectOperation::TracedEntry))
+            && !matches!(operation, Some(ObjectOperation::CheckedEntry))
             && (owner == "__main__"
                 || machinery_graph
                     .is_none_or(|graph| graph.modules.iter().any(|m| m.name == owner)))
@@ -1158,6 +1158,7 @@ pub(crate) fn compile<const SPLIT: bool>(
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
+        "sitecustomize":options.sitecustomize,"path0":options.path_entry || !safe_path,
         "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),

@@ -186,6 +186,51 @@ def check_sysconfig_build(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (0, b"build markers passed\n", b""), result
 
 
+def check_script_sitecustomize(imre, root, run):
+    root = root.resolve()
+    app = root / "script-app"
+    hooks = root / "startup-hooks"
+    packages = root / "startup-packages"
+    for directory in (app, hooks, packages):
+        directory.mkdir()
+    (app / "sitecustomize.py").write_text("print('script-local hook ran')\n")
+    (hooks / "sitecustomize.py").write_text(f"import sys\nsys.path.insert(0, {str(packages)!r})\n")
+    (packages / "startup_plugin.py").write_text("value = 'plugin loaded'\n")
+    script = app / "entry.py"
+    script.write_text(
+        "import importlib, sys\n"
+        "print(sys.path[0] == sys.argv[1], sys.argv[2] in sys.path)\n"
+        "try:\n"
+        "    print(importlib.import_module(sys.argv[3]).value)\n"
+        "except ModuleNotFoundError as error:\n"
+        "    print(error.name)\n"
+    )
+    env = {"PYTHONPATH": str(hooks)}
+    for flag, stdout in [
+        ("-B", b"True True\nplugin loaded\n"),
+        ("-BS", b"True True\nstartup_plugin\n"),
+        ("-BE", b"True False\nstartup_plugin\n"),
+    ]:
+        result = run(
+            imre, flag, script, app, hooks, "startup_plugin", extra=env, timeout=300,
+        )
+        assert (result.returncode, result.stdout, result.stderr) == (0, stdout, b""), result
+
+    literal = app / "literal_import.py"
+    literal.write_text("from startup_plugin import value\nprint(value)\n")
+    result = run(imre, "-B", literal, extra=env, timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"plugin loaded\n", b""), result
+
+    invalid = app / "typed_argument.py"
+    invalid.write_text(
+        "def take(value: int) -> int:\n    return value\n"
+        "\ndef dormant() -> int:\n    return take('bad')\n"
+        "\nprint(1)\n"
+    )
+    result = run(imre, "-B", invalid, extra=env)
+    assert result.returncode > 0 and not result.stdout and b"expected int, got str" in result.stderr, result
+
+
 def check_explicit_site_directory(imre, root, run):
     site_dir = root / "extra-site"
     plugins = site_dir / "plugins"
@@ -1429,6 +1474,7 @@ def main():
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
+            check_script_sitecustomize(imre, root, run)
             check_explicit_site_directory(imre, root, run)
         if sys.platform.startswith("linux"):
             check_os_abort(imre, run)
