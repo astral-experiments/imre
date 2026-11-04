@@ -110,17 +110,6 @@ pub(in crate::dynamic) struct Pattern {
 }
 
 impl Pattern {
-    fn for_subject(&self, ctx: &Context, string: Id) -> &Self {
-        if matches!(
-            ctx.heap.get(ctx.scalar_value(string)),
-            Value::SurrogateStr(_)
-        ) {
-            self.surrogate_literals.as_deref().unwrap_or(self)
-        } else {
-            self
-        }
-    }
-
     /// Synthetic Scanner patterns do not have a Python pattern object to compare.
     pub(in crate::dynamic) fn same_program(&self, other: &Self) -> bool {
         if self.source == NONE
@@ -905,6 +894,8 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
                 return Err(error);
             }
         }
+    } else if let Value::Str(text) = scalar {
+        surrogate::class_patterns(text)
     } else {
         None
     };
@@ -1635,29 +1626,32 @@ struct SearchSubject {
 }
 
 impl SearchSubject {
-    fn new(ctx: &Context, pattern: &Pattern, id: Id, method: &str) -> Result<Self> {
-        let projection = match ctx.heap.get(ctx.scalar_value(id)) {
-            Value::SurrogateStr(points)
-                if matches!(
-                    ctx.heap.get(ctx.scalar_value(pattern.source)),
-                    Value::SurrogateStr(_)
-                ) =>
-            {
-                Some(surrogate::Projection::for_literals(method, points)?)
+    fn for_pattern<'a>(
+        ctx: &Context,
+        pattern: &'a Pattern,
+        id: Id,
+        method: &str,
+    ) -> Result<(&'a Pattern, Self)> {
+        let mut subject = Self {
+            id,
+            bytes_pattern: pattern.bytes,
+            projection: None,
+        };
+        if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(id))
+            && !pattern.bytes
+        {
+            if let Some(encoded) = &pattern.surrogate_literals {
+                subject.projection = Some(surrogate::Projection::for_literals(method, points)?);
+                return Ok((encoded, subject));
             }
-            Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
+            subject.projection = Some(surrogate::Projection::new(
                 ctx.str_value(pattern.source).ok(),
                 &pattern.regex,
                 method,
                 points,
-            )?),
-            _ => None,
-        };
-        Ok(Self {
-            id,
-            bytes_pattern: pattern.bytes,
-            projection,
-        })
+            )?);
+        }
+        Ok((pattern, subject))
     }
 
     fn bytes<'a>(&'a self, ctx: &'a Context) -> Result<&'a [u8]> {
@@ -1727,8 +1721,7 @@ pub(super) fn search(
             ));
         }
     };
-    let pattern = pattern.for_subject(ctx, string);
-    let subject = SearchSubject::new(ctx, pattern, string, method)?;
+    let (pattern, subject) = SearchSubject::for_pattern(ctx, &pattern, string, method)?;
     let text = subject.bytes(ctx)?;
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {

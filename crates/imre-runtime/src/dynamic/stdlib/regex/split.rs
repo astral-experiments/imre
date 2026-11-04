@@ -39,8 +39,7 @@ pub(super) fn split(
         ));
     };
     let pattern = Rc::clone(pattern);
-    let pattern = pattern.for_subject(ctx, string);
-    let subject = SearchSubject::new(ctx, pattern, string, "split")?;
+    let (pattern, subject) = SearchSubject::for_pattern(ctx, &pattern, string, "split")?;
     let text = subject.bytes(ctx)?;
     let length = text.len();
     let mut pieces = Vec::new();

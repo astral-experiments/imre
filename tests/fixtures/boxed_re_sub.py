@@ -180,3 +180,21 @@ def current():
     assert re.compile("[^\ud800-\udfff]+").sub("-", text) == "-\ud800\ud801-\udfff-"
     above = re.compile("[\udfff-\U0010ffff]+")
     assert above.findall("\udc80\udfff\U000f04ff\udcff") == ["\udfff\U000f04ff"]
+
+    escaped = re.compile(r"[\ud800-\U0000dfff]+")
+    assert escaped.pattern == r"[\ud800-\U0000dfff]+"
+    assert escaped.subn("-", "\U000f04ff\udcff\ud800") == ("\U000f04ff-", 1)
+    scalar = re.compile("[^\u0000-\ud7ff\ue000-\U0010ffff]")
+    assert scalar.search("\ud7ff\ue000\U0010ffff") is None
+    assert scalar.search("\U000f04ff\udcff").span() == (1, 2)
+    try:
+        re.compile(r"[\udfff-\ud800]")
+    except re.PatternError as exc:
+        assert (exc.msg, exc.pos) == (r"bad character range \u-\u", 9)
+    else:
+        raise AssertionError("descending Unicode escape range accepted")
+
+    outside = re.compile(r"[^a\ud7ff\ue000]", re.I)
+    assert outside.findall("A\ud7fe\ud7ff\ud800\ue000\ue001\U000f04ff") == [
+        "\ud7fe", "\ud800", "\ue001", "\U000f04ff",
+    ]
