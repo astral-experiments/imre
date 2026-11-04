@@ -249,6 +249,14 @@ REJECTED = {
             "typed('wrong')\n"
         ),
     }, "expected int, got str"),
+    "fma_preserves_typed_arguments": ({
+        "main.py": (
+            "from math import fma\n"
+            "def typed(n: int) -> int: return n\n"
+            "fma(1.0, 2.0, 3.0)\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unused_warn_preserves_typed_arguments": ({
         "main.py": (
             "from warnings import warn\n"

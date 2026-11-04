@@ -51,6 +51,25 @@ pub(super) fn call(
         let y = as_double(ctx, y)?;
         return Ok(ctx.alloc(Value::Float(x.copysign(y))));
     }
+    if operation == "fma" {
+        let &[x, y, z] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("fma expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let x = as_double(ctx, x)?;
+        let y = as_double(ctx, y)?;
+        let z = as_double(ctx, z)?;
+        let result = x.mul_add(y, z);
+        if result.is_nan() && !x.is_nan() && !y.is_nan() && !z.is_nan() {
+            return Err(Error::new("ValueError", "invalid operation in fma"));
+        }
+        if result.is_infinite() && x.is_finite() && y.is_finite() && z.is_finite() {
+            return Err(Error::new("OverflowError", "overflow in fma"));
+        }
+        return Ok(ctx.alloc(Value::Float(result)));
+    }
     if operation == "log" {
         let (value, base) = match args {
             [value] => (value, None),
