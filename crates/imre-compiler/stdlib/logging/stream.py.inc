@@ -57,12 +57,6 @@ class NullHandler(Handler):
 
 class StreamHandler(Handler):
     stream: _TextOutput | None
-    terminator: str
-
-    def __init__(self, stream: _TextOutput | None = None) -> None:
-        super().__init__()
-        self.stream = sys.stderr if stream is None else stream
-        self.terminator = "\n"
 
     def flush(self) -> None:
         with self.lock:

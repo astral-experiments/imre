@@ -144,9 +144,6 @@ def _handle_error(record):
         del exc
 
 
-StreamHandler.terminator = "\n"
-
-
 class FileHandler(StreamHandler):
     def __init__(self, filename, mode="a", encoding=None, delay=False, errors=None):
         self.baseFilename = os.path.abspath(os.fspath(filename))

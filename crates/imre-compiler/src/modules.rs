@@ -5072,6 +5072,8 @@ impl<'a> Loader<'a> {
                     "\n",
                     include_str!("../stdlib/logging/stream.py.inc"),
                     "\n",
+                    include_str!("../stdlib/logging/typed_stream.py.inc"),
+                    "\n",
                     include_str!("../stdlib/logging/classes.py")
                 ),
             )),
