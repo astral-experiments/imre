@@ -15,6 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unix_permissions(0o644);
     for name in [
         "_pydatetime.py",
+        "tarfile.py",
         "xml/__init__.py",
         "xml/etree/__init__.py",
         "xml/etree/ElementPath.py",

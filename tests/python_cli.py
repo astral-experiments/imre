@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
@@ -88,10 +89,21 @@ def check_installed_site(imre, root, run):
         if companion.exists():
             (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
     name = "xml.etree.ElementTree"
-    use_xml = "import importlib, sys; print(importlib.import_module(sys.argv[1]).Element('root').tag)"
+    sample = root / "sample.tar"
+    member = root / "payload"
+    member.write_bytes(b"archive member")
+    with tarfile.open(sample, "w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "sample"}) as tar:
+        tar.add(member, arcname="payload")
+    use_sources = (
+        "import importlib, sys, tarfile\n"
+        "print(importlib.import_module(sys.argv[1]).Element('root').tag)\n"
+        "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
+        "    with tar.extractfile('payload') as member:\n"
+        "        assert member.read() == b'archive member'\n"
+    )
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
-    bare = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    bare = run(launcher, "-IB", "-c", use_sources, name, sample, timeout=300)
     assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
     opaque = run(
         launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
@@ -108,7 +120,7 @@ def check_installed_site(imre, root, run):
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported
     archive.write_bytes(exported.stdout)
-    packaged = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
     shadow = root / "shadow_xml"
     shadow.mkdir()

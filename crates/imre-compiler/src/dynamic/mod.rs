@@ -672,6 +672,7 @@ pub(crate) fn compile<const SPLIT: bool>(
         && (src.contains("logging")
             || src.contains("tokenize")
             || src.contains("configparser")
+            || src.contains("tarfile")
             || src.contains("_pyio")
             || !src.is_ascii());
     let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
@@ -715,7 +716,9 @@ pub(crate) fn compile<const SPLIT: bool>(
     let tokenize_script = !object_entry && imports_provider("tokenize");
     let configparser_script = !object_entry && imports_provider("configparser");
     let pyio_script = !object_entry && imports_provider("_pyio");
-    let fallback_script = logging_script || tokenize_script || configparser_script || pyio_script;
+    let tarfile_script = !object_entry && imports_provider("tarfile");
+    let fallback_script =
+        logging_script || tokenize_script || configparser_script || pyio_script || tarfile_script;
     let ordered_only = !object_entry && !fallback_script;
     if ordered_only
         && (!ordered_command
@@ -971,8 +974,16 @@ pub(crate) fn compile<const SPLIT: bool>(
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
                 let bundled = bundled_module_source(&prefix);
+                if prefix == "tarfile" {
+                    // The installed ZIP supplies the module. Collect the providers it imports.
+                    let path = Path::new(bundled_root).join("tarfile.py");
+                    let imports =
+                        imports_for_module(&path, include_str!("../../stdlib/tarfile.py"))?;
+                    work.push_back((prefix.clone(), false, imports));
+                }
                 if implicit_site.is_some()
                     && (bundled.is_some()
+                        || prefix == "tarfile"
                         || imre_ast::providers::provider(&prefix).is_some()
                         || prefix
                             .rsplit_once('.')
