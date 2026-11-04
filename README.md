@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 4, 2026, Imre has a paired pass for **11,833 of 16,202 tests (73.0%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,900 of 16,202 tests (73.4%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -164,10 +164,10 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `fractions` | 50 | 50 | 0 | The ordinary fractions module ran all 50 original parents. Every parent passed on pinned stock and on public Imre O0 and O3. |
 | `glob` | 22 | 24 | 0 | On Linux, CPython and both native builds passed 22 of the 24 tests in the complete module, including the open-file stress test. All three skipped the two Windows tests. |
 | `gzip` | 68 | 75 | 0 | All 66 previous passes repeated. The public whole suite passed 69 of 75 at both native levels. The two new eligible originals cover peek and a file object without a name. A prior compiler failure keeps one CLI result under review. |
-| `inspect` | 212 | 362 | 0 | All 362 upstream tests ran on one public revision. Both native levels passed 212, including 27 newly recorded generator-state, call-argument, descriptor and signature tests. |
-| `math` | 36 | 89 | 0 | The public 89-case suite passed 35. The selected `test.test_math.MathTests.testIsfinite` (occurrence 1) passed on stock and both native levels after the isfinite fix. |
+| `inspect` | 274 | 362 | 0 | Stock passed all 362 originals. Both native levels passed 274 on the public revision, retaining all 212 earlier passes and adding 62. |
+| `math` | 39 | 89 | 0 | Stock passed all 89 originals. Both native levels passed 39 on the public revision, including atan2, sine, and tangent. |
 | `ssl` | 50 | 195 | 0 | Stock passed 178 of 195 originals and skipped 17. Both native levels passed 50 in the complete public suite, including `test.test_ssl.SSLErrorTests.test_lib_reason` (occurrence 1). |
-| `struct` | 17 | 43 | 0 | All 43 originals ran to completion on a public release build. Stock passed 41 and skipped two. Both native levels passed 17, including all eight from the earlier reconstructed baseline. |
+| `struct` | 19 | 43 | 0 | Both native levels passed the two fixed-width Pascal string originals. Each run discovered all 43 upstream cases before selecting its original. |
 | `tokenize` | 53 | 130 | 0 | The unchanged test_max_indent passed on stock and public Imre at O0 and O3. It adds one new paired pass. |
 | `tomllib` | 17 | 17 | 0 | All 17 originals passed on stock and public O0/O3 through both the package entry point and the three explicit upstream test modules. |
 | `types` | 134 | 141 | 1 | Two Linux workers passed the integer and float locale-formatting originals at stock and both native levels with genuine en_US numeric data. |
@@ -176,7 +176,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 252 | 383 | 0 | Across two public revisions, 249 distinct ZIP originals passed on stock and both native levels. Of those, 48 are new and 201 repeat earlier passes. Three earlier CLI passes failed in the later complete runs. The cumulative ledger contains 252 of 383. |
 | `zoneinfo` | 227 | 261 | 2 | One full public run passed 227 of 261 originals. A second machine verified 217 on the preceding public version and all ten additional cache originals on the newer one. Stock passed 233 and skipped 28. Two private-cache omissions remain in the denominator. |
-| **Measured total (19 of 19 families)** | **2,120** | **2,875** | **10** |  |
+| **Measured total (19 of 19 families)** | **2,187** | **2,875** | **10** |  |
 
 ### Whole-suite baselines for later additions
 
@@ -185,17 +185,20 @@ We track these families separately to keep the original 16,202-test baseline com
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
 | `binascii` | 32 | 93 | 76 passed, 17 skipped | 32 passed, 8 failures, 36 errors, 17 skipped |
-| `http.client` | 130 | 144 | 139 passed, 5 skipped | 130 passed, 10 errors, 4 skipped |
+| `http.client` | 131 | 144 | 139 passed, 5 skipped | 131 passed, 9 errors, 4 skipped |
 | `pyexpat` | 33 | 60 | 47 passed, 13 skipped | 33 passed, 13 errors, 14 skipped |
+| `shlex` | 18 | 19 | 19 passed | 18 passed, 1 skipped |
 | `zlib` | 57 | 76 | 74 passed, 2 skipped | 57 passed, 15 errors, 4 skipped |
 
 Seven XML encoding tests account for the increase from 26 to 33 passes. Both independent Linux workers registered all 60 originals. One class-setup skip occurred before its method ran, so unittest reported 59 tests. [Public Imre revision](https://github.com/astral-experiments/imre/commit/56f7c1d949541a578424c7fdb6db103c7b30beab)
 
 The zlib suite retained 55 earlier passes and added two tests for copying decompressors. Two Linux workers reproduced the 57 passing originals across the earlier suite, the public copy fix, and a complete later run. [Public copy fix](https://github.com/astral-experiments/imre/pull/5158) and [full-suite revision](https://github.com/astral-experiments/imre/commit/dab64ec6ec1617f7cf6cca400351881e13f90044).
 
-Both native levels repeated 106 earlier passes and added 24 across IDNA hostnames, request-body charsets and IPv6 header formatting. All 144 upstream cases ran. [Full-suite revision](https://github.com/astral-experiments/imre/commit/a38e91a7b3eaee245f648c3df0cb733854a565c6).
+Both native levels retained the earlier 130 passes and passed the TLS 1.3 post-handshake authentication case. [Full-suite revision](https://github.com/astral-experiments/imre/commit/87716da5bdbcc7d0d33f0eb4470ae828e10eb1e8).
 
 Four CRC32 originals raised the whole-suite count from 28 to 32. Stock and both native levels also accepted an intact ZIP member and rejected a corrupted copy. [CRC32 revision](https://github.com/astral-experiments/imre/commit/2674c357fa343457574ce1e9ad701361e65fe98b).
+
+Both native levels skipped the upstream CPython-specific lazy-import test. It stays in the denominator. [Full-suite revision](https://github.com/astral-experiments/imre/commit/87f33807d3a0108053fcd07421856c6aadef4f4f).
 
 ## Design
 
