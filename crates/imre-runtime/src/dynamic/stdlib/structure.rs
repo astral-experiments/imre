@@ -512,10 +512,50 @@ fn pack_word(
             )),
         },
         b'?' => ctx.truth(id).map(u64::from),
+        b'e' => half_bits(ctx, id).map(u64::from),
         b'f' => single_bits(ctx, id).map(u64::from),
         b'd' => float_value(ctx, id).map(f64::to_bits),
         _ => integer_field(ctx, id, code, width, little_endian),
     }
+}
+
+fn float_overflow(ctx: &Context, id: Id, code: char) -> Error {
+    if matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Int(_)) {
+        format_error(ctx, "int too large to convert")
+    } else {
+        Error::new(
+            "OverflowError",
+            format!("float too large to pack with {code} format"),
+        )
+    }
+}
+
+fn half_bits(ctx: &mut Context, id: Id) -> Result<u16> {
+    let value = float_value(ctx, id)?;
+    let bits = value.to_bits();
+    let sign = ((bits >> 48) as u16) & 0x8000;
+    if !value.is_finite() {
+        let payload = ((bits >> 42) as u16) & 0x03ff;
+        // A NaN whose high payload bits vanish must not turn into infinity.
+        let payload = if value.is_nan() && payload == 0 {
+            0x0200
+        } else {
+            payload
+        };
+        return Ok(sign | 0x7c00 | payload);
+    }
+
+    let magnitude = value.abs();
+    // 65520 is halfway between the largest finite half and the next power of two.
+    if magnitude >= 65520.0 {
+        return Err(float_overflow(ctx, id, 'e'));
+    }
+    // Round in units of one half-precision ULP. Subnormals all use 2^-24.
+    let exponent = ((magnitude.to_bits() >> 52) as i32 - 1023).max(-14);
+    let units = (magnitude * 2f64.powi(10 - exponent)).round_ties_even() as u16;
+    // units includes the leading bit for normals; adding also carries across powers of two.
+    let base = ((exponent + 14) as u16) << 10;
+    Ok(sign | (base + units))
 }
 
 fn single_bits(ctx: &mut Context, id: Id) -> Result<u32> {
@@ -531,13 +571,7 @@ fn single_bits(ctx: &mut Context, id: Id) -> Result<u32> {
     }
     let single = value as f32;
     if single.is_infinite() && value.is_finite() {
-        if matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Int(_)) {
-            return Err(format_error(ctx, "int too large to convert"));
-        }
-        return Err(Error::new(
-            "OverflowError",
-            "float too large to pack with f format",
-        ));
+        return Err(float_overflow(ctx, id, 'f'));
     }
     Ok(single.to_bits())
 }
