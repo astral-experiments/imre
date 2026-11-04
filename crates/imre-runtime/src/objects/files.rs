@@ -817,7 +817,7 @@ fn open_state_with_capacity(
         0 if gzip => Stream::UnreadGzip { file, capacity },
         0 | 4 => {
             let mut input = Input::new(file, gzip, binary, capacity);
-            if !binary && !gzip && metadata.is_file() {
+            if !gzip && metadata.is_file() {
                 input.read_size_hint = metadata.len().min(1024 * 1024) as usize;
             }
             if mode == 4 {

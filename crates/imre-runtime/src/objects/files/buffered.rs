@@ -207,6 +207,31 @@ enum ReadBuffer {
 }
 
 impl ReadBuffer {
+    /// Use File's direct read into spare capacity once the buffer cannot cover a whole file.
+    fn read_plain_file(
+        &mut self,
+        bytes: &mut Vec<u8>,
+        size_hint: usize,
+    ) -> Option<io::Result<usize>> {
+        let Self::File(reader) = self else {
+            return None;
+        };
+        if size_hint <= reader.capacity()
+            || !reader.buffer().is_empty()
+            || reader.get_ref().limit() != u64::MAX
+        {
+            return None;
+        }
+        let source = reader.get_mut();
+        let Source::Plain(file) = source.get_mut() else {
+            return None;
+        };
+        let start = bytes.len();
+        let result = file.read_to_end(bytes);
+        source.set_limit(u64::MAX - (bytes.len() - start) as u64);
+        Some(result)
+    }
+
     fn into_inner(self) -> io::Take<Source> {
         match self {
             Self::File(r) => r.into_inner(),
@@ -469,7 +494,11 @@ impl Input {
                 crate::compact_bytes(&mut bytes);
             }
         } else {
-            self.raw.read_to_end(&mut bytes).map_err(errno_error)?;
+            let hint = std::mem::take(&mut self.read_size_hint);
+            self.raw
+                .read_plain_file(&mut bytes, hint)
+                .unwrap_or_else(|| self.raw.read_to_end(&mut bytes))
+                .map_err(errno_error)?;
         }
         Ok(bytes)
     }
@@ -535,11 +564,13 @@ impl Input {
         // The file can grow or shrink after open. Its size only guides allocation.
         let hint = std::mem::take(&mut self.read_size_hint);
         let _ = bytes.try_reserve_exact(hint);
-        match &mut self.raw {
-            ReadBuffer::File(file) => file.read_to_end(&mut bytes),
-            pipe => pipe.read_to_end(&mut bytes),
-        }
-        .map_err(errno_error)?;
+        self.raw
+            .read_plain_file(&mut bytes, hint)
+            .unwrap_or_else(|| match &mut self.raw {
+                ReadBuffer::File(file) => file.read_to_end(&mut bytes),
+                pipe => pipe.read_to_end(&mut bytes),
+            })
+            .map_err(errno_error)?;
         if bytes.len() < hint / 2 {
             bytes.shrink_to_fit();
         }

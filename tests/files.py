@@ -18,6 +18,23 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "whole_regular_file": """
+        with open("large.bin", "wb") as output:
+            output.write(b"a" * 262144)
+        with open("large.bin", "rb") as source:
+            with open("large.bin", "ab") as output:
+                output.write(b"tail")
+            data = source.read()
+            print(len(data))
+            print(len(source.read()))
+        with open("large.bin", "rb") as source:
+            print(len(source.read(3)))
+            print(len(source.read()))
+        with open("large.bin", "r", encoding="utf-8") as text_source:
+            with open("large.bin", "wb") as output:
+                output.write("é\\r\\nend".encode("utf-8"))
+            print(text_source.read())
+    """,
     "device_encoding": """
         import locale
         import os
