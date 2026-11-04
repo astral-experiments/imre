@@ -250,6 +250,21 @@ class NonCallableMock(_FixedMock):
                 target = getattr(target, part)
             setattr(target, parts[-1], attrs[path])
 
+    def attach_mock(self, mock, attribute):
+        """Reparent a mock so its calls are recorded under the given attribute."""
+        if _is_instance_mock(mock):
+            node = mock._node
+            node._mock_name = ""
+            node._magic = False
+            if hasattr(node, "_owner"):
+                del node._owner
+        else:
+            # Writable objects can also be attached using the standard mock attributes.
+            mock._mock_parent = mock._mock_new_parent = None
+            mock._mock_name = ""
+            mock._mock_new_name = None
+        setattr(self, attribute, mock)
+
     def _attach(self, child, suffix):
         child._owner = self
         child._suffix = suffix
@@ -311,6 +326,10 @@ class NonCallableMock(_FixedMock):
             adopted = self._adopt(value, "." + name)
             if self._mock_sealed and not adopted and not hasattr(self, name):
                 raise AttributeError("Cannot set " + self._mock_path() + "." + name)
+            if isinstance(value, PropertyMock):
+                # Installing the mock must not call the property's setter.
+                self.__dict__[name] = value
+                return
         object.__setattr__(self, name, value)
 
     def __delattr__(self, name):

@@ -3317,6 +3317,15 @@ for name in ("md4", "ripemd160"):
         compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
         compare(
+            "-B", "-c",
+            "from unittest.mock import Mock\n"
+            "parent = Mock()\n"
+            "child = Mock()\n"
+            "parent.attach_mock(child, 'client')\n"
+            "assert parent.client is child\n",
+            extra=mock_compile_flags, native_timeout=300,
+        )
+        compare(
             "-B", "-c", "from unittest.mock import Mock\nm = Mock(['close'])\nm.close()\nassert not hasattr(m, 'read')\n",
             extra=mock_compile_flags, native_timeout=300,
         )
