@@ -431,9 +431,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ) => ctx.builtin(&format!("{module}.{name}")),
         (
             "_imre_gzip",
-            "open" | "read" | "read1" | "readline" | "tell" | "fileno" | "close" | "writer"
-            | "compress" | "flush_writer" | "decoder" | "raw_tell" | "raw_read" | "raw_mtime"
-            | "raw_rewind",
+            "writer" | "compress" | "flush_writer" | "decoder" | "raw_tell" | "raw_read"
+            | "raw_mtime" | "raw_rewind",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_gzip", "BadGzipFile") => ctx.builtin("gzip.BadGzipFile"),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
