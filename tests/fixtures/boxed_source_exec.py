@@ -309,7 +309,8 @@ def source_annotated_targets():
         return value
 
     class Box:
-        pass
+        def __repr__(self):
+            raise AssertionError("an annotation operand reached the display hook")
 
     target = Box()
     items = {}
@@ -321,6 +322,23 @@ class C:
     assert events == ["value", "object", "item", "items", "key"]
     assert target.value == 3 and items == {"x": 4}
     assert not namespace["C"].__annotations__
+
+    for future in ("", "from __future__ import annotations\n"):
+        events.clear()
+        exec(future + """mark("module", target).missing: unknown()
+class C:
+    mark("class", target)[mark("lo", 1):mark("hi", 4):mark("step", 2), mark("key", 3)]: unknown()
+def annotate():
+    (target): unknown()
+    mark("function", target).missing: unknown()
+annotate()
+""", namespace)
+        assert events == ["module", "class", "lo", "hi", "step", "key", "function"]
+        assert not hasattr(target, "missing") and not namespace["C"].__annotations__
+
+    events.clear()
+    exec(compile("mark('single', target).missing: unknown()", "<single>", "single"), namespace)
+    assert events == ["single"]
 
 
 def source_generic_functions():

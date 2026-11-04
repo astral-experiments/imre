@@ -136,6 +136,7 @@ enum EnclosingBinding {
 
 enum Instruction {
     Eval(ast::Expr),
+    Discard(ast::Expr),
     AugAssign(ast::StmtAugAssign),
     DeleteName(String),
     DeleteItem(ast::ExprSubscript),
@@ -1266,6 +1267,7 @@ impl Program {
         for (_, op) in &mut self.instructions {
             match op {
                 Instruction::Eval(e)
+                | Instruction::Discard(e)
                 | Instruction::Unless(e, _)
                 | Instruction::Iter(e)
                 | Instruction::ExceptMatch(e, _)
@@ -2181,18 +2183,18 @@ impl Program {
                         None => Instruction::BindSent(s.targets),
                     }
                 }
-                Stmt::AnnAssign(s)
-                    if function
-                        || s.simple
-                        || s.value.is_some()
-                        || (self.class_attributes.is_none() && s.target.is_name_expr()) =>
-                {
+                Stmt::AnnAssign(s) => {
                     let name = s.target.as_name_expr().map(|name| name.id.to_string());
+                    if ((s.simple || s.value.is_some()) && name.as_deref() == Some("__debug__"))
+                        || s.target
+                            .as_attribute_expr()
+                            .is_some_and(|a| a.attr.as_str() == "__debug__")
+                    {
+                        return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+                    }
                     if let Some(name) = &name {
-                        if name == "__debug__" {
-                            return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
-                        }
-                        if let Some((kind, _)) = self.directives.get(name)
+                        if s.simple
+                            && let Some((kind, _)) = self.directives.get(name)
                             && (function
                                 || self.class_attributes.is_some()
                                 || *kind != ScopeDirective::Global)
@@ -2202,11 +2204,9 @@ impl Program {
                                 format!("annotated name '{name}' can't be {}", kind.keyword()),
                             ));
                         }
-                        if function || s.simple || s.value.is_some() {
+                        if s.simple || s.value.is_some() {
                             self.locals.insert(name.clone());
                         }
-                    } else if s.value.is_none() {
-                        return Err(unsupported("annotated assignment target"));
                     }
                     annotations::validate(&s.annotation, name.is_some())?;
                     if let Some(value) = s.value {
@@ -2215,6 +2215,18 @@ impl Program {
                             None => Instruction::BindSent(vec![*s.target]),
                         };
                         self.instructions.push((line, op));
+                    } else {
+                        match *s.target {
+                            ast::Expr::Attribute(attr) => {
+                                self.discard_annotation_operand(*attr.value, line, function)?;
+                            }
+                            ast::Expr::Subscript(item) => {
+                                self.discard_annotation_operand(*item.value, line, function)?;
+                                self.discard_annotation_slice(*item.slice, line, function)?;
+                            }
+                            ast::Expr::Name(_) => {}
+                            _ => return Err(unsupported("annotated assignment target")),
+                        }
                     }
                     // Function-local annotations never evaluate the annotation expression.
                     if function || !s.simple {
@@ -4683,9 +4695,9 @@ impl Context {
                 }
                 *sent = NONE;
             }
-            Instruction::Eval(e) => {
+            Instruction::Eval(e) | Instruction::Discard(e) => {
                 let value = eval(self, e)?;
-                if code.interactive {
+                if code.interactive && matches!(op, Instruction::Eval(_)) {
                     self.display_expression(value)?;
                 }
             }
