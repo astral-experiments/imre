@@ -13,13 +13,14 @@ pub(crate) fn specialize(module: &mut Module) {
         if function.expression_rebound().into_iter().any(|value| value) {
             continue;
         }
+        let private_cursors = crate::ir::private_string_cursors(function);
         crate::ir::rewrite_statements(&mut function.body, &mut |statement| {
-            rewrite_loop(statement, &mut function.locals);
+            rewrite_loop(statement, &mut function.locals, &private_cursors);
         });
     }
 }
 
-fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
+fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, private_cursors: &[usize]) {
     let (arguments, body, orelse, while_source) = match statement {
         Statement::For {
             args, body, orelse, ..
@@ -108,6 +109,7 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
         outputs, appends, ..
     } = plan;
     let mut fast_body = Vec::new();
+    let cursor_loop = arguments.is_none();
     if let Some([start, mut stop, step]) = arguments {
         // Every append target passed ListDistinct against the condition's source.
         // Only this arm can reuse its length across the loop backedge.
@@ -139,7 +141,27 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
             }));
         }
     }
-    fast_body.push(fast);
+    if cursor_loop
+        && outputs.len() == 1
+        && let Some(&output) = outputs.first()
+        && buffer_appends(&mut fast, output, locals, private_cursors)
+    {
+        let marker = |op| {
+            Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(op, Vec::new()),
+            })
+        };
+        fast_body.push(marker(Builtin::BeginListAppends(output)));
+        fast_body.push(Statement::Try {
+            body: vec![fast],
+            handlers: Vec::new(),
+            orelse: Vec::new(),
+            finalbody: vec![marker(Builtin::FinishListAppends(output))],
+        });
+    } else {
+        fast_body.push(fast);
+    }
     let fallback = std::mem::replace(statement, Statement::Break);
     *statement = Statement::If(
         Expr {
@@ -149,6 +171,74 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
         fast_body,
         vec![fallback],
     );
+}
+
+/// A checked leaf loop can defer publishing immediate appends when its only
+/// observations of the destination are tail reads. Other inputs are distinct,
+/// and all local values released inside the loop have native destructors.
+fn buffer_appends(
+    statement: &mut Statement,
+    output: usize,
+    locals: &[Type],
+    private_cursors: &[usize],
+) -> bool {
+    let Statement::While(_, body, orelse) = statement else {
+        return false;
+    };
+    if !orelse.is_empty() {
+        return false;
+    }
+    let scalar = |ty: Type| matches!(ty, Type::Int | Type::Bool | Type::Str | Type::None);
+    let mut safe = true;
+    let mut tail = false;
+    crate::ir::walk_writes(body, |slot, _| {
+        safe &= scalar(locals[slot])
+            || locals[slot] == Type::ListInt
+            || (locals[slot] == Type::Iterator && private_cursors.contains(&slot))
+    });
+    crate::ir::walk_expressions(body, &mut |value| {
+        safe &= match &value.kind {
+            ExprKind::Builtin(Builtin::ListGet, args) => {
+                let reads = matches!(args[0].kind, ExprKind::Local(slot) if slot == output)
+                    && small_literal(&args[1]) == Some(-1);
+                tail |= reads;
+                reads
+            }
+            ExprKind::Builtin(Builtin::ListGetStable, _) => true,
+            ExprKind::Builtin(Builtin::Append, args) => {
+                args[0].ty == Type::ListInt && args[1].ty == Type::Int
+            }
+            ExprKind::Builtin(
+                Builtin::Int
+                | Builtin::Ord
+                | Builtin::Bool
+                | Builtin::Abs
+                | Builtin::IntExtremum { .. },
+                args,
+            ) => args.iter().all(|arg| scalar(arg.ty)),
+            ExprKind::Builtin(..) => false,
+            ExprKind::Local(_) => scalar(value.ty) || value.ty == Type::ListInt,
+            ExprKind::Scope { value: result, .. } => scalar(result.ty),
+            _ => {
+                let mut primitive = scalar(value.ty);
+                crate::ir::children(value, |child| primitive &= scalar(child.ty));
+                primitive
+            }
+        };
+    });
+    if !safe || !tail {
+        return false;
+    }
+    crate::ir::walk_expressions_mut(body, &mut |value| {
+        if let ExprKind::Builtin(op, _) = &mut value.kind {
+            match op {
+                Builtin::ListGet => *op = Builtin::GetInAppendWindow(output),
+                Builtin::Append => *op = Builtin::AppendInWindow(output),
+                _ => {}
+            }
+        }
+    });
+    true
 }
 
 struct Plan<'a> {
@@ -500,6 +590,28 @@ mod tests {
         crate::tuples::scalarize(&mut module);
         specialize(&mut module);
         module
+    }
+
+    #[test]
+    fn buffers_only_unobserved_appends_to_one_stable_list() {
+        let source = "def fill(data: list[int], out: list[int], text: str) -> None:\n    for c in text:\n        out.append(out[-1] + data[0] + data[1] + ord(c))\nfill([1, 2], [0], 'abc')\n";
+        let operations = |source: &str| {
+            let module = optimized(source);
+            let mut calls = (0, 0, 0);
+            for function in &module.functions {
+                walk_expressions(&function.body, &mut |value| match value.kind {
+                    ExprKind::Builtin(Builtin::AppendInWindow(_), _) => calls.0 += 1,
+                    ExprKind::Builtin(Builtin::GetInAppendWindow(_), _) => calls.1 += 1,
+                    ExprKind::Builtin(Builtin::FinishListAppends(_), _) => calls.2 += 1,
+                    _ => {}
+                });
+            }
+            calls
+        };
+        assert_eq!(operations(source), (1, 1, 1));
+        for observed in ["out[-2]", "out[-1] + len(out)", "out[-1] + len(data)"] {
+            assert_eq!(operations(&source.replace("out[-1]", observed)), (0, 0, 0));
+        }
     }
 
     fn counts(module: &Module) -> (usize, usize, usize) {

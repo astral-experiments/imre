@@ -2015,6 +2015,94 @@ pub unsafe extern "C" fn imre_list_append(list: *const List, value: usize) -> i3
     }
 }
 
+/// Spare storage borrowed by a checked loop that appends immediate integers.
+#[repr(C)]
+pub struct ListAppendWindow {
+    owner: *const List,
+    next: *mut Int,
+    end: *mut Int,
+}
+
+/// Records the allocation of a rooted list whose last word is immediate.
+///
+/// # Safety
+/// The exact list must end in an immediate integer. Keep it rooted and do not
+/// resize or inspect it through another handle
+/// until the written prefix has been committed. The window must be writable.
+unsafe fn open_list_append_window(list: *const List, window: *mut ListAppendWindow) {
+    // SAFETY: the caller holds the exact list across this window.
+    unsafe {
+        (&*list).0.with_mut(|words| {
+            let data = words.as_mut_ptr();
+            window.write(ListAppendWindow {
+                owner: list,
+                next: data.add(words.len()),
+                end: data.add(words.capacity()),
+            });
+        });
+    }
+}
+
+/// Appends through the ordinary list API, then borrows the resulting allocation.
+///
+/// # Safety
+/// Both handles must be live. The writable window must be closed and the list
+/// must remain rooted and exclusively accessed until its window is committed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_append_open_window(
+    list: *const List,
+    word: usize,
+    window: *mut ListAppendWindow,
+) -> i32 {
+    // SAFETY: the caller supplies rooted values and a closed writable window.
+    unsafe {
+        let status = imre_list_append(list, word);
+        if status != 0 && word & 1 != 0 {
+            open_list_append_window(list, window);
+        }
+        status
+    }
+}
+
+/// Reads the ordinary last element and borrows the allocation for an immediate tail.
+///
+/// # Safety
+/// The list and closed window must be live. After a successful immediate read,
+/// keep the list rooted and use the window until publishing any buffered words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_tail_open_window(
+    list: *const List,
+    window: *mut ListAppendWindow,
+) -> usize {
+    // SAFETY: usize::MAX is the canonical tagged representation of -1.
+    unsafe {
+        let word = imre_list_get(list, usize::MAX);
+        if word & 1 != 0 {
+            open_list_append_window(list, window);
+        }
+        word
+    }
+}
+
+/// Publishes the initialized prefix of a list's borrowed spare capacity.
+///
+/// # Safety
+/// The matching list and allocation must still be live. Every word from the
+/// end of the previously visible prefix up to next must be an initialized immediate integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_commit_append_window(window: *mut ListAppendWindow) {
+    // SAFETY: the checked loop only writes initialized, tagged immediate integers.
+    unsafe {
+        let view = &mut *window;
+        (&*view.owner).0.with_mut(|words| {
+            let data = words.as_mut_ptr();
+            let initialized = usize::try_from(view.next.offset_from(data)).unwrap();
+            assert!((words.len()..=words.capacity()).contains(&initialized));
+            words.set_len(initialized);
+        });
+    }
+}
+
 /// Appends two already-evaluated integers with one capacity check. The compiler
 /// selects this only when the first append cannot affect the second operand.
 ///
@@ -3446,6 +3534,45 @@ mod tests {
             drop(saved);
         }
         assert!(source_weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn append_windows_publish_small_words_and_keep_owned_bigint_reads() {
+        let list = imre_list_new();
+        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let weak = Shared::downgrade(&big);
+        let mut window = ListAppendWindow {
+            owner: std::ptr::null(),
+            next: std::ptr::null_mut(),
+            end: std::ptr::null_mut(),
+        };
+        // SAFETY: the list stays rooted. Only the open window touches its
+        // reserved allocation until the initialized prefix has been committed.
+        unsafe {
+            (&*list).0.with_mut(|words| words.reserve(4));
+            assert_eq!(imre_list_append_open_window(list, 1, &mut window), 1);
+            assert_eq!(window.owner, list);
+            assert_ne!(window.next, window.end);
+            window.next.write(Int::small(7).unwrap());
+            window.next = window.next.add(1);
+            imre_list_commit_append_window(&mut window);
+            window.owner = std::ptr::null();
+            assert_eq!(imre_list_tail_open_window(list, &mut window), 15);
+            assert_eq!(window.owner, list);
+            imre_list_commit_append_window(&mut window);
+            window.owner = std::ptr::null();
+            let word = Shared::as_ptr(&big) as usize;
+            assert_eq!(imre_list_append_open_window(list, word, &mut window), 1);
+            assert!(window.owner.is_null());
+            let tail = imre_list_tail_open_window(list, &mut window);
+            assert_eq!(tail, word);
+            assert!(window.owner.is_null());
+            drop(big);
+            imre_list_release(list);
+            assert!(weak.upgrade().is_some());
+            imre_int_release(tail);
+            assert!(weak.upgrade().is_none());
+        }
     }
 
     #[test]
