@@ -2145,7 +2145,10 @@ impl Value {
             | Self::TlsSession(_)
             | Self::TlsListener(_)
             | Self::TlsBioSession(_) => {}
-            Self::ZlibDecompressor { dictionary, .. } => visit.extend(*dictionary),
+            Self::ZlibDecompressor { state, dictionary } => {
+                visit.extend(*dictionary);
+                state.borrow().children(visit);
+            }
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
