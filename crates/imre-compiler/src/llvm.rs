@@ -400,6 +400,8 @@ fn emit_program(
         code: String::new(),
         entry_allocas: String::new(),
         mapping_words: 0,
+        forward_cursors: BTreeMap::new(),
+        uses_forward_cursors: false,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
@@ -568,6 +570,12 @@ fn emit_program(
     record_layouts(module, emitter.output);
     callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
+    if emitter.uses_forward_cursors {
+        emitter
+            .output
+            .common()
+            .push_str(include_str!("llvm/next_utf8_scalar.ll"));
+    }
     emitter.output.common().push_str(&integer_helpers());
     emitter
         .output
@@ -638,6 +646,8 @@ struct Emitter<'a, 'module> {
     code: String,
     entry_allocas: String,
     mapping_words: usize,
+    forward_cursors: BTreeMap<usize, (String, String)>,
+    uses_forward_cursors: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
@@ -2019,6 +2029,13 @@ impl Emitter<'_, '_> {
             self.line("store ptr null, ptr %directory_frame");
         }
         self.line_slots = line_views::select(function);
+        self.forward_cursors.clear();
+        for slot in ir::private_scalar_cursors(function) {
+            let next = self.entry_alloca("ptr");
+            let end = self.entry_alloca("ptr");
+            self.forward_cursors.insert(slot, (next, end));
+        }
+        self.uses_forward_cursors |= !self.forward_cursors.is_empty();
         if self
             .line_slots
             .iter()
@@ -2367,6 +2384,17 @@ impl Emitter<'_, '_> {
     fn statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(slot, expression) => {
+                if let Some((next, end)) = self.forward_cursors.get(slot).cloned() {
+                    // The cursor holds its immutable string until the normal scope cleanup.
+                    let cursor = self.expr(expression);
+                    let start = self.instruction(format!(
+                        "call ptr @imre_str_iter_bounds(ptr {}, ptr {end})",
+                        cursor.operand
+                    ));
+                    self.line(format!("store ptr {start}, ptr {next}"));
+                    self.store(*slot, &cursor);
+                    return;
+                }
                 if self.line_slots[*slot] {
                     self.assign_line(*slot, expression);
                     return;
@@ -8557,6 +8585,7 @@ impl Emitter<'_, '_> {
             debug_assert_ne!(key, value);
             debug_assert_ne!(ready, value);
         }
+        let forward = self.forward_cursors.get(&iterator).cloned();
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
             ir::IterNextKind::Generic => {
@@ -8579,7 +8608,15 @@ impl Emitter<'_, '_> {
                 } else {
                     "imre_str_iter_next_codepoint"
                 };
-                let word = self.instruction(format!("call i64 @{next}(ptr {})", iterator.operand));
+                let word = if let Some((next_byte, end)) = forward {
+                    debug_assert!(kind == ir::IterNextKind::CodePoint);
+                    let end = self.instruction(format!("load ptr, ptr {end}"));
+                    self.instruction(format!(
+                        "call i64 @next_utf8_scalar(ptr {next_byte}, ptr {end})"
+                    ))
+                } else {
+                    self.instruction(format!("call i64 @{next}(ptr {})", iterator.operand))
+                };
                 (
                     self.instruction(format!("icmp ne i64 {word}, 0")),
                     Some(word),
@@ -9995,6 +10032,8 @@ declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)
 declare i64 @imre_str_iter_next_owned(ptr)
 declare i64 @imre_str_iter_next_codepoint(ptr)
+declare ptr @imre_str_iter_bounds(ptr, ptr)
+declare i64 @imre_utf8_next_non_ascii(ptr, ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)
