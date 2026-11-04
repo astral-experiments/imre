@@ -354,6 +354,24 @@ impl Function<'_, '_> {
     /// A failed intermediate comparison returns its object in a value context and false in a branch.
     fn compare_expr(&mut self, comparison: &ast::ExprCompare, context: BooleanContext) -> String {
         let mut left = self.expr(&comparison.operands[0]);
+        if let [op @ (ast::CmpOp::In | ast::CmpOp::NotIn)] = comparison.ops.as_ref()
+            && let ast::Expr::Tuple(tuple) = &comparison.operands[1]
+            && tuple.elts.len() <= 8
+            && tuple.elts.iter().all(imre_ast::literal_tuple_element)
+        {
+            // Keep the entry-block scratch array bounded even for very large tuple displays.
+            let values: Vec<_> = tuple.elts.iter().map(|item| self.expr(item)).collect();
+            let (array, count) = self.handle_array(&values);
+            let negate = u32::from(*op == ast::CmpOp::NotIn);
+            let value = self.checked(&format!(
+                "call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {left}, ptr {array}, i64 {count}, i32 {negate})"
+            ));
+            return if context == BooleanContext::Condition {
+                self.truth(&value)
+            } else {
+                value
+            };
+        }
         let done = self.name("b");
         let mut incoming = Vec::new();
         for (i, (op, operand)) in comparison

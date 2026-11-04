@@ -1277,6 +1277,31 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
     finish(ctx, result)
 }
 
+/// Test a handle against the evaluated elements of a literal tuple.
+///
+/// # Safety
+/// The generated caller roots the operands and provides a readable array of
+/// `count` handles for the duration of the comparison.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_contains_literal_tuple(
+    ctx: *mut Context,
+    item: Id,
+    values: *const Id,
+    count: usize,
+    negate: u32,
+) -> Id {
+    // SAFETY: the caller owns this context and retains the array through rich comparisons.
+    let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let mut candidates = values.iter().copied();
+    let result = ctx
+        .contains_next(item, |_| Ok(candidates.next()))
+        .map(|found| flag(found ^ (negate != 0)));
+    finish(ctx, result)
+}
+
 /// Invoke a prepared method. The leading operand is either the unbound method's
 /// receiver or None when lookup returned a bound callable.
 ///
