@@ -227,6 +227,7 @@ impl BuiltinDescriptor {
                             | "__round__"
                             | "__trunc__"
                             | "__getinitargs__"
+                            | "__getnewargs__"
                             | "__reduce__"
                             | "__reduce_ex__"
                             | "__replace__"

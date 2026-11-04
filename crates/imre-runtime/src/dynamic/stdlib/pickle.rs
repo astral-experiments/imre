@@ -223,6 +223,7 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
     let base = ctx.allocation_base(class);
     let cursor = base.and_then(|base| ctx.itertools_layout(base).map(|name| (base, name)));
     if class == ctx.builtin("object")
+        || (protocol >= 2 && base == Some(ctx.builtin("int")))
         || (protocol >= 2
             && (base == Some(ctx.builtin("list"))
                 || base == Some(ctx.builtin("dict"))
