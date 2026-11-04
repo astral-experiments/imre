@@ -94,7 +94,39 @@ fn glob_matches(
     if let Some(matched) = match_literal_components(path, pattern, sensitive, recursive, sep) {
         return Ok(matched);
     }
+    if sensitive
+        && pattern.contains(['?', '['])
+        && !path.contains(sep)
+        && !pattern.contains(sep)
+        && let Pattern::Wildcard(tokens) = Pattern::component(pattern)
+        && let Some(matched) = match_token_component(path, &tokens)
+    {
+        return Ok(matched);
+    }
     Ok(glob_regex(pattern, sensitive, recursive, sep)?.is_match(path))
+}
+
+/// Question marks, literals, and character classes each consume one character.
+/// With one star, match the two fixed-width ends without retrying the suffix.
+fn match_token_component(path: &str, tokens: &[Token]) -> Option<bool> {
+    let mut chars = path.chars();
+    let mut tokens = tokens.iter();
+    while let Some(token) = tokens.next() {
+        if matches!(token, Token::Star) {
+            if tokens.as_slice().iter().any(|t| matches!(t, Token::Star)) {
+                return None;
+            }
+            return Some(
+                tokens
+                    .rev()
+                    .all(|t| chars.next_back().is_some_and(|c| t.matches(c))),
+            );
+        }
+        if !chars.next().is_some_and(|c| token.matches(c)) {
+            return Some(false);
+        }
+    }
+    Some(chars.next().is_none())
 }
 
 /// A single run of stars between literal affixes has only one possible match
