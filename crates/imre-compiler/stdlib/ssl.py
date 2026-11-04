@@ -313,26 +313,31 @@ class SSLContext:
 
     __slots__ = ("_ctx", "_post_handshake_auth", "__dict__")
 
-    def __init__(self, protocol=None):
+    def __new__(cls, protocol=None, *args, **kwargs):
         if protocol is None:
             _warnings.warn("ssl.SSLContext() without protocol argument is deprecated.",
                            DeprecationWarning, stacklevel=2)
             protocol = PROTOCOL_TLS
+        if not issubclass(cls, __class__):
+            raise TypeError("expected an SSLContext subclass")
         protocol = _index(protocol)
         if protocol == PROTOCOL_TLS_CLIENT:
-            self._ctx = _call(_imre_ssl.context)
+            ctx = _call(_imre_ssl.context)
         elif protocol == PROTOCOL_TLS_SERVER:
-            self._ctx = _call(_imre_ssl.server_context)
+            ctx = _call(_imre_ssl.server_context)
         elif protocol == PROTOCOL_TLS:
             _warnings.warn("ssl.PROTOCOL_TLS is deprecated", DeprecationWarning, stacklevel=2)
-            self._ctx = _call(_imre_ssl.generic_context)
+            ctx = _call(_imre_ssl.generic_context)
         elif protocol in _PROTOCOL_NAMES:
             raise NotImplementedError("fixed-version SSL contexts are not supported")
         elif not -(1 << 31) <= protocol < (1 << 31):
             raise OverflowError("Python int too large to convert to C int")
         else:
             raise ValueError("invalid or unsupported protocol version %i" % protocol)
-        self._post_handshake_auth = False
+        self = object.__new__(cls)
+        __class__._ctx.__set__(self, ctx)
+        __class__._post_handshake_auth.__set__(self, False)
+        return self
 
     @property
     def protocol(self):

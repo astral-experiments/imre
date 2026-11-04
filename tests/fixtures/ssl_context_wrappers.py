@@ -1,6 +1,17 @@
 import socket
 import ssl
 
+
+class ClientContext(ssl.SSLContext):
+    def __init__(self, protocol, *, minimum_version):
+        self.minimum_version = minimum_version
+
+
+client = ClientContext(ssl.PROTOCOL_TLS_CLIENT, minimum_version=ssl.TLSVersion.TLSv1_3)
+assert client.minimum_version == ssl.TLSVersion.TLSv1_3
+assert client.check_hostname and client.verify_mode == ssl.CERT_REQUIRED
+
+
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 other = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 assert context.sslsocket_class is other.sslsocket_class is ssl.SSLSocket
