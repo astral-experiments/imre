@@ -21,6 +21,12 @@ def main() -> None:
     print(selected_characters("plain.dat", keys) == "")
     print(selected_characters("prefix文é!", keys) == "!é")
     print(selected_characters("prefix\x1f", keys) == "\x1f")
+    assert "x" * 65 not in keys
+    keys.add("新")
+    assert "新" in keys
+    keys.discard("新")
+    assert "新" not in keys
+    assert "é" in (keys | {"longer key"})
     keys.add("p")
     print(selected_characters("plain.dat", keys) == "p")
     print(set(range(6)) == {0, 1, 2, 3, 4, 5})

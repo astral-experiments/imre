@@ -892,6 +892,9 @@ pub(super) struct Set {
     tables: Tables<()>,
     frozen: bool,
     ascii_characters: Option<allocator_api2::boxed::Box<[bool; 128]>>,
+    /// A string key sets the bit for its UTF-8 byte length modulo 64.
+    /// Removal may leave a bit set, so hits still use the ordinary table.
+    string_lengths: u64,
 }
 
 impl Mapping {
@@ -1356,11 +1359,38 @@ impl Mapping {
 
 impl Set {
     fn new(tables: Tables<()>, frozen: bool) -> Self {
+        let string_lengths = match &tables {
+            Tables::Str(keys) => keys
+                .entries
+                .iter()
+                .flatten()
+                .fold(0, |bits, entry| bits | Self::length_bit(entry.key.len())),
+            _ => 0,
+        };
         Self {
             tables,
             frozen,
             ascii_characters: None,
+            string_lengths,
         }
+    }
+
+    /// Equal strings have equal byte lengths, including after reducing modulo 64.
+    fn length_bit(bytes: usize) -> u64 {
+        1 << (bytes % u64::BITS as usize)
+    }
+
+    /// Keep the lengths of newly inserted string keys in the membership summary.
+    fn insert(&mut self, key: OwnedWord) -> Result<Option<(OwnedWord, ())>, Error> {
+        let bit = if key.kind.raw() == 3 {
+            // SAFETY: a string word owns a live native string.
+            Self::length_bit(unsafe { (&*(key.word as *const Str)).len() })
+        } else {
+            0
+        };
+        let old = self.mutable_tables("add")?.insert(key, ())?;
+        self.string_lengths |= bit;
+        Ok(old)
     }
 
     /// Build a small string set's ASCII lookup on its first character scan.
@@ -3090,9 +3120,16 @@ unsafe fn filter_character_set(
 pub unsafe extern "C" fn imre_set_contains(value: *const Object, key: usize) -> u32 {
     // SAFETY: hashing/equality cannot reenter user code.
     u32::from(unsafe {
-        object(value)
-            .0
-            .with(|s| s.set().tables.lookup(key).is_some())
+        object(value).0.with(|storage| {
+            let set = storage.set();
+            if let Tables::Str(_) = &set.tables
+                && set.string_lengths != u64::MAX
+                && set.string_lengths & Set::length_bit((&*(key as *const Str)).len()) == 0
+            {
+                return false;
+            }
+            set.tables.lookup(key).is_some()
+        })
     })
 }
 /// # Safety
@@ -3115,11 +3152,7 @@ pub(super) unsafe fn set_add(value: *const Object, key: usize) -> Result<(), Err
     // SAFETY: the caller roots this exact scalar key until acquisition completes.
     let key = unsafe { kind.acquire(key) };
     // SAFETY: unused incoming owners leave mutation before dropping.
-    let old = unsafe {
-        object(value)
-            .0
-            .with_mut(|s| s.set_mut().mutable_tables("add")?.insert(key, ()))
-    };
+    let old = unsafe { object(value).0.with_mut(|s| s.set_mut().insert(key)) };
     old.map(drop)
 }
 /// # Safety
