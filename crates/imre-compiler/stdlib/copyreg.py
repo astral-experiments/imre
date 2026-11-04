@@ -140,7 +140,8 @@ def _reduce_newobj(self, arguments, extended):
         constructor, newargs = __newobj__, (cls, *args)
     state = self.__getstate__()
     listitems = iter(self) if issubclass(cls, list) else None
-    return constructor, newargs, state, listitems, None
+    dictitems = iter(self.items()) if issubclass(cls, dict) else None
+    return constructor, newargs, state, listitems, dictitems
 
 
 def _has_type_dict(cls):

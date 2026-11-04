@@ -203,7 +203,7 @@ fn reduce_newobj(
     let args = if let Some(hook) = hook {
         let method = ctx.bind_attribute(hook, receiver, class)?;
         ctx.call(method, Vec::new(), Vec::new())?
-    } else if ctx.list_storage(receiver).is_some() {
+    } else if ctx.list_storage(receiver).is_some() || ctx.dict_storage(receiver).is_some() {
         ctx.alloc(Value::Tuple(Vec::new()))
     } else {
         return reduce_without_newargs(ctx, receiver, class, cursor);
@@ -223,7 +223,8 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
     let base = ctx.allocation_base(class);
     let cursor = base.and_then(|base| ctx.itertools_layout(base).map(|name| (base, name)));
     if class == ctx.builtin("object")
-        || (protocol >= 2 && base == Some(ctx.builtin("list")))
+        || (protocol >= 2
+            && (base == Some(ctx.builtin("list")) || base == Some(ctx.builtin("dict"))))
         || cursor.is_some()
         || ctx.namedtuple_fields(class).is_some()
     {
