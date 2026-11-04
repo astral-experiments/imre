@@ -1204,6 +1204,8 @@ ACCEPTED = {
             "import email\n"
             "from email import message_from_bytes\n"
             "from email._header_value_parser import get_addr_spec, get_angle_addr as angle\n"
+            "from email import message_from_binary_file\n"
+            "from io import BytesIO\n"
             "import email._header_value_parser as parser\n"
             "assert angle is parser.get_angle_addr\n"
             "assert email.message_from_bytes is message_from_bytes\n"
@@ -1212,6 +1214,9 @@ ACCEPTED = {
             "for parse, value in ((get_addr_spec, 'user@example.org SIZE=32'), (angle, '<>')):\n"
             "    address, rest = parse(value)\n"
             "    print(address.addr_spec, rest)\n"
+            "with BytesIO(b'Subject: hi\\r\\n folded\\r\\n\\r\\nraw\\xff') as fp:\n"
+            "    msg = message_from_binary_file(fp)\n"
+            "    print(msg['Subject'], msg.get_payload(decode=True), fp.read())\n"
         ),
     },
     "zip_source_spec": {
