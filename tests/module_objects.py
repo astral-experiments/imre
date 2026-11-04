@@ -32,8 +32,8 @@ def main():
         env = dict(os.environ, IMRE_CACHE_DIR=str(root / "cache"), IMRE_CACHE_TRACE="1")
         target = root / "program"
 
-        def build(label, flags=(), path=target):
-            r = subprocess.run([compiler, "build", "--quiet", main, *flags, "-o", path],
+        def build(label, flags=(), path=target, source=main):
+            r = subprocess.run([compiler, "build", "--quiet", source, *flags, "-o", path],
                                cwd=project, env=env, text=True, capture_output=True, check=True)
             assert not r.stdout
             events, units = [], {}
@@ -96,6 +96,14 @@ def main():
         events, low = build("different_optimization", ["--opt-level", "0"])
         assert events == ["miss", "store"] and set(low.values()) == {"miss"}
         assert output() == "7\n10\n"
+        alternate = project / "main_again.py"
+        alternate.write_text(entry + "print(99)\n")
+        events, shared = build("different_entry", source=alternate)
+        assert events == ["miss", "store"] and shared["main_again"] == "miss", (events, shared)
+        assert shared["leaf"] == shared["unchanged"] == "hit", shared
+        assert output() == "7\n10\n99\n"
+        assert build("cached_alternate", source=alternate) == (["hit"], {}) and output() == "7\n10\n99\n"
+        assert build("cached_original") == (["hit"], {}) and output() == "7\n10\n"
     if args.output:
         args.output.write_text(json.dumps(checks, indent=2) + "\n")
     print(f"{len(checks)} cross-unit and cache checks passed")
