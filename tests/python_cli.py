@@ -115,6 +115,18 @@ def check_installed_site(imre, root, run):
     assert target.returncode == 0, target.stderr
     version = json.loads(target.stdout)["python_version"]
     site = prefix / "lib" / f"imre{version}" / "site-packages"
+    use_decimal = (
+        "import importlib.util, sys; from fractions import Fraction; "
+        "decimal = importlib.import_module(sys.argv[1]); "
+        "second = importlib.util.module_from_spec(decimal.__spec__); "
+        "decimal.__loader__.exec_module(second); "
+        "print(decimal.Decimal(10), second.Decimal(11), Fraction.from_decimal(10))"
+    )
+    for installed in (False, True):
+        if installed:
+            site.mkdir(parents=True)
+        result = run(launcher, "-B", "-c", use_decimal, "decimal", timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"10 11 10\n", b""), result
     package = site / "installed_example"
     package.mkdir(parents=True)
     init = package / "__init__.py"

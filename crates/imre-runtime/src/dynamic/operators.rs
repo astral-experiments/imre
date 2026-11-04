@@ -5457,8 +5457,10 @@ impl Context {
             };
         }
         if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
-            && let Some(&decimal) = self.classes.get("decimal.Decimal")
-            && (ac == Some(decimal) || bc == Some(decimal))
+            && let Some(decimal) = [ac, bc]
+                .into_iter()
+                .flatten()
+                .find(|&class| self.is_bundled_decimal(class))
             && !(matches!(op, "==" | "!=")
                 && [ac, bc]
                     .into_iter()
