@@ -3780,6 +3780,67 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Check the tags once for a short chain of integer comparisons.
+    fn integer_extremum(&mut self, minimum: bool, args: &[Operand]) -> Value {
+        let order = if minimum {
+            Compare::Less
+        } else {
+            Compare::Greater
+        };
+        let mut unknown = args.iter().filter(|arg| !arg.value.small_integer);
+        // Each version emits the full comparison chain. Bound its code size.
+        let Some(first) = unknown.next().filter(|_| (3..=8).contains(&args.len())) else {
+            return self.select_integer_extremum(order, args, false);
+        };
+        let mut bits = first.value.operand.clone();
+        for arg in unknown {
+            bits = self.instruction(format!("and i64 {bits}, {}", arg.value.operand));
+        }
+        let immediate = self.instruction(format!("trunc i64 {bits} to i1"));
+        let (fast, slow, done) = (self.label(), self.label(), self.label());
+        self.branch(&immediate, &fast, &slow);
+        self.start(&fast);
+        let small = self.select_integer_extremum(order, args, true);
+        let fast_end = self.current.clone();
+        self.jump(&done);
+        self.start(&slow);
+        let generic = self.select_integer_extremum(order, args, false);
+        let slow_end = self.current.clone();
+        self.jump(&done);
+        self.start(&done);
+        Value {
+            ty: Type::Int,
+            operand: self.instruction(format!(
+                "phi i64 [{}, %{fast_end}], [{}, %{slow_end}]",
+                small.operand, generic.operand
+            )),
+            small_integer: false,
+        }
+    }
+
+    /// Select and retain the first winning operand, using the caller’s tag proof when available.
+    fn select_integer_extremum(
+        &mut self,
+        order: Compare,
+        args: &[Operand],
+        immediate: bool,
+    ) -> Value {
+        let mut best = args[0].value.clone();
+        best.small_integer |= immediate;
+        for arg in &args[1..] {
+            let mut next = arg.value.clone();
+            next.small_integer |= immediate;
+            let better = self.compare(order, &next, &best);
+            best.operand = self.instruction(format!(
+                "select i1 {}, i64 {}, i64 {}",
+                better.operand, next.operand, best.operand
+            ));
+            best.small_integer &= next.small_integer;
+        }
+        self.retain(&best);
+        best
+    }
+
     fn compare(&mut self, op: Compare, left: &Value, right: &Value) -> Value {
         let predicate = match op {
             Compare::Equal => "eq",
@@ -7171,26 +7232,7 @@ impl Emitter<'_, '_> {
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
             },
-            Builtin::IntExtremum { minimum } => {
-                let order = if *minimum {
-                    Compare::Less
-                } else {
-                    Compare::Greater
-                };
-                let mut best = args[0].value.clone();
-                for arg in &args[1..] {
-                    let next = &arg.value;
-                    let better = self.compare(order, next, &best);
-                    best.operand = self.instruction(format!(
-                        "select i1 {}, i64 {}, i64 {}",
-                        better.operand, next.operand, best.operand
-                    ));
-                    best.small_integer &= next.small_integer;
-                }
-                // The selected integer survives release of all the call arguments.
-                self.retain(&best);
-                best
-            }
+            Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::IntSignAsFloat => {
                 let order = self.instruction(format!(
