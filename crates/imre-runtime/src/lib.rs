@@ -2358,6 +2358,25 @@ pub unsafe extern "C" fn imre_list_reserve_range(
     drop(displaced);
 }
 
+/// Check the tag and i32 range with a single vectorizable reduction.
+#[inline(always)]
+fn all_tagged_i32(values: &[Int]) -> bool {
+    // Subtract the tagged i32 minimum from each word. Valid words become
+    // even offsets in 0..=2*u32::MAX; boxed handles give odd offsets.
+    let bias = u32::MAX as usize;
+    let bits = values
+        .iter()
+        .fold(0, |bits, value| bits | value.0.wrapping_add(bias));
+    bits & !(bias << 1) == 0
+}
+
+/// Scan four tagged words per vector when AVX2 is available.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+fn all_tagged_i32_avx2(values: &[Int]) -> bool {
+    all_tagged_i32(values)
+}
+
 /// Guards native arithmetic in a loop that cannot replace this list's elements.
 /// The caller keeps the list rooted and excludes mutation until the guarded
 /// reads finish; arbitrary-precision values select the original checked loop.
@@ -2389,13 +2408,12 @@ pub unsafe extern "C" fn imre_list_all_i32(
             if values.len().div_ceil(4) > trips {
                 return false;
             }
-            // Subtract the tagged i32 minimum from each word. Valid words become
-            // even offsets in 0..=2*u32::MAX; boxed handles give odd offsets.
-            let bias = u32::MAX as usize;
-            let bits = values
-                .iter()
-                .fold(0, |bits, value| bits | value.0.wrapping_add(bias));
-            bits & !(bias << 1) == 0
+            #[cfg(target_arch = "x86_64")]
+            if values.len() >= 32 && std::arch::is_x86_feature_detected!("avx2") {
+                // SAFETY: the runtime feature check permits AVX2 in this function.
+                return all_tagged_i32_avx2(values);
+            }
+            all_tagged_i32(values)
         })
     };
     u32::from(valid)

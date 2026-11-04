@@ -510,6 +510,21 @@ pub unsafe extern "C" fn imre_str_iter_next_codepoint(cursor: *const Object) -> 
     }
 }
 
+/// Borrows the UTF-8 bounds of a rooted string without allocating an iterator.
+///
+/// # Safety
+/// The caller keeps the string alive and immutable through the final read and
+/// supplies a writable end pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_bounds(value: *const Str, end: *mut *const u8) -> *const u8 {
+    // SAFETY: the rooted source owns the buffer and the caller supplied the output pointer.
+    unsafe {
+        let bytes = (&*value).as_bytes().as_ptr_range();
+        end.write(bytes.end);
+        bytes.start
+    }
+}
+
 /// Borrows the complete UTF-8 buffer of a freshly constructed forward cursor.
 ///
 /// # Safety
@@ -527,9 +542,7 @@ pub unsafe extern "C" fn imre_str_iter_bounds(
                 unreachable!("exact string iterator")
             };
             debug_assert!(!iter.reverse);
-            let bytes = iter.owner.as_bytes().as_ptr_range();
-            end.write(bytes.end);
-            bytes.start
+            imre_str_bounds(StrOwner::as_ptr(&iter.owner), end)
         })
     }
 }
