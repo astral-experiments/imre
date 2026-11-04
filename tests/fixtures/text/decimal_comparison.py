@@ -28,3 +28,6 @@ for left, right in (
 ):
     compare(left, right, True)
     compare(left, right, False)
+
+value = Decimal("1")
+print(value == "1", "1" != value)

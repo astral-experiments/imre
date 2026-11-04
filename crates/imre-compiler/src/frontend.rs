@@ -6445,6 +6445,13 @@ impl<'a> Checker<'a> {
             .find(|name| self.unshadowed_builtin(expression, name))
     }
 
+    fn object_builtin_error_with_checked_calls(&self, name: &str, node: &impl Ranged) -> String {
+        self.graph
+            .check_fallback_calls
+            .set(crate::analysis::FallbackCalls::FunctionBodies);
+        self.object_builtin_error(name, node)
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
         let error = self.object_export_error(name, node);
@@ -7404,18 +7411,28 @@ impl<'a> Checker<'a> {
                 let decimal =
                     |value: &Expr| matches!(value.ty, Type::Class(id) if self.decimal_class(id));
                 if values.iter().any(decimal) {
-                    if values.iter().all(decimal)
-                        && compare
-                            .ops
-                            .iter()
-                            .all(|op| matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
-                    {
-                        return Err(self.object_builtin_error("Decimal equality", expression));
+                    for (pair, op) in values.windows(2).zip(compare.ops.iter()) {
+                        if pair.iter().any(decimal)
+                            && pair.iter().all(|v| {
+                                decimal(v)
+                                    || matches!(
+                                        v.ty,
+                                        Type::Int | Type::Bool | Type::Float | Type::IntEnum(_)
+                                    )
+                            })
+                            && !(pair.iter().all(decimal)
+                                && matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
+                        {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "native Decimal numeric comparisons are unsupported",
+                            ));
+                        }
                     }
-                    return Err(error(
-                        self.source,
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "Decimal comparison",
                         expression,
-                        "native Decimal numeric comparisons are unsupported",
                     ));
                 }
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()

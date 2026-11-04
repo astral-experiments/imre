@@ -5456,21 +5456,6 @@ impl Context {
                 _ => Err(self.unsupported_order(op, a, b)),
             };
         }
-        if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
-            && let Some(decimal) = [ac, bc]
-                .into_iter()
-                .flatten()
-                .find(|&class| self.is_bundled_decimal(class))
-            && !(matches!(op, "==" | "!=")
-                && [ac, bc]
-                    .into_iter()
-                    .all(|class| class.is_some_and(|class| self.direct_subclass(class, decimal))))
-        {
-            return Err(Error::new(
-                "NotImplementedError",
-                "native Decimal numeric comparisons are unsupported",
-            ));
-        }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
             let complex_pair = matches!(op, "*" | "/" | "**")
                 && [a, b]
@@ -5505,10 +5490,49 @@ impl Context {
         {
             self.check_buffer_exporter(a)?;
         }
-        if !reflected_first && (ac != bc || inplace.is_empty()) {
-            return self.operator_slot(b, right, a);
+        if !reflected_first
+            && (ac != bc || inplace.is_empty())
+            && let Some(result) = self.operator_slot(b, right, a)?
+        {
+            return Ok(Some(result));
+        }
+        // Both rich comparison methods declined. Keep the explicit numeric boundary,
+        // but let unrelated operands use the normal identity or ordering fallback.
+        if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
+            && [(ac, b), (bc, a)].into_iter().any(|(class, other)| {
+                class.is_some_and(|class| {
+                    self.is_bundled_decimal(class) && self.decimal_numeric_peer(class, other)
+                })
+            })
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "native Decimal numeric comparisons are unsupported",
+            ));
         }
         Ok(None)
+    }
+
+    fn decimal_numeric_peer(&self, decimal: Id, other: Id) -> bool {
+        if matches!(
+            self.heap.get(self.scalar_value(other)),
+            Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Complex(_)
+        ) {
+            return true;
+        }
+        let Some(class) = self.heap.get(other).instance_class() else {
+            return false;
+        };
+        if self.is_bundled_decimal(class) || self.direct_subclass(class, decimal) {
+            return true;
+        }
+        if let Some(numbers) = self.dict_named_item(self.modules, "numbers")
+            && let Value::Module { scope, .. } = *self.heap.get(numbers)
+            && let Some(rational) = self.scope_name(scope, "Rational")
+        {
+            return self.instance_of(other, rational);
+        }
+        false
     }
 
     pub(super) fn inplace(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
