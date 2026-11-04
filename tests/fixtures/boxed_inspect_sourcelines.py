@@ -1,4 +1,4 @@
-from inspect import getsourcelines
+from inspect import getsource, getsourcelines
 
 
 def identity(func):
@@ -30,6 +30,7 @@ def current():
 
     wrapper.__wrapped__ = sample
     assert getsourcelines(wrapper) == (expected, first)
+    assert getsource(wrapper) == "".join(expected)
 
     namespace = {"__name__": "_missing_inspect_module"}
     exec(compile("def missing(): pass", "_missing_inspect_source.py", "exec"), namespace)

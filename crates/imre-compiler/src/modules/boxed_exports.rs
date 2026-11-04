@@ -356,6 +356,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "getgeneratorstate",
             "getmodule",
             "getmodulename",
+            "getsource",
             "getsourcelines",
             "isbuiltin",
             "ismethodwrapper",
