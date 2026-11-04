@@ -195,6 +195,24 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
     }
 }
 
+fn buffered_socket_writer(ctx: &mut Context, raw: Id, size: Id) -> Result<Id> {
+    let zero = ctx.int(0);
+    let size = if size == NONE { ctx.int(-1) } else { size };
+    let negative = ctx.binary("<", size, zero)?;
+    let io = ctx.module("io")?;
+    let size = if ctx.truth(negative)? {
+        ctx.lookup_attr(io, "DEFAULT_BUFFER_SIZE")?
+    } else {
+        size
+    };
+    let unbuffered = ctx.binary("==", size, zero)?;
+    if ctx.truth(unbuffered)? {
+        return Ok(raw);
+    }
+    let writer = ctx.lookup_attr(io, "BufferedWriter")?;
+    ctx.call(writer, vec![raw, size], Vec::new())
+}
+
 fn integer(ctx: &Context, id: Id) -> Result<i32> {
     i32::try_from(ctx.as_integer(id)?)
         .map_err(|_| Error::new("OverflowError", "Python int too large to convert to C int"))
@@ -1149,12 +1167,8 @@ pub(super) fn call(
         let binary = text.contains('b');
         let write = text.contains('w');
         let read = text.contains('r') || !write;
-        let buffering = match option(args, 1, kwargs, "buffering")? {
-            None | Some(NONE) => -1,
-            Some(value) => integer(ctx, value)?,
-        };
-        if buffering == 0 {
-            let roots = ctx.heap.temporary_mark();
+        let buffering = option(args, 1, kwargs, "buffering")?.unwrap_or(NONE);
+        let raw_file = |ctx: &mut Context| -> Result<Id> {
             let module = ctx.module("socket")?;
             let Value::Module { scope, .. } = *ctx.heap.get(module) else {
                 return Err(Error::new("TypeError", "socket must be a module"));
@@ -1169,6 +1183,29 @@ pub(super) fn call(
             });
             let raw = ctx.call(factory, vec![*receiver, raw_mode], Vec::new())?;
             native::retain_socketio(&s);
+            Ok(raw)
+        };
+        let roots = ctx.heap.temporary_mark();
+        let release_on_error = |ctx: &mut Context, error: &Error| {
+            // A replacement factory can retain the raw stream before raising.
+            ctx.heap.release_temporaries_since(roots);
+            for root in error.roots() {
+                ctx.heap.keep(root);
+            }
+            ctx.collect_unreachable();
+        };
+        if binary && write && !read {
+            let raw = raw_file(ctx)?;
+            return buffered_socket_writer(ctx, raw, buffering)
+                .inspect_err(|error| release_on_error(ctx, error));
+        }
+        let buffering = if buffering == NONE {
+            -1
+        } else {
+            integer(ctx, buffering)?
+        };
+        if buffering == 0 {
+            let raw = raw_file(ctx)?;
             if !binary {
                 // The live factory may have retained the raw stream outside this call.
                 ctx.heap.release_temporaries_since(roots);
@@ -1183,7 +1220,7 @@ pub(super) fn call(
         if write || buffering > 0 {
             return Err(Error::new(
                 "NotImplementedError",
-                "socket.makefile supports raw binary streams and default buffered readers",
+                "socket.makefile supports raw binary streams, buffered binary writers and default buffered readers",
             ));
         }
         let wrapper = if binary {
@@ -1192,7 +1229,6 @@ pub(super) fn call(
             let io = ctx.module("io")?;
             Some(ctx.lookup_attr(io, "TextIOWrapper")?)
         };
-        let roots = ctx.heap.temporary_mark();
         let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
         let buffer = ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?);
         let Some(cls) = wrapper else {
@@ -1208,14 +1244,7 @@ pub(super) fn call(
                 ctx.set_attr(text, "mode", mode)?;
                 Ok(text)
             })
-            .inspect_err(|error| {
-                // A replacement text factory can retain the socket reader before raising.
-                ctx.heap.release_temporaries_since(roots);
-                for root in error.roots() {
-                    ctx.heap.keep(root);
-                }
-                ctx.collect_unreachable();
-            });
+            .inspect_err(|error| release_on_error(ctx, error));
     }
     let max = match method {
         "bind" | "connect" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
