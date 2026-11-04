@@ -8426,7 +8426,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::GetInAppendWindow(output) => {
                 let window = self.append_window(*output);
-                let word = self.checked_instruction(format!(
+                let word = self.checked_int_list_word(format!(
                     "call i64 @get_in_append_window(ptr {window}, ptr {})",
                     args[0].value.operand
                 ));
