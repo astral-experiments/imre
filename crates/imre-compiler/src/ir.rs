@@ -2463,6 +2463,9 @@ pub(crate) enum IterNextKind {
     Generic,
     String,
     CodePoint,
+    /// One unsigned UTF-8 byte. The loop lowerer creates a hidden string
+    /// iterator whose only uses are this pull and scope cleanup.
+    Utf8Byte,
 }
 
 #[derive(Clone)]
@@ -2636,11 +2639,11 @@ pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut
     });
 }
 
-/// Finds forward string cursors whose only observable operation is a scalar pull.
+/// Finds forward string cursors whose only observable operation is a byte or scalar pull.
 /// Clearing the cursor ends the borrow. Replacing it with a fresh string cursor
 /// starts a new borrow. A move, a read of the cursor itself, or another kind of
 /// pull requires the position stored in the runtime iterator.
-pub(crate) fn private_scalar_cursors(function: &Function) -> Vec<usize> {
+pub(crate) fn private_string_cursors(function: &Function) -> Vec<usize> {
     let mut pulled = vec![false; function.locals.len()];
     let mut created = vec![false; function.locals.len()];
     let mut exposed = vec![false; function.locals.len()];
@@ -2651,7 +2654,7 @@ pub(crate) fn private_scalar_cursors(function: &Function) -> Vec<usize> {
         match &node {
             Node::Statement(Statement::IterNext {
                 iterator,
-                kind: IterNextKind::CodePoint,
+                kind: IterNextKind::CodePoint | IterNextKind::Utf8Byte,
                 ..
             }) => pulled[*iterator] = true,
             Node::Statement(Statement::IterNext { iterator, .. }) => exposed[*iterator] = true,

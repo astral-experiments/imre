@@ -1,7 +1,7 @@
 
-; The cursor roots a valid UTF-8 buffer. The compiler owns this private byte
-; position, so a successful ASCII pull can advance it without a runtime call.
-define internal i64 @next_utf8_scalar(ptr %next, ptr %end) alwaysinline {
+; The cursor roots the immutable UTF-8 buffer. Raw bytes and ASCII scalars
+; each consume one byte. Only a non-ASCII scalar needs the runtime decoder.
+define internal i64 @next_utf8_value(ptr %next, ptr %end, i1 %raw) alwaysinline {
 entry:
   %current = load ptr, ptr %next
   %more = icmp ne ptr %current, %end
@@ -9,7 +9,8 @@ entry:
 read:
   %byte = load i8, ptr %current
   %ascii = icmp sge i8 %byte, 0
-  br i1 %ascii, label %one, label %unicode
+  %single = or i1 %ascii, %raw
+  br i1 %single, label %one, label %unicode
 one:
   %after = getelementptr inbounds i8, ptr %current, i64 1
   store ptr %after, ptr %next

@@ -108,7 +108,10 @@ impl RangeFacts<'_> {
                 kind,
                 ..
             } => {
-                if *kind != crate::ir::IterNextKind::CodePoint {
+                if !matches!(
+                    kind,
+                    crate::ir::IterNextKind::CodePoint | crate::ir::IterNextKind::Utf8Byte
+                ) {
                     small[*key] = false;
                 }
                 if let Some(value) = value {
@@ -583,12 +586,16 @@ impl Analyzer {
                 kind,
                 ..
             } => {
-                // Exhaustion preserves the old output. A successful scalar
-                // pull contributes only the Unicode code-point interval.
-                state.0[*key] = if *kind == crate::ir::IterNextKind::CodePoint {
-                    state.0[*key].join(Interval::bounded(0, 0x10ffff))
-                } else {
-                    Interval::UNKNOWN
+                // Exhaustion preserves the old output. Join it with the range
+                // of integers produced by a successful pull.
+                state.0[*key] = match kind {
+                    crate::ir::IterNextKind::CodePoint => {
+                        state.0[*key].join(Interval::bounded(0, 0x10ffff))
+                    }
+                    crate::ir::IterNextKind::Utf8Byte => {
+                        state.0[*key].join(Interval::bounded(0, 255))
+                    }
+                    _ => Interval::UNKNOWN,
                 };
                 if let Some(value) = value {
                     state.0[*value] = Interval::UNKNOWN;
