@@ -258,7 +258,7 @@ pub(super) fn pack_into(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -
             ),
         ));
     }
-    ctx.with_writable_byte_span(*buffer, |ctx, storage, span| {
+    ctx.with_writable_byte_span(*buffer, "argument", |ctx, storage, span| {
         let index = ctx.index_integer(*offset)?;
         let offset = crate::signed_index(&index).ok_or_else(|| {
             Error::new(

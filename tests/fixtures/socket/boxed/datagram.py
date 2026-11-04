@@ -28,6 +28,27 @@ def check(family, host):
         # A zero-size recvfrom consumes a datagram and still returns the sender.
         assert receiver.recvfrom(0) == (b"", source)
         assert receiver.recvfrom(16, 0) == (b"last", source)
+
+        assert sender.sendto(b"queued", target) == 6
+        out = bytearray(b"....")
+
+        class Flags:
+            def __index__(self):
+                try:
+                    out.append(0)
+                except BufferError:
+                    raise LookupError("invalid flag")
+                raise AssertionError("recvfrom_into released the buffer before converting flags")
+
+        try:
+            receiver.recvfrom_into(out, len(out) + 1, Flags())
+        except LookupError:
+            pass
+        else:
+            raise AssertionError("accepted invalid flags")
+        out.append(0)
+        assert receiver.recvfrom_into(memoryview(out)[1:3], flags=0) == (2, source)
+        assert out == b".qu.\x00"
         receiver.setblocking(False)
         try:
             receiver.recvfrom(16)

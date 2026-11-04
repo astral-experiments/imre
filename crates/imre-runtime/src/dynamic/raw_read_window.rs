@@ -89,6 +89,7 @@ impl Context {
     pub(super) fn with_writable_byte_span<T>(
         &mut self,
         object: Id,
+        argument: &str,
         consume: impl FnOnce(&mut Self, Id, Range<usize>) -> Result<T>,
     ) -> Result<T> {
         // PyArg_Parse("w*") replaces any acquisition failure with this TypeError.
@@ -101,7 +102,7 @@ impl Context {
             let kind = &kind[..kind.floor_char_boundary(50)];
             Error::new(
                 "TypeError",
-                format!("argument must be read-write bytes-like object, not {kind}"),
+                format!("{argument} must be read-write bytes-like object, not {kind}"),
             )
         };
         let method = self

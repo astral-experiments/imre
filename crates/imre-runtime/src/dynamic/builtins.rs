@@ -788,6 +788,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "close"
                     | "recv"
                     | "recvfrom"
+                    | "recvfrom_into"
                     | "recv_into"
                     | "makefile"
                     | "_decref_socketios"
