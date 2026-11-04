@@ -87,6 +87,18 @@ def current():
         def __len__(self):
             raise AssertionError("length called")
 
+    header = struct.Struct("!2cI")
+    assert header.pack(Data(b"M"), b"\xff", 258) == b"M\xff\0\0\x01\x02"
+    assert header.unpack_from(b"XM\xff\0\0\x01\x02", 1) == (b"M", b"\xff", 258)
+    target = bytearray(b"1234")
+    try:
+        struct.pack_into("2c", target, 1, b"A", bytearray(b"B"))
+    except struct.error as error:
+        assert str(error) == "char format requires a bytes object of length 1"
+        assert target == b"1A\x004"
+    else:
+        raise AssertionError("accepted a bytearray for a char field")
+
     for fmt in (Text(">Q"), Data(b">Q")):
         record = struct.Struct(fmt)
         print(record.format, struct.calcsize(fmt))

@@ -315,6 +315,13 @@ fn pack_word(
     little_endian: bool,
 ) -> Result<u64> {
     match code {
+        b'c' => match ctx.heap.get(ctx.scalar_value(id)) {
+            Value::Bytes(bytes) if bytes.len() == 1 => Ok(u64::from(bytes[0])),
+            _ => Err(format_error(
+                ctx,
+                "char format requires a bytes object of length 1",
+            )),
+        },
         b'?' => ctx.truth(id).map(u64::from),
         b'f' => single_bits(ctx, id).map(u64::from),
         b'd' => float_value(ctx, id).map(f64::to_bits),
