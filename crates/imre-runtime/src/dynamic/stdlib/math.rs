@@ -7,6 +7,51 @@ use num_traits::{One, ToPrimitive, Zero};
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
+/// Compute the final adjacent convergents without boxing the Euclidean steps.
+pub(super) fn fraction_convergents(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let &[n, d, limit] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "_convergents requires three integers",
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_convergents takes no keyword arguments",
+        ));
+    }
+    let small = |id| match ctx.heap.get(id) {
+        Value::Int(value) => value.as_small().map(i128::from),
+        _ => None,
+    };
+    let (Some(mut n), Some(mut d), Some(limit)) = (small(n), small(d), small(limit)) else {
+        return Ok(super::NONE);
+    };
+    if limit < 1 || d <= limit {
+        return Ok(super::NONE);
+    }
+    let (mut p0, mut q0, mut p1, mut q1) = (0, 1, 1, 0);
+    while d != 0 {
+        let a = n.div_euclid(d);
+        let q2 = q0 + a * q1;
+        if q2 > limit {
+            // Each convergent fits the input magnitudes. Keep products wide
+            // until the loop finishes, then box the five live integers once.
+            let values = [p0, q0, p1, q1, d].map(|v| ctx.int(v as i64));
+            return Ok(ctx.alloc(Value::Tuple(values.into())));
+        }
+        (p0, q0, p1, q1) = (p1, q1, p0 + a * p1, q2);
+        (n, d) = (d, n.rem_euclid(d));
+    }
+    // A mutated, non-reduced Fraction can exhaust the divisions before the bound.
+    Ok(super::NONE)
+}
+
 /// Dispatch the boxed math functions.
 pub(super) fn call(
     ctx: &mut Context,

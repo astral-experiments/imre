@@ -3,6 +3,8 @@
 
 """Fraction, infinite-precision, rational numbers."""
 
+from _imre_fractions import _convergents
+
 import functools
 import math
 import numbers
@@ -420,13 +422,17 @@ class Fraction(numbers.Rational):
 
         p0, q0, p1, q1 = 0, 1, 1, 0
         n, d = self._numerator, self._denominator
-        while True:
-            a = n//d
-            q2 = q0+a*q1
-            if q2 > max_denominator:
-                break
-            p0, q0, p1, q1 = p1, q1, p0+a*p1, q2
-            n, d = d, n-a*d
+        state = _convergents(n, d, max_denominator)
+        if state is None:
+            while True:
+                a = n//d
+                q2 = q0+a*q1
+                if q2 > max_denominator:
+                    break
+                p0, q0, p1, q1 = p1, q1, p0+a*p1, q2
+                n, d = d, n-a*d
+        else:
+            p0, q0, p1, q1, d = state
         k = (max_denominator-q0)//q1
 
         # Determine which of the candidates (p0+k*p1)/(q0+k*q1) and p1/q1 is

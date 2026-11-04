@@ -3300,6 +3300,10 @@ impl Context {
                     self.bind(scope, attr, value);
                 }
             }
+            "_imre_fractions" => {
+                let value = self.builtin("_imre_fractions._convergents");
+                self.bind(scope, "_convergents", value);
+            }
             "_imre_itertools" => {
                 for attr in [
                     "_accumulate_allocate",

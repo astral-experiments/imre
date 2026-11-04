@@ -2029,6 +2029,9 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
+    if name == "_imre_fractions._convergents" {
+        return math::fraction_convergents(ctx, args, kwargs);
+    }
     if name == "_imre_itertools._accumulate_allocate" {
         return itertools::accumulate_allocate(ctx, args, kwargs);
     }
