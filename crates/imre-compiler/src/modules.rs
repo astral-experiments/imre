@@ -3997,10 +3997,11 @@ impl<'a> Loader<'a> {
         for (index, path) in extension_paths.iter().enumerate() {
             if python_archive_indices.contains(&index) {
                 let logical = std::path::absolute(path).map_err(|e| e.to_string())?;
-                if !zip_sources.contains_key(&logical) {
-                    let archive = crate::zip_entry::ZipSources::open(&logical, &mut zip_inputs)?;
-                    search_roots.push(logical.clone());
-                    zip_sources.insert(logical, archive);
+                if let std::collections::hash_map::Entry::Vacant(entry) = zip_sources.entry(logical)
+                {
+                    let archive = crate::zip_entry::ZipSources::open(entry.key(), &mut zip_inputs)?;
+                    search_roots.push(entry.key().clone());
+                    entry.insert(archive);
                 }
                 continue;
             }
