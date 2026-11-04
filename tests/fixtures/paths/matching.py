@@ -70,10 +70,18 @@ except ValueError as error:
 for text in ["", "/", "//", "a", "/a", "//a", "a/b", "/a/b", ".dot",
              "a\nb", "İ", "ı", "K", "ſ", "]", "雪"]:
     for pattern in ["", ".", "/", "//", "*", "?", "**", "***", "**/*", "a/**",
-                    "**/a", "/**/a", "//**", "a/**/**/b", "[!a]", "[z-a]",
+                    "**/a", "/**/a", "//**", "a/**/**/b", "a[!x]b", "a*b", "a**b", "a*b*c", "[!a]", "[z-a]",
                     "[!z-a]", "[a-c]", "[[]", "[]]", "[a-z]", "[!I]", "[ſ]"]:
         p = PosixPath(text)
         q = Path(pattern)
         check(p, q, None)
         check(p, q, False)
         check(p, q, True)
+
+
+for path, pattern in [("SRC/lib/Test_main.PY", "src/*/test_*.py"),
+                      ("test", "tes*est"), ("abc", "a**c"), ("a/b", "a*b")]:
+    windows = PureWindowsPath(path)
+    print(windows.match(pattern))
+    print(windows.full_match(pattern))
+    print(windows.full_match(pattern, case_sensitive=True))
