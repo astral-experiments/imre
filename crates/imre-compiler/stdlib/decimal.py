@@ -82,15 +82,32 @@ def _canonical(value: str) -> str:
     return result + "E" + str(adjusted)
 
 
+def _coefficient_int(digits: str) -> int:
+    # A Decimal coefficient can exceed the digit limit on int(string).
+    first = len(digits) % 18 or 18
+    value = int(digits[:first])
+    for offset in range(first, len(digits), 18):
+        value = value * 10**18 + int(digits[offset:offset + 18])
+    return value
+
+
+def _product_parts(magnitude: str) -> tuple[str, int]:
+    mantissa, marker, exponent = magnitude.partition("E")
+    whole, dot, fraction = mantissa.partition(".")
+    return (whole + fraction).lstrip("0") or "0", (int(exponent) if marker else 0) - len(fraction)
+
+
+def _display(text: str) -> str:
+    return text
+
+
 def _parts(text: str) -> tuple[str, int]:
     """Return the signed coefficient and power of ten of a finite canonical value."""
-    significand, marker, exponent = text.partition("E")
-    whole, dot, fraction = significand.lstrip("-").partition(".")
-    digits = (whole + fraction).lstrip("0")
-    if not digits:
+    digits, power = _product_parts(text.lstrip("-"))
+    if digits == "0":
         return "0", 0
     coefficient = digits.rstrip("0")
-    power = (int(exponent) if marker else 0) - len(fraction) + len(digits) - len(coefficient)
+    power += len(digits) - len(coefficient)
     if text.startswith("-"):
         coefficient = "-" + coefficient
     return coefficient, power
@@ -115,11 +132,7 @@ class Decimal:
 
         coefficient, exponent = _parts(text)
         digits = coefficient.lstrip("-")
-        # A Decimal coefficient can exceed the limit for int(string).
-        first = len(digits) % 18 or 18
-        numerator = int(digits[:first])
-        for start in range(first, len(digits), 18):
-            numerator = numerator * 10**18 + int(digits[start:start + 18])
+        numerator = _coefficient_int(digits)
         if coefficient.startswith("-"):
             numerator = -numerator
         scale = 10**abs(exponent)
@@ -136,10 +149,10 @@ class Decimal:
         return bool(mantissa.replace("0", "").replace(".", ""))
 
     def __str__(self) -> str:
-        return self._text
+        return _display(self._text)
 
     def __repr__(self) -> str:
-        return "Decimal('" + self._text + "')"
+        return "Decimal('" + _display(self._text) + "')"
 
     # Object-protocol methods for the boxed runtime.
     def __float__(self, /) -> float:
@@ -196,3 +209,120 @@ class Decimal:
         if coefficient.startswith("-"):
             result = -result
         return -2 if result == -1 else result
+
+    def __mul__(self, other, /):
+        return _decimal_product(self, other, False)
+
+    def __rmul__(self, other, /):
+        return _decimal_product(self, other, True)
+
+
+def _round_product_up(rounding, sign, last, first, sticky):
+    # Called only if at least one discarded digit is nonzero.
+    if rounding == ROUND_DOWN:
+        return False
+    if rounding == ROUND_UP:
+        return True
+    if rounding == ROUND_CEILING:
+        return not sign
+    if rounding == ROUND_FLOOR:
+        return bool(sign)
+    if rounding == ROUND_05UP:
+        return last in "05"
+    if first != "5" or sticky:
+        return first >= "5"
+    return rounding == ROUND_HALF_UP or (rounding == ROUND_HALF_EVEN and last in "13579")
+
+
+def _product_overflow(context, sign):
+    context._signal(Overflow, Inexact, Rounded)
+    rounding = context.rounding
+    if (rounding in (ROUND_DOWN, ROUND_05UP)
+            or (rounding == ROUND_CEILING and sign)
+            or (rounding == ROUND_FLOOR and not sign)):
+        return Decimal(sign + "9" * context.prec + "E" + str(context.Etop()))
+    return Decimal(sign + "Infinity")
+
+
+def _finish_product(sign, digits, exponent, context):
+    tiny = context.Etiny()
+    top = context.Etop()
+    if digits == "0":
+        bounded = max(tiny, min(exponent, top if context.clamp else context.Emax))
+        if bounded != exponent:
+            context._signal(Clamped)
+        return Decimal(sign + "0E" + str(bounded))
+
+    adjusted = exponent + len(digits) - 1
+    if adjusted > context.Emax:
+        return _product_overflow(context, sign)
+    subnormal = adjusted < context.Emin
+    signals = [Subnormal] if subnormal else []
+
+    # Round once, at the stricter of the precision and subnormal limits.
+    drop = max(len(digits) - context.prec, tiny - exponent)
+    if drop > 0:
+        keep = len(digits) - drop
+        tail = digits[max(keep, 0):]
+        digits = digits[:max(keep, 0)] or "0"
+        exponent += drop
+        signals.append(Rounded)
+        if tail.strip("0"):
+            signals.append(Inexact)
+            if subnormal:
+                signals.append(Underflow)
+            first = tail[0] if keep >= 0 else "0"
+            if _round_product_up(context.rounding, sign, digits[-1], first, bool(tail[1:].strip("0"))):
+                digits = Decimal(_coefficient_int(digits) + 1)._text
+                if len(digits) > context.prec:
+                    digits = digits[:-1]
+                    exponent += 1
+                if exponent + len(digits) - 1 > context.Emax:
+                    return _product_overflow(context, sign)
+            if digits == "0":
+                signals.append(Clamped)
+
+    if context.clamp and exponent > top:
+        digits += "0" * (exponent - top)
+        exponent = top
+        signals.append(Clamped)
+    if signals:
+        context._signal(*signals)
+    return Decimal(sign + digits + "E" + str(exponent))
+
+
+def _decimal_product(self, other, reflected):
+    if not issubclass(type(self), Decimal):
+        method = "__rmul__" if reflected else "__mul__"
+        raise TypeError(f"descriptor '{method}' requires a 'decimal.Decimal' object but received a '{type(self).__name__}'")
+    if not issubclass(type(other), (Decimal, int)):
+        return NotImplemented
+    left = Decimal(self)._text
+    right = Decimal(other)._text
+    if reflected:
+        left, right = right, left
+    context = getcontext()
+
+    # A signaling NaN takes precedence over a quiet NaN; preserve the selected payload.
+    for prefix in ("sNaN", "NaN"):
+        for text in (left, right):
+            magnitude = text.lstrip("-")
+            if magnitude.startswith(prefix):
+                if prefix == "sNaN":
+                    context._signal(InvalidOperation)
+                size = context.prec - context.clamp
+                payload = magnitude[len(prefix):]
+                return Decimal(("-" if text.startswith("-") else "") + "NaN" + (payload[-size:] if size else ""))
+
+    sign = "-" if left.startswith("-") != right.startswith("-") else ""
+    left, right = left.lstrip("-"), right.lstrip("-")
+    if left == "Infinity" or right == "Infinity":
+        peer = right if left == "Infinity" else left
+        if not peer.partition("E")[0].strip("0."):
+            context._signal(InvalidOperation)
+            return Decimal("NaN")
+        return Decimal(sign + "Infinity")
+    a, ea = _product_parts(left)
+    b, eb = _product_parts(right)
+    digits = Decimal(_coefficient_int(a) * _coefficient_int(b))._text
+    return _finish_product(sign, digits, ea + eb, context)

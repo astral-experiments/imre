@@ -236,7 +236,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "re/_constants.py",
             include_str!("../stdlib/re/_constants.py"),
         )),
-        "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
+        "decimal" => Some((
+            "decimal.py",
+            concat!(
+                include_str!("../stdlib/decimal.py"),
+                "\n",
+                include_str!("../stdlib/decimal_context.py")
+            ),
+        )),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
         "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
         "pyexpat" => Some(("pyexpat.py", include_str!("../stdlib/pyexpat.py"))),
@@ -1186,6 +1193,7 @@ impl Intrinsic {
         }
     }
 
+    pub(crate) const DECIMAL_CONTEXT: Self = Self::ScopedObjectExport("decimal context");
     pub(crate) const SOCKET_MSG_PEEK: Self = Self::ScopedObjectExport("socket.MSG_PEEK");
     pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
@@ -2812,6 +2820,40 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
+        if self.is_bundled("decimal")
+            && matches!(
+                name,
+                "Context"
+                    | "BasicContext"
+                    | "DefaultContext"
+                    | "ExtendedContext"
+                    | "getcontext"
+                    | "setcontext"
+                    | "localcontext"
+                    | "Clamped"
+                    | "DivisionByZero"
+                    | "FloatOperation"
+                    | "Inexact"
+                    | "Overflow"
+                    | "Rounded"
+                    | "Subnormal"
+                    | "Underflow"
+                    | "MAX_PREC"
+                    | "MAX_EMAX"
+                    | "MIN_EMIN"
+                    | "MIN_ETINY"
+                    | "ROUND_CEILING"
+                    | "ROUND_FLOOR"
+                    | "ROUND_UP"
+                    | "ROUND_DOWN"
+                    | "ROUND_HALF_UP"
+                    | "ROUND_HALF_DOWN"
+                    | "ROUND_HALF_EVEN"
+                    | "ROUND_05UP"
+            )
+        {
+            return Some(Binding::Intrinsic(Intrinsic::DECIMAL_CONTEXT));
+        }
         if self.is_bundled("uuid") {
             let export = match name {
                 "uuid1" => Some("uuid.uuid1"),
