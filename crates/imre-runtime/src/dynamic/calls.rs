@@ -10,7 +10,8 @@ const KEY_WRAPPER: &str = "functools.KeyWrapper";
 fn nonconstructible_result_type(name: &str) -> bool {
     matches!(
         name,
-        HashState::CLASS
+        value::ZLIB_COMPRESS_TYPE
+            | HashState::CLASS
             | HashState::XOF_CLASS
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
@@ -136,6 +137,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
+        "zlib" if function == "compressobj" => Some((module, function)),
         "lzma" if function == "decompress" => Some((module, function)),
         "zlib"
             if matches!(
@@ -1561,6 +1563,7 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | value::ZLIB_COMPRESS_TYPE
                             | "socket.socket"
                             | "struct.Struct"
                             | value::ZLIB_DECOMPRESS_TYPE
@@ -1745,6 +1748,7 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | (value::ZLIB_COMPRESS_TYPE, Value::ZlibCompressor(_))
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
@@ -2447,6 +2451,12 @@ impl Context {
                 "tb_lineno" => return Ok(self.int(lineno)),
                 _ => {}
             },
+            Value::Native(ref class)
+                if class == value::ZLIB_COMPRESS_TYPE
+                    && value::ZLIB_COMPRESS_METHODS.contains(&name) =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
             Value::Native(ref class) if class == "frame" && name == "clear" => {
                 return Ok(self.builtin("frame.clear"));
             }

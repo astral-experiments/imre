@@ -1359,6 +1359,11 @@ impl IntrinsicModule {
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
         }
+        if self == Self::Zlib
+            && let Some(value) = imre_ast::zlib::integer_constant(name)
+        {
+            return Some(Binding::Intrinsic(Intrinsic::IntConstant(value)));
+        }
         if self == Self::DatetimeNative {
             return Self::Datetime.symbol(name);
         }
@@ -2333,6 +2338,10 @@ impl IntrinsicModule {
             (Self::Lzma, "FORMAT_AUTO") => Intrinsic::IntConstant(0),
             (Self::Lzma, "FORMAT_XZ") => Intrinsic::IntConstant(1),
             (Self::Lzma, "FORMAT_ALONE") => Intrinsic::IntConstant(2),
+            (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
+            (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
+                Intrinsic::StringConstant(imre_ast::zlib::VERSION)
+            }
             (Self::Lzma, "LZMAError") => Intrinsic::ScopedObjectExport("lzma.LZMAError"),
             (Self::Lzma, "decompress") => Intrinsic::ScopedObjectExport("lzma.decompress"),
             (Self::Zlib, "decompressobj") => Intrinsic::ScopedObjectExport("zlib.decompressobj"),
