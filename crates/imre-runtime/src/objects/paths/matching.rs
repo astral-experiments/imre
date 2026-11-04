@@ -94,6 +94,18 @@ fn glob_matches(
     if let Some(matched) = match_literal_components(path, pattern, sensitive, recursive, sep) {
         return Ok(matched);
     }
+    complex_glob_matches(path, pattern, sensitive, recursive, sep)
+}
+
+// Keep token and regex compilation out of the literal-component loop.
+#[inline(never)]
+fn complex_glob_matches(
+    path: &str,
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Result<bool> {
     if sensitive
         && pattern.contains(['?', '['])
         && !path.contains(sep)
