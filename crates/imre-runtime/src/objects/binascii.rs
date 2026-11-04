@@ -98,11 +98,11 @@ const fn decode_digits(urlsafe: bool) -> [u8; 256] {
     digits
 }
 
+fn unpack_digits([a, b, c, d]: [u8; 4]) -> [u8; 3] {
+    [a << 2 | b >> 4, b << 4 | c >> 2, c << 6 | d]
+}
+
 fn decode(data: &[u8], strict: bool, urlsafe: bool) -> Result<Bytes> {
-    let mut decoded = allocate(data.len().div_ceil(4) * 3)?;
-    let mut count = 0;
-    let mut pads = 0;
-    let mut remaining = 0;
     const STANDARD_DIGITS: [u8; 256] = decode_digits(false);
     const URLSAFE_DIGITS: [u8; 256] = decode_digits(true);
     let digits = if urlsafe {
@@ -110,77 +110,95 @@ fn decode(data: &[u8], strict: bool, urlsafe: bool) -> Result<Bytes> {
     } else {
         &STANDARD_DIGITS
     };
+    if strict {
+        decode_groups::<true>(data, digits)
+    } else {
+        decode_groups::<false>(data, digits)
+    }
+}
+
+fn decode_groups<const STRICT: bool>(data: &[u8], digits: &[u8; 256]) -> Result<Bytes> {
+    let mut decoded = allocate(data.len().div_ceil(4) * 3)?;
     let mut input = data;
     while !input.is_empty() {
-        let position = count % 4;
-        if position == 0 && pads == 0 {
-            let start = input.len();
-            while let Some((group, rest)) = input.split_first_chunk::<4>() {
-                let [a, b, c, d] = group.map(|byte| digits[usize::from(byte)]);
-                if a | b | c | d == u8::MAX {
-                    break;
+        while let Some((raw, rest)) = input.split_first_chunk::<4>() {
+            let group @ [a, b, c, d] = raw.map(|byte| digits[usize::from(byte)]);
+            if a | b | c | d == u8::MAX {
+                if rest.is_empty() && raw[3] == b'=' && a | b != u8::MAX {
+                    let len = if raw[2] == b'=' {
+                        1
+                    } else if c != u8::MAX {
+                        2
+                    } else {
+                        break;
+                    };
+                    decoded.extend_from_slice(&unpack_digits(group)[..len]);
+                    return Ok(decoded);
                 }
-                decoded.extend_from_slice(&[a << 2 | b >> 4, b << 4 | c >> 2, c << 6 | d]);
-                input = rest;
+                break;
             }
-            count += start - input.len();
+            decoded.extend_from_slice(&unpack_digits(group));
+            input = rest;
         }
-        let Some((&byte, rest)) = input.split_first() else {
-            break;
-        };
-        let first = input.len() == data.len();
-        input = rest;
-        if byte == b'=' {
-            pads += 1;
-            if !strict || (position >= 2 && position + pads <= 4) {
+
+        // Gather a group across ignored bytes. Resume contiguous decoding at its end.
+        let mut group = [0; 4];
+        let mut used: usize = 0;
+        let mut pads = 0;
+        while used < group.len() {
+            let Some((&byte, rest)) = input.split_first() else {
+                break;
+            };
+            let first = input.len() == data.len();
+            input = rest;
+            let value = digits[usize::from(byte)];
+            if value != u8::MAX {
+                if STRICT && pads != 0 {
+                    let message = if used + pads == 4 {
+                        "Excess data after padding"
+                    } else {
+                        "Discontinuous padding not allowed"
+                    };
+                    return Err(Error::new(Kind::BinasciiError, message));
+                }
+                group[used] = value;
+                used += 1;
+                pads = 0;
                 continue;
             }
-            if position == 1 {
-                break; // The length error below takes precedence over bad padding.
-            }
-            let message = if first {
-                "Leading padding not allowed"
-            } else {
-                "Excess padding not allowed"
-            };
-            return Err(Error::new(Kind::BinasciiError, message));
-        }
-        let value = digits[usize::from(byte)];
-        if value == u8::MAX {
-            if strict {
+            if byte == b'=' {
+                pads += 1;
+                if STRICT && (used < 2 || used + pads > 4) {
+                    if used == 1 {
+                        break; // The length error takes precedence over bad padding.
+                    }
+                    let message = if first {
+                        "Leading padding not allowed"
+                    } else {
+                        "Excess padding not allowed"
+                    };
+                    return Err(Error::new(Kind::BinasciiError, message));
+                }
+            } else if STRICT {
                 return Err(Error::new(
                     Kind::BinasciiError,
                     "Only base64 data is allowed",
                 ));
             }
-            continue;
         }
-        if strict && pads != 0 {
-            let message = if position + pads == 4 {
-                "Excess data after padding"
-            } else {
-                "Discontinuous padding not allowed"
-            };
-            return Err(Error::new(Kind::BinasciiError, message));
+        if used == 1 {
+            let count = decoded.len() / 3 * 4 + 1;
+            return Err(Error::new(
+                Kind::BinasciiError,
+                format!(
+                    "Invalid base64-encoded string: number of data characters ({count}) cannot be 1 more than a multiple of 4"
+                ),
+            ));
         }
-        pads = 0;
-        if position != 0 {
-            decoded.push((remaining << (2 * position)) | (value >> (6 - 2 * position)));
+        if used != 0 && used + pads < 4 {
+            return Err(Error::new(Kind::BinasciiError, "Incorrect padding"));
         }
-        remaining = value;
-        count += 1;
-    }
-    let position = count % 4;
-    if position == 1 {
-        return Err(Error::new(
-            Kind::BinasciiError,
-            format!(
-                "Invalid base64-encoded string: number of data characters ({count}) cannot be 1 more than a multiple of 4"
-            ),
-        ));
-    }
-    if position != 0 && position + pads < 4 {
-        return Err(Error::new(Kind::BinasciiError, "Incorrect padding"));
+        decoded.extend_from_slice(&unpack_digits(group)[..used.saturating_sub(1)]);
     }
     Ok(decoded)
 }
