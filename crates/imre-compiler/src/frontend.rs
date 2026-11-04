@@ -8574,6 +8574,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Type::Class(class) = receiver.ty
                     && (self.classes.methods[class].contains_key(attribute.attr.as_str())
+                        || (attribute.attr.as_str() == "__float__" && self.decimal_class(class))
                         || matches!(
                             self.classes.declarations.definitions[class]
                                 .static_bindings
@@ -11665,6 +11666,12 @@ impl<'a> Checker<'a> {
                     && matches!(args[0].ty, Type::Int | Type::Float | Type::Bool | Type::Str) =>
             {
                 (Builtin::Int, Type::Int)
+            }
+            "float"
+                if args.len() == 1
+                    && matches!(args[0].ty, Type::Class(class) if self.decimal_class(class)) =>
+            {
+                return Err(self.scoped_builtin_error("Decimal.__float__", call));
             }
             "float" if args.is_empty() => {
                 return Ok(Expr {

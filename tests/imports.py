@@ -25,6 +25,30 @@ LOCALE_FORMAT = (
 )
 
 REJECTED = {
+    "decimal_float_preserves_typed_call": ({
+        "main.py": (
+            "from decimal import Decimal\n"
+            "def convert(value: Decimal) -> float: return float(value)\n"
+            "def typed(n: int) -> int: return n\n"
+            "def unused() -> int: return typed('wrong')\n"
+            "print(convert(Decimal('1.25')))\n"
+        ),
+    }, "invalid-argument-type"),
+    "unused_isclose_preserves_typed_call": ({
+        "main.py": (
+            "from math import isclose\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "isclose_call_preserves_typed_call": ({
+        "main.py": (
+            "from math import isclose\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(isclose(1, 1))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unused_float_info_preserves_typed_call": ({
         "main.py": (
             "from sys import float_info\n"
