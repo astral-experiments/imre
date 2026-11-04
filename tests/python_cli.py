@@ -1776,6 +1776,14 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         )
         compare("-B", shadow_script, extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
 
+        (root / "shell_words.py").write_text(
+            "import shlex\n"
+            "words = ['', 'two words', '$HOME']\n"
+            "print(shlex.split(shlex.join(words)))\n"
+            "print(list(shlex.shlex('a && b', posix=True, punctuation_chars=True)))\n"
+        )
+        compare("-B", "-m", "shell_words")
+
         tokenize_script = root / "tokenize_entry.py"
         tokenize_script.write_text(
             "from io import StringIO\n"
