@@ -471,6 +471,50 @@ pub unsafe extern "C" fn imre_str_iter_next_codepoint(cursor: *const Object) -> 
     }
 }
 
+/// Borrows the complete UTF-8 buffer of a freshly constructed forward cursor.
+///
+/// # Safety
+/// Root the exact forward string iterator until the final read from the view.
+/// The caller supplies a writable end pointer and tracks its own byte position.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_iter_bounds(
+    cursor: *const Object,
+    end: *mut *const u8,
+) -> *const u8 {
+    // SAFETY: the cursor owns an immutable string with a stable address.
+    unsafe {
+        object(cursor).0.with(|storage| {
+            let Storage::StringIterator(iter) = storage else {
+                unreachable!("exact string iterator")
+            };
+            debug_assert!(!iter.reverse);
+            let bytes = iter.owner.as_bytes().as_ptr_range();
+            end.write(bytes.end);
+            bytes.start
+        })
+    }
+}
+
+/// Advances a borrowed UTF-8 view over one non-ASCII scalar and returns its tagged value.
+///
+/// # Safety
+/// The pointers bound one live UTF-8 allocation. The writable position points
+/// to the start of a non-ASCII scalar strictly before the end.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_utf8_next_non_ascii(next: *mut *const u8, end: *const u8) -> usize {
+    // SAFETY: the current position is a scalar boundary in the rooted string.
+    unsafe {
+        let start = *next;
+        let bytes = std::slice::from_raw_parts(start, end.offset_from_unsigned(start));
+        let text = std::str::from_utf8_unchecked(bytes);
+        let ch = text.chars().next().expect("nonempty UTF-8 view");
+        next.write(start.add(ch.len_utf8()));
+        Int::small(i64::from(u32::from(ch)))
+            .expect("Unicode scalar fits")
+            .into_raw()
+    }
+}
+
 unsafe fn string_iter_next(
     cursor: *const Object,
     pull: impl FnOnce(&mut StringIterator) -> Option<usize>,
@@ -1072,6 +1116,25 @@ mod tests {
             }
         }
         assert_eq!(imre_error_pending(), 0);
+    }
+
+    #[test]
+    fn private_forward_view_uses_scalar_boundaries_in_the_rooted_string() {
+        let source = StrOwner::new(Str::new("\0é雪🙂"));
+        // SAFETY: the cursor roots the buffer after its caller drops the source.
+        unsafe {
+            let cursor = crate::ObjectOwner::from_raw(imre_str_iter(StrOwner::as_ptr(&source)));
+            drop(source);
+            let mut end = std::ptr::null();
+            let mut next = imre_str_iter_bounds(crate::ObjectOwner::as_ptr(&cursor), &mut end);
+            assert_eq!(*next, 0);
+            next = next.add(1);
+            for expected in ['é', '雪', '🙂'] {
+                let word = imre_utf8_next_non_ascii(&mut next, end);
+                assert_eq!(Int(word).as_small(), Some(i64::from(u32::from(expected))));
+            }
+            assert_eq!(next, end);
+        }
     }
 
     #[test]

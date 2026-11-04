@@ -2623,6 +2623,50 @@ pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut
     });
 }
 
+/// Finds forward string cursors whose only observable operation is a scalar pull.
+/// Clearing the cursor ends the borrow. Replacing it with a fresh string cursor
+/// starts a new borrow. A move, a read of the cursor itself, or another kind of
+/// pull requires the position stored in the runtime iterator.
+pub(crate) fn private_scalar_cursors(function: &Function) -> Vec<usize> {
+    let mut pulled = vec![false; function.locals.len()];
+    let mut created = vec![false; function.locals.len()];
+    let mut exposed = vec![false; function.locals.len()];
+    for &parameter in &function.params {
+        exposed[parameter] = true;
+    }
+    walk_nodes(&function.body, &mut |node| {
+        match &node {
+            Node::Statement(Statement::IterNext {
+                iterator,
+                kind: IterNextKind::CodePoint,
+                ..
+            }) => pulled[*iterator] = true,
+            Node::Statement(Statement::IterNext { iterator, .. }) => exposed[*iterator] = true,
+            Node::Expression(Expr {
+                kind: ExprKind::Local(slot),
+                ..
+            }) => exposed[*slot] = true,
+            // Scope cleanup clears owners without publishing a replacement cursor.
+            Node::Statement(Statement::Clear(_) | Statement::Scope { .. })
+            | Node::Expression(Expr {
+                kind: ExprKind::Scope { .. },
+                ..
+            }) => return,
+            _ => {}
+        }
+        node_writes(node, &mut |slot, value| {
+            if value.is_some_and(|v| matches!(v.kind, ExprKind::Builtin(Builtin::StringIter, _))) {
+                created[slot] = true;
+            } else {
+                exposed[slot] = true;
+            }
+        });
+    });
+    (0..pulled.len())
+        .filter(|&slot| pulled[slot] && created[slot] && !exposed[slot])
+        .collect()
+}
+
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
 pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Option<&Expr>)) {
     walk_nodes(body, &mut |node| node_writes(node, &mut visit));

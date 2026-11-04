@@ -187,6 +187,30 @@ mod tests {
     use crate::{CompileOptions, compile};
 
     #[test]
+    fn reading_the_iterator_itself_requires_its_shared_position() {
+        use crate::ir::{Expr, Statement, Type};
+
+        let graph = crate::modules::SourceGraph::single(
+            "def scan(text: str) -> int:\n    score = 0\n    for ch in text:\n        score += ord(ch)\n    return score\n",
+        )
+        .unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        crate::tuples::scalarize(&mut module);
+        super::specialize(&mut module);
+        let function = module
+            .functions
+            .iter_mut()
+            .find(|f| f.params.len() == 1)
+            .unwrap();
+        let private = crate::ir::private_scalar_cursors(function);
+        assert_eq!(private.len(), 1);
+        function
+            .body
+            .insert(0, Statement::Expr(Expr::local(private[0], Type::Iterator)));
+        assert!(crate::ir::private_scalar_cursors(function).is_empty());
+    }
+
+    #[test]
     fn scalarizes_character_comparisons_and_ord_but_preserves_escaping_strings() {
         for (body, scalar) in [
             ("score += ord(ch)", true),
@@ -200,7 +224,7 @@ mod tests {
             );
             let llvm = compile(&source, &CompileOptions::default()).unwrap();
             assert_eq!(
-                llvm.contains("call i64 @imre_str_iter_next_codepoint("),
+                llvm.contains("call i64 @next_utf8_scalar("),
                 scalar,
                 "{source}"
             );
