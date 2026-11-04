@@ -139,6 +139,9 @@ pub(crate) struct Context {
     default_encoding: Id,
     audit_hooks: Vec<Id>,
     fork_hooks: [Vec<Id>; 3],
+    /// The boxed random module registers its own child reseed alongside Python callbacks.
+    #[cfg(target_os = "linux")]
+    random_fork_hook: Option<Id>,
     // The fatal handler borrows its descriptor while Python retains the destination.
     fault_file: Option<Id>,
     exit_callbacks: Vec<Id>,

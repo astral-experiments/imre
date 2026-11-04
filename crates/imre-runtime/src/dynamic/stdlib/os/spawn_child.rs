@@ -90,7 +90,9 @@ pub(super) fn fork_current(ctx: &mut Context) -> Result<libc::pid_t> {
     // Restore before re-entering Python in either process, including on error.
     unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, previous.as_ptr(), ptr::null_mut()) };
     if matches!(result, Ok(0)) {
-        crate::objects::reseed_after_fork();
+        if ctx.random_fork_hook.is_none() {
+            crate::objects::reseed_after_fork();
+        }
         ctx.refresh_main_thread_after_fork();
     }
     result

@@ -44,8 +44,12 @@ def current():
 
 
 def threaded_spawn():
+    import random
     import threading
     import warnings
+
+    # The automatic child reseed only touches private scalar state before immediate exec.
+    random.gauss()
 
     # Keep a second native thread alive for the duration of the fork.
     gate = threading.Lock()

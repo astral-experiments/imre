@@ -2401,6 +2401,9 @@ impl IntrinsicModule {
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
             (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
+            (Self::Random, "getstate") => Intrinsic::ScopedObjectExport("random.getstate"),
+            (Self::Random, "setstate") => Intrinsic::ScopedObjectExport("random.setstate"),
+            (Self::Random, "gauss") => Intrinsic::ScopedObjectExport("random.gauss"),
             (Self::Random, "Random") => Intrinsic::ScopedObjectExport("random.Random"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },

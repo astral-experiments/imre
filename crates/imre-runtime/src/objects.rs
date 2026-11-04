@@ -103,7 +103,7 @@ mod random;
 pub(crate) use random::reseed_after_fork;
 pub(crate) use random::{
     Generator, choice_index, imre_random_float, randint, random_below, random_bits, seed_shared,
-    shuffle_swaps,
+    shared_random_state, shuffle_swaps,
 };
 pub(crate) mod readiness;
 pub(crate) mod records;

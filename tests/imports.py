@@ -1879,6 +1879,7 @@ def main() -> None:
             ("from math import sin\n", "def helper() -> float:\n    return sin(1.0)\n"),
             ("from math import sqrt\n", "def helper() -> float:\n    return sqrt(4.0)\n"),
             ("from math import tan\n", "def helper() -> float:\n    return tan(1.0)\n"),
+            ("from random import gauss\n", "def helper() -> float:\n    return gauss(2.0, 0.0)\n"),
             ("from socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
             ("from _socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
         ):

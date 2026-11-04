@@ -1,4 +1,6 @@
+mod gaussian;
 pub(in crate::dynamic) mod instance;
+mod state;
 
 use num_bigint::Sign;
 

@@ -773,6 +773,8 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         default_encoding: NONE,
         audit_hooks: Vec::new(),
         fork_hooks: Default::default(),
+        #[cfg(target_os = "linux")]
+        random_fork_hook: None,
         fault_file: None,
         exit_callbacks: Vec::new(),
         finalizing: Default::default(),

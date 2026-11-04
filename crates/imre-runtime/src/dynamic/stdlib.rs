@@ -822,11 +822,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "calcsize" | "iter_unpack" | "pack" | "pack_into" | "unpack" | "unpack_from",
         )
         | ("base64", "b16encode" | "urlsafe_b64encode" | "urlsafe_b64decode")
-        | (
-            "random",
-            "seed" | "getrandbits" | "random" | "choice" | "choices" | "shuffle" | "randint"
-            | "randbytes",
-        )
+        | ("random", "choice" | "choices" | "shuffle" | "randint" | "randbytes")
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
