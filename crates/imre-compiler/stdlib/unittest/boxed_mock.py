@@ -473,7 +473,11 @@ class NonCallableMock(_FixedMock):
             current.mock_calls = _CallList()
             current.method_calls = _CallList()
             if node._result != -1:
-                result = current.return_value
+                if isinstance(node, _FunctionMockState):
+                    # The wrapper may since have been given a different return value.
+                    result = current._nodes[node._result]._configured_return
+                else:
+                    result = current.return_value
                 if _is_instance_mock(result):
                     pending.append((result, False, False))
             for child in current._mock_children.values():
@@ -661,6 +665,8 @@ class CallableMixin:
             if result is not DEFAULT:
                 return result
         if self._node._result == -1 and self._mock_wraps is not None:
+            if isinstance(self._node, _FunctionMockState) and self._node._function.return_value is not DEFAULT:
+                return self.return_value
             return self._mock_wraps(*args, **kwargs)
         return self.return_value
 
@@ -792,7 +798,7 @@ def _autospec_signature(target):
         return None
 
 
-def _make_autospec(spec, strict, as_instance, name=None, target=None, *, eat_self=False):
+def _make_autospec(spec, strict, as_instance, name=None, target=None, *, eat_self=False, wraps=None):
     from dataclasses import fields, is_dataclass
     from functools import partial
     from inspect import iscoroutinefunction, isdatadescriptor
@@ -830,7 +836,8 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None, *, eat_sel
             cls = NonCallableMagicMock
     if target is not _unset_return and iscoroutinefunction(target):
         raise NotImplementedError("autospeccing async callables is not supported")
-    mock = cls(spec_set=spec, name=name) if strict else cls(spec=spec, name=name)
+    spec_arg = {"spec_set": spec} if strict else {"spec": spec}
+    mock = cls(name=name, wraps=wraps, **spec_arg)
     if spec is not None:
         # Capture the original attributes now; build their mocks on first access.
         members = {}
@@ -869,32 +876,127 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None, *, eat_sel
     return mock
 
 
+class _FunctionMockState(_Node):
+    """Share the backing mock's call history with the function returned to the caller."""
+
+    _fields = ("called", "call_count", "call_args", "call_args_list")
+
+    def __init__(self, function, node):
+        self._function = function
+        for name, value in vars(node).items():
+            setattr(self, name, value)
+
+    def __getattr__(self, name):
+        if name in self._fields:
+            return getattr(self._function, name)
+        raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        if name in self._fields:
+            setattr(self._function, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
+    @property
+    def side_effect(self):
+        effect = self._function.side_effect
+        if effect is not None and not _is_exception(effect) and not _callable(effect):
+            if not hasattr(effect, "__next__"):
+                effect = iter(effect)
+                self._function.side_effect = effect
+        return effect
+
+    @side_effect.setter
+    def side_effect(self, effect):
+        self._function.side_effect = effect
+
+    def _reset_state(self, reset_return, reset_effect):
+        # Resetting the backing mock leaves the function's configured effect intact.
+        super()._reset_state(reset_return, False)
+
+
+def _autospec_function(spec, mock, return_value):
+    sig = mock._node._spec_signature
+
+    def funcopy(*args, **kwargs):
+        sig.bind(*args, **kwargs)
+        return mock(*args, **kwargs)
+
+    name = spec.__name__
+    funcopy.__name__ = funcopy.__qualname__ = name if name.isidentifier() else "funcopy"
+    funcopy.__signature__ = sig
+    funcopy.mock = mock
+    funcopy._mock_children = mock._mock_children
+    if return_value is not DEFAULT:
+        # Constructor-supplied mocks keep their own call histories.
+        mock._nodes[mock._return_index()]._configured_return = return_value
+    funcopy.return_value = mock.return_value
+    funcopy.mock_calls = mock.mock_calls
+    funcopy.method_calls = _CallList()
+    mock._node = _FunctionMockState(funcopy, mock._node)
+    # Only the wrapper enforces the signature. Direct backing calls still use
+    # the spec signature to normalize positional and keyword call assertions.
+    mock._node._call_signature = None
+
+    def get_return(backing):
+        if funcopy.return_value is DEFAULT and backing._mock_wraps is None:
+            funcopy.return_value = backing._get_child_mock(_new_parent=backing, _new_name="()")
+        return funcopy.return_value
+
+    # Each mock already has a private type for its protocol slots.
+    owner = type(mock)
+    owner.return_value = property(get_return, lambda backing, value: setattr(funcopy, "return_value", value))
+    owner.mock_calls = property(lambda backing: funcopy.mock_calls,
+                                lambda backing, value: setattr(funcopy, "mock_calls", value))
+    for assertion in ("assert_called", "assert_called_once", "assert_not_called", "assert_called_with",
+                      "assert_called_once_with", "assert_any_call", "assert_has_calls"):
+        setattr(funcopy, assertion, getattr(mock, assertion))
+
+    def reset_mock():
+        funcopy.method_calls = _CallList()
+        mock.reset_mock()
+        result = funcopy.return_value
+        if _is_instance_mock(result) and result is not mock:
+            result.reset_mock()
+
+    funcopy.reset_mock = reset_mock
+    for entry, (value, _) in mock._node._autospec_members.items():
+        if isinstance(value, (FunctionType, MethodType)):
+            setattr(funcopy, entry, getattr(mock, entry))
+    return funcopy
+
+
 def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwargs):
-    """Create a mock of a class or instance, checking calls against the source signatures."""
+    """Create a mock that checks calls against the source signatures."""
     from types import BuiltinFunctionType
 
     if _is_instance_mock(spec):
         raise InvalidSpecError("Cannot autospec a Mock object")
-    if isinstance(spec, (FunctionType, MethodType)):
-        # Python functions and methods need a delegating function exposing .mock.
+    if isinstance(spec, MethodType):
+        function = spec.__func__
+        wrap_function = isinstance(function, FunctionType)
         # A bound builtin with an explicitly absent signature returns the mock itself.
-        if not (
-            isinstance(spec, MethodType)
-            and isinstance(spec.__func__, BuiltinFunctionType)
-            and getattr(spec.__func__, "__text_signature__", False) is None
+        if not wrap_function and not (
+            isinstance(function, BuiltinFunctionType) and getattr(function, "__text_signature__", False) is None
         ):
             raise NotImplementedError("create_autospec does not yet support standalone routines")
+    else:
+        wrap_function = isinstance(spec, FunctionType)
     if not unsafe:
         for typo in ("autospect", "auto_spec", "set_spec"):
             if typo in kwargs:
                 raise RuntimeError(f"{typo!r} might be a typo; use unsafe=True if this is intended")
+    wraps = kwargs.pop("wraps", None) if wrap_function else None
     for option in ("wraps", "parent"):
         if option in kwargs:
             raise NotImplementedError(f"create_autospec does not support {option!r}")
-    mock = _make_autospec(spec, spec_set, instance, kwargs.pop("name", None))
+    mock = _make_autospec(spec, spec_set, instance, kwargs.pop("name", None), wraps=wraps)
+    result = mock
+    if wrap_function and getattr(mock._node, "_spec_signature", None) is not None:
+        result = _autospec_function(spec, mock, kwargs.pop("return_value", DEFAULT))
     if kwargs:
         mock.configure_mock(**kwargs)
-    return mock
+    return result
 
 
 def seal(mock):
