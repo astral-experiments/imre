@@ -1343,6 +1343,7 @@ impl Emitter<'_, '_> {
         source: &Expr,
         receiver: &Value,
         index: &Value,
+        small_elements: bool,
     ) -> Option<Value> {
         let (length, data) = self.guarded_list_buffer(source)?;
         let at = self.instruction(format!("ashr i64 {}, 1", index.operand));
@@ -1358,9 +1359,13 @@ impl Emitter<'_, '_> {
         self.branch(&valid, &fast, &slow);
         self.start(&fast);
         let word = self.load_list_word(&data, &at);
-        let tag = self.instruction(format!("and i64 {word}, 1"));
-        let immediate = self.instruction(format!("icmp ne i64 {tag}, 0"));
-        self.branch(&immediate, &end, &slow);
+        if small_elements {
+            self.jump(&end);
+        } else {
+            let tag = self.instruction(format!("and i64 {word}, 1"));
+            let immediate = self.instruction(format!("icmp ne i64 {tag}, 0"));
+            self.branch(&immediate, &end, &slow);
+        }
         self.start(&slow);
         let ordinary = self
             .runtime_call(&LIST_GET, [receiver, index])
@@ -2097,6 +2102,12 @@ impl Emitter<'_, '_> {
         self.append_windows.clear();
         let cursors = ir::private_string_cursors(function);
         let invariant = ir::invariant_string_cursors(function, &cursors);
+        let mut estimated = std::collections::BTreeSet::new();
+        ir::walk_expressions(&function.body, &mut |value| {
+            if let ExprKind::Builtin(Builtin::CursorScanBudget(slot), _) = value.kind {
+                estimated.insert(slot);
+            }
+        });
         for slot in cursors {
             let start = invariant.contains(&slot).then(|| {
                 let start = self.entry_alloca("ptr");
@@ -2105,6 +2116,10 @@ impl Emitter<'_, '_> {
             });
             let next = self.entry_alloca("ptr");
             let end = self.entry_alloca("ptr");
+            if estimated.contains(&slot) {
+                writeln!(self.entry_allocas, "  store ptr null, ptr {next}").unwrap();
+                writeln!(self.entry_allocas, "  store ptr null, ptr {end}").unwrap();
+            }
             self.forward_cursors
                 .insert(slot, ForwardCursor { next, end, start });
         }
@@ -2731,11 +2746,44 @@ impl Emitter<'_, '_> {
             Statement::If(test, yes, no) => {
                 let condition = self.expr(test);
                 let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
-                self.branch(&condition.operand, &yes_label, &no_label);
+                let mut bounded = false;
+                if crate::list_specialization::is_window_range_guard(test)
+                    && let [Statement::While(_, body, _)] = yes.as_slice()
+                {
+                    crate::ir::walk_expressions(body, &mut |value| {
+                        bounded |= matches!(
+                            value.kind,
+                            ExprKind::Builtin(Builtin::GetBoundedInAppendWindow { .. }, _)
+                        );
+                    });
+                }
+                let slots = if bounded {
+                    self.ranges
+                        .checked_small_slots(yes, &self.locals, &self.small_locals)
+                } else {
+                    Vec::new()
+                };
+                let mut guard = condition.operand;
+                if let Some((first, rest)) = slots.split_first() {
+                    let mut words = self.borrow_slot(*first).operand;
+                    for slot in rest {
+                        let word = self.borrow_slot(*slot).operand;
+                        words = self.instruction(format!("and i64 {words}, {word}"));
+                    }
+                    let tagged = self.instruction(format!("trunc i64 {words} to i1"));
+                    guard = self.instruction(format!("and i1 {guard}, {tagged}"));
+                }
+                self.branch(&guard, &yes_label, &no_label);
                 self.start(&yes_label);
                 let prior = self.guarded_integer_lists.len();
                 self.borrow_guarded_integer_lists(test);
+                for slot in &slots {
+                    self.small_locals[*slot] = true;
+                }
                 self.block(yes);
+                for slot in slots {
+                    self.small_locals[slot] = false;
+                }
                 self.guarded_integer_lists.truncate(prior);
                 let yes_ends = self.terminated;
                 if !yes_ends {
@@ -7378,7 +7426,7 @@ impl Emitter<'_, '_> {
                 self.fixed_int_get(slot, &args[1].value)
             }
             Builtin::ListGetStable => self
-                .guarded_owned_integer(&expressions[0], &args[0].value, &args[1].value)
+                .guarded_owned_integer(&expressions[0], &args[0].value, &args[1].value, false)
                 .unwrap_or_else(|| {
                     self.get_item(
                         &args[0].value,
@@ -7460,6 +7508,15 @@ impl Emitter<'_, '_> {
                         self.guarded_integer_word(&expressions[0], &args[0].value, &args[1].value)
                 {
                     word
+                } else if matches!(builtin, Builtin::ListGetI32)
+                    && let Some(value) = self.guarded_owned_integer(
+                        &expressions[0],
+                        &args[0].value,
+                        &args[1].value,
+                        true,
+                    )
+                {
+                    value.operand
                 } else if self.nonnegative_index(&expressions[1]) {
                     let index = self.native_index(&args[1].value);
                     self.runtime_call(&LIST_BORROW_INDEX, [&args[0].value, &index])
@@ -7523,6 +7580,29 @@ impl Emitter<'_, '_> {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {result}, 0")),
                     small_integer: false,
+                }
+            }
+            Builtin::CursorScanBudget(slot) => {
+                let operand = if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
+                    let next = self.instruction(format!("load ptr, ptr {}", cursor.next));
+                    let end = self.instruction(format!("load ptr, ptr {}", cursor.end));
+                    let next = self.instruction(format!("ptrtoint ptr {next} to i64"));
+                    let end = self.instruction(format!("ptrtoint ptr {end} to i64"));
+                    let remaining = self.instruction(format!("sub i64 {end}, {next}"));
+                    let fits = self.instruction(format!("icmp ule i64 {remaining}, {}", i32::MAX));
+                    let count = self.instruction(format!(
+                        "select i1 {fits}, i64 {remaining}, i64 {}",
+                        i32::MAX
+                    ));
+                    let tagged = self.instruction(format!("shl i64 {count}, 1"));
+                    self.instruction(format!("or i64 {tagged}, 1"))
+                } else {
+                    "1".to_owned()
+                };
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
                 }
             }
             Builtin::ListPresent => Value {
@@ -8424,13 +8504,24 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
-            Builtin::GetInAppendWindow(output) => {
+            Builtin::GetInAppendWindow(output)
+            | Builtin::GetBoundedInAppendWindow { output, .. } => {
                 let window = self.append_window(*output);
                 let word = self.checked_int_list_word(format!(
                     "call i64 @get_in_append_window(ptr {window}, ptr {})",
                     args[0].value.operand
                 ));
-                self.unpack_word(word, Type::Int)
+                if let Builtin::GetBoundedInAppendWindow { min, max, .. } = builtin {
+                    self.line(format!("; inductive list tail {min}..={max}"));
+                    let word = self.instruction(format!("or i64 {word}, 1"));
+                    Value {
+                        ty: Type::Int,
+                        operand: word,
+                        small_integer: true,
+                    }
+                } else {
+                    self.unpack_word(word, Type::Int)
+                }
             }
             Builtin::Append | Builtin::JoinBufferAppend => {
                 if matches!(builtin, Builtin::JoinBufferAppend) {
