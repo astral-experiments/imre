@@ -1176,6 +1176,17 @@ pub unsafe extern "C" fn imre_str_equal(a: *const Str, b: *const Str) -> u32 {
     u32::from(unsafe { *a == *b })
 }
 
+/// Compare exact strings in Python's lexicographic Unicode code-point order.
+/// UTF-8 preserves that order under unsigned byte comparison.
+///
+/// # Safety
+/// Both arguments must be live string handles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_compare(left: *const Str, right: *const Str) -> i32 {
+    // SAFETY: both immutable operands remain rooted for the comparison.
+    unsafe { (&*left).as_str().cmp((&*right).as_str()) as i32 }
+}
+
 /// # Safety
 /// Both words are absent zero or a rooted canonical integer.
 #[unsafe(no_mangle)]

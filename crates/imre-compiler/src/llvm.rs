@@ -3811,6 +3811,15 @@ impl Emitter<'_, '_> {
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
+                Type::Str | Type::StrLiteral(_)
+                    if !matches!(op, Compare::Equal | Compare::NotEqual) =>
+                {
+                    let order = self.instruction(format!(
+                        "call i32 @imre_str_compare(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
                 Type::Str | Type::StrLiteral(_) | Type::BuiltinClass | Type::Optional(_) => {
                     let equal = if matches!(left.ty, Type::Optional(_))
                         || matches!(right.ty, Type::Optional(_))
@@ -10311,6 +10320,7 @@ declare i64 @imre_enum_find_int(i64, i64, i64)
 declare void @imre_http_enum_table(ptr)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
+declare i32 @imre_str_compare(ptr, ptr)
 declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
