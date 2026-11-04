@@ -32,6 +32,8 @@ declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_call_position(ptr, ptr)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
+declare i64 @imre_dyn_positional_method_at(ptr, i64, ptr, i64, i64, ptr, i64)
+declare i64 @imre_dyn_string_method_target(ptr, i64, ptr, ptr)
 declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
 declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
@@ -571,8 +573,15 @@ impl Output {
 
 /// Pack expanded operands in Python containers or pass evaluated positional handles directly.
 enum CallArguments {
-    Packed { args: String, kwargs: String },
-    Positional { array: &'static str, count: usize },
+    Packed {
+        args: String,
+        kwargs: String,
+    },
+    Positional {
+        array: &'static str,
+        count: usize,
+        receiver_slot: bool,
+    },
 }
 
 struct Function<'a, 'p> {
@@ -922,7 +931,11 @@ impl Function<'_, '_> {
         let (ptr, count) = self.handle_array(values);
         self.call_at(
             callable,
-            CallArguments::Positional { array: ptr, count },
+            CallArguments::Positional {
+                array: ptr,
+                count,
+                receiver_slot: false,
+            },
             &mark,
             None,
         )
@@ -943,8 +956,16 @@ impl Function<'_, '_> {
                 "imre_dyn_scoped_call_at",
                 format!("i64 {args}, i64 {kwargs}"),
             ),
-            CallArguments::Positional { array: ptr, count } => (
-                "imre_dyn_positional_call_at",
+            CallArguments::Positional {
+                array: ptr,
+                count,
+                receiver_slot,
+            } => (
+                if receiver_slot {
+                    "imre_dyn_positional_method_at"
+                } else {
+                    "imre_dyn_positional_call_at"
+                },
                 format!("ptr {ptr}, i64 {count}"),
             ),
         };

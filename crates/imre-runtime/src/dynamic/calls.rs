@@ -2145,6 +2145,21 @@ impl Context {
         Err(Error::new_static("TypeError", message))
     }
 
+    /// Resolve an ordinary string method before evaluating positional arguments.
+    /// Keep an exact string receiver alive if an argument rebinds its last owner.
+    pub(super) fn string_method_target(&mut self, receiver: Id, symbol: &str) -> Result<(Id, Id)> {
+        if matches!(
+            self.heap.get(receiver),
+            Value::Str(_) | Value::SurrogateStr(_)
+        ) {
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(receiver);
+            return Ok((self.builtin(symbol), receiver));
+        }
+        let name = symbol.strip_prefix("str.").expect("compiled string method");
+        Ok((self.lookup_method(receiver, name)?, NONE))
+    }
+
     /// Resolve an immediately called attribute before its arguments are evaluated.
     pub(super) fn lookup_method(&mut self, obj: Id, name: &str) -> Result<Id> {
         if name == "writelines"

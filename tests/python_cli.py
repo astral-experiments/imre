@@ -3548,6 +3548,7 @@ for name in ("md4", "ripemd160"):
             "boxed_decimal_hash.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
+            "boxed_positional_string_methods.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
             "boxed_namedtuple_factory.py",

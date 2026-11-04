@@ -141,13 +141,28 @@ impl Function<'_, '_> {
                         .iter()
                         .any(|value| matches!(value, ast::Expr::Starred(_)));
                 let packed = (!direct).then(|| self.op("list", &[]));
+                let mut bound_receiver = None;
                 let callable = if let Some(field) = imre_ast::direct_method(
                     v,
                     &self.source.method_imports,
                     Some(&self.source.private_names),
                 ) {
                     let receiver = self.expr(&field.value);
-                    self.named_op("method", &receiver, field.attr.as_str(), "0")
+                    let name = field.attr.as_str();
+                    if direct
+                        && !name.starts_with('_')
+                        && imre_ast::strings::STR_METHODS.contains(&name)
+                    {
+                        self.output.interned_identifiers.insert(name.to_owned());
+                        let symbol = self.output.data(format!("str.{name}").as_bytes());
+                        self.max_live = self.max_live.max(1);
+                        let target = self.checked(&format!("call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"));
+                        // Nested calls can reuse the entry-block scratch space.
+                        bound_receiver = Some(self.value("load i64, ptr %live"));
+                        target
+                    } else {
+                        self.named_op("method", &receiver, field.attr.as_str(), "0")
+                    }
                 } else {
                     self.expr(&v.func)
                 };
@@ -155,10 +170,17 @@ impl Function<'_, '_> {
                     let kwargs = self.arguments(&args, &v.arguments, &callable);
                     CallArguments::Packed { args, kwargs }
                 } else {
-                    let values: Vec<_> =
-                        v.arguments.args.iter().map(|arg| self.expr(arg)).collect();
-                    let (ptr, count) = self.handle_array(&values);
-                    CallArguments::Positional { array: ptr, count }
+                    let values: Vec<_> = bound_receiver
+                        .iter()
+                        .cloned()
+                        .chain(v.arguments.args.iter().map(|arg| self.expr(arg)))
+                        .collect();
+                    let (array, count) = self.handle_array(&values);
+                    CallArguments::Positional {
+                        array,
+                        count,
+                        receiver_slot: bound_receiver.is_some(),
+                    }
                 };
                 let span = self.expression_span(expr, &v.func, b'(');
                 // A caller inspecting this live frame needs the full call range, including
