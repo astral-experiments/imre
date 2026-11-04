@@ -100,7 +100,14 @@ class Thread:
 
     def is_alive(self):
         assert self._initialized, "Thread.__init__() not called"
-        return self._handle is not None and _imre_thread.alive(self._handle)
+        if self._handle is None:
+            # The main thread has an identity and shutdown state, but no spawned handle.
+            return (
+                issubclass(type(self), _MainThread)
+                and self._ident is not None
+                and not self._stopped
+            )
+        return _imre_thread.alive(self._handle)
 
     def __repr__(self):
         assert self._initialized, "Thread.__init__() was not called"
@@ -1000,9 +1007,6 @@ class _MainThread(Thread):
         self._ident = get_ident()
         if _HAVE_THREAD_NATIVE_ID:
             self._native_id = get_native_id()
-
-    def is_alive(self):
-        return not self._stopped
 
 
 def current_thread():
