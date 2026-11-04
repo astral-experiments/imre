@@ -5,6 +5,11 @@
 #include <stdint.h>
 #include <wchar.h>
 
+/* libc exposes the process locale as an implementation-defined C macro. */
+locale_t imre_use_process_locale(void) {
+    return uselocale(LC_GLOBAL_LOCALE);
+}
+
 /* Python's percent formatting always uses an ASCII radix. This immutable C
  * locale is shared by threads, each of which restores its own previous locale. */
 static locale_t numeric_c_locale;
