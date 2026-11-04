@@ -59,6 +59,11 @@ pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 pub(super) const EMPTY_TUPLE: Id = 5;
+const SMALL_INT_MIN: i64 = -5;
+const SMALL_INT_MAX: i64 = 256;
+const FIRST_SMALL_INT: Id = EMPTY_TUPLE + 1;
+const FIRST_DYNAMIC_SLOT: usize =
+    FIRST_SMALL_INT as usize + (SMALL_INT_MAX - SMALL_INT_MIN + 1) as usize;
 
 /// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
 pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
@@ -2639,7 +2644,6 @@ pub(super) struct Heap {
     scalar_leaves: Vec<bool>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
-    small_ints: HashMap<i64, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
     full_collection: Option<CycleSet>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
@@ -2849,7 +2853,7 @@ impl Heap {
     }
 
     pub fn new() -> Self {
-        let slots = vec![
+        let mut slots = vec![
             Slot::new(Value::None),
             Slot::new(Value::Bool(false)),
             Slot::new(Value::Bool(true)),
@@ -2857,8 +2861,11 @@ impl Heap {
             Slot::new(Value::NotImplemented),
             Slot::new(Value::Tuple(Vec::new())),
         ];
+        for n in SMALL_INT_MIN..=SMALL_INT_MAX {
+            slots.push(Slot::new(Value::Int(crate::Int::from(n))));
+        }
         let mut heap = Self {
-            traces: vec![Cell::new(UNMARKED); slots.len()],
+            traces: vec![Cell::new(END); slots.len()],
             scalar_leaves: slots
                 .iter()
                 .map(|slot| slot.value.as_ref().is_some_and(Value::scalar_leaf))
@@ -2869,7 +2876,6 @@ impl Heap {
             gc_order: GcOrder::EMPTY,
             full_collection: None,
             linked_string_constants: HashMap::new(),
-            small_ints: HashMap::new(),
             short_bytes: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
@@ -2881,7 +2887,7 @@ impl Heap {
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
-            next_collection: 4096,
+            next_collection: FIRST_DYNAMIC_SLOT + 4096,
             byte_buffer_allowance: BYTE_BUFFER_FLOOR,
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
@@ -2898,7 +2904,7 @@ impl Heap {
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
         };
-        for id in 0..heap.slots.len() {
+        for id in 0..FIRST_SMALL_INT as usize {
             heap.gc_order.push(id, &heap.slots);
         }
         heap
@@ -3095,14 +3101,9 @@ impl Heap {
             return self.intern_literal(owner, true);
         }
         if let Value::Int(integer) = &value
-            && let Some(n @ -5..=256) = integer.as_small()
+            && let Some(n @ SMALL_INT_MIN..=SMALL_INT_MAX) = integer.as_small()
         {
-            if let Some(&id) = self.small_ints.get(&n) {
-                return id;
-            }
-            let id = self.alloc_slot_with_trace(value, false);
-            self.small_ints.insert(n, id);
-            return id;
+            return FIRST_SMALL_INT + (n - SMALL_INT_MIN) as Id;
         }
         match value {
             Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
@@ -3956,9 +3957,7 @@ impl Heap {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_string_constants.values().copied());
-        pending.extend(self.small_ints.values().copied());
         pending.extend(self.short_bytes.values().copied());
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned
                 .values()
@@ -3978,12 +3977,17 @@ impl Heap {
         }
     }
 
+    /// The singleton and small-integer prefix is permanently marked and has no children.
+    fn clear_marks(&self) {
+        for trace in &self.traces[FIRST_DYNAMIC_SLOT..] {
+            trace.set(UNMARKED);
+        }
+    }
+
     fn reachable(&self, id: Id, roots: impl Iterator<Item = Id>) -> bool {
         self.mark(roots);
         let reachable = self.traces[id as usize].get() != UNMARKED;
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         reachable
     }
 
@@ -4032,9 +4036,7 @@ impl Heap {
             .zip(&self.traces)
             .filter(|(slot, trace)| trace.get() != UNMARKED && exports(slot))
             .count();
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         self.slots[storage as usize].may_have_buffer_views = live != 0;
         Ok(live)
     }
@@ -4518,9 +4520,7 @@ impl Heap {
         let small = self.small_unreachable();
         let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
         let Ok(mut cycles) = CycleSet::new(size) else {
-            for trace in &self.traces {
-                trace.set(UNMARKED);
-            }
+            self.clear_marks();
             self.collect_next_statement = true;
             return None;
         };
@@ -4604,9 +4604,7 @@ impl Heap {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, Some(child));
         let last = self.traces[child as usize].get() == UNMARKED;
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         Ok(last)
     }
 
@@ -4862,9 +4860,7 @@ impl Heap {
         } else {
             Vec::new()
         };
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         Ok(callbacks)
     }
 
@@ -5076,7 +5072,7 @@ impl Heap {
             .retain_live(|id| self.traces[id as usize].get() != UNMARKED);
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
-        for id in 0..self.slots.len() {
+        for id in FIRST_DYNAMIC_SLOT..self.slots.len() {
             let slot = &self.slots[id];
             if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
                 self.gc_order.remove(id, &self.slots);
@@ -5097,9 +5093,10 @@ impl Heap {
             BYTE_BUFFER_FLOOR
         };
         // A refused growth request can lower the usual collection floor.
-        let floor = self.next_collection.min(4096);
-        self.next_collection = (self.slots.len() - self.free_count)
-            .saturating_mul(2)
+        let floor = self.next_collection.min(FIRST_DYNAMIC_SLOT + 4096);
+        let live = self.slots.len() - FIRST_DYNAMIC_SLOT - self.free_count;
+        self.next_collection = FIRST_DYNAMIC_SLOT
+            .saturating_add(live.saturating_mul(2))
             .max(floor);
         (!callbacks.is_empty()).then_some(callbacks)
     }
@@ -5108,6 +5105,21 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_integer_identity_survives_collection() {
+        let mut heap = Heap::new();
+        let values = SMALL_INT_MIN..=SMALL_INT_MAX;
+        let ids: Vec<_> = values
+            .clone()
+            .map(|n| heap.alloc(Value::Int(crate::Int::from(n))))
+            .collect();
+        heap.collect(std::iter::empty());
+        for (n, id) in values.zip(ids) {
+            assert!(matches!(heap.get(id), Value::Int(value) if value.as_small() == Some(n)));
+            assert_eq!(heap.alloc(Value::Int(crate::Int::from(n))), id);
+        }
+    }
 
     #[test]
     fn byte_buffer_pressure_tracks_retained_capacity() {
