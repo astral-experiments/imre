@@ -47,6 +47,15 @@ finally:
     property_patch.stop()
 assert Readable.read is original and property_patch.stop() is None
 
+manager = Mock()
+prop = PropertyMock(name="old", return_value=7)
+type(manager).answer = prop
+manager.attach_mock(prop, "answer")
+assert prop.mock_calls == manager.mock_calls == []
+assert manager.answer == 7
+manager.answer = 9
+assert manager.mock_calls == [call.answer(), call.answer(9)]
+
 factory_patch = patch.object(Readable, "read", new_callable=dict, contents=7)
 with factory_patch as replacement:
     assert replacement == {"contents": 7}

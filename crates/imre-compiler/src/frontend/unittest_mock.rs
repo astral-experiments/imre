@@ -138,7 +138,7 @@ impl Checker<'_> {
         let name = attr.attr.as_str();
         if matches!(
             name,
-            "configure_mock" | "mock_calls" | "method_calls" | "assert_has_calls"
+            "attach_mock" | "configure_mock" | "mock_calls" | "method_calls" | "assert_has_calls"
         ) {
             return Err(self.object_runtime_export(&format!("unittest.mock.Mock.{name}"), attr));
         }
@@ -150,7 +150,6 @@ impl Checker<'_> {
                 "assert_any_call"
                     | "assert_called_once_with"
                     | "assert_called_with"
-                    | "attach_mock"
                     | "mock_add_spec"
                     | "reset_mock"
             )
