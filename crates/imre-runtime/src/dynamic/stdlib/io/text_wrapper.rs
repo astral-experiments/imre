@@ -497,7 +497,8 @@ impl Wrapper {
             StreamCodec::Wide { format, bom } => {
                 let errors = ctx.str_value(encoder.errors)?.to_owned();
                 let signature = bom && self.seekable && self.write_start.get();
-                codecs::encode_fixed(ctx, translated, format, &errors, signature)
+                let order = if signature { 0 } else { format.byte_order() };
+                codecs::encode_fixed(ctx, translated, format, &errors, order)
             }
             StreamCodec::Registered(codec) => {
                 let encoding = if matches!(codec, Codec::Utf8 { signature: true })

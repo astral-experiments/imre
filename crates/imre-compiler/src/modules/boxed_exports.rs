@@ -32,7 +32,10 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "encode",
             "escape_decode",
             "lookup",
-            "utf_16_ex_decode"
+            "utf_16_ex_decode",
+            "utf_32_ex_decode",
+            "utf_16_encode",
+            "utf_32_encode"
         ),
         M::Imp => exports!(
             "_imp",
@@ -147,11 +150,16 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "CodecInfo",
             "IncrementalDecoder",
             "IncrementalEncoder",
+            "StreamReader",
             "StreamWriter",
             "escape_decode",
             "getincrementaldecoder",
             "getincrementalencoder",
-            "utf_16_ex_decode"
+            "getreader",
+            "utf_16_ex_decode",
+            "utf_32_ex_decode",
+            "utf_16_encode",
+            "utf_32_encode"
         ),
         M::Collections => exports!("collections", "UserDict", "UserList", "UserString"),
         M::CollectionsAbc => exports!(
