@@ -86,6 +86,30 @@ def check_installed_site(imre, root, run):
         companion = imre.with_name(name)
         if companion.exists():
             (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
+    name = "xml.etree.ElementTree"
+    use_xml = "import importlib, sys; print(importlib.import_module(sys.argv[1]).Element('root').tag)"
+    archive = install / "imre-stdlib.zip"
+    # The relocated launcher works both on its own and in a release installation.
+    bare = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
+    opaque = run(
+        launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
+        "import xml; print(xml.__name__)", timeout=300,
+    )
+    assert (opaque.returncode, opaque.stdout, opaque.stderr) == (0, b"xml\n", b""), opaque
+    assert not archive.exists()
+    exported = run(launcher, "--emit-bundled-stdlib")
+    assert exported.returncode == 0 and not exported.stderr, exported
+    archive.write_bytes(exported.stdout)
+    packaged = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
+    shadow = root / "shadow_xml"
+    shadow.mkdir()
+    (shadow / "xml.py").write_text("marker = 73\n")
+    probe = shadow / "probe.py"
+    probe.write_text("import importlib, sys\nprint(importlib.import_module(sys.argv[1]).marker)\n")
+    local = run(launcher, "-B", probe, "xml", timeout=300)
+    assert (local.returncode, local.stdout, local.stderr) == (0, b"73\n", b""), local
     target = run(launcher, "build-target")
     assert target.returncode == 0, target.stderr
     version = json.loads(target.stdout)["python_version"]
@@ -1239,9 +1263,13 @@ def check_unittest_module_main(imre, root, run):
         "        self.assertEqual(sys.argv[0], os.path.basename(sys.executable) + ' -m unittest')\n"
         "        self.assertEqual((Fraction('6/8') + Fraction(1, 6)).as_integer_ratio(), (11, 12))\n"
         "        self.assertRaises(ZeroDivisionError, Fraction, '1/0')\n"
+        "        from xml.etree.ElementTree import Element\n"
+        "        self.assertEqual(Element('sample').tag, 'sample')\n"
         "        print(self.id())\n"
         "class Failing(unittest.TestCase):\n"
-        "    def test_one(self): self.fail('deliberate failure')\n"
+        "    def test_one(self):\n"
+        "        failure_reason = 'deliberate failure'\n"
+        "        self.fail(failure_reason)\n"
     )
     passing = "cli_test_package.sample.Passing"
     ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one")
@@ -1253,6 +1281,18 @@ def check_unittest_module_main(imre, root, run):
     assert f"FAIL: test_one ({failing})".encode() in errors.stderr, errors
     assert b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in errors.stderr, errors
     assert b"FAILED (failures=1, errors=1)" in errors.stderr, errors
+    local_line = b"    failure_reason = 'deliberate failure'"
+    assert local_line not in errors.stderr.splitlines(), errors
+    with_locals = run(imre, "-m", "unittest", "--locals", "-v", failing, passing + ".test_missing")
+    assert with_locals.returncode == 1 and b"FAILED (failures=1, errors=1)" in with_locals.stderr, with_locals
+    assert local_line in with_locals.stderr.splitlines(), with_locals
+
+    (package / "other.py").write_text("raise AssertionError('outside discovery pattern')\n")
+    discovered = run(imre, "-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
+                     "-p", "sample.py", "-k", "Passing.test_one")
+    assert discovered.returncode == 0 and discovered.stdout == (passing + ".test_one\n").encode(), discovered
+    assert f"test_one ({passing}.test_one) ... ok".encode() in discovered.stderr.splitlines(), discovered
+    assert b"Ran 1 test in " in discovered.stderr, discovered
 
 
 def check_unittest_file_discovery(imre, root, run):
@@ -1601,6 +1641,12 @@ def main():
         for module in ("json", "json.tool"):
             compare("-B", "-m", module, "--compact", json_input)
 
+        binary_input = root / "input.bin"
+        binary_input.write_bytes(b"a\xffb\n" * 15)
+        compare("-B", "-m", "base64", "-e", binary_input, native_timeout=600)
+        binary_input.write_bytes(b"Yf9iCg==\n")
+        compare("-B", "-m", "base64", "-d", binary_input, native_timeout=600)
+
         entry = root / "entry"
         entry.mkdir()
         (entry / "__main__.py").write_text(
@@ -1621,6 +1667,52 @@ def main():
             missing = run(exe, "-I", "empty_entry")
             message = f"can't find '__main__' module in '{root / 'empty_entry'}'"
             assert missing.returncode == 1 and missing.stderr.decode().rstrip().endswith(message)
+
+        compare("-IB", "-c", r"""import zipfile
+with zipfile.ZipFile('stored.zip', 'w') as archive:
+    archive.writestr('wheel/data', b'\x00\xff')
+with zipfile.ZipFile('stored.zip') as archive:
+    print(archive.namelist(), archive.read('wheel/data'))""")
+
+        compare("-IB", "-c", """import os, zipfile, zlib
+path = 'zip-writer-capability.zip'
+try:
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('compressed', b'data')
+except NotImplementedError as exc:
+    from unittest import TestCase
+    assert not hasattr(zlib, 'compressobj')
+    assert str(exc) == 'Writing ZIP_DEFLATED requires zlib.compressobj'
+    assert not os.path.exists(path)
+    with open(path, 'wb') as stream:
+        stream.write(b'original')
+    with TestCase().assertRaises(NotImplementedError):
+        zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED)
+    with open(path, 'rb') as stream:
+        assert stream.read() == b'original'
+
+    def fields(member):
+        return (member.compress_type, member.compress_level, member.file_size,
+                member.compress_size, member.CRC, member.flag_bits, member.header_offset)
+
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('first', b'original')
+        member = archive.getinfo('first')
+        before = fields(member)
+        with TestCase().assertRaises(NotImplementedError):
+            archive.writestr(member, b'replacement', compress_type=zipfile.ZIP_DEFLATED, compresslevel=3)
+        assert fields(member) == before
+        assert archive.read('first') == b'original'
+        archive.writestr('later', b'added')
+    with zipfile.ZipFile(path) as archive:
+        assert archive.namelist() == ['first', 'later']
+        assert archive.read('first') == b'original' and archive.read('later') == b'added'
+else:
+    assert hasattr(zlib, 'compressobj')
+    with zipfile.ZipFile(path) as archive:
+        assert archive.getinfo('compressed').compress_type == zipfile.ZIP_DEFLATED
+        assert archive.read('compressed') == b'data'
+os.unlink(path)""")
 
         archive = root / "application"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as app:
@@ -2030,6 +2122,8 @@ def main():
         ):
             compare("-c", f"try:\n    {statement}\nexcept {error} as exc:\n    print(exc)")
 
+        compare("-c", "print(divmod(1.0, 0.1), divmod(0, -2.0), divmod(-2.0, 1))")
+
         subset_method = root / "set_issubset.py"
         for statement in (
             "print({1, 2}.issubset([2, 1]))",
@@ -2065,6 +2159,9 @@ def main():
         ):
             set_method.write_text("items = {1, 2}\nalias = items\n" + statement + "\nprint(sorted(alias))\n")
             compare("-B", set_method, native_args=("run", set_method, "--quiet"))
+
+        compare("-c", "print(2.0 * (3 + 4j), (3 + 4j) * 2.0, 2.0 / (3 + 4j), (3 + 4j) / 2.0)")
+        compare("-c", "z = complex(3, 4)\nprint(2.0 * z, z * 2.0, 2.0 / z, z / 2.0)")
 
         instance_check = root / "unittest_instance.py"
         for statement in (
@@ -2122,6 +2219,22 @@ def main():
                 statement + '\nvalues = cls("i", [7])\nprint(type(values) is cls, list(values))\n'
             )
             compare("-B", array_import, native_args=("run", array_import, "--runtime-imports", "--quiet"))
+
+        zoneinfo_entry = root / "zoneinfo_entry.py"
+        (root / "zoneinfo_helper.py").write_text("import zoneinfo as provider\n")
+        for statement in (
+            "from zoneinfo_helper import provider",
+            "import sys\nprovider = __import__(sys.argv[1])",
+        ):
+            zoneinfo_entry.write_text(
+                statement + "\nprint(provider.ZoneInfo.__name__, provider.TZPATH)\n"
+                "provider.reset_tzpath([])\nprint(provider.TZPATH)\n"
+            )
+            compare(
+                "-B", zoneinfo_entry, "zoneinfo", extra={"PYTHONTZPATH": str(root)},
+                native_args=("run", zoneinfo_entry, "--quiet", "--", "zoneinfo"),
+                native_timeout=300,
+            )
 
         hash_args = ["", b"", "latin1é", b"latin1\xe9", "Āfoo", "😀abc", bytes(range(32))]
         hash_calls = "\n".join(f"print(hash({value!r}))" for value in hash_args)
@@ -2667,6 +2780,16 @@ def report(text):
             compare("-B", token_limit, extra=digit_env)
             compare("-B", token_limit, extra=digit_env, native_args=("run", token_limit, "--runtime-imports", "--quiet"))
 
+        compare(
+            "-B", "-c",
+            "import uuid\n"
+            "from uuid import NAMESPACE_DNS, uuid3\n"
+            "print(uuid3(NAMESPACE_DNS, 'python.org'))\n"
+            "space = uuid.UUID(int=42)\n"
+            "print(uuid.uuid5(space, 'café'), uuid.uuid5(space, b'\\xff'))\n",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
         (helpers / "uuid").mkdir()
         uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
@@ -2782,6 +2905,31 @@ def report(text):
             "print(d.astimezone(), d.astimezone(tz=None))",
             extra={"TZ": "EST5"},
         )
+        element_user = root / "element_user.py"
+        shutil.copyfile(fixtures / "boxed_xml_etree.py", root / "element_helper.py")
+        element_user.write_text("import element_helper\n")
+        compare("-B", element_user, native_args=("run", element_user, "--quiet"), native_timeout=300)
+        compare(
+            "-B", "-c", "import importlib, sys\nmodule = importlib.import_module(sys.argv[1])\nprint(module.__name__)",
+            "xml.etree.ElementTree", native_timeout=300,
+        )
+        # A computed import must not register ElementTree in the caller's native image.
+        registry = run(
+            imre, "-B", "-c",
+            "import sys\n"
+            "from _imre_importlib import registered_path_spec\n"
+            "assert __import__(sys.argv[1]).__name__ == sys.argv[1]\n"
+            "root = '<imre stdlib>'\n"
+            "assert registered_path_spec('importlib', root) is not None\n"
+            "for name in sys.argv[2:]:\n"
+            "    path = '/'.join([root] + name.split('.')[:-1])\n"
+            "    assert registered_path_spec(name, path) is None, name",
+            "sys", "xml", "xml.etree", "xml.etree.ElementTree", "xml.etree.ElementPath", timeout=300,
+        )
+        assert (registry.returncode, registry.stdout, registry.stderr) == (0, b"", b""), registry
+        if Path("/usr/share/zoneinfo/America/New_York").is_file():
+            compare("-IB", fixtures / "boxed_zoneinfo.py", native_timeout=300)
+        compare("-IB", fixtures / "boxed_pyexpat.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pickle_writer.py")
         for first in ("_pickle", "pickle"):
             compare("-IB", fixtures / "pickle_accelerator_writer.py", first, native_timeout=600)
@@ -2915,6 +3063,11 @@ def report(text):
                 compare(
                     "-IB", object_io, certdata,
                     native_args=("run", object_io, "--quiet", "--", certdata), native_timeout=600,
+                )
+                cert_chain = fixtures / "ssl_cert_chain.py"
+                compare(
+                    "-IB", cert_chain, certdata,
+                    native_args=("run", cert_chain, "--quiet", "--", certdata), native_timeout=600,
                 )
                 unwrap = fixtures / "ssl_object_unwrap.py"
                 compare(
@@ -3164,6 +3317,15 @@ for name in ("md4", "ripemd160"):
         compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
         compare(
+            "-B", "-c",
+            "from unittest.mock import Mock\n"
+            "parent = Mock()\n"
+            "child = Mock()\n"
+            "parent.attach_mock(child, 'client')\n"
+            "assert parent.client is child\n",
+            extra=mock_compile_flags, native_timeout=300,
+        )
+        compare(
             "-B", "-c", "from unittest.mock import Mock\nm = Mock(['close'])\nm.close()\nassert not hasattr(m, 'read')\n",
             extra=mock_compile_flags, native_timeout=300,
         )
@@ -3209,6 +3371,7 @@ for name in ("md4", "ripemd160"):
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
+            "boxed_indentation_limit.py",
             "boxed_source_except.py",
             "boxed_interactive.py",
             "boxed_relative_package_imports.py",
@@ -3220,6 +3383,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
             "boxed_sys_byteorder.py",
+            "boxed_sys_float_info.py",
             "boxed_sys_hash_info.py",
             "boxed_sys_thread_info.py",
             "boxed_sys_flags.py",
@@ -3229,6 +3393,7 @@ for name in ("md4", "ripemd160"):
             "boxed_binary_iterators.py",
             "boxed_array.py",
             "boxed_bytearray_memoryview.py",
+            "boxed_fileio_buffer_export.py",
             "boxed_bytes_io.py",
             "boxed_io_newline_decoder.py",
             "boxed_io_utf16.py",
@@ -3245,11 +3410,13 @@ for name in ("md4", "ripemd160"):
             "boxed_round.py",
             "boxed_math_rounding.py",
             "boxed_math_gcd.py",
+            "boxed_math_isclose.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
             "boxed_binary_ljust.py",
             "boxed_binary_strip.py",
+            "boxed_bytes_removeprefix.py",
             "boxed_class_union.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
@@ -3271,6 +3438,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_reduce.py",
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
+            "boxed_functools_partial_state.py",
             "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",
@@ -3286,6 +3454,7 @@ for name in ("md4", "ripemd160"):
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
             "boxed_typing_exports.py",
+            "boxed_typing_any_weakref.py",
             "boxed_typing_type_predicates.py",
             "boxed_typing_bytestring.py",
             "boxed_typing_new_type.py",
@@ -3325,6 +3494,7 @@ for name in ("md4", "ripemd160"):
             "boxed_re_sub.py",
             "boxed_re_findall_empty.py",
             "boxed_memoryview_context.py",
+            "boxed_memoryview_shape.py",
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
             "boxed_datetime.py",
@@ -3355,6 +3525,7 @@ for name in ("md4", "ripemd160"):
             "boxed_io_unsupported_operation.py",
             "boxed_io_reimport.py",
             "boxed_fileio_opener.py",
+            "boxed_fileio_write.py",
             "boxed_open_opener.py",
             "boxed_io_text_encoding.py",
             "boxed_locale.py",
@@ -3612,9 +3783,11 @@ for name in ("md4", "ripemd160"):
             "boxed_with_control.py",
             "boxed_short_circuit.py",
             "boxed_doctest_suite.py",
+            "boxed_doctest_files.py",
             "boxed_slice.py",
             "boxed_binascii.py",
             "boxed_zlib.py",
+            "boxed_lzma.py",
             "boxed_hashlib_names.py",
             "bytes/hashlib_md5_provider.py",
             "bytes/hashlib_sha3_provider.py",
@@ -3722,6 +3895,66 @@ else:
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_text.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            script = root / "subprocess_text.py"
+            command = r"printf '\200'; printf '\223err\224' >&2; exit 7"
+            script.write_text(
+                "import subprocess\n"
+                f"cmd = ['/bin/sh', '-c', {command!r}]\n"
+                "try: subprocess.run(cmd, capture_output=True, check=True, encoding='cp1252')\n"
+                "except subprocess.CalledProcessError as exc:\n"
+                "    print(exc.output == '€', exc.stderr == '“err”', exc.args == (7, cmd))\n"
+            )
+            compare("-B", script)
+
+            script.write_text(
+                "import subprocess\n"
+                "print(subprocess.check_output(['/bin/cat'], input='€', encoding='cp1252'))\n"
+            )
+            compare("-B", script)
+
+            capture = (
+                "def capture() -> str:\n"
+                "    return subprocess.check_output(['/bin/printf', r'\\200'], encoding='cp1252')\n"
+            )
+            for invalid, diagnostic in (
+                ("def invalid() -> int:\n    return 'bad'\n", b"invalid-return-type"),
+                ("def needs_int(value: int): pass\ndef invalid():\n    needs_int('invalid')\n", b"invalid-argument-type"),
+            ):
+                for definitions, calls in (
+                    (invalid + capture, "invalid()\nprint(capture())"),
+                    (invalid + capture, "print(capture())"),
+                    (capture + invalid, "print(capture())\ninvalid()"),
+                    (capture + invalid, "print(capture())"),
+                ):
+                    script.write_text("import subprocess\n" + definitions + calls + "\n")
+                    result = run(imre, "-B", script)
+                    assert result.returncode > 0 and not result.stdout, result
+                    assert diagnostic in result.stderr or b"expected int, got str" in result.stderr, result
+
+            script.write_text(
+                "import subprocess\n"
+                "def ordinary(value): pass\n"
+                "def caught():\n"
+                "    try: subprocess.run(['/bin/cat'], input=b'bad', capture_output=True, encoding='cp1252')\n"
+                "    except AttributeError: print('input rejected')\n"
+                "    try: ordinary()\n"
+                "    except TypeError: print('argument rejected')\n"
+                "caught()\n"
+            )
+            compare("-B", script)
+
+            script.write_text(
+                "import io\n"
+                "def acquire(): return io.BytesIO(b'x').getbuffer()\n"
+                "def wrong() -> int: return 'wrong'\n"
+                "print(acquire().tobytes())\n"
+                "try: wrong()\n"
+                "except TypeError: print('return rejected')\n"
+            )
+            result = run(imre, "-B", script)
+            assert result.returncode == 0 and result.stderr == b"", result
+            assert result.stdout == b"b'x'\nreturn rejected\n", result
+
             plugin.write_bytes((fixtures / "boxed_os_chdir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())

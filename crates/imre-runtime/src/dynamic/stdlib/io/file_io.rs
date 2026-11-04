@@ -1005,6 +1005,18 @@ pub(super) fn call(
             format!("invalid arguments to FileIO.{name}"),
         ));
     }
+    if name == "write"
+        && let Some(method) = ctx.python_buffer_method(args[0], true)?
+    {
+        // FileIO requests PyBUF_SIMPLE. Acquisition can close or replace its descriptor.
+        return ctx.with_contiguous_python_buffer(args[0], method, 0, |ctx, view| {
+            call_method(ctx, receiver, name, &[view])
+        });
+    }
+    call_method(ctx, receiver, name, args)
+}
+
+fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Result<Id> {
     let raw = state(ctx, receiver);
     let is_closed = raw.as_ref().is_none_or(|raw| raw.live_fd().is_none());
     match name {
@@ -1123,7 +1135,16 @@ pub(super) fn call(
         return Ok(ctx.alloc(Value::Bytes(Vec::new())));
     }
     if name == "write" {
-        ctx.bytes_like(args[0])?;
+        let input = args[0];
+        ctx.check_buffer_exporter(input)?;
+        let bytes = ctx.native_buffer_bytes(input)?;
+        let raw = raw.ok_or_else(closed)?;
+        let count = raw.access(|fd| {
+            raw.check_direction(false)?;
+            // SAFETY: the write only reads the borrowed contiguous buffer during this call.
+            transfer(|| unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) })
+        })?;
+        return Ok(count.map_or(NONE, |n| ctx.int(n as i64)));
     }
     if name == "readinto" && ctx.writable_byte_span(args[0])?.is_none() {
         return Err(Error::new(
@@ -1202,15 +1223,6 @@ pub(super) fn call(
             raw.check_direction(true)?;
             let buf = files::readinto_bytes(ctx, args[0])?;
             Ok(read_into(fd, buf)?.map_or(NONE, |n| ctx.int(n as i64)))
-        }
-        "write" => {
-            raw.check_direction(false)?;
-            let bytes = ctx.bytes_like(args[0])?;
-            // SAFETY: write reads only the live bytes slice for this call.
-            Ok(
-                transfer(|| unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) })?
-                    .map_or(NONE, |n| ctx.int(n as i64)),
-            )
         }
         _ => Err(Error::new(
             "AttributeError",

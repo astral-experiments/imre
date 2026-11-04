@@ -76,18 +76,20 @@ class zipimporter(_ZipResourceLoader):
         return None
 
     def find_spec(self, fullname, target=None):
-        from importlib import _file_spec
         resolved = self._origin(fullname)
         if resolved is None:
             return None
+        from _frozen_importlib import ModuleSpec
         origin, loader = resolved
         if loader is None:
-            from _frozen_importlib import ModuleSpec
             spec = ModuleSpec(fullname, None, is_package=True)
             spec.submodule_search_locations.append(origin)
             return spec
         locations = [origin.rpartition('/')[0]] if origin.endswith('/__init__.py') else None
-        return _file_spec(fullname, origin, locations, loader)
+        spec = ModuleSpec(fullname, loader, origin=origin)
+        spec.submodule_search_locations = locations
+        spec.has_location = True
+        return spec
 
 
 def _find_at(root, fullname):

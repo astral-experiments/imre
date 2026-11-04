@@ -3,6 +3,7 @@ import builtins
 import codecs
 import copyreg
 import pickle
+from collections import namedtuple
 from typing import ParamSpec
 
 
@@ -350,7 +351,88 @@ class Plain:
         self.slot = self.link = item
 
 
+def check_list_subclass_reducer():
+    events = []
+    class Items(list):
+        def __getnewargs__(self):
+            events.append("args")
+            return ()
+
+        def __getstate__(self):
+            events.append("state")
+            return self.__dict__
+
+        def __iter__(self):
+            events.append("iter")
+            return self.cursor
+
+    for protocol in (2, 3, 4, 5):
+        value = Items()
+        value.cursor = iter((1, 2))
+        events.clear()
+        constructor, args, state, items, pairs = value.__reduce_ex__(protocol)
+        assert constructor is copyreg.__newobj__ and args == (Items,)
+        assert state is value.__dict__ and items is value.cursor and pairs is None
+        assert events == ["args", "state", "iter"] and list(items) == [1, 2]
+
+    class NoInit(list):
+        def __init__(self):
+            raise AssertionError("called __init__ during allocation")
+
+    assert NoInit.__new__ is list.__new__ and list.__new__.__self__ is list
+    assert list.__new__(list, [1]) == []
+    try:
+        list.__new__(dict)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a non-list subtype")
+    empty = list.__new__(NoInit, [1], ignored=True)
+    assert empty.__new__ is list.__new__
+    assert type(empty) is NoInit and empty == []
+    empty.append(empty)
+    import copy
+    clone = copy.deepcopy(empty)
+    assert type(clone) is NoInit and clone is not empty and clone[0] is clone
+
+
+def check_dict_subclass_reducer():
+    events = []
+    class Pairs:
+        def __iter__(self):
+            events.append("iter")
+            return cursor
+
+    class Mapping(dict):
+        def __getstate__(self):
+            events.append("state")
+            return self.__dict__
+
+        def items(self):
+            events.append("items")
+            return Pairs()
+
+    class WithArgs(Mapping):
+        def __getnewargs__(self):
+            events.append("args")
+            return ()
+
+    for cls, before_state in ((Mapping, []), (WithArgs, ["args"])):
+        value = cls()
+        value["raw"] = 1
+        for protocol in (2, 3, 4, 5):
+            cursor = iter((("from override", 2),))
+            events.clear()
+            constructor, args, state, items, pairs = value.__reduce_ex__(protocol)
+            assert constructor is copyreg.__newobj__ and args == (cls,)
+            assert state is value.__dict__ and items is None and pairs is cursor
+            assert events == before_state + ["state", "items", "iter"]
+            assert list(pairs) == [("from override", 2)]
+
+
 def check_object_reducer():
+    check_list_subclass_reducer()
+    check_dict_subclass_reducer()
     class Child(WithoutProtocol):
         def reduce_from_super(self):
             return super().__reduce_ex__(4)
@@ -532,20 +614,23 @@ class RecordFamily:
         right: object
 
 
-def check_namedtuple_reducer():
+FactoryRecord = namedtuple("FactoryRecord", ("left", "right"))
+
+
+def check_namedtuple_reducer(record):
     from copy import copy, deepcopy
     import copyreg
 
     shared = []
-    value = RecordFamily.Record(shared, shared)
+    value = record(shared, shared)
     assert value.__getnewargs__() == (shared, shared)
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         if protocol < 2:
             assert value.__reduce_ex__(protocol) == (
-                copyreg._reconstructor, (RecordFamily.Record, tuple, (shared, shared)))
+                copyreg._reconstructor, (record, tuple, (shared, shared)))
         else:
             assert value.__reduce_ex__(protocol) == (
-                copyreg.__newobj__, (RecordFamily.Record, shared, shared), None, None, None)
+                copyreg.__newobj__, (record, shared, shared), None, None, None)
         restored = pickle.loads(pickle.dumps(value, protocol))
         assert type(restored) is type(value)
         assert restored.left is restored.right and restored.left is not shared
@@ -575,7 +660,8 @@ def check_list_items(protocol):
 
 
 def produce():
-    check_namedtuple_reducer()
+    for record in (RecordFamily.Record, FactoryRecord):
+        check_namedtuple_reducer(record)
     check_object_reducer()
     check_builtin_method_reduction()
     check_python_method_reduction()

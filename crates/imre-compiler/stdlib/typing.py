@@ -25,6 +25,26 @@ from typing import Any, Callable, Generic, Protocol, TypeVar, Union
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
+@_typing_runtime._install_any_namespace
+class Any:
+    """Special type indicating an unconstrained type.
+
+    - Any is compatible with every type.
+    - Any assumed to have all methods.
+    - All values assumed to be instances of Any.
+
+    Note that all the above statements are true from the point of view of
+    static type checkers. At runtime, Any should not be used with instance
+    checks.
+    """
+
+    @staticmethod
+    def __new__(cls, *args, **kwargs):
+        if cls is Any:
+            raise TypeError("Any cannot be instantiated")
+        return super().__new__(cls)
+
+
 # Please keep __all__ alphabetized within each category.
 __all__ = [
     # Super-special typing primitives.
@@ -326,22 +346,6 @@ _SPECIAL_NAMES = frozenset({
 EXCLUDED_ATTRIBUTES = _TYPING_INTERNALS | _SPECIAL_NAMES | {'_MutableMapping__marker'}
 
 
-_protocol_annotation_names = None
-
-
-def _freeze_protocol_members(cls, declared_annotations):
-    global _protocol_annotation_names
-    provider = cls.__dict__.get('__annotate_func__')
-    if declared_annotations and provider is not None:
-        # Key the fallback by the original generated provider. A replacement
-        # must supply its own annotations and the cache must not retain classes.
-        if _protocol_annotation_names is None:
-            from weakref import WeakKeyDictionary
-            _protocol_annotation_names = WeakKeyDictionary()
-        _protocol_annotation_names[provider] = tuple(declared_annotations)
-    cls.__protocol_attrs__ = _get_protocol_attrs(cls)
-
-
 def _get_protocol_attrs(cls):
     """Collect protocol members from a protocol class objects.
 
@@ -382,18 +386,8 @@ def _protocol_annotations(base):
     try:
         return base.__annotations__
     except Exception:
-        # The class builder records executed annotation declarations even
-        # when a forward reference prevents evaluating their values.
-        provider = getattr(base, '__annotate__', None)
-        if provider is None:
-            return ()
-        else:
-            try:
-                return provider(3)  # annotationlib.Format.FORWARDREF
-            except NotImplementedError:
-                if _protocol_annotation_names is None or provider not in _protocol_annotation_names:
-                    raise
-                return _protocol_annotation_names[provider]
+        from annotationlib import Format, get_annotations
+        return get_annotations(base, format=Format.FORWARDREF)
 
 
 @classmethod
@@ -1446,22 +1440,9 @@ def no_type_check(arg):
     if isinstance(arg, type):
         from types import FunctionType, MethodType
 
-        if type(arg) is type:
-            # Only Python class dictionaries can contain definitions to mark.
-            # Native descriptor names advertised by dir() need not be materialized.
-            names = set()
-            for base in getattr(arg, '__mro__', (arg,)):
-                for key, value in getattr(base, '__dict__', {}).items():
-                    if key == '__annotations__' and type(value) is dict:
-                        # An annotations dict cannot be a declared function or class.
-                        # Looking it up can force unrelated deferred annotations.
-                        continue
-                    names.add(key)
-            names = sorted(names)
-        else:
-            names = dir(arg)
-        for key in names:
-            obj = getattr(arg, key)
+        lookup = _typing_runtime._no_type_check_member if type(arg) is type else getattr
+        for key in dir(arg):
+            obj = lookup(arg, key)
             if (
                 not hasattr(obj, '__qualname__')
                 or obj.__qualname__ != f'{arg.__qualname__}.{obj.__name__}'

@@ -158,11 +158,11 @@ fn stack_effect(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resu
     let mut jump = NONE;
     for (key, value) in kwargs {
         if key != "jump" {
-            let mut message = format!("stack_effect() got an unexpected keyword argument '{key}'");
-            if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &["jump"]) {
-                message.push_str(&format!(". Did you mean '{hint}'?"));
-            }
-            return Err(Error::new("TypeError", message));
+            return Err(crate::dynamic::calls::unexpected_keyword_error(
+                "stack_effect",
+                key,
+                &["jump"],
+            ));
         }
         jump = *value;
     }

@@ -15,6 +15,7 @@ use super::{
 };
 mod buffered;
 mod gzip;
+pub(crate) use gzip::GzipDecoder;
 mod path_text;
 mod random;
 pub(crate) use random::Random;
@@ -113,6 +114,21 @@ impl FileState {
         )
     }
 
+    /// Open an owned binary gzip reader and defer parsing until its first read.
+    pub(crate) fn gzip_reader(path: &[u8]) -> Result<Self> {
+        let (file, metadata) = open_raw_file(path, 0, false)?;
+        let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
+        Ok(Self {
+            fd: Some(file.as_raw_fd()),
+            raw: false,
+            stream: Some(Stream::UnreadGzip { file, capacity }),
+            name: None,
+            encoding: None,
+            errors: None,
+            kind: FileKind::GzipBinaryRead,
+        })
+    }
+
     /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
     pub(crate) fn temporary(directory: Option<&str>) -> Result<Self> {
         let file = super::tempdirs::anonymous_file(directory)?;
@@ -152,7 +168,10 @@ impl FileState {
         self.input()?.take_read_ahead()
     }
 
-    pub(super) fn read_pipe_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+    pub(crate) fn read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        if size == Some(0) && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
+            return Ok(Bytes::new());
+        }
         self.input()?.read_once(size)
     }
 
@@ -160,7 +179,8 @@ impl FileState {
         self.input()?.peek()
     }
 
-    pub(super) fn read_pipe_line(&mut self, size: Option<usize>) -> Result<Bytes> {
+    /// Read through the first newline or size limit, whichever comes first.
+    pub(crate) fn read_line_limited(&mut self, size: Option<usize>) -> Result<Bytes> {
         self.input()?.binary_line_limited(size)
     }
 
@@ -547,7 +567,7 @@ impl Storage {
     }
 }
 
-pub(super) fn os_error(error: io::Error) -> Error {
+pub(crate) fn os_error(error: io::Error) -> Error {
     if let Some(gzip) = error
         .get_ref()
         .and_then(|error| error.downcast_ref::<gzip::GzipError>())

@@ -203,15 +203,7 @@ impl Context {
                 format!("descriptor '{name}' of '{owner}' object needs an argument"),
             ));
         };
-        let accepts = match self.heap.get(cursor) {
-            Value::Map { .. } => owner == "map",
-            Value::Filter { .. } => owner == "filter",
-            Value::Enumerate { .. } => owner == "enumerate",
-            Value::DictIterator(iter) => owner == iter.class_name(),
-            Value::Generator { .. } => owner == "generator",
-            _ => false,
-        };
-        if !accepts {
+        if self.heap.get(cursor).intrinsic_type_name() != Some(owner) {
             return Err(Error::new(
                 "TypeError",
                 format!(

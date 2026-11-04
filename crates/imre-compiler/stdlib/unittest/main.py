@@ -9,6 +9,7 @@ from . import _MainRunner, loader, runner
 
 __unittest = True
 _NO_TESTS_EXITCODE = 5
+_LONG_OPTIONS = ("--verbose", "--quiet", "--failfast", "--locals")
 
 
 def _convert_name(name):
@@ -28,11 +29,15 @@ def _convert_name(name):
     return name
 
 
+def _convert_select_pattern(pattern):
+    return pattern if "*" in pattern else "*" + pattern + "*"
+
+
 def _main_option(arg):
     # argparse recognizes a known option before treating strings with spaces as names.
     if arg[:2] in ("-k", "-v", "-q", "-f"):
         return True
-    if "=" in arg and arg.partition("=")[0] in ("--verbose", "--quiet", "--failfast"):
+    if "=" in arg and arg.partition("=")[0] in _LONG_OPTIONS:
         return True
     return (arg.startswith("-") and arg != "-" and " " not in arg
             and not re.match(r"-\.?\d", arg))
@@ -58,8 +63,11 @@ def _parse_main_args(argv, options):
         # The positional `tests` argument is a single group. Options may precede or follow it.
         names_finished = bool(names)
         if arg.startswith("--"):
-            options._setOption(next((flag for flag in ("--verbose", "--quiet", "--failfast")
-                                    if flag.startswith(arg)), arg))
+            flag = next((flag for flag in _LONG_OPTIONS if flag.startswith(arg)), arg)
+            if flag == "--locals":
+                options.tb_locals = True
+            else:
+                options._setOption(flag)
             continue
         for i, flag in enumerate(arg[1:], 2):
             if flag != "k":
@@ -73,7 +81,7 @@ def _parse_main_args(argv, options):
                 if pattern is None or _main_option(pattern):
                     print("argument -k: expected one argument", file=sys.stderr)
                     sys.exit(2)
-            patterns.append(pattern if "*" in pattern else "*" + pattern + "*")
+            patterns.append(_convert_select_pattern(pattern))
             break
     if extras:
         print("unrecognized arguments: " + " ".join(extras), file=sys.stderr)
@@ -132,20 +140,32 @@ class TestProgram(object):
         self.runTests()
 
     def parseArgs(self, argv):
+        if self.module is None and len(argv) > 1 and argv[1].lower() == "discover":
+            self._discovery_parser = self._make_discovery_parser()
+            self._do_discovery(argv[2:])
+            return
+
         options = _MainRunner()
         options.verbose = self.verbosity
+        options.tb_locals = getattr(self, "tb_locals", False)
         options.failfast = False if self.failfast is None else self.failfast
         if self.buffer is None:
             self.buffer = False
         if self.catchbreak is None:
             self.catchbreak = False
+        if not hasattr(self, "durations"):
+            self.durations = None
         self.tests, patterns = _parse_main_args(argv, options)
+        self.tb_locals = options.tb_locals
         self.verbosity = options.verbose
         self.failfast = options.failfast
         if self.testNamePatterns is None or patterns:
             self.testNamePatterns = patterns
-        if self.testNamePatterns:
-            self.testLoader.testNamePatterns = self.testNamePatterns
+        if self.module is None and not self.tests:
+            self._discovery_parser = self._make_discovery_parser()
+            self._do_discovery([])
+            return
+
         if self.tests:
             self.testNames = [_convert_name(name) for name in self.tests]
         elif isinstance(self.defaultTest, str):
@@ -155,8 +175,48 @@ class TestProgram(object):
         else:
             self.testNames = None
 
-        if self.module is None and not self.tests:
-            self.test = self.testLoader.discover(".")
+        self.createTests()
+
+    def _make_discovery_parser(self):
+        import argparse
+
+        parser = argparse.ArgumentParser(prog="%s discover" % self.progName)
+        parser.add_argument("-v", "--verbose", dest="verbosity", action="store_const", const=2)
+        parser.add_argument("-q", "--quiet", dest="verbosity", action="store_const", const=0)
+        parser.add_argument("--locals", dest="tb_locals", action="store_true")
+        parser.add_argument("--durations", type=int)
+        for short, long, attr in (("-f", "--failfast", "failfast"),
+                                  ("-c", "--catch", "catchbreak"),
+                                  ("-b", "--buffer", "buffer")):
+            if getattr(self, attr) is None:
+                parser.add_argument(short, long, dest=attr, action="store_true")
+                setattr(self, attr, False)
+        if self.testNamePatterns is None:
+            parser.add_argument("-k", dest="testNamePatterns", action="append",
+                                type=_convert_select_pattern)
+            self.testNamePatterns = []
+
+        parser.add_argument("-s", "--start-directory", dest="start")
+        parser.add_argument("-p", "--pattern", dest="pattern")
+        parser.add_argument("-t", "--top-level-directory", dest="top")
+        for attr in ("start", "pattern", "top"):
+            parser.add_argument(attr, nargs="?", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        return parser
+
+    def _do_discovery(self, argv, Loader=None):
+        self.start, self.pattern, self.top = ".", "test*.py", None
+        if argv is not None:
+            if self._discovery_parser is None:
+                self._discovery_parser = self._make_discovery_parser()
+            self._discovery_parser.parse_args(argv, self)
+        self.createTests(from_discovery=True, Loader=Loader)
+
+    def createTests(self, from_discovery=False, Loader=None):
+        if self.testNamePatterns:
+            self.testLoader.testNamePatterns = self.testNamePatterns
+        if from_discovery:
+            test_loader = self.testLoader if Loader is None else Loader()
+            self.test = test_loader.discover(self.start, self.pattern, self.top)
         elif self.testNames is None:
             self.test = self.testLoader.loadTestsFromModule(self.module)
         else:

@@ -78,6 +78,56 @@ class BaseWriteCases:
         pass
 
 
+def check_exported_writes():
+    stream = io.BytesIO(b"id:")
+    events = []
+
+    class Chunk:
+        def __init__(self, view):
+            self.view = view
+
+        def __buffer__(self, flags):
+            events.append(flags)
+            stream.seek(0, 2)
+            return self.view
+
+        def __release_buffer__(self, view):
+            events.append((view is self.view, stream.tell()))
+            view.release()
+
+    words = array("h", [257, -2, 513])
+    data = words.tobytes()
+    tail = data[words.itemsize:]
+    first = Chunk(memoryview(words)[1:])
+    assert stream.write(first) == len(tail)
+    stream.writelines([b"|", Chunk(memoryview(words)[:1])])
+    expected = b"id:" + tail + b"|" + data[:words.itemsize]
+    assert stream.getvalue() == expected
+    assert events == [8, (True, 3 + len(tail)), 8, (True, len(expected))]
+    words.append(0)
+
+    strided = Chunk(memoryview(b"abcd")[::2])
+    try:
+        stream.write(strided)
+    except BufferError:
+        assert events[4:] == [8] and strided.view.tobytes() == b"ac"
+        assert stream.getvalue() == expected
+    else:
+        raise AssertionError("BytesIO accepted a noncontiguous buffer")
+
+    class ClosingChunk(Chunk):
+        def __release_buffer__(self, view):
+            stream.close()
+            view.release()
+
+    assert stream.__init__(ClosingChunk(memoryview(b"new"))) is None
+    assert stream.closed
+
+    stream = io.BytesIO()
+    assert stream.__setstate__((ClosingChunk(memoryview(b"saved")), 7, {"part": 2})) is None
+    assert stream.closed and stream.part == 2
+
+
 def check_base_writes():
     from _collections_abc import _check_methods
 
@@ -148,7 +198,28 @@ def check_text_base():
         print(error.args, stream.closed)
 
 
+def check_typed_raw_readinto():
+    class Raw(RawIOBase):
+        def readable(self):
+            return True
+
+        def readinto(self, buffer):
+            words = buffer[1:].cast("I")
+            buffer[0] = ord("!")
+            words[0] = 0x41414141
+            assert io.BytesIO(b"1234").readinto(words[1:]) == 4
+            assert words[0] == 0x41414141 and words[1:].tobytes() == b"1234"
+            return len(buffer)
+
+    target = bytearray(b"." * 13)
+    with io.BufferedReader(Raw(), 2) as reader:
+        assert reader.readinto(memoryview(target)[2:-2]) == 9
+    assert target == b"..!AAAA1234.."
+
+
 def exercise(path):
+    check_exported_writes()
+    check_typed_raw_readinto()
     check_base_writes()
     check_text_base()
     events = []

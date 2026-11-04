@@ -24,6 +24,8 @@ fn safe_alphabet(source: &str) -> bool {
                     return false;
                 }
             }
+            // Three octal digits up to 0o377 denote a literal below U+0100, even outside a class.
+            Some(b'0'..=b'3') if (0..2).all(|_| matches!(bytes.next(), Some(b'0'..=b'7'))) => {}
             Some(ch) if !ch.is_ascii_alphanumeric() || b"AbBdDsSwWZzafnrtv".contains(&ch) => {}
             _ => return false,
         }

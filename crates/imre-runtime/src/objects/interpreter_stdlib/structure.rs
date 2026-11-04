@@ -18,7 +18,8 @@ pub(crate) enum UnpackedField {
 }
 
 pub(crate) struct StructFormat {
-    little_endian: bool,
+    native: bool,
+    pub(crate) little_endian: bool,
     pub(crate) size: usize,
     pub(crate) item_count: usize,
     fields: Vec<Field>,
@@ -33,6 +34,7 @@ impl StructFormat {
             b'@'
         };
         let mut result = Self {
+            native: prefix == b'@',
             little_endian: match prefix {
                 b'<' => true,
                 b'>' | b'!' => false,
@@ -63,11 +65,11 @@ impl StructFormat {
             let count = if c == b's' { 1 } else { repeat_count };
             let (width, alignment) = match c {
                 b's' => (repeat_count, 1),
-                b'L' if prefix == b'@' => (
+                b'L' if result.native => (
                     size_of::<std::ffi::c_ulong>(),
                     align_of::<std::ffi::c_ulong>(),
                 ),
-                b'l' if prefix == b'@' => (
+                b'l' if result.native => (
                     size_of::<std::ffi::c_long>(),
                     align_of::<std::ffi::c_long>(),
                 ),
@@ -75,13 +77,14 @@ impl StructFormat {
                 b'b' | b'B' => (1, 1),
                 b'H' => (2, align_of::<u16>()),
                 b'i' | b'I' => (4, align_of::<u32>()),
+                b'f' => (4, align_of::<f32>()),
                 b'd' => (8, align_of::<f64>()),
-                b'Q' => (8, align_of::<u64>()),
+                b'q' | b'Q' => (8, align_of::<u64>()),
                 b'x' => (1, 1),
-                b'P' if prefix == b'@' => (size_of::<usize>(), align_of::<usize>()),
+                b'P' if result.native => (size_of::<usize>(), align_of::<usize>()),
                 _ => return Err("bad char in struct format".into()),
             };
-            let offset = if prefix == b'@' {
+            let offset = if result.native {
                 result
                     .size
                     .checked_next_multiple_of(alignment)
@@ -133,6 +136,64 @@ impl StructFormat {
         }
     }
 
+    /// Decode a record at a byte offset, with negative offsets measured from the end.
+    pub(crate) fn unpack_from(
+        &self,
+        buffer: &[u8],
+        offset: isize,
+    ) -> Result<Vec<UnpackedField>, String> {
+        let range = self.record_range(buffer.len(), offset, false)?;
+        self.unpack(&buffer[range])
+    }
+
+    /// Locate one record for pack_into or unpack_from, preserving their distinct diagnostics.
+    pub(crate) fn record_range(
+        &self,
+        len: usize,
+        offset: isize,
+        packing: bool,
+    ) -> Result<std::ops::Range<usize>, String> {
+        let size = self.size;
+        let start = if offset < 0 {
+            let distance = offset.unsigned_abs();
+            if size > distance {
+                return Err(if packing {
+                    format!("no space to pack {size} bytes at offset {offset}")
+                } else {
+                    format!("not enough data to unpack {size} bytes at offset {offset}")
+                });
+            }
+            len.checked_sub(distance)
+                .ok_or_else(|| format!("offset {offset} out of range for {len}-byte buffer"))?
+        } else {
+            offset as usize
+        };
+        // Both the parsed size and the nonnegative offset fit in isize.
+        let end = start + size;
+        if end > len {
+            let (method, action) = if packing {
+                ("pack_into", "packing")
+            } else {
+                ("unpack_from", "unpacking")
+            };
+            return Err(format!(
+                "{method} requires a buffer of at least {end} bytes for {action} {size} bytes at offset {start} (actual buffer size is {len})"
+            ));
+        }
+        Ok(start..end)
+    }
+
+    fn unpack_single(&self, bits: u32) -> f64 {
+        let single = f32::from_bits(bits);
+        if !self.native && single.is_nan() {
+            // Standard formats preserve signaling NaNs. Native unpacking uses a float cast.
+            let sign = u64::from(bits >> 31) << 63;
+            let fraction = u64::from(bits & 0x007f_ffff) << 29;
+            return f64::from_bits(sign | f64::INFINITY.to_bits() | fraction);
+        }
+        f64::from(single)
+    }
+
     pub(crate) fn unpack(&self, buffer: &[u8]) -> Result<Vec<UnpackedField>, String> {
         if buffer.len() != self.size {
             return Err(format!("unpack requires a buffer of {} bytes", self.size));
@@ -153,11 +214,12 @@ impl StructFormat {
                 u64::from_be_bytes(word)
             };
             result.push(match code {
-                b'b' | b'i' | b'l' => {
+                b'b' | b'i' | b'l' | b'q' => {
                     // Move the field's sign bit into bit 63 before the arithmetic shift.
                     let shift = (8 - field.len()) * 8;
                     UnpackedField::Signed(((value << shift) as i64) >> shift)
                 }
+                b'f' => UnpackedField::Float(self.unpack_single(value as u32)),
                 b'd' => UnpackedField::Float(f64::from_bits(value)),
                 _ => UnpackedField::Integer(value),
             });
@@ -195,6 +257,18 @@ mod tests {
         assert_eq!(struct_calcsize("<HHIIIIIHHH").unwrap(), 30);
         assert_eq!(struct_calcsize(">HHIQQQIHHH").unwrap(), 42);
         assert_eq!(struct_calcsize("<IIQQQQQQ").unwrap(), 56);
+    }
+
+    #[test]
+    fn signed_long_long_transitions() {
+        use UnpackedField::Signed;
+        let values = [i64::MIN, -2_717_650_800, 0, i64::MAX];
+        let big: Vec<_> = values.into_iter().flat_map(i64::to_be_bytes).collect();
+        let little: Vec<_> = values.into_iter().flat_map(i64::to_le_bytes).collect();
+        assert_eq!(struct_unpack(">4q", &big).unwrap(), values.map(Signed));
+        assert_eq!(struct_unpack("<4q", &little).unwrap(), values.map(Signed));
+        assert_eq!(struct_calcsize("@B0q"), struct_calcsize("@B0Q"));
+        assert_eq!(struct_calcsize("!Bq"), Ok(9));
     }
 
     #[test]

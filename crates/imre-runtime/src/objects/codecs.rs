@@ -1,4 +1,5 @@
 //! Native text codecs shared by the registry and text files.
+pub(crate) mod shift_jis;
 pub(super) mod writer;
 
 use super::bytes::{DecodeIssue, ascii_decode_error, owned_input};
@@ -13,19 +14,21 @@ use std::sync::LazyLock;
 
 pub(crate) struct CodePage {
     index: usize,
+    pub(crate) module_name: &'static str,
     decode: Charmap,
     encode: HashMap<char, u8>,
 }
 
 impl CodePage {
     /// Reuse the pinned source decoding table in both directions.
-    fn new(index: usize, name: &str) -> Self {
-        let decode = Charmap::named(name).unwrap();
+    fn new(index: usize, module_name: &'static str) -> Self {
+        let decode = Charmap::named(module_name).unwrap();
         let encode = (0..=u8::MAX)
             .filter_map(|byte| decode.decode(byte).map(|ch| (ch, byte)))
             .collect();
         Self {
             index,
+            module_name,
             decode,
             encode,
         }
@@ -35,8 +38,10 @@ impl CodePage {
 static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
 static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
 static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
+static KOI8_U: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(8, "koi8_u"));
+static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"));
 
-const CODEC_NAMES: [&str; 7] = [
+const CODEC_NAMES: [&str; 10] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -44,6 +49,9 @@ const CODEC_NAMES: [&str; 7] = [
     "cp1251",
     "cp424",
     "cp437",
+    "shift_jis",
+    "koi8-u",
+    "cp1252",
 ];
 
 thread_local! {
@@ -488,6 +496,7 @@ pub(crate) enum Codec {
     Latin1,
     Ascii,
     CodePage(&'static CodePage),
+    ShiftJis,
 }
 
 impl Codec {
@@ -498,6 +507,7 @@ impl Codec {
             Self::Utf8 { signature: false } => 2,
             Self::Utf8 { signature: true } => 3,
             Self::CodePage(page) => page.index,
+            Self::ShiftJis => 7,
         }
     }
 
@@ -528,9 +538,14 @@ impl Codec {
                 Ok(Self::Utf8 { signature: false })
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
+            "shift_jis" | "shiftjis" | "s_jis" | "sjis" | "csshiftjis" | "x_mac_japanese" => {
+                Ok(Self::ShiftJis)
+            }
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
+            "cp1252" | "1252" | "windows_1252" => Ok(Self::CodePage(&CP1252)),
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
             "cp437" | "437" | "cspc8codepage437" | "ibm437" => Ok(Self::CodePage(&CP437)),
+            "koi8_u" => Ok(Self::CodePage(&KOI8_U)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
@@ -580,12 +595,16 @@ impl Codec {
             points.extend(super::interpreter_stdlib::fsdecode(data));
             return Ok(points);
         }
+        if matches!(self, Self::ShiftJis) {
+            shift_jis::decode_filesystem(data, &mut points);
+            return Ok(points);
+        }
         for (index, &byte) in data.iter().enumerate() {
             let ch = match self {
                 Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
                 Self::Latin1 => Some(char::from(byte)),
                 Self::CodePage(page) => page.decode.decode(byte),
-                Self::Utf8 { .. } => unreachable!(),
+                Self::Utf8 { .. } | Self::ShiftJis => unreachable!(),
             };
             points.push(match ch {
                 Some(ch) => u32::from(ch),
@@ -641,6 +660,10 @@ impl Codec {
                 }
                 Ok(text)
             }
+            Self::ShiftJis => {
+                shift_jis::decode_chunk(&mut text, data, errors, true)?;
+                Ok(text)
+            }
             Self::Utf8 { signature } => {
                 let data = if signature {
                     data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data)
@@ -659,21 +682,46 @@ impl Codec {
         }
     }
 
+    /// Encodings other than UTF-8 write one or two bytes for a representable scalar.
+    pub(crate) fn encode_unit(self, ch: char) -> Option<([u8; 2], usize)> {
+        if matches!(self, Self::ShiftJis) {
+            return shift_jis::encode_char(ch);
+        }
+        self.encode_byte(ch).map(|byte| ([byte, 0], 1))
+    }
+
     pub(crate) fn encode_byte(self, ch: char) -> Option<u8> {
         match self {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
             Self::CodePage(page) => page.encode.get(&ch).copied(),
-            Self::Utf8 { .. } => unreachable!("UTF-8 is a multibyte encoding"),
+            Self::Utf8 { .. } | Self::ShiftJis => unreachable!("expected a single-byte encoding"),
         }
     }
 
-    pub(crate) fn single_byte_error(self) -> (&'static str, &'static str) {
+    /// Text substituted for one unencodable Python code point by a built-in error handler.
+    pub(crate) fn error_replacement(name: &str, code: u32) -> Str {
+        match name {
+            "replace" => Str::const_new("?"),
+            "backslashreplace" => escaped(code),
+            "xmlcharrefreplace" => compact_str::format_compact!("&#{code};"),
+            "namereplace" => char::from_u32(code)
+                .and_then(unicode_names2::name)
+                .map_or_else(
+                    || escaped(code),
+                    |name| compact_str::format_compact!("\\N{{{name}}}"),
+                ),
+            _ => unreachable!("text replacement policy"),
+        }
+    }
+
+    pub(crate) fn encoding_error_reason(self) -> (&'static str, &'static str) {
         match self {
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
             Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
-            Self::Utf8 { .. } => unreachable!("UTF-8 is a multibyte encoding"),
+            Self::ShiftJis => ("shift_jis", "illegal multibyte sequence"),
+            Self::Utf8 { .. } => unreachable!("UTF-8 encodes every Unicode scalar"),
         }
     }
 
@@ -694,32 +742,31 @@ impl Codec {
                 out.extend_from_slice(text.as_bytes());
                 return Ok(Cow::Owned(out));
             }
-            _ => self.single_byte_error(),
+            _ => self.encoding_error_reason(),
         };
         let mut out = Vec::new();
         out.try_reserve_exact(text.len())
             .map_err(|_| Error::allocation())?;
         let mut chars = text.chars().enumerate().peekable();
         while let Some((start, ch)) = chars.next() {
-            if let Some(byte) = self.encode_byte(ch) {
-                out.try_reserve(1).map_err(|_| Error::allocation())?;
-                out.push(byte);
+            if let Some((unit, size)) = self.encode_unit(ch) {
+                out.try_reserve(size).map_err(|_| Error::allocation())?;
+                out.extend_from_slice(&unit[..size]);
                 continue;
             }
             let replacement = match errors.unwrap_or("strict") {
                 "ignore" => continue,
-                "replace" => Str::const_new("?"),
-                "backslashreplace" => escaped(ch),
-                "xmlcharrefreplace" => compact_str::format_compact!("&#{};", u32::from(ch)),
-                "namereplace" => unicode_names2::name(ch).map_or_else(
-                    || escaped(ch),
-                    |name| compact_str::format_compact!("\\N{{{name}}}"),
-                ),
+                name @ ("replace" | "backslashreplace" | "xmlcharrefreplace" | "namereplace") => {
+                    Self::error_replacement(name, u32::from(ch))
+                }
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
-                    while let Some((i, _)) = chars.next_if(|(_, c)| self.encode_byte(*c).is_none())
-                    {
-                        end = i;
+                    if !matches!(self, Self::ShiftJis) {
+                        while let Some((i, _)) =
+                            chars.next_if(|(_, c)| self.encode_byte(*c).is_none())
+                        {
+                            end = i;
+                        }
                     }
                     return Err(encoding_error(
                         codec,
@@ -735,7 +782,7 @@ impl Codec {
             out.try_reserve(replacement.len())
                 .map_err(|_| Error::allocation())?;
             for c in replacement.chars() {
-                let Some(byte) = self.encode_byte(c) else {
+                let Some((unit, size)) = self.encode_unit(c) else {
                     return Err(encoding_error(
                         codec,
                         reason,
@@ -745,7 +792,7 @@ impl Codec {
                         ch,
                     ));
                 };
-                out.push(byte);
+                out.extend_from_slice(&unit[..size]);
             }
         }
         Ok(Cow::Owned(out))
@@ -762,7 +809,7 @@ fn encoding_error(
     ch: char,
 ) -> Error {
     let at = if start == end {
-        format!("character '{}' in position {start}", escaped(ch))
+        format!("character '{}' in position {start}", escaped(u32::from(ch)))
     } else {
         format!("characters in position {start}-{end}")
     };
@@ -800,8 +847,7 @@ pub(super) fn normalize_newlines(bytes: &mut Vec<u8>) {
     bytes.truncate(written);
 }
 
-fn escaped(ch: char) -> Str {
-    let code = u32::from(ch);
+fn escaped(code: u32) -> Str {
     match code {
         0..=255 => compact_str::format_compact!("\\x{code:02x}"),
         256..=65535 => compact_str::format_compact!("\\u{code:04x}"),

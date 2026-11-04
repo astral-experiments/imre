@@ -69,7 +69,7 @@ impl Builtin {
                 }
             }
             Self::SplitIntSource(_) => Contract::new(false, PreservesLists),
-            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
+            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
@@ -432,6 +432,7 @@ impl Builtin {
             | Self::NegativeIntegerPower
             | Self::Decode
             | Self::DecodeAscii
+            | Self::FloatDivmod | Self::BytesHex
             | Self::UrlsafeB64encode
             | Self::Base64Translate
             | Self::BinasciiAsciiInput
@@ -631,6 +632,7 @@ impl Builtin {
             | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
+            | Self::IntToBytes
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
             | Self::DequeNew
@@ -669,6 +671,7 @@ impl Builtin {
             | Self::ZipMinReadSize
             | Self::ZipField(_)
             | Self::ZipOpen
+            | Self::ZipImportIndex
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
@@ -774,6 +777,7 @@ impl Builtin {
             | Self::DequeReverse
             | Self::SetIter
             | Self::MatchingSplitIter(_)
+            | Self::SplitByteIter(_)
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
@@ -915,6 +919,7 @@ impl Builtin {
                 signature(&[Type::Str, Type::Str, Type::Int], Type::Iterator)
             }
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::SplitByteIter(byte) => byte.is_ascii() && signature(&[Type::Str], Type::Iterator),
             Self::FunctionWrappedSet => {
                 matches!(result, Type::Callable(_)) && signature(&[result, result], result)
             }
@@ -1273,6 +1278,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
+                | "imre_bytes_hex"
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
@@ -1306,6 +1312,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_hash_algorithms_available"
                 | "imre_hash_algorithms_guaranteed"
                 | "imre_toml_keys"
+                | "imre_int_to_bytes"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"
                 | "imre_binary_read"
@@ -1387,6 +1394,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_zip_test"
                 | "imre_zip_min_read_size"
                 | "imre_zip_open"
+                | "imre_zip_import_index"
                 | "imre_zip_namelist"
                 | "imre_zip_close"
                 | "imre_int_str"

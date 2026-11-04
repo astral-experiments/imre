@@ -270,12 +270,6 @@ impl Context {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some(v.clone())
             }
-            Value::Instance { class, fields, .. } => Some(
-                self.namedtuple_fields(*class)?
-                    .iter()
-                    .map(|k| fields[k])
-                    .collect(),
-            ),
             _ => None,
         }
     }
@@ -283,10 +277,6 @@ impl Context {
         match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some((v.len(), v.get(index).copied()))
-            }
-            Value::Instance { class, fields, .. } => {
-                let names = self.namedtuple_fields(*class)?;
-                Some((names.len(), names.get(index).map(|key| fields[key])))
             }
             _ => None,
         }
@@ -471,7 +461,7 @@ impl Context {
             Value::Str(s) => !s.is_empty(),
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
-            Value::MemoryView { .. } => self.view_layout(id)?.len != 0,
+            Value::MemoryView { .. } => self.view_layout(id)?.first_len()? != 0,
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
@@ -491,7 +481,7 @@ impl Context {
             } => !bindings.is_empty(),
             Value::Array(array) => array.len() != 0,
             Value::Range(range) => range.len.as_small() != Some(0),
-            Value::Instance { .. } | Value::Raised(_) => {
+            Value::Instance { .. } | Value::Raised(_) | Value::FrameLocalsProxy { .. } => {
                 if let Some(hook) = self.bound_slot(id, "__bool__")? {
                     let value = self.call(hook, Vec::new(), Vec::new())?;
                     let Value::Bool(result) = self.heap.get(value) else {
@@ -548,7 +538,6 @@ impl Context {
         // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
         let supported = match self.heap.get(self.scalar_value(mapping)) {
             Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
-            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => false,
             Value::Dict(_)
             | Value::DefaultDict { .. }
             | Value::MappingProxy(_)
@@ -1363,9 +1352,12 @@ impl Context {
     /// Resolve formatting methods on heap instances and exceptions that retain their Python class.
     fn format_slot(&self, id: Id, name: &str) -> Option<(Id, Id)> {
         let class = match self.heap.get(id) {
-            Value::Instance { class, .. } => *class,
+            Value::Instance { class, .. } | Value::FrameLocalsProxy { class, .. } => *class,
             Value::Raised(error) => error.class()?,
             Value::Weak(wr) if name == "__repr__" => *self.builtins.get(wr.kind.class())?,
+            Value::Partial { .. } if name == "__repr__" => {
+                *self.builtins.get(stdlib::functools::PARTIAL_CLASS)?
+            }
             value if name == "__repr__" => match value.native_io_class_name()? {
                 class @ ("_io.BufferedReader" | "_io.BufferedWriter" | "_io.TextIOWrapper") => {
                     *self.builtins.get(class)?
@@ -1932,7 +1924,7 @@ impl Context {
                     }
                 }
                 Part::Fields(id, index) => {
-                    let Value::Instance { class, fields, .. } = ctx.heap.get(id) else {
+                    let Value::Instance { class, .. } = ctx.heap.get(id) else {
                         unreachable!("active named tuple")
                     };
                     let Some(names) = ctx.namedtuple_fields(*class) else {
@@ -1945,15 +1937,10 @@ impl Context {
                         append_rendered_text(&mut output, name)?;
                         append_rendered_text(&mut output, "=")?;
                         push_frame(&mut work, Part::Fields(id, index + 1))?;
-                        push_frame(
-                            &mut work,
-                            Part::Value(
-                                *fields
-                                    .get(name)
-                                    .ok_or_else(|| Error::new("AttributeError", name.clone()))?,
-                                true,
-                            ),
-                        )?;
+                        let Value::Tuple(items) = ctx.tuple_backing(id) else {
+                            unreachable!("active named tuple storage")
+                        };
+                        push_frame(&mut work, Part::Value(items[index], true))?;
                     }
                 }
                 Part::SnapshotMembers(members, index) => {
@@ -2352,13 +2339,14 @@ impl Context {
                             push_frame(&mut work, Part::Value(*backing, repr))?;
                             continue;
                         }
-                        Value::Instance { class, fields, .. }
+                        Value::Instance { class, .. }
                             if let Value::Class {
                                 name,
                                 namedtuple_fields: Some(names),
                                 ..
                             } = ctx.heap.get(*class)
-                                && names.iter().all(|field| fields.contains_key(field)) =>
+                                && let Value::Tuple(items) = ctx.tuple_backing(id)
+                                && items.len() >= names.len() =>
                         {
                             if checked {
                                 ctx.check_call_depth(namedtuple_depth)?;
@@ -3004,9 +2992,6 @@ impl Context {
         result
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
-            return self.raw_view_get(obj, key);
-        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
             return self.memoryview_get(obj, key);
         }
@@ -3065,7 +3050,6 @@ impl Context {
         let kind = match self.heap.get(storage) {
             Value::List(_) => "list",
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
-            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => "tuple",
             Value::Str(_) | Value::SurrogateStr(_) => "string",
             Value::Bytes(_) => "byte",
             Value::ByteArray(_) => "bytearray",
@@ -3132,12 +3116,6 @@ impl Context {
         Ok(match self.heap.get(storage) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 v[position(v.len())?]
-            }
-            Value::Instance { class, fields, .. } => {
-                let names = self
-                    .namedtuple_fields(*class)
-                    .expect("validated named tuple");
-                fields[&names[position(names.len())?]]
             }
             Value::SurrogateStr(points) => {
                 let point = points[position(points.len())?];
@@ -3238,10 +3216,13 @@ impl Context {
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
-        if self.raw_read_window(obj).is_some() {
-            return self.raw_view_set(obj, key, val);
-        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            if let Some(window) = self.raw_read_window(obj) {
+                self.window_bytes(window)?;
+                // An index or value conversion can try to resize the unpinned backing.
+                return self
+                    .with_buffer_export(window.backing, |ctx| ctx.memoryview_set(obj, key, val));
+            }
             return self.memoryview_set(obj, key, val);
         }
         let target = self.weak_proxy_target(obj)?;
@@ -3426,11 +3407,11 @@ impl Context {
                 | Value::SurrogateStr(_)
                 | Value::Bytes(_)
                 | Value::ByteArray(_)
+                | Value::Array(_)
                 | Value::List(_)
                 | Value::Tuple(_)
                 | Value::NamedTuple { .. }
-        ) && !matches!(self.heap.get(obj), Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some())
-        {
+        ) {
             return Err(Error::new(
                 "TypeError",
                 format!("'{}' object is not subscriptable", self.type_name(obj)),
@@ -3452,14 +3433,11 @@ impl Context {
                 _ => text.chars().count(),
             },
             Value::SurrogateStr(points) => points.len(),
+            Value::Array(array) => array.len(),
             Value::Bytes(data) | Value::ByteArray(data) => data.len(),
             Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                 items.len()
             }
-            Value::Instance { class, .. } => self
-                .namedtuple_fields(*class)
-                .expect("validated named tuple")
-                .len(),
             _ => unreachable!("validated sequence"),
         };
         let [start, end, step] = super::slice::normalize(bounds, len as i64);
@@ -3493,18 +3471,10 @@ impl Context {
             }
             Value::Bytes(data) => Value::Bytes(sliced_values(data, positions, count)?),
             Value::ByteArray(data) => Value::ByteArray(sliced_values(data, positions, count)?),
+            Value::Array(array) => Value::Array(array.sliced(start, step, count)?),
             Value::List(items) => Value::List(sliced_values(items, positions, count)?),
             Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                 Value::Tuple(sliced_values(items, positions, count)?)
-            }
-            Value::Instance { class, fields, .. } => {
-                let names = self
-                    .namedtuple_fields(*class)
-                    .expect("validated named tuple");
-                let mut items = Vec::new();
-                items.try_reserve_exact(count).map_err(slice_memory_error)?;
-                items.extend(positions.map(|i| fields[&names[i]]));
-                Value::Tuple(items)
             }
             _ => unreachable!("validated sequence"),
         };
@@ -4714,6 +4684,20 @@ impl Context {
             ));
         }
         let (left, right) = (self.scalar_value(a), self.scalar_value(b));
+        if matches!(op, "*" | "/" | "//" | "%")
+            && (matches!(self.heap.get(left), Value::Complex(_))
+                || matches!(self.heap.get(right), Value::Complex(_)))
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for {op}{}: '{}' and '{}'",
+                    if inplace { "=" } else { "" },
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            ));
+        }
         if matches!(self.heap.get(left), Value::Float(_))
             || matches!(self.heap.get(right), Value::Float(_))
         {
@@ -4766,18 +4750,8 @@ impl Context {
                                 }
                                 Some(if odd { x } else { 0.0 })
                             } else if x < 0.0 && y.fract() != 0.0 {
-                                let magnitude = (-x).powf(y);
-                                if magnitude.is_infinite() {
-                                    return Err(Error::new(
-                                        "OverflowError",
-                                        "complex exponentiation",
-                                    ));
-                                }
-                                let phase = std::f64::consts::PI * y;
-                                return Ok(self.alloc(Value::Complex(super::complex::Complex {
-                                    real: magnitude * phase.cos(),
-                                    imag: magnitude * phase.sin(),
-                                })));
+                                let base = super::complex::Complex::from(x);
+                                return Ok(self.alloc(Value::Complex(base.power(y.into())?)));
                             } else {
                                 let magnitude = x.abs().powf(y);
                                 if magnitude.is_infinite() {
@@ -4983,7 +4957,10 @@ impl Context {
         }
         let method = if matches!(
             (name, self.heap.get(obj)),
-            ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
+            (
+                "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__pow__" | "__rpow__",
+                Value::Complex(_)
+            ) | ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
                 | ("__xor__" | "__rxor__", Value::Set { .. })
                 | (
                     "__or__" | "__ror__",
@@ -5075,7 +5052,7 @@ impl Context {
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
 
-    /// Try divmod's numeric slots in order, including the inherited slot of integer subclasses.
+    /// Try divmod's numeric slots in order, including the inherited integer and float slots.
     pub(super) fn divmod(&mut self, a: Id, b: Id) -> Result<Id> {
         let class = |value| {
             self.heap
@@ -5116,6 +5093,17 @@ impl Context {
                 if let Some(result) = self.operator_slot(receiver, hook, other)? {
                     return Ok(result);
                 }
+            } else if let Value::Float(x) = *self.heap.get(self.scalar_value(receiver))
+                && let Some(y) = self.real_component(self.scalar_value(other))?
+            {
+                let (left, right) = if reflected { (y, x) } else { (x, y) };
+                if right == 0.0 {
+                    return Err(Error::new("ZeroDivisionError", "division by zero"));
+                }
+                let (quotient, remainder) = crate::floats::divmod_nonzero(left, right);
+                let quotient = self.alloc(Value::Float(quotient));
+                let remainder = self.alloc(Value::Float(remainder));
+                return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             } else if let (Ok(x), Ok(y)) = (self.as_int(a), self.as_int(b)) {
                 let quotient = self.alloc(Value::Int(crate::integer_binary(&x, &y, 3)?));
                 let remainder = self.alloc(Value::Int(crate::integer_binary(&x, &y, 4)?));
@@ -5136,16 +5124,21 @@ impl Context {
         ))
     }
 
-    /// Python-defined union slots compare the reflected methods after binding them to each class.
-    fn has_python_union_slot(&self, obj: Id) -> bool {
-        ["__or__", "__ror__"].iter().any(|name| {
+    /// A Python implementation of either method installs a shared forward/reflected slot.
+    fn has_python_binary_slot(&self, obj: Id, forward: &str, reflected: &str) -> bool {
+        [forward, reflected].iter().any(|name| {
             self.slot(obj, name)
                 .is_some_and(|slot| !matches!(self.heap.get(slot), Value::Native(_)))
         })
     }
 
     /// Compare the attributes on the two classes after applying descriptor binding.
-    fn reflected_slot_overridden(&mut self, left: Id, right: Id, name: &str) -> Result<bool> {
+    pub(super) fn reflected_slot_overridden(
+        &mut self,
+        left: Id,
+        right: Id,
+        name: &str,
+    ) -> Result<bool> {
         let right = match self.lookup_attr(right, name) {
             Ok(slot) => slot,
             Err(error) if self.is_attribute_error(&error) => return Ok(false),
@@ -5370,11 +5363,13 @@ impl Context {
                 .into_iter()
                 .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
         let dict_union = op == "|" && [a, b].into_iter().any(|id| self.dict_storage(id).is_some());
-        if set_xor || dict_union {
+        if set_xor || dict_union || matches!(op, "*" | "/" | "**") {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
                 if matches!(
                     (op, self.heap.get(value)),
-                    ("^", Value::Set { .. }) | ("|", Value::Dict(_) | Value::DefaultDict { .. })
+                    ("*" | "/" | "**", Value::Complex(_))
+                        | ("^", Value::Set { .. })
+                        | ("|", Value::Dict(_) | Value::DefaultDict { .. })
                 ) {
                     *class = Some(self.exact_type(value)?);
                 }
@@ -5431,14 +5426,21 @@ impl Context {
             ));
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
+            let complex_pair = matches!(op, "*" | "/" | "**")
+                && [a, b]
+                    .into_iter()
+                    .all(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Complex(_)));
             let strict_subclass = ac != bc
-                && if set_xor || dict_union {
+                && if set_xor || dict_union || complex_pair {
                     self.direct_subclass(bc, ac)
                 } else {
                     self.subclass(bc, ac)
                 };
             strict_subclass
-                && if dict_union && self.has_python_union_slot(a) && self.has_python_union_slot(b) {
+                && if (dict_union || complex_pair)
+                    && self.has_python_binary_slot(a, left, right)
+                    && self.has_python_binary_slot(b, left, right)
+                {
                     self.reflected_slot_overridden(ac, bc, right)?
                 } else {
                     inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right)

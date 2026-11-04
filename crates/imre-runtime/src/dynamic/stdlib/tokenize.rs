@@ -55,7 +55,7 @@ impl Batch<'_> {
         let (col, alt) = columns(indent);
         let (top, top_alt) = columns(self.indents.last().map_or("", String::as_str));
         if col > top && alt > top_alt {
-            if self.indents.len() >= 99 {
+            if self.indents.len() >= crate::dynamic::source_code::MAX_INDENT_LEVELS {
                 self.error = Some(Failure::too_deep(&source[physical_start..], line_base()));
                 return false;
             }

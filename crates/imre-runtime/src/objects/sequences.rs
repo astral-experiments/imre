@@ -163,19 +163,15 @@ pub unsafe extern "C" fn imre_str_get(value: *const Str, at: usize) -> *const St
 
 /// Shares Unicode indexing and exact failure messages between owned strings and
 /// caller-buffer fragments; negative indices avoid a complete length scan.
-pub(super) fn string_character(value: &str, at: &Int) -> Result<char> {
+pub(super) fn string_character(value: &Str, at: &Int) -> Result<char> {
     let at = crate::decode_index(at).map_err(|_| {
         Error::new(
             Kind::IndexError,
             "cannot fit 'int' into an index-sized integer",
         )
     })?;
-    let character = if at < 0 {
-        value.chars().rev().nth(at.unsigned_abs() - 1)
-    } else {
-        value.chars().nth(at as usize)
-    };
-    character.ok_or_else(|| Error::new(Kind::IndexError, "string index out of range"))
+    crate::string_cursor::character(value, at)
+        .ok_or_else(|| Error::new(Kind::IndexError, "string index out of range"))
 }
 
 /// Copies selected code points in one forward or backward pass. UTF-8 offsets

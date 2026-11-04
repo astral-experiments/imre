@@ -38,6 +38,7 @@ def current():
     assert bytes(data) == b"Abcd"
     resize_buffer()
     unsigned_cast()
+    unsigned_int_cast()
     print("bytearray memoryview")
 
 
@@ -111,6 +112,58 @@ def unsigned_cast():
             pass
         else:
             raise AssertionError("accepted invalid cast")
+
+
+def unsigned_int_cast():
+    values = array("I", [1, 2, 3, 4])
+    size = values.itemsize
+    for fmt in ("I", "@I"):
+        data = bytearray(b"<" + values.tobytes() + b">")
+        with memoryview(data)[1:-1] as span:
+            words = span.cast(fmt)
+        assert words.obj is data and not words.readonly
+        assert (words.format, words.itemsize, words.nbytes) == (fmt, size, 4 * size)
+        assert words.shape == (4,) and words.strides == (size,)
+        words[0] = 300
+        assert data[1:1 + size] == array("I", [300]).tobytes()
+        with words.cast("B") as raw:
+            raw[size:2 * size] = array("I", [400]).tobytes()
+        assert words[1] == 400
+        with words[::-2] as stride:
+            assert stride.strides == (-2 * size,)
+            assert (stride[0], stride[1]) == (4, 400)
+            assert stride.tobytes() == array("I", [4, 400]).tobytes()
+        words[1:] = words[:-1]
+        assert words.tobytes() == array("I", [300, 300, 400, 3]).tobytes()
+        words[::2] = words[1::2]
+        assert data == bytearray(b"<" + array("I", [300, 300, 3, 3]).tobytes() + b">")
+        only = words.toreadonly()
+        words.release()
+        try:
+            only[0] = 0
+        except TypeError as error:
+            assert str(error) == "cannot modify read-only memory"
+        else:
+            raise AssertionError("wrote through read-only unsigned int view")
+        try:
+            data.append(0)
+        except BufferError as error:
+            assert str(error) == "Existing exports of data: object cannot be re-sized"
+        else:
+            raise AssertionError("resized exporter with live unsigned int view")
+        only.release()
+        data.append(0)
+
+    for source, message in [
+        (memoryview(values.tobytes())[::2], "memoryview: casts are restricted to C-contiguous views"),
+        (memoryview(b"x"), "memoryview: length is not a multiple of itemsize"),
+    ]:
+        try:
+            source.cast("I")
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("accepted invalid unsigned int cast")
 
 
 def resize_buffer():

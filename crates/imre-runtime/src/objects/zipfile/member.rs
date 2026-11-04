@@ -5,6 +5,7 @@ use flate2::{Crc, Decompress, FlushDecompress, Status};
 use num_bigint::Sign;
 use num_traits::ToPrimitive;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
+use zlib_rs::{Inflate, InflateFlush, Status as InflateStatus};
 
 use super::super::{
     Bytes, Str, bytes,
@@ -19,6 +20,11 @@ use super::{
 use crate::Int;
 
 const BLOCK: usize = 64 * 1024;
+
+/// ZIP method 8 uses raw DEFLATE with a 32 KiB window.
+fn raw_inflater() -> Inflate {
+    Inflate::new(false, 15)
+}
 
 fn deflate_error(message: &str) -> Error {
     Error::new(
@@ -101,7 +107,7 @@ pub(in crate::objects) struct Member {
     packed_at: u64,
     packed_left: u64,
     left: u64,
-    inflater: Option<Decompress>,
+    inflater: Option<Inflate>,
     packed: Bytes,
     packed_pos: usize,
     buffer: Bytes,
@@ -197,7 +203,7 @@ impl Member {
             packed_at: start,
             packed_left: info.compress_size,
             left: info.file_size,
-            inflater: (info.method == 8).then(|| Decompress::new(false)),
+            inflater: (info.method == 8).then(raw_inflater),
             info,
             packed: Vec::new(),
             packed_pos: 0,
@@ -265,20 +271,25 @@ impl Member {
             self.input(n)?;
             if let Some(inflater) = &mut self.inflater {
                 let len = n.max(self.min_read).min(BLOCK);
-                grow(&mut self.buffer, len)?;
+                // A small member may produce only a few bytes of a full read buffer.
+                self.buffer
+                    .try_reserve(len)
+                    .map_err(|_| Error::allocation())?;
                 let before_in = inflater.total_in();
                 let before_out = inflater.total_out();
-                let result = inflater.decompress(
+                let result = inflater.decompress_uninit(
                     &self.packed[self.packed_pos..],
-                    &mut self.buffer,
-                    FlushDecompress::None,
+                    &mut self.buffer.spare_capacity_mut()[..len],
+                    InflateFlush::NoFlush,
                 );
                 let consumed = (inflater.total_in() - before_in) as usize;
                 self.packed_pos += consumed;
                 let status = match result {
                     Ok(status) => status,
-                    Err(error) => {
-                        let message = error.message().unwrap_or("invalid compressed data");
+                    Err(_) => {
+                        let message = inflater
+                            .error_message()
+                            .unwrap_or("invalid compressed data");
                         let diagnostic = if message == "repeated call with bad state" {
                             self.diagnose_deflate()
                         } else {
@@ -288,10 +299,12 @@ impl Member {
                     }
                 };
                 let written = (inflater.total_out() - before_out) as usize;
-                self.buffer.truncate(written);
-                self.eof = status == Status::StreamEnd
+                // SAFETY: the buffer was empty and the inflater initialized exactly
+                // the prefix counted by the change in total_out.
+                unsafe { self.buffer.set_len(written) };
+                self.eof = status == InflateStatus::StreamEnd
                     || (self.packed_left == 0 && self.packed_pos == self.packed.len());
-                if self.eof && status != Status::StreamEnd && written == len {
+                if self.eof && status != InflateStatus::StreamEnd && written == len {
                     // CPython flushes as soon as the last compressed byte has
                     // been consumed. A pending distance run can cross the read
                     // boundary, so the final CRC may raise on this very read.
@@ -299,16 +312,20 @@ impl Member {
                     loop {
                         let before = inflater.total_out();
                         let status = inflater
-                            .decompress(&[], &mut last, FlushDecompress::Finish)
-                            .map_err(|e| {
-                                deflate_error(e.message().unwrap_or("invalid compressed data"))
+                            .decompress(&[], &mut last, InflateFlush::Finish)
+                            .map_err(|_| {
+                                deflate_error(
+                                    inflater
+                                        .error_message()
+                                        .unwrap_or("invalid compressed data"),
+                                )
                             })?;
                         let added = (inflater.total_out() - before) as usize;
                         self.buffer
                             .try_reserve(added)
                             .map_err(|_| Error::allocation())?;
                         self.buffer.extend_from_slice(&last[..added]);
-                        if added < last.len() || status == Status::StreamEnd {
+                        if added < last.len() || status == InflateStatus::StreamEnd {
                             break;
                         }
                     }
@@ -530,7 +547,7 @@ impl Member {
                 self.packed_at = self.start;
                 self.packed_left = self.info.compress_size;
                 self.left = self.info.file_size;
-                self.inflater = Some(Decompress::new(false));
+                self.inflater = Some(raw_inflater());
                 self.crc = Some(Crc::new());
                 self.eof = false;
                 self.packed.clear();

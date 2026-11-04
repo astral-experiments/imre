@@ -1480,7 +1480,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         && let Some(&dictionary) = ctx.native_type_dicts.get(&value)
         && let Some(member) = ctx.dict_named_item(dictionary, name)
     {
-        return Some(Ok(member));
+        return Some(Ok(match *ctx.heap.get(member) {
+            Value::StaticMethod { callable, .. } => callable,
+            _ => member,
+        }));
     }
     let attr = match ctx.heap.get(value) {
         Value::Native(class)
@@ -2289,6 +2292,10 @@ pub(super) fn call(
         };
         return typing_alias_helper(ctx, helper, args.to_vec());
     }
+    if let ("_no_type_check_member", [class, attr], []) = (operation, args, kwargs) {
+        let name = ctx.str_value(*attr)?.to_owned();
+        return ctx.no_type_check_member(*class, &name);
+    }
     if let ("_protocol_mro", [class], []) = (operation, args, kwargs) {
         if matches!(ctx.heap.get(*class), Value::Native(_)) {
             let bases = ctx.base_lineage(*class, true);
@@ -2680,6 +2687,24 @@ pub(super) fn call(
         },
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
+        }
+        ("_install_any_namespace", [template]) => {
+            let Value::Class { scope, .. } = *ctx.heap.get(*template) else {
+                return Err(Error::new("TypeError", "expected a class"));
+            };
+            let class = ctx.builtin("typing.Any");
+            let dictionary = ctx.class_namespace_dict(scope, false);
+            // The constructor's super() and instance layout descriptors belong to the public class.
+            if let Some(cell) = ctx.scope_data(scope).class_cell {
+                ctx.heap.replace_cell(cell, Some(class));
+            }
+            for name in ["__dict__", "__weakref__"] {
+                let key = ctx.heap.code_name(name);
+                let descriptor = ctx.alloc(Value::LayoutDescriptor(class, name));
+                ctx.put_item(dictionary, key, descriptor)?;
+            }
+            ctx.native_type_dicts.insert(class, dictionary);
+            Ok(class)
         }
         // Keep the source method (and its defining globals) on the native alias class.
         ("_install_generic_alias_iter", [methods]) => {
@@ -3252,11 +3277,13 @@ impl Context {
             if !self.is_type_object(base) {
                 return Err(Error::new("TypeError", "bases must be types"));
             }
-            if self.classes.get("typing.Union") == Some(&base) {
-                return Err(Error::new(
-                    "TypeError",
-                    "type 'typing.Union' is not an acceptable base type",
-                ));
+            for name in ["typing.Union", super::frame_locals::CLASS] {
+                if self.classes.get(name) == Some(&base) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("type '{name}' is not an acceptable base type"),
+                    ));
+                }
             }
             if matches!(self.heap.get(base), Value::Native(name) if name == "typing._UnpackGenericAlias")
             {
@@ -3266,7 +3293,10 @@ impl Context {
                 ));
             }
             if let Some(name) = self.heap.get(base).heap_type()
-                && name != super::value::SSL_ERROR_TYPE
+                && !matches!(
+                    name,
+                    super::value::SSL_ERROR_TYPE | super::stdlib::random::instance::CLASS
+                )
             {
                 return Err(Error::new(
                     "TypeError",
@@ -3375,14 +3405,14 @@ impl Context {
         } else {
             mro.extend_from_slice(&ancestors);
         }
-        // Other dunder names can replace special methods or class metadata. Keep
-        // their existing layout until their type slots can be updated as well.
+        // Calls already resolve __call__ through descriptor binding. Other dunder
+        // names can replace special methods or class metadata with their own layout.
         let ordinary_slots = layout != ClassLayout::Specialized
             && slot_names.as_deref().is_some_and(|names| {
                 names.iter().all(|name| {
                     !name.starts_with("__")
                         || !name.ends_with("__")
-                        || matches!(name.as_str(), "__dict__" | "__weakref__")
+                        || matches!(name.as_str(), "__call__" | "__dict__" | "__weakref__")
                 })
             });
         if layout == ClassLayout::TypeNamespace && slot_names.is_some() && !ordinary_slots {

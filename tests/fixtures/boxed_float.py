@@ -39,6 +39,33 @@ def current():
     class Kind(str):
         pass
 
+    assert float.fromhex(Kind("  -.8p+1\v")) == -1.0
+    assert repr(float.fromhex("-1p-1075")) == "-0.0"
+    assert float.fromhex("1.00000000000008p0") == 1.0
+    assert float.fromhex("1.00000000000008000001p0") == 1.0 + 2**-52
+    assert float.fromhex("0.fffffffffffff8p-1022") == 2.0**-1022
+    try:
+        float.fromhex("1.fffffffffffff8p1023")
+    except OverflowError:
+        pass
+    else:
+        raise AssertionError("hexadecimal overflow rounded to a finite value")
+    desc = vars(float)["fromhex"]
+    assert desc.__objclass__ is float
+    assert type(desc.__get__(None, Weight)("2")) is Weight
+    assert Weight().fromhex.__self__ is Weight
+
+    class Unrelated:
+        method = desc
+
+    for receiver in (Unrelated, Unrelated()):
+        try:
+            receiver.method
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("bound a float classmethod to an unrelated class")
+
     for receiver, owner in ((float, float), (0.5, float), (Weight, Weight), (Weight(), Weight)):
         method = receiver.__getformat__
         assert method.__self__ is owner

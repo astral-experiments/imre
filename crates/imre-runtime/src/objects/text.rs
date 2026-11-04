@@ -347,13 +347,13 @@ pub unsafe extern "C" fn imre_str_is_title(value: *const Str) -> u32 {
 }
 
 /// Returns whether the string has a cased character and every cased character is uppercase.
-pub(crate) fn python_isupper(text: &str) -> bool {
+pub(crate) fn python_isupper(chars: impl Iterator<Item = char>) -> bool {
     use icu_properties::{
         CodePointSetData,
         props::{Cased, Uppercase},
     };
     let mut seen = false;
-    for c in text.chars() {
+    for c in chars {
         if c.is_ascii_uppercase() {
             seen = true;
         } else if c.is_ascii_lowercase() || c == '\u{295}' {
@@ -379,7 +379,7 @@ pub(crate) fn python_isupper(text: &str) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
     // SAFETY: the caller supplies a rooted, exact UTF-8 string.
-    u32::from(python_isupper(unsafe { &*value }))
+    u32::from(python_isupper(unsafe { &*value }.chars()))
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.
@@ -804,6 +804,20 @@ pub unsafe extern "C" fn imre_shlex_quote(value: *const Str) -> *const Str {
     owned_text(result)
 }
 
+/// Returns the prefix before the first occurrence of an explicit separator.
+///
+/// # Safety
+/// Both inputs are rooted immutable strings. Returns one owned string or null
+/// with a pending separator or allocation error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_split_first(
+    value: *const Str,
+    separator: *const Str,
+) -> *const Str {
+    // SAFETY: the caller roots both strings for the duration of the split.
+    unsafe { split_field(value, separator, SplitField::First) }
+}
+
 /// Selects the final field of an ephemeral explicit-separator right split.
 ///
 /// # Safety
@@ -815,7 +829,7 @@ pub unsafe extern "C" fn imre_str_rsplit_last(
     separator: *const Str,
 ) -> *const Str {
     // SAFETY: the caller roots both strings for the duration of the split.
-    unsafe { rsplit_last(value, separator, false) }
+    unsafe { split_field(value, separator, SplitField::Last) }
 }
 
 /// Percent-decodes the borrowed final field of a right split into its result.
@@ -829,12 +843,19 @@ pub unsafe extern "C" fn imre_str_unquote_rsplit_last(
     separator: *const Str,
 ) -> *const Str {
     // SAFETY: both source strings remain live through decoding.
-    unsafe { rsplit_last(value, separator, true) }
+    unsafe { split_field(value, separator, SplitField::UnquoteLast) }
+}
+
+#[derive(Clone, Copy)]
+enum SplitField {
+    First,
+    Last,
+    UnquoteLast,
 }
 
 /// # Safety
 /// Both inputs are rooted immutable strings. The returned reference is owned.
-unsafe fn rsplit_last(value: *const Str, separator: *const Str, decode: bool) -> *const Str {
+unsafe fn split_field(value: *const Str, separator: *const Str, field: SplitField) -> *const Str {
     // SAFETY: both string owners remain live throughout the operation.
     let (source, separator) = unsafe { (&*value, &*separator) };
     if separator.is_empty() {
@@ -843,16 +864,23 @@ unsafe fn rsplit_last(value: *const Str, separator: *const Str, decode: bool) ->
             std::ptr::null(),
         );
     }
-    let boundary = if separator.len() == 1 {
-        memchr::memrchr(separator.as_bytes()[0], source.as_bytes())
-    } else {
-        source.rfind(separator.as_str())
+    let boundary = match (field, separator.as_bytes()) {
+        (SplitField::First, [byte]) => memchr::memchr(*byte, source.as_bytes()),
+        (SplitField::First, _) => source.find(separator.as_str()),
+        (_, [byte]) => memchr::memrchr(*byte, source.as_bytes()),
+        _ => source.rfind(separator.as_str()),
     };
-    let tail = &source[boundary.map_or(0, |index| index + separator.len())..];
-    if decode && let Some(first) = memchr::memchr(b'%', tail.as_bytes()) {
-        owned_text(unquote(tail, first))
+    let part = match (field, boundary) {
+        (_, None) => source.as_str(),
+        (SplitField::First, Some(i)) => &source[..i],
+        (_, Some(i)) => &source[i + separator.len()..],
+    };
+    if matches!(field, SplitField::UnquoteLast)
+        && let Some(first) = memchr::memchr(b'%', part.as_bytes())
+    {
+        owned_text(unquote(part, first))
     } else if boundary.is_some() {
-        owned_text(Str::try_new(tail).ok())
+        owned_text(Str::try_new(part).ok())
     } else {
         // SAFETY: the caller's live owner permits acquiring the result reference.
         unsafe { StrOwner::increment_strong_count(value) };
@@ -951,7 +979,7 @@ fn search_start(source: &str, start: Option<&Int>) -> Option<(usize, usize)> {
 /// Returns the first matching Unicode-scalar position, or -1 when absent.
 ///
 /// # Safety
-/// Both strings and the optional Int remain rooted; raw zero means start=None.
+/// Both strings are rooted native string owners. A nonzero start is a rooted Int.
 /// The returned canonical Int is owned and reports Unicode-scalar offsets.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_find(
@@ -963,6 +991,17 @@ pub unsafe extern "C" fn imre_str_find(
     let (source, needle) = unsafe { (&*value, &*needle) };
     // SAFETY: a nonzero start is an exact canonical integer handle.
     let start = (start != 0).then(|| unsafe { Int::borrow(start) });
+    if source.len() >= crate::string_cursor::MIN_BYTES
+        && let Some(at) = start.as_deref().and_then(Int::as_small)
+        && at > 0
+        && let Ok(at) = usize::try_from(at)
+    {
+        // SAFETY: the caller owns the strong reference. Only a weak observer persists.
+        let owner = ManuallyDrop::new(unsafe { StrOwner::from_raw(value) });
+        return crate::string_cursor::find(&owner, needle, at)
+            .map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)
+            .into_raw();
+    }
     find_text(source, needle, start.as_deref(), None, false).into_raw()
 }
 

@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::ir::{self, JsonDefault};
+use crate::ir::JsonDefault;
 
 use super::*;
 
@@ -23,6 +23,12 @@ impl Emitter<'_, '_> {
             _ => unreachable!("checked JSON selection"),
         };
         tag | if payload.is_some() { 256 } else { 0 }
+    }
+
+    /// Record the root so the entry unit can emit its schema and field schemas.
+    pub(super) fn json_schema(&mut self, ty: Type) -> String {
+        self.json_schema_roots.push(ty);
+        self.output.global_ref(schema_name(ty))
     }
 
     fn json_key(&mut self, key: &str) -> String {
@@ -95,29 +101,7 @@ impl Emitter<'_, '_> {
     }
 }
 
-pub(super) fn schemas(module: &Module, output: &mut Output) {
-    let mut roots = Vec::new();
-    for function in module.functions.iter().chain([&module.entry]) {
-        ir::walk_expressions(&function.body, &mut |value| {
-            if let ExprKind::Builtin(Builtin::JsonDumps(_) | Builtin::JsonDump(_), args) =
-                &value.kind
-            {
-                roots.push(args[5].ty);
-            }
-            if let ExprKind::Builtin(
-                Builtin::JsonDecode(ty)
-                | Builtin::TomlDecode(ty)
-                | Builtin::JsonEncode(ty)
-                | Builtin::JsonEncoderEncode(ty)
-                | Builtin::JsonDumps(ty)
-                | Builtin::JsonDump(ty),
-                _,
-            ) = value.kind
-            {
-                roots.push(ty);
-            }
-        });
-    }
+pub(super) fn schemas(module: &Module, roots: &[Type], output: &mut Output) {
     if roots.is_empty() {
         return;
     }
@@ -127,12 +111,12 @@ pub(super) fn schemas(module: &Module, output: &mut Output) {
         seen: HashSet::new(),
         output,
     };
-    for ty in roots {
+    for &ty in roots {
         builder.schema(ty);
     }
 }
 
-pub(super) fn schema_name(ty: Type) -> String {
+fn schema_name(ty: Type) -> String {
     match ty {
         Type::Int => "json_int".to_owned(),
         Type::Str | Type::StrLiteral(_) => "json_str".to_owned(),
@@ -273,7 +257,7 @@ impl Schemas<'_> {
                 (
                     7,
                     None,
-                    Some(format!("layout_class_{class}")),
+                    Some(self.output.record_layout(Type::Class(class))),
                     count,
                     Some(fields_name),
                 )

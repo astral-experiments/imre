@@ -29,9 +29,7 @@ impl Emitter<'_, '_> {
                     return out;
                 }
                 let pair = self.module.types.element(returns).unwrap();
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(pair)));
+                let layout = self.output.record_layout(pair);
                 let operand = self.checked_pointer(format!(
                     "call ptr @imre_poll_wait(ptr {}, i32 {tag}, i64 {word}, ptr @{layout})",
                     args[0].value.operand

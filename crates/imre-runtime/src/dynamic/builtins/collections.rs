@@ -360,11 +360,6 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
         Value::Tuple(values) | Value::NamedTuple { values, .. } => {
             values.iter().find_map(|&x| unhashable_part(ctx, x))
         }
-        Value::Instance { class, fields, .. } => ctx.namedtuple_fields(*class).and_then(|names| {
-            names
-                .iter()
-                .find_map(|name| unhashable_part(ctx, fields[name]))
-        }),
         _ => None,
     }
 }
@@ -670,8 +665,11 @@ pub(super) fn construct(
 /// Build a fresh mapping through the bound class, sharing the supplied value.
 fn fromkeys(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let Some((&class, args)) = args.split_first() else {
-        return Err(type_error("dict.fromkeys needs a class"));
+        return Err(type_error(
+            "descriptor 'fromkeys' of 'dict' object needs an argument",
+        ));
     };
+    super::super::stdlib::datetime::validate_classmethod_receiver(ctx, "dict", "fromkeys", class)?;
     if !kwargs.is_empty() {
         let name = ctx.class_name(class);
         let name = match ctx.own_class_attr(class, "__qualname__") {
@@ -1453,11 +1451,35 @@ pub(super) fn builtin_slot(
     }
     let storage = ctx.scalar_value(object);
     let set_op = set_operator(method);
-    if matches!(method, "__add__" | "__iadd__" | "__contains__") || set_op.is_some() {
+    if matches!(method, "__add__" | "__iadd__" | "__contains__" | "__pow__") || set_op.is_some() {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
             )));
+        }
+        if method == "__pow__" {
+            let (exponent, modulus) = match *rest {
+                [exponent] => (exponent, NONE),
+                [exponent, modulus] => (exponent, modulus),
+                _ => {
+                    return Err(type_error(format!(
+                        "expected 1 or 2 arguments, got {}",
+                        rest.len()
+                    )));
+                }
+            };
+            if !ctx.builtin_slot_accepts(exponent, "int")
+                || (modulus != NONE && !ctx.builtin_slot_accepts(modulus, "int"))
+            {
+                return Ok(NOT_IMPLEMENTED);
+            }
+            // The slot operates on the integer payloads without reflected dispatch.
+            let operands = [
+                storage,
+                ctx.scalar_value(exponent),
+                ctx.scalar_value(modulus),
+            ];
+            return super::power(ctx, &operands, &[]);
         }
         let [value] = rest else {
             return Err(type_error(format!(
@@ -1526,10 +1548,6 @@ pub(super) fn builtin_slot(
                 | Value::Tuple(items)
                 | Value::NamedTuple { values: items, .. } => items.len(),
                 Value::Set { entries, .. } => entries.len(),
-                Value::Instance { class, .. } => ctx
-                    .namedtuple_fields(*class)
-                    .expect("validated tuple receiver")
-                    .len(),
                 _ => unreachable!("validated collection receiver"),
             };
             return Ok(ctx.int(length as i64));

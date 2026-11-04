@@ -484,6 +484,69 @@ fn default_float(
     Ok(text)
 }
 
+/// Group the integer digits from the right. Sign-aware zero padding participates
+/// in grouping, while a localized decimal point contributes its character width.
+fn grouped_number(
+    text: &str,
+    head: usize,
+    digits: usize,
+    zero_width: usize,
+    grouping: &[u8],
+    separator: &str,
+    decimal: &str,
+) -> Result<String> {
+    let suffix = &text[head + digits..];
+    let fraction = suffix.strip_prefix('.');
+    // All original digits, signs, prefixes and exponents are ASCII.
+    let suffix_width = fraction.map_or(suffix.len(), |f| decimal.chars().count() + f.len());
+    let mut width = zero_width.saturating_sub(head + suffix_width);
+    let mut remaining = &text.as_bytes()[head..head + digits];
+    let mut sizes = grouping.iter().copied();
+    let mut size = usize::MAX;
+    let separator_width = separator.chars().count();
+    let mut reversed = Vec::new();
+    reversed
+        .try_reserve(width.max(text.len()))
+        .map_err(|_| Error::allocation())?;
+    loop {
+        // POSIX zero repeats the last size; CHAR_MAX leaves the rest ungrouped.
+        match sizes.next() {
+            None | Some(0) => {}
+            Some(stop) if stop == libc::c_char::MAX as u8 => size = usize::MAX,
+            Some(next) => size = next.into(),
+        }
+        let count = size.min(remaining.len().max(width).max(1));
+        let (rest, take) = remaining.split_at(remaining.len().saturating_sub(count));
+        let sep = if reversed.is_empty() { "" } else { separator };
+        reversed
+            .try_reserve(count + sep.len())
+            .map_err(|_| Error::allocation())?;
+        reversed.extend(sep.bytes().rev());
+        reversed.extend(take.iter().rev());
+        reversed.extend(std::iter::repeat_n(b'0', count - take.len()));
+        remaining = rest;
+        width = width.saturating_sub(count);
+        if remaining.is_empty() && width == 0 {
+            break;
+        }
+        width = width.saturating_sub(separator_width);
+    }
+    reversed
+        .try_reserve(head)
+        .map_err(|_| Error::allocation())?;
+    reversed.extend(text[..head].bytes().rev());
+    reversed.reverse();
+    // Every separator and prefix has now been restored to its original byte order.
+    let mut result = String::from_utf8(reversed).expect("numeric grouping preserves UTF-8");
+    if let Some(fraction) = fraction {
+        append(&mut result, decimal)?;
+        append(&mut result, fraction)?;
+    } else {
+        append(&mut result, suffix)?;
+    }
+    Ok(result)
+}
+
 /// Apply Python's alignment after converting the scalar; the field width counts characters.
 pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -> Result<String> {
     if spec.is_empty() {
@@ -711,43 +774,30 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
     } else {
         s[head..].bytes().take_while(u8::is_ascii_digit).count()
     };
-    if let Some(group) = group
-        && numeric
-        && digits != 0
-        && c != 'c'
-    {
-        let step = if base_digits { 4 } else { 3 };
-        let suffix = &s[head + digits..];
-        let zeros = if fill == '0' && align == Some('=') {
-            let target = width.saturating_sub(head + suffix.len());
-            target
-                .saturating_sub(target.saturating_sub(1) / (step + 1))
-                .saturating_sub(digits)
+    if digits != 0 && numeric && c != 'c' {
+        let zero_width = if fill == '0' && align == Some('=') {
+            width
         } else {
             0
         };
-        let total = digits + zeros;
-        let mut grouped = String::new();
-        let bytes = s
-            .len()
-            .checked_add(zeros)
-            .and_then(|n| n.checked_add((total - 1) / step))
-            .ok_or_else(|| Error::new(Kind::OverflowError, "formatted string is too long"))?;
-        grouped
-            .try_reserve_exact(bytes)
-            .map_err(|_| Error::new(Kind::MemoryError, "formatted string is too long"))?;
-        grouped.push_str(&s[..head]);
-        for (i, digit) in std::iter::repeat_n(b'0', zeros)
-            .chain(s[head..head + digits].bytes())
-            .enumerate()
-        {
-            if i != 0 && (total - i).is_multiple_of(step) {
-                grouped.push(group);
+        if c == 'n' {
+            let locale = crate::sys::numeric_locale()?;
+            if !locale.grouping.is_empty() || locale.decimal_point != "." {
+                s = grouped_number(
+                    &s,
+                    head,
+                    digits,
+                    zero_width,
+                    &locale.grouping,
+                    &locale.thousands_sep,
+                    &locale.decimal_point,
+                )?;
             }
-            grouped.push(char::from(digit));
+        } else if let Some(group) = group {
+            let step = if base_digits { 4 } else { 3 };
+            let sep = if group == '_' { "_" } else { "," };
+            s = grouped_number(&s, head, digits, zero_width, &[step, 0], sep, ".")?;
         }
-        grouped.push_str(suffix);
-        s = grouped;
     }
     let count = width.saturating_sub(s.chars().count());
     let align = align.unwrap_or(if numeric { '>' } else { '<' });
@@ -960,4 +1010,33 @@ pub unsafe extern "C" fn imre_formatter_set_default_msec(f: *const Object, s: us
 pub unsafe extern "C" fn imre_formatter_stack(_f: *const Object, s: *const Str) -> *const Str {
     // SAFETY: acquire the exact string, which the default formatter returns unchanged.
     StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(s as usize) })
+}
+
+#[cfg(test)]
+mod numeric_grouping_tests {
+    use super::grouped_number;
+
+    #[test]
+    fn zero_width_counts_localized_separators_and_decimal_point_in_characters() {
+        assert_eq!(
+            grouped_number("+12345.6e+07", 1, 5, 19, &[3, 2, 0], "·:", "٫:")
+                .ok()
+                .expect("repeating numeric groups"),
+            "+00·:12·:345٫:6e+07"
+        );
+        assert_eq!(
+            grouped_number(
+                "-123456789",
+                1,
+                9,
+                15,
+                &[3, 2, libc::c_char::MAX as u8],
+                "_",
+                "."
+            )
+            .ok()
+            .expect("terminated numeric groups"),
+            "-0001234_56_789"
+        );
+    }
 }

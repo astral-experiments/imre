@@ -2,63 +2,6 @@ use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins::boolean;
 use crate::objects::fnmatch::{byte_spelling, compile, mixed_message, translate, translated_parts};
 
-/// Bind the required positional-or-keyword parameters of a Python fnmatch function.
-fn arguments<const N: usize>(
-    function: &str,
-    params: [&str; N],
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<[Id; N]> {
-    let mut values = std::array::from_fn(|i| args.get(i).copied());
-    for (key, value) in kwargs {
-        let Some(index) = params.iter().position(|&p| p == key) else {
-            let mut message = format!("{function}() got an unexpected keyword argument '{key}'");
-            if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &params) {
-                message.push_str(&format!(". Did you mean '{hint}'?"));
-            }
-            return Err(Error::new("TypeError", message));
-        };
-        if values[index].replace(*value).is_some() {
-            return Err(Error::new(
-                "TypeError",
-                format!("{function}() got multiple values for argument '{key}'"),
-            ));
-        }
-    }
-    if args.len() > N {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "{function}() takes {N} positional arguments but {} were given",
-                args.len()
-            ),
-        ));
-    }
-    if values.iter().any(Option::is_none) {
-        let missing: Vec<_> = params
-            .iter()
-            .zip(values)
-            .filter(|(_, value)| value.is_none())
-            .map(|(p, _)| format!("'{p}'"))
-            .collect();
-        let (last, others) = missing.split_last().unwrap();
-        let names = match others {
-            [] => last.clone(),
-            [first] => format!("{first} and {last}"),
-            _ => format!("{}, and {last}", others.join(", ")),
-        };
-        let plural = if others.is_empty() { "" } else { "s" };
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "{function}() missing {} required positional argument{plural}: {names}",
-                missing.len()
-            ),
-        ));
-    }
-    Ok(values.map(Option::unwrap))
-}
-
 fn pattern(ctx: &Context, pat: Id) -> Result<(impl Fn(&str) -> bool + use<>, bool)> {
     match ctx.heap.get(ctx.scalar_value(pat)) {
         Value::Str(_) | Value::SurrogateStr(_) => Ok((compile(ctx.str_value(pat)?), false)),
@@ -104,7 +47,7 @@ pub(super) fn call(
 ) -> Result<Id> {
     match op {
         "fnmatch" | "fnmatchcase" => {
-            let [mut name, mut pat] = arguments(op, ["name", "pat"], args, kwargs)?;
+            let [mut name, mut pat] = super::required_arguments(op, ["name", "pat"], args, kwargs)?;
             if op == "fnmatch" {
                 // POSIX normcase resolves PathLike values in name-then-pattern order.
                 name = super::posixpath::fspath(ctx, name)?;
@@ -114,7 +57,7 @@ pub(super) fn call(
             Ok(boolean(matches(ctx, name, bytes, &matcher)?))
         }
         "filter" | "filterfalse" => {
-            let [names, pat] = arguments(op, ["names", "pat"], args, kwargs)?;
+            let [names, pat] = super::required_arguments(op, ["names", "pat"], args, kwargs)?;
             let pat = super::posixpath::fspath(ctx, pat)?;
             let (matcher, bytes) = pattern(ctx, pat)?;
             let iter = ctx.iterator(names)?;
@@ -130,7 +73,7 @@ pub(super) fn call(
             Ok(result)
         }
         "translate" => {
-            let pat = super::single_argument(op, "pat", args, kwargs)?;
+            let [pat] = super::required_arguments(op, ["pat"], args, kwargs)?;
             let regex = match ctx.heap.get(ctx.scalar_value(pat)) {
                 Value::Str(_) | Value::SurrogateStr(_) => translate(ctx.str_value(pat)?),
                 Value::Bytes(bytes) if bytes.is_empty() => translate(""),
@@ -151,7 +94,7 @@ pub(super) fn call(
         }
         "_translate" => {
             let [pat, star, question] =
-                arguments(op, ["pat", "star", "question_mark"], args, kwargs)?;
+                super::required_arguments(op, ["pat", "star", "question_mark"], args, kwargs)?;
             let (parts, stars) = translated_parts(ctx.str_value(pat)?, "*", "?");
             let parts = parts
                 .into_iter()

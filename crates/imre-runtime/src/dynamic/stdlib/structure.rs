@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
+use super::super::builtins::bind_builtin_arguments;
 use super::{
     Context, Error, Id, NONE, Result, Value,
     system::{StructFormat, UnpackedField},
@@ -103,6 +104,10 @@ pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Re
     let fields = layout
         .unpack(ctx.bytes_like(buffer)?)
         .map_err(|message| format_error(ctx, message))?;
+    Ok(unpacked_tuple(ctx, fields))
+}
+
+fn unpacked_tuple(ctx: &mut Context, fields: Vec<UnpackedField>) -> Id {
     let items = fields
         .into_iter()
         .map(|field| match field {
@@ -112,7 +117,50 @@ pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Re
             UnpackedField::Bytes(bytes) => ctx.alloc(Value::Bytes(bytes)),
         })
         .collect();
-    Ok(ctx.alloc(Value::Tuple(items)))
+    ctx.alloc(Value::Tuple(items))
+}
+
+pub(super) fn module_unpack_from(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    // Only the format is positional-only. Argument Clinic checks total arity first.
+    if args.is_empty() && kwargs.len() <= 3 {
+        return Err(Error::new(
+            "TypeError",
+            "unpack_from() takes at least 1 positional argument (0 given)",
+        ));
+    }
+    let [Some(format), Some(buffer), offset] =
+        bind_builtin_arguments("unpack_from", args, kwargs, ["", "buffer", "offset"], 2)?
+    else {
+        unreachable!("required format and buffer")
+    };
+    let (_, layout) = parse(ctx, format)?;
+    unpack_from(ctx, &layout, buffer, offset)
+}
+
+fn unpack_from(
+    ctx: &mut Context,
+    layout: &StructFormat,
+    buffer: Id,
+    offset: Option<Id>,
+) -> Result<Id> {
+    // Acquire the buffer before __index__, then read its current bytes under the same export.
+    let decode = |ctx: &mut Context, view| {
+        let offset = offset.map_or(Ok(0), |id| super::os::ssize_t(ctx, id))?;
+        layout
+            .unpack_from(ctx.native_buffer_bytes(view)?, offset)
+            .map_err(|message| format_error(ctx, message))
+    };
+    let fields = if let Some(method) = ctx.python_buffer_method(buffer, true)? {
+        ctx.with_contiguous_python_buffer(buffer, method, 0, decode)
+    } else {
+        ctx.native_buffer_bytes(buffer)?;
+        ctx.with_buffer_export(buffer, |ctx| decode(ctx, buffer))
+    }?;
+    Ok(unpacked_tuple(ctx, fields))
 }
 
 pub(super) fn method(
@@ -125,13 +173,24 @@ pub(super) fn method(
     let Value::Struct { layout, .. } = ctx.heap.get(receiver) else {
         unreachable!("bound Struct method")
     };
+    let layout = Rc::clone(layout);
+    if name == "unpack_from" {
+        let [Some(buffer), offset] =
+            bind_builtin_arguments("unpack_from", args, kwargs, ["buffer", "offset"], 1)?
+        else {
+            unreachable!("required buffer")
+        };
+        return unpack_from(ctx, &layout, buffer, offset);
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
             format!("Struct.{name}() takes no keyword arguments"),
         ));
     }
-    let layout = Rc::clone(layout);
+    if name == "pack_into" {
+        return pack_into(ctx, &layout, args);
+    }
     if name == "unpack" {
         let [id] = args else {
             return Err(Error::new(
@@ -170,18 +229,122 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
             let length = target.len().min(bytes.len());
             target[..length].copy_from_slice(&bytes[..length]);
         } else {
-            let word = if code == b'd' {
-                double_field(ctx, id)?.to_bits()
-            } else {
-                integer_field(ctx, id, code, target.len())?
-            };
+            let word = pack_word(ctx, id, code, target.len(), layout.little_endian)?;
             layout.write_integer(target, word);
         }
     }
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
-fn double_field(ctx: &mut Context, id: Id) -> Result<f64> {
+pub(super) fn pack_into(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Result<Id> {
+    let [buffer, offset, values @ ..] = args else {
+        return Err(format_error(
+            ctx,
+            if args.is_empty() {
+                "pack_into expected buffer argument"
+            } else {
+                "pack_into expected offset argument"
+            },
+        ));
+    };
+    if values.len() != layout.item_count {
+        return Err(format_error(
+            ctx,
+            format!(
+                "pack_into expected {} items for packing (got {})",
+                layout.item_count,
+                values.len()
+            ),
+        ));
+    }
+    ctx.with_writable_byte_span(*buffer, |ctx, storage, span| {
+        let index = ctx.index_integer(*offset)?;
+        let offset = crate::signed_index(&index).ok_or_else(|| {
+            Error::new(
+                "IndexError",
+                format!(
+                    "cannot fit '{}' into an index-sized integer",
+                    ctx.type_name(*offset)
+                ),
+            )
+        })?;
+        let record = layout
+            .record_range(span.len(), offset, true)
+            .map_err(|e| format_error(ctx, e))?;
+        let start = span.start + record.start;
+        // Field conversion callbacks can observe the cleared record and any preceding writes.
+        ctx.writable_storage_bytes(storage)?[start..start + layout.size].fill(0);
+        for ((code, range), &id) in layout.items().zip(values) {
+            let pos = start + range.start;
+            if code == b's' {
+                let source = ctx.scalar_value(id);
+                if source == storage {
+                    let Value::ByteArray(bytes) = ctx.heap.get_mut(storage) else {
+                        return Err(format_error(ctx, "argument for 's' must be a bytes object"));
+                    };
+                    let count = range.len().min(bytes.len());
+                    bytes.copy_within(..count, pos);
+                } else {
+                    let Some((Value::Bytes(bytes) | Value::ByteArray(bytes), target)) =
+                        ctx.heap.source_and_target(source, storage)
+                    else {
+                        return Err(format_error(ctx, "argument for 's' must be a bytes object"));
+                    };
+                    let count = range.len().min(bytes.len());
+                    Context::mutable_storage_bytes(target)?[pos..pos + count]
+                        .copy_from_slice(&bytes[..count]);
+                }
+            } else {
+                let word = pack_word(ctx, id, code, range.len(), layout.little_endian)?;
+                layout.write_integer(
+                    &mut ctx.writable_storage_bytes(storage)?[pos..start + range.end],
+                    word,
+                );
+            }
+        }
+        Ok(NONE)
+    })
+}
+
+fn pack_word(
+    ctx: &mut Context,
+    id: Id,
+    code: u8,
+    width: usize,
+    little_endian: bool,
+) -> Result<u64> {
+    match code {
+        b'f' => single_bits(ctx, id).map(u64::from),
+        b'd' => float_value(ctx, id).map(f64::to_bits),
+        _ => integer_field(ctx, id, code, width, little_endian),
+    }
+}
+
+fn single_bits(ctx: &mut Context, id: Id) -> Result<u32> {
+    let value = float_value(ctx, id)?;
+    if value.is_nan() {
+        // Preserve sign and the high 23 significand bits, including the quiet bit.
+        // A payload that disappears in binary32 becomes a quiet NaN, never infinity.
+        let bits = value.to_bits();
+        let sign = (bits >> 32) as u32 & 0x8000_0000;
+        let fraction = (bits >> 29) as u32 & 0x007f_ffff;
+        let fraction = if fraction == 0 { 1 << 22 } else { fraction };
+        return Ok(sign | f32::INFINITY.to_bits() | fraction);
+    }
+    let single = value as f32;
+    if single.is_infinite() && value.is_finite() {
+        if matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Int(_)) {
+            return Err(format_error(ctx, "int too large to convert"));
+        }
+        return Err(Error::new(
+            "OverflowError",
+            "float too large to pack with f format",
+        ));
+    }
+    Ok(single.to_bits())
+}
+
+fn float_value(ctx: &mut Context, id: Id) -> Result<f64> {
     // PyFloat_AsDouble reads float subclasses directly, bypassing their __float__.
     if let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(id)) {
         return Ok(value);
@@ -195,18 +358,27 @@ fn double_field(ctx: &mut Context, id: Id) -> Result<f64> {
     Ok(value)
 }
 
-fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u64> {
+fn integer_field(
+    ctx: &mut Context,
+    id: Id,
+    code: u8,
+    width: usize,
+    little_endian: bool,
+) -> Result<u64> {
     let value = ctx.index_value(id).and_then(|value| {
         value.ok_or_else(|| format_error(ctx, "required argument is not an integer"))
     });
-    if matches!(code, b'b' | b'i' | b'l') {
+    if matches!(code, b'b' | b'i' | b'l' | b'q') {
         let max = i64::MAX >> ((8 - width) * 8);
         let min = !max;
         let number = match value {
             Ok(value) => value.to_i64(),
             Err(error) => {
                 let overflow = ctx.builtin("OverflowError");
-                if !ctx.raised_error_matches(&error, overflow) {
+                // CPython's non-native-endian q packer propagates __index__ errors.
+                if (code == b'q' && little_endian != cfg!(target_endian = "little"))
+                    || !ctx.raised_error_matches(&error, overflow)
+                {
                     return Err(error);
                 }
                 None

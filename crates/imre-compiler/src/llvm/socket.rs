@@ -18,15 +18,11 @@ impl Emitter<'_, '_> {
             };
         }
         if matches!(op, SockName | Accept) {
-            let layout = self
-                .output
-                .global_ref(format!("layout_{}", record_name(returns)));
+            let layout = self.output.record_layout(returns);
             let socket = &args[0].value.operand;
             let call = if op == Accept {
                 let address = self.module.types.fields(returns).unwrap()[1];
-                let address_layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(address)));
+                let address_layout = self.output.record_layout(address);
                 format!(
                     "call ptr @imre_socket_accept(ptr {socket}, ptr @{layout}, ptr @{address_layout})"
                 )

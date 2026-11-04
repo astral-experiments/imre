@@ -225,6 +225,15 @@ def _call(function, *args):
         raise SSLError(SSL_ERROR_SSL, str(exc)) from None
 
 
+def _check_context_result(result):
+    if result is not None:
+        code, message, library, reason = result
+        error = SSLError(code, message)
+        error.library = library
+        error.reason = reason
+        raise error
+
+
 def _check_role(protocol, server_side):
     if server_side and protocol == PROTOCOL_TLS_CLIENT:
         raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
@@ -388,6 +397,19 @@ class SSLContext:
         _call(_imre_ssl.set_hostname_checks_common_name, self._ctx, enabled)
 
     @property
+    def num_tickets(self):
+        """Control the number of TLSv1.3 session tickets."""
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("num_tickets", self)
+        return _imre_ssl.num_tickets(__class__._ctx.__get__(self))
+
+    @num_tickets.setter
+    def num_tickets(self, value):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("num_tickets", self)
+        _imre_ssl.num_tickets(__class__._ctx.__get__(self), value)
+
+    @property
     def security_level(self):
         return _call(_imre_ssl.security_level, self._ctx)
 
@@ -450,25 +472,30 @@ class SSLContext:
             _imre_ssl.raise_context_receiver_error("get_ciphers", self)
         return _call(_imre_ssl.get_ciphers, __class__._ctx.__get__(self))
 
+    def set_ecdh_curve(self, name, /):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("set_ecdh_curve", self)
+        result = _imre_ssl.set_ecdh_curve(__class__._ctx.__get__(self), name)
+        if result is False:
+            raise ValueError(f"unknown elliptic curve name {name!r}")
+        _check_context_result(result)
+
     def set_ciphers(self, cipherlist, /):
         _call(_imre_ssl.set_ciphers, self._ctx, cipherlist)
 
     def load_cert_chain(self, certfile, keyfile=None, password=None):
-        if password is not None:
-            raise NotImplementedError("load_cert_chain supports unencrypted private keys")
-        _call(_imre_ssl.load_cert_chain, self._ctx, certfile, keyfile)
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("load_cert_chain", self)
+        result = _call(_imre_ssl.load_cert_chain, __class__._ctx.__get__(self),
+                       certfile, keyfile, password)
+        _check_context_result(result)
 
     def load_verify_locations(self, /, cafile=None, capath=None, cadata=None):
         if not issubclass(type(self), __class__):
             _imre_ssl.raise_context_receiver_error("load_verify_locations", self)
         result = _call(_imre_ssl.load_verify_locations, __class__._ctx.__get__(self),
                        cafile, capath, cadata)
-        if result is not None:
-            code, message, library, reason = result
-            error = SSLError(code, message)
-            error.library = library
-            error.reason = reason
-            raise error
+        _check_context_result(result)
 
     def wrap_bio(self, incoming, outgoing, server_side=False, server_hostname=None, session=None):
         if server_hostname is not None:
@@ -502,7 +529,7 @@ _TLS_ERRORS = {
 
 def _tls_result(result, hostname):
     if isinstance(result, tuple):
-        # Certificate errors carry a numeric verification code, record errors a reason name.
+        # Certificate errors carry a numeric verification code; protocol errors carry a reason name.
         reason, message = result
         if isinstance(reason, int):
             _raise_verify_error(hostname, reason, message)
@@ -513,7 +540,8 @@ def _tls_result(result, hostname):
     else:
         return result
     if library:
-        message = f"[{library}: {reason}] {message}"
+        prefix = f"{library}: {reason}" if reason else library
+        message = f"[{prefix}] {message}"
     error = kind(code, message)
     error.library = library
     error.reason = reason if library else None
@@ -630,8 +658,7 @@ class SSLSocket:
             error.reason = reason
             error.library = None
             raise error
-        if isinstance(result, tuple):
-            _raise_verify_error(server_hostname, *result)
+        result = _tls_result(result, server_hostname)
         try:
             peer._io_refs = 0
             peer._closed = False

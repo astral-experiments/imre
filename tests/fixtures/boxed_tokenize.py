@@ -10,6 +10,10 @@ def current():
     assert (operator.string, operator.exact_type) == ("+=", token.PLUSEQUAL)
     assert (comment.string, comment.start) == ("# note", (1, 12))
 
+    source = br"f'\N{EXCLAMATION MARK}'" + b"\n"
+    tokens = list(tokenize.tokenize(BytesIO(source).readline))
+    assert tokenize.untokenize(tokens) == source
+
     invalid = BytesIO(b"# coding: no-such-encoding\n")
     try:
         tokenize.detect_encoding(invalid.readline)

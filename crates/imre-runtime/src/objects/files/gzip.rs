@@ -1,7 +1,6 @@
 //! CPython's gzip member framing on top of flate2's streaming DEFLATE decoder.
 
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, Read};
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
@@ -30,21 +29,30 @@ enum Phase {
 
 /// Metadata reads and DEFLATE share unread bytes across gzip members. A new
 /// DEFLATE chunk starts at the current compressed position, even after a header.
-struct GzipInput {
-    file: BufReader<File>,
-    block: Box<[u8]>,
-    unread: Range<usize>,
+struct GzipInput<'a> {
+    source: &'a mut dyn Read,
+    block: &'a mut [u8],
+    unread: &'a mut Range<usize>,
+    borrowed: bool,
 }
 
-impl GzipInput {
+impl GzipInput<'_> {
     fn fill_block(&mut self) -> io::Result<()> {
+        if self.borrowed {
+            // A short return can be all that is currently available from a pipe.
+            // Give those bytes to the inflater before asking the caller for more.
+            if Range::is_empty(self.unread) {
+                *self.unread = 0..self.source.read(&mut self.block[..CHUNK_SIZE])?;
+            }
+            return Ok(());
+        }
         if self.unread.start + CHUNK_SIZE > self.block.len() {
             self.block.copy_within(self.unread.clone(), 0);
-            self.unread = 0..self.unread.len();
+            *self.unread = 0..self.unread.len();
         }
         let end = self.unread.start + CHUNK_SIZE;
         while self.unread.end < end {
-            match self.file.read(&mut self.block[self.unread.end..end]) {
+            match self.source.read(&mut self.block[self.unread.end..end]) {
                 Ok(0) => break,
                 Ok(count) => self.unread.end += count,
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
@@ -55,10 +63,13 @@ impl GzipInput {
     }
 }
 
-impl BufRead for GzipInput {
+impl BufRead for GzipInput<'_> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        if self.unread.is_empty() {
-            self.unread = 0..self.file.read(&mut self.block[..CHUNK_SIZE])?;
+        if Range::is_empty(self.unread) {
+            // Null-terminated header fields and trailer padding consume one byte
+            // at a time from a supplied object, without reading into the next field.
+            let n = if self.borrowed { 1 } else { CHUNK_SIZE };
+            *self.unread = 0..self.source.read(&mut self.block[..n])?;
         }
         Ok(&self.block[self.unread.clone()])
     }
@@ -68,52 +79,117 @@ impl BufRead for GzipInput {
     }
 }
 
-impl Read for GzipInput {
+impl Read for GzipInput<'_> {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if self.borrowed {
+            let prefix = (&self.block[self.unread.clone()]).read(out)?;
+            self.consume(prefix);
+            return if prefix == out.len() {
+                Ok(prefix)
+            } else {
+                Ok(prefix + self.source.read(&mut out[prefix..])?)
+            };
+        }
         let count = self.fill_buf()?.read(out)?;
         self.consume(count);
         Ok(count)
     }
 }
 
-pub(super) struct GzipReader {
-    input: GzipInput,
+/// Gzip member decoder shared by buffered path reads and arbitrary Python sources.
+pub(crate) struct GzipDecoder {
+    block: Box<[u8]>,
+    unread: Range<usize>,
+    member: MemberDecoder,
+}
+
+struct MemberDecoder {
     decoder: Decompress,
+    position: u64,
     crc: Crc,
     phase: Phase,
 }
 
-impl GzipReader {
-    pub(super) fn new(file: File, capacity: usize) -> Self {
+impl GzipDecoder {
+    pub(crate) fn new() -> Self {
         Self {
-            input: GzipInput {
-                // gzip.open reads compressed chunks through a buffered binary file.
-                file: BufReader::with_capacity(capacity, file),
-                // Leave room to slide past small members without moving a full chunk each time.
-                block: vec![0; CHUNK_SIZE + 4096].into_boxed_slice(),
-                unread: 0..0,
+            // Leave room to slide past small members without moving a full chunk each time.
+            block: vec![0; CHUNK_SIZE + 4096].into_boxed_slice(),
+            unread: 0..0,
+            member: MemberDecoder {
+                decoder: Decompress::new(false),
+                position: 0,
+                crc: Crc::new(),
+                phase: Phase::Header,
             },
-            decoder: Decompress::new(false),
-            crc: Crc::new(),
-            phase: Phase::Header,
         }
     }
 
-    pub(super) fn into_file(self) -> File {
-        self.input.file.into_inner()
+    /// Uncompressed bytes returned by successful raw reads, across all members.
+    pub(crate) fn position(&self) -> u64 {
+        self.member.position
     }
 
+    /// Decode from the caller's current position without retaining its transport.
+    pub(crate) fn read(
+        &mut self,
+        source: &mut impl Read,
+        out: &mut [MaybeUninit<u8>],
+    ) -> io::Result<usize> {
+        self.decode(source, out, true)
+    }
+
+    pub(super) fn read_file(
+        &mut self,
+        source: &mut impl Read,
+        out: &mut [MaybeUninit<u8>],
+    ) -> io::Result<usize> {
+        self.decode(source, out, false)
+    }
+
+    fn decode(
+        &mut self,
+        source: &mut dyn Read,
+        out: &mut [MaybeUninit<u8>],
+        borrowed: bool,
+    ) -> io::Result<usize> {
+        let mut input = GzipInput {
+            source,
+            block: &mut self.block,
+            unread: &mut self.unread,
+            borrowed,
+        };
+        self.member.read(&mut input, out).map_err(|err| {
+            if err.kind() == io::ErrorKind::UnexpectedEof {
+                io::Error::other(GzipError(
+                    Kind::EOFError,
+                    "Compressed file ended before the end-of-stream marker was reached",
+                ))
+            } else {
+                err
+            }
+        })
+    }
+}
+
+impl MemberDecoder {
     /// Skip optional metadata without allocating in proportion to its size.
     /// Python consumes the header CRC and ignores reserved flag bits.
-    fn header(&mut self) -> io::Result<bool> {
-        if self.input.fill_buf()?.is_empty() {
-            return Ok(false);
-        }
+    fn header(&mut self, input: &mut GzipInput<'_>) -> io::Result<bool> {
         let mut magic = [0; 2];
-        if let Err(err) = self.input.read_exact(&mut magic)
-            && err.kind() != io::ErrorKind::UnexpectedEof
-        {
-            return Err(err);
+        if input.borrowed {
+            if input.read(&mut magic)? == 0 {
+                return Ok(false);
+            }
+        } else {
+            if input.fill_buf()?.is_empty() {
+                return Ok(false);
+            }
+            if let Err(err) = input.read_exact(&mut magic)
+                && err.kind() != io::ErrorKind::UnexpectedEof
+            {
+                return Err(err);
+            }
         }
         if magic != [0x1f, 0x8b] {
             return Err(io::Error::other(GzipError(
@@ -122,7 +198,7 @@ impl GzipReader {
             )));
         }
         let mut header = [0; 8];
-        self.input.read_exact(&mut header)?;
+        input.read_exact(&mut header)?;
         if header[0] != 8 {
             return Err(io::Error::other(GzipError(
                 Kind::BadGzipFile,
@@ -132,20 +208,20 @@ impl GzipReader {
         let flags = header[1];
         if flags & 4 != 0 {
             let mut length = [0; 2];
-            self.input.read_exact(&mut length)?;
+            input.read_exact(&mut length)?;
             let length = u64::from(u16::from_le_bytes(length));
-            let copied = io::copy(&mut self.input.by_ref().take(length), &mut io::sink())?;
+            let copied = io::copy(&mut input.by_ref().take(length), &mut io::sink())?;
             if copied != length {
                 return Err(io::ErrorKind::UnexpectedEof.into());
             }
         }
         for flag in [8, 16] {
             if flags & flag != 0 {
-                self.input.skip_until(0)?;
+                input.skip_until(0)?;
             }
         }
         if flags & 2 != 0 {
-            self.input.read_exact(&mut [0; 2])?;
+            input.read_exact(&mut [0; 2])?;
         }
         self.phase = Phase::Body { needs_input: true };
         Ok(true)
@@ -153,9 +229,9 @@ impl GzipReader {
 
     /// Verify a finished member when the caller requests more bytes. A caller
     /// stopping at its last result has not yet observed its checksum or trailer.
-    fn trailer(&mut self) -> io::Result<()> {
+    fn trailer(&mut self, input: &mut GzipInput<'_>) -> io::Result<()> {
         let mut trailer = [0; 8];
-        self.input.read_exact(&mut trailer)?;
+        input.read_exact(&mut trailer)?;
         if trailer[..4] != self.crc.sum().to_le_bytes() {
             return Err(io::Error::other(GzipError(
                 Kind::BadGzipFile,
@@ -169,12 +245,12 @@ impl GzipReader {
             )));
         }
         loop {
-            let bytes = self.input.fill_buf()?;
+            let bytes = input.fill_buf()?;
             let padding = bytes.iter().take_while(|&&byte| byte == 0).count();
             if padding == 0 {
                 break;
             }
-            self.input.consume(padding);
+            input.consume(padding);
         }
         self.decoder.reset(false);
         self.crc.reset();
@@ -183,34 +259,38 @@ impl GzipReader {
     }
 
     /// Decode one raw read, initializing only the returned prefix of the destination.
-    pub(super) fn read(&mut self, out: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
+    fn read(
+        &mut self,
+        input: &mut GzipInput<'_>,
+        out: &mut [MaybeUninit<u8>],
+    ) -> io::Result<usize> {
         if out.is_empty() {
             return Ok(0);
         }
         loop {
             match self.phase {
                 Phase::Header => {
-                    if !self.header()? {
+                    if !self.header(input)? {
                         return Ok(0);
                     }
                 }
-                Phase::Trailer => self.trailer()?,
+                Phase::Trailer => self.trailer(input)?,
                 Phase::Body { needs_input } => {
                     if needs_input {
-                        self.input.fill_block()?;
+                        input.fill_block()?;
                     }
-                    let input = &self.input.block[self.input.unread.clone()];
-                    let empty = input.is_empty();
+                    let compressed = &input.block[input.unread.clone()];
+                    let empty = compressed.is_empty();
                     let before = (self.decoder.total_in(), self.decoder.total_out());
                     let status = self
                         .decoder
-                        .decompress_uninit(input, out, FlushDecompress::None)
+                        .decompress_uninit(compressed, out, FlushDecompress::None)
                         .map_err(|_| {
                             io::Error::other(GzipError(Kind::ZlibError, "invalid DEFLATE stream"))
                         })?;
                     let consumed = (self.decoder.total_in() - before.0) as usize;
                     let written = (self.decoder.total_out() - before.1) as usize;
-                    self.input.consume(consumed);
+                    input.consume(consumed);
                     if status == Status::StreamEnd {
                         self.phase = Phase::Trailer;
                     } else if written == 0 && consumed == 0 && (needs_input || !empty) {
@@ -219,12 +299,13 @@ impl GzipReader {
                         // A full output can leave bytes inside the inflater.
                         // Drain those before supplying another compressed chunk.
                         self.phase = Phase::Body {
-                            needs_input: self.input.unread.is_empty() && written < out.len(),
+                            needs_input: Range::is_empty(input.unread) && written < out.len(),
                         };
                     }
                     if written > 0 {
                         // SAFETY: total_out advanced by the initialized prefix length.
                         self.crc.update(unsafe { out[..written].assume_init_ref() });
+                        self.position += written as u64;
                         return Ok(written);
                     }
                 }

@@ -81,6 +81,10 @@ def current():
     subtype = Text(low)
     assert _imp.is_frozen(low) is False and _imp.is_frozen(subtype) is False
     assert type(subtype) is Text and isinstance(subtype, str)
+    assert not low.isalnum() and not Text("A1" + low).isalnum()
+    assert not low.isspace() and not Text(" " + low).isspace()
+    assert not low.isupper() and Text("Ω" + low).isupper()
+    assert not ("A" + low + "ǅ").isupper()  # U+01C5 is a titlecase letter.
     scalar = Text("🙂")
     source = Text(low + low + low + scalar)
     assert source.count(Text(low + low)) == 1

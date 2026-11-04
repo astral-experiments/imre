@@ -36,14 +36,55 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Res
         ctx.bind(scope, "nl_langinfo", function);
     }
 
-    let callable = ctx.builtin("_locale.setlocale");
-    let function = ctx.alloc(Value::Method {
-        callable,
-        receiver: module,
-        explicit: false,
-    });
-    ctx.bind(scope, "setlocale", function);
+    let char_max = ctx.int(libc::c_char::MAX.into());
+    ctx.bind(scope, "CHAR_MAX", char_max);
+    for (name, symbol) in [
+        ("setlocale", "_locale.setlocale"),
+        ("localeconv", "_locale.localeconv"),
+    ] {
+        let callable = ctx.builtin(symbol);
+        let function = ctx.alloc(Value::Method {
+            callable,
+            receiver: module,
+            explicit: false,
+        });
+        ctx.bind(scope, name, function);
+    }
     Ok(())
+}
+
+pub(super) fn localeconv(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_locale.localeconv() takes no keyword arguments",
+        ));
+    }
+    if args.len() != 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "_locale.localeconv() takes no arguments ({} given)",
+                args.len().saturating_sub(1)
+            ),
+        ));
+    }
+    let fields = crate::sys::locale_conventions().map_err(|err| ctx.decode_error(err))?;
+    let entries = fields
+        .into_iter()
+        .map(|(name, field)| {
+            let value = match field {
+                crate::sys::Convention::Text(value) => ctx.text(value),
+                crate::sys::Convention::Number(value) => ctx.int(value),
+                crate::sys::Convention::Grouping(widths) => {
+                    let values = widths.into_iter().map(|n| ctx.int(n.into())).collect();
+                    ctx.alloc(Value::List(values))
+                }
+            };
+            (ctx.heap.code_name(name), value)
+        })
+        .collect();
+    Ok(ctx.dict(entries))
 }
 
 pub(super) fn setlocale(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

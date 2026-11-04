@@ -317,6 +317,8 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "AGEN_CREATED",
             "AGEN_RUNNING",
             "AGEN_SUSPENDED",
+            "ArgInfo",
+            "Arguments",
             "BoundArguments",
             "CORO_CLOSED",
             "CORO_CREATED",
@@ -329,7 +331,13 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "GEN_SUSPENDED",
             "Parameter",
             "Signature",
+            "formatargvalues",
+            "getargs",
+            "getargvalues",
+            "getasyncgenlocals",
             "getasyncgenstate",
+            "getcallargs",
+            "getcoroutinelocals",
             "getcoroutinestate",
             "getfullargspec",
             "getgeneratorstate",
@@ -367,7 +375,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "zip_longest"
         ),
         M::Locale => exports!("locale", "getlocale", "getpreferredencoding", "setlocale"),
-        M::Math => exports!("math", "copysign", "isinf", "isnan", "isqrt"),
+        M::Math => exports!("math", "copysign", "cos", "isinf", "isnan", "isqrt", "log"),
         M::Numbers => exports!("numbers", "Complex", "Integral", "Rational", "Real"),
         M::Pickle => exports!("pickle", "UnpicklingError", "_loads", "dumps", "loads"),
         M::PosixPath => exports!("posixpath", "expanduser", "ismount", "split"),
@@ -385,7 +393,16 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "getrlimit",
             "setrlimit"
         ),
-        M::Struct => exports!("struct", "Struct", "calcsize", "error", "pack", "unpack"),
+        M::Struct => exports!(
+            "struct",
+            "Struct",
+            "calcsize",
+            "error",
+            "pack",
+            "pack_into",
+            "unpack",
+            "unpack_from"
+        ),
         M::Sys => exports!(
             "sys",
             "byteorder",
@@ -439,7 +456,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "tzname",
             "tzset"
         ),
-        M::Traceback => exports!("traceback", "extract_tb", "print_stack"),
+        M::Traceback => exports!("traceback", "extract_tb", "print_stack", "walk_tb"),
         M::Types => exports!(
             "types",
             "BuiltinMethodType",
@@ -597,6 +614,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "finalize",
             "ref"
         ),
+        M::Gzip => exports!("gzip", "GzipFile"),
         M::Zlib => exports!("zlib", "compress", "crc32", "decompress"),
         _ => return None,
     };

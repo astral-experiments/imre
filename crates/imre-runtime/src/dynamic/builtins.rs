@@ -12,6 +12,7 @@ mod float;
 mod round;
 pub(super) use float::from_numeric;
 mod integer;
+mod power;
 mod print;
 mod text;
 mod translation;
@@ -29,7 +30,9 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
         "socket.gaierror" => Some(Kind::GaiError),
         "socket.herror" => Some(Kind::HError),
+        "_lzma.LZMAError" => Some(Kind::LzmaError),
         "zlib.error" => Some(Kind::ZlibError),
+        "gzip.BadGzipFile" => Some(Kind::BadGzipFile),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),
@@ -184,6 +187,7 @@ pub(super) fn exception_new_owner(name: &str) -> &str {
         | "StopIteration"
         | "StopAsyncIteration"
         | "binascii.Incomplete"
+        | "_lzma.LZMAError"
         | "zlib.error" => "Exception",
         "binascii.Error" => "ValueError",
         name if exception_subclass(name, "OSError") == Some(true) => "OSError",
@@ -251,6 +255,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
         owner,
         "object"
             | "dict"
+            | "list"
             | "mappingproxy"
             | "float"
             | "function"
@@ -360,6 +365,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "list_reverseiterator"
             | "tuple_iterator"
             | "generic_alias_iterator"
+            | "memory_iterator"
             | "bytes_iterator"
             | "bytearray_iterator"
             | "range_iterator"
@@ -412,6 +418,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
+    "__new__",
     "__add__",
     "__getitem__",
     "__iadd__",
@@ -449,6 +456,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__float__",
             "__int__",
             "__lt__",
+            "__pow__",
             "__round__",
             "__trunc__",
         ],
@@ -525,6 +533,7 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
 
 pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
     "cast",
+    "__iter__",
     "__enter__",
     "__exit__",
     "release",
@@ -570,6 +579,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "ljust",
     "lower",
     "lstrip",
+    "removeprefix",
     "replace",
     "rfind",
     "rsplit",
@@ -583,6 +593,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "__eq__",
     "__str__",
     "__format__",
     "__mod__",
@@ -672,6 +683,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
             iter.class_name()
         }
+        Value::Iterator {
+            kind: "list_iterator",
+            ..
+        } if matches!(attr, "__iter__" | "__next__") => "list_iterator",
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
@@ -710,6 +725,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             kind.type_name()
         }
+        Value::MemoryIterator { .. } if matches!(attr, "__iter__" | "__next__") => {
+            "memory_iterator"
+        }
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine { .. }
             if super::generator_protocol::coroutine_method("coroutine", attr) =>
@@ -728,13 +746,20 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
-        Value::Complex(_) if attr == "__complex__" => "complex",
+        Value::Complex(_) if super::complex::METHODS.contains(&attr) => "complex",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
         {
             "bytearray"
         }
-        Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
+        Value::Struct { .. } if matches!(attr, "pack" | "pack_into" | "unpack" | "unpack_from") => {
+            "struct.Struct"
+        }
+        Value::ZlibDecompressor { .. }
+            if matches!(attr, "decompress" | "flush" | "copy" | "__copy__") =>
+        {
+            super::value::ZLIB_DECOMPRESS_TYPE
+        }
         Value::Hash(state)
             if crate::objects::HashState::is_provider_class(state.lock().class_name())
                 && matches!(attr, "update" | "copy" | "digest" | "hexdigest") =>
@@ -752,12 +777,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "connect"
                     | "getsockname"
                     | "getpeername"
+                    | "detach"
                     | "fileno"
                     | "close"
                     | "recv"
                     | "recvfrom"
                     | "recv_into"
                     | "makefile"
+                    | "dup"
                     | "send"
                     | "sendall"
                     | "sendto"
@@ -1037,6 +1064,25 @@ pub(super) fn bind_builtin_arguments<const N: usize>(
     bind_method_arguments(builtin, args, kwargs, names, N)
 }
 
+/// Bind two required positional-or-keyword operands followed by keyword-only options.
+pub(super) fn bind_two_positional<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    if args.len() > 2 && args.len() + kwargs.len() <= N {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() takes exactly 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    bind_builtin_arguments(name, args, kwargs, names, 2)
+}
+
 /// Bind the positional or named operands of `pow` before selecting its numeric operation.
 fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [Some(base), Some(exp), modulus] =
@@ -1047,23 +1093,7 @@ fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> 
     let Some(modulus) = modulus.filter(|&id| id != NONE) else {
         return ctx.binary("**", base, exp);
     };
-    let (Ok(x), Ok(y), Ok(m)) = (ctx.as_int(base), ctx.as_int(exp), ctx.as_int(modulus)) else {
-        if [base, exp, modulus]
-            .into_iter()
-            .any(|id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Float(_)))
-        {
-            return Err(type_error(
-                "pow() 3rd argument not allowed unless all arguments are integers",
-            ));
-        }
-        return Err(type_error(format!(
-            "unsupported operand type(s) for ** or pow(): '{}', '{}', '{}'",
-            ctx.type_name(base),
-            ctx.type_name(exp),
-            ctx.type_name(modulus)
-        )));
-    };
-    Ok(ctx.alloc(Value::Int(crate::integer_power::modular_power(&x, &y, &m)?)))
+    power::ternary(ctx, base, exp, modulus)
 }
 
 pub(super) fn boolean(value: bool) -> Id {
@@ -1463,6 +1493,15 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
+    let complex_op = match name {
+        "complex.__mul__" => Some(("*", false)),
+        "complex.__rmul__" => Some(("*", true)),
+        "complex.__truediv__" => Some(("/", false)),
+        "complex.__rtruediv__" => Some(("/", true)),
+        "complex.__pow__" => Some(("**", false)),
+        "complex.__rpow__" => Some(("**", true)),
+        _ => None,
+    };
     if matches!(
         name,
         "object.__hash__"
@@ -1489,7 +1528,8 @@ pub(super) fn call(
             | "mappingproxy.__ror__"
             | "mappingproxy.__ior__"
             | "super.__repr__"
-    ) {
+    ) || complex_op.is_some()
+    {
         let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
@@ -1497,7 +1537,7 @@ pub(super) fn call(
             )));
         };
         if (owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)))
-            || (owner == "super" && !ctx.builtin_slot_accepts(receiver, owner))
+            || (matches!(owner, "super" | "complex") && !ctx.builtin_slot_accepts(receiver, owner))
         {
             return Err(type_error(format!(
                 "descriptor '{method}' requires a '{owner}' object but received a '{}'",
@@ -1509,14 +1549,47 @@ pub(super) fn call(
                 "wrapper {method}() takes no keyword arguments"
             )));
         }
+        if let Some(("**", reflected)) = complex_op {
+            let (other, modulus) = match *rest {
+                [other] => (other, None),
+                [other, third] => (other, Some(third)),
+                _ => {
+                    return Err(type_error(format!(
+                        "expected 1 or 2 arguments, got {}",
+                        rest.len()
+                    )));
+                }
+            };
+            let (base, exponent) = if reflected {
+                (other, receiver)
+            } else {
+                (receiver, other)
+            };
+            return Ok(ctx
+                .complex_power(base, exponent, modulus)?
+                .unwrap_or(NOT_IMPLEMENTED));
+        }
         let comparison = super::operators::comparison_op(method);
-        if comparison.is_some() || matches!(method, "__or__" | "__ror__" | "__ior__") {
+        if complex_op.is_some()
+            || comparison.is_some()
+            || matches!(method, "__or__" | "__ror__" | "__ior__")
+        {
             let [other] = rest else {
                 return Err(type_error(format!(
                     "expected 1 argument, got {}",
                     rest.len()
                 )));
             };
+            if let Some((op, reflected)) = complex_op {
+                let (a, b) = if reflected {
+                    (*other, receiver)
+                } else {
+                    (receiver, *other)
+                };
+                return Ok(ctx
+                    .complex_product_or_quotient(op, a, b)?
+                    .unwrap_or(NOT_IMPLEMENTED));
+            }
             if owner == "object" {
                 if method != "__ne__" {
                     return Ok(if method == "__eq__" && receiver == *other {
@@ -1783,7 +1856,7 @@ pub(super) fn call(
                 arity(name, args, min, max)?;
                 ctx.call_coroutine_method(owner, method, args)
             }
-            "generator" if matches!(method, "__iter__" | "__next__") => {
+            "generator" | "memory_iterator" if matches!(method, "__iter__" | "__next__") => {
                 ctx.iterator_method(owner, method, args, kwargs)
             }
             "generator" if method == "send" => {
@@ -1816,6 +1889,7 @@ pub(super) fn call(
                 text::builtin_format(ctx, owner, args[0], Some(args[1]))
             }
             "module" => ctx.module_method(method, args, kwargs),
+            "float" if method == "fromhex" => float::fromhex(ctx, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "int" | "float" if matches!(method, "__abs__" | "__int__" | "__float__") => {
                 collections::builtin_slot(ctx, name, args, kwargs)
@@ -1931,7 +2005,7 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
-            "int" if matches!(method, "__add__" | "__bool__" | "__index__") => {
+            "int" if matches!(method, "__add__" | "__bool__" | "__index__" | "__pow__") => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
@@ -2030,7 +2104,7 @@ pub(super) fn call(
                     }
                     let [order] =
                         bind_method_arguments("tobytes", &args[1..], kwargs, ["order"], 1)?;
-                    if let Some(order) = order.filter(|&id| id != NONE) {
+                    let fortran = if let Some(order) = order.filter(|&id| id != NONE) {
                         let value = ctx.str_value(order).map_err(|_| {
                             type_error(format!(
                                 "tobytes() argument 'order' must be str or None, not {}",
@@ -2040,11 +2114,14 @@ pub(super) fn call(
                         if !matches!(value, "C" | "F" | "A") {
                             return Err(Error::new("ValueError", "order must be 'C', 'F' or 'A'"));
                         }
-                    }
+                        value == "F"
+                    } else {
+                        false
+                    };
                     if !matches!(ctx.heap.get(args[0]), Value::MemoryView { .. }) {
                         return Err(type_error("expected memoryview"));
                     }
-                    let bytes = ctx.memoryview_bytes(args[0])?;
+                    let bytes = ctx.memoryview_bytes_order(args[0], fortran)?;
                     return Ok(ctx.alloc(Value::Bytes(bytes)));
                 }
                 positional(name, kwargs)?;
@@ -2064,6 +2141,9 @@ pub(super) fn call(
                 let Value::MemoryView { owner, .. } = *ctx.heap.get(args[0]) else {
                     return Err(type_error("expected memoryview"));
                 };
+                if method == "__iter__" {
+                    return ctx.memoryview_iterator(args[0]);
+                }
                 if method == "__enter__" {
                     Context::memoryview_owner(owner)?;
                     return Ok(args[0]);
@@ -2104,7 +2184,9 @@ pub(super) fn call(
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
+            "list_iterator" | "map" | "filter" | "enumerate" => {
+                ctx.iterator_method(owner, method, args, kwargs)
+            }
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "cell" | "mappingproxy" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
@@ -2523,7 +2605,7 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::MemoryView { .. } => ctx.view_layout(args[0])?.len,
+                Value::MemoryView { .. } => ctx.view_layout(args[0])?.first_len()?,
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -2532,7 +2614,7 @@ pub(super) fn call(
                         )
                     });
                 }
-                Value::Instance { .. } | Value::Raised(_) => {
+                Value::Instance { .. } | Value::Raised(_) | Value::FrameLocalsProxy { .. } => {
                     ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
                 }
                 _ => return Err(no_length(ctx)),

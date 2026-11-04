@@ -40,6 +40,7 @@ mod format_grammar;
 mod shared;
 #[cfg(unix)]
 mod signals;
+mod string_cursor;
 mod string_owner;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
@@ -1154,7 +1155,7 @@ pub unsafe extern "C" fn imre_print_str(value: *const Str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_len(value: *const Str) -> usize {
     // SAFETY: the caller roots this immutable string for the duration of the call.
-    Int::from_usize(unsafe { &*value }.chars().count()).into_raw()
+    Int::from_usize(string_cursor::length(unsafe { &*value })).into_raw()
 }
 
 /// Tests emptiness without counting Unicode code points.
@@ -1173,6 +1174,17 @@ pub unsafe extern "C" fn imre_str_truthy(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_equal(a: *const Str, b: *const Str) -> u32 {
     // SAFETY: both immutable strings are rooted by the caller.
     u32::from(unsafe { *a == *b })
+}
+
+/// Compare exact strings in Python's lexicographic Unicode code-point order.
+/// UTF-8 preserves that order under unsigned byte comparison.
+///
+/// # Safety
+/// Both arguments must be live string handles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_compare(left: *const Str, right: *const Str) -> i32 {
+    // SAFETY: both immutable operands remain rooted for the comparison.
+    unsafe { (&*left).as_str().cmp((&*right).as_str()) as i32 }
 }
 
 /// # Safety
@@ -1885,8 +1897,21 @@ pub unsafe extern "C" fn imre_list_copy_index(
     )
 }
 
+/// Grow a full integer list into a cached allocation when one fits its next capacity.
+#[inline(never)]
+fn grow_int_list(list: &mut Vec<Int>) -> bool {
+    let mut buffer = take_list_buffer(list.len().saturating_mul(2).max(4));
+    if buffer.capacity() == 0 {
+        return list.try_reserve(1).is_ok();
+    }
+    buffer.append(list);
+    std::mem::swap(list, &mut buffer);
+    recycle_list_buffer(&mut buffer);
+    true
+}
+
 fn try_append_int(list: &mut Vec<Int>, value: &Int) -> bool {
-    if list.try_reserve(1).is_err() {
+    if list.len() == list.capacity() && !grow_int_list(list) {
         objects::exceptions::sequence_allocation_failed();
         return false;
     }
@@ -2678,6 +2703,36 @@ mod tests {
         assert!(reused.is_empty());
         reused.push(Int::small(-7).unwrap());
         assert_eq!(reused[0].as_small(), Some(-7));
+    }
+
+    #[test]
+    fn growing_a_list_reuses_storage_and_moves_its_bigint_owners() {
+        let bigint = Shared::new(BigInt::from(1_u128 << 100));
+        let weak = Shared::downgrade(&bigint);
+        let mut values = Vec::with_capacity(4);
+        values.push(Int(Shared::into_raw(bigint) as usize));
+        values.extend((1..4).map(|i| Int::small(i).unwrap()));
+        let original = values.as_ptr();
+        let mut spare = Vec::with_capacity(8);
+        let allocation = spare.as_ptr();
+        recycle_list_buffer(&mut spare);
+
+        assert!(try_append_int(&mut values, &Int::small(4).unwrap()));
+        assert_eq!(values.as_ptr(), allocation);
+        assert_eq!(weak.strong_count(), 1);
+        assert_eq!(values[0].big().as_ref(), &BigInt::from(1_u128 << 100));
+        assert!(
+            values[1..]
+                .iter()
+                .zip(1..=4)
+                .all(|(v, i)| v.as_small() == Some(i))
+        );
+        assert_eq!(values.len(), 5);
+        let displaced = take_list_buffer(4);
+        assert!(displaced.is_empty());
+        assert_eq!(displaced.as_ptr(), original);
+        drop(values);
+        assert!(weak.upgrade().is_none());
     }
 
     #[test]

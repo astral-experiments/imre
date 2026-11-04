@@ -48,6 +48,7 @@ def current():
     assert not hasattr(Captured, "__abstractmethods__")
     check_flag_overrides()
     check_descriptor_binding()
+    check_declaration_snapshot()
     print("abstract class flags and subclass hooks")
 
 
@@ -141,3 +142,23 @@ def check_descriptor_binding():
     assert Base.__abstractmethods__ == {"action"} and inspect.isabstract(Base)
     assert not Child.__abstractmethods__ and not inspect.isabstract(Child)
     assert Child().action == 1
+
+
+def check_declaration_snapshot():
+    class Remove:
+        def __set_name__(self, owner, name):
+            self.owner = owner
+
+        @property
+        def __isabstractmethod__(self):
+            del self.owner.second
+            return True
+
+    class Abstract:
+        __isabstractmethod__ = True
+
+    class Subject(abc.ABC):
+        first = Remove()
+        second = Abstract()
+
+    assert Subject.__abstractmethods__ == {"first", "second"}

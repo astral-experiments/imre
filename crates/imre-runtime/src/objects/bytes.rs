@@ -69,6 +69,42 @@ pub unsafe extern "C" fn imre_byte_output_reserve_range(
     }
 }
 
+impl ByteOutput {
+    /// Publish a fixed-width append into slots the caller already reserved.
+    fn append_reserved<const N: usize>(&mut self, words: [usize; N]) {
+        let len = self.bytes.len();
+        let invalid_bits = words.into_iter().fold(0, |bits, word| bits | (word ^ 1));
+        self.invalid |= invalid_bits & !0x1fe != 0;
+        for (slot, word) in self.bytes.spare_capacity_mut()[..N].iter_mut().zip(words) {
+            slot.write((word >> 1) as u8);
+        }
+        // SAFETY: the slice above bounds-checks and initializes all N spare slots.
+        unsafe { self.bytes.set_len(len + N) };
+    }
+
+    /// Grow a full buffer, preserving any prefix that fits if the allocation fails.
+    #[cold]
+    #[inline(never)]
+    fn grow_and_append<const N: usize>(&mut self, words: [usize; N]) -> i32 {
+        let count = N.min(super::MAX_LIST_LEN - self.bytes.len());
+        let writable = if self.bytes.try_reserve(count).is_ok() {
+            count
+        } else {
+            count.min(self.bytes.capacity() - self.bytes.len())
+        };
+        if writable == N {
+            self.append_reserved(words);
+            return 1;
+        }
+        for word in words.into_iter().take(writable) {
+            self.invalid |= word & !0x1fe != 1;
+            self.bytes.push((word >> 1) as u8);
+        }
+        super::exceptions::sequence_allocation_failed();
+        0
+    }
+}
+
 /// # Safety
 /// Root the private output and its canonical integer arguments for this call.
 unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N]) -> i32 {
@@ -78,26 +114,11 @@ unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N])
             let Storage::ByteOutput(output) = storage else {
                 unreachable!()
             };
-            let count = N.min(super::MAX_LIST_LEN - output.bytes.len());
-            let writable = if output.bytes.try_reserve(count).is_ok() {
-                count
-            } else {
-                // A fused pair can still commit its first Python append in a spare slot.
-                count.min(output.bytes.capacity() - output.bytes.len())
-            };
-            output
-                .bytes
-                .extend(words.into_iter().take(writable).map(|word| {
-                    // Canonical 0..=255 are exactly the odd words in 1..=511.
-                    // Invalid Ints have no observable destructor. Record the error
-                    // without raising: a later producer exception must still win.
-                    output.invalid |= word & !0x1fe != 1;
-                    (word >> 1) as u8
-                }));
-            if writable < N {
-                super::exceptions::sequence_allocation_failed();
-                return 0;
+            let len = output.bytes.len();
+            if output.bytes.capacity() - len < N || len > super::MAX_LIST_LEN - N {
+                return output.grow_and_append(words);
             }
+            output.append_reserved(words);
             1
         })
     }
@@ -144,6 +165,97 @@ pub unsafe extern "C" fn imre_byte_output_finish(output: *const Object) -> *cons
             )))
         })
     };
+    finish(result, std::ptr::null())
+}
+
+/// Encode an integer at a fixed width after Python argument conversion.
+pub(crate) fn integer_bytes(value: &Int, size: isize, little: bool, signed: bool) -> Result<Bytes> {
+    if size < 0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            "length argument must be non-negative",
+        ));
+    }
+    let size = size as usize;
+    if size > crate::MAX_BYTES_LEN {
+        return Err(Error::new(Kind::OverflowError, "byte string is too large"));
+    }
+    // CPython allocates the result before checking whether the integer fits.
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(size)
+        .map_err(|_| Error::memory_error())?;
+    let value = value.big();
+    let negative = value.sign() == num_bigint::Sign::Minus;
+    if negative && !signed {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "can't convert negative int to unsigned",
+        ));
+    }
+    let bits = value.bits();
+    // At a signed boundary the negative power of two already includes its sign bit.
+    let sign_bit = signed && bits != 0 && !(negative && value.trailing_zeros() == Some(bits - 1));
+    if (bits + u64::from(sign_bit)).div_ceil(8) > size as u64 {
+        return Err(Error::new(Kind::OverflowError, "int too big to convert"));
+    }
+    output.resize(size, 0u8);
+    for (byte, source) in output
+        .iter_mut()
+        .zip(value.iter_u32_digits().flat_map(u32::to_le_bytes))
+    {
+        *byte = source;
+    }
+    if negative {
+        let mut carry = true;
+        for byte in &mut output {
+            (*byte, carry) = (!*byte).overflowing_add(u8::from(carry));
+        }
+    }
+    if !little {
+        output.reverse();
+    }
+    Ok(output)
+}
+
+/// Convert exact typed operands using the same width and sign rules as boxed int.to_bytes.
+///
+/// # Safety
+/// The caller roots both integer words and the byte order string throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_to_bytes(
+    value: usize,
+    length: usize,
+    order: *const Str,
+    signed: bool,
+) -> *const Bytes {
+    // SAFETY: generated code holds all three owners until the call returns.
+    let (value, length, order) = unsafe { (Int::borrow(value), Int::borrow(length), &*order) };
+    let result = (|| {
+        let size = length
+            .to_i64()
+            .and_then(|n| isize::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+        let little = match order.as_str() {
+            "big" => false,
+            "little" => true,
+            _ => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "byteorder must be either 'little' or 'big'",
+                ));
+            }
+        };
+        let bytes = integer_bytes(&value, size, little, signed)?;
+        crate::BytesOwner::try_new(bytes)
+            .map(crate::BytesOwner::into_raw)
+            .map_err(|_| Error::memory_error())
+    })();
     finish(result, std::ptr::null())
 }
 
@@ -230,6 +342,17 @@ pub unsafe extern "C" fn imre_bytes_release(value: *const Bytes) {
         // SAFETY: the caller transfers one exact crate::BytesOwner reference.
         unsafe { crate::release_bytes(value) };
     }
+}
+
+/// Encodes exact bytes as lowercase hexadecimal digits.
+///
+/// # Safety
+/// The caller roots the immutable bytes through the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_hex(value: *const Bytes) -> *const Str {
+    // SAFETY: the input remains rooted until encoding finishes.
+    let text = super::hash_hex(unsafe { &*value }).and_then(crate::checked_owned_str);
+    finish(text, std::ptr::null())
 }
 
 /// # Safety

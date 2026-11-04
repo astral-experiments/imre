@@ -144,7 +144,9 @@ fn source(expression: &mut Expr) -> Option<&mut Expr> {
     let [split, index] = values.as_mut_slice() else {
         return None;
     };
-    let args = split.last_rsplit_args(index)?;
+    let (true, args) = split.selected_split_args(index)? else {
+        return None;
+    };
     if !matches!(&args[1].kind, ExprKind::Present(s) if matches!(&s.kind, ExprKind::Str(v) if !v.is_empty()))
     {
         return None;

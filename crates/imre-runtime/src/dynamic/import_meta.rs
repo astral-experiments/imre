@@ -78,16 +78,31 @@ impl Context {
         Some((source.path.clone(), SourceBody::Compiled(source.code)))
     }
 
-    /// Return the source of this loader's registered initializer when it has a Python body.
-    pub(super) fn native_source(&mut self, name: &str, bundled: bool) -> Result<Id> {
-        let frozen = self.is_frozen(name);
-        let sealed = frozen || stdlib::is_module(name);
+    /// Look up a module owned by this loader, including native modules without a Python body.
+    fn native_registration(&self, name: &str, bundled: bool) -> Result<Option<&SourceModule>> {
+        let sealed = self.is_frozen(name) || stdlib::is_module(name);
         let registration = self.bundled_registration(name);
         if sealed == bundled || (!sealed && registration.is_none()) {
             return Err(Self::missing_module(name));
         }
-        let text = registration.and_then(|source| source.bundled_text);
-        Ok(if frozen {
+        Ok(registration)
+    }
+
+    /// Return the registered Python body for execution in the caller's module namespace.
+    pub(super) fn native_code(&mut self, name: &str, bundled: bool) -> Result<Id> {
+        let Some(source) = self.native_registration(name, bundled)? else {
+            return Ok(NONE);
+        };
+        let (entry, path) = (source.code, source.path.clone());
+        Ok(self.module_code(entry, &path))
+    }
+
+    /// Return the source of this loader's registered initializer when it has a Python body.
+    pub(super) fn native_source(&mut self, name: &str, bundled: bool) -> Result<Id> {
+        let text = self
+            .native_registration(name, bundled)?
+            .and_then(|source| source.bundled_text);
+        Ok(if self.is_frozen(name) {
             NONE
         } else {
             text.map_or(NONE, |bytes| {

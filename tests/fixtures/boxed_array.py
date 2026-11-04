@@ -3,12 +3,27 @@ from collections.abc import MutableSequence
 
 
 def current():
+    source = array('I', [1, 2, 3])
+    view = memoryview(source)
+    copy = source[:]
+    view[0] = 9
+    copy[1] = 8
+    assert source.tolist() == [9, 2, 3]
+    assert copy.tolist() == [1, 8, 3]
+    view.release()
+
     for code, items in [('i', [-2147483648,0,2147483647]), ('f', [0.1,1.1,-0.0]), ('d',[0.1,1e300]),('w','😀ab')]:
         a = array(code, items)
         assert type(a) is array and isinstance(a, MutableSequence)
         assert type(iter(a)) is type(iter(array(code)))
         b = array(code, a.tobytes())
         assert b.tolist() == list(a) and a[-1] == list(a)[-1]
+        part = a[::-2]
+        assert type(part) is array and part.typecode == code
+        assert part.tobytes() == array(code, list(a)[::-2]).tobytes()
+        part[0] = a[0]
+        assert a.tobytes() == b.tobytes()
+        assert len(a[:0]) == 0
         print(a.typecode, a.itemsize, len(a), a.tobytes(), list(a))
         it = iter(a)
         assert next(it) == a[0]
@@ -149,6 +164,27 @@ def current():
         owner.append(69)
     finally:
         gc.enable()
+
+    import weakref
+
+    payload = array("B", b"abc")
+    callbacks = []
+    handle = weakref.ref(payload, callbacks.append)
+    access = weakref.proxy(payload)
+    view = memoryview(payload)
+    del payload
+    gc.collect()
+    assert handle() is view.obj and access.tobytes() == b"abc"
+    assert not callbacks
+    view.release()
+    gc.collect()
+    assert handle() is None and len(callbacks) == 1 and callbacks[0] is handle
+    try:
+        access.tobytes()
+    except ReferenceError:
+        pass
+    else:
+        raise AssertionError("proxy survived its array")
 
     a = array('i', [0])
     views = []

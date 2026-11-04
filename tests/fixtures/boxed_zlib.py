@@ -1,3 +1,4 @@
+import copy
 import zlib
 from zlib import adler32, compress, crc32, decompress, error as ZlibError
 
@@ -61,6 +62,29 @@ def current():
     for encode, decode in [(8, 0), (15, 47), (-9, -15), (31, 47)]:
         packed = compress(memoryview(data), level=9, wbits=encode)
         assert decompress(packed + b"trailing", wbits=decode, bufsize=1) == data
+    for wbits in (-15, 15):
+        packed = compress(data, wbits=wbits)
+        stream = zlib.decompressobj(wbits)
+        assert stream.decompress(packed[:1]) == b""
+        assert stream.decompress(packed[1:] + b"tail", max_length=17) == data[:17]
+        assert not stream.eof and stream.unconsumed_tail
+        for fork in (stream.copy(), copy.copy(stream)):
+            assert fork.unconsumed_tail is stream.unconsumed_tail
+            assert fork.decompress(fork.unconsumed_tail + b"!") == data[17:]
+            assert fork.eof and fork.unused_data == b"tail!"
+            assert not stream.eof
+        pending = stream.unconsumed_tail
+        assert pending is stream.unconsumed_tail
+        assert stream.decompress(pending) == data[17:]
+        assert stream.eof and stream.unused_data == b"tail"
+        assert stream.copy().unused_data is stream.unused_data
+        snapshot = stream.unused_data
+        assert snapshot is stream.unused_data
+        assert stream.decompress(b"!") == b""
+        assert snapshot == b"tail"
+        assert stream.unused_data == b"tail!"
+        assert stream.flush() == b""
+
     # Interoperate with zlib and gzip streams emitted by reference zlib.
     zstream = bytes.fromhex("789c2b48acccc94f4c01000bdd02eb")
     gzip = bytes.fromhex("1f8b08000000000000032b48acccc94f4c0100156a2c4207000000")

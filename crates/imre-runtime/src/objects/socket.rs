@@ -1,5 +1,4 @@
-//! One socket object owns a non-inheritable fd. All aliases observe explicit
-//! close; dropping the last owner closes silently, including on error paths.
+//! A socket closes its descriptor on explicit close or drop, unless detached.
 use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, c_int, errno_error};
@@ -268,10 +267,14 @@ fn checked(ret: i32) -> io::Result<i32> {
     }
 }
 
-fn retry<T>(mut call: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+fn retry<T>(until: Option<Deadline>, mut call: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     loop {
         match call() {
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                if until.is_some_and(|end| end.remaining().is_zero()) {
+                    return Err(timed_out());
+                }
+            }
             result => return result,
         }
     }
@@ -305,6 +308,10 @@ fn timed_out() -> io::Error {
 
 /// Wait without extending the deadline on a signal, spurious readiness or a long poll interval.
 fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()> {
+    retry(until, || poll_interruptible(fd, events, until))
+}
+
+fn poll_interruptible(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()> {
     let mut pollfd = libc::pollfd {
         fd,
         events,
@@ -318,11 +325,8 @@ fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()
                 .min(i32::MAX as u128) as i32
         });
         // SAFETY: poll may write revents on this one live descriptor record.
-        match checked(unsafe { libc::poll(&raw mut pollfd, 1, timeout) }) {
-            Ok(n) if n > 0 => return Ok(()),
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
+        if checked(unsafe { libc::poll(&raw mut pollfd, 1, timeout) })? != 0 {
+            return Ok(());
         }
         if until.is_some_and(|end| end.remaining().is_zero()) {
             return Err(timed_out());
@@ -343,13 +347,24 @@ fn socket_call<T>(
     until: Option<Deadline>,
     mut call: impl FnMut() -> io::Result<T>,
 ) -> io::Result<T> {
+    retry(until, || {
+        socket_call_interruptible(fd, event, until, &mut call)
+    })
+}
+
+/// Return EINTR from either readiness polling or the syscall to the caller.
+fn socket_call_interruptible<T>(
+    fd: RawFd,
+    event: i16,
+    until: Option<Deadline>,
+    mut call: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
     loop {
         // A negative fd is ignored by poll; the syscall itself must report EBADF.
         if fd >= 0 && until.is_some() {
-            poll_socket(fd, event, until)?;
+            poll_interruptible(fd, event, until)?;
         }
         match call() {
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) if until.is_some() && e.kind() == io::ErrorKind::WouldBlock => {}
             result => return result,
         }
@@ -421,8 +436,14 @@ fn handle(
     }
     #[cfg(target_vendor = "apple")]
     setopt(raw, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1).map_err(errno_error)?;
+    let socket = socket_state(family, kind, proto, blocking)?;
+    state(&socket, |s| s.fd = fd.into_raw_fd());
+    Ok(socket)
+}
+
+fn socket_state(family: i32, kind: i32, proto: i32, blocking: bool) -> Result<crate::ObjectOwner> {
     Socket {
-        fd: fd.into_raw_fd(),
+        fd: -1,
         family,
         kind,
         proto,
@@ -433,25 +454,92 @@ fn handle(
     .into_owner()
 }
 
+/// Adopt the caller’s descriptor after validating it and filling omitted metadata.
+pub(crate) fn adopt(
+    raw: RawFd,
+    mut family: i32,
+    mut kind: i32,
+    mut proto: i32,
+) -> Result<crate::ObjectOwner> {
+    if raw < 0 {
+        return Err(Error::new(Kind::ValueError, "negative file descriptor"));
+    }
+    match peer_call(|addr, len| {
+        // SAFETY: peer_call supplies writable sockaddr storage and its capacity.
+        unsafe { libc::getsockname(raw, addr, len) }
+    }) {
+        Ok((_, addr, _)) if family == -1 => family = i32::from(addr.ss_family),
+        Err(e)
+            if family == -1 || matches!(e.raw_os_error(), Some(libc::EBADF | libc::ENOTSOCK)) =>
+        {
+            return Err(errno_error(e));
+        }
+        // Some valid families (e.g. AF_ALG) do not implement getsockname.
+        _ => {}
+    }
+    if kind == -1 {
+        kind = int_option(raw, libc::SOL_SOCKET, libc::SO_TYPE)?;
+    }
+    #[cfg(target_os = "linux")]
+    if proto == -1 {
+        proto = int_option(raw, libc::SOL_SOCKET, libc::SO_PROTOCOL)?;
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        proto = 0;
+    }
+    #[cfg(target_os = "linux")]
+    let (kind, blocking) = (
+        kind & !(libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC),
+        kind & libc::SOCK_NONBLOCK == 0,
+    );
+    #[cfg(not(target_os = "linux"))]
+    let blocking = true;
+    let socket = socket_state(family, kind, proto, blocking)?;
+    state(&socket, |s| s.fd = raw);
+    Ok(socket)
+}
+
+/// Return the underlying descriptor and disable subsequent closes by this socket.
+pub(crate) fn detach(socket: &Object) -> RawFd {
+    state(socket, |s| {
+        s.close_requested = true;
+        std::mem::replace(&mut s.fd, -1)
+    })
+}
+
+/// Return the syscall type, stored socket kind, and initial blocking mode.
+fn creation_type(ty: i32) -> (i32, i32, bool) {
+    #[cfg(target_os = "linux")]
+    {
+        (
+            ty | libc::SOCK_CLOEXEC,
+            ty & !(libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK),
+            ty & libc::SOCK_NONBLOCK == 0,
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        (ty, ty, true)
+    }
+}
+
 pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwner> {
     // socket.socket uses -1 to request the default for each field.
     let family = if family == -1 { libc::AF_INET } else { family };
-    let ty = if ty == -1 { libc::SOCK_STREAM } else { ty };
+    let (flags, kind, blocking) = creation_type(if ty == -1 { libc::SOCK_STREAM } else { ty });
     let proto = if proto == -1 { 0 } else { proto };
     if !matches!(family, libc::AF_INET | libc::AF_INET6 | libc::AF_UNIX)
-        || !matches!(ty, libc::SOCK_STREAM | libc::SOCK_DGRAM)
+        || !matches!(kind, libc::SOCK_STREAM | libc::SOCK_DGRAM)
     {
         return Err(Error::new(
             Kind::NotImplementedError,
             "only Internet and Unix stream and datagram sockets are supported",
         ));
     }
-    let kind = ty;
-    #[cfg(target_os = "linux")]
-    let ty = ty | libc::SOCK_CLOEXEC;
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
-    let raw = checked(unsafe { libc::socket(family, ty, proto) }).map_err(errno_error)?;
-    handle(raw, true, family, kind, proto)
+    let raw = checked(unsafe { libc::socket(family, flags, proto) }).map_err(errno_error)?;
+    handle(raw, blocking, family, kind, proto)
 }
 
 pub(crate) fn socketpair(
@@ -459,14 +547,7 @@ pub(crate) fn socketpair(
     kind: i32,
     proto: i32,
 ) -> Result<(crate::ObjectOwner, crate::ObjectOwner)> {
-    #[cfg(target_os = "linux")]
-    let (flags, blocking, kind) = (
-        kind | libc::SOCK_CLOEXEC,
-        kind & libc::SOCK_NONBLOCK == 0,
-        kind & !(libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK),
-    );
-    #[cfg(not(target_os = "linux"))]
-    let (flags, blocking) = (kind, true);
+    let (flags, kind, blocking) = creation_type(kind);
 
     let mut pair = [-1; 2];
     // SAFETY: on success socketpair initializes both entries and transfers both descriptors.
@@ -1316,7 +1397,7 @@ fn connect(socket: &Object, addr: &SocketAddress) -> io::Result<()> {
     // can report EISCONN or start a different attempt. Observe the existing attempt.
     poll_socket(fd, libc::POLLOUT, until)?;
     // Retry the completion check itself on EINTR, without reconnecting.
-    retry(|| {
+    retry(None, || {
         let mut error: i32 = 0;
         let mut len = size_of_val(&error) as libc::socklen_t;
         // SAFETY: SO_ERROR fills one int and its initialized capacity.
@@ -1633,7 +1714,8 @@ unsafe fn receive(socket: &Object, buffer: *mut u8, len: usize, flags: i32) -> i
 }
 
 pub(crate) fn send(socket: &Object, bytes: &[u8], flags: i32) -> Result<usize> {
-    send_until(fd(socket), bytes, flags, deadline(socket))
+    let until = deadline(socket);
+    retry(until, || send_until(fd(socket), bytes, flags, until)).map_err(errno_error)
 }
 
 /// Send one message to a socket address using the socket's existing timeout policy.
@@ -1656,15 +1738,14 @@ pub(crate) fn send_to(
     .map_err(errno_error)
 }
 
-fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> Result<usize> {
+fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> io::Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
-    socket_call(raw, libc::POLLOUT, until, || {
+    socket_call_interruptible(raw, libc::POLLOUT, until, || {
         // SAFETY: the slice stays initialized and immovable across retries.
         let n = unsafe { libc::send(raw, bytes.as_ptr().cast(), bytes.len(), flags) };
         usize::try_from(n).map_err(|_| io::Error::last_os_error())
     })
-    .map_err(errno_error)
 }
 
 #[unsafe(no_mangle)]
@@ -1679,25 +1760,62 @@ pub extern "C" fn imre_socket_send(s: &Object, data: &Bytes, flags: usize) -> us
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_sendall(s: &Object, data: &Bytes, flags: usize) {
-    finish(c_int(flags).and_then(|flag| send_all(s, data, flag)), ());
+    finish(
+        c_int(flags).and_then(|flags| {
+            SendAll::run(s, flags, |send| {
+                let done = send.step(data)?;
+                super::stdlib::check_interrupt()?;
+                Ok(done)
+            })
+        }),
+        (),
+    );
 }
 
-pub(crate) fn send_all(s: &Object, data: &[u8], flags: i32) -> Result<()> {
-    let raw = fd(s);
-    let until = deadline(s);
-    let mut remaining = data;
-    // Empty input still makes one send: EBADF/EPIPE are observable.
-    loop {
-        let written = send_until(raw, remaining, flags, until)?;
-        remaining = &remaining[written..];
-        if remaining.is_empty() {
-            return Ok(());
+/// Preserve the byte offset and the original timeout across Python signal handlers.
+pub(crate) struct SendAll<'a> {
+    socket: &'a Object,
+    flags: i32,
+    until: Option<Deadline>,
+    sent: usize,
+}
+
+impl<'a> SendAll<'a> {
+    pub(crate) fn run<E: From<Error>>(
+        socket: &'a Object,
+        flags: i32,
+        mut attempt: impl FnMut(&mut Self) -> std::result::Result<bool, E>,
+    ) -> std::result::Result<(), E> {
+        let mut send = Self {
+            socket,
+            flags,
+            until: deadline(socket),
+            sent: 0,
+        };
+        while !attempt(&mut send)? {
+            if send.until.is_some_and(|end| end.remaining().is_zero()) {
+                return Err(errno_error(timed_out()).into());
+            }
         }
-        if until.is_some_and(|end| end.remaining().is_zero()) {
-            return Err(errno_error(timed_out()));
-        }
-        if written == 0 {
-            return Err(errno_error(io::Error::from_raw_os_error(libc::EPIPE)));
+        Ok(())
+    }
+
+    /// The caller checks signals after every successful send (even a partial one) or EINTR.
+    pub(crate) fn step(&mut self, data: &[u8]) -> Result<bool> {
+        // The buffer remains exported, but a handler can change its contents or close the socket.
+        let remaining = data
+            .get(self.sent..)
+            .ok_or_else(|| Error::new(Kind::SystemError, "exported socket buffer shrank"))?;
+        match send_until(fd(self.socket), remaining, self.flags, self.until) {
+            Ok(0) if !remaining.is_empty() => {
+                Err(errno_error(io::Error::from_raw_os_error(libc::EPIPE)))
+            }
+            Ok(n) => {
+                self.sent += n;
+                Ok(self.sent == data.len())
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => Ok(false),
+            Err(e) => Err(errno_error(e)),
         }
     }
 }
@@ -1768,20 +1886,22 @@ pub extern "C" fn imre_socket_getblocking(s: &Object) -> bool {
     get_timeout(s) != Some(Duration::ZERO)
 }
 
+/// Duplicate the descriptor and copy the socket's timeout onto the new owner.
+pub(crate) fn dup(s: &Object) -> Result<crate::ObjectOwner> {
+    let (raw, family, kind, proto) = state(s, |s| (s.fd, s.family, s.kind, s.proto));
+    let timeout = get_timeout(s);
+    // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
+    let copy =
+        checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
+    let child = handle(copy, timeout.is_none(), family, kind, proto)?;
+    // socket.dup reapplies its source's blocking mode to the shared open file.
+    set_timeout(&child, timeout)?;
+    Ok(child)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
-    let result = (|| {
-        let (raw, family, kind, proto) = state(s, |s| (s.fd, s.family, s.kind, s.proto));
-        let timeout = get_timeout(s);
-        // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
-        let copy =
-            checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, timeout.is_none(), family, kind, proto)?;
-        // socket.dup reapplies its source's blocking mode to the shared open file.
-        set_timeout(&child, timeout)?;
-        Ok(crate::ObjectOwner::into_raw(child))
-    })();
-    finish(result, ptr::null())
+    finish(dup(s).map(crate::ObjectOwner::into_raw), ptr::null())
 }
 
 #[unsafe(no_mangle)]
@@ -1844,7 +1964,7 @@ pub extern "C" fn imre_socket_setsockopt_bytes(
 }
 
 pub(crate) fn get_option_into(
-    s: &Object,
+    raw: RawFd,
     level: i32,
     name: i32,
     buffer: &mut [u8],
@@ -1853,15 +1973,19 @@ pub(crate) fn get_option_into(
         .map_err(|_| Error::new(Kind::OverflowError, "getsockopt buffer too large"))?;
     // SAFETY: the buffer is writable for the supplied capacity; the kernel returns its used length.
     checked(unsafe {
-        libc::getsockopt(fd(s), level, name, buffer.as_mut_ptr().cast(), &raw mut len)
+        libc::getsockopt(raw, level, name, buffer.as_mut_ptr().cast(), &raw mut len)
     })
     .map_err(errno_error)?;
     Ok(len as usize)
 }
 
 pub(crate) fn get_option(s: &Object, level: i32, name: i32) -> Result<i32> {
+    int_option(fd(s), level, name)
+}
+
+fn int_option(raw: RawFd, level: i32, name: i32) -> Result<i32> {
     let mut bytes = [0; size_of::<i32>()];
-    get_option_into(s, level, name, &mut bytes)?;
+    get_option_into(raw, level, name, &mut bytes)?;
     Ok(i32::from_ne_bytes(bytes))
 }
 

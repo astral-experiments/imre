@@ -1,6 +1,7 @@
 """Check closed module graphs against CPython and exercise rejected import boundaries."""
 
 import argparse
+import gzip
 import os
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
@@ -14,8 +15,55 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "imports"
 HELPER = "def f(value: int) -> int:\n    return value + 1\n"
 IMPORT = "from helper import f\nprint(f(2))\n"
 
+# The wrong call is never executed. Checked builds must diagnose it in either source order.
+LOCALE_CALL = "def typed(n: int) -> int: return n\ndef unused() -> int: return typed({argument})\n"
+LOCALE_CHAR_MAX = "from _locale import CHAR_MAX\n" + LOCALE_CALL + "print(CHAR_MAX)\n"
+LOCALE_FORMAT = (
+    LOCALE_CALL
+    + "from _locale import CHAR_MAX\nfrom locale import format_string\n"
+    + "print(format_string('%d', CHAR_MAX))\n"
+)
 
 REJECTED = {
+    "decimal_float_preserves_typed_call": ({
+        "main.py": (
+            "from decimal import Decimal\n"
+            "def convert(value: Decimal) -> float: return float(value)\n"
+            "def typed(n: int) -> int: return n\n"
+            "def unused() -> int: return typed('wrong')\n"
+            "print(convert(Decimal('1.25')))\n"
+        ),
+    }, "invalid-argument-type"),
+    "unused_isclose_preserves_typed_call": ({
+        "main.py": (
+            "from math import isclose\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "isclose_call_preserves_typed_call": ({
+        "main.py": (
+            "from math import isclose\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(isclose(1, 1))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "unused_float_info_preserves_typed_call": ({
+        "main.py": (
+            "from sys import float_info\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "float_info_field_preserves_typed_call": ({
+        "main.py": (
+            "from sys import float_info\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(float_info.mant_dig)\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "generator_local_keeps_typed_call": ({
         "helper.py": (
             "def values():\n"
@@ -25,6 +73,14 @@ REJECTED = {
         ),
         "main.py": "from helper import values, typed\nprint(next(values()))\ntyped('wrong')\n",
     }, "invalid-argument-type"),
+    "docfile_suite_preserves_typed_call": ({
+        "main.py": (
+            "from doctest import DocFileSuite\n"
+            "def typed(n: int) -> int: return n\n"
+            "DocFileSuite()\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unittest_method_skip_preserves_typed_call": ({
         "main.py": (
             "import unittest\n"
@@ -68,6 +124,14 @@ REJECTED = {
             "class Both(Left, Right): pass\n"
         ),
     }, "multiple independent base classes"),
+    "math_lcm_preserves_typed_call": ({
+        "main.py": (
+            "from math import lcm\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(lcm(6, 10))\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "custom_dir_preserves_typed_call": ({
         "main.py": (
             "class Subject:\n"
@@ -82,6 +146,15 @@ REJECTED = {
             "from inspect import isdatadescriptor\n"
             "def typed(n: int) -> int: return n\n"
             "print(isdatadescriptor(property()))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "inspect_classify_class_attrs_preserves_typed_call": ({
+        "main.py": (
+            "from inspect import classify_class_attrs\n"
+            "class Subject: pass\n"
+            "def typed(n: int) -> int: return n\n"
+            "classify_class_attrs(Subject)\n"
             "typed('wrong')\n"
         ),
     }, "expected int, got str"),
@@ -145,6 +218,27 @@ REJECTED = {
             "def typed(n: int) -> int: return n\n"
             "print(urlopen('data:,hello').read())\n"
             "print(typed('wrong'))\n"
+        ),
+    }, "expected int, got str"),
+    "locale_char_max_keeps_unused_function_checked": ({
+        "main.py": LOCALE_CHAR_MAX.format(argument="'wrong'"),
+    }, "expected int, got str"),
+    "locale_formatting_keeps_earlier_function_checked": ({
+        "main.py": LOCALE_FORMAT.format(argument="'wrong'"),
+    }, "expected int, got str"),
+    "unused_randbytes_preserves_typed_call": ({
+        "main.py": (
+            "from random import randbytes\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "randbytes_call_preserves_typed_call": ({
+        "main.py": (
+            "from random import randbytes\n"
+            "def typed(n: int) -> int: return n\n"
+            "randbytes(5)\n"
+            "typed('wrong')\n"
         ),
     }, "expected int, got str"),
     "unused_warn_preserves_typed_arguments": ({
@@ -357,6 +451,10 @@ REJECTED = {
     "unsupported_stdlib": ({"main.py": "import turtle\n"}, 'standard-library imports and shadowing are unsupported: "turtle"'),
     "missing": ({"main.py": "import missing_dependency\n"}, "cannot resolve first-party"),
     "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),
+    "unused_import_builtin_keeps_checked_import": ({
+        "main.py": '__import__("helper")\nif False:\n    unused = __import__\n',
+        "helper.py": HELPER,
+    }, "unsupported"),
     "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
     "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
     "conditional_missing_export": ({
@@ -367,6 +465,22 @@ REJECTED = {
         "main.py": "from helper import selected\n",
         "helper.py": "if True:\n    selected: int\nelse:\n    selected = 1\n",
     }, 'no static binding "selected"'),
+    "inspect_descriptor_doc_preserves_typed_call": ({
+        "main.py": (
+            "from inspect import getdoc, ismemberdescriptor\n"
+            "def typed(n: int) -> int: return n\n"
+            "getdoc(int)\n"
+            "ismemberdescriptor(int)\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "float_fromhex_preserves_uncalled_argument_check": ({
+        "main.py": (
+            "def typed(n: int) -> int: return n\n"
+            "def helper() -> float: return float.fromhex('0x1p0')\n"
+            "def unused() -> int: return typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "namedtuple_descriptor_preserves_typed_call": ({
         "main.py": (
             "from collections import namedtuple\n"
@@ -439,6 +553,21 @@ REJECTED = {
         "main.py": "from helper import bad, render\nprint(render())\nprint(bad())\n",
         "helper.py": "import traceback as tb\ndef render():\n    return tb.format_exc()\ndef bad() -> int:\n    return 'wrong'\n",
     }, "invalid-return-type"),
+    "unused_lzma_exports_preserve_typed_call": ({
+        "main.py": (
+            "from lzma import decompress, LZMAError, FORMAT_AUTO, FORMAT_XZ, FORMAT_ALONE\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "lzma_decompress_preserves_typed_call": ({
+        "main.py": (
+            "from lzma import decompress\n"
+            "def typed(n: int) -> int: return n\n"
+            "decompress(b']\\x00\\x00\\x80\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\x00\\x83\\xff\\xfb\\xff\\xff\\xc0\\x00\\x00\\x00')\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
     "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
     "wrong_imported_argument": ({"main.py": 'from helper import f\nprint(f("wrong"))\n', "helper.py": HELPER}, "int"),
@@ -479,6 +608,10 @@ REJECTED = {
             "def typed(value: int) -> int: return value\ntyped('wrong')\n"
         ),
     }, "invalid-argument-type"),
+    "invalid_call_after_imported_initializer": ({
+        "feature.py": "def require(enabled: bool):\n    if not enabled: raise RuntimeError('unavailable')\n",
+        "main.py": "import feature\nfeature.require(True)\ndef typed(value: int) -> int: return value\ntyped('bad')\n",
+    }, "expected int, got str"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
     "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
     "namespace_preserves_annotation": ({
@@ -527,6 +660,8 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "locale_typed_char_max": {"main.py": LOCALE_CHAR_MAX.format(argument="1")},
+    "locale_formats_typed_char_max": {"main.py": LOCALE_FORMAT.format(argument="1")},
     "generator_local_argument_binding": {
         "helper.py": (
             "def values():\n"
@@ -586,6 +721,16 @@ ACCEPTED = {
     "nested_operator_compare_digest": {
         "main.py": "from consumer import equal\nprint(equal(b'ab', b'ab'), equal(b'ab', b'ac'))\n",
         "consumer.py": "from _operator import _compare_digest as equal\n",
+    },
+    "lzma_formats_and_error": {
+        "main.py": (
+            "from lzma import FORMAT_AUTO, FORMAT_XZ, FORMAT_ALONE, LZMAError as Error\n"
+            "assert FORMAT_AUTO == 0 and FORMAT_XZ == 1 and FORMAT_ALONE == 2\n"
+            "try:\n"
+            "    raise Error('bad stream')\n"
+            "except Error as exc:\n"
+            "    print(str(exc))\n"
+        ),
     },
     "urllib_request_and_error": {
         "main.py": (
@@ -668,6 +813,16 @@ ACCEPTED = {
             "from unittest.mock import patch\nclass Owner:\n    value = 1\n"
             "patcher = patch.object\nwith patcher(Owner, 'value', 2):\n    assert Owner.value == 2\n"
             "assert Owner.value == 1\n"
+        ),
+    },
+    "ordered_entry_class": {
+        "feature.py": "def initialize(): print('initialize')\n",
+        "main.py": (
+            "import feature\nfeature.initialize()\n"
+            "if hasattr(feature, 'initialize'):\n    class Available: pass\n"
+            "if hasattr(feature, 'missing'):\n    class Missing: pass\n"
+            "class Last: pass\nprint(Available.__name__, Last.__name__)\n"
+            "try: Missing()\nexcept NameError: print('absent')\n"
         ),
     },
     "entry_module_attribute_guard": {
@@ -1487,6 +1642,7 @@ def main() -> None:
                 slow_optimized = name in {
                     "boxed_unittest_lazy_import",
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
+                    "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
                     "warn_named_helper", "zip_source_spec",
                 }
@@ -1503,6 +1659,7 @@ def main() -> None:
                     assert denied.stderr.splitlines()[-1] == expected.stderr.splitlines()[-1]
                 checks += 1
 
+        (temporary / "members.gz").write_bytes(gzip.compress(b"first", mtime=0) + gzip.compress(b"second", mtime=0))
         late_import = temporary / "late_import.py"
         late_import.write_text("import importlib, sys\nimportlib.import_module(sys.argv[1]).run()\n")
         for level in args.opt_levels:
@@ -1526,6 +1683,42 @@ def main() -> None:
                 "        print(module.opmap['POP_TOP'])\n"
                 "    elif sys.argv[3] == 'current':\n"
                 "        module.current()\n"
+                "    elif sys.argv[3] == 'write':\n"
+                "        import zlib\n"
+                "        member = module.compress(memoryview(b'payload'), compresslevel=1, mtime=42)\n"
+                "        assert member[4:10] == bytes((42, 0, 0, 0, 4, 255))\n"
+                "        assert zlib.decompress(member, wbits=31) == b'payload'\n"
+                "        with module.open('written.gz', 'wb') as stream:\n"
+                "            print(stream.write(b'payload'))\n"
+                "            assert stream.seekable() and stream.tell() == 7\n"
+                "            stream.flush()\n"
+                "    elif sys.argv[3] == 'read':\n"
+                "        with module.open('members.gz', 'rb') as stream:\n"
+                "            print(stream.read1(65536), stream.read(1), stream.tell(), stream.read())\n"
+                "        print(stream.closed)\n"
+                "        from io import BytesIO\n"
+                "        with open('members.gz', 'rb') as raw:\n"
+                "            with module.GzipFile(fileobj=raw) as reader:\n"
+                "                assert reader.read(3) == b'fir' and reader.rewind() is None\n"
+                "                assert reader.tell() == 0 and reader.read(5) == b'first'\n"
+                "            raw.seek(0)\n"
+                "            source = BytesIO(b'prefix' + raw.read())\n"
+                "        source.seek(6)\n"
+                "        with module.GzipFile(filename='metadata.gz', fileobj=source) as stream:\n"
+                "            assert stream.read1(65536) == b'first'\n"
+                "            assert stream.seek(1, 1) == 6 and stream.read() == b'econd'\n"
+                "        assert not source.closed\n"
+                "        class Reader(module.GzipFile):\n"
+                "            def read(self, *args):\n"
+                "                raise AssertionError('readline called read')\n"
+                "        with Reader('members.gz', 'rb') as stream:\n"
+                "            print(stream.readline(0), stream.readline(3), stream.readline(8), stream.readline(1))\n"
+                "            try:\n"
+                "                stream.readline(-(1 << 100))\n"
+                "            except OverflowError:\n"
+                "                pass\n"
+                "            else:\n"
+                "                raise AssertionError('unrepresentable line size accepted')\n"
             )
             for module, operation, path, expected in [
                 ("opcode", "lookup", temporary, "31\n"), ("_opcode_metadata", "lookup", temporary, "31\n"),
@@ -1533,11 +1726,15 @@ def main() -> None:
                 ("main", "import", temporary / "codeop_module", ""),
                 ("main", "import", temporary / "codeop_named_helper", "16896\n"),
                 ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
+                ("gzip", "write", temporary, "7\n"),
+                ("gzip", "read", temporary, "b'first' b's' 6 b'econd'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
             ]:
                 result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
                 require_success(result)
                 assert result.stdout == expected, (module, level, result.stdout)
                 checks += 1
+
+            assert gzip.decompress((temporary / "written.gz").read_bytes()) == b"payload"
 
             absent = "no_such_console_guard_module"
             result = run([str(executable), probe.stem, absent, "flags", str(temporary)], temporary)
@@ -1589,12 +1786,47 @@ def main() -> None:
         assert result.returncode == 1 and "import nesting exceeds 96" in result.stderr, result
         checks += 2
 
+        if sys.platform in ("linux", "darwin"):
+            constants = ["SO_ERROR"]
+            if sys.platform == "linux":
+                constants.extend(["SOCK_NONBLOCK", "SOCK_CLOEXEC"])
+            for module in ("socket", "_socket"):
+                case = temporary / f"{module}_constants_keep_typed_calls"
+                write_files(case, {"main.py": (
+                    f"from {module} import {', '.join(constants)}\n"
+                    "def typed(n: int) -> int: return n\n"
+                    f"def mask() -> int: return {' | '.join(constants)}\n"
+                    "def dormant() -> int:\n"
+                    "    return typed('wrong')\n"
+                    "print(mask())\n"
+                )})
+                result = run([compiler, "check", str(case / "main.py")], temporary)
+                assert result.returncode != 0 and "main.py:5:" in result.stderr, result
+                assert "expected int, got str" in result.stderr or "invalid-argument-type" in result.stderr, result
+                checks += 1
+
         for name, (files, expected) in REJECTED.items():
             case = temporary / name
             write_files(case, files)
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
             checks += 1
+
+        # Check even uncalled functions when a different function requires boxed operations.
+        setup = "from unittest.mock import patch\nclass Owner:\n    value = 0\n" + HELPER
+        invalid = "def uncalled() -> int:\n    return f('wrong')\n"
+        for patcher in (
+            "def helper() -> None:\n    patch.object(Owner, 'value', 1)\n",
+            "def helper() -> object:\n    return patch.object(Owner, 'value', 1)\n",
+        ):
+            for before, after in ((invalid, patcher), (patcher, invalid)):
+                source = temporary / "boxed_call_order.py"
+                source.write_text(setup + before + after)
+                result = run([compiler, "check", str(source)], temporary)
+                assert result.returncode != 0 and (
+                    "expected int, got str" in result.stderr or "invalid-argument-type" in result.stderr
+                ), (source.read_text(), result.stderr)
+                checks += 1
 
         # The imported object operation precedes the call that supplies flag's type.
         for name, function, diagnostic in [
@@ -1614,6 +1846,20 @@ def main() -> None:
                 assert result.returncode == 1 and diagnostic in result.stderr, (name, result)
             require_success(run(command + ["--runtime-imports"], temporary))
             checks += 3
+
+        caller = "def gzip_caller() -> bytes: return compress(b'payload')\n"
+        typed = "def typed(n: int) -> int: return n\n"
+        unused = "def unused() -> int: return typed('wrong')\n"
+        for name, definitions, error_line in (
+            ("caller_first", caller + typed + unused, 4),
+            ("caller_last", unused + typed + caller, 2),
+        ):
+            case = temporary / f"gzip_compress_{name}"
+            write_files(case, {"main.py": "from gzip import compress\n" + definitions + "print(gzip_caller())\n"})
+            result = run([compiler, "check", str(case / "main.py")], temporary)
+            assert result.returncode != 0 and f"main.py:{error_line}:" in result.stderr, result
+            assert "expected int, got str" in result.stderr or "invalid-argument-type" in result.stderr, result
+            checks += 1
 
         # A TypeError raised while evaluating a return operand can still be caught.
         caught = temporary / "object_return_operand"

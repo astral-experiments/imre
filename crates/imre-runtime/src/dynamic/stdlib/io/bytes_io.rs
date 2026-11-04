@@ -159,8 +159,17 @@ impl BytesIo {
     }
 
     fn write_input(&self, ctx: &mut Context, input: Id) -> Result<usize> {
-        ctx.check_buffer_exporter(input)?;
-        ctx.native_buffer_bytes(input)?;
+        let Some(method) = ctx.python_buffer_method(input, true)? else {
+            ctx.native_buffer_bytes(input)?;
+            return self.write_buffer(ctx, input);
+        };
+        // PyBUF_CONTIG_RO requests shape without strides. Acquisition may change this stream.
+        ctx.with_contiguous_python_buffer(input, method, 0x0008, |ctx, view| {
+            self.write_buffer(ctx, view)
+        })
+    }
+
+    fn write_buffer(&self, ctx: &mut Context, input: Id) -> Result<usize> {
         self.file(ctx)?;
         ctx.with_buffer_export(input, |ctx| {
             ctx.check_bytearray_resize(self.storage)?;
@@ -266,8 +275,18 @@ impl BytesIo {
             })?;
         let position = u64::try_from(position)
             .map_err(|_| Error::new("ValueError", "position value cannot be negative"))?;
-        self.file_mut(ctx)?.seek(SeekFrom::Start(position))?;
+        self.set_position_after_write(ctx, position)?;
         super::restore_stream_dict(ctx, receiver, dict, "third")
+    }
+
+    fn set_position_after_write(&self, ctx: &mut Context, position: u64) -> Result<()> {
+        // A Python exporter can close the stream when releasing its view after a successful write.
+        if let Ok(file) = self.file_mut(ctx) {
+            file.seek(SeekFrom::Start(position))?;
+        } else {
+            self.closed_position.set(position);
+        }
+        Ok(())
     }
 
     fn reset(&self, ctx: &mut Context) {
@@ -321,7 +340,7 @@ impl BytesIo {
                 self.snapshot.set(Some(initial));
             } else {
                 self.write_input(ctx, initial)?;
-                self.file_mut(ctx)?.seek(SeekFrom::Start(0))?;
+                self.set_position_after_write(ctx, 0)?;
             }
         }
         Ok(NONE)
@@ -447,8 +466,11 @@ pub(super) fn call(
         "writelines" => {
             stream.file(ctx)?;
             let iterator = ctx.iterator(args[0])?;
+            let mark = ctx.heap.temporary_mark();
             while let Some(line) = ctx.next_item(iterator)? {
                 stream.write_input(ctx, line)?;
+                // Drop this line and its buffer before asking the iterator for the next one.
+                ctx.heap.release_temporaries_since(mark);
             }
             Ok(NONE)
         }

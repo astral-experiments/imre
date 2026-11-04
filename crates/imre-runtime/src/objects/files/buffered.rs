@@ -8,7 +8,7 @@ use std::mem::MaybeUninit;
 use smallvec::SmallVec;
 
 use super::super::codecs::Codec;
-use super::gzip::{GzipError, GzipReader};
+use super::gzip::GzipDecoder;
 use super::{Bytes, Error, Kind, Result, Str, decode_text, errno_error};
 use crate::{BinaryOutput, StrOwner};
 
@@ -142,7 +142,12 @@ impl Output {
 
 enum Source {
     Plain(File),
-    Gzip(Box<GzipReader>),
+    Gzip(Box<GzipFile>),
+}
+
+struct GzipFile {
+    file: BufReader<File>,
+    decoder: GzipDecoder,
 }
 
 impl Source {
@@ -153,16 +158,7 @@ impl Source {
                 rustix::io::read(&*file, &mut *buf).map(|(initialized, _)| initialized.len())
             })
             .map_err(Into::into),
-            Self::Gzip(gzip) => gzip.read(buf).map_err(|err| {
-                if err.kind() == io::ErrorKind::UnexpectedEof {
-                    io::Error::other(GzipError(
-                        Kind::EOFError,
-                        "Compressed file ended before the end-of-stream marker was reached",
-                    ))
-                } else {
-                    err
-                }
-            }),
+            Self::Gzip(gzip) => gzip.decoder.read_file(&mut gzip.file, buf),
         }
     }
 }
@@ -307,7 +303,10 @@ pub(super) struct Input {
 impl Input {
     pub(super) fn new(file: File, gzip: bool, binary: bool, capacity: usize) -> Self {
         let source = if gzip {
-            Source::Gzip(Box::new(GzipReader::new(file, capacity)))
+            Source::Gzip(Box::new(GzipFile {
+                file: BufReader::with_capacity(capacity, file),
+                decoder: GzipDecoder::new(),
+            }))
         } else {
             Source::Plain(file)
         };
@@ -346,12 +345,21 @@ impl Input {
     pub(super) fn into_file(self) -> File {
         match self.raw.into_inner().into_inner() {
             Source::Plain(file) => file,
-            Source::Gzip(reader) => reader.into_file(),
+            Source::Gzip(gzip) => gzip.file.into_inner(),
         }
     }
 
     pub(super) fn preserve_newlines(&mut self) {
         self.text.preserve_newlines = true;
+    }
+
+    /// Exclude read-ahead from the file or decompressor's position.
+    pub(super) fn binary_position(&mut self) -> Result<u64> {
+        let position = match self.raw.get_mut().get_mut() {
+            Source::Plain(file) => file.stream_position().map_err(super::errno_error)?,
+            Source::Gzip(gzip) => gzip.decoder.position(),
+        };
+        Ok(position - self.raw.buffer().len() as u64)
     }
 
     /// Seek a plain BufferedReader at its logical position, discarding read-ahead
@@ -363,10 +371,7 @@ impl Input {
         };
         if let SeekFrom::Current(delta) = at {
             if delta == 0 {
-                return file
-                    .stream_position()
-                    .map(|pos| pos - buffered as u64)
-                    .map_err(super::errno_error);
+                return self.binary_position();
             }
             let pos = i128::from(file.stream_position().map_err(super::errno_error)?)
                 - buffered as i128
@@ -401,6 +406,9 @@ impl Input {
             self.raw.consume(count);
             return Ok(data);
         }
+        if size > crate::MAX_BYTES_LEN {
+            return Err(Error::new(Kind::OverflowError, "byte string is too large"));
+        }
         let mut data = reserve(size)?;
         if size != 0 {
             loop {
@@ -421,6 +429,7 @@ impl Input {
                 break;
             }
         }
+        crate::compact_bytes(&mut data);
         Ok(data)
     }
 
@@ -658,6 +667,19 @@ pub(in crate::objects) fn decode_text_lines(bytes: &[u8], codec: Codec) -> Resul
             text.push_str(&decoder.decoded);
         }
         Ok(text)
+    } else if matches!(codec, Codec::ShiftJis) {
+        let mut start = 0;
+        let mut end = 0;
+        for chunk in chunks.chain([&[][..]]) {
+            end += chunk.len();
+            start += super::super::codecs::shift_jis::decode_chunk(
+                &mut text,
+                &bytes[start..end],
+                None,
+                chunk.is_empty(),
+            )?;
+        }
+        Ok(super::super::codecs::universal_newlines(text))
     } else {
         for chunk in chunks {
             let decoded = codec.decode(chunk, None)?;

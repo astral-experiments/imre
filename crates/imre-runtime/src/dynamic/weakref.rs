@@ -44,7 +44,7 @@ impl Value {
 
     fn is_weakrefable_native_base(&self) -> bool {
         matches!(self, Self::Native(name)
-            if matches!(name.as_str(), "set" | "frozenset" | super::deque::CLASS))
+            if matches!(name.as_str(), "set" | "frozenset" | super::deque::CLASS | super::stdlib::functools::PARTIAL_CLASS))
     }
 
     /// Return the reference payload for an exact ref, proxy, or Python reference subclass.
@@ -208,7 +208,7 @@ impl Context {
 
     pub(super) fn class_instances_support_weakref(&self, class: Id) -> bool {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
-            return false;
+            return self.native_owns_layout_descriptor(class, "__weakref__");
         };
         if ancestors.iter().any(|&base| {
             matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "int" | "tuple" | "bytes"))
@@ -224,7 +224,10 @@ impl Context {
                     .as_deref()
                     .and_then(|namespace| namespace.slot_names.as_deref())
                     .is_none_or(|names| names.iter().any(|name| name == "__weakref__")),
-                base => base.is_weakrefable_native_base(),
+                value => {
+                    value.is_weakrefable_native_base()
+                        || self.native_owns_layout_descriptor(base, "__weakref__")
+                }
             })
     }
 
@@ -248,42 +251,6 @@ impl Context {
         self.bind(scope, "__weakref__", descriptor);
     }
 
-    pub(super) fn weakref_descriptor_owner(&self, owner: Id) -> &str {
-        let Value::Class { name, .. } = self.heap.get(owner) else {
-            unreachable!()
-        };
-        name
-    }
-
-    pub(super) fn readonly_weakref(&self, owner: Id) -> Error {
-        Error::new(
-            "AttributeError",
-            format!(
-                "attribute '__weakref__' of '{}' objects is not writable",
-                self.weakref_descriptor_owner(owner)
-            ),
-        )
-    }
-
-    pub(super) fn weakref_list(&self, owner: Id, receiver: Id) -> Result<Id> {
-        if !self.instance_of(receiver, owner) {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "descriptor '__weakref__' for '{}' objects doesn't apply to a '{}' object",
-                    self.weakref_descriptor_owner(owner),
-                    self.type_name(receiver)
-                ),
-            ));
-        }
-        Ok(self
-            .heap
-            .weak_references(receiver)
-            .first()
-            .copied()
-            .unwrap_or(NONE))
-    }
-
     fn weakrefable(&self, value: Id) -> bool {
         match self.heap.get(value) {
             Value::Instance { class, .. } => self.class_instances_support_weakref(*class),
@@ -293,6 +260,7 @@ impl Context {
             Value::GenericAlias(_)
             | Value::Union(_)
             | Value::RegexPattern(_)
+            | Value::Struct { .. }
             | Value::ParamSpec(_)
             | Value::TypeVar(_)
             | Value::TypeVarTuple { .. }
@@ -306,6 +274,7 @@ impl Context {
             | Value::Code(_)
             | Value::Set { .. }
             | Value::Deque(_)
+            | Value::Array(_)
             | Value::MemoryView { .. }
             | Value::File(_)
             | Value::Partial { .. }

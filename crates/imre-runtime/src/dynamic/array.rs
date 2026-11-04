@@ -215,6 +215,35 @@ impl Array {
         self.bytes.len() / self.format.width()
     }
 
+    /// Copy selected elements in their native representation, preserving the typecode.
+    pub(super) fn sliced(&self, start: i64, step: i64, count: usize) -> Result<Self> {
+        if step == 1 && count == self.len() {
+            // Each array detaches its shared bytes on the first write.
+            return Ok(self.clone());
+        }
+        let width = self.format.width();
+        let size = count * width;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        if step == 1 {
+            let first = start as usize * width;
+            bytes.extend_from_slice(&self.bytes[first..first + size]);
+        } else {
+            // The normalized slice guarantees that every selected index is in bounds.
+            for ordinal in 0..count {
+                let index = (start + ordinal as i64 * step) as usize;
+                let first = index * width;
+                bytes.extend_from_slice(&self.bytes[first..first + width]);
+            }
+        }
+        Ok(Self {
+            format: self.format,
+            bytes: Rc::new(bytes),
+        })
+    }
+
     pub(super) fn at(&self, index: usize) -> Result<Value> {
         let width = self.format.width();
         let element = &self.bytes[width * index..width * (index + 1)];

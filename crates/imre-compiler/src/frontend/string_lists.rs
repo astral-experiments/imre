@@ -46,6 +46,126 @@ fn prefix_argument<'a>(expr: &'a ast::Expr, name: &str) -> Option<&'a ast::Expr>
 }
 
 impl Checker<'_> {
+    /// Recognize `{c for c in text if c in keys}`, optionally including `ord(c) < n`.
+    pub(super) fn character_set_filter(
+        &mut self,
+        set: &ast::ExprSetComp,
+        expected: Option<Type>,
+    ) -> Result<Option<Expr>, String> {
+        let [clause] = set.generators.as_slice() else {
+            return Ok(None);
+        };
+        let [condition] = clause.ifs.as_slice() else {
+            return Ok(None);
+        };
+        let ast::Expr::Name(target) = &clause.target else {
+            return Ok(None);
+        };
+        let name = target.id.as_str();
+        let ty = self.types.set(Type::Str);
+        if clause.is_async
+            || !same_name(&set.elt, name)
+            || expected.is_some_and(|t| t != ty)
+            || !matches!(clause.iter, ast::Expr::Name(_))
+        {
+            return Ok(None);
+        }
+        let Some((keys, below)) = self.character_filter_operands(condition, name) else {
+            return Ok(None);
+        };
+        let text = self.expr(&clause.iter)?;
+        if text.ty != Type::Str {
+            return Ok(None);
+        }
+        let keys = self.expr(keys)?;
+        if !matches!(keys.ty, Type::Set(_) | Type::FrozenStrings)
+            || self.types.readable_set_element(keys.ty) != Some(Type::Str)
+        {
+            return Ok(None);
+        }
+        let source = self.hidden(Type::Str);
+        let selected = Expr {
+            ty,
+            kind: ExprKind::Builtin(
+                Builtin::FilterCharacterSet(below),
+                vec![self.local(source), keys],
+            ),
+        };
+        // An empty input never evaluates the membership operand.
+        let nonempty = self.truth_value(self.local(source));
+        Ok(Some(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(source, text)],
+                value: Box::new(Expr {
+                    ty,
+                    kind: ExprKind::Conditional(
+                        Box::new(nonempty),
+                        Box::new(selected),
+                        Box::new(Expr {
+                            ty,
+                            kind: ExprKind::Set {
+                                element: Type::Str,
+                                values: Vec::new(),
+                            },
+                        }),
+                    ),
+                }),
+                clear: vec![source],
+            },
+        }))
+    }
+
+    /// The set expression must be invariant for this iteration target. An
+    /// optional second operand may only call the unshadowed builtin `ord`.
+    fn character_filter_operands<'a>(
+        &self,
+        condition: &'a ast::Expr,
+        name: &str,
+    ) -> Option<(&'a ast::Expr, u32)> {
+        let (membership, below) = if let ast::Expr::BoolOp(or) = condition {
+            let [membership, ast::Expr::Compare(bound)] = or.values.as_slice() else {
+                return None;
+            };
+            let [ast::Expr::Call(call), ast::Expr::NumberLiteral(limit)] = bound.operands.as_ref()
+            else {
+                return None;
+            };
+            let ast::Number::Int(limit) = &limit.value else {
+                return None;
+            };
+            let [arg] = call.arguments.args.as_slice() else {
+                return None;
+            };
+            if or.op != ast::BoolOp::Or
+                || bound.ops.as_ref() != [ast::CmpOp::Lt]
+                || !same_name(&call.func, "ord")
+                || name == "ord"
+                || !same_name(arg, name)
+                || !call.arguments.keywords.is_empty()
+                || self.names.contains_key("ord")
+                || self.local_functions.contains_key("ord")
+                || self.resolve(&call.func).is_some()
+            {
+                return None;
+            }
+            (membership, limit.to_string().parse().ok()?)
+        } else {
+            (condition, 0)
+        };
+        let ast::Expr::Compare(test) = membership else {
+            return None;
+        };
+        let [item, keys @ ast::Expr::Name(_)] = test.operands.as_ref() else {
+            return None;
+        };
+        if test.ops.as_ref() != [ast::CmpOp::In] || !same_name(item, name) || same_name(keys, name)
+        {
+            return None;
+        }
+        Some((keys, below))
+    }
+
     /// Pure string expressions may depend on fixed scalar locals but never on
     /// the iteration target. Evaluate them at the first item so even overflow
     /// in string repetition follows the empty-input behavior of the comprehension.
@@ -244,5 +364,32 @@ impl Checker<'_> {
             ty: source.ty,
             kind: ExprKind::Builtin(Builtin::StringListSortSuffix(skip), vec![source]),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{CompileOptions, compile};
+
+    #[test]
+    fn character_set_filter_requires_exact_strings_and_a_pure_predicate() {
+        for (element, condition, fused) in [
+            ("c", "c in keys", true),
+            ("c", "c in keys or ord(c) < 128", true),
+            ("c", "c in keys and ord(c) < 128", false),
+            ("c", "c in keys or ord(c) <= 128", false),
+            ("c", "c in keys or ord(c) < limit", false),
+            ("c.upper()", "c in keys", false),
+        ] {
+            let source = format!(
+                "def select(text: str, keys: set[str], limit: int) -> set[str]:\n    return {{{element} for c in text if {condition}}}\n"
+            );
+            let llvm = compile(&source, &CompileOptions::default()).unwrap();
+            assert_eq!(llvm.contains("call ptr @imre_filter_character_set("), fused);
+        }
+
+        let source = "def ord(c: str) -> int:\n    print(c)\n    return 0\ndef select(text: str, keys: set[str]) -> set[str]:\n    return {c for c in text if c in keys or ord(c) < 32}\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(!llvm.contains("call ptr @imre_filter_character_set("));
     }
 }

@@ -121,6 +121,34 @@ def current():
         else:
             raise AssertionError("invalid struct input accepted")
 
+    # A failed field conversion leaves the preceding fields written.
+    data = bytearray(b"abcdefgh")
+    class TooLarge:
+        def __index__(self):
+            assert data == b"a\x07\x00\x00efgh"
+            return 1 << 16
+
+    try:
+        struct.pack_into(">BH", data, 1, 7, TooLarge())
+    except struct.error:
+        assert data == b"a\x07\x00\x00efgh"
+    else:
+        raise AssertionError("field overflow accepted")
+    view = memoryview(data)[1:6]
+    assert struct.Struct(">H").pack_into(view, -2, 0x1234) is None
+    assert data == b"a\x07\x00\x00\x12\x34gh"
+
+    # Read a signed field within a larger record from either end of a mutable buffer.
+    field = struct.Struct(">l")
+    data = bytearray(b"ab" + field.pack(-2) + b"c")
+    assert struct.unpack_from(">l", data, 2) == field.unpack_from(buffer=data, offset=-5) == (-2,)
+    try:
+        field.unpack_from(data, -3)
+    except struct.error as error:
+        assert str(error) == "not enough data to unpack 4 bytes at offset -3"
+    else:
+        raise AssertionError("short field accepted")
+
     record = struct.Struct(">lbb")
     assert record.size == 6
     encoded = b"\xff\xff\xff\xff\x80\x7f"
@@ -154,6 +182,28 @@ def current():
     assert struct.pack(">l", -2) == b"\xff\xff\xff\xfe"
     assert struct.unpack("<l", b"\xfe\xff\xff\xff") == (-2,)
     assert struct.unpack("!0l", b"") == ()
+    transitions = (-(1 << 63), -2208988800, (1 << 63) - 1)
+    for prefix in ("", "@", "=", "<", ">", "!"):
+        layout = struct.Struct(prefix + "3q")
+        assert layout.size == 24
+        assert layout.unpack(layout.pack(*transitions)) == transitions
+        for n in (-(1 << 63) - 1, 1 << 63):
+            try:
+                struct.pack(prefix + "q", n)
+            except struct.error as error:
+                assert str(error) == "'q' format requires -9223372036854775808 <= number <= 9223372036854775807"
+            else:
+                raise AssertionError("signed long long overflow accepted")
+    assert struct.pack(">q", Field(-2)) == b"\xff" * 7 + b"\xfe"
+    assert struct.unpack("<q", b"\xfe" + b"\xff" * 7) == (-2,)
+    opposite_endian = ">" if struct.pack("@q", 1) == struct.pack("<q", 1) else "<"
+    try:
+        struct.pack(opposite_endian + "q", OverflowingIndex())
+    except HookOverflow:
+        pass
+    else:
+        raise AssertionError("lost index error")
+
     assert struct.calcsize("@B0l") == struct.calcsize("@B0L")
     bcm = struct.Struct("@3I4l2I")
     fields = (1, 2, 3, -1, 17, -19, 23, 29, 31)
@@ -180,6 +230,29 @@ def current():
                 assert str(error) == "'i' format requires -2147483648 <= number <= 2147483647"
             else:
                 raise AssertionError("signed int overflow accepted")
+
+    sample = struct.Struct(">f")
+    assert sample.pack(Double()) == b"\x3f\xc0\x00\x00"
+    assert struct.unpack_from("<f", b"x\x00\x00\xc0\x3f", 1) == (1.5,)
+    assert struct.pack("!f", float("-inf")) == b"\xff\x80\x00\x00"
+    assert struct.calcsize("@B0f") == struct.calcsize("@Bf") - 4
+    assert struct.calcsize("=Bf") == 5
+    signaling_nan = b"\x7f\xa0\x00\x01"
+    assert sample.pack(sample.unpack(signaling_nan)[0]) == signaling_nan
+    try:
+        sample.pack(1e100)
+    except OverflowError as error:
+        assert str(error) == "float too large to pack with f format"
+    else:
+        raise AssertionError("finite float overflow accepted")
+
+    for integer in (1 << 128, -(1 << 128)):
+        try:
+            sample.pack(integer)
+        except struct.error as error:
+            assert str(error) == "int too large to convert"
+        else:
+            raise AssertionError("integer overflow accepted")
 
     assert struct.calcsize("@B0d") == struct.calcsize("@Bd") - 8
     assert struct.calcsize("=Bd") == 9

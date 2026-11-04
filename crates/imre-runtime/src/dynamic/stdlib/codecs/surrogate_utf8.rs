@@ -22,12 +22,12 @@ impl Context {
             Codec::Utf8 { signature: true } => {
                 self.encode_utf8_codepoints(id, true, "surrogateescape")
             }
-            _ => self.encode_single_byte_codepoints(id, codec, true),
+            _ => self.encode_legacy_codepoints(id, codec, true),
         }
     }
 
-    /// Encode code points with a single-byte codec under strict or surrogateescape handling.
-    pub(super) fn encode_single_byte_codepoints(
+    /// Encode code points with a legacy codec under strict or surrogateescape handling.
+    pub(super) fn encode_legacy_codepoints(
         &mut self,
         id: Id,
         codec: Codec,
@@ -38,18 +38,25 @@ impl Context {
         bytes
             .try_reserve_exact(points.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        let encode = |point| char::from_u32(point).and_then(|ch| codec.encode_byte(ch));
+        let encode = |point| char::from_u32(point).and_then(|ch| codec.encode_unit(ch));
         for (start, &point) in points.iter().enumerate() {
-            if let Some(byte) = encode(point) {
-                bytes.push(byte);
+            if let Some((unit, len)) = encode(point) {
+                bytes
+                    .try_reserve(len)
+                    .map_err(|_| crate::Error::allocation())?;
+                bytes.extend_from_slice(&unit[..len]);
             } else if surrogateescape && (0xdc80..=0xdcff).contains(&point) {
                 bytes.push(point as u8);
             } else {
-                let end = start
-                    + points[start..]
-                        .iter()
-                        .take_while(|&&p| encode(p).is_none())
-                        .count();
+                let end = if matches!(codec, Codec::ShiftJis) {
+                    start + 1
+                } else {
+                    start
+                        + points[start..]
+                            .iter()
+                            .take_while(|&&p| encode(p).is_none())
+                            .count()
+                };
                 // A charmap passes the whole unmapped run to the error handler.
                 // ASCII and Latin-1 first consume its leading escaped bytes.
                 let start = if surrogateescape && matches!(codec, Codec::CodePage(_)) {
@@ -62,7 +69,7 @@ impl Context {
                 } else {
                     start
                 };
-                let (name, reason) = codec.single_byte_error();
+                let (name, reason) = codec.encoding_error_reason();
                 let first = points[start];
                 return Err(self.string_encoding_error(id, name, reason, first, start..end));
             }

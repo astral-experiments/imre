@@ -250,6 +250,21 @@ class NonCallableMock(_FixedMock):
                 target = getattr(target, part)
             setattr(target, parts[-1], attrs[path])
 
+    def attach_mock(self, mock, attribute):
+        """Reparent a mock so its calls are recorded under the given attribute."""
+        if _is_instance_mock(mock):
+            node = mock._node
+            node._mock_name = ""
+            node._magic = False
+            if hasattr(node, "_owner"):
+                del node._owner
+        else:
+            # Writable objects can also be attached using the standard mock attributes.
+            mock._mock_parent = mock._mock_new_parent = None
+            mock._mock_name = ""
+            mock._mock_new_name = None
+        setattr(self, attribute, mock)
+
     def _attach(self, child, suffix):
         child._owner = self
         child._suffix = suffix
@@ -311,6 +326,10 @@ class NonCallableMock(_FixedMock):
             adopted = self._adopt(value, "." + name)
             if self._mock_sealed and not adopted and not hasattr(self, name):
                 raise AttributeError("Cannot set " + self._mock_path() + "." + name)
+            if isinstance(value, PropertyMock):
+                # Installing the mock must not call the property's setter.
+                self.__dict__[name] = value
+                return
         object.__setattr__(self, name, value)
 
     def __delattr__(self, name):
@@ -537,6 +556,8 @@ class _MagicSlot:
         setattr(self.parent, self.name, child)
         if self.name == "__exit__":
             child.return_value = False
+        elif self.name == "__int__":
+            child.return_value = 1
         elif self.name == "__iter__":
             def iterate():
                 if child._node._result == -1:
@@ -600,7 +621,7 @@ class Mock(CallableMixin, NonCallableMock):
 
 
 class MagicMock(Mock):
-    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__setitem__", "__iter__", "__next__")
+    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__setitem__", "__int__", "__iter__", "__next__")
 
 
 class NonCallableMagicMock(NonCallableMock):
@@ -620,6 +641,7 @@ def _autospec_target(spec, name, value):
 
 
 def _make_autospec(spec, strict, as_instance, name=None, target=None):
+    from dataclasses import fields, is_dataclass
     from functools import partial
     from inspect import iscoroutinefunction, isdatadescriptor, signature
     from types import FunctionType
@@ -661,6 +683,13 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
             if isinstance(value, FunctionType):
                 target_method = _autospec_target(spec, entry, value)
             members[entry] = (value, target_method)
+        if is_class and as_instance and is_dataclass(spec):
+            # Fields without defaults need not appear in dir(spec). The declared
+            # type supplies the instance attribute's spec even when it has a default.
+            for field in fields(spec):
+                mock._mock_methods.append(field.name)
+                if "__%s__" % field.name[2:-2] != field.name:
+                    members[field.name] = (field.type, None)
         mock._node._autospec_members = members
     if target is not None:
         try:

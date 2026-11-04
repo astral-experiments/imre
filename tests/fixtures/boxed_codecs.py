@@ -25,6 +25,67 @@ def check_text_encoding_flag():
         raise AssertionError("deleted the inherited flag")
 
 
+def check_shift_jis():
+    entry = codecs.lookup("sjis")
+    assert entry.name == "shift_jis"
+    text = "これは古い日本語です。\n"
+    wire = bytes.fromhex("82b182ea82cd8cc382a293fa967b8cea82c582b781420a")
+    assert text.encode("shift-jis") == wire
+    assert wire.decode("csshiftjis") == text
+    assert entry.encode("¥‾ｱ〜") == (b"\\~\xb1\x81\x60", 4)
+    assert entry.decode(b"\\~\xb1\x81\x60") == ("\\~ｱ〜", 5)
+    for data, reason in ((b"A\x81", "incomplete multibyte sequence"),
+                         (b"A\x87@", "illegal multibyte sequence")):
+        try:
+            data.decode("shift_jis")
+        except UnicodeDecodeError as error:
+            assert (error.encoding, error.object, error.start, error.end, error.reason) == (
+                "shift_jis", data, 1, 2, reason)
+        else:
+            raise AssertionError(data)
+    assert b"A\x87@".decode("shift_jis", "replace") == "A\ufffd@"
+    try:
+        "x①①".encode("shift_jis")
+    except UnicodeEncodeError as error:
+        assert (error.encoding, error.object, error.start, error.end, error.reason) == (
+            "shift_jis", "x①①", 1, 2, "illegal multibyte sequence")
+    else:
+        raise AssertionError("accepted a CP932 extension")
+
+    source = "A☃xB"
+    errors = []
+
+    def replace_snowman(error):
+        errors.append(error)
+        return replacement, error.end
+
+    codecs.register_error("test.sjis_replace", replace_snowman)
+    replacement = "Q日"
+    assert source.encode("shift_jis", "test.sjis_replace") == b"AQ\x93\xfaxB"
+    replacement = "Q😀"
+    try:
+        source.encode("shift_jis", "test.sjis_replace")
+    except UnicodeEncodeError as error:
+        assert error.object is replacement
+        assert (error.encoding, error.start, error.end, error.reason) == (
+            "shift_jis", 1, 2, "illegal multibyte sequence")
+    else:
+        raise AssertionError("accepted an unencodable replacement")
+    assert len(errors) == 2
+    assert all(error.object is source and (error.start, error.end) == (1, 2) for error in errors)
+
+    def second_handler(error):
+        codecs.register_error("test.sjis_switch", codecs.replace_errors)
+        return b"B", error.end
+
+    def switch_handler(error):
+        codecs.register_error("test.sjis_switch", second_handler)
+        return b"A", error.end
+
+    codecs.register_error("test.sjis_switch", switch_handler)
+    assert "☃😀☃".encode("shift_jis", "test.sjis_switch") == b"AB?"
+
+
 def check_raw_unicode_escape():
     source = "\0\n\\u1234\x1aÿĀ€\ud800\udfff😀"
     encoded = b"\0\n\\u1234\x1a\xff" + br"\u0100\u20ac\ud800\udfff\U0001f600"
@@ -214,13 +275,40 @@ def check_incremental_decoder_factory():
         entry.incrementaldecoder = IncrementalDecoder
 
 
+def check_utf8_error_handler():
+    def replace_surrogate(error):
+        return "?", error.end
+
+    codecs.register_error("test.utf8_scalar", replace_surrogate)
+    for encoding in ("utf-8", "utf-8-sig"):
+        assert "é東🚉".encode(encoding, "test.utf8_scalar") == "é東🚉".encode(encoding)
+        assert "A\ud800B".encode(encoding, "test.utf8_scalar") == "A?B".encode(encoding)
+
+
+def check_utf8_buffer_slice():
+    from array import array
+
+    assert codecs.utf_8_decode(array("B", b"data")) == ("data", 4)
+    source = memoryview(array("B", b"\xffdata\xff"))
+    assert codecs.utf_8_decode(source[1:5].cast("I")) == ("data", 4)
+    try:
+        codecs.utf_8_decode(source[1:5:2])
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("decoded a non-contiguous array view")
+
+
 def current():
+    check_utf8_error_handler()
+    check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
     check_incremental_decoder_factory()
     check_text_encoding_flag()
     check_escape_decode()
     fixed_endian_encoders()
     utf16_extended_decoder()
+    check_shift_jis()
     check_raw_unicode_escape()
     check_boms()
     decoder = codecs.IncrementalDecoder(errors="replace")
@@ -322,6 +410,11 @@ def current():
         text = wire.decode(name)
         assert text[128:131] == "Çüé" and text.encode(name) == wire
         assert codecs.lookup(name).name == "cp437"
+
+    entry_koi8 = codecs.lookup("KOI8_U")
+    assert entry_koi8.name == "koi8-u"
+    assert entry_koi8.decode(bytes.fromhex("a4 b4 ad bd a6 b6 a7 b7")) == ("єЄґҐіІїЇ", 8)
+    assert wire.decode("koi8-u").encode("koi8-u") == wire
     text = entry.decode(wire)[0]
     for name in ("latin-1", "LATIN_1", "iso-8859-1", "cp819"):
         print(text.encode(name) == wire, text.encode(name, "strict") == wire)

@@ -1,74 +1,9 @@
-//! One-dimensional native memoryview indexing and assignment.
+//! Native memoryview indexing, casting and assignment.
 use super::{Context, Error, Id, Result, Value, builtins, slice};
 use num_traits::ToPrimitive;
 
-#[derive(Clone, Copy)]
-pub(super) struct ViewLayout {
-    pub(super) start: usize,
-    pub(super) len: usize,
-    pub(super) stride: i64,
-    pub(super) byte_format: Option<&'static str>,
-}
-
-impl ViewLayout {
-    pub(super) fn full(len: usize) -> Self {
-        Self {
-            start: 0,
-            len,
-            stride: 1,
-            byte_format: None,
-        }
-    }
-
-    pub(super) fn is_contiguous(self) -> bool {
-        self.len == 1 || self.stride == 1
-    }
-
-    fn position(self, index: usize) -> i128 {
-        self.start as i128 + index as i128 * i128::from(self.stride)
-    }
-
-    // The first and last element bound every address in a one-dimensional view.
-    fn checked(self, elements: usize) -> Result<Self> {
-        if self.len > elements
-            || self.start > elements
-            || (self.len != 0
-                && (self.start == elements
-                    || !(0..elements as i128).contains(&self.position(self.len - 1))))
-        {
-            return Err(Error::new(
-                "BufferError",
-                "underlying buffer has changed size",
-            ));
-        }
-        Ok(self)
-    }
-
-    fn element(self, index: usize) -> usize {
-        self.position(index) as usize
-    }
-
-    fn sliced(self, bounds: [Option<i64>; 3]) -> Self {
-        let [start, stop, step] = slice::normalize(bounds, self.len as i64);
-        // PySlice_Unpack limits the absolute step to PY_SSIZE_T_MAX.
-        let step = step.max(-i64::MAX);
-        let distance = if step > 0 { stop - start } else { start - stop };
-        let len = (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize;
-        // A stride too large to address another element is still reported by CPython
-        // using signed Py_ssize_t arithmetic on singleton and empty views.
-        let stride = self.stride.wrapping_mul(step);
-        Self {
-            start: if len == 0 {
-                0
-            } else {
-                self.element(start as usize)
-            },
-            len,
-            stride,
-            byte_format: self.byte_format,
-        }
-    }
-}
+mod shape;
+pub(super) use shape::ViewLayout;
 
 struct Span<'a> {
     data: &'a [u8],
@@ -80,7 +15,7 @@ struct Span<'a> {
 
 impl<'a> Span<'a> {
     fn element(&self, index: usize) -> &[u8] {
-        let offset = self.layout.element(index) * self.width;
+        let offset = self.layout.byte_at(index, self.width);
         &self.data[offset..offset + self.width]
     }
 
@@ -91,16 +26,20 @@ impl<'a> Span<'a> {
                 "memoryview: underlying buffer is not C-contiguous",
             ));
         }
-        let begin = self.layout.start * self.width;
+        let begin = self.layout.byte_start(self.width);
         Ok(&self.data[begin..begin + self.layout.len * self.width])
     }
 
-    fn gather(&self) -> Result<Vec<u8>> {
+    fn gather(&self, fortran: bool) -> Result<Vec<u8>> {
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(self.layout.len * self.width)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        if let Ok(data) = self.contiguous() {
+        if fortran && self.layout.shape().len() > 1 && !self.layout.is_f_contiguous() {
+            for i in 0..self.layout.len {
+                bytes.extend_from_slice(self.element(self.layout.fortran_index(i)));
+            }
+        } else if let Ok(data) = self.contiguous() {
             bytes.extend_from_slice(data);
         } else {
             for i in 0..self.layout.len {
@@ -110,12 +49,16 @@ impl<'a> Span<'a> {
         Ok(bytes)
     }
 
-    fn item(&self, index: usize) -> Option<Value> {
+    fn item(&self, index: usize) -> Result<Value> {
         if let Some(array) = self.array {
-            array.at(self.layout.element(index)).ok()
-        } else {
-            Some(Value::Int(i64::from(self.element(index)[0]).into()))
+            return array.at(self.layout.element(index));
         }
+        let bytes = self.element(index);
+        let number = match self.format {
+            "I" | "@I" => i64::from(u32::from_ne_bytes(bytes.try_into().unwrap())),
+            _ => i64::from(bytes[0]),
+        };
+        Ok(Value::Int(number.into()))
     }
 }
 
@@ -135,21 +78,30 @@ impl Context {
     }
 
     pub(super) fn view_layout(&self, view: Id) -> Result<ViewLayout> {
-        let Value::MemoryView { owner, layout, .. } = *self.heap.get(view) else {
+        let Value::MemoryView { owner, layout, .. } = self.heap.get(view) else {
             unreachable!()
         };
-        let owner = Self::memoryview_owner(owner)?;
+        let owner = Self::memoryview_owner(*owner)?;
         let layout = match layout {
-            Some(layout) => layout,
+            Some(layout) => layout.clone(),
             None => ViewLayout::full(self.view_element_count(owner)?),
         };
-        let (_, width) = self.view_format_width(owner, layout);
-        layout.checked(self.owner_bytes(owner)?.len() / width)
+        let (_, width) = self.view_format_width(owner, &layout);
+        layout.checked(self.owner_bytes(owner)?.len(), width)
     }
 
-    pub(super) fn view_format_width(&self, owner: Id, layout: ViewLayout) -> (&'static str, usize) {
+    pub(super) fn view_format_width(
+        &self,
+        owner: Id,
+        layout: &ViewLayout,
+    ) -> (&'static str, usize) {
         if let Some(format) = layout.byte_format {
-            return (format, 1);
+            let width = if matches!(format, "I" | "@I") {
+                size_of::<u32>()
+            } else {
+                1
+            };
+            return (format, width);
         }
         if !matches!(self.heap.get(owner), Value::RawReadWindow(_))
             && let Value::Array(a) = self.heap.get(self.view_storage_id(owner))
@@ -159,31 +111,74 @@ impl Context {
         ("B", 1)
     }
 
-    pub(super) fn unsigned_assignment_bytes(&self, value: Id, len: usize) -> Result<Vec<u8>> {
-        let span = self.buffer_span(value)?;
-        if span.format.trim_start_matches('@') != "B" || span.layout.len != len {
-            return Err(structure_error());
-        }
-        span.gather()
-    }
-
     fn buffer_span(&self, id: Id) -> Result<Span<'_>> {
         let (owner, layout) = if matches!(self.heap.get(id), Value::MemoryView { .. }) {
             (self.view_owner(id)?, self.view_layout(id)?)
         } else {
             (id, ViewLayout::full(self.view_element_count(id)?))
         };
-        let (format, width) = self.view_format_width(owner, layout);
+        let (format, width) = self.view_format_width(owner, &layout);
         Ok(Span {
             data: self.owner_bytes(owner)?,
             array: match self.heap.get(self.view_storage_id(owner)) {
-                Value::Array(array) if layout.byte_format.is_none() => Some(array),
+                Value::Array(array)
+                    if layout.byte_format.is_none()
+                        && !matches!(self.heap.get(owner), Value::RawReadWindow(_)) =>
+                {
+                    Some(array)
+                }
                 _ => None,
             },
             layout,
             format,
             width,
         })
+    }
+
+    pub(super) fn memoryview_iterator(&mut self, view: Id) -> Result<Id> {
+        let layout = self.view_layout(view)?;
+        let length = match layout.shape() {
+            [] => return Err(Error::new("TypeError", "invalid indexing of 0-dim memory")),
+            [length] => *length,
+            _ => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "multi-dimensional sub-views are not implemented",
+                ));
+            }
+        };
+        Ok(self.alloc(Value::MemoryIterator {
+            view: Some(view),
+            index: 0,
+            length,
+        }))
+    }
+
+    pub(super) fn next_memoryview_item(
+        &mut self,
+        iterator: Id,
+        view: Option<Id>,
+        index: usize,
+        length: usize,
+    ) -> Result<Option<Id>> {
+        let Some(view) = view else {
+            return Ok(None);
+        };
+        // Exhaustion uses the original length even if the view has since been released.
+        if index == length {
+            let Value::MemoryIterator { view: source, .. } = self.heap.get_mut(iterator) else {
+                unreachable!()
+            };
+            *source = None;
+            self.heap.weak_edge_removed(view);
+            return Ok(None);
+        }
+        let item = self.buffer_span(view)?.item(index);
+        let Value::MemoryIterator { index, .. } = self.heap.get_mut(iterator) else {
+            unreachable!()
+        };
+        *index += 1;
+        Ok(Some(self.alloc(item?)))
     }
 
     pub(super) fn cast_memoryview(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -215,79 +210,120 @@ impl Context {
                 "memoryview: casts are restricted to C-contiguous views",
             ));
         }
-        let byte_format = match name {
-            "B" => "B",
-            "@B" => "@B",
-            _ => {
-                let native = name.strip_prefix('@').unwrap_or(name);
-                if native.len() != 1 || !"cb?hHiIlLqQnNefdP".contains(native) {
-                    return Err(Error::new(
-                        "ValueError",
-                        "memoryview: destination format must be a native single character format prefixed with an optional '@'",
-                    ));
-                }
-                if !matches!(span.format.trim_start_matches('@'), "B" | "b" | "c")
-                    && !matches!(native, "B" | "b" | "c")
-                {
-                    return Err(Error::new(
-                        "TypeError",
-                        "memoryview: cannot cast between two non-byte formats",
-                    ));
-                }
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "only casts to unsigned bytes are supported",
-                ));
-            }
-        };
-        let len = span.layout.len * span.width;
-        if let Some(shape) = shape {
+        let rank = span.layout.shape().len();
+        if (shape.is_some() || rank != 1) && span.layout.len == 0 {
+            return Err(Error::new(
+                "TypeError",
+                "memoryview: cannot cast view with zeros in shape or strides",
+            ));
+        }
+        let dims = if let Some(shape) = shape {
             let (Value::List(dims) | Value::Tuple(dims)) = self.heap.get(self.scalar_value(shape))
             else {
                 return Err(Error::new("TypeError", "shape must be a list or a tuple"));
             };
-            if len == 0 {
-                return Err(Error::new(
-                    "TypeError",
-                    "memoryview: cannot cast view with zeros in shape or strides",
-                ));
-            }
-            let [size] = dims.as_slice() else {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "only one-dimensional casts are supported",
-                ));
-            };
-            let size = self.as_int(*size).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    "memoryview.cast(): elements of shape must be integers",
-                )
-            })?;
-            let size = size.to_i64().ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    "Python int too large to convert to C ssize_t",
-                )
-            })?;
-            if size <= 0 {
+            if dims.len() > 64 {
                 return Err(Error::new(
                     "ValueError",
-                    "memoryview.cast(): elements of shape must be integers > 0",
+                    "memoryview: number of dimensions must not exceed 64",
                 ));
             }
-            if size != len as i64 {
+            if rank != 1 && dims.len() != 1 {
+                return Err(Error::new(
+                    "TypeError",
+                    "memoryview: cast must be 1D -> ND or ND -> 1D",
+                ));
+            }
+            Some(dims)
+        } else {
+            None
+        };
+        let native = name.strip_prefix('@').unwrap_or(name);
+        if native.len() != 1 || !"cBb?hHiIlLqQnNefdP".contains(native) {
+            return Err(Error::new(
+                "ValueError",
+                "memoryview: destination format must be a native single character format prefixed with an optional '@'",
+            ));
+        }
+        if !matches!(span.format.trim_start_matches('@'), "B" | "b" | "c")
+            && !matches!(native, "B" | "b" | "c")
+        {
+            return Err(Error::new(
+                "TypeError",
+                "memoryview: cannot cast between two non-byte formats",
+            ));
+        }
+        let (format, width) = match name {
+            "B" => ("B", 1),
+            "@B" => ("@B", 1),
+            "I" => ("I", size_of::<u32>()),
+            "@I" => ("@I", size_of::<u32>()),
+            _ => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "only casts to unsigned bytes and unsigned ints are supported",
+                ));
+            }
+        };
+        let nbytes = span.layout.len * span.width;
+        if !nbytes.is_multiple_of(width) {
+            return Err(Error::new(
+                "TypeError",
+                "memoryview: length is not a multiple of itemsize",
+            ));
+        }
+        let len = nbytes / width;
+        let shape = if let Some(dims) = dims {
+            let mut shape = Vec::with_capacity(dims.len());
+            let mut bytes = width;
+            for &size in dims {
+                let size = self.as_int(size).map_err(|_| {
+                    Error::new(
+                        "TypeError",
+                        "memoryview.cast(): elements of shape must be integers",
+                    )
+                })?;
+                let size = size.to_i64().ok_or_else(|| {
+                    Error::new(
+                        "OverflowError",
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+                if size <= 0 {
+                    return Err(Error::new(
+                        "ValueError",
+                        "memoryview.cast(): elements of shape must be integers > 0",
+                    ));
+                }
+                let size = size as usize;
+                bytes = bytes
+                    .checked_mul(size)
+                    .filter(|&n| n <= isize::MAX as usize)
+                    .ok_or_else(|| {
+                        Error::new(
+                            "ValueError",
+                            "memoryview.cast(): product(shape) > SSIZE_MAX",
+                        )
+                    })?;
+                shape.push(size);
+            }
+            if bytes != nbytes {
                 return Err(Error::new(
                     "TypeError",
                     "memoryview: product(shape) * itemsize != buffer size",
                 ));
             }
-        }
-        let cast = ViewLayout {
-            start: span.layout.start * span.width,
-            byte_format: Some(byte_format),
-            ..ViewLayout::full(len)
+            Some(shape)
+        } else {
+            None
         };
+        let cast = ViewLayout::cast(
+            span.layout.byte_start(span.width),
+            width,
+            len,
+            format,
+            shape,
+        );
         let child = self.new_memoryview(view)?;
         if let Value::MemoryView { layout, .. } = self.heap.get_mut(child) {
             *layout = Some(cast);
@@ -310,14 +346,18 @@ impl Context {
     }
 
     pub(super) fn memoryview_bytes(&self, view: Id) -> Result<Vec<u8>> {
-        self.buffer_span(view)?.gather()
+        self.memoryview_bytes_order(view, false)
+    }
+
+    pub(super) fn memoryview_bytes_order(&self, view: Id, fortran: bool) -> Result<Vec<u8>> {
+        self.buffer_span(view)?.gather(fortran)
     }
 
     pub(super) fn memoryview_equal(&self, a: Id, b: Id) -> bool {
         let (Ok(left), Ok(right)) = (self.buffer_span(a), self.buffer_span(b)) else {
             return a == b;
         };
-        if left.layout.len != right.layout.len {
+        if !left.layout.same_shape(&right.layout) {
             return false;
         }
         if left.format == "B"
@@ -326,7 +366,7 @@ impl Context {
         {
             return x == y;
         }
-        (0..left.layout.len).all(|i| match (left.item(i), right.item(i)) {
+        (0..left.layout.len).all(|i| match (left.item(i).ok(), right.item(i).ok()) {
             (Some(Value::Int(x)), Some(Value::Int(y))) => x.cmp(&y).is_eq(),
             (Some(Value::Float(x)), Some(Value::Float(y))) => x == y,
             (Some(Value::Int(n)), Some(Value::Float(f)))
@@ -336,16 +376,24 @@ impl Context {
     }
 
     fn view_index(&mut self, id: Id, key: Id, assign: bool) -> Result<usize> {
-        let key = if let Value::Tuple(items) = self.heap.get(key) {
-            if items.is_empty() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "sub-views are not implemented",
-                ));
-            }
-            if items
-                .iter()
-                .all(|&v| matches!(self.heap.get(v), Value::Slice(_)))
+        let layout = self.view_layout(id)?;
+        let shape = layout.shape();
+        let rank = shape.len();
+        if rank == 0 {
+            return if key == super::value::ELLIPSIS
+                || self.tuple_items(key)?.is_some_and(|items| items.is_empty())
+            {
+                Ok(0)
+            } else {
+                Err(Error::new("TypeError", "invalid indexing of 0-dim memory"))
+            };
+        }
+        let scalar_index = self.is_view_index(key);
+        if !scalar_index && let Some(items) = self.tuple_items(key)? {
+            if !items.is_empty()
+                && items
+                    .iter()
+                    .all(|&v| matches!(self.heap.get(v), Value::Slice(_)))
             {
                 let text = if assign {
                     "memoryview slice assignments are currently restricted to ndim = 1"
@@ -354,56 +402,95 @@ impl Context {
                 };
                 return Err(Error::new("NotImplementedError", text));
             }
-            if items.iter().any(|&id| {
-                !matches!(self.heap.get(self.scalar_value(id)), Value::Int(_) | Value::Bool(_))
-                    && !matches!(self.heap.get(id), Value::Instance {class, ..} if self.class_attr(*class, "__index__").is_some())
-            }) {
+            if items.iter().any(|&id| !self.is_view_index(id)) {
                 return Err(Error::new("TypeError", "memoryview: invalid slice key"));
             }
-            if items.len() != 1 {
+            if items.len() < rank {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "sub-views are not implemented",
+                ));
+            }
+            if items.len() > rank {
                 return Err(Error::new(
                     "TypeError",
                     format!(
-                        "cannot index 1-dimension view with {}-element tuple",
+                        "cannot index {rank}-dimension view with {}-element tuple",
                         items.len()
                     ),
                 ));
             }
-            items[0]
-        } else {
-            key
-        };
-        let index = self
-            .index_value(key)?
-            .ok_or_else(|| Error::new("TypeError", "memoryview: invalid slice key"))?;
-        let index = index.to_i64().ok_or_else(|| {
-            Error::new(
-                "IndexError",
-                format!(
-                    "cannot fit '{}' into an index-sized integer",
-                    self.type_name(key)
-                ),
-            )
-        })?;
-        let layout = self.view_layout(id)?;
+            let mut flat = 0;
+            for (axis, (key, &size)) in items.into_iter().zip(shape).enumerate() {
+                flat = flat * size + self.view_coordinate(key, size, axis)?;
+            }
+            return Ok(flat);
+        }
+        if rank != 1 {
+            if !scalar_index {
+                return Err(Error::new("TypeError", "memoryview: invalid slice key"));
+            }
+            if !assign {
+                self.view_subscript_index(key)?;
+            }
+            let message = if assign {
+                "sub-views are not implemented"
+            } else {
+                "multi-dimensional sub-views are not implemented"
+            };
+            return Err(Error::new("NotImplementedError", message));
+        }
+        self.view_coordinate(key, shape[0], 0)
+    }
+
+    fn is_view_index(&self, key: Id) -> bool {
+        matches!(
+            self.heap.get(self.scalar_value(key)),
+            Value::Int(_) | Value::Bool(_)
+        ) || matches!(self.heap.get(key), Value::Instance {class, ..} if self.class_attr(*class, "__index__").is_some())
+    }
+
+    fn view_subscript_index(&mut self, key: Id) -> Result<i64> {
+        self.index_value(key)?
+            .ok_or_else(|| Error::new("TypeError", "memoryview: invalid slice key"))?
+            .to_i64()
+            .ok_or_else(|| {
+                Error::new(
+                    "IndexError",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        self.type_name(key)
+                    ),
+                )
+            })
+    }
+
+    fn view_coordinate(&mut self, key: Id, size: usize, axis: usize) -> Result<usize> {
+        let index = self.view_subscript_index(key)?;
         let index = if index < 0 {
-            index + layout.len as i64
+            index + size as i64
         } else {
             index
         };
-        if index < 0 || index as usize >= layout.len {
+        if index < 0 || index as usize >= size {
             return Err(Error::new(
                 "IndexError",
-                "index out of bounds on dimension 1",
+                format!("index out of bounds on dimension {}", axis + 1),
             ));
         }
-        Ok(layout.element(index as usize))
+        Ok(index as usize)
     }
 
     pub(super) fn memoryview_get(&mut self, view: Id, key: Id) -> Result<Id> {
         let owner = self.view_owner(view)?;
+        if key == super::value::ELLIPSIS && self.view_layout(view)?.shape().is_empty() {
+            return Ok(view);
+        }
         if let Value::Slice(parts) = *self.heap.get(key) {
             let layout = self.view_layout(view)?;
+            if layout.shape().is_empty() {
+                return Err(Error::new("TypeError", "invalid indexing of 0-dim memory"));
+            }
             let Value::MemoryView {
                 anonymous,
                 readonly,
@@ -426,7 +513,7 @@ impl Context {
             let mark = self.heap.temporary_mark();
             self.heap.keep(child);
             let sliced = slice::sequence_components(self, parts)
-                .and_then(|bounds| Ok(self.view_layout(child)?.sliced(bounds)));
+                .and_then(|bounds| self.view_layout(child)?.sliced(bounds));
             self.heap.release_temporaries_since(mark);
             let Value::MemoryView { layout, .. } = self.heap.get_mut(child) else {
                 unreachable!()
@@ -435,16 +522,8 @@ impl Context {
             return Ok(child);
         }
         let index = self.view_index(view, key, false)?;
-        let owner = self.view_owner(view)?;
-        if self.view_layout(view)?.byte_format.is_none()
-            && let Value::Array(array) = self.heap.get(self.view_storage_id(owner))
-        {
-            let item = array.at(index)?;
-            Ok(self.alloc(item))
-        } else {
-            let value = self.owner_bytes(owner)?[index];
-            Ok(self.int(value.into()))
-        }
+        let item = self.buffer_span(view)?.item(index)?;
+        Ok(self.alloc(item))
     }
 
     pub(super) fn buffer_item_method(
@@ -507,6 +586,7 @@ impl Context {
     }
 
     fn packed_view_value(&mut self, format: &str, value: Id) -> Result<Vec<u8>> {
+        let format = format.strip_prefix('@').unwrap_or(format);
         let invalid_type = || {
             Error::new(
                 "TypeError",
@@ -550,7 +630,13 @@ impl Context {
             }
         };
         Ok(match format {
-            "B" | "@B" => vec![n.big().to_u8().ok_or_else(invalid_value)?],
+            "B" => vec![n.big().to_u8().ok_or_else(invalid_value)?],
+            "I" => n
+                .big()
+                .to_u32()
+                .ok_or_else(invalid_value)?
+                .to_ne_bytes()
+                .to_vec(),
             "b" => vec![n.big().to_i8().ok_or_else(invalid_value)? as u8],
             "q" => n.to_i64().ok_or_else(invalid_value)?.to_ne_bytes().to_vec(),
             "i" => n
@@ -573,41 +659,45 @@ impl Context {
         if self.view_is_readonly(view)? {
             return Err(Error::new("TypeError", "cannot modify read-only memory"));
         }
-        let (format, width) = self.view_format_width(owner, self.view_layout(view)?);
+        let layout = self.view_layout(view)?;
+        let (format, width) = self.view_format_width(owner, &layout);
         let (dest, source) = if let Value::Slice(parts) = *self.heap.get(key) {
+            match layout.shape().len() {
+                0 => return Err(Error::new("TypeError", "invalid indexing of 0-dim memory")),
+                1 => {}
+                _ => {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "memoryview slice assignments are currently restricted to ndim = 1",
+                    ));
+                }
+            }
             self.check_buffer_exporter(value)?;
             // CPython acquires the right-hand buffer before interpreting the slice, but
             // reads its contents after index conversions, which can mutate that buffer.
             self.buffer_span(value)?;
             self.with_buffer_export(value, |ctx| {
                 let bounds = slice::sequence_components(ctx, parts)?;
-                let dest = ctx.view_layout(view)?.sliced(bounds);
+                let dest = ctx.view_layout(view)?.sliced(bounds)?;
                 let rhs = ctx.buffer_span(value)?;
                 if rhs.format.trim_start_matches('@') != format.trim_start_matches('@')
-                    || rhs.layout.len != dest.len
+                    || !rhs.layout.same_shape(&dest)
                 {
                     return Err(structure_error());
                 }
                 // Take a copy before assignment because the two views can overlap.
-                Ok((dest, rhs.gather()?))
+                Ok((dest, rhs.gather(false)?))
             })?
         } else {
             let index = self.view_index(view, key, true)?;
             let bytes = self.packed_view_value(format, value)?;
-            self.view_owner(view)?;
-            (
-                ViewLayout {
-                    start: index,
-                    ..ViewLayout::full(1)
-                },
-                bytes,
-            )
+            let layout = self.view_layout(view)?;
+            (layout.scalar_at(index), bytes)
         };
-        let storage = self.view_storage_id(owner);
-        let bytes = self.writable_storage_bytes(storage)?;
-        dest.checked(bytes.len() / width)?;
+        let bytes = self.writable_owner_bytes(owner)?;
+        let dest = dest.checked(bytes.len(), width)?;
         for (i, item) in source.chunks_exact(width).enumerate() {
-            let start = dest.element(i) * width;
+            let start = dest.byte_at(i, width);
             bytes[start..start + width].copy_from_slice(item);
         }
         Ok(())

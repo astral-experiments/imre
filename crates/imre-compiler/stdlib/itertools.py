@@ -35,23 +35,6 @@ chain = _make_chain(_itertools._chain_next, _itertools._chain_set, _itertools._c
 
 
 def _make_cycle(_allocate, _advance):
-    def object_state(obj):
-        getstate = getattr(type(obj), "__getstate__", None)
-        if getstate is not None and getstate is not getattr(object, "__getstate__", None):
-            return getstate(obj)
-        state = getattr(obj, "__dict__", None) or None
-        slots = {}
-        for base in type(obj).__mro__:
-            names = getattr(base, "__dict__", {}).get("__slots__", ())
-            for name in (names,) if isinstance(names, str) else names:
-                if name in ("__dict__", "__weakref__"):
-                    continue
-                if name.startswith("__") and not name.endswith("__") and base.__name__.lstrip("_"):
-                    name = "_" + base.__name__.lstrip("_") + name
-                if hasattr(obj, name):
-                    slots[name] = getattr(obj, name)
-        return (state, slots) if slots else state
-
     class cycle:
         """Repeat an iterable, saving each element as the input produces it."""
 
@@ -70,48 +53,6 @@ def _make_cycle(_allocate, _advance):
         def __next__(self):
             return _advance(self)
 
-        def __reduce__(self):
-            cls = type(self)
-            if cls is __class__:
-                raise TypeError("cannot pickle 'cycle' object")
-            from copyreg import _reconstructor
-            args = (cls, __class__, __class__(self))
-            if getattr(cls, "__slots__", ()) and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None):
-                raise TypeError("a class that defines __slots__ without defining __getstate__ cannot be pickled")
-            state = object_state(self)
-            return (_reconstructor, args, state) if state else (_reconstructor, args)
-
-        def __reduce_ex__(self, protocol, /):
-            protocol = _index(protocol)
-            cls = type(self)
-            if protocol < 2 or cls.__reduce__ is not __class__.__reduce__:
-                return self.__reduce__()
-            getargs_ex = getattr(cls, "__getnewargs_ex__", None)
-            getargs = getattr(cls, "__getnewargs__", None)
-            custom_state = getattr(cls, "__getstate__", None) is not getattr(object, "__getstate__", None)
-            if getargs_ex is None and getargs is None and not custom_state:
-                name = "itertools.cycle" if cls is __class__ else cls.__name__
-                raise TypeError(f"cannot pickle {name!r} object")
-            from copyreg import __newobj__, __newobj_ex__
-            args, kwargs = (), {}
-            if getargs_ex is not None:
-                pair = getargs_ex(self)
-                if not isinstance(pair, tuple):
-                    raise TypeError(f"__getnewargs_ex__ should return a tuple, not {type(pair).__name__!r}")
-                if len(pair) != 2:
-                    raise ValueError(f"__getnewargs_ex__ should return a tuple of length 2, not {len(pair)}")
-                args, kwargs = pair
-                if not isinstance(args, tuple):
-                    raise TypeError(f"first item of the tuple returned by __getnewargs_ex__ must be a tuple, not {type(args).__name__!r}")
-                if not isinstance(kwargs, dict):
-                    raise TypeError(f"second item of the tuple returned by __getnewargs_ex__ must be a dict, not {type(kwargs).__name__!r}")
-            elif getargs is not None:
-                args = getargs(self)
-                if not isinstance(args, tuple):
-                    raise TypeError(f"__getnewargs__ should return a tuple, not {type(args).__name__!r}")
-            factory, arguments = (__newobj_ex__, (cls, args, kwargs)) if kwargs else (__newobj__, (cls, *args))
-            return factory, arguments, object_state(self), None, None
-
     cycle.__qualname__ = "cycle"
     return cycle
 
@@ -125,9 +66,12 @@ def _make_filterfalse(_allocate, _state):
 
         __slots__ = ()
 
-        def __new__(cls, predicate, iterable, /, **kwargs):
+        def __new__(cls, /, *args, **kwargs):
             if kwargs and getattr(cls, "__init__", None) is getattr(__class__, "__init__", None):
                 raise TypeError("filterfalse() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"filterfalse expected 2 arguments, got {len(args)}")
+            predicate, iterable = args
             return _allocate(__class__, cls, bool if predicate is None else predicate, iterable)
 
         def __iter__(self):
@@ -139,15 +83,6 @@ def _make_filterfalse(_allocate, _state):
                 item = next(source)
                 if not predicate(item):
                     return item
-
-        def __reduce__(self):
-            raise TypeError("cannot pickle 'filterfalse' object")
-
-        def __reduce_ex__(self, protocol, /):
-            if _index(protocol) < 2 or type(self).__reduce__ is not __class__.__reduce__:
-                return self.__reduce__()
-            name = "itertools.filterfalse" if type(self) is __class__ else type(self).__name__
-            raise TypeError(f"cannot pickle '{name}' object")
 
     filterfalse.__qualname__ = "filterfalse"
     return filterfalse

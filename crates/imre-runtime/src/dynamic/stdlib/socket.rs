@@ -23,6 +23,7 @@ const CONSTANTS: &[(&str, i32)] = &[
 
 // socket.py imports these constants once, so deletion must not fall back to a native value.
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    ("AI_NUMERICHOST", libc::AI_NUMERICHOST),
     ("AI_NUMERICSERV", libc::AI_NUMERICSERV),
     ("EAI_SERVICE", libc::EAI_SERVICE),
     ("EAI_NODATA", libc::EAI_NODATA),
@@ -36,9 +37,14 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
     ("SOL_SOCKET", libc::SOL_SOCKET),
     ("SO_TYPE", libc::SO_TYPE),
+    ("SO_ERROR", libc::SO_ERROR),
     ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),
+    #[cfg(target_os = "linux")]
+    ("SOCK_CLOEXEC", libc::SOCK_CLOEXEC),
+    #[cfg(target_os = "linux")]
+    ("SOCK_NONBLOCK", libc::SOCK_NONBLOCK),
     ("SOCK_RAW", libc::SOCK_RAW),
     ("SOCK_RDM", libc::SOCK_RDM),
     ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
@@ -68,7 +74,14 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.builtin(&format!("socket.{name}"));
         ctx.bind(scope, name, value);
     }
-    for name in ["getdefaulttimeout", "setdefaulttimeout"] {
+    for name in [
+        "getdefaulttimeout",
+        "setdefaulttimeout",
+        "inet_aton",
+        "inet_pton",
+        "inet_ntoa",
+        "inet_ntop",
+    ] {
         let function = ctx.builtin(&format!("_socket.{name}"));
         ctx.bind(scope, name, function);
     }
@@ -97,7 +110,15 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
         .iter()
         .map(|&(name, _)| name)
         .chain(RESOLVER_NAMES.iter().copied())
-        .chain(["timeout", "getdefaulttimeout", "setdefaulttimeout"])
+        .chain([
+            "timeout",
+            "getdefaulttimeout",
+            "setdefaulttimeout",
+            "inet_aton",
+            "inet_pton",
+            "inet_ntoa",
+            "inet_ntop",
+        ])
     {
         match ctx.lookup_attr(low, name) {
             Ok(value) => ctx.bind(scope, name, value),
@@ -603,10 +624,10 @@ pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)
 }
 
 /// Parse a PyArg "s" argument as strict UTF-8 without calling str subclass methods.
-fn service_text(
+fn text_argument(
     ctx: &mut Context,
     name: &str,
-    index: usize,
+    index: Option<usize>,
     value: Id,
 ) -> Result<std::ffi::CString> {
     let storage = ctx.string_storage(value).ok_or_else(|| {
@@ -615,16 +636,149 @@ fn service_text(
         } else {
             ctx.type_name(value)
         };
-        Error::new(
-            "TypeError",
-            format!("{name}() argument {index} must be str, not {ty}"),
-        )
+        let message = match index {
+            Some(index) => format!("{name}() argument {index} must be str, not {ty}"),
+            None => {
+                let ty = &ty[..ty.floor_char_boundary(50)];
+                format!("{name}() argument must be str, not {ty}")
+            }
+        };
+        Error::new("TypeError", message)
     })?;
     let text = match ctx.heap.get(storage) {
         Value::Str(text) => std::ffi::CString::new(text.as_bytes()),
         _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
     };
     text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+/// Convert the host's IPv4 numbers-and-dots notation to four network-order bytes.
+pub(super) fn inet_aton(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let arg = super::super::builtins::one_positional_arg("_socket.inet_aton", args, kwargs)?;
+    let text = text_argument(ctx, "inet_aton", None, arg)?;
+    unsafe extern "C" {
+        #[link_name = "inet_aton"]
+        fn c_inet_aton(cp: *const libc::c_char, inp: *mut libc::in_addr) -> libc::c_int;
+    }
+    let mut addr = libc::in_addr { s_addr: 0 };
+    // SAFETY: text is NUL-terminated and addr is a writable IPv4 address.
+    if unsafe { c_inet_aton(text.as_ptr(), &mut addr) } == 0 {
+        return Err(Error::new(
+            "OSError",
+            "illegal IP address string passed to inet_aton",
+        ));
+    }
+    Ok(ctx.alloc(Value::Bytes(addr.s_addr.to_ne_bytes().to_vec())))
+}
+
+/// Parse a numeric IPv4 or IPv6 address using the platform's inet_pton.
+pub(super) fn inet_pton(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    unsafe extern "C" {
+        #[link_name = "inet_pton"]
+        fn c_inet_pton(
+            af: libc::c_int,
+            src: *const libc::c_char,
+            dst: *mut libc::c_void,
+        ) -> libc::c_int;
+    }
+
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "inet_pton() takes no keyword arguments",
+        ));
+    }
+    let [family, address] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "inet_pton() takes exactly 2 arguments ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let family = ctx.index_c_int(*family)?;
+    let address = text_argument(ctx, "inet_pton", Some(2), *address)?;
+    let mut packed = [0u8; 16];
+    // SAFETY: address is NUL-terminated and packed fits either supported address family.
+    let status = unsafe { c_inet_pton(family, address.as_ptr(), packed.as_mut_ptr().cast()) };
+    if status < 0 {
+        return Err(super::os_error(std::io::Error::last_os_error()));
+    }
+    if status == 0 {
+        return Err(Error::new(
+            "OSError",
+            "illegal IP address string passed to inet_pton",
+        ));
+    }
+    let bytes = match family {
+        libc::AF_INET => &packed[..4],
+        libc::AF_INET6 => &packed[..],
+        _ => return Err(Error::new("OSError", "unknown address family")),
+    };
+    Ok(ctx.alloc(Value::Bytes(bytes.to_vec())))
+}
+
+/// Format a contiguous packed address while its Python buffer export is live.
+pub(super) fn format_packed_address(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (family, packed) = if name == "_socket.inet_ntoa" {
+        let packed = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+        (libc::AF_INET, packed)
+    } else {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "inet_ntop() takes no keyword arguments",
+            ));
+        }
+        let [family, packed] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "inet_ntop() takes exactly 2 arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        (ctx.index_c_int(*family)?, *packed)
+    };
+    let format = |bytes: &[u8]| -> Result<String> {
+        match family {
+            libc::AF_INET => {
+                let octets = <[u8; 4]>::try_from(bytes).map_err(|_| {
+                    if name == "_socket.inet_ntoa" {
+                        Error::new("OSError", "packed IP wrong length for inet_ntoa")
+                    } else {
+                        Error::new("ValueError", "invalid length of packed IP address string")
+                    }
+                })?;
+                Ok(std::net::Ipv4Addr::from(octets).to_string())
+            }
+            libc::AF_INET6 => {
+                let s6_addr = bytes.try_into().map_err(|_| {
+                    Error::new("ValueError", "invalid length of packed IP address string")
+                })?;
+                Ok(native::ipv6_text(&libc::in6_addr { s6_addr })?)
+            }
+            _ => Err(Error::new(
+                "ValueError",
+                format!("unknown address family {family}"),
+            )),
+        }
+    };
+    let text = if let Some(method) = ctx.python_buffer_method(packed, true)? {
+        ctx.with_contiguous_python_buffer(packed, method, 0, |ctx, view| {
+            format(ctx.view_bytes(view)?)
+        })?
+    } else {
+        format(ctx.native_buffer_bytes(packed)?)?
+    };
+    Ok(ctx.text(text))
 }
 
 fn lookup_service(
@@ -655,14 +809,14 @@ fn lookup_service(
         Port(i32),
     }
     let query = if name == "getservbyname" {
-        Query::Name(service_text(ctx, name, 1, args[0])?)
+        Query::Name(text_argument(ctx, name, Some(1), args[0])?)
     } else {
         Query::Port(ctx.index_c_int(args[0])?)
     };
     // Parse the optional protocol before checking the converted port's 16-bit range.
     let proto = args
         .get(1)
-        .map(|&v| service_text(ctx, name, 2, v))
+        .map(|&v| text_argument(ctx, name, Some(2), v))
         .transpose()?;
     let audit_proto = proto
         .as_ref()
@@ -776,7 +930,7 @@ fn getsockopt(
         return Err(Error::new("OSError", "getsockopt buflen out of range"));
     }
     let mut bytes = vec![0; len as usize];
-    let used = native::get_option_into(socket, level, name, &mut bytes)?;
+    let used = native::get_option_into(native::fd(socket), level, name, &mut bytes)?;
     bytes.truncate(used);
     Ok(ctx.alloc(Value::Bytes(bytes)))
 }
@@ -881,13 +1035,30 @@ pub(super) fn call(
 ) -> Result<Id> {
     match name {
         "socket" => {
-            let keys = ["family", "type", "proto"];
+            let keys = ["family", "type", "proto", "fileno"];
             check_args(name, args, kwargs, keys.len(), &keys)?;
-            let handle = native::open(
-                int_option(ctx, args, kwargs, 0, "family", -1)?,
-                int_option(ctx, args, kwargs, 1, "type", -1)?,
-                int_option(ctx, args, kwargs, 2, "proto", -1)?,
-            )?;
+            // Bind like the public Python constructor before invoking any __index__ methods.
+            let mut values = [None; 4];
+            for (i, key) in keys.iter().enumerate() {
+                values[i] = option(args, i, kwargs, key).map_err(|_| {
+                    Error::new(
+                        "TypeError",
+                        format!("socket.__init__() got multiple values for argument '{key}'"),
+                    )
+                })?;
+            }
+            let [family, kind, proto, fileno] = values;
+            let mut number = |value: Option<Id>| {
+                value
+                    .map(|v| ctx.index_c_int(v))
+                    .transpose()
+                    .map(|v| v.unwrap_or(-1))
+            };
+            let (family, kind, proto) = (number(family)?, number(kind)?, number(proto)?);
+            let handle = match fileno {
+                None | Some(NONE) => native::open(family, kind, proto)?,
+                Some(value) => native::adopt(ctx.index_c_long(value)? as i32, family, kind, proto)?,
+            };
             return new_socket(ctx, handle);
         }
         "if_nameindex" => {
@@ -1034,9 +1205,11 @@ pub(super) fn call(
     match method {
         "__enter__" => return Ok(*receiver),
         "__exit__" | "close" => native::close(&s)?,
+        "detach" => return Ok(ctx.int(i64::from(native::detach(&s)))),
         "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
             return endpoint_method(ctx, method, &s, args);
         }
+        "dup" => return Ok(ctx.alloc(Value::Socket(native::dup(&s)?))),
         "get_inheritable" => {
             let enabled = crate::objects::os::INHERITABLE.enabled(native::fd(&s))?;
             return Ok(if enabled { super::TRUE } else { super::FALSE });
@@ -1153,15 +1326,15 @@ pub(super) fn call(
             return Ok(ctx.alloc(Value::Bytes(bytes)));
         }
         "send" | "sendall" => {
-            let (Value::Bytes(bytes) | Value::ByteArray(bytes)) = ctx.heap.get(argument(args, 0)?)
-            else {
+            let data = argument(args, 0)?;
+            let (Value::Bytes(bytes) | Value::ByteArray(bytes)) = ctx.heap.get(data) else {
                 return Err(Error::new("TypeError", "a bytes-like object is required"));
             };
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
             if method == "send" {
                 return Ok(ctx.int(native::send(&s, bytes, flags)? as i64));
             }
-            native::send_all(&s, bytes, flags)?;
+            ctx.with_buffer_export(data, |ctx| send_all_exported(ctx, &s, data, flags))?;
         }
         _ => {
             return Err(Error::new(
@@ -1171,4 +1344,18 @@ pub(super) fn call(
         }
     }
     Ok(NONE)
+}
+
+/// Reacquire the exported bytes after dispatch, when a signal handler may have mutated them.
+pub(super) fn send_all_exported(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    data: Id,
+    flags: i32,
+) -> Result<()> {
+    native::SendAll::run(socket, flags, |send| {
+        let done = send.step(ctx.native_buffer_bytes(data)?)?;
+        ctx.dispatch_signals()?;
+        Ok(done)
+    })
 }

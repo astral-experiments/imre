@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
+use imre_ast::code_flags;
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
@@ -33,8 +34,10 @@ pub(super) struct Program {
     pub(super) string_roots: Id,
     first_line: u32,
     kind: FunctionKind,
+    scope_flags: u32,
+    unlowered_yield: bool,
     interactive: bool,
-    locals: HashSet<String>,
+    locals: indexmap::IndexSet<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
     reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
@@ -240,13 +243,23 @@ struct Definition {
 
 enum DefinitionKind {
     TypeAlias(Option<Box<ast::TypeParams>>),
-    Function(Box<ast::Parameters>),
+    Function(Box<ast::Parameters>, Option<Box<ast::TypeParams>>),
     Class {
         arguments: Option<Box<ast::Arguments>>,
         parameterized: bool,
         needs_enclosing_frame: bool,
     },
     ClassParameters(Box<ast::TypeParams>),
+}
+
+impl DefinitionKind {
+    fn type_params(&self) -> Option<&ast::TypeParams> {
+        match self {
+            Self::Function(_, params) | Self::TypeAlias(params) => params.as_deref(),
+            Self::ClassParameters(params) => Some(params),
+            Self::Class { .. } => None,
+        }
+    }
 }
 
 struct EagerComprehension<'a> {
@@ -888,7 +901,7 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    fn scan(&mut self) -> Result<(bool, Vec<ScopedExpression<'a>>)> {
+    fn scan(&mut self, unlowered_yield: &mut bool) -> Result<(bool, Vec<ScopedExpression<'a>>)> {
         use ast::visitor::Visitor;
         let mut functions = Vec::new();
         if !self.directives.is_empty() {
@@ -898,6 +911,8 @@ impl<'a> CompiledStrings<'a, '_> {
         while let Some((expr, bound)) = self.pending.pop() {
             self.bound = bound;
             match expr {
+                // A yield still present in an expression has no suspension instruction.
+                ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => *unlowered_yield = true,
                 ast::Expr::Name(name) => {
                     if !self
                         .bound
@@ -1079,6 +1094,71 @@ pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Resul
     Ok(starts)
 }
 
+pub(super) const MAX_INDENT_LEVELS: usize = 99;
+
+pub(super) struct IndentationLimit {
+    row: i64,
+    text: String,
+}
+
+impl IndentationLimit {
+    /// Locate the first excess logical indent, unless parsing already failed earlier.
+    pub(super) fn find<T>(
+        parsed: &ruff_python_parser::Parsed<T>,
+        source: &str,
+        file_input: bool,
+        first_statement_end: Option<ruff_text_size::TextSize>,
+    ) -> Option<Self> {
+        use ast::token::TokenKind::{Dedent, Indent};
+        let mut depth = 0usize;
+        for token in parsed.tokens() {
+            match token.kind() {
+                Indent if depth == MAX_INDENT_LEVELS => {
+                    if first_statement_end.is_some_and(|end| token.start() >= end)
+                        || parsed
+                            .errors()
+                            .first()
+                            .is_some_and(|e| e.location.start() < token.start())
+                    {
+                        return None;
+                    }
+                    // An indent can span an explicit continuation. Report the physical
+                    // line containing the first non-whitespace character.
+                    let prefix = &source[..token.end().to_usize()];
+                    let start = prefix.rfind('\n').map_or(0, |i| i + 1);
+                    let row = 1 + prefix.bytes().filter(|&b| b == b'\n').count() as i64;
+                    let mut text = source[start..].split_inclusive('\n').next()?.to_owned();
+                    if file_input && !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    return Some(Self { row, text });
+                }
+                Indent => depth += 1,
+                Dedent => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    pub(super) fn raise(self, ctx: &mut Context, filename: Id) -> Result<Id> {
+        let message = "too many levels of indentation";
+        let msg = ctx.text(message);
+        let row = ctx.int(self.row);
+        let column = ctx.int(1);
+        let end_column = ctx.int(0);
+        let text = ctx.text(self.text);
+        let details = ctx.alloc(Value::Tuple(vec![
+            filename, row, column, text, row, end_column,
+        ]));
+        let args = [msg, details];
+        let mut error = ctx.exception("IndentationError", &args);
+        error.message = format!("{message}{}", ctx.syntax_suffix(filename, row)?);
+        ctx.retain_syntax_fields(&mut error, ctx.syntax_fields(&args))?;
+        Err(error)
+    }
+}
+
 /// Interactive input accepts one compound statement or one logical line of simple statements.
 fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result<()> {
     use ast::token::TokenKind::{Dedent, Newline};
@@ -1159,10 +1239,11 @@ impl Program {
         shared: &mut SharedConstants<'a>,
         spellings: &StringReplacements,
         line_at: &impl Fn(usize) -> u32,
-        annotation_class: Option<&HashSet<String>>,
+        annotation_class: Option<&indexmap::IndexSet<String>>,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
         let class_parameters = self.class_parameter_header();
+        let nested_scope_flags = self.nested_scope_flags();
         let mut nested_reads = BTreeSet::new();
         let stringized = self.string_annotations();
         let class_locals = self.class_attributes.as_ref().map(|_| &self.locals);
@@ -1286,13 +1367,21 @@ impl Program {
                     );
                 }
                 Instruction::Define(definition) | Instruction::ReturnClass(definition) => {
-                    if let Some(provider) = &mut definition.annotate {
+                    let params = definition.kind.type_params();
+                    let mut inherit_reads = |reads: &BTreeSet<String>| {
                         nested_reads.extend(
-                            strings
-                                .annotation_code(provider, class_locals, line_at)?
+                            reads
                                 .iter()
+                                .filter(|name| {
+                                    !params.is_some_and(|params| {
+                                        params.iter().any(|p| p.name().as_str() == name.as_str())
+                                    })
+                                })
                                 .cloned(),
                         );
+                    };
+                    if let Some(provider) = &mut definition.annotate {
+                        inherit_reads(strings.annotation_code(provider, class_locals, line_at)?);
                     }
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
@@ -1304,22 +1393,7 @@ impl Program {
                     }
                     let (roots, reads) =
                         child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
-                    if let DefinitionKind::ClassParameters(params)
-                    | DefinitionKind::TypeAlias(Some(params)) = &definition.kind
-                    {
-                        nested_reads.extend(
-                            reads
-                                .iter()
-                                .filter(|name| {
-                                    !params
-                                        .iter()
-                                        .any(|param| param.name().as_str() == name.as_str())
-                                })
-                                .cloned(),
-                        );
-                    } else {
-                        nested_reads.extend(reads.iter().cloned());
-                    }
+                    inherit_reads(reads);
                     if roots != NONE {
                         strings.keep(roots)?;
                     }
@@ -1327,7 +1401,7 @@ impl Program {
                         strings.visit_expr(&decorator.expression);
                     }
                     match &definition.kind {
-                        DefinitionKind::Function(parameters) => {
+                        DefinitionKind::Function(parameters, _) => {
                             strings.visit_parameters(parameters)
                         }
                         DefinitionKind::Class {
@@ -1384,13 +1458,14 @@ impl Program {
                 | Instruction::Delegate => {}
             }
         }
-        let (class_cell, functions) = strings.scan()?;
+        let (class_cell, functions) = strings.scan(&mut self.unlowered_yield)?;
         self.class_cell |= class_cell;
         self.expression_functions
             .try_reserve(functions.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
         let mut comprehension_sites = HashMap::new();
         for (site, (expr, bound)) in functions.into_iter().enumerate() {
+            let in_comprehension = bound.is_some();
             if let Some(names) = bound {
                 comprehension_sites.insert(expr.range(), names);
             }
@@ -1400,6 +1475,7 @@ impl Program {
                 "<genexpr>"
             };
             let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
+            child.scope_flags = nested_scope_flags;
             child.strip_docstrings = self.strip_docstrings;
             child.source_lines = self.source_lines.clone();
             child.linked_body_line = self.linked_body_line;
@@ -1431,6 +1507,11 @@ impl Program {
                 ast::Expr::Generator(genexpr) => child.lower_genexpr(genexpr, line_at)?,
                 _ => unreachable!("anonymous function expression"),
             };
+            child.scope_flags |= code_flags::function_flags(
+                Some(&params),
+                in_comprehension,
+                !in_comprehension && self.class_attributes.is_some(),
+            );
             child
                 .locals
                 .extend(params.iter().map(|p| p.name().to_string()));
@@ -1442,7 +1523,7 @@ impl Program {
                         binding: name.to_owned(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::Function(params),
+                        kind: DefinitionKind::Function(params, None),
                         annotate: None,
                     },
                 ),
@@ -1639,7 +1720,7 @@ impl Program {
         for (_, op) in &mut self.instructions {
             if let Instruction::Define(definition) | Instruction::ReturnClass(definition) = op {
                 let child = Rc::get_mut(&mut definition.body).expect("newly lowered child code");
-                if let DefinitionKind::ClassParameters(params) = &definition.kind {
+                if let Some(params) = definition.kind.type_params() {
                     child.resolve_directives(
                         &|name| {
                             if params.iter().any(|p| p.name().as_str() == name) {
@@ -1705,7 +1786,20 @@ impl Program {
         child.source_lines = self.source_lines.clone();
         child.linked_body_line = self.linked_body_line;
         child.strip_docstrings = self.strip_docstrings;
+        child.scope_flags = self.nested_scope_flags();
         child
+    }
+
+    fn nested_scope_flags(&self) -> u32 {
+        let mut flags = self.scope_flags
+            & (code_flags::FUTURE_ANNOTATIONS
+                | code_flags::FUTURE_BARRY_AS_BDFL
+                | code_flags::NESTED);
+        // A class body keeps its enclosing function scope even when bound by a global declaration.
+        if self.name != "<module>" && self.class_attributes.is_none() {
+            flags |= code_flags::NESTED;
+        }
+        flags
     }
 
     fn new(filename: Rc<str>, name: &str, has_named_bindings: bool) -> Self {
@@ -1729,8 +1823,10 @@ impl Program {
             string_roots: NONE,
             first_line: 1,
             kind: FunctionKind::Plain,
+            scope_flags: 0,
+            unlowered_yield: false,
             interactive: false,
-            locals: HashSet::new(),
+            locals: indexmap::IndexSet::new(),
             directives: HashMap::new(),
             reads: BTreeSet::new(),
             method_imports: Rc::default(),
@@ -1888,6 +1984,42 @@ impl Program {
             .map_or(name.as_str(), |names| names.definition(name))
     }
 
+    fn validate_type_params(&self, params: &ast::TypeParams, owner: &str) -> Result<()> {
+        let mut names = HashSet::new();
+        for param in params {
+            let name = param.name();
+            match name.as_str() {
+                "__classdict__" => {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        "reserved name '__classdict__' cannot be used for type parameter",
+                    ));
+                }
+                "__debug__" => {
+                    return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+                }
+                _ => {}
+            }
+            if param.default().is_some()
+                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
+            {
+                return Err(unsupported(format!(
+                    "{owner} type parameter bounds and defaults"
+                )));
+            }
+            if !names.insert(name.as_str()) {
+                return Err(Error::new(
+                    "SyntaxError",
+                    format!(
+                        "duplicate type parameter '{}'",
+                        self.definition_spelling(name)
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn definition_body(
         &self,
         name: &ast::Identifier,
@@ -1934,6 +2066,9 @@ impl Program {
             if self.strip_docstrings {
                 body.remove(0);
             } else if function || self.class_attributes.is_some() {
+                if function {
+                    self.scope_flags |= code_flags::HAS_DOCSTRING;
+                }
                 self.doc = Some(doc.range());
             }
         }
@@ -2208,8 +2343,16 @@ impl Program {
                         annotate: None,
                     })
                 }
-                Stmt::FunctionDef(mut s) if s.type_params.is_none() => {
+                Stmt::FunctionDef(mut s) => {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    if let Some(params) = &s.type_params {
+                        child.validate_type_params(params, "function")?;
+                    }
+                    child.scope_flags |= code_flags::function_flags(
+                        Some(&s.parameters),
+                        s.type_params.is_some(),
+                        self.class_attributes.is_some() && s.type_params.is_none(),
+                    );
                     let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
                         child.kind = if imre_ast::code_flags::is_generator(&s.body) {
@@ -2234,7 +2377,7 @@ impl Program {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::Function(s.parameters),
+                        kind: DefinitionKind::Function(s.parameters, s.type_params),
                         annotate,
                     })
                 }
@@ -2254,6 +2397,10 @@ impl Program {
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
+                    // The implicit type-parameter function encloses the class body.
+                    if s.type_params.is_some() {
+                        child.scope_flags |= code_flags::NESTED;
+                    }
                     child.class_attributes = Some(imre_ast::class_attributes::static_attributes(
                         &s.body, spellings,
                     ));
@@ -2279,41 +2426,7 @@ impl Program {
                         annotate: None,
                     };
                     if let Some(params) = s.type_params {
-                        let mut names = HashSet::new();
-                        for param in &*params {
-                            let name = param.name();
-                            match name.as_str() {
-                                "__classdict__" => {
-                                    return Err(Error::new(
-                                        "SyntaxError",
-                                        "reserved name '__classdict__' cannot be used for type parameter",
-                                    ));
-                                }
-                                "__debug__" => {
-                                    return Err(Error::new(
-                                        "SyntaxError",
-                                        "cannot assign to __debug__",
-                                    ));
-                                }
-                                _ => {}
-                            }
-                            if param.default().is_some()
-                                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
-                            {
-                                return Err(unsupported(
-                                    "class type parameter bounds and defaults",
-                                ));
-                            }
-                            if !names.insert(name.as_str()) {
-                                return Err(Error::new(
-                                    "SyntaxError",
-                                    format!(
-                                        "duplicate type parameter '{}'",
-                                        definition.body.definition_spelling(name)
-                                    ),
-                                ));
-                            }
-                        }
+                        definition.body.validate_type_params(&params, "class")?;
                         // Bases and keywords run in the implicit type-parameter function.
                         // Decorators are evaluated and applied in the enclosing scope.
                         let mut header = self.definition_body(&s.name, &[], line, lines);
@@ -2685,10 +2798,10 @@ impl Program {
         Self::collect_target_names(target, &mut self.locals)
     }
 
-    fn collect_target_names(target: &ast::Expr, names: &mut HashSet<String>) -> Result<()> {
+    fn collect_target_names(target: &ast::Expr, names: &mut impl Extend<String>) -> Result<()> {
         match target {
             ast::Expr::Name(n) => {
-                names.insert(n.id.to_string());
+                names.extend([n.id.to_string()]);
             }
             ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {}
             ast::Expr::Starred(_) => {
@@ -2918,8 +3031,20 @@ impl Context {
         } else {
             source
         };
-        let parsed = ruff_python_parser::parse(source, parser_mode.into())
-            .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
+        let parsed = ruff_python_parser::parse_unchecked(source, parser_mode.into());
+        // In single mode, a second statement is an error before its suite is read.
+        let first_statement_end = match (interactive, parsed.syntax()) {
+            (true, ast::Mod::Module(module)) => module.body.first().map(Ranged::end),
+            _ => None,
+        };
+        if let Some(limit) =
+            IndentationLimit::find(&parsed, source, mode == "exec", first_statement_end)
+        {
+            return limit.raise(self, filename_id);
+        }
+        if let Some(error) = parsed.errors().first() {
+            return Err(Error::new("SyntaxError", format!("{filename}: {error}")));
+        }
         if interactive && let ast::Mod::Module(module) = parsed.syntax() {
             check_single_input(&module.body, parsed.tokens())?;
         }
@@ -3004,6 +3129,10 @@ impl Context {
             return Err(error);
         }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
+        if let Value::Code(caller) = self.heap.get(self.heap.current_code()) {
+            code.scope_flags =
+                caller.flags & (code_flags::FUTURE_ANNOTATIONS | code_flags::FUTURE_BARRY_AS_BDFL);
+        }
         code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
@@ -3029,11 +3158,13 @@ impl Context {
                     self.check_source_docstrings(&body, !interactive, &spellings)?;
                 }
                 code.method_imports = Rc::new(imre_ast::module_imports(&body));
-                let caller = self.heap.current_code();
-                let inherited = matches!(self.heap.get(caller), Value::Code(code) if
-            code.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
-            || matches!(&code.body, Body::Source(p) if p.private_names.as_ref().is_some_and(|n| n.string_annotations)));
-                if inherited || imre_ast::future_annotations(&body) {
+                if imre_ast::future_import(&body, "barry_as_FLUFL") {
+                    code.scope_flags |= code_flags::FUTURE_BARRY_AS_BDFL;
+                }
+                if code.scope_flags & code_flags::FUTURE_ANNOTATIONS != 0
+                    || imre_ast::future_annotations(&body)
+                {
+                    code.scope_flags |= code_flags::FUTURE_ANNOTATIONS;
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
                 code.lower_namespace(body, &lines, false)?;
@@ -3143,15 +3274,17 @@ impl Context {
             first_line: program.first_line,
             module_definition: !program.nested_global && program.name == program.qualname,
             coroutine: program.kind == FunctionKind::Coroutine,
-            flags: match program.kind {
-                FunctionKind::Generator | FunctionKind::GeneratorLambda => {
-                    imre_ast::code_flags::GENERATOR
-                }
-                FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
-                FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
-                FunctionKind::Plain => 0,
-            },
-            flags_complete: false,
+            flags: program.scope_flags
+                | match program.kind {
+                    FunctionKind::Generator | FunctionKind::GeneratorLambda => {
+                        imre_ast::code_flags::GENERATOR
+                    }
+                    FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
+                    FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
+                    FunctionKind::Plain => 0,
+                },
+            flags_complete: program.scope_flags & code_flags::OPTIMIZED != 0
+                && !program.unlowered_yield,
             body: Body::Source(program),
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
@@ -3465,23 +3598,82 @@ impl Context {
         if let Some(locals) = frame.exec_locals {
             return Ok(locals);
         }
-        if frame.parent.is_none() {
+        if frame.parent.is_none() && !frame.closure.cleared {
             return self.module_globals(scope);
         }
         if frame.class_body.is_some() {
             return Ok(self.active_class_namespace(scope));
         }
-        let mut names = BTreeSet::new();
+        let mut bindings = Vec::new();
+        for name in self.frame_binding_names(scope, code)? {
+            match self.lookup(scope, &name) {
+                Ok(value) => bindings.push((self.heap.code_name(&name), value)),
+                Err(error) if self.is_builtin_error(&error, "NameError") => {}
+                Err(error) => return Err(error),
+            }
+        }
+        let snapshot = self.dict(bindings);
+        if let Some(extras) = self.scope_data(scope).closure.extra_locals {
+            self.for_each_mapping_item(
+                extras,
+                snapshot,
+                super::calls::MappingOperation::Update,
+                |ctx, key, value, hash| {
+                    ctx.set_dictionary_key(snapshot, key, value, hash, true)
+                        .map(|_| ())
+                },
+            )?;
+        }
+        Ok(snapshot)
+    }
+
+    pub(super) fn frame_binding_names(
+        &self,
+        scope: Id,
+        code: Id,
+    ) -> Result<indexmap::IndexSet<String>> {
+        let mut names = indexmap::IndexSet::new();
+        let frame = self.scope_data(scope);
+        if frame.comprehension.is_none()
+            && let Value::Code(code) = self.heap.get(code)
+            && let Value::Str(parameters) = self.heap.get(code.parameters)
+        {
+            let signature: serde_json::Value = serde_json::from_str(parameters)
+                .map_err(|error| Error::new("SystemError", error.to_string()))?;
+            // Argument slots come first, including arguments held in closure cells.
+            let arguments = ["posonly", "positional", "kwonly"]
+                .into_iter()
+                .flat_map(|group| signature[group].as_array().into_iter().flatten())
+                .filter_map(serde_json::Value::as_str)
+                .chain(
+                    ["varargs", "kwargs"]
+                        .into_iter()
+                        .filter_map(|key| signature[key].as_str()),
+                );
+            for name in arguments {
+                if frame.names.contains_key(name) || frame.closure.cells.contains_key(name) {
+                    names.insert(name.to_owned());
+                }
+            }
+            // Slot order comes from the code layout even when a branch skipped the first store.
+            for name in signature["scope_locals"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+            {
+                if frame.names.contains_key(name) {
+                    names.insert(name.to_owned());
+                }
+            }
+        }
         let mut local = scope;
         loop {
             let frame = self.scope_data(local);
-            names.extend(
-                frame
-                    .names
-                    .keys()
-                    .chain(frame.closure.cells.keys())
-                    .cloned(),
-            );
+            names.extend(frame.names.keys().cloned());
+            let mut cells: Vec<_> = frame.closure.cells.keys().cloned().collect();
+            cells.sort_unstable();
+            names.extend(cells);
             let Some(parent) = frame.parent else { break };
             if frame.comprehension != Some(ComprehensionKind::Ordinary)
                 || self.scope_data(parent).parent.is_none()
@@ -3516,15 +3708,7 @@ impl Context {
                 );
             }
         }
-        let mut bindings = Vec::new();
-        for name in names {
-            match self.lookup(scope, &name) {
-                Ok(value) => bindings.push((self.heap.code_name(&name), value)),
-                Err(error) if self.is_builtin_error(&error, "NameError") => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(self.dict(bindings))
+        Ok(names)
     }
 
     pub(super) fn exec_source(
@@ -3769,6 +3953,7 @@ impl Context {
         program.private_names = private_names;
         program.qualname = self.str_value(code.qualname)?.to_owned();
         program.first_line = code.first_line;
+        program.scope_flags = code.flags;
         program.kind = FunctionKind::prelinked(code);
         program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
         if signature.generator_lambda {
@@ -4984,7 +5169,7 @@ impl Context {
                 self.mark_module_annotation(scope, index)?;
             }
             Instruction::ClassAnnotator(provider) => {
-                let annotate = self.source_annotator(provider, owner, scope)?;
+                let annotate = self.source_annotator(provider, owner, scope, scope)?;
                 self.bind_source_name(scope, "__annotate_func__", annotate)?;
             }
             Instruction::CheckAnnotationFormat => {
@@ -5028,6 +5213,31 @@ impl Context {
         Ok(None)
     }
 
+    /// Bind fresh PEP 695 parameters under their lexical (possibly mangled) names.
+    fn source_parameter_scope(
+        &mut self,
+        child: &Program,
+        outer: Id,
+        params: &ast::TypeParams,
+        class: bool,
+    ) -> Result<Id> {
+        let entries = params
+            .iter()
+            .map(|param| {
+                let binding = self.heap.code_name(param.name().as_str());
+                let name = self.heap.code_name(child.definition_spelling(param.name()));
+                let declaration = match param {
+                    ast::TypeParam::TypeVar(_) => name,
+                    ast::TypeParam::TypeVarTuple(_) => super::typing::declared_pack(self, name),
+                    ast::TypeParam::ParamSpec(_) => super::paramspec::declared(self, name),
+                };
+                (binding, declaration)
+            })
+            .collect();
+        let names = self.dict(entries);
+        super::typing::parameter_scope(self, outer, names, class)
+    }
+
     /// Evaluate a definition's defaults and reuse its code object at this lexical site.
     fn source_definition(
         &mut self,
@@ -5052,32 +5262,14 @@ impl Context {
         } else {
             scope
         };
-        let mut alias_parameters = NONE;
+        let mut type_params = NONE;
         let mut bases = None;
         let sig = match &definition.kind {
             DefinitionKind::TypeAlias(params) => {
                 if let Some(params) = params {
-                    let entries = params
-                        .iter()
-                        .map(|param| {
-                            let binding = self.heap.code_name(param.name().as_str());
-                            let name = self.heap.code_name(child.definition_spelling(param.name()));
-                            let declaration = match param {
-                                ast::TypeParam::TypeVar(_) => name,
-                                ast::TypeParam::TypeVarTuple(_) => {
-                                    super::typing::declared_pack(self, name)
-                                }
-                                ast::TypeParam::ParamSpec(_) => {
-                                    super::paramspec::declared(self, name)
-                                }
-                            };
-                            (binding, declaration)
-                        })
-                        .collect();
-                    let names = self.dict(entries);
                     defining_scope =
-                        super::typing::parameter_scope(self, defining_scope, names, false)?;
-                    alias_parameters = self.lookup(defining_scope, ".type_params")?;
+                        self.source_parameter_scope(child, defining_scope, params, false)?;
+                    type_params = self.lookup(defining_scope, ".type_params")?;
                 }
                 let format = self.text(".format");
                 let value_format = self.int(1);
@@ -5117,13 +5309,14 @@ impl Context {
                 };
                 serde_json::json!({
                     "class_globals": declared(ScopeDirective::Global),
+                    "class_frame_reads": child.reads,
                     "scope_nonlocals": declared(ScopeDirective::Nonlocal),
                     "needs_class_cell": child.needs_class_cell,
                     "needs_dict_cell": child.needs_dict_cell,
                     "postponed_annotations": child.postponed_annotations,
                 })
             }
-            DefinitionKind::Function(p) => {
+            DefinitionKind::Function(p, params) => {
                 let mut sig = serde_json::json!({"posonly":[],"positional":[],"kwonly":[],"varargs":p.vararg.as_ref().map(|x|x.name.as_str()),"kwargs":p.kwarg.as_ref().map(|x|x.name.as_str())});
                 for (group, args) in [
                     ("posonly", &p.posonlyargs),
@@ -5140,9 +5333,19 @@ impl Context {
                         }
                     }
                 }
+                // Defaults are evaluated above, before entering the type-parameter scope.
+                if let Some(params) = params {
+                    let class_cell = self.scope_data(defining_scope).class_cell;
+                    defining_scope =
+                        self.source_parameter_scope(child, defining_scope, params, false)?;
+                    let Value::Scope(frame) = self.heap.get_mut(defining_scope) else {
+                        unreachable!()
+                    };
+                    frame.class_cell = class_cell;
+                    type_params = self.lookup(defining_scope, ".type_params")?;
+                }
                 sig["class_cell"] = serde_json::json!(child.class_cell);
-                sig["scope_locals"] =
-                    serde_json::json!(child.locals.iter().collect::<BTreeSet<_>>());
+                sig["scope_locals"] = serde_json::json!(child.locals.iter().collect::<Vec<_>>());
                 sig["scope_locals_complete"] = true.into();
                 sig
             }
@@ -5156,7 +5359,7 @@ impl Context {
             *existing
         } else {
             let parameters = self.text(sig.to_string());
-            let freevars = if alias_parameters != NONE {
+            let freevars = if type_params != NONE {
                 self.enclosing_freevars(defining_scope, child.reads.iter().map(String::as_str))
             } else if (code.name != "<module>" || self.scope_data(scope).comprehension.is_some())
                 && !matches!(
@@ -5190,28 +5393,17 @@ impl Context {
         let mut value = self.source_function(code, defining_scope, defaults);
         if matches!(definition.kind, DefinitionKind::TypeAlias(_)) {
             let name = self.code_object(code).name;
-            return self.op("type_alias", name, value, alias_parameters);
+            return self.op("type_alias", name, value, type_params);
+        }
+        if type_params != NONE {
+            self.set_function_attr(value, "__type_params__", type_params)?;
         }
         if let Some(provider) = &definition.annotate {
-            let annotate = self.source_annotator(provider, code, defining_scope)?;
+            let annotate = self.source_annotator(provider, code, scope, defining_scope)?;
             self.set_function_attr(value, "__annotate__", annotate)?;
         }
         if let DefinitionKind::ClassParameters(params) = &definition.kind {
-            let entries = params
-                .iter()
-                .map(|param| {
-                    let binding = self.heap.code_name(param.name().as_str());
-                    let name = self.heap.code_name(child.definition_spelling(param.name()));
-                    let declaration = match param {
-                        ast::TypeParam::TypeVar(_) => name,
-                        ast::TypeParam::TypeVarTuple(_) => super::typing::declared_pack(self, name),
-                        ast::TypeParam::ParamSpec(_) => super::paramspec::declared(self, name),
-                    };
-                    (binding, declaration)
-                })
-                .collect();
-            let names = self.dict(entries);
-            let parameters = super::typing::parameter_scope(self, defining_scope, names, true)?;
+            let parameters = self.source_parameter_scope(child, defining_scope, params, true)?;
             if self.scope_data(scope).class_body.is_some() {
                 let namespace = self.active_class_namespace(scope);
                 self.bind(parameters, "__classdict__", namespace);
@@ -5882,12 +6074,14 @@ impl Context {
             Expr::Dict(v) => {
                 let result = self.dict(vec![]);
                 for item in &v.items {
-                    let Some(key) = &item.key else {
-                        return Err(unsupported("dict unpack"));
-                    };
-                    let k = eval(self, key)?;
-                    let val = eval(self, &item.value)?;
-                    self.put_item(result, k, val)?;
+                    if let Some(key) = &item.key {
+                        let key = eval(self, key)?;
+                        let value = eval(self, &item.value)?;
+                        self.put_item(result, key, value)?;
+                    } else {
+                        let mapping = eval(self, &item.value)?;
+                        self.merge_mapping(result, mapping, calls::MappingOperation::Unpack)?;
+                    }
                 }
                 Ok(result)
             }

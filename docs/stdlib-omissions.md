@@ -39,6 +39,15 @@ The deque size original passed on stock and reported the upstream CPython-specif
 | `test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc` | 1 | The pure-Python subclass checks the collector's tracking bit after its first item. A different tuple lifetime strategy can satisfy the subclass iteration contract. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `PurePythonOrderedDictSubclassTests.test_views` |
 | `test.test_ordered_dict.PurePythonOrderedDictTests.test_ordered_dict_items_result_gc` | 1 | The pure-Python provider runs the same tuple-tracking assertion. The required item values are observable regardless of the collector's tracking policy. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `PurePythonOrderedDictTests.test_views` |
 
+### `csv`
+
+The pinned stock suite passed both methods. Public Imre at O0 and O3 took each method’s CPython-only skip.
+
+| Original test | Occurrence | Reason for omission | Public behavior checked |
+| --- | --- | --- | --- |
+| [`test.test_csv.MiscTestCase.test_disallow_instantiation`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_csv.py#L1657-L1662) | 1 | The test calls CPython’s private `_csv.Reader` and `_csv.Writer` types directly and through `__new__`. Imre implements the public `csv.reader` and `csv.writer` factories with its own types. | The public writer and reader round-tripped a row containing a quoted comma on stock and at O0 and O3. The native factory types also allowed explicit `__new__`. |
+| [`test.test_csv.MiscTestCase.test_lazy_import`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_csv.py#L1649-L1651) | 1 | The test specifies when CPython loads re during an import of csv. Imre can load parser dependencies independently of its public CSV behavior. | Fresh stock, O0 and O3 processes imported csv, then called `Sniffer.sniff` on a semicolon-delimited sample. All three first loaded re during sniffing and returned the semicolon delimiter. |
+
 ### `io`
 
 These two originals come from the SizeofTest mixin on CBufferedWriterTest. Stock passed both. The ordinary native runs reported the upstream CPython-specific skip at both optimization levels. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/daf27ebdd244b9654a3183ab822fef2be8cf4c80)
@@ -116,6 +125,10 @@ Seven originals in this additional module family exercise CPython implementation
 | `test.test_weakref.ReferencesTestCase.test_proxy_repr` | 1 | The test specifies the exact live and dead display strings for a proxy, including hexadecimal addresses. Proxy forwarding, callback delivery, and `ReferenceError` after the target dies remain in scope. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_weakref.py#L233-L247) | `ReferencesTestCase.test_basic_proxy`, `ReferencesTestCase.test_proxy_ref` |
 | `test.test_weakref.ReferencesTestCase.test_ref_repr` | 1 | The test specifies hexadecimal addresses and the exact class and optional name formatting in a reference’s live and dead representations. References must still produce usable representations, including for classes with unusual attribute lookup. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_weakref.py#L122-L152) | `ReferencesTestCase.test_basic_ref`, `ReferencesTestCase.test_repr_failure_gh99184` |
 | `test.test_weakref.WeakMethodTestCase.test_no_cycles` | 1 | The test expects a weak reference to the `WeakMethod` wrapper itself to clear immediately after `del`, while its receiver remains alive. That timing depends on CPython reference counting. Recreating a live method and observing expiration when its receiver or function dies remain in scope. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_weakref.py#L1217-L1226) | `WeakMethodTestCase.test_callback_when_object_dead`, `WeakMethodTestCase.test_object_dead` |
+
+### `types`
+
+Omit `test.test_types.TypesTests.test_internal_sizes`, occurrence 1. The original requires positive values for `object.__basicsize__` and `tuple.__itemsize__`. CPython uses these attributes to describe the fixed part of a C instance and the stride of its variable-length tail. Imre stores a boxed tuple’s elements in a separate vector. A positive in-object stride would give memory-size tools an incorrect layout. Revisit this decision if Imre exposes an object-layout API with those guarantees. The original remains in the 141-test denominator. [Upstream test](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_types.py#L622-L624) · [CPython layout contract](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Doc/c-api/typeobj.rst#L592-L610) · [Imre tuple storage](https://github.com/astral-experiments/imre/blob/10841d802a8f485aa9da6a76e06e5a6e6d08b6b3/crates/imre-runtime/src/dynamic/value.rs#L1049-L1055)
 
 ## Reviewed cases still in scope
 

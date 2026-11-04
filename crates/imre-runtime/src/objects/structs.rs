@@ -483,7 +483,7 @@ pub unsafe extern "C" fn imre_struct_cycle_prefix(
     }
 }
 
-/// Borrowed dictionary payloads and flat tags for a stable scalar row scan.
+/// Borrowed dictionary rows. Sparse indexed counts omit the flat tag array.
 #[repr(C)]
 pub struct BinaryRead {
     rows: [*const usize; 2],
@@ -528,6 +528,74 @@ pub unsafe extern "C" fn imre_struct_binary_prefix(
     }
 }
 
+/// Count visits to a common alternate payload by walking the physical sparse edits.
+/// With a coprime stride, each row has one ordinal per period. The partial period
+/// contributes one more visit exactly when that ordinal precedes the cut.
+///
+/// # Safety
+/// The rooted scalar list covers `n` rows, with `0 < n <= 2^32` and both
+/// `first` and `inverse` reduced modulo `n`. The writable descriptor borrows
+/// the unmodified list through the fold.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_sparse_indexed_count(
+    list: *const Object,
+    out: *mut BinaryRead,
+    n: u64,
+    first: u64,
+    inverse: u64,
+    visits: u64,
+) -> i64 {
+    // SAFETY: the typed loop roots the list and reserves the output descriptor.
+    unsafe {
+        object(list).0.with(|storage| {
+            let Storage::Sequence(words) = storage else {
+                return -1;
+            };
+            let Some(rows) = words.rows() else { return -1 };
+            let RowStorage::Repeated(base, Overrides::Sparse(edits)) = &rows.storage else {
+                return -1;
+            };
+            // Amortize the physical scan even when a third payload declines the fold.
+            if edits.len as u64 > visits / 32 {
+                return -1;
+            }
+            let (periods, tail) = (visits / n, visits % n);
+            let mut alternate = None;
+            let mut hits = 0;
+            for (i, (at, row)) in edits.iter(rows.layout.length).enumerate() {
+                if i.is_multiple_of(1024)
+                    && crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    return -1;
+                }
+                let at = at as u64;
+                if at >= n {
+                    continue;
+                }
+                if *alternate.get_or_insert(row) != row {
+                    return -1;
+                }
+                let delta = if at >= first {
+                    at - first
+                } else {
+                    at + n - first
+                };
+                let rank = delta * inverse % n;
+                hits += periods + u64::from(rank < tail);
+            }
+            let Some(alternate) = alternate else {
+                return -1;
+            };
+            out.write(BinaryRead {
+                rows: [base.word as *const usize, alternate.as_ptr()],
+                bits: std::ptr::null(),
+                words: 0,
+            });
+            hits as i64
+        })
+    }
+}
+
 /// Sum two projected terms in their original row order when rounding matters.
 ///
 /// # Safety
@@ -557,6 +625,83 @@ pub unsafe extern "C" fn imre_struct_binary_ordered(
         at += count;
     }
     sum
+}
+
+/// Continue a modular progression of writes using the two rows already in its dictionary.
+/// Return the tagged ordinal of the last completed store, or zero to resume the scalar loop.
+///
+/// # Safety
+/// The typed loop roots the list and an independent record of the given layout.
+/// `last_index` has room for one tagged integer. The first scalar store has succeeded.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_set_modular(
+    list: *const Object,
+    layout: *const RecordDescriptor,
+    row: *const usize,
+    current: i64,
+    stop: i64,
+    at: i64,
+    stride: i64,
+    upper: i64,
+    modulus: i64,
+    last_index: *mut i64,
+) -> i64 {
+    if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+        return 0;
+    }
+    let tagged = [current, stop, at, stride, upper, modulus];
+    if tagged.iter().any(|&v| v <= 0 || v & 1 == 0) {
+        return 0;
+    }
+    let [current, stop, at, stride, upper, n] = tagged.map(|v| (v >> 1) as usize);
+    // Keep every source multiply and add in the tagged range. Positive n also
+    // makes the remainder total and bounds every subsequent list subscript.
+    if n == 0
+        || at >= n
+        || stop.saturating_sub(current) < 64
+        || (stop - 1) as u128 * stride as u128 + upper as u128 > (i64::MAX / 2) as u128
+    {
+        return 0;
+    }
+    // SAFETY: both borrowed inputs survive every store. The kernel only updates
+    // integer tags, so it cannot run Python while the list is mutably borrowed.
+    unsafe {
+        object(list).0.with_mut(|storage| {
+            let Storage::Sequence(words) = storage else {
+                return 0;
+            };
+            let Some(rows) = words.rows_mut() else {
+                return 0;
+            };
+            if n > rows.len || !std::ptr::eq(rows.layout, layout) {
+                return 0;
+            }
+            let value = rows.payload(row);
+            let RowStorage::Repeated(base, edits) = &mut rows.storage else {
+                return 0;
+            };
+            let base = base_row(base, rows.layout.length);
+            let count = stop - current - 1;
+            let step = stride % n;
+            let Some(binary) = edits.for_modular_writes(at, value, base, n, step, count) else {
+                return 0;
+            };
+            let set = if value == binary.row {
+                true
+            } else if value == base {
+                false
+            } else {
+                return 0;
+            };
+            let (done, at) = binary.set_modular(at, step, n, count, set);
+            if done == 0 {
+                return 0;
+            }
+            rows.boxed.take();
+            last_index.write(2 * at as i64 + 1);
+            2 * (current + done) as i64 + 1
+        })
+    }
 }
 
 /// Append a loop-invariant value to an empty scalar struct list in one step.

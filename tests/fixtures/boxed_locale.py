@@ -14,6 +14,25 @@ def current():
         assert _locale.setlocale(locale.LC_CTYPE, None) == "C"
         assert locale.getlocale() == (None, None)
         assert locale.getlocale(category=locale.LC_ALL) == (None, None)
+
+        conv = _locale.localeconv()
+        assert conv["decimal_point"] == "." and conv["grouping"] == []
+        conv["grouping"].append(3)
+        assert locale.localeconv()["grouping"] == []
+        assert locale.localeconv()["frac_digits"] == _locale.CHAR_MAX
+        assert int.__format__(1234567, "n") == "1234567"
+        assert float.__format__(1234.5, ".6n") == "1234.5"
+
+        previous = locale._override_localeconv
+        locale._override_localeconv = {
+            "grouping": [3, 2, 0], "thousands_sep": "_", "decimal_point": ",",
+            "mon_grouping": [3, locale.CHAR_MAX], "mon_thousands_sep": " ", "mon_decimal_point": ":",
+        }
+        try:
+            assert locale.format_string("%(value).1f%%", {"value": 1234567.5}, grouping=True) == "12_34_567,5%"
+            assert locale.format_string("%.1f", 1234567.5, grouping=True, monetary=True) == "1234 567:5"
+        finally:
+            locale._override_localeconv = previous
         try:
             locale.setlocale(locale.LC_CTYPE, "C.UTF-8")
         except locale.Error:

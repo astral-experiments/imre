@@ -6,6 +6,8 @@ use super::*;
 use crate::CodegenUnit;
 
 pub(super) struct Output {
+    /// Whether a reference to this named type also needs its destruction descriptor.
+    pub(super) record_types: HashMap<Type, bool>,
     units: Vec<String>,
     common: Option<String>,
     pub entry: usize,
@@ -29,6 +31,7 @@ impl Output {
             })
             .collect();
         Self {
+            record_types: HashMap::new(),
             units: vec![String::new(); count],
             common: split.then(|| "source_filename = \"imre-unit\"\n".to_owned()),
             entry,
@@ -113,6 +116,18 @@ impl Output {
         name
     }
 
+    /// Record a named LLVM type used in a field access or allocation.
+    pub fn record_type(&mut self, ty: Type) -> String {
+        self.record_types.entry(ty).or_insert(false);
+        record_name(ty)
+    }
+
+    /// Reference the destruction descriptor from the current codegen unit.
+    pub fn record_layout(&mut self, ty: Type) -> String {
+        self.record_types.insert(ty, true);
+        self.global_ref(format!("layout_{}", record_name(ty)))
+    }
+
     pub fn global_ref(&mut self, name: String) -> String {
         self.used(self.entry, name)
     }
@@ -138,16 +153,6 @@ impl Output {
 
     pub fn adapter_ref(&mut self, id: usize, bound: bool) -> String {
         self.used(self.function_owner(id), self.adapter_name(id, bound))
-    }
-
-    pub fn shared_global(&mut self, name: &str, ty: &str, value: &str) {
-        if self.units.len() > 1 {
-            self.users.insert(
-                name.to_owned(),
-                (0..self.units.len()).filter(|&u| u != self.entry).collect(),
-            );
-        }
-        writeln!(self.global(self.entry, name, "global", ty), "{value}").unwrap();
     }
 
     pub fn global(
@@ -279,6 +284,48 @@ mod tests {
             assert_eq!(uses > 0, unit.name == "loops");
             assert_eq!(definitions, usize::from(uses > 0));
             assert!(!unit.llvm_ir.contains("@imre_repeat_fadd"));
+        }
+    }
+
+    #[test]
+    fn sequence_layout_follows_inline_reads() {
+        let options = crate::CompileOptions::default();
+        assert!(
+            !crate::compile("print(42)", &options)
+                .unwrap()
+                .contains("@sequence_layout")
+        );
+
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(&entry, "from lists import nonempty\nfrom spare import answer\nprint(nonempty([0.5]))\nprint(answer())\n").unwrap();
+        fs::write(
+            temp.path().join("lists.py"),
+            "def nonempty(values: list[float]) -> bool:\n    return bool(values)\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("spare.py"),
+            "def answer() -> int:\n    return 42\n",
+        )
+        .unwrap();
+        let units = crate::compile_file_units(&entry, None, &options)
+            .unwrap()
+            .units;
+        assert_eq!(units.len(), 3);
+        for unit in units {
+            let ir = unit.llvm_ir;
+            assert_eq!(
+                ir.contains("define internal i32 @sequence_header"),
+                unit.name == "lists"
+            );
+            match unit.name.as_str() {
+                "lists" => assert!(ir.contains("@sequence_layout = external hidden global")),
+                "main" => {
+                    assert!(ir.contains("call void @imre_typed_start(i32 0, ptr @sequence_layout)"))
+                }
+                _ => assert!(!ir.contains("@sequence_layout")),
+            }
         }
     }
 

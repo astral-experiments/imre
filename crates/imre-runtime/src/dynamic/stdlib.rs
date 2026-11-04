@@ -28,6 +28,7 @@ mod formatters;
 pub(super) mod functools;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) mod grp;
+mod gzip;
 pub(super) mod hashlib;
 mod hmac;
 mod inspect;
@@ -43,6 +44,7 @@ pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
 pub(super) mod io;
 mod json;
+mod lzma;
 mod marshal;
 mod math;
 mod metadata;
@@ -58,7 +60,8 @@ pub(super) mod posix_spawn;
 mod posixpath;
 #[cfg(target_os = "linux")]
 mod process_arguments;
-mod random;
+pub(super) mod pyexpat;
+pub(super) mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
 #[cfg(target_os = "linux")]
@@ -78,7 +81,7 @@ pub(super) mod urllib;
 mod warnings;
 pub(super) mod warnings_accel;
 mod zipimport;
-mod zlib;
+pub(super) mod zlib;
 
 /// Format a type for CPython diagnostics, including a non-default module and its qualname.
 pub(super) fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
@@ -188,44 +191,67 @@ fn string_argument_message(
     crate::objects::Codec::Utf8 { signature: false }.decode(&message, None)
 }
 
-/// Bind the one positional-or-keyword parameter of a Python function.
-pub(super) fn single_argument(
+/// Bind a native implementation of a Python function. Keyword errors take
+/// precedence over excess positional arguments, even when both apply.
+fn python_arguments<'a, const N: usize>(
     name: &str,
-    param: &str,
-    args: &[Id],
+    params: [&str; N],
+    positional: usize,
+    defaults: usize,
+    args: impl IntoIterator<Item = &'a Id>,
     kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let mut value = args.first().copied();
-    for (key, arg) in kwargs {
-        if key != param {
-            let mut message = format!("{name}() got an unexpected keyword argument '{key}'");
-            if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &[param]) {
-                message.push_str(&format!(". Did you mean '{hint}'?"));
-            }
-            return Err(Error::new("TypeError", message));
-        }
-        if value.replace(*arg).is_some() {
+) -> Result<[Option<Id>; N]> {
+    let mut args = args.into_iter().copied();
+    let mut values = [None; N];
+    for (slot, value) in values[..positional].iter_mut().zip(&mut args) {
+        *slot = Some(value);
+    }
+    for (key, value) in kwargs {
+        let Some(index) = params.iter().position(|&param| param == key) else {
+            return Err(super::calls::unexpected_keyword_error(name, key, &params));
+        };
+        if values[index].replace(*value).is_some() {
             return Err(Error::new(
                 "TypeError",
-                format!("{name}() got multiple values for argument '{param}'"),
+                format!("{name}() got multiple values for argument '{key}'"),
             ));
         }
     }
-    if args.len() > 1 {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "{name}() takes 1 positional argument but {} were given",
-                args.len()
-            ),
+    let extra = args.count();
+    if extra != 0 {
+        let keywords = values[positional..].iter().flatten().count();
+        return Err(super::calls::excess_positional_error(
+            name,
+            positional,
+            defaults,
+            positional + extra,
+            keywords,
         ));
     }
-    value.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!("{name}() missing 1 required positional argument: '{param}'"),
-        )
-    })
+    let required = positional - defaults;
+    if values[..required].contains(&None) {
+        let missing: Vec<_> = params[..required]
+            .iter()
+            .zip(values)
+            .filter_map(|(&param, value)| value.is_none().then_some(param))
+            .collect();
+        return Err(super::calls::missing_arguments_error(
+            name,
+            "positional",
+            &missing,
+        ));
+    }
+    Ok(values)
+}
+
+/// Bind a Python function whose parameters are all required and positional-or-keyword.
+fn required_arguments<'a, const N: usize>(
+    name: &str,
+    params: [&str; N],
+    args: impl IntoIterator<Item = &'a Id>,
+    kwargs: &[(String, Id)],
+) -> Result<[Id; N]> {
+    Ok(python_arguments(name, params, N, 0, args, kwargs)?.map(Option::unwrap))
 }
 
 fn option(args: &[Id], index: usize, kwargs: &[(String, Id)], name: &str) -> Result<Option<Id>> {
@@ -380,7 +406,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         (
             "math",
-            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isinf" | "isnan" | "isqrt",
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "cos" | "gcd" | "isclose" | "isinf"
+            | "isnan" | "isqrt" | "lcm" | "log",
         ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
@@ -393,6 +420,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_imre_tempfile",
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "finalize_at_shutdown",
         ) => ctx.builtin(&format!("{module}.{name}")),
+        (
+            "_imre_gzip",
+            "open" | "read" | "read1" | "readline" | "tell" | "fileno" | "close" | "writer"
+            | "compress" | "flush_writer" | "decoder" | "raw_tell" | "raw_read",
+        ) => ctx.builtin(&format!("{module}.{name}")),
+        ("_imre_gzip", "BadGzipFile") => ctx.builtin("gzip.BadGzipFile"),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
         ("_locale", "LC_COLLATE") => ctx.int(libc::LC_COLLATE.into()),
@@ -421,6 +454,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "find_spec"
             | "native_spec_info"
             | "native_source"
+            | "native_code"
             | "create_native_module"
             | "exec_native_module"
             | "warn_import"
@@ -504,9 +538,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "_typing",
             "_clear_alias_caches"
+            | "_no_type_check_member"
             | "_get_alias_kind"
             | "_eval_type_expression"
             | "_validate_forward_ref"
+            | "_install_any_namespace"
             | "_install_generic_alias_iter",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("_typing", "_get_args") => ctx.builtin("typing.get_args"),
@@ -604,7 +640,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "error") => {
+        ("lzma", "decompress") => ctx.builtin("lzma.decompress"),
+        ("lzma", "LZMAError") => ctx.builtin("_lzma.LZMAError"),
+        ("lzma", "FORMAT_AUTO") => ctx.int(0),
+        ("lzma", "FORMAT_XZ") => ctx.int(1),
+        ("lzma", "FORMAT_ALONE") => ctx.int(2),
+        ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "decompressobj" | "error") => {
             ctx.builtin(&format!("zlib.{name}"))
         }
         (
@@ -650,8 +691,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("sys", "flags") => flags::current(ctx),
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
-        ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
-        ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -708,7 +747,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
             ctx.builtin(&format!("_contextvars.{name}"))
         }
-        ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
+        ("functools", "Placeholder") => functools::placeholder(ctx),
+        ("functools", "_PlaceholderType") => ctx.builtin("functools._PlaceholderType"),
         (
             "sys",
             "exit"
@@ -745,6 +785,19 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_linecache", "source_lines")
         | ("_imre_unittest", "format_exception")
+        | (
+            "_imre_pyexpat",
+            "version_info"
+            | "create"
+            | "parse"
+            | "flush_buffer"
+            | "position"
+            | "error_code"
+            | "error_string"
+            | "in_callback"
+            | "get_reparse_deferral"
+            | "set_reparse_deferral",
+        )
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
@@ -753,9 +806,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
-        | ("struct", "calcsize" | "pack" | "unpack")
+        | ("struct", "calcsize" | "pack" | "pack_into" | "unpack" | "unpack_from")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
-        | ("random", "random" | "choice" | "choices" | "shuffle")
+        | (
+            "random",
+            "seed" | "getrandbits" | "random" | "choice" | "choices" | "shuffle" | "randint"
+            | "randbytes",
+        )
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -767,10 +824,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("typing", "IO" | "Generator" | "Iterator")
         | ("enum", "_simple_enum")
-        | (
-            "functools",
-            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "reduce" | "update_wrapper",
-        )
+        | ("functools", "cmp_to_key" | "_cache_wrapper" | "reduce")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
@@ -778,6 +832,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_frame_position"
             | "_abstract_flags"
             | "markcoroutinefunction"
+            | "_descriptor_get"
             | "_native_data_descriptor"
             | "_static_member"
             | "_signature_layout",
@@ -975,6 +1030,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("_warnings.") {
         return warnings_accel::call(ctx, method, args, kwargs);
     }
+    if name == "_locale.localeconv" {
+        return locale::localeconv(ctx, args, kwargs);
+    }
     if name == "_locale.setlocale" {
         return locale::setlocale(ctx, args, kwargs);
     }
@@ -1140,15 +1198,15 @@ pub(super) fn call(
         return traceback::format_result(ctx, *kind, *value, *tb, *locals);
     }
     if name == "traceback._frame_locals" {
-        let frame = single_argument("_frame_locals", "frame", args, kwargs)?;
+        let [frame] = required_arguments("_frame_locals", ["frame"], args, kwargs)?;
         return traceback::frame_locals(ctx, frame);
     }
     if name == "traceback._tb_position" {
-        let tb = single_argument("_tb_position", "tb", args, kwargs)?;
+        let [tb] = required_arguments("_tb_position", ["tb"], args, kwargs)?;
         return Ok(traceback::tb_position(ctx, tb));
     }
     if name == "traceback.clear_frames" {
-        let tb = single_argument("clear_frames", "tb", args, kwargs)?;
+        let [tb] = required_arguments("clear_frames", ["tb"], args, kwargs)?;
         return traceback::clear_frames(ctx, tb);
     }
     if let Some(method) = name.strip_prefix("collections.defaultdict.")
@@ -1555,23 +1613,29 @@ pub(super) fn call(
         "resource.setrlimit" => return resource::setrlimit(ctx, args, kwargs),
         _ => {}
     }
+    if name == "random.seed" {
+        return random::seed(ctx, args, kwargs);
+    }
+    if name == "random.getrandbits" {
+        let count = random::bit_count(ctx, args, kwargs)?;
+        return Ok(
+            ctx.alloc(Value::Int(crate::Int::new(crate::objects::random_bits(
+                &count,
+            )?))),
+        );
+    }
     if name == "random.random" {
-        if !kwargs.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "Random.random() takes no keyword arguments",
-            ));
-        }
-        if !args.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                format!("Random.random() takes no arguments ({} given)", args.len()),
-            ));
-        }
+        random::random_args(args, kwargs)?;
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
     }
     if name == "random.shuffle" {
         return random::shuffle(ctx, args, kwargs);
+    }
+    if name == "random.randint" {
+        return random::randint(ctx, args, kwargs);
+    }
+    if name == "random.randbytes" {
+        return random::randbytes(ctx, args, kwargs);
     }
     if name == "random.randrange" {
         return random::randrange(ctx, args, kwargs);
@@ -1655,18 +1719,25 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::ThreadLocal(Default::default())));
     }
-    if name == "struct.pack" {
+    if name == "struct.unpack_from" {
+        return structure::module_unpack_from(ctx, args, kwargs);
+    }
+    if matches!(name, "struct.pack" | "struct.pack_into") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "_struct.pack() takes no keyword arguments",
+                format!("_{name}() takes no keyword arguments"),
             ));
         }
         let Some((&format, values)) = args.split_first() else {
             return Err(Error::new("TypeError", "missing format argument"));
         };
         let (_, layout) = structure::parse(ctx, format)?;
-        return structure::pack(ctx, &layout, values);
+        return if name == "struct.pack_into" {
+            structure::pack_into(ctx, &layout, values)
+        } else {
+            structure::pack(ctx, &layout, values)
+        };
     }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
@@ -1713,6 +1784,17 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
+    if name == "lzma.decompress" {
+        return lzma::call(ctx, "decompress", args, kwargs);
+    }
+    if name == "zlib.decompressobj" {
+        return zlib::decompressor(ctx, "new", args, kwargs);
+    }
+    if let Some(method @ ("decompress" | "flush" | "copy" | "__copy__")) =
+        name.strip_prefix("zlib.Decompress.")
+    {
+        return zlib::decompressor(ctx, method, args, kwargs);
+    }
     if let Some(method @ ("compress" | "decompress")) = name.strip_prefix("zlib.") {
         return zlib::call(ctx, method, args, kwargs);
     }
@@ -1737,6 +1819,9 @@ pub(super) fn call(
         && os::xattr::FUNCTIONS.contains(&op)
     {
         return os::xattr::call(ctx, op, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imre_pyexpat.") {
+        return pyexpat::call(ctx, method, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
@@ -2016,7 +2101,7 @@ pub(super) fn call(
     }
     if name == "types._coroutine_flags" {
         use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
-        let code = single_argument("_coroutine_flags", "code", args, kwargs)?;
+        let [code] = required_arguments("_coroutine_flags", ["code"], args, kwargs)?;
         if let Value::Code(code) = ctx.heap.get(code) {
             // Source functions track execution kind and the iterable-coroutine
             // bit even when their full public co_flags value is unavailable.
@@ -2117,6 +2202,10 @@ pub(super) fn call(
                     frozen,
                 )?;
                 return Ok(NONE);
+            }
+            ("native_code", [name, bundled], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx.native_code(&name, *bundled == TRUE);
             }
             ("native_source", [name, bundled], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
@@ -2399,6 +2488,15 @@ pub(super) fn call(
     if name == "_socket.getaddrinfo" {
         return socket::getaddrinfo(ctx, args, kwargs);
     }
+    if name == "_socket.inet_aton" {
+        return socket::inet_aton(ctx, args, kwargs);
+    }
+    if name == "_socket.inet_pton" {
+        return socket::inet_pton(ctx, args, kwargs);
+    }
+    if matches!(name, "_socket.inet_ntoa" | "_socket.inet_ntop") {
+        return socket::format_packed_address(ctx, name, args, kwargs);
+    }
     if name == "_socket.socketpair" {
         return socket::socketpair(ctx, args, kwargs);
     }
@@ -2446,6 +2544,9 @@ pub(super) fn call(
         && crate::objects::HashState::algorithms().any(|name| name == algorithm)
     {
         return hashlib::hash(ctx, algorithm, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imre_gzip.") {
+        return gzip::call(ctx, method, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("_imre_tempfile.") {
         return tempfile::path_operation(ctx, name, args, kwargs);
@@ -2513,7 +2614,7 @@ pub(super) fn call(
         let generation = if args.is_empty() && kwargs.is_empty() {
             2
         } else {
-            let value = single_argument("collect", "generation", args, kwargs)?;
+            let [value] = required_arguments("collect", ["generation"], args, kwargs)?;
             let generation = ctx
                 .index_integer(value)?
                 .to_i64()
@@ -2535,7 +2636,63 @@ pub(super) fn call(
     if name == "_pickle.dumps" {
         return pickle::dumps(ctx, args, kwargs);
     }
-    if name == "functools.partial" {
+    if name == "functools._PlaceholderType" {
+        if !args.is_empty() || !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "PlaceholderType takes no arguments",
+            ));
+        }
+        return Ok(functools::placeholder(ctx));
+    }
+    if name == "functools.partial.__setstate__" {
+        return functools::partial_setstate(ctx, args, kwargs);
+    }
+    if name == "functools.partial.__repr__" {
+        let receiver = builtins::noargs_method_receiver(
+            ctx,
+            functools::PARTIAL_CLASS,
+            "__repr__",
+            args,
+            kwargs,
+        )?;
+        return functools::partial_repr(ctx, receiver);
+    }
+    if name == "functools.partial.__call__" {
+        let Some((&receiver, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "descriptor '__call__' of 'functools.partial' object needs an argument",
+            ));
+        };
+        let partial = ctx.scalar_value(receiver);
+        if !matches!(ctx.heap.get(partial), Value::Partial { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__call__' requires a 'functools.partial' object but received a '{}'",
+                    ctx.type_name(receiver)
+                ),
+            ));
+        }
+        return ctx.call(partial, rest.to_vec(), kwargs.to_vec());
+    }
+    if matches!(name, functools::PARTIAL_CLASS | "functools.partial.__new__") {
+        let base = ctx.builtin(functools::PARTIAL_CLASS);
+        let (class, args) = if name == "functools.partial.__new__" {
+            let Some((&class, rest)) = args.split_first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    "functools.partial.__new__(): not enough arguments",
+                ));
+            };
+            if !ctx.direct_subclass(class, base) {
+                return Err(ctx.invalid_new_subtype(functools::PARTIAL_CLASS, class));
+            }
+            (class, rest)
+        } else {
+            (base, args)
+        };
         let Some((&function, bound)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
@@ -2557,7 +2714,16 @@ pub(super) fn call(
                 "trailing Placeholders are not allowed",
             ));
         }
-        let (function, mut args, keywords) = match ctx.heap.get(function).clone() {
+        // Flatten a nested partial only until its own instance dictionary is materialized.
+        let inner = match ctx.heap.get(function) {
+            Value::Instance {
+                scalar: Some(storage),
+                namespace: None,
+                ..
+            } => *storage,
+            _ => function,
+        };
+        let (function, mut args, keywords) = match ctx.heap.get(inner).clone() {
             Value::Partial {
                 function,
                 args,
@@ -2592,12 +2758,21 @@ pub(super) fn call(
             let name = ctx.text(name);
             ctx.put_item(keywords, name, *value)?;
         }
-        return Ok(ctx.alloc(Value::Partial {
+        let partial = ctx.alloc(Value::Partial {
             function,
             args,
             keywords,
             dictionary: None,
-        }));
+        });
+        if class == base {
+            return Ok(partial);
+        }
+        let object = ctx.instance(class, None);
+        let Value::Instance { scalar, .. } = ctx.heap.get_mut(object) else {
+            unreachable!()
+        };
+        *scalar = Some(partial);
+        return Ok(object);
     }
     if let Some(method @ ("digest" | "hexdigest")) = name.strip_prefix("hash.") {
         return hashlib::digest(ctx, method, args, kwargs);
@@ -2668,10 +2843,7 @@ pub(super) fn call(
             }));
         }
         "functools.reduce" => return functools::reduce(ctx, args, kwargs),
-        "functools.cache" => return functools::cache(ctx, args, kwargs),
-        "functools.lru_cache" => return functools::lru_cache(ctx, args, kwargs),
         "functools._cache_wrapper" => (3, &[]),
-        "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "_json.scanstring" => return json::scanstring(ctx, args, kwargs),
@@ -2746,7 +2918,7 @@ pub(super) fn call(
         }
         "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
         _ if urlsafe => {
-            let id = single_argument(name.trim_start_matches("base64."), "s", args, kwargs)?;
+            let [id] = required_arguments(name.trim_start_matches("base64."), ["s"], args, kwargs)?;
             let decode = name == "base64.urlsafe_b64decode";
             let (id, urlsafe) = if decode
                 && matches!(ctx.heap.get(id), Value::Instance { .. })
@@ -2923,7 +3095,6 @@ pub(super) fn call(
             argument(args, 1)?,
             argument(args, 2)?,
         )?,
-        "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools._cache_wrapper" => functools::make_cache(
             ctx,
             argument(args, 0)?,

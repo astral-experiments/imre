@@ -1,11 +1,199 @@
-use super::{option, tuple_text};
 use crate::dynamic::{
     Context,
-    value::{CACHE_CAPACITY, Error, FALSE, Id, NONE, Result, Value},
+    value::{Error, Id, NONE, Result, Value},
 };
 
+pub(in crate::dynamic) const PARTIAL_CLASS: &str = "functools.partial";
 pub(in crate::dynamic) const LRU_CACHE_CLASS: &str = "functools._lru_cache_wrapper";
 pub(in crate::dynamic) const COPY_METHODS: &[&str] = &["__reduce__", "__copy__", "__deepcopy__"];
+
+pub(super) fn placeholder(ctx: &mut Context) -> Id {
+    let key = "functools.Placeholder";
+    if let Some(&value) = ctx.builtins.get(key) {
+        return value;
+    }
+    let value = ctx.alloc(Value::PartialPlaceholder);
+    ctx.builtins.insert(key.to_owned(), value);
+    value
+}
+
+pub(super) fn partial_setstate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (receiver, rest) =
+        super::builtins::method_receiver_args(ctx, PARTIAL_CLASS, "__setstate__", args, kwargs)?;
+    let state = super::builtins::one_positional_arg("partial.__setstate__", rest, kwargs)?;
+    let invalid = || Error::new("TypeError", "invalid partial state");
+    let state = ctx.tuple_items(state)?.ok_or_else(invalid)?;
+    let &[function, args, keywords, namespace] = state.as_slice() else {
+        return Err(invalid());
+    };
+    let raw_args = ctx.tuple_items(args)?.ok_or_else(invalid)?;
+    if !ctx.callable(function)
+        || (keywords != NONE && ctx.dict_storage(keywords).is_none())
+        || (namespace != NONE && ctx.dict_storage(namespace).is_none())
+    {
+        return Err(invalid());
+    }
+    if raw_args
+        .last()
+        .is_some_and(|&arg| matches!(ctx.heap.get(arg), Value::PartialPlaceholder))
+    {
+        return Err(Error::new(
+            "TypeError",
+            "trailing Placeholders are not allowed",
+        ));
+    }
+
+    // Conversion may call Python code. Finish both conversions before replacing any state.
+    let tuple = ctx.builtin("tuple");
+    let args = ctx.call(tuple, vec![args], Vec::new())?;
+    let keywords = if keywords == NONE {
+        ctx.dict(Vec::new())
+    } else if matches!(ctx.heap.get(keywords), Value::Dict(_)) {
+        keywords
+    } else {
+        let storage = ctx
+            .dict_storage(keywords)
+            .expect("validated keyword dictionary");
+        super::builtins::copy_dict(ctx, keywords, storage)?
+    };
+    let storage = ctx.scalar_value(receiver);
+    let namespace = (namespace != NONE).then_some(namespace);
+    let dictionary = if let Value::Instance { class, .. } = *ctx.heap.get(receiver) {
+        ctx.replace_instance_dictionary(receiver, class, namespace);
+        None
+    } else {
+        namespace
+    };
+    let previous = std::mem::replace(
+        ctx.heap.get_mut(storage),
+        Value::Partial {
+            function,
+            args,
+            keywords,
+            dictionary,
+        },
+    );
+    let Value::Partial {
+        function,
+        args,
+        keywords,
+        dictionary,
+    } = previous
+    else {
+        unreachable!("validated partial receiver")
+    };
+    for old in [Some(function), Some(args), Some(keywords), dictionary]
+        .into_iter()
+        .flatten()
+    {
+        ctx.heap.weak_edge_removed(old);
+    }
+    Ok(NONE)
+}
+
+/// Keep the original fields live while calling user formatting hooks, as in CPython's partial_repr.
+pub(super) fn partial_repr(ctx: &mut Context, object: Id) -> Result<Id> {
+    if ctx.repr_ancestors.contains(&object) {
+        return Ok(ctx.text("..."));
+    }
+    let Value::Partial {
+        function,
+        args,
+        keywords,
+        ..
+    } = *ctx.heap.get(ctx.scalar_value(object))
+    else {
+        return Err(Error::new("TypeError", "expected a partial object"));
+    };
+    ctx.repr_ancestors
+        .try_reserve(1)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    ctx.heap.reserve_temporaries(4)?;
+    let roots = ctx.heap.temporary_mark();
+    for value in [object, function, args, keywords] {
+        ctx.heap.keep(value);
+    }
+    ctx.repr_ancestors.push(object);
+    let result = ctx.with_slot_depth(
+        "maximum recursion depth exceeded while getting the repr of an object",
+        |ctx| partial_repr_fields(ctx, object, function, args, keywords),
+    );
+    ctx.repr_ancestors.pop();
+    ctx.heap.release_temporaries_since(roots);
+    match &result {
+        Ok(value) => ctx.heap.keep(*value),
+        Err(error) => {
+            for value in error.roots() {
+                ctx.heap.keep(value);
+            }
+        }
+    }
+    result
+}
+
+fn partial_repr_fields(
+    ctx: &mut Context,
+    object: Id,
+    function: Id,
+    args: Id,
+    keywords: Id,
+) -> Result<Id> {
+    fn append(ctx: &mut Context, buffer: &mut Vec<u32>, op: &str, value: Id) -> Result<()> {
+        let text = super::builtins::call(ctx, op, &[value], &[])?;
+        let chars = ctx.string_codepoints(text)?;
+        buffer
+            .try_reserve(chars.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        buffer.extend_from_slice(&chars);
+        Ok(())
+    }
+
+    let mut suffix = Vec::new();
+    let step = ctx.heap.temporary_mark();
+    let invalid = || Error::new("TypeError", "invalid partial state");
+    let args = ctx.tuple_items(args)?.ok_or_else(invalid)?;
+    let keywords = ctx.dict_storage(keywords).ok_or_else(invalid)?;
+    for arg in args {
+        suffix.extend([u32::from(','), u32::from(' ')]);
+        append(ctx, &mut suffix, "repr", arg)?;
+        ctx.heap.release_temporaries_since(step);
+    }
+    let mut position = 0;
+    while let Some((index, key, value)) = ctx.stored_entries(keywords).at(position) {
+        position = index + 1;
+        // The key's __str__ may remove the value from the dictionary.
+        ctx.heap.keep(value);
+        suffix.extend([u32::from(','), u32::from(' ')]);
+        append(ctx, &mut suffix, "str", key)?;
+        suffix.push(u32::from('='));
+        append(ctx, &mut suffix, "repr", value)?;
+        ctx.heap.release_temporaries_since(step);
+    }
+    let class = ctx.exact_type(object)?;
+    let module = ctx
+        .own_class_attr(class, "__module__")
+        .ok_or_else(|| Error::new("AttributeError", "__module__"))?;
+    let qualname = match ctx.own_class_attr(class, "__qualname__") {
+        Some(name) => name,
+        None => ctx.text(ctx.class_qualname(class).to_owned()),
+    };
+    // Formatting either name can replace both attributes on the class.
+    ctx.heap.keep(module);
+    ctx.heap.keep(qualname);
+    let mut output = Vec::new();
+    append(ctx, &mut output, "str", module)?;
+    output.push(u32::from('.'));
+    append(ctx, &mut output, "str", qualname)?;
+    output.push(u32::from('('));
+    append(ctx, &mut output, "repr", function)?;
+    output.extend(suffix);
+    output.push(u32::from(')'));
+    Ok(ctx.text_codepoints(output))
+}
 
 /// Argument Clinic accepts either one positional argument or its named equivalent.
 pub(in crate::dynamic) fn key_argument(
@@ -88,16 +276,6 @@ pub(super) fn key_method(
     Ok(key_comparison(ctx, slot, comparator, object, other)?.expect("registered comparison slot"))
 }
 
-pub(super) const ASSIGNED: &[&str] = &[
-    "__module__",
-    "__name__",
-    "__qualname__",
-    "__doc__",
-    "__annotate__",
-    "__type_params__",
-];
-pub(super) const UPDATED: &[&str] = &["__dict__"];
-
 /// Reduce consumes one item between calls, leaving the iterator at the failure point.
 pub(super) fn reduce(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let count = args.len() + kwargs.len();
@@ -172,50 +350,6 @@ fn reduce_iterable(
     Ok(accumulator)
 }
 
-pub(super) fn cache(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    if kwargs.iter().any(|(key, _)| key == "user_function") {
-        return Err(Error::new(
-            "TypeError",
-            "cache() got some positional-only arguments passed as keyword arguments: 'user_function'",
-        ));
-    }
-    let function = super::single_argument("cache", "user_function", args, kwargs)?;
-    let module = ctx.module("functools")?;
-    let lru_cache = ctx.lookup_attr(module, "lru_cache")?;
-    let factory = ctx.call(lru_cache, Vec::new(), vec![("maxsize".into(), NONE)])?;
-    ctx.call(factory, vec![function], Vec::new())
-}
-
-pub(super) fn lru_cache(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [maxsize, typed] = super::builtins::bind("lru_cache", args, kwargs, ["maxsize", "typed"])?;
-    let mut maxsize = maxsize.unwrap_or_else(|| ctx.int(CACHE_CAPACITY as i64));
-    let typed = typed.unwrap_or(FALSE);
-    if ctx.as_int(maxsize).is_ok() {
-        let zero = ctx.int(0);
-        let negative = ctx.binary("<", maxsize, zero)?;
-        if ctx.truth(negative)? {
-            maxsize = zero;
-        }
-    } else if ctx.callable(maxsize) && matches!(ctx.heap.get(typed), Value::Bool(_)) {
-        let capacity = ctx.int(CACHE_CAPACITY as i64);
-        return wrap_cache(ctx, maxsize, capacity, typed);
-    } else if maxsize != NONE {
-        return Err(Error::new(
-            "TypeError",
-            "Expected first argument to be an integer, a callable, or None",
-        ));
-    }
-    // Computed-only imports can expose the intrinsic module without its bundled Python source.
-    let module = ctx.module("functools")?;
-    match ctx.lookup_attr(module, "_lru_cache_decorator") {
-        Ok(factory) => ctx.call(factory, vec![maxsize, typed], Vec::new()),
-        Err(error) if ctx.is_attribute_error(&error) => {
-            Ok(ctx.alloc(Value::CacheDecorator { maxsize, typed }))
-        }
-        Err(error) => Err(error),
-    }
-}
-
 pub(super) fn make_cache(ctx: &mut Context, function: Id, maxsize: Id, typed: Id) -> Result<Id> {
     let typed_keys = ctx.truth(typed)?;
     if !ctx.callable(function) {
@@ -243,75 +377,6 @@ pub(super) fn make_cache(ctx: &mut Context, function: Id, maxsize: Id, typed: Id
         Some(n.max(0) as usize)
     };
     Ok(ctx.new_cache(function, capacity, typed_keys))
-}
-
-// Attach the same public attributes when no Python decorating function was registered.
-pub(in crate::dynamic) fn wrap_cache(
-    ctx: &mut Context,
-    function: Id,
-    maxsize: Id,
-    typed: Id,
-) -> Result<Id> {
-    let wrapper = make_cache(ctx, function, maxsize, typed)?;
-    let mark = ctx.heap.temporary_mark();
-    ctx.heap.keep(wrapper);
-    let result = (|| {
-        let parameters = ctx.alloc(Value::CacheParameters { maxsize, typed });
-        ctx.set_attr(wrapper, "cache_parameters", parameters)?;
-        update_wrapper(ctx, &[wrapper, function], &[])
-    })();
-    ctx.heap.release_temporaries_since(mark);
-    result
-}
-
-pub(super) fn update_wrapper(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let wrapper = option(args, 0, kwargs, "wrapper")?;
-    let wrapped = option(args, 1, kwargs, "wrapped")?;
-    let (wrapper, wrapped) = match (wrapper, wrapped) {
-        (Some(wrapper), Some(wrapped)) => (wrapper, wrapped),
-        (None, None) => {
-            return Err(Error::new(
-                "TypeError",
-                "update_wrapper() missing 2 required positional arguments: 'wrapper' and 'wrapped'",
-            ));
-        }
-        (only, _) => {
-            let name = if only.is_none() { "wrapper" } else { "wrapped" };
-            return Err(Error::new(
-                "TypeError",
-                format!("update_wrapper() missing 1 required positional argument: '{name}'"),
-            ));
-        }
-    };
-    let assigned =
-        option(args, 2, kwargs, "assigned")?.unwrap_or_else(|| tuple_text(ctx, ASSIGNED));
-    let updated = option(args, 3, kwargs, "updated")?.unwrap_or_else(|| tuple_text(ctx, UPDATED));
-    for key in ctx.items(assigned)? {
-        let name = ctx.str_value(key)?.to_owned();
-        match ctx.lookup_attr(wrapped, &name) {
-            Ok(value) => ctx.set_attr(wrapper, &name, value)?,
-            Err(error) if ctx.is_attribute_error(&error) => {}
-            Err(error) => return Err(error),
-        }
-    }
-    for key in ctx.items(updated)? {
-        let name = ctx.str_value(key)?.to_owned();
-        let target = ctx.lookup_attr(wrapper, &name)?;
-        let update = ctx.lookup_attr(target, "update")?;
-        let source = match ctx.lookup_attr(wrapped, &name) {
-            Ok(value) => value,
-            Err(error) if ctx.is_attribute_error(&error) => ctx.dict(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        ctx.call(update, vec![source], Vec::new())?;
-    }
-    // A wrapped function's dictionary can itself contain __wrapped__.
-    ctx.set_attr(wrapper, "__wrapped__", wrapped)?;
-    Ok(wrapper)
 }
 
 pub(super) fn cache_info_type(ctx: &mut Context) -> Result<Id> {

@@ -1,6 +1,7 @@
 """Binary percent interpolation with positional and keyed operands."""
 
 import sys
+import warnings
 
 
 class Binary:
@@ -99,6 +100,17 @@ def current():
     assert b"%(x)s:%(x).2b:%%" % {b"x": b"xyz"} == b"xyz:xy:%"
     assert b"%((\xff))s" % Mapping() == b"value"
     assert b"%03o|%s|%b" % (9, b"x", b"y") == b"011|x|y"
+    class IntResult:
+        def __int__(self):
+            return True
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        assert b"%d" % IntResult() == b"1"
+    assert [warning.category for warning in caught] == [DeprecationWarning]
+    assert b"TZif%d" % 3 == b"TZif3"
+    assert b"%*.*i|%u|%#x|%X" % (-5, 3, -2, 4.9, 31, 255) == b"-002 |4|0x1f|FF"
+    assert b"\xff%(version)d" % {b"version": IndexOnly()} == b"\xff2"
     assert b"%c-%c" % tuple(b"*$") == b"*-$"
     assert b"%#03c|%*.*c|%c" % (Child(b"\xff"), -3, 0, bytearray(b"\x00"), IndexOnly()) == b"  \xff|\x00  |\x02"
     assert b"%(symbol)c" % {b"symbol": 255} == b"\xff"

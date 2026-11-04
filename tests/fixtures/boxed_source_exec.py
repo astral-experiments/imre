@@ -323,6 +323,60 @@ class C:
     assert not namespace["C"].__annotations__
 
 
+def source_generic_functions():
+    from typing import ParamSpec, TypeVar, TypeVarTuple, get_type_hints
+
+    ns = {"events": []}
+    exec("""from __future__ import annotations
+def decorate(value):
+    events.append(value)
+    def apply(func):
+        events.append(func.__type_params__)
+        return func
+    return apply
+
+class Host:
+    T = int
+    @decorate(T)
+    def method[T, *Ts, **P](self, value: T = T, *, other=T):
+        return value, other, (T, Ts, P)
+
+def factory(T):
+    def nested[T](value: T = T):
+        return value, T
+    return nested
+""", ns)
+    host = ns["Host"]
+    method = host.method
+    params = method.__type_params__
+    assert tuple(map(type, params)) == (TypeVar, TypeVarTuple, ParamSpec)
+    assert ns["events"] == [int, params]
+    assert host().method() == (int, int, params)
+    assert get_type_hints(method)["value"] is params[0]
+
+    first, second = ns["factory"](str), ns["factory"](bytes)
+    assert first() == (str, first.__type_params__[0])
+    assert second() == (bytes, second.__type_params__[0])
+    assert first.__type_params__[0] is not second.__type_params__[0]
+
+    exec("""T = bytes
+class Base:
+    def value(self): return self
+class Lazy(Base):
+    T = int
+    K = str
+    def method[T, __U](self, x: T, y: __U, z: K): return super().value(), __U
+""", ns)
+    lazy = ns["Lazy"]
+    del lazy.T
+    lazy.K = bool
+    private = lazy.method.__type_params__[1]
+    assert private.__name__ == "__U"
+    assert lazy.method.__annotations__ == {"x": bytes, "y": private, "z": bool}
+    instance = lazy()
+    assert instance.method(None, None, None) == (instance, private)
+
+
 def module_annotations():
     events = []
     ns = {"events": events, "alias": int}
@@ -1130,6 +1184,7 @@ def current():
     source_name_deletion()
     source_classes()
     source_generic_classes()
+    source_generic_functions()
     source_test_cases()
     source_nested_functions()
     check_source_lambdas()

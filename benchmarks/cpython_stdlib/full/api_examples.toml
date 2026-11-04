@@ -44,6 +44,7 @@ json = ["Decode and encode supported JSON values via `loads`, `load`, `dumps` an
 keyword = ["Check hard and soft keywords with `iskeyword` and `issoftkeyword`.","benchmarks/cpython_stdlib/full/keyword/README.md"]
 linecache = ["Filesystem-backed `getline`, cache population and invalidation.","benchmarks/cpython_stdlib/full/linecache/README.md"]
 logging = ["Send runtime-loaded log messages to `sys.stderr` with `getLogger` and `StreamHandler`, change the handler stream, and rotate log files by size or time.","benchmarks/cpython_stdlib/full/logging/README.md"]
+lzma = ["Decompress XZ and LZMA-alone byte streams, including concatenated streams, with an optional decoder memory limit.","tests/fixtures/boxed_lzma.py"]
 marshal = ["Decode integer, bytes, boolean, and None records with `loads`.","tests/fixtures/boxed_bytecache.py"]
 math = ["`prod` multiplies integer factors from iterables with an optional integer start.","tests/fixtures/iterables/math_product.py"]
 mimetypes = ["Guess the MIME type and encoding of a filename or URL with POSIX host tables or a custom database.", "benchmarks/cpython_stdlib/full/mimetypes/README.md"]

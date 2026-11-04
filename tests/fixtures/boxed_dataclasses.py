@@ -109,7 +109,52 @@ def mapping_conversion():
         collections.defaultdict = defaultdict
 
 
+def abstract_refresh():
+    import abc
+    import inspect
+
+    class Ordered(abc.ABC):
+        @abc.abstractmethod
+        def __lt__(self, other): pass
+
+    class Required(abc.ABC):
+        @abc.abstractmethod
+        def action(self): pass
+
+    @dataclass(order=True)
+    class Item(Ordered):
+        number: int
+
+    @dataclass(order=True)
+    class Pending(Ordered, Required):
+        number: int
+
+    assert not inspect.isabstract(Item) and Item(1) < Item(2)
+    assert inspect.isabstract(Pending) and Pending.__abstractmethods__ == {'action'}
+    Pending.action = lambda self: self.number
+    assert abc.update_abstractmethods(Pending) is Pending and Pending(3).action() == 3
+
+    class Plain: pass
+    assert abc.update_abstractmethods(Plain) is Plain
+    assert not hasattr(Plain, '__abstractmethods__')
+
+    class Broken:
+        def __get__(self, instance, owner):
+            raise LookupError('binding failed')
+
+    before = Item.__abstractmethods__
+    Item.__lt__ = Broken()
+    try:
+        abc.update_abstractmethods(Item)
+    except LookupError as exc:
+        assert exc.args == ('binding failed',)
+    else:
+        raise AssertionError('ignored descriptor exception')
+    assert Item.__abstractmethods__ is before
+
+
 def current():
+    abstract_refresh()
     @dataclass
     class Base:
         count: int

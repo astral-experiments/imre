@@ -1,6 +1,7 @@
 """Compare sealed UTF-8 files, context cleanup, and process arguments with CPython."""
 
 import argparse
+import binascii
 import errno
 import gzip
 import os
@@ -44,6 +45,25 @@ ACCEPTED = {
             os.close(master)
             os.close(slave)
         assert os.device_encoding(slave) is None
+    """,
+    "zip_empty_unicode_path": """
+        import warnings
+        from zipfile import ZipFile
+        from zipimport import zipimporter
+
+        warnings.simplefilter("error", UserWarning)
+        assert zipimporter("empty-path.zip").get_data("original") == b"payload"
+        warnings.simplefilter("ignore", UserWarning)
+        warnings.filterwarnings("error", category=UserWarning, module="^zipfile$")
+        try:
+            ZipFile("empty-path.zip").close()
+        except UserWarning as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("missing empty Unicode path warning")
+        warnings.simplefilter("ignore", UserWarning)
+        with ZipFile("empty-path.zip") as archive:
+            print(archive.namelist())
     """,
     "binary_update_path_builtin": """
         with open("checked-update.bin", "wb+") as stream:
@@ -685,8 +705,8 @@ REJECTED = {
     "unsupported_newline": 'open("input.txt", "r", encoding="utf-8", newline="other")',
     "read_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.read(1)',
     "readline_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.readline(2)',
+    "private_zip_index": 'from imre._zipimport import open_index\nopen_index("archive.zip")',
     "zipimport_code": 'import zipimport\nzipimport.zipimporter("archive.zip").get_code("module")',
-    "gzip_write": 'import gzip\ngzip.open("output.gz", "wb")',
     "gzip_text_codec": 'import gzip\ngzip.open("input.gz", "rt", encoding="latin1")',
     "gzip_binary_encoding": 'import gzip\ngzip.open("input.gz", "rb", encoding="utf-8")',
     "gzip_text_no_encoding": 'import gzip\ngzip.open("input.gz", "rt")',
@@ -802,6 +822,12 @@ def seed(directory: Path, case: str) -> None:
     (directory / "truncated.txt").write_bytes(b"truncated \xf0\x9f")
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
+    if case == "zip_empty_unicode_path":
+        member = zipfile.ZipInfo("original")
+        # Info-ZIP Unicode Path, version 1, matching CRC and no replacement name.
+        member.extra = b"\x75\x70\x05\x00\x01" + binascii.crc32(b"original").to_bytes(4, "little")
+        with zipfile.ZipFile(directory / "empty-path.zip", "w") as archive:
+            archive.writestr(member, b"payload")
     if case in {"zipimport_resources", "boxed_zipimport_resources"}:
         for name, method in [("stored.zip", zipfile.ZIP_STORED), ("deflated.zip", zipfile.ZIP_DEFLATED)]:
             with zipfile.ZipFile(directory / name, "w") as archive:
@@ -939,6 +965,16 @@ def main() -> None:
     passed = 0
     with tempfile.TemporaryDirectory(prefix="imre-files-") as directory:
         temporary = Path(directory)
+        for call in (
+            'gzip.open("out.gz", "wb")',
+            'gzip.open("out.gz", mode="ab")',
+            'gzip.GzipFile("out.gz", "xb")',
+        ):
+            path = temporary / "gzip_writer.py"
+            path.write_text(f"import gzip\nwith {call} as f:\n    f.write(b'x')\n")
+            result = run([compiler, "check", str(path)], temporary)
+            assert result.returncode == 0, (call, result.stderr)
+            passed += 1
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
             path.write_text(dedent(source), encoding="utf-8")

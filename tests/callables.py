@@ -11,6 +11,7 @@ IMPORT = "from typing import Callable\n"
 FUNCTION = "def identity(value: int) -> int:\n    return value\n"
 
 REJECTED = {
+    "overload_result_annotation": "from typing import get_overloads\nvalues: list[int] = get_overloads(sum)\n",
     "overload_bound_or_plain": (
         "from typing import Callable, overload\n"
         "def register(callback: Callable[[], int]) -> None:\n    overload(callback)\n"

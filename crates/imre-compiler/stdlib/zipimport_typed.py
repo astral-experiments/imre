@@ -1,3 +1,4 @@
+from imre._zipimport import open_index as _open_index
 from pathlib import Path as _Path
 from posixpath import exists as _exists
 from zipfile import BadZipFile as _BadZipFile, ZipFile as _ZipFile
@@ -16,8 +17,7 @@ def _is_file(path: str) -> bool:
 def _index(path: str) -> bool:
     if path not in _indexes:
         try:
-            with _ZipFile(path) as index:
-                _indexes[path] = index
+            _indexes[path] = _open_index(path)
         except _BadZipFile:
             return False
     return True

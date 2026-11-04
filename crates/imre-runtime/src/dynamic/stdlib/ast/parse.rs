@@ -1071,7 +1071,17 @@ pub(super) fn parse_source(
     let syntax = |err| Error::new("SyntaxError", format!("{filename}: {err}"));
     match mode {
         "exec" => {
-            let body = ruff_python_parser::parse_module(source).map_err(syntax)?;
+            let body =
+                ruff_python_parser::parse_unchecked_source(source, ast::PySourceType::Python);
+            if let Some(limit) =
+                crate::dynamic::source_code::IndentationLimit::find(&body, source, true, None)
+            {
+                let file = parser.ctx.text(filename);
+                return limit.raise(parser.ctx, file);
+            }
+            if let Some(error) = body.errors().first() {
+                return Err(syntax(error.clone()));
+            }
             parser.prepare_strings(source, body.tokens(), body.syntax())?;
             let body = parser.suite(body.into_syntax().body)?;
             let ignores = parser.list(vec![]);

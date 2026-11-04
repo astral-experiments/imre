@@ -107,6 +107,8 @@ pub struct CompileOptions {
     pub address_sanitizer: bool,
     /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
     pub bundled_provider_archive: Option<PathBuf>,
+    /// Compiler-owned archive for a Python launcher missing its installed companion.
+    pub stdlib_fallback: Option<PathBuf>,
     /// Existing pure-Python site directory of a Python-style launcher.
     pub system_site: Option<PathBuf>,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
@@ -187,6 +189,9 @@ pub struct Compilation {
 /// Files and failed import lookups observed by the source loader.
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct SourceInputs {
+    /// A native run of this image can request Python source modules at runtime.
+    #[serde(default)]
+    pub boxed_imports: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
     /// Existing namespace portions and the canonical directories they resolve to.
@@ -305,17 +310,9 @@ fn object_fallback<T>(
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
     if options.module_entry.is_some() {
-        return dynamic::compile(
-            path,
-            module_root,
-            options,
-            true,
-            None,
-            Default::default(),
-            || Ok(()),
-        )?
-        .map(boxed)
-        .ok_or_else(|| "could not compile the module entry".to_owned());
+        return dynamic::compile(path, module_root, options, true, None, None, || Ok(()))?
+            .map(boxed)
+            .ok_or_else(|| "could not compile the module entry".to_owned());
     }
     let tracing = options
         .python_startup()
@@ -350,7 +347,7 @@ fn object_fallback<T>(
         if traced_typed_entry {
             Some(dynamic::ObjectOperation::TracedEntry)
         } else if g.class_layout_error.borrow().as_ref() == Some(&error) {
-            Some(dynamic::ObjectOperation::ClassLayout(g))
+            Some(dynamic::ObjectOperation::ClassLayout)
         } else {
             g.object_builtin_errors
                 .borrow()
@@ -363,13 +360,15 @@ fn object_fallback<T>(
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
-    let registered_imports = graph
-        .as_ref()
-        .filter(|_| runtime_imports)
-        .map(dynamic::registered_imports)
-        .unwrap_or_default();
     let check_returns = || {
-        if checked_file && let Some(graph) = &graph {
+        if let Some(graph) = &graph {
+            let requested = graph.check_fallback_calls.get();
+            if !checked_file
+                && (options.runtime_imports
+                    || !matches!(requested, analysis::FallbackCalls::FunctionBodies))
+            {
+                return Ok(());
+            }
             let (skipped, overloads) = graph.diagnostic_scopes();
             let entry = &graph.modules[graph.entry];
             // A deferred probe can call typed functions while initializing additional names.
@@ -379,12 +378,14 @@ fn object_fallback<T>(
                     .values()
                     .any(|names| names.len() > 1)
             });
-            let all_calls = graph.check_decorated_method_calls.get()
+            let all_calls = !matches!(requested, analysis::FallbackCalls::None)
                 || !entry.optional_imports.is_empty()
                 || compound_probe
                 || !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error);
-            let checked_calls = if graph.check_method_factories.get() {
+            let checked_calls = if !checked_file {
+                requested
+            } else if graph.check_method_factories.get() {
                 analysis::FallbackCalls::DecoratorFactories
             } else if all_calls {
                 analysis::FallbackCalls::All
@@ -412,7 +413,7 @@ fn object_fallback<T>(
         runtime_imports,
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
-        registered_imports,
+        graph.as_ref(),
         check_returns,
     )? {
         Some(compilation) => Ok(boxed(compilation)),

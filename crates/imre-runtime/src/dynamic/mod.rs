@@ -24,6 +24,7 @@ mod enums;
 mod excepthook;
 mod ffi;
 mod finalizers;
+mod frame_locals;
 mod function_fields;
 mod gc_schedule;
 mod generator_protocol;
@@ -214,12 +215,9 @@ impl Context {
     }
 
     fn alloc(&mut self, value: Value) -> Id {
-        let finalizer = matches!(&value, Value::Instance { class, .. }
-            if self.class_attr(*class, "__del__").is_some());
+        let class = value.finalizer_class();
         let id = self.heap.alloc(value);
-        if finalizer {
-            self.heap.register_finalizer(id);
-        }
+        self.register_instance_finalizer(id, class);
         id
     }
     fn text(&mut self, value: impl Into<String>) -> Id {
@@ -310,7 +308,6 @@ impl Context {
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
             }
-            ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (_, Value::DictView { .. }) => {
                 Self::dict_view_owner(self.type_name(object)) == Some(owner)
             }
@@ -326,6 +323,7 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("array.array", Value::Array(_))
+            | (stdlib::functools::PARTIAL_CLASS, Value::Partial { .. })
             | (stdlib::functools::LRU_CACHE_CLASS, Value::Cached { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
@@ -386,31 +384,103 @@ impl Context {
         })
     }
 
-    /// Find the Python acquisition slot, keeping native base descriptors in MRO order.
-    fn python_buffer_method(&self, object: Id) -> Result<Option<Id>> {
+    /// A native buffer descriptor in the MRO takes precedence over a later Python definition.
+    fn buffer_slot(&self, object: Id, name: &str) -> Option<Option<Id>> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
+            return None;
+        };
+        self.find_in_mro(*class, |base| match self.heap.get(base) {
+            Value::Class { .. } => self.own_class_attr(base, name).map(Some),
+            Value::Native(base)
+                if matches!(base.as_str(), "array.array" | "bytearray")
+                    || (base == "bytes" && name == "__buffer__") =>
+            {
+                Some(None)
+            }
+            _ => None,
+        })
+    }
+
+    fn python_buffer_method(&self, object: Id, scoped: bool) -> Result<Option<Id>> {
+        let Some(method) = self.buffer_slot(object, "__buffer__") else {
             return Ok(None);
         };
-        let slot = |name| {
-            self.find_in_mro(*class, |base| match self.heap.get(base) {
-                Value::Class { .. } => self.own_class_attr(base, name).map(Some),
-                Value::Native(base)
-                    if matches!(base.as_str(), "array.array" | "bytearray")
-                        || (base == "bytes" && name == "__buffer__") =>
-                {
-                    Some(None)
-                }
-                _ => None,
-            })
-        };
-        let Some(method) = slot("__buffer__") else {
-            return Ok(None);
-        };
-        // A Python release hook must run even when the last derived view dies in GC.
-        if slot("__release_buffer__").flatten().is_some() {
+        // A long-lived view needs a Python release hook even if its last reference dies in GC.
+        if (!scoped || method.is_none())
+            && self
+                .buffer_slot(object, "__release_buffer__")
+                .flatten()
+                .is_some()
+        {
             return Err(Self::unsupported_buffer_hooks());
         }
         Ok(method)
+    }
+
+    fn call_buffer_hook(&mut self, object: Id, method: Id, arg: Id) -> Result<Id> {
+        let class = self.exact_type(object)?;
+        let method = self.bind_attribute(method, object, class)?;
+        self.call(method, vec![arg], vec![])
+    }
+
+    fn acquire_python_buffer(&mut self, object: Id, method: Id, flags: i64) -> Result<Id> {
+        let flags = self.int(flags);
+        let view = self.call_buffer_hook(object, method, flags)?;
+        if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                "__buffer__ returned non-memoryview object",
+            ));
+        }
+        Ok(view)
+    }
+
+    /// Consume a contiguous view returned by a Python buffer provider.
+    fn with_contiguous_python_buffer<T>(
+        &mut self,
+        object: Id,
+        method: Id,
+        flags: i64,
+        consume: impl FnOnce(&mut Self, Id) -> Result<T>,
+    ) -> Result<T> {
+        let view = self.acquire_python_buffer(object, method, flags)?;
+        // A failed export of the returned view does not call the provider's release hook.
+        self.view_bytes(view)?;
+        self.with_python_buffer_export(object, view, |ctx| consume(ctx, view))
+    }
+
+    /// Run the consumer of a successfully acquired Python export, then release it.
+    fn with_python_buffer_export<T>(
+        &mut self,
+        object: Id,
+        view: Id,
+        consume: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let result = self.with_buffer_export(view, consume);
+        if let Err(error) = &result {
+            for id in error.roots() {
+                self.heap.keep(id);
+            }
+        }
+        self.release_python_buffer(object, view);
+        result
+    }
+
+    /// Release a synchronous Python export after its consumer has dropped the view's export.
+    fn release_python_buffer(&mut self, object: Id, view: Id) {
+        if matches!(self.heap.get(view), Value::MemoryView { owner: Some(owner), lease: None, .. } if *owner == object)
+        {
+            return;
+        }
+        if let Some(method) = self.buffer_slot(object, "__release_buffer__").flatten()
+            && let Err(error) = self.call_buffer_hook(object, method, view)
+        {
+            let message = format!(
+                "Exception ignored in __release_buffer__ of {}",
+                self.type_name(object)
+            );
+            unraisable::report(self, error, false, None, &message);
+        }
     }
 
     fn unsupported_buffer_hooks() -> Error {
@@ -421,7 +491,7 @@ impl Context {
     }
 
     fn check_buffer_exporter(&self, object: Id) -> Result<()> {
-        if self.python_buffer_method(object)?.is_some() {
+        if self.python_buffer_method(object, false)?.is_some() {
             return Err(Self::unsupported_buffer_hooks());
         }
         Ok(())
@@ -461,6 +531,15 @@ impl Context {
         }
     }
 
+    fn writable_owner_bytes(&mut self, owner: Id) -> Result<&mut [u8]> {
+        let storage = self.view_storage_id(owner);
+        if let Value::RawReadWindow(w) = *self.heap.get(storage) {
+            let range = w.checked_range(self.owner_bytes(w.backing)?.len())?;
+            return Ok(&mut self.writable_storage_bytes(w.backing)?[range]);
+        }
+        self.writable_storage_bytes(storage)
+    }
+
     fn writable_storage_bytes(&mut self, storage: Id) -> Result<&mut [u8]> {
         Self::mutable_storage_bytes(self.heap.get_mut(storage))
     }
@@ -492,13 +571,14 @@ impl Context {
                 _ => Err(Error::new("ValueError", "I/O operation on closed file.")),
             },
             Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
-            _ => Err(Error::new(
-                "TypeError",
-                format!(
-                    "a bytes-like object is required, not '{}'",
-                    self.type_name(id)
-                ),
-            )),
+            _ => {
+                let name = self.type_name(id);
+                let name = &name[..name.floor_char_boundary(100)];
+                Err(Error::new(
+                    "TypeError",
+                    format!("a bytes-like object is required, not '{name}'"),
+                ))
+            }
         }
     }
 
@@ -532,18 +612,9 @@ impl Context {
     }
 
     fn new_memoryview(&mut self, object: Id) -> Result<Id> {
-        if let Some(method) = self.python_buffer_method(object)? {
-            let class = self.exact_type(object)?;
-            let method = self.bind_attribute(method, object, class)?;
+        if let Some(method) = self.python_buffer_method(object, false)? {
             // PyMemoryView_FromObject requests PyBUF_FULL_RO, including shape and strides.
-            let flags = self.int(0x11c);
-            let view = self.call(method, vec![flags], vec![])?;
-            if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
-                return Err(Error::new(
-                    "TypeError",
-                    "__buffer__ returned non-memoryview object",
-                ));
-            }
+            let view = self.acquire_python_buffer(object, method, 0x11c)?;
             let outer = self.new_memoryview(view)?;
             let wrapper = self.alloc(Value::BufferWrapper);
             let export = self.alloc(Value::PythonBufferLease {
@@ -563,10 +634,15 @@ impl Context {
             Value::MemoryView {
                 owner,
                 anonymous,
-                layout,
+                ref layout,
                 lease,
                 ..
-            } => (Self::memoryview_owner(owner)?, anonymous, layout, lease),
+            } => (
+                Self::memoryview_owner(owner)?,
+                anonymous,
+                layout.clone(),
+                lease,
+            ),
             Value::BytesIoBuffer { .. } => {
                 let len = self.view_element_count(object)?;
                 self.invalidate_stream_snapshot(object);
@@ -733,6 +809,7 @@ impl Context {
                 | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
                 | Value::GenericAliasIterator(_)
+                | Value::MemoryIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -809,6 +886,7 @@ impl Context {
                 let unpacked = typing::unpack_parameter(self, id)?;
                 (self.alloc(Value::Tuple(vec![unpacked])), "tuple_iterator")
             }
+            Value::MemoryView { .. } => return self.memoryview_iterator(id),
             Value::Array(_) => (id, "array.arrayiterator"),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
@@ -903,6 +981,7 @@ impl Context {
             value,
             Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
+                | Value::MemoryIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1242,6 +1321,14 @@ impl Context {
                 self.alloc(Value::GenericAlias(alias.unpacked_copy()))
             }));
         }
+        if let Value::MemoryIterator {
+            view,
+            index,
+            length,
+        } = *self.heap.get(id)
+        {
+            return self.next_memoryview_item(id, view, index, length);
+        }
         if let Value::SequenceIterator { source, index } = *self.heap.get(id) {
             return self.next_sequence_item(id, source, index);
         }
@@ -1432,16 +1519,6 @@ impl Context {
         {
             return copy_ids(items).map(Some);
         }
-        if let Value::Instance { class, fields, .. } = self.heap.get(id)
-            && let Some(names) = self.namedtuple_fields(*class)
-        {
-            let mut items = Vec::new();
-            items
-                .try_reserve_exact(names.len())
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            items.extend(names.iter().map(|name| fields[name]));
-            return Ok(Some(items));
-        }
         Ok(None)
     }
 
@@ -1514,6 +1591,8 @@ impl Context {
                 | Value::AsyncGeneratorOperation { .. }
                 | Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
+                | Value::MemoryView { .. }
+                | Value::MemoryIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -2277,12 +2356,27 @@ impl Context {
             .chain(["__new__"])
             .chain((owner == "int").then_some("__sizeof__"))
             .chain(fields);
-        let entries = members
+        let mut entries: Vec<_> = members
             .map(|member| {
                 let key = self.heap.code_name(member);
                 (key, self.builtin(&format!("{owner}.{member}")))
             })
             .collect();
+        if owner == "int" {
+            let doc = self.text(concat!(
+                "int([x]) -> integer\nint(x, base=10) -> integer\n\n",
+                "Convert a number or string to an integer, or return 0 if no arguments\n",
+                "are given.  If x is a number, return x.__int__().  For floating-point\n",
+                "numbers, this truncates towards zero.\n\n",
+                "If x is not a number or if base is given, then x must be a string,\n",
+                "bytes, or bytearray instance representing an integer literal in the\n",
+                "given base.  The literal can be preceded by '+' or '-' and be surrounded\n",
+                "by whitespace.  The base defaults to 10.  Valid bases are 0 and 2-36.\n",
+                "Base 0 means to interpret the base from the string as an integer literal.\n",
+                ">>> int('0b100', base=0)\n4",
+            ));
+            entries.push((self.heap.code_name("__doc__"), doc));
+        }
         let dictionary = self.dict(entries);
         self.native_type_dicts.insert(class, dictionary);
     }
@@ -2318,6 +2412,25 @@ impl Context {
                 let field = self.readonly_member("super", name);
                 entries.push((self.heap.code_name(name), field));
             }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
+        if name == stdlib::functools::PARTIAL_CLASS {
+            let mut entries = Vec::new();
+            for method in ["__new__", "__call__", "__get__", "__setstate__"] {
+                let slot = self.builtin(&format!("{name}.{method}"));
+                entries.push((self.heap.code_name(method), slot));
+            }
+            for field in ["func", "args", "keywords"] {
+                let member = self.readonly_member(stdlib::functools::PARTIAL_CLASS, field);
+                entries.push((self.heap.code_name(field), member));
+            }
+            let repr = self.builtin("functools.partial.__repr__");
+            entries.push((self.heap.code_name("__repr__"), repr));
+            let module = self.heap.code_name("functools");
+            entries.push((self.heap.code_name("__module__"), module));
+            let doc = self.text("Create a new function with partial application of the given arguments\nand keywords.");
+            entries.push((self.heap.code_name("__doc__"), doc));
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
@@ -2421,10 +2534,11 @@ impl Context {
             "float" => &[
                 "__format__",
                 "__getformat__",
+                "fromhex",
                 "as_integer_ratio",
                 "__repr__",
             ],
-            "complex" => &["__complex__"],
+            "complex" => complex::METHODS,
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -2452,6 +2566,16 @@ impl Context {
             self.builtin(&format!("{name}.{method}"));
         }
         match name {
+            "dict" => {
+                let mut entries = Vec::new();
+                for member in methods.iter().copied().chain(["__sizeof__"]) {
+                    let key = self.heap.code_name(member);
+                    entries.push((key, self.builtin(&format!("dict.{member}"))));
+                }
+                entries.push((self.heap.code_name("__hash__"), NONE));
+                let dictionary = self.dict(entries);
+                self.native_type_dicts.insert(value, dictionary);
+            }
             "int" => {
                 self.install_numeric_dictionary(value, "int", methods, ["numerator", "denominator"])
             }
@@ -3079,6 +3203,14 @@ impl Context {
                     self.finder_external
                 };
                 self.bind(scope, "_finder_external", finder);
+                // The Python launcher (or standalone program) owns its installed sources.
+                let archive = self.executable.with_file_name("imre-stdlib.zip");
+                let archive = if archive.is_absolute() {
+                    archive.to_str().map_or(NONE, |path| self.text(path))
+                } else {
+                    NONE
+                };
+                self.bind(scope, "_installed_stdlib", archive);
             }
             "_imre_importlib" => {
                 // All bootstrap instances invalidate the finders used by the native path search.
@@ -3361,6 +3493,7 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
+            "random" if source.is_none() => stdlib::random::instance::install(self, scope)?,
             "math" if source.is_none() => {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
@@ -3555,6 +3688,8 @@ impl Context {
                     "big"
                 });
                 self.bind(scope, "byteorder", byteorder);
+                let float_info = stdlib::fixed_structseq::float_info(self);
+                self.bind(scope, "float_info", float_info);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
                 for name in [
@@ -3763,6 +3898,8 @@ impl Context {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
                     ("accumulate", "itertools.accumulate"),
+                    ("cycle", "itertools.cycle"),
+                    ("filterfalse", "itertools.filterfalse"),
                     ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),

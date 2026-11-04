@@ -14,6 +14,7 @@ verify-ir = []
 imre-ast = { path = "../imre-ast" }
 imre-regex = { path = "../imre-regex" }
 blake3 = "1"
+indexmap = "=2.14.2"
 notify = "8.2.0"
 num-bigint.workspace = true
 rpds = "1"
@@ -36,6 +37,9 @@ fancy-regex.workspace = true
 regex.workspace = true
 tempfile = "=3.23.0"
 zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[build-dependencies]
+zip = { version = "8", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"

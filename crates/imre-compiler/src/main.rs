@@ -26,6 +26,7 @@ enum Allocator {
 }
 
 const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
+const STDLIB_ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip"));
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--runtime-imports] [--entry-profile FILE] [--watch | -w]
@@ -80,6 +81,16 @@ fn run() -> Result<ExitCode, String> {
     }
     if command == "--version" {
         println!("imre {}", env!("CARGO_PKG_VERSION"));
+        return Ok(ExitCode::SUCCESS);
+    }
+    if command == "--emit-bundled-stdlib" {
+        if args.next().is_some() {
+            return Err("--emit-bundled-stdlib takes no arguments".into());
+        }
+        std::io::stdout()
+            .lock()
+            .write_all(STDLIB_ARCHIVE)
+            .map_err(|e| e.to_string())?;
         return Ok(ExitCode::SUCCESS);
     }
     if command == "--emit-bundled-provider-ir" {
@@ -298,7 +309,19 @@ fn run() -> Result<ExitCode, String> {
         options.bundled_provider_archive =
             bundled_native.and_then(|toolchain| toolchain.provider_archive(&optimization));
     }
-    let run_image = |directory| {
+    #[cfg(unix)]
+    if let Some((_, executable)) = options.python_startup()
+        && !Path::new(executable)
+            .with_file_name("imre-stdlib.zip")
+            .is_file()
+    {
+        options.stdlib_fallback = Some(build_cache::stdlib_archive_path()?);
+    }
+    let run_image = |directory, boxed_imports| {
+        #[cfg(unix)]
+        if boxed_imports && let Some(path) = &options.stdlib_fallback {
+            build_cache::prepare_stdlib_archive(path).map_err(|e| e.to_string())?;
+        }
         #[cfg(unix)]
         if let Some(disposition) = child_disposition {
             disposition
@@ -308,6 +331,7 @@ fn run() -> Result<ExitCode, String> {
         run_program(
             &output,
             directory,
+            boxed_imports,
             &source_path,
             args,
             options.python_startup().map(|(flags, _)| flags),
@@ -368,7 +392,7 @@ fn run() -> Result<ExitCode, String> {
             progress.cached(label);
             if let Some(directory) = run_directory {
                 progress.running(&source_path);
-                return run_image(directory);
+                return run_image(directory, sources.boxed_imports);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -541,6 +565,18 @@ fn run() -> Result<ExitCode, String> {
         .arg("-o")
         .arg(staged_output.as_ref().unwrap_or(&output));
     let invoke = |driver: &mut Command| {
+        // An unbundled Clang also needs to find its linker when PATH is absent.
+        #[cfg(target_os = "linux")]
+        if bundled.is_none() && std::env::var_os("PATH").is_none() {
+            let path = option_env!("IMRE_DEFAULT_TOOL_PATH").unwrap_or("/bin:/usr/bin");
+            if std::env::split_paths(OsStr::new(path)).any(|dir| !dir.is_absolute()) {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "IMRE_DEFAULT_TOOL_PATH must contain only absolute directories",
+                ));
+            }
+            driver.env("PATH", path);
+        }
         if link.verbose {
             eprintln!("{driver:?}");
         }
@@ -567,6 +603,7 @@ fn run() -> Result<ExitCode, String> {
     if !status.success() {
         return Err(format!("LLVM compilation/linking failed: {status}"));
     }
+    let boxed_imports = sources.boxed_imports;
     if let (Some(cache), Some(stage), Some(file)) = (&cache, &stage, &staged_output) {
         build_cache::materialize(file, &output).map_err(|e| e.to_string())?;
         if cache
@@ -588,7 +625,7 @@ fn run() -> Result<ExitCode, String> {
         drop(temporary);
         drop(scratch);
         drop(stage);
-        return run_image(directory);
+        return run_image(directory, boxed_imports);
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -672,12 +709,13 @@ fn validate_paths<'a>(
 fn run_program(
     output: &Path,
     directory: tempfile::TempDir,
+    boxed_imports: bool,
     source: &Path,
     args: impl Iterator<Item = OsString>,
     python: Option<&imre_compiler::CommandFlags>,
 ) -> Result<ExitCode, String> {
     #[cfg(unix)]
-    let status = run_program::launch(output, directory, source, args, python);
+    let status = run_program::launch(output, directory, source, args, python, boxed_imports);
     #[cfg(not(unix))]
     let status = {
         let _directory = directory;

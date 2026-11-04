@@ -15,12 +15,20 @@ use super::{Bytes, Int, Str};
 const N: usize = 624;
 const M: usize = 397;
 
-struct Generator {
+pub(crate) struct Generator {
     state: [u32; N],
     index: usize,
 }
 
 impl Generator {
+    /// A newly allocated Random has zeroed state until its initializer seeds it.
+    pub(crate) fn unseeded() -> Self {
+        Self {
+            state: [0; N],
+            index: 0,
+        }
+    }
+
     fn from_key(key: &[u32]) -> Self {
         let key = if key.is_empty() { &[0] } else { key };
         let mut state = [0u32; N];
@@ -53,7 +61,7 @@ impl Generator {
         Self { state, index: N }
     }
 
-    fn from_entropy() -> Self {
+    pub(crate) fn from_entropy() -> Self {
         let mut seed = [0; N * 4];
         if getrandom::fill(&mut seed).is_ok() {
             return Self::from_key(&std::array::from_fn::<_, N, _>(|i| {
@@ -89,6 +97,16 @@ impl Generator {
             mono as u32,
             (mono >> 32) as u32,
         ])
+    }
+
+    pub(crate) fn from_integer(seed: &Int) -> Self {
+        Self::from_key(&seed.big().magnitude().to_u32_digits())
+    }
+
+    pub(crate) fn from_seed_bytes(bytes: &[u8]) -> Self {
+        let mut data = bytes.to_vec();
+        data.extend_from_slice(&Sha512::digest(bytes));
+        Self::from_key(&BigUint::from_bytes_be(&data).to_u32_digits())
     }
 
     fn word(&mut self) -> u32 {
@@ -127,6 +145,26 @@ impl Generator {
         Ok(BigUint::new(limbs))
     }
 
+    pub(crate) fn random(&mut self) -> f64 {
+        let high = u64::from(self.word() >> 5);
+        let low = u64::from(self.word() >> 6);
+        ((high << 26) | low) as f64 / (1u64 << 53) as f64
+    }
+
+    pub(crate) fn getrandbits(&mut self, count: &Int) -> Result<BigInt> {
+        let count = count.big();
+        if count.sign() == Sign::Minus {
+            Err(Error::new(Kind::ValueError, "Cannot convert negative int"))
+        } else if let Some(n) = count.to_u64() {
+            self.bits(n).map(BigInt::from)
+        } else {
+            Err(Error::new(
+                Kind::OverflowError,
+                "Python int too large for C uint64_t",
+            ))
+        }
+    }
+
     fn below(&mut self, stop: &BigUint) -> Result<BigUint> {
         debug_assert!(!stop.is_zero());
         loop {
@@ -160,9 +198,13 @@ fn shared() -> MutexGuard<'static, Generator> {
         .unwrap_or_else(|e| e.into_inner())
 }
 
+pub(crate) fn seed_shared(generator: Generator) {
+    *shared() = generator;
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_random_seed_none() {
-    *shared() = Generator::from_entropy();
+    seed_shared(Generator::from_entropy());
 }
 
 /// # Safety
@@ -171,13 +213,7 @@ pub extern "C" fn imre_random_seed_none() {
 pub unsafe extern "C" fn imre_random_seed_int(seed: usize) {
     // SAFETY: the compiler roots this Python integer for the call.
     let seed = unsafe { Int::borrow(seed) };
-    *shared() = Generator::from_key(&seed.big().magnitude().to_u32_digits());
-}
-
-fn seed_bytes(bytes: &[u8]) {
-    let mut data = bytes.to_vec();
-    data.extend_from_slice(&Sha512::digest(bytes));
-    *shared() = Generator::from_key(&BigUint::from_bytes_be(&data).to_u32_digits());
+    seed_shared(Generator::from_integer(&seed));
 }
 
 /// # Safety
@@ -185,7 +221,7 @@ fn seed_bytes(bytes: &[u8]) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_seed_str(seed: *const Str) {
     // SAFETY: the compiler roots this string for the call.
-    seed_bytes(unsafe { &*seed }.as_bytes());
+    seed_shared(Generator::from_seed_bytes(unsafe { &*seed }.as_bytes()));
 }
 
 /// # Safety
@@ -193,15 +229,12 @@ pub unsafe extern "C" fn imre_random_seed_str(seed: *const Str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_seed_bytes(seed: *const Bytes) {
     // SAFETY: the compiler roots these bytes for the call.
-    seed_bytes(unsafe { &*seed });
+    seed_shared(Generator::from_seed_bytes(unsafe { &*seed }));
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_random_float() -> f64 {
-    let mut rng = shared();
-    let high = u64::from(rng.word() >> 5);
-    let low = u64::from(rng.word() >> 6);
-    ((high << 26) | low) as f64 / (1u64 << 53) as f64
+    shared().random()
 }
 
 fn integer_result(result: Result<BigInt>) -> usize {
@@ -214,17 +247,12 @@ fn integer_result(result: Result<BigInt>) -> usize {
 pub unsafe extern "C" fn imre_random_bits(count: usize) -> usize {
     // SAFETY: the compiler roots this Python integer for the call.
     let count = unsafe { Int::borrow(count) };
-    let count = count.big();
-    integer_result(if count.sign() == Sign::Minus {
-        Err(Error::new(Kind::ValueError, "Cannot convert negative int"))
-    } else if let Some(n) = count.to_u64() {
-        shared().bits(n).map(BigInt::from)
-    } else {
-        Err(Error::new(
-            Kind::OverflowError,
-            "Python int too large for C uint64_t",
-        ))
-    })
+    integer_result(random_bits(&count))
+}
+
+/// Draw the requested number of bits from the same module generator as random().
+pub(crate) fn random_bits(count: &Int) -> Result<BigInt> {
+    shared().getrandbits(count)
 }
 
 fn sequence_index(length: &BigUint, secure: bool) -> Result<BigUint> {
@@ -328,6 +356,17 @@ pub unsafe extern "C" fn imre_random_shuffle_list(list: *const super::Object) {
     };
 }
 
+/// Draw from an inclusive interval of Python integers.
+pub(crate) fn randint(start: &BigInt, stop: &BigInt) -> Result<BigInt> {
+    if start > stop {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("empty range in randint({start}, {stop})"),
+        ));
+    }
+    Ok(start + BigInt::from(random_below((stop - start + 1u32).magnitude())?))
+}
+
 /// Select from an arithmetic progression without materializing it. A range used
 /// as a sequence must fit len(); randrange and randint admit arbitrary widths.
 fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Result<BigInt> {
@@ -338,13 +377,7 @@ fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Resul
         ));
     }
     if mode == 1 {
-        if start > stop {
-            return Err(Error::new(
-                Kind::ValueError,
-                format!("empty range in randint({start}, {stop})"),
-            ));
-        }
-        return Ok(start + BigInt::from(random_below((stop - start + 1u32).magnitude())?));
+        return randint(start, stop);
     }
     let sequence = matches!(mode, 2 | 4);
     if step.is_zero() {

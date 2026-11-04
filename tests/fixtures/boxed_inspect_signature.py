@@ -48,6 +48,8 @@ class C:
 
 
 class CallableInstance:
+    __text_signature__ = "(name, /)"
+
     def __call__(self, item, /, *, count=1):
         return item * count
 
@@ -75,6 +77,42 @@ class ClassCall:
     @classmethod
     def __call__(cls, item):
         return item
+
+
+class JoinCall(str):
+    __call__ = str.join
+
+
+class BoundJoinCall:
+    __call__ = ":".join
+
+
+class DictFactory(dict):
+    __call__ = dict.__dict__["fromkeys"]
+
+
+class CustomDict(dict):
+    def __init__(self, fields):
+        super().__init__(fields)
+
+
+class ReadOnce:
+    def __get__(self, obj, owner):
+        obj.reads += 1
+        if obj.reads > 1:
+            raise RuntimeError("descriptor read twice")
+        return partial(with_options, "label")
+
+
+class Handler:
+    __call__ = ReadOnce()
+
+    def __init__(self):
+        self.reads = 0
+
+
+class SlottedHandler:
+    __slots__ = "__call__"
 
 
 class InheritedName(str):
@@ -129,6 +167,15 @@ class InitDescriptor:
 
 class DescriptorInit:
     __init__ = InitDescriptor()
+
+
+class InheritedAdapter(staticmethod):
+    pass
+
+
+class NamedAdapter(staticmethod):
+    def __init__(self, callback, *, name):
+        super().__init__(callback)
 
 
 class JoinMeta(type):
@@ -188,15 +235,54 @@ else:
     raise AssertionError("string formatting with eval_str was silently accepted")
 
 
+assert str(inspect.signature(CallableInstance)) == "()"
 target = CallableInstance()
 target.__call__ = lambda shadow: None
-assert str(inspect.signature(target)) == "(item, /, *, count=1)"
+assert str(inspect.signature(target)) == "(name, /)"
 target.__text_signature__ = "(value, /, *, width=80)"
 assert str(inspect.signature(target)) == "(value, /, *, width=80)"
 target.__text_signature__ = ""
 assert str(inspect.signature(target)) == "(item, /, *, count=1)"
 assert str(inspect.signature(StaticCall())) == "(first, second)"
 assert str(inspect.signature(ClassCall())) == "(item)"
+for join in (JoinCall(":"), BoundJoinCall()):
+    sig = inspect.signature(join)
+    assert str(sig) == "(iterable, /)"
+    assert join(*sig.bind(["a", "bc"]).args) == "a:bc"
+
+factory = DictFactory()
+assert inspect.signature(factory) == inspect.signature(dict.fromkeys)
+assert type(factory(["key"])) is DictFactory
+assert str(inspect.signature(CustomDict)) == "(fields)"
+for cls in (dict, DictFactory):
+    try:
+        inspect.signature(cls)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("native dict constructor acquired a signature")
+
+power = (2).__pow__
+assert str(inspect.signature(power)) == "(value, mod=None, /)"
+assert power(3, 5) == 3
+assert int.__pow__(2, 1.5) is NotImplemented
+
+handler = Handler()
+handler.__call__ = lambda wrong: None
+assert inspect.signature(handler) == inspect.signature(partial(with_options, "label"))
+assert handler.reads == 1
+try:
+    inspect.signature(handler)
+except RuntimeError as error:
+    assert str(error) == "descriptor read twice"
+else:
+    raise AssertionError("descriptor exception was lost")
+assert handler.reads == 2
+
+slotted = SlottedHandler()
+slotted.__call__ = lambda value: value
+assert str(inspect.signature(slotted)) == "(value)"
+assert slotted(7) == 7
 
 update_wrapper(wrapper, original)
 spec = inspect.getfullargspec(original)
@@ -205,6 +291,17 @@ assert spec == FullArgSpec(["a", "b"], "args", "kwargs", (3,), ["flag"], {"flag"
                            {"b": int, "return": str})
 assert getfullargspec(wrapper).varargs == "values"
 assert getfullargspec(C().method).args == ["self", "value"]
+receiver = C()
+assert inspect.getcallargs(receiver.method) == {"self": receiver, "value": b"x"}
+assert inspect.getcallargs(original, 1, 2, 3, extra=4) == {
+    "a": 1, "b": 2, "args": (3,), "flag": False, "kwargs": {"extra": 4},
+}
+try:
+    inspect.getcallargs(receiver.method, b"x", value=b"y")
+except TypeError as exc:
+    assert str(exc) == "method() got multiple values for argument 'value'"
+else:
+    raise AssertionError("getcallargs accepted two values for the same parameter")
 assert getfullargspec(partial(C().method, b"x")).args == ["value"]
 sig = Signature.from_callable(wrapper)
 assert type(sig.parameters.copy()) is OrderedDict
@@ -277,6 +374,12 @@ DeprecatedChild.__new__.__signature__ = Signature([
 assert str(inspect.signature(DeprecatedChild)) == "(*, published)"
 
 
+for adapter in (classmethod, staticmethod):
+    assert adapter.__text_signature__ == "(function, /)"
+    assert str(inspect.signature(adapter)) == "(function, /)"
+assert str(inspect.signature(InheritedAdapter)) == "(function, /)"
+assert str(inspect.signature(NamedAdapter)) == "(callback, *, name)"
+
 assert str(inspect.signature(DescriptorInit)) == "(selected)"
 
 assert str(inspect.signature(Joined)) == "(parts)"
@@ -311,6 +414,8 @@ assert sig.parameters["instance"].kind is Parameter.POSITIONAL_ONLY
 
 assert str(inspect.signature(object.__init__)) == "(self, /, *args, **kwargs)"
 assert str(inspect.signature(object().__init__)) == "(*args, **kwargs)"
+assert str(inspect.signature(list.append)) == "(self, object, /)"
+assert str(inspect.signature([].append)) == "(object, /)"
 
 assert str(inspect.signature(object.__new__, follow_wrapped=False)) == "(*args, **kwargs)"
 assert getfullargspec(object.__new__).args == ["type"]
@@ -322,6 +427,12 @@ except ValueError as exc:
     assert str(exc) == f"no signature found for builtin {min!r}"
 else:
     raise AssertionError("min has no text signature")
+try:
+    inspect.signature(bytes.count)
+except ValueError as exc:
+    assert str(exc) == f"{bytes.count!r} builtin has invalid signature"
+else:
+    raise AssertionError("invalid bytes.count text signature was accepted")
 
 documented.__self__ = object()
 documented.__text_signature__ = "($self, /, value, *, retries=1)"

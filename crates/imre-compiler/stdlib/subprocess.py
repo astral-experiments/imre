@@ -161,6 +161,16 @@ def _decode(data, stream):
     return data.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _flush_stdin(stream):
+    try:
+        stream.flush()
+    except BrokenPipeError:
+        pass
+    except ValueError:
+        if not stream.closed:
+            raise
+
+
 def _exec_search_path(env):
     """Read the POSIX search path independently of the child's saved environment."""
     from os import environ, fsdecode, fsencode
@@ -474,6 +484,10 @@ class Popen:
             self._stdin_ref is not None and self._stdin_ref() is self.stdin)
         if self._replacement_output is not None or (not self._communication_started and not same_stdin):
             return self._communicate_replaced_stdin(input, endtime, orig_timeout)
+        if not self._communication_started and isinstance(self.stdin, io.TextIOWrapper):
+            # The native exchange flushes the binary pipe. The text wrapper may
+            # still own encoded bytes from an earlier write to stdin.
+            _flush_stdin(self.stdin)
         if self.stdin is not None and self._input is None:
             if input is not None and self.text_mode:
                 # A false input closes stdin before encoding, even for a codec
@@ -520,13 +534,7 @@ class Popen:
             self._replacement_offset = 0
             self._communication_started = True
             if self.stdin:
-                try:
-                    self.stdin.flush()
-                except BrokenPipeError:
-                    pass
-                except ValueError:
-                    if not self.stdin.closed:
-                        raise
+                _flush_stdin(self.stdin)
                 if input:
                     if self.text_mode:
                         input = input.encode(self.stdin.encoding, self.stdin.errors)
@@ -764,5 +772,5 @@ def run(*popenargs, input=None, capture_output=False, timeout=None, check=False,
             raise
         code = process.poll()
         if check and code:
-            raise CalledProcessError(code, process.args, stdout, stderr)
+            raise CalledProcessError(code, process.args, output=stdout, stderr=stderr)
     return CompletedProcess(process.args, code, stdout, stderr)

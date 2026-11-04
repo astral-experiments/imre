@@ -246,13 +246,12 @@ impl Emitter<'_, '_> {
             &|e| indexed_list(self.module, e, *index) == Some(list),
             None,
         ) {
-            let (dictionary, project, publish, resume) =
-                (self.label(), self.label(), self.label(), self.label());
+            let (dictionary, project, publish) = (self.label(), self.label(), self.label());
             self.branch(&unplanned, &dictionary, &planned);
             self.start(&dictionary);
             let view = self.entry_alloca("{ [2 x ptr], ptr, i64 }");
             let alternate = self.instruction(format!(
-                "call i64 @imre_struct_binary_prefix(ptr {}, ptr {view})",
+                "call i64 @imre_indexed_dictionary(ptr {}, ptr {view}, i64 {start}, i64 {stop}, i64 {modulus}, i64 {scale}, i64 {offset})",
                 receiver.operand
             ));
             let found = self.instruction(format!("icmp sge i64 {alternate}, 0"));
@@ -268,10 +267,10 @@ impl Emitter<'_, '_> {
                 include_str!("bitmap_indexed_sum.ll"),
             );
             let initial = self.borrow_slot(*sum);
-            let result = self.instruction(format!("call {{ double, i64 }} @imre_bitmap_indexed_sum(ptr {view}, i64 {start}, i64 {stop}, i64 {modulus}, i64 {scale}, i64 {offset}, double {}, double {}, double {})", initial.operand, terms[0], terms[1]));
+            let result = self.instruction(format!("call {{ double, i64 }} @imre_bitmap_indexed_sum(ptr {view}, i64 {start}, i64 {stop}, i64 {modulus}, i64 {}, i64 {alternate}, i64 {scale}, i64 {offset}, double {}, double {}, double {})", length.operand, initial.operand, terms[0], terms[1]));
             let end = self.instruction(format!("extractvalue {{ double, i64 }} {result}, 1"));
             let advanced = self.instruction(format!("icmp ne i64 {end}, {start}"));
-            self.branch(&advanced, &publish, &resume);
+            self.branch(&advanced, &publish, &scalar);
             self.start(&publish);
             let subtotal = self.instruction(format!("extractvalue {{ double, i64 }} {result}, 0"));
             self.line(format!("store double {subtotal}, ptr %local{sum}"));
@@ -287,8 +286,6 @@ impl Emitter<'_, '_> {
                     },
                 );
             }
-            self.jump(&resume);
-            self.start(&resume);
             self.jump(&ordinary);
         } else {
             self.branch(&unplanned, &scalar, &planned);

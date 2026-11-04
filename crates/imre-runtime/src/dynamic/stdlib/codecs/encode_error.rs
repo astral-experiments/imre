@@ -2,6 +2,8 @@
 use super::{Codec, Context, Error, Id, NONE, Result, Value, handler_builtin, type_error};
 use crate::dynamic::value::DecodeState;
 
+mod multibyte;
+
 pub(super) enum Handler {
     Builtin(&'static str),
     Python(Id),
@@ -10,9 +12,10 @@ pub(super) enum Handler {
 pub(super) fn registered(ctx: &Context, codec: Codec, name: &str) -> Option<Handler> {
     let callback = *ctx.codec_entries.handlers.get(name)?;
     // The C encoders implement these named policies inline, bypassing the registry.
-    if matches!(name, "replace" | "ignore" | "xmlcharrefreplace")
+    if matches!(name, "replace" | "ignore")
+        || name == "xmlcharrefreplace" && !matches!(codec, Codec::ShiftJis)
         || name == "strict" && !matches!(codec, Codec::Utf8 { .. })
-        || name == "backslashreplace" && !matches!(codec, Codec::CodePage(_))
+        || name == "backslashreplace" && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis)
         || name == "surrogatepass" && matches!(codec, Codec::Utf8 { .. })
     {
         return None;
@@ -52,9 +55,9 @@ fn point(codec: Codec, code: u32, output: Option<&mut Vec<u8>>) -> Result<bool> 
     let mut scratch = [0; 4];
     let bytes: &[u8] = if matches!(codec, Codec::Utf8 { .. }) {
         ch.encode_utf8(&mut scratch).as_bytes()
-    } else if let Some(byte) = codec.encode_byte(ch) {
-        scratch[0] = byte;
-        &scratch[..1]
+    } else if let Some((unit, len)) = codec.encode_unit(ch) {
+        scratch[..len].copy_from_slice(&unit[..len]);
+        &scratch[..len]
     } else {
         return Ok(false);
     };
@@ -69,7 +72,7 @@ pub(super) fn encode(
     input: Id,
     codec: Codec,
     callback: Id,
-    escape_prefix: bool,
+    name: &str,
 ) -> Result<Vec<u8>> {
     let source = ctx.string_codepoints(input)?.into_owned();
     let mut output = Vec::new();
@@ -79,13 +82,14 @@ pub(super) fn encode(
     let (encoding, reason) = if matches!(codec, Codec::Utf8 { .. }) {
         ("utf-8", "surrogates not allowed")
     } else {
-        codec.single_byte_error()
+        codec.encoding_error_reason()
     };
     let mark = ctx.heap.temporary_mark();
     ctx.heap.reserve_temporaries(3)?;
-    ctx.heap.keep(callback);
-    // A Python return and each allocated error detail are rooted in the native caller.
-    // Keep only the callback and its reusable exception between iterations.
+    if !matches!(codec, Codec::ShiftJis) {
+        ctx.heap.keep(callback);
+    }
+    // Multibyte encoders retain only the reusable exception between errors.
     let iteration_mark = ctx.heap.temporary_mark();
     let mut exception = None;
     let result = (|| {
@@ -96,10 +100,13 @@ pub(super) fn encode(
                 continue;
             }
             let mut end = pos + 1;
-            while end < source.len() && !point(codec, source[end], None)? {
+            while !matches!(codec, Codec::ShiftJis)
+                && end < source.len()
+                && !point(codec, source[end], None)?
+            {
                 end += 1;
             }
-            if escape_prefix && !matches!(codec, Codec::CodePage(_)) {
+            if name == "surrogateescape" && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis) {
                 while pos < end && (0xdc80..=0xdcff).contains(&source[pos]) {
                     append(&mut output, &[source[pos] as u8])?;
                     pos += 1;
@@ -136,7 +143,24 @@ pub(super) fn encode(
                 exception = Some(exc);
                 exc
             };
-            let response = ctx.call(callback, vec![exc], Vec::new())?;
+            let response = if matches!(codec, Codec::ShiftJis) {
+                // Multibyte codecs look up the name separately for each error.
+                match registered(ctx, codec, name) {
+                    Some(Handler::Builtin(policy)) => {
+                        multibyte::replacement(ctx, policy, exc, input, &source, pos, end)?
+                    }
+                    Some(Handler::Python(current)) => {
+                        let call_mark = ctx.heap.temporary_mark();
+                        ctx.heap.keep(current);
+                        let response = ctx.call(current, vec![exc], Vec::new())?;
+                        ctx.heap.release_temporaries_since(call_mark);
+                        response
+                    }
+                    None => return Err(crate::objects::unknown_handler(name).into()),
+                }
+            } else {
+                ctx.call(callback, vec![exc], Vec::new())?
+            };
             ctx.heap.keep(response);
             let invalid =
                 || type_error("encoding error handler must return (str/bytes, int) tuple");
@@ -157,6 +181,13 @@ pub(super) fn encode(
             ) {
                 return Err(invalid());
             }
+            // Multibyte codecs strictly encode a text replacement before resuming the input.
+            let encoded =
+                if matches!(codec, Codec::ShiftJis) && ctx.string_storage(*replacement).is_some() {
+                    Some(ctx.encode_legacy_codepoints(*replacement, codec, false)?)
+                } else {
+                    None
+                };
             // Encoding resumes in the original string even when the handler rebinds exc.object.
             let resume = if resume < 0 {
                 source.len() as i64 + resume
@@ -169,7 +200,9 @@ pub(super) fn encode(
                     format!("position {resume} from error handler out of bounds"),
                 ));
             }
-            if let Value::Bytes(bytes) = ctx.heap.get(value) {
+            if let Some(bytes) = encoded {
+                append(&mut output, &bytes)?;
+            } else if let Value::Bytes(bytes) = ctx.heap.get(value) {
                 append(&mut output, bytes)?;
             } else {
                 for &code in ctx.string_codepoints(value)?.iter() {

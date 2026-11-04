@@ -142,7 +142,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     // Python-visible setter on their type.
                     let descriptors = section(
                         "def ismethoddescriptor(object):",
-                        "if hasattr(types, 'MemberDescriptorType'):",
+                        "if hasattr(types, 'GetSetDescriptorType'):",
                     )
                     .replace(
                         "or hasattr(tp, \"__delete__\")",
@@ -184,18 +184,21 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def isfunction(object):", "# A marker for markcoroutinefunction"),
                         section("def isasyncgenfunction(obj):", "def isabstract(object):"),
                         &abstract_predicate,
-                        section("def _getmembers(", "Attribute = namedtuple("),
+                        section("def _getmembers(", "def getmro(cls):"),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "def getcomments(object):"),
                         &source_blocks,
-                        section("AGEN_CREATED =", "def getasyncgenlocals("),
+                        section("AGEN_CREATED =", "_NonUserDefinedCallables ="),
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
                         section("def getmro(cls):", "def indentsize(line):"),
+                        section("def _findclass(func):", "def cleandoc(doc):"),
                         section("GEN_CREATED = ", "def getgeneratorlocals("),
-                        section("CORO_CREATED = ", "def getcoroutinelocals("),
+                        section("CORO_CREATED = ", "AGEN_CREATED ="),
                         section("def formatannotation(", "def formatannotationrelativeto("),
-                        section("FullArgSpec = namedtuple(", "ArgInfo = namedtuple("),
+                        section("Arguments = namedtuple(", "def getargs(co):"),
+                        section("FullArgSpec = namedtuple(", "def formatannotation("),
+                        section("def formatargvalues(", "ClosureVars = namedtuple("),
                         section("_NonUserDefinedCallables =", "def _signature_get_user_defined_method("),
                         section("def _signature_get_partial(", "def _signature_strip_non_python_syntax("),
                         &text_signatures,
@@ -282,6 +285,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/pathlib/types.py"),
         )),
         "glob" => Some(("glob.py", include_str!("../../stdlib/glob.py"))),
+        "gzip" => Some(("gzip.py", include_str!("../../stdlib/gzip.py"))),
         "ntpath" => Some(("ntpath.py", include_str!("../../stdlib/ntpath.py"))),
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => Some(("shutil.py", include_str!("../../stdlib/shutil.py"))),
@@ -492,14 +496,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 ].join("\n")
             })))
         }
-        "uuid" => Some((
-            "uuid.py",
-            concat!(
-                include_str!("../../stdlib/uuid.py"),
-                "\n",
-                include_str!("../../stdlib/uuid_boxed.py"),
-            ),
-        )),
+        // CPython 3.14.5 Lib/uuid.py with a public Enum declaration for SafeUUID.
+        "uuid" => Some(("uuid.py", include_str!("../../stdlib/uuid_boxed.py"))),
         _ => crate::modules::bundled_runtime_source(name),
     }
 }
@@ -580,6 +578,10 @@ fn stdlib_package_source(name: &str) -> Option<(&'static str, &'static str)> {
         "tomllib._parser" => source!("tomllib/_parser.py"),
         "tomllib._re" => source!("tomllib/_re.py"),
         "tomllib._types" => source!("tomllib/_types.py"),
+        "zipfile" => source!("zipfile/__init__.py"),
+        "zipfile.__main__" => source!("zipfile/__main__.py"),
+        "zipfile._path" => source!("zipfile/_path/__init__.py"),
+        "zipfile._path.glob" => source!("zipfile/_path/glob.py"),
         _ => None,
     }
 }
@@ -587,6 +589,7 @@ fn stdlib_package_source(name: &str) -> Option<(&'static str, &'static str)> {
 #[derive(Default)]
 pub(crate) struct RegisteredImports {
     pub(super) called: bool,
+    pub(super) computed: bool,
     pub(super) targets: Vec<String>,
 }
 
@@ -612,6 +615,8 @@ pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
                 self.imports.called = true;
                 if let Some(name) = target(call) {
                     self.imports.targets.push(name);
+                } else if !self.graph.modules[self.module].bundled {
+                    self.imports.computed = true;
                 }
             }
             visitor::walk_expr(self, expr);
