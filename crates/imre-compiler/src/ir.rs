@@ -1,6 +1,8 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
+use std::collections::BTreeSet;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SysEncoding {
     Locale,
@@ -2683,6 +2685,115 @@ pub(crate) fn private_string_cursors(function: &Function) -> Vec<usize> {
     (0..pulled.len())
         .filter(|&slot| pulled[slot] && created[slot] && !exposed[slot])
         .collect()
+}
+
+/// Find private cursors restarted from a parameter that is rooted throughout the
+/// containing loop. Every creation and pull must lie inside that same loop.
+pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -> BTreeSet<usize> {
+    let mut result = BTreeSet::new();
+    if private.is_empty() {
+        return result;
+    }
+    let mut creates = vec![0_usize; function.locals.len()];
+    let mut pulls = vec![0_usize; function.locals.len()];
+    walk_statements(&function.body, &mut |statement| match statement {
+        Statement::Assign(
+            slot,
+            Expr {
+                kind: ExprKind::Builtin(Builtin::StringIter, _),
+                ..
+            },
+        ) => creates[*slot] += 1,
+        Statement::IterNext { iterator, .. } => pulls[*iterator] += 1,
+        _ => {}
+    });
+    let candidates: Vec<_> = private
+        .iter()
+        .copied()
+        .filter(|&slot| creates[slot] == 1)
+        .collect();
+    if candidates.is_empty() {
+        return result;
+    }
+    fn loops(body: &[Statement], visit: &mut impl FnMut(&Statement, &[Statement])) {
+        for statement in body {
+            match statement {
+                Statement::While(_, body, orelse) | Statement::For { body, orelse, .. } => {
+                    visit(statement, body);
+                    loops(orelse, visit);
+                }
+                _ => statement.suites(|suite| loops(suite, visit)),
+            }
+        }
+    }
+    // Lowering sometimes saves the source before initializing scalar loop counters.
+    fn parameter_source(before: &[Statement], source: usize, stable: &[bool]) -> bool {
+        if stable[source] {
+            return true;
+        }
+        for statement in before.iter().rev() {
+            match statement {
+                Statement::Assign(
+                    target,
+                    Expr {
+                        kind: ExprKind::Local(origin),
+                        ..
+                    },
+                ) if *target == source => return stable[*origin],
+                Statement::Assign(
+                    target,
+                    Expr {
+                        kind: ExprKind::Int(_) | ExprKind::Bool(_),
+                        ..
+                    },
+                ) if *target != source => {}
+                _ => break,
+            }
+        }
+        false
+    }
+    fn mark(suite: &[Statement], stable: &[bool], eligible: &[bool], result: &mut BTreeSet<usize>) {
+        for (index, statement) in suite.iter().enumerate() {
+            if let Statement::Assign(
+                slot,
+                Expr {
+                    kind: ExprKind::Builtin(Builtin::StringIter, args),
+                    ..
+                },
+            ) = statement
+                && eligible[*slot]
+                && let ExprKind::Local(source) = args[0].kind
+                && parameter_source(&suite[..index], source, stable)
+            {
+                result.insert(*slot);
+            }
+            statement.suites(|nested| mark(nested, stable, eligible, result));
+        }
+    }
+    loops(&function.body, &mut |statement, body| {
+        let mut stable = vec![false; function.locals.len()];
+        for &parameter in &function.params {
+            stable[parameter] = function.locals[parameter] == Type::Str;
+        }
+        walk_writes(std::slice::from_ref(statement), |slot, _| {
+            stable[slot] = false
+        });
+        if !stable.iter().any(|&rooted| rooted) {
+            return;
+        }
+        let mut inside = vec![0_usize; function.locals.len()];
+        walk_statements(body, &mut |statement| {
+            if let Statement::IterNext { iterator, .. } = statement {
+                inside[*iterator] += 1;
+            }
+        });
+        let mut eligible = vec![false; function.locals.len()];
+        for &slot in &candidates {
+            eligible[slot] = inside[slot] == pulls[slot];
+        }
+        mark(body, &stable, &eligible, &mut result);
+    });
+    result
 }
 
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.

@@ -240,6 +240,13 @@ struct Operand {
 }
 
 #[derive(Clone)]
+struct ForwardCursor {
+    next: String,
+    end: String,
+    start: Option<String>,
+}
+
+#[derive(Clone)]
 enum ListBuffer {
     Words(String),
     Struct {
@@ -646,7 +653,7 @@ struct Emitter<'a, 'module> {
     code: String,
     entry_allocas: String,
     mapping_words: usize,
-    forward_cursors: BTreeMap<usize, (String, String)>,
+    forward_cursors: BTreeMap<usize, ForwardCursor>,
     uses_forward_cursors: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
@@ -2077,10 +2084,18 @@ impl Emitter<'_, '_> {
         }
         self.line_slots = line_views::select(function);
         self.forward_cursors.clear();
-        for slot in ir::private_string_cursors(function) {
+        let cursors = ir::private_string_cursors(function);
+        let invariant = ir::invariant_string_cursors(function, &cursors);
+        for slot in cursors {
+            let start = invariant.contains(&slot).then(|| {
+                let start = self.entry_alloca("ptr");
+                self.line(format!("store ptr null, ptr {start}"));
+                start
+            });
             let next = self.entry_alloca("ptr");
             let end = self.entry_alloca("ptr");
-            self.forward_cursors.insert(slot, (next, end));
+            self.forward_cursors
+                .insert(slot, ForwardCursor { next, end, start });
         }
         self.uses_forward_cursors |= !self.forward_cursors.is_empty();
         if self
@@ -2428,18 +2443,42 @@ impl Emitter<'_, '_> {
         true
     }
 
+    /// Restarts a private UTF-8 cursor, caching the full view when a parameter
+    /// owns its bytes across every iteration of the enclosing loop.
+    fn assign_forward_cursor(&mut self, slot: usize, expression: &Expr, cursor: ForwardCursor) {
+        let ForwardCursor { next, end, start } = cursor;
+        let restart = start.map(|cache| {
+            let previous = self.instruction(format!("load ptr, ptr {cache}"));
+            let missing = self.instruction(format!("icmp eq ptr {previous}, null"));
+            let initialize = self.label();
+            let ready = self.label();
+            self.branch(&missing, &initialize, &ready);
+            self.start(&initialize);
+            (cache, ready)
+        });
+        let iterator = self.expr(expression);
+        let start = self.instruction(format!(
+            "call ptr @imre_str_iter_bounds(ptr {}, ptr {end})",
+            iterator.operand
+        ));
+        if let Some((cache, ready)) = restart {
+            self.line(format!("store ptr {start}, ptr {cache}"));
+            self.release(&iterator);
+            self.jump(&ready);
+            self.start(&ready);
+            let first = self.instruction(format!("load ptr, ptr {cache}"));
+            self.line(format!("store ptr {first}, ptr {next}"));
+        } else {
+            self.line(format!("store ptr {start}, ptr {next}"));
+            self.store(slot, &iterator);
+        }
+    }
+
     fn statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(slot, expression) => {
-                if let Some((next, end)) = self.forward_cursors.get(slot).cloned() {
-                    // The cursor holds its immutable string until the normal scope cleanup.
-                    let cursor = self.expr(expression);
-                    let start = self.instruction(format!(
-                        "call ptr @imre_str_iter_bounds(ptr {}, ptr {end})",
-                        cursor.operand
-                    ));
-                    self.line(format!("store ptr {start}, ptr {next}"));
-                    self.store(*slot, &cursor);
+                if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
+                    self.assign_forward_cursor(*slot, expression, cursor);
                     return;
                 }
                 if self.line_slots[*slot] {
@@ -8758,7 +8797,12 @@ impl Emitter<'_, '_> {
             }
             ir::IterNextKind::String | ir::IterNextKind::CodePoint | ir::IterNextKind::Utf8Byte => {
                 debug_assert!(value.is_none());
-                let word = if let Some((next_byte, end)) = forward {
+                let word = if let Some(ForwardCursor {
+                    next: next_byte,
+                    end,
+                    ..
+                }) = forward
+                {
                     debug_assert!(kind != ir::IterNextKind::String);
                     let raw = kind == ir::IterNextKind::Utf8Byte;
                     let end = self.instruction(format!("load ptr, ptr {end}"));

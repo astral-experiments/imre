@@ -211,6 +211,30 @@ mod tests {
     }
 
     #[test]
+    fn only_restarts_cursors_rooted_by_a_stable_parameter() {
+        for (setup, count) in [("", 1), ("        text = 'replacement'\n", 0)] {
+            let source = format!(
+                "def scan(text: str) -> int:\n    score = 0\n    for i in range(3):\n{setup}        for ch in text:\n            score += ord(ch)\n    return score\n"
+            );
+            let graph = crate::modules::SourceGraph::single(&source).unwrap();
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            crate::tuples::scalarize(&mut module);
+            super::specialize(&mut module);
+            let function = module
+                .functions
+                .iter()
+                .find(|f| f.params.len() == 1)
+                .unwrap();
+            let private = crate::ir::private_string_cursors(function);
+            assert_eq!(private.len(), 1);
+            assert_eq!(
+                crate::ir::invariant_string_cursors(function, &private).len(),
+                count
+            );
+        }
+    }
+
+    #[test]
     fn byte_iteration_borrows_only_a_direct_utf8_encode() {
         for (setup, iterable, fused) in [
             ("", "text.encode()", true),
