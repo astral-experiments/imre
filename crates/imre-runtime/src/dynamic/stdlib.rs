@@ -377,6 +377,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
+    if module == "zlib"
+        && let Some(value) = imre_ast::zlib::integer_constant(name)
+    {
+        return Ok(ctx.int(value));
+    }
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
         return ctx.module(&format!("{module}.{name}"));
     }
@@ -642,6 +647,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("lzma", "decompress") => ctx.builtin("lzma.decompress"),
         ("lzma", "LZMAError") => ctx.builtin("_lzma.LZMAError"),
+        ("zlib", "compressobj") => ctx.builtin("zlib.compressobj"),
+        ("zlib", "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => ctx.text(imre_ast::zlib::VERSION),
         ("lzma", "FORMAT_AUTO") => ctx.int(0),
         ("lzma", "FORMAT_XZ") => ctx.int(1),
         ("lzma", "FORMAT_ALONE") => ctx.int(2),
@@ -1783,6 +1790,12 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
+    }
+    if name == "zlib.compressobj" {
+        return zlib::compressor(ctx, "new", args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("zlib.Compress.") {
+        return zlib::compressor(ctx, method, args, kwargs);
     }
     if name == "lzma.decompress" {
         return lzma::call(ctx, "decompress", args, kwargs);

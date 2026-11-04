@@ -102,7 +102,17 @@ def current():
     assert decompress(compress(data, Seed(data, False))) == bytes(data) == b"\xffnput"
     data.extend(b"!")
 
+    clean = zlib.compressobj()
+    clean.flush()
+    finished = zlib.compressobj()
+    finished.flush(zlib.Z_SYNC_FLUSH)
+    finished.compress(b"")
+    finished.compress(b"suffix")
+    finished.flush()
     for operation, args, error, message in [
+        (clean.flush, (), ZlibError, "Error -2 while flushing: inconsistent stream state"),
+        (finished.flush, (), ZlibError, "Error -2 while flushing: buffer error"),
+        (finished.compress, (b"x",), ZlibError, "Error -2 while compressing data: buffer error"),
         (compress, (b"", 10), ZlibError, "Bad compression level"),
         (decompress, (b"", 7), ZlibError, "Error -2 while preparing to decompress data: inconsistent stream state"),
         (decompress, (b"invalid",), ZlibError, "Error -3 while decompressing data: incorrect header check"),

@@ -744,6 +744,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "anext_awaitable"
         }
+        Value::ZlibCompressor(_) if super::value::ZLIB_COMPRESS_METHODS.contains(&attr) => {
+            super::value::ZLIB_COMPRESS_TYPE
+        }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::Complex(_) if super::complex::METHODS.contains(&attr) => "complex",
