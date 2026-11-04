@@ -301,6 +301,87 @@ def compress(data, compresslevel=9, *, mtime=0):
     return header + member[10:]
 
 
+# Adapted from CPython 3.14.5, Lib/gzip.py. See stdlib/docstrings/LICENSE.
+_FHCRC, _FEXTRA, _FNAME, _FCOMMENT = 2, 4, 8, 16
+
+
+def _read_exact(fp, n):
+    '''Read exactly *n* bytes from `fp`
+
+    This method is required because fp may be unbuffered,
+    i.e. return short reads.
+    '''
+    data = fp.read(n)
+    while len(data) < n:
+        b = fp.read(n - len(data))
+        if not b:
+            raise EOFError("Compressed file ended before the "
+                           "end-of-stream marker was reached")
+        data += b
+    return data
+
+
+def _read_gzip_header(fp):
+    '''Read a gzip header from `fp` and progress to the end of the header.
+
+    Returns last mtime if header was present or None otherwise.
+    '''
+    magic = fp.read(2)
+    if magic == b'':
+        return None
+
+    if magic != b'\037\213':
+        raise BadGzipFile('Not a gzipped file (%r)' % magic)
+
+    (method, flag, last_mtime) = struct.unpack("<BBIxx", _read_exact(fp, 8))
+    if method != 8:
+        raise BadGzipFile('Unknown compression method')
+
+    if flag & _FEXTRA:
+        # Read & discard the extra field, if present
+        extra_len, = struct.unpack("<H", _read_exact(fp, 2))
+        _read_exact(fp, extra_len)
+    if flag & _FNAME:
+        # Read and discard a null-terminated string containing the filename
+        while True:
+            s = fp.read(1)
+            if not s or s==b'\000':
+                break
+    if flag & _FCOMMENT:
+        # Read and discard a null-terminated string containing a comment
+        while True:
+            s = fp.read(1)
+            if not s or s==b'\000':
+                break
+    if flag & _FHCRC:
+        _read_exact(fp, 2)     # Read & discard the 16-bit header CRC
+    return last_mtime
+
+
+def decompress(data):
+    """Decompress a gzip compressed string in one shot.
+    Return the decompressed string.
+    """
+    decompressed_members = []
+    while True:
+        fp = io.BytesIO(data)
+        if _read_gzip_header(fp) is None:
+            return b"".join(decompressed_members)
+        do = zlib.decompressobj(wbits=-zlib.MAX_WBITS)
+        # Read all the data except the header
+        decompressed = do.decompress(data[fp.tell():])
+        if not do.eof or len(do.unused_data) < 8:
+            raise EOFError("Compressed file ended before the end-of-stream "
+                           "marker was reached")
+        crc, length = struct.unpack("<II", do.unused_data[:8])
+        if crc != zlib.crc32(decompressed):
+            raise BadGzipFile("CRC check failed")
+        if length != (len(decompressed) & 0xffffffff):
+            raise BadGzipFile("Incorrect length of data produced")
+        decompressed_members.append(decompressed)
+        data = do.unused_data[8:].lstrip(b"\x00")
+
+
 def open(filename, mode="rb", compresslevel=9, encoding=None, errors=None, newline=None):
     """Open a gzip-compressed path or file object in binary or text mode."""
     if "t" in mode:

@@ -3788,6 +3788,7 @@ for name in ("md4", "ripemd160"):
             "boxed_slice.py",
             "boxed_binascii.py",
             "boxed_zlib.py",
+            "boxed_gzip_decompress.py",
             "boxed_lzma.py",
             "boxed_hashlib_names.py",
             "bytes/hashlib_md5_provider.py",
