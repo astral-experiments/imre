@@ -318,9 +318,6 @@ impl BoxedPopen {
         self.0.borrow().signal(|| Ok(number))
     }
 
-    pub(crate) fn close_wait(&self) -> Result<()> {
-        self.0.borrow_mut().close_wait()
-    }
     pub(crate) fn cleanup() {
         cleanup()
     }
