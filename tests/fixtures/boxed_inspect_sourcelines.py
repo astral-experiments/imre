@@ -1,4 +1,4 @@
-from inspect import getsource, getsourcelines
+from inspect import getcomments, getsource, getsourcelines
 
 
 def identity(func):
@@ -6,6 +6,8 @@ def identity(func):
 
 
 def current():
+    # First line.
+    # Second line.
     @identity
     def sample(
         value,
@@ -24,6 +26,7 @@ def current():
     with open(__file__, encoding="utf-8") as source:
         first = source.readlines().index(expected[0]) + 1
     assert getsourcelines(sample) == (expected, first)
+    assert getcomments(sample) == "# First line.\n# Second line.\n"
 
     def wrapper():
         pass
@@ -31,6 +34,7 @@ def current():
     wrapper.__wrapped__ = sample
     assert getsourcelines(wrapper) == (expected, first)
     assert getsource(wrapper) == "".join(expected)
+    assert getcomments(wrapper) is None
 
     namespace = {"__name__": "_missing_inspect_module"}
     exec(compile("def missing(): pass", "_missing_inspect_source.py", "exec"), namespace)
