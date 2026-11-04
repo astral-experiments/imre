@@ -1,3 +1,4 @@
+declare i32 @imre_list_try_open_append_window(ptr, i64, ptr)
 declare i32 @imre_list_append_open_window(ptr, i64, ptr)
 declare i64 @imre_list_tail_open_window(ptr, ptr)
 declare void @imre_list_commit_append_window(ptr)

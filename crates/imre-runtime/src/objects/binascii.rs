@@ -1,4 +1,4 @@
-//! Base64 and checksums over rooted immutable inputs.
+//! Binary-to-text codecs and checksums over byte slices.
 
 use base64::Engine;
 use base64::engine::general_purpose::{GeneralPurpose, STANDARD, URL_SAFE};
@@ -201,6 +201,114 @@ fn decode_groups<const STRICT: bool>(data: &[u8], digits: &[u8; 256]) -> Result<
         decoded.extend_from_slice(&unpack_digits(group)[..used.saturating_sub(1)]);
     }
     Ok(decoded)
+}
+
+/// Decode quoted-printable bytes, including the permissive escapes accepted by binascii.
+pub(crate) fn decode_quoted_printable(mut input: &[u8], header: bool) -> Result<Bytes> {
+    use super::text::hexadecimal;
+
+    let mut output = allocate(input.len())?;
+    loop {
+        match input {
+            [] | [b'='] => break,
+            [b'=', b'\n', tail @ ..] => input = tail,
+            // A soft break starting with CR consumes the rest of the line, even without LF.
+            [b'=', b'\r', tail @ ..] => {
+                let Some(end) = tail.iter().position(|&byte| byte == b'\n') else {
+                    break;
+                };
+                input = &tail[end + 1..];
+            }
+            [b'=', b'=', tail @ ..] => {
+                output.push(b'=');
+                input = tail;
+            }
+            [b'=', high, low, tail @ ..]
+                if let (Some(high), Some(low)) = (hexadecimal(*high), hexadecimal(*low)) =>
+            {
+                output.push(high << 4 | low);
+                input = tail;
+            }
+            [byte, tail @ ..] => {
+                output.push(if header && *byte == b'_' { b' ' } else { *byte });
+                input = tail;
+            }
+        }
+    }
+    Ok(output)
+}
+
+/// Encode bytes using binascii's 76-column quoted-printable line rules.
+pub(crate) fn encode_quoted_printable(
+    mut input: &[u8],
+    quotetabs: bool,
+    istext: bool,
+    header: bool,
+) -> Result<Bytes> {
+    // The first LF selects the ending for all hard and soft breaks in this input.
+    let newline: &[u8] = match input.iter().position(|&byte| byte == b'\n') {
+        Some(i) if i > 0 && input[i - 1] == b'\r' => b"\r\n",
+        _ => b"\n",
+    };
+    let escape = |byte: u8| {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        [
+            b'=',
+            HEX[usize::from(byte >> 4)],
+            HEX[usize::from(byte & 15)],
+        ]
+    };
+    let mut output = allocate(input.len())?;
+    let mut column = 0;
+    while let Some((&byte, rest)) = input.split_first() {
+        input = rest;
+        let next = rest.first().copied();
+        if istext && (byte == b'\n' || (byte == b'\r' && next == Some(b'\n'))) {
+            if byte == b'\r' {
+                input = &rest[1..];
+            }
+            // Header spaces have already become underscores. Only a literal trailing
+            // space or tab in the output needs protection before the hard break.
+            if let Some(&last @ (b' ' | b'\t')) = output.last() {
+                output.try_reserve(2).map_err(|_| Error::allocation())?;
+                output.pop();
+                output.extend_from_slice(&escape(last));
+            }
+            output
+                .try_reserve(newline.len())
+                .map_err(|_| Error::allocation())?;
+            output.extend_from_slice(newline);
+            column = 0;
+            continue;
+        }
+
+        let quote = match byte {
+            b'=' => true,
+            b'_' => header,
+            b'.' => column == 0 && matches!(next, None | Some(0 | b'\r' | b'\n')),
+            b' ' | b'\t' => quotetabs || next.is_none(),
+            b'\r' | b'\n' => !istext,
+            _ => !(b' '..=b'~').contains(&byte),
+        };
+        let width = if quote { 3 } else { 1 };
+        let wrap = column + width >= 76 && (quote || !matches!(next, None | Some(b'\n')));
+        let break_len = if wrap { 1 + newline.len() } else { 0 };
+        output
+            .try_reserve(break_len + width)
+            .map_err(|_| Error::allocation())?;
+        if wrap {
+            output.push(b'=');
+            output.extend_from_slice(newline);
+            column = 0;
+        }
+        if quote {
+            output.extend_from_slice(&escape(byte));
+        } else {
+            output.push(if header && byte == b' ' { b'_' } else { byte });
+        }
+        column += width;
+    }
+    Ok(output)
 }
 
 /// Decode ASCII hex pairs with binascii's strict length and alphabet rules.

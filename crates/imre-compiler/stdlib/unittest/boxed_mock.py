@@ -219,7 +219,7 @@ class NonCallableMock(_FixedMock):
         return object.__new__(type(cls.__name__, (cls,), {}))
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
-                 parent=None, _new_parent=None, _new_name="", **attrs):
+                 wraps=None, parent=None, _new_parent=None, _new_name="", **attrs):
         methods = spec_set if spec_set is not None else spec
         if _is_instance_mock(methods):
             raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
@@ -234,6 +234,7 @@ class NonCallableMock(_FixedMock):
         if spec_class is not None:
             object.__setattr__(self, "_spec_asyncs", _spec_async_methods(original_spec, methods))
         object.__setattr__(self, "_spec_class", spec_class)
+        object.__setattr__(self, "_mock_wraps", wraps)
         owner = type(self)
         for magic in owner._mock_auto_magics:
             if methods is None or magic in methods:
@@ -257,9 +258,8 @@ class NonCallableMock(_FixedMock):
         if return_value is not _unset_return:
             self.return_value = return_value
         if attrs:
-            for key in ("wraps", "unsafe"):
-                if key in attrs:
-                    raise TypeError(f"Mock.__init__() got an unexpected keyword argument '{key}'")
+            if "unsafe" in attrs:
+                raise TypeError("Mock.__init__() got an unexpected keyword argument 'unsafe'")
             self.configure_mock(**attrs)
 
     @property
@@ -381,6 +381,8 @@ class NonCallableMock(_FixedMock):
         child = self._mock_children.get(name)
         if child is None:
             kwargs = {} if magic else {"parent": self}
+            if not magic and self._mock_wraps is not None:
+                kwargs["wraps"] = getattr(self._mock_wraps, name)
             child = self._get_child_mock(name=name, _new_parent=self, _new_name=name, **kwargs)
             self._mock_children[name] = child
         return child
@@ -429,8 +431,11 @@ class NonCallableMock(_FixedMock):
 
     @property
     def return_value(self):
-        if self._mock_sealed and self._node._result == -1:
-            raise AttributeError(self._mock_path() + ".return_value")
+        if self._node._result == -1:
+            if self._mock_wraps is not None:
+                return DEFAULT
+            if self._mock_sealed:
+                raise AttributeError(self._mock_path() + ".return_value")
         index = self._return_index()
         node = self._nodes[index]
         if hasattr(node, "_configured_return"):
@@ -655,6 +660,8 @@ class CallableMixin:
                     raise result
             if result is not DEFAULT:
                 return result
+        if self._node._result == -1 and self._mock_wraps is not None:
+            return self._mock_wraps(*args, **kwargs)
         return self.return_value
 
 
@@ -709,6 +716,10 @@ class AsyncMock(Mock):
                 result = effect(*args, **kwargs)
             if result is not DEFAULT:
                 return result
+        if self._node._result == -1 and self._mock_wraps is not None:
+            if iscoroutinefunction(self._mock_wraps):
+                return await self._mock_wraps(*args, **kwargs)
+            return self._mock_wraps(*args, **kwargs)
         return self.return_value
 
     def assert_not_awaited(self):

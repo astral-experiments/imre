@@ -16,7 +16,10 @@ pub(crate) mod base32;
 mod base85;
 pub(crate) use base85::encode as base85_encode;
 mod binascii;
-pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, crc32, unhexlify};
+pub(crate) use binascii::{
+    adler32, binascii_decode, binascii_encode, crc32, decode_quoted_printable,
+    encode_quoted_printable, unhexlify,
+};
 pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
@@ -56,7 +59,9 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::{State as HashState, hex_text as hash_hex, hex_with_separator};
+pub(crate) use hashlib::{
+    State as HashState, hex_text as hash_hex, hex_with_separator, uppercase_hex_bytes,
+};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
@@ -106,8 +111,10 @@ mod regexes;
 mod sequences;
 mod shutil;
 pub(crate) mod socket;
+mod sorted_split_fields;
 mod source_modules;
 pub(crate) mod stdio;
+use sorted_split_fields::SortedSplitFields;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
 pub(crate) use stdlib::{format_fixed_float, format_index, replace_text};
@@ -292,6 +299,7 @@ enum Storage {
     },
     JsonDecoder(crate::ObjectOwner),
     PairTable(allocator_api2::boxed::Box<pair_tables::Table>),
+    SortedSplitFields(Box<SortedSplitFields>),
 }
 
 /// Borrows a rooted object for one nonreentrant operation.
@@ -1492,6 +1500,15 @@ struct LineIterator {
     offsets: LineOffsets,
 }
 
+/// Turns a range in a rooted split source into an independently owned string word.
+fn owned_split_field(source: &StrOwner, range: std::ops::Range<usize>) -> Result<OwnedWord, Error> {
+    let field = owned_line(source, range)?;
+    // SAFETY: the owned field transfers one string reference to the caller.
+    Ok(unsafe {
+        OwnedWord::from_owned(StrOwner::into_raw(field) as usize, words::WordKind::new(3))
+    })
+}
+
 struct SplitFields {
     source: StrOwner,
     separator: u8,
@@ -1506,13 +1523,9 @@ impl SplitFields {
         };
         let end = memchr::memchr(self.separator, remaining)
             .map_or(self.source.len(), |offset| start + offset);
-        let field = owned_line(&self.source, start..end)?;
+        let word = owned_split_field(&self.source, start..end)?;
         // A separator at the end leaves one final empty field to yield.
         self.start = end + 1;
-        // SAFETY: the field transfers its owned string reference to the caller.
-        let word = unsafe {
-            OwnedWord::from_owned(StrOwner::into_raw(field) as usize, words::WordKind::new(3))
-        };
         Ok(Some((word, None)))
     }
 }

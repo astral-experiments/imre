@@ -361,15 +361,63 @@ def _read_gzip_header(fp):
     return last_mtime
 
 
+def _decompress_members(data):
+    """Decode complete gzip members and return the start of the first rejected member."""
+    parts = []
+    pos = 0
+    size = len(data)
+    view = memoryview(data)
+    while pos < size:
+        start = pos
+        mark = len(parts)
+        decoder = zlib.decompressobj(wbits=31)
+        # A single-member file yields one output buffer. For subsequent members,
+        # grow the window from a small prefix to limit copies into unused_data.
+        window = size if pos == 0 else 256
+        try:
+            while pos < size and not decoder.eof:
+                end = min(pos + window, size)
+                block = data if pos == 0 else view[pos:end]
+                parts.append(decoder.decompress(block))
+                pos = end
+                window = min(window * 2, 128 * 1024)
+        except zlib.error:
+            pass
+        if not decoder.eof:
+            del parts[mark:]
+            return parts, start
+
+        pos -= len(decoder.unused_data.lstrip(b"\0"))
+        # Padding can continue past the last window we handed to zlib.
+        window = 256
+        while pos < size and data[pos] == 0:
+            end = min(pos + window, size)
+            pos = end - len(data[pos:end].lstrip(b"\0"))
+            window = min(window * 2, 128 * 1024)
+    return parts, pos
+
+
 def decompress(data):
     """Decompress a gzip compressed string in one shot.
     Return the decompressed string.
     """
     decompressed_members = []
+    if type(data) is bytes or type(data) is bytearray:
+        if not data:
+            return b""
+        # Python ignores reserved flags and skips the header CRC without validating it.
+        if len(data) >= 4 and not data[3] & 0xe2:
+            decompressed_members, consumed = _decompress_members(data)
+            if consumed == len(data):
+                if len(decompressed_members) == 1:
+                    return decompressed_members[0]
+                return b"".join(decompressed_members)
+            # Resume the Python parser at the first member that zlib did not finish.
+            data = data[consumed:]
     while True:
         fp = io.BytesIO(data)
         if _read_gzip_header(fp) is None:
-            return b"".join(decompressed_members)
+            break
         do = zlib.decompressobj(wbits=-zlib.MAX_WBITS)
         # Read all the data except the header
         decompressed = do.decompress(data[fp.tell():])
@@ -383,6 +431,9 @@ def decompress(data):
             raise BadGzipFile("Incorrect length of data produced")
         decompressed_members.append(decompressed)
         data = do.unused_data[8:].lstrip(b"\x00")
+        if not data:
+            break
+    return b"".join(decompressed_members)
 
 
 def open(filename, mode="rb", compresslevel=9, encoding=None, errors=None, newline=None):

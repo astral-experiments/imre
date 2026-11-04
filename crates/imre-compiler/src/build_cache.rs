@@ -527,6 +527,7 @@ impl Cache {
                 options.runtime_imports,
                 &options.extension_paths,
                 &options.system_site,
+                options.sitecustomize,
                 &options.stdlib_fallback,
             ),
             env::current_dir().ok()?.join(entry).into_os_string(),

@@ -410,6 +410,7 @@ fn emit_program(
         forward_cursors: BTreeMap::new(),
         uses_forward_cursors: false,
         append_windows: BTreeMap::new(),
+        reserved_append_window: None,
         uses_append_windows: false,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
@@ -444,6 +445,7 @@ fn emit_program(
         fixed_int_lists: Vec::new(),
         line_slots: Vec::new(),
         affine_literal_lengths: Vec::new(),
+        cached_string_lengths: BTreeSet::new(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
         guarded_integer_lists: Vec::new(),
@@ -664,6 +666,7 @@ struct Emitter<'a, 'module> {
     forward_cursors: BTreeMap<usize, ForwardCursor>,
     uses_forward_cursors: bool,
     append_windows: BTreeMap<usize, String>,
+    reserved_append_window: Option<usize>,
     uses_append_windows: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
@@ -698,6 +701,7 @@ struct Emitter<'a, 'module> {
     fixed_int_lists: Vec<bool>,
     line_slots: Vec<bool>,
     affine_literal_lengths: Vec<(usize, i32)>,
+    cached_string_lengths: BTreeSet<usize>,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
     guarded_integer_lists: Vec<(usize, String, String)>,
@@ -1280,6 +1284,11 @@ impl Emitter<'_, '_> {
             if let ExprKind::Builtin(Builtin::ListAllI32 | Builtin::ListPresent, args) = &guard.kind
                 && let ExprKind::Local(slot) = args[0].kind
             {
+                if self.reserved_append_window == Some(slot)
+                    || self.guarded_list_buffer(&args[0]).is_some()
+                {
+                    continue;
+                }
                 let receiver = self.borrow_slot(slot);
                 let length = self.list_length(&receiver);
                 let length = self.index_word(&length, true);
@@ -1607,6 +1616,62 @@ impl Emitter<'_, '_> {
             operand,
             small_integer: true,
         }
+    }
+
+    /// Finds immutable string parameters whose length is requested inside a loop.
+    fn loop_string_lengths(function: &ir::Function, writes: &[u8]) -> BTreeSet<usize> {
+        fn in_loops(body: &[Statement], inspect: &mut impl FnMut(&Expr)) {
+            for statement in body {
+                match statement {
+                    Statement::While(test, body, orelse) => {
+                        ir::walk_operand_expressions(test, inspect);
+                        ir::walk_expressions(body, inspect);
+                        in_loops(orelse, inspect);
+                    }
+                    Statement::For { body, orelse, .. } => {
+                        ir::walk_expressions(body, inspect);
+                        in_loops(orelse, inspect);
+                    }
+                    _ => statement.suites(|suite| in_loops(suite, inspect)),
+                }
+            }
+        }
+        let mut parameters = BTreeSet::new();
+        in_loops(&function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::Len, args) = &expr.kind
+                && let ExprKind::Local(slot) = args[0].kind
+                && args[0].ty == Type::Str
+                && writes[slot] == 0
+                && function.params.contains(&slot)
+            {
+                parameters.insert(slot);
+            }
+        });
+        parameters
+    }
+
+    /// Memoizes immediate lengths on first use. A heap integer remains owned by
+    /// the ordinary call edge and is transferred to the result without caching.
+    fn cached_string_length(&mut self, slot: usize, text: &Value) -> Value {
+        let cached = self.instruction(format!("load i64, ptr %str_count{slot}"));
+        let hit = self.instruction(format!("icmp ne i64 {cached}, 0"));
+        let from = self.current.clone();
+        let (miss, done) = (self.label(), self.label());
+        self.branch(&hit, &done, &miss);
+        self.start(&miss);
+        let length = self.call("imre_str_len", Type::Int, &[text]);
+        self.forget(&length);
+        let word = length.operand;
+        let immediate = self.instruction(format!("trunc i64 {word} to i1"));
+        let entry = self.instruction(format!("select i1 {immediate}, i64 {word}, i64 0"));
+        self.line(format!("store i64 {entry}, ptr %str_count{slot}"));
+        let miss_exit = self.current.clone();
+        self.jump(&done);
+        self.start(&done);
+        let word = self.instruction(format!(
+            "phi i64 [{cached}, %{from}], [{word}, %{miss_exit}]"
+        ));
+        self.unpack_word(word, Type::Int)
     }
 
     /// Identity-only definitions do not exclude Clear/Move resets. A current
@@ -2004,6 +2069,7 @@ impl Emitter<'_, '_> {
             writes[slot] = writes[slot].saturating_add(1);
         });
         self.affine_literal_lengths = affine::literal_lengths(function, &writes);
+        self.cached_string_lengths = Self::loop_string_lengths(function, &writes);
         self.borrowed_params = vec![false; self.locals.len()];
         for &slot in &function.params {
             self.borrowed_params[slot] =
@@ -2044,6 +2110,12 @@ impl Emitter<'_, '_> {
             function.returns.llvm()
         };
         self.start("entry");
+        for &slot in &function.params {
+            if self.cached_string_lengths.contains(&slot) {
+                self.line(format!("%str_count{slot} = alloca i64"));
+                self.line(format!("store i64 0, ptr %str_count{slot}"));
+            }
+        }
         let fault_frame = if let Some(Statement::Expr(Expr {
             kind: ExprKind::Builtin(Builtin::FaultFrame { file, name, line }, _),
             ..
@@ -2744,8 +2816,6 @@ impl Emitter<'_, '_> {
                 self.route(Completion::Return(value));
             }
             Statement::If(test, yes, no) => {
-                let condition = self.expr(test);
-                let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
                 let mut bounded = false;
                 if crate::list_specialization::is_window_range_guard(test)
                     && let [Statement::While(_, body, _)] = yes.as_slice()
@@ -2763,8 +2833,29 @@ impl Emitter<'_, '_> {
                 } else {
                     Vec::new()
                 };
+                let reserve = bounded
+                    .then(|| crate::list_specialization::reserved_append_window(yes))
+                    .flatten();
+                let reserve = reserve.and_then(|(slot, cursor)| {
+                    self.forward_cursors
+                        .get(&cursor)
+                        .cloned()
+                        .map(|c| (slot, c))
+                });
+                let previous = self.reserved_append_window;
+                if let Some((slot, _)) = &reserve {
+                    self.reserved_append_window = Some(*slot);
+                }
+                let condition = self.expr(test);
+                self.reserved_append_window = previous;
+                let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
                 let mut guard = condition.operand;
-                if let Some((first, rest)) = slots.split_first() {
+                let unknown = slots
+                    .iter()
+                    .copied()
+                    .filter(|slot| !self.ranges.starts_small(statement, *slot))
+                    .collect::<Vec<_>>();
+                if let Some((first, rest)) = unknown.split_first() {
                     let mut words = self.borrow_slot(*first).operand;
                     for slot in rest {
                         let word = self.borrow_slot(*slot).operand;
@@ -2773,7 +2864,22 @@ impl Emitter<'_, '_> {
                     let tagged = self.instruction(format!("trunc i64 {words} to i1"));
                     guard = self.instruction(format!("and i1 {guard}, {tagged}"));
                 }
-                self.branch(&guard, &yes_label, &no_label);
+                if let Some((slot, cursor)) = reserve {
+                    let check = self.label();
+                    self.branch(&guard, &check, &no_label);
+                    self.start(&check);
+                    let bytes = self.remaining_cursor_bytes(&cursor);
+                    let list = self.borrow_slot(slot).operand;
+                    let window = self.append_window(slot);
+                    let success = self.instruction(format!(
+                        "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
+                    ));
+                    let opened = self.instruction(format!("icmp ne i32 {success}, 0"));
+                    self.branch(&opened, &yes_label, &no_label);
+                    self.reserved_append_window = Some(slot);
+                } else {
+                    self.branch(&guard, &yes_label, &no_label);
+                }
                 self.start(&yes_label);
                 let prior = self.guarded_integer_lists.len();
                 self.borrow_guarded_integer_lists(test);
@@ -2781,6 +2887,7 @@ impl Emitter<'_, '_> {
                     self.small_locals[*slot] = true;
                 }
                 self.block(yes);
+                self.reserved_append_window = previous;
                 for slot in slots {
                     self.small_locals[slot] = false;
                 }
@@ -7377,6 +7484,10 @@ impl Emitter<'_, '_> {
             }
             Builtin::Len => {
                 if let ExprKind::Local(slot) = expressions[0].kind
+                    && self.cached_string_lengths.contains(&slot)
+                {
+                    self.cached_string_length(slot, &args[0].value)
+                } else if let ExprKind::Local(slot) = expressions[0].kind
                     && let Some(length) = self.snapshot_length(slot, &args[0].value)
                 {
                     length
@@ -7555,7 +7666,7 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
-            Builtin::IntBounded { min, max } => {
+            Builtin::BoundedCursorValue { min, max } | Builtin::IntBounded { min, max } => {
                 debug_assert!(min <= max && *min >= -(1_i64 << 62) && *max < (1_i64 << 62));
                 debug_assert!(matches!(expressions[0].kind, ExprKind::Local(_)));
                 // Range analysis already uses the checked induction proof to
@@ -7566,6 +7677,13 @@ impl Emitter<'_, '_> {
                     ty: Type::Int,
                     operand: args[0].value.operand.clone(),
                     small_integer: true,
+                }
+            }
+            Builtin::ListAllI32 if matches!(expressions[0].kind,ExprKind::Local(slot) if Some(slot)==self.reserved_append_window) => {
+                Value {
+                    ty: Type::Bool,
+                    operand: "true".to_owned(),
+                    small_integer: false,
                 }
             }
             Builtin::ListAllI32 => {
@@ -7582,18 +7700,35 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::IntFitsI32 => {
+                if self
+                    .ranges
+                    .integer(&expressions[0])
+                    .is_some_and(|r| r.min >= i64::from(i32::MIN) && r.max <= i64::from(i32::MAX))
+                {
+                    return Value {
+                        ty: Type::Bool,
+                        operand: "true".to_owned(),
+                        small_integer: false,
+                    };
+                }
+                let word = &args[0].value.operand;
+                let tag = self.instruction(format!("trunc i64 {word} to i1"));
+                let shift = self.instruction(format!("add i64 {word}, 4294967295"));
+                let fits = self.instruction(format!("icmp ule i64 {shift}, 8589934590"));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("and i1 {tag}, {fits}")),
+                    small_integer: false,
+                }
+            }
             Builtin::CursorScanBudget(slot) => {
                 let operand = if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
-                    let next = self.instruction(format!("load ptr, ptr {}", cursor.next));
-                    let end = self.instruction(format!("load ptr, ptr {}", cursor.end));
-                    let next = self.instruction(format!("ptrtoint ptr {next} to i64"));
-                    let end = self.instruction(format!("ptrtoint ptr {end} to i64"));
-                    let remaining = self.instruction(format!("sub i64 {end}, {next}"));
+                    let remaining = self.remaining_cursor_bytes(&cursor);
+                    // Zero disables the guarded loop when its byte bound cannot fit i32.
                     let fits = self.instruction(format!("icmp ule i64 {remaining}, {}", i32::MAX));
-                    let count = self.instruction(format!(
-                        "select i1 {fits}, i64 {remaining}, i64 {}",
-                        i32::MAX
-                    ));
+                    let count =
+                        self.instruction(format!("select i1 {fits}, i64 {remaining}, i64 0"));
                     let tagged = self.instruction(format!("shl i64 {count}, 1"));
                     self.instruction(format!("or i64 {tagged}, 1"))
                 } else {
@@ -7839,6 +7974,14 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::StringIter => self.call("imre_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::SortedSplitByteIter(separator) => Value {
+                ty: Type::Iterator,
+                operand: self.checked_pointer(format!(
+                    "call ptr @imre_str_sorted_split_byte_iter(ptr {}, i8 {separator})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::SplitByteIter(separator) => Value {
                 ty: Type::Iterator,
                 operand: self.checked_instruction(format!(
@@ -8496,6 +8639,33 @@ impl Emitter<'_, '_> {
                 self.line(format!("call void @finish_list_appends(ptr {window})"));
                 none()
             }
+            Builtin::AppendInWindow(output) if self.reserved_append_window == Some(*output) => {
+                let window = self.append_window(*output);
+                let cursor = self.instruction(format!(
+                    "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+                ));
+                let next = self.instruction(format!("load ptr, ptr {cursor}"));
+                self.line(format!("store i64 {}, ptr {next}", args[1].value.operand));
+                let after = self.instruction(format!("getelementptr i64, ptr {next}, i64 1"));
+                self.line(format!("store ptr {after}, ptr {cursor}"));
+                none()
+            }
+            Builtin::GetBoundedInAppendWindow { output, .. }
+                if self.reserved_append_window == Some(*output) =>
+            {
+                let window = self.append_window(*output);
+                let cursor = self.instruction(format!(
+                    "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+                ));
+                let next = self.instruction(format!("load ptr, ptr {cursor}"));
+                let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
+                let word = self.instruction(format!("load i64, ptr {last}"));
+                Value {
+                    ty: Type::Int,
+                    operand: word,
+                    small_integer: true,
+                }
+            }
             Builtin::AppendInWindow(output) => {
                 let window = self.append_window(*output);
                 self.checked_status(format!(
@@ -8910,6 +9080,16 @@ impl Emitter<'_, '_> {
         let forward = self.forward_cursors.get(&iterator).cloned();
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
+            ir::IterNextKind::SplitField => {
+                let field = self.instruction(format!(
+                    "call i64 @imre_split_field_next(ptr {})",
+                    iterator.operand
+                ));
+                (
+                    self.instruction(format!("icmp ne i64 {field}, 0")),
+                    Some(field),
+                )
+            }
             ir::IterNextKind::Generic => {
                 self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
                 let value_output = if value.is_some() {
@@ -9211,6 +9391,15 @@ impl Emitter<'_, '_> {
         } else {
             self.release(&old);
         }
+    }
+
+    /// The unconsumed UTF-8 bytes bound the number of successful scalar pulls.
+    fn remaining_cursor_bytes(&mut self, cursor: &ForwardCursor) -> String {
+        let next = self.instruction(format!("load ptr, ptr {}", cursor.next));
+        let end = self.instruction(format!("load ptr, ptr {}", cursor.end));
+        let next = self.instruction(format!("ptrtoint ptr {next} to i64"));
+        let end = self.instruction(format!("ptrtoint ptr {end} to i64"));
+        self.instruction(format!("sub i64 {end}, {next}"))
     }
 
     /// Keeps one native append window per guarded destination in this activation.
@@ -10378,6 +10567,7 @@ declare i64 @imre_str_iter_next_codepoint(ptr)
 declare ptr @imre_str_iter_bounds(ptr, ptr)
 declare i64 @imre_utf8_next_non_ascii(ptr, ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
+declare i64 @imre_split_field_next(ptr)
 declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)
 declare ptr @imre_str_repeat(ptr, i64)
@@ -10426,6 +10616,7 @@ declare i32 @imre_str_isdigit(ptr)
 declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_str_split_byte_iter(ptr, i8)
+declare ptr @imre_str_sorted_split_byte_iter(ptr, i8)
 declare ptr @imre_str_matching_split_iter(ptr, ptr, i64, i8)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
@@ -12075,6 +12266,21 @@ def transform(values: list[int], count: int) -> int:
         assert!(fast.contains("icmp ult i64"));
         assert!(fast.contains("getelementptr inbounds i64"));
         assert!(fast.contains("call i64 @imre_list_borrow_index("));
+    }
+
+    #[test]
+    fn string_lengths_in_loop_conditions_and_bodies_cache_only_unwritten_parameters() {
+        let source = "def score(a: str, b: str) -> int:\n    total = 0\n    i = 0\n    while i < len(a):\n        total += len(b)\n        i += 1\n    return total\n";
+        let slots = |source: &str| {
+            compile(source, &CompileOptions::default())
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("%str_count") && line.contains(" = alloca i64"))
+                .count()
+        };
+        assert_eq!(slots(source), 2);
+        let rebound = source.replace("        i += 1", "        b = a + b\n        i += 1");
+        assert_eq!(slots(&rebound), 1);
     }
 
     #[test]

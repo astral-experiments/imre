@@ -538,7 +538,9 @@ impl Function<'_, '_> {
                     if name == "__future__" && v.level == 0 {
                         continue;
                     }
-                    let Some(name) = relative_import(self.source.package, v.level, name) else {
+                    let Some(name) =
+                        crate::modules::resolve_import(self.source.package, v.level, name)
+                    else {
                         self.unsupported("relative import beyond the top-level package");
                         continue;
                     };
@@ -1454,24 +1456,6 @@ impl Function<'_, '_> {
         self.raise(&exc, None, true);
         self.label(&done);
     }
-}
-
-fn relative_import(package: &str, level: u32, name: &str) -> Option<String> {
-    if level == 0 {
-        return Some(name.to_owned());
-    }
-    if package.is_empty() {
-        return None;
-    }
-    let mut base = package;
-    for _ in 1..level {
-        base = base.rsplit_once('.')?.0;
-    }
-    Some(if name.is_empty() {
-        base.to_owned()
-    } else {
-        format!("{base}.{name}")
-    })
 }
 
 /// A nested function can close over the declaring class through its enclosing method.

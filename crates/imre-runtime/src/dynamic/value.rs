@@ -2443,6 +2443,9 @@ impl DictIterator {
 const UNMARKED: usize = usize::MAX;
 const END: usize = usize::MAX - 1;
 
+/// Minimum allocation allowance for separately owned Python bytes buffers.
+const BYTE_BUFFER_FLOOR: usize = 8 * 1024 * 1024;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Finalization {
     None,
@@ -2658,6 +2661,7 @@ pub(super) struct Heap {
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
+    byte_buffer_allowance: usize,
     pub(super) gc_settings: Arc<GcSettings>,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
@@ -2884,6 +2888,7 @@ impl Heap {
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: FIRST_DYNAMIC_SLOT + 4096,
+            byte_buffer_allowance: BYTE_BUFFER_FLOOR,
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
@@ -3102,6 +3107,7 @@ impl Heap {
         }
         match value {
             Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
+            Value::Bytes(bytes) => self.alloc_bytes(bytes, true),
             Value::Tuple(items) if items.is_empty() => EMPTY_TUPLE,
             Value::Class { .. } => {
                 let id = self.alloc_slot(value);
@@ -3147,17 +3153,29 @@ impl Heap {
         id
     }
 
+    /// Charge buffers larger than a slot to the next statement's collection budget.
+    fn alloc_bytes(&mut self, bytes: Vec<u8>, trace: bool) -> Id {
+        if bytes.capacity() > std::mem::size_of::<Slot>() {
+            self.byte_buffer_allowance =
+                self.byte_buffer_allowance.saturating_sub(bytes.capacity());
+            if self.byte_buffer_allowance == 0 && !self.full_collection_active() {
+                self.collect_next_statement = true;
+            }
+        }
+        self.alloc_slot_with_trace(Value::Bytes(bytes), trace)
+    }
+
     /// Reuse CPython's empty and one-byte singletons when copying known byte data.
     /// Allocating an uninitialized one-byte result (for example, bytes(1)) is distinct.
-    pub(super) fn bytes_from_data(&mut self, bytes: Vec<u8>) -> Id {
-        if bytes.len() > 1 {
-            return self.alloc_slot(Value::Bytes(bytes));
+    pub(super) fn bytes_from_data(&mut self, bytes: impl AsRef<[u8]> + Into<Vec<u8>>) -> Id {
+        if bytes.as_ref().len() > 1 {
+            return self.alloc_bytes(bytes.into(), true);
         }
-        let byte = bytes.first().copied();
+        let byte = bytes.as_ref().first().copied();
         if let Some(&id) = self.short_bytes.get(&byte) {
             return id;
         }
-        let id = self.alloc_slot_with_trace(Value::Bytes(bytes), false);
+        let id = self.alloc_bytes(bytes.into(), false);
         self.short_bytes.insert(byte, id);
         id
     }
@@ -4991,6 +5009,19 @@ impl Heap {
                 .any(|value| super::stdlib::io::pending_callback_write(self, value))
     }
 
+    /// Revisit buffer sizes only when the buffers themselves requested a sweep.
+    #[cold]
+    fn retained_byte_allowance(&self) -> usize {
+        self.slots
+            .iter()
+            .filter_map(|slot| match &slot.value {
+                Some(Value::Bytes(bytes)) => Some(bytes.capacity()),
+                _ => None,
+            })
+            .fold(0, usize::saturating_add)
+            .max(BYTE_BUFFER_FLOOR)
+    }
+
     fn sweep(&mut self) -> Option<WeakCallbacks> {
         // Finalizers have had their chance to flush or resurrect the writer. Check its
         // actual buffer before recycling any slot, including its raw stream or class.
@@ -5056,6 +5087,11 @@ impl Heap {
                 self.free_count += 1;
             }
         }
+        self.byte_buffer_allowance = if self.byte_buffer_allowance == 0 {
+            self.retained_byte_allowance()
+        } else {
+            BYTE_BUFFER_FLOOR
+        };
         // A refused growth request can lower the usual collection floor.
         let floor = self.next_collection.min(FIRST_DYNAMIC_SLOT + 4096);
         let live = self.slots.len() - FIRST_DYNAMIC_SLOT - self.free_count;
@@ -5083,6 +5119,28 @@ mod tests {
             assert!(matches!(heap.get(id), Value::Int(value) if value.as_small() == Some(n)));
             assert_eq!(heap.alloc(Value::Int(crate::Int::from(n))), id);
         }
+    }
+
+    #[test]
+    fn byte_buffer_pressure_tracks_retained_capacity() {
+        let mut heap = Heap::new();
+        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        buffer.extend_from_slice(b"live");
+        let capacity = buffer.capacity();
+        let live = heap.alloc(Value::Bytes(buffer));
+        assert!(heap.collection_requested());
+        heap.frames.last_mut().unwrap().live.clear();
+        heap.collect_if_due([live].into_iter());
+        assert_eq!(heap.byte_buffer_allowance, capacity);
+
+        let mut buffer = Vec::with_capacity(capacity);
+        buffer.extend_from_slice(b"dead");
+        let dead = heap.bytes_from_data(buffer);
+        heap.frames.last_mut().unwrap().live.clear();
+        heap.collect_if_due([live].into_iter());
+        assert!(heap.slots[dead as usize].value.is_none());
+        assert!(matches!(heap.get(live), Value::Bytes(bytes) if bytes == b"live"));
+        assert_eq!(heap.byte_buffer_allowance, capacity);
     }
 
     #[test]

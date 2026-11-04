@@ -1,4 +1,7 @@
 //! Store sparse exceptions by occupied block, or one alternate scalar row and a bitmap.
+mod spaced_writes;
+mod word_writes;
+
 use super::{Error, Result};
 use std::collections::HashMap;
 
@@ -445,8 +448,11 @@ impl Binary {
             _ if count.saturating_mul(distance) <= n => count,
             _ => count.min(n / num_integer::gcd(n, step)),
         };
-        let (done, last) = if distance == 1 {
-            self.set_contiguous(at, step == 1, n, writes, set)
+        let (done, last) = if distance < BLOCK && distance.is_power_of_two() {
+            self.set_strided(at, distance, step == distance, n, writes, set)
+        } else if (2..=BLOCK / 4).contains(&distance) {
+            // At least four regularly spaced writes fit in a full word.
+            self.set_spaced(at, distance, step == distance, n, writes, set)
         } else if distance == BLOCK && n.is_multiple_of(BLOCK) {
             self.set_word_stride(at, step == BLOCK, n, writes, set)
         } else {
@@ -495,66 +501,6 @@ impl Binary {
         }
         self.changed += added;
         (done, at)
-    }
-
-    /// Fill each contiguous run up to its wrap or the next signal check.
-    #[inline(never)]
-    fn set_contiguous(
-        &mut self,
-        mut at: usize,
-        forward: bool,
-        n: usize,
-        count: usize,
-        set: bool,
-    ) -> (usize, usize) {
-        let mut done = 0;
-        while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
-            let chunk = (count - done).min(1024);
-            let range = if forward {
-                let first = if at + 1 == n { 0 } else { at + 1 };
-                first..first + chunk.min(n - first)
-            } else {
-                let end = if at == 0 { n } else { at };
-                end - chunk.min(end)..end
-            };
-            done += range.len();
-            at = if forward { range.end - 1 } else { range.start };
-            self.fill_range(range, set);
-        }
-        (done, at)
-    }
-
-    /// Set or clear a contiguous range and count only the bits that change.
-    fn fill_range(&mut self, range: std::ops::Range<usize>, set: bool) {
-        let end = range.end.min(self.bits.len().saturating_mul(BLOCK));
-        let mut at = range.start;
-        let mut changed = 0;
-        while at < end {
-            let offset = at % BLOCK;
-            if offset == 0 && end - at >= BLOCK {
-                let last = end / BLOCK;
-                let target = if set { u64::MAX } else { 0 };
-                for word in &mut self.bits[at / BLOCK..last] {
-                    let flips = *word ^ target;
-                    changed += flips.count_ones() as usize;
-                    *word ^= flips;
-                }
-                at = last * BLOCK;
-                continue;
-            }
-            let width = (end - at).min(BLOCK - offset);
-            let mask = (u64::MAX >> (BLOCK - width)) << offset;
-            let word = &mut self.bits[at / BLOCK];
-            let flips = mask & if set { !*word } else { *word };
-            changed += flips.count_ones() as usize;
-            *word ^= flips;
-            at += width;
-        }
-        if set {
-            self.changed += changed;
-        } else {
-            self.changed -= changed;
-        }
     }
 
     /// A one-word stride on a word-aligned ring keeps the bit within each word fixed.
@@ -900,9 +846,22 @@ mod page_tests {
     }
 
     #[test]
-    fn contiguous_row_and_word_writes_match_scalar_stores_across_wraps() {
+    fn strided_writes_match_scalar_stores_across_wraps() {
         let n: usize = 193;
         for (n, step) in [
+            (n, 2),
+            (n, n - 2),
+            (n, 3),
+            (n, n - 3),
+            (4 * BLOCK, 5),
+            (4 * BLOCK, 4 * BLOCK - 5),
+            (n, 7),
+            (n, n - 15),
+            (n, 4),
+            (n, n - 4),
+            (n, 8),
+            (n, 16),
+            (n, 32),
             (n, 1),
             (n, n - 1),
             (4 * BLOCK, BLOCK),

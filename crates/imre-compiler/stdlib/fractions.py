@@ -10,6 +10,8 @@ import operator
 import re
 import sys
 
+_limit_candidates = __import__('_imre_fractions')._limit_candidates
+
 __all__ = ['Fraction']
 
 
@@ -420,6 +422,12 @@ class Fraction(numbers.Rational):
 
         p0, q0, p1, q1 = 0, 1, 1, 0
         n, d = self._numerator, self._denominator
+        candidates = _limit_candidates(n, d, max_denominator)
+        if candidates is not None:
+            p1, q1, p2, q2, distance = candidates
+            if distance <= self._denominator:
+                return Fraction._from_coprime_ints(p1, q1)
+            return Fraction._from_coprime_ints(p2, q2)
         while True:
             a = n//d
             q2 = q0+a*q1

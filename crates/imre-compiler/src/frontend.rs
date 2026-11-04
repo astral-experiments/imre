@@ -1262,7 +1262,6 @@ fn lower_body(
         .as_deref()
         .filter(|p| p.annotation().is_some())
         .map(|p| p.name.to_string());
-    checker.consuming_lists = consuming_lists::find(&definition.body);
     checker.joined_lines = joined_lines::find(&definition.body);
     checker.returns = signature.returns;
     checker.interactive_names = module.is_doctest_case() && definition.name.as_str() == "_run_case";
@@ -1283,6 +1282,9 @@ fn lower_body(
         checker.assigned.insert(slot);
         params.push(slot);
     }
+    checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
+        checker.unshadowed_builtin(func, "sorted")
+    });
     let (mut body, falls_through) = if module.archive.is_some() {
         let args = params.iter().map(|&slot| checker.local(slot)).collect();
         let kind = |ty| match ty {
@@ -3993,18 +3995,8 @@ impl<'a> Checker<'a> {
         {
             return self.groupby_iteration(loop_, call);
         }
-        let mut input = if let Some(&byte) = self
-            .consuming_lists
-            .split_consumers
-            .get(&loop_.iter.range())
-        {
-            let receiver = self.expr(&loop_.iter)?;
-            debug_assert_eq!(receiver.ty, Type::Str);
-            let cursor = Expr {
-                ty: Type::Iterator,
-                kind: ExprKind::Builtin(Builtin::SplitByteIter(byte), vec![receiver]),
-            };
-            Iteration::Prepared(self.prepare_cursor(cursor, Type::Str))
+        let mut input = if let Some(fields) = self.prepared_split_iteration(&loop_.iter)? {
+            fields
         } else if let Some(items) = self.environ_items_loop(&loop_.iter)? {
             items
         } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
@@ -6452,7 +6444,7 @@ impl<'a> Checker<'a> {
     }
 
     fn boxed_builtin_callable(&self, expression: &ast::Expr) -> Option<&'static str> {
-        ["exec", "hex", "oct"]
+        ["bin", "exec", "hex", "oct"]
             .into_iter()
             .find(|name| self.unshadowed_builtin(expression, name))
     }

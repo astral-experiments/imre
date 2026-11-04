@@ -7,6 +7,7 @@ struct Candidate {
     init: (usize, TextRange),
     consume: Option<(usize, TextRange)>,
     split: bool,
+    sorted: bool,
     appended: bool,
     escaped: bool,
 }
@@ -51,6 +52,7 @@ fn record<'a>(
             init: (index, name.range()),
             consume: None,
             split,
+            sorted: false,
             appended: false,
             escaped: false,
         });
@@ -61,6 +63,7 @@ struct Uses<'a> {
     names: HashMap<&'a str, Candidate>,
     statement: usize,
     indirect: bool,
+    shadows_sorted: bool,
 }
 
 impl<'ast> Visitor<'ast> for Uses<'_> {
@@ -103,6 +106,8 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+        self.shadows_sorted |= matches!(expr, ast::Expr::Name(name) if name.id.as_str() == "sorted" && name.ctx != ast::ExprContext::Load);
+
         if matches!(expr, ast::Expr::Lambda(_))
             || matches!(expr, ast::Expr::Name(n) if matches!(n.id.as_str(), "locals" | "vars" | "eval" | "exec"))
             || matches!(expr, ast::Expr::Attribute(a) if matches!(a.attr.as_str(), "_getframe" | "currentframe" | "f_locals"))
@@ -143,27 +148,40 @@ impl Plan {
 }
 
 /// A top-level consuming loop has no enclosing backedge that could reuse its input.
-pub(super) fn find(body: &[ast::Stmt]) -> Plan {
+pub(super) fn find(body: &[ast::Stmt], is_sorted: impl Fn(&ast::Expr) -> bool) -> Plan {
     let mut uses = Uses {
         names: HashMap::new(),
         statement: 0,
         indirect: false,
+        shadows_sorted: false,
     };
     for (index, stmt) in body.iter().enumerate() {
         record(stmt, index, false, &mut uses.names);
         if let ast::Stmt::For(for_) = stmt {
-            let sources = match &*for_.iter {
-                source @ ast::Expr::Name(_) => std::slice::from_ref(source),
-                ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(n) if n.id.as_str() == "zip") => {
-                    call.arguments.args.as_ref()
+            let (sources, sorted) = match &*for_.iter {
+                source @ ast::Expr::Name(_) => (std::slice::from_ref(source), false),
+                ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(n) if n.id.as_str()=="zip") => {
+                    (call.arguments.args.as_ref(), false)
+                }
+                ast::Expr::Call(call)
+                    if is_sorted(&call.func)
+                        && call.arguments.keywords.is_empty()
+                        && call.arguments.args.len() == 1 =>
+                {
+                    (call.arguments.args.as_ref(), true)
                 }
                 _ => continue,
             };
             for source in sources {
                 if let ast::Expr::Name(name) = source
                     && let Some(use_) = uses.names.get_mut(name.id.as_str())
-                    && (!use_.split || matches!(&*for_.iter, ast::Expr::Name(_)))
+                    && if sorted {
+                        use_.split
+                    } else {
+                        !use_.split || matches!(&*for_.iter, ast::Expr::Name(_))
+                    }
                 {
+                    use_.sorted = sorted;
                     use_.escaped |= use_.consume.replace((index, name.range())).is_some();
                 }
             }
@@ -183,7 +201,7 @@ pub(super) fn find(body: &[ast::Stmt]) -> Plan {
     let mut plan = Plan::default();
     for c in uses.names.into_values().filter(|c| !c.escaped) {
         if let Some((_, at)) = c.consume {
-            if c.split && !c.appended {
+            if c.split && !c.appended && !(c.sorted && uses.shadows_sorted) {
                 plan.split_sites.insert(c.init.1, at);
             } else if !c.split && c.appended {
                 plan.takes.insert(at);
@@ -209,6 +227,19 @@ impl Checker<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sorted_split_only_streams_private_fields_in_lexical_order() {
+        let source = include_str!("../../../../tests/fixtures/containers/sorted_split_fields.py");
+        let code = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(
+            code.matches("call ptr @imre_str_sorted_split_byte_iter(")
+                .count(),
+            3
+        );
+        assert_eq!(code.matches("call ptr @imre_str_split(").count(), 4);
+        assert!(code.matches("call i64 @imre_split_field_next(").count() >= 3);
+    }
+
     #[test]
     fn only_a_private_single_pass_split_streams_its_fields() {
         let source = include_str!("../../../../tests/fixtures/containers/assigned_split_fields.py");

@@ -127,6 +127,21 @@ pub(super) fn date_isoformat(
     Ok(ctx.text(format!("{year:04}-{month:02}-{day:02}")))
 }
 
+/// ISO fields are zero-padded to a minimum width, including fields restored from pickle.
+fn push_digits<const WIDTH: usize>(out: &mut String, mut value: i64) {
+    if !(0..10_i64.pow(WIDTH as u32)).contains(&value) {
+        use std::fmt::Write;
+        write!(out, "{value:0WIDTH$}").unwrap();
+        return;
+    }
+    let mut bytes = [b'0'; WIDTH];
+    for digit in bytes.iter_mut().rev() {
+        *digit += (value % 10) as u8;
+        value /= 10;
+    }
+    out.extend(bytes.map(char::from));
+}
+
 pub(super) fn isoformat(
     ctx: &mut Context,
     method: &str,
@@ -223,27 +238,54 @@ pub(super) fn isoformat(
         let [y, m, d, h, min, s, us, _] = value.fields().map(|n| n as i64);
         (y, m, d, h, min, s, us)
     };
-    let clock = match spec {
-        "hours" => format!("{h:02}"),
-        "minutes" => format!("{h:02}:{min:02}"),
-        "seconds" => format!("{h:02}:{min:02}:{s:02}"),
-        "milliseconds" => format!("{h:02}:{min:02}:{s:02}.{:03}", us / 1000),
-        "auto" if us == 0 => format!("{h:02}:{min:02}:{s:02}"),
-        "microseconds" | "auto" => format!("{h:02}:{min:02}:{s:02}.{us:06}"),
+    let (components, precision) = match spec {
+        "hours" => (1, 0),
+        "minutes" => (2, 0),
+        "seconds" => (3, 0),
+        "milliseconds" => (3, 3),
+        "microseconds" => (3, 6),
+        "auto" => (3, if us == 0 { 0 } else { 6 }),
         _ => return Err(Error::new("ValueError", "Unknown timespec value")),
     };
+    let mut text = String::with_capacity(32);
+    let mut surrogate_at = None;
+    if kind != "time" {
+        push_digits::<4>(&mut text, y);
+        text.push('-');
+        push_digits::<2>(&mut text, m);
+        text.push('-');
+        push_digits::<2>(&mut text, d);
+        if let Some(ch) = char::from_u32(separator) {
+            text.push(ch);
+        } else {
+            surrogate_at = Some(text.len());
+            text.push('T');
+        }
+    }
+    push_digits::<2>(&mut text, h);
+    for &part in &[min, s][..components - 1] {
+        text.push(':');
+        push_digits::<2>(&mut text, part);
+    }
+    if precision != 0 {
+        text.push('.');
+        if precision == 3 {
+            push_digits::<3>(&mut text, us / 1000);
+        } else {
+            push_digits::<6>(&mut text, us);
+        }
+    }
     let Value::Calendar { tzinfo, .. } = *ctx.heap.get(ctx.scalar_value(receiver)) else {
         unreachable!()
     };
     let arg = if kind == "time" { NONE } else { receiver };
-    let offset = offset_text(ctx, tzinfo, arg, true)?;
-    let mut points = Vec::new();
-    if kind != "time" {
-        points.extend(format!("{y:04}-{m:02}-{d:02}").bytes().map(u32::from));
-        points.push(separator);
+    text.push_str(&offset_text(ctx, tzinfo, arg, true)?);
+    if let Some(index) = surrogate_at {
+        let mut points: Vec<_> = text.bytes().map(u32::from).collect();
+        points[index] = separator;
+        return Ok(ctx.text_codepoints(points));
     }
-    points.extend(clock.bytes().chain(offset.bytes()).map(u32::from));
-    Ok(ctx.text_codepoints(points))
+    Ok(ctx.text(text))
 }
 
 // Exact calendar values have no Python instance slots for the generic container renderer to call.

@@ -975,7 +975,66 @@ impl Checker<'_> {
         Iteration::Prepared(self.prepare_cursor(cursor, Type::Str))
     }
 
+    /// Consume a checked private split, or a direct sorted split of a string local.
+    pub(super) fn prepared_split_iteration(
+        &mut self,
+        expression: &ast::Expr,
+    ) -> Result<Option<Iteration>, String> {
+        let (input, sorted) = match expression {
+            ast::Expr::Name(_) => (expression, false),
+            ast::Expr::Call(call)
+                if self.unshadowed_builtin(&call.func, "sorted")
+                    && call.arguments.keywords.is_empty() =>
+            {
+                let [input] = call.arguments.args.as_ref() else {
+                    return Ok(None);
+                };
+                (input, true)
+            }
+            _ => return Ok(None),
+        };
+        let (receiver, byte) =
+            if let Some(&byte) = self.consuming_lists.split_consumers.get(&input.range()) {
+                (self.expr(input)?, byte)
+            } else if sorted
+                && let ast::Expr::Call(split) = input
+                && split.arguments.keywords.is_empty()
+                && let [ast::Expr::StringLiteral(sep)] = split.arguments.args.as_ref()
+                && let [byte] = *sep.value.to_str().as_bytes()
+                && let ast::Expr::Attribute(method) = &*split.func
+                && method.attr.as_str() == "split"
+                && let ast::Expr::Name(name) = &*method.value
+                && self
+                    .names
+                    .get(name.id.as_str())
+                    .is_some_and(|slot| self.locals[*slot] == Type::Str)
+            {
+                (self.expr(&method.value)?, byte)
+            } else {
+                return Ok(None);
+            };
+        debug_assert_eq!(receiver.ty, Type::Str);
+        let op = if sorted {
+            Builtin::SortedSplitByteIter(byte)
+        } else {
+            Builtin::SplitByteIter(byte)
+        };
+        let cursor = Expr {
+            ty: Type::Iterator,
+            kind: ExprKind::Builtin(op, vec![receiver]),
+        };
+        Ok(Some(Iteration::Prepared(
+            self.prepare_cursor(cursor, Type::Str),
+        )))
+    }
+
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
+        let kind = match cursor.kind {
+            ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _) => {
+                crate::ir::IterNextKind::SplitField
+            }
+            _ => crate::ir::IterNextKind::Generic,
+        };
         let iterator = self.hidden(cursor.ty);
         let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);
@@ -985,7 +1044,7 @@ impl Checker<'_> {
             next: vec![
                 Statement::Clear(value),
                 Statement::IterNext {
-                    kind: crate::ir::IterNextKind::Generic,
+                    kind,
                     iterator,
                     key: value,
                     value: None,

@@ -817,7 +817,13 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
     ctx.argv = ctx.alloc(Value::List(args));
     let paths: Vec<String> =
         serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
-    let paths = paths.into_iter().map(|p| ctx.text(p)).collect();
+    // The CLI adds its script directory only after site has finished.
+    let defer_path0 = ctx.config["sitecustomize"] == true && ctx.config["path0"] == true;
+    let paths = paths
+        .into_iter()
+        .skip(usize::from(defer_path0))
+        .map(|p| ctx.text(p))
+        .collect();
     ctx.sys_path = ctx.alloc(Value::List(paths));
     ctx.default_encoding = ctx.heap.code_name(crate::sys::default_encoding().as_str());
     let current = ctx.alloc(Value::Context(Default::default()));
@@ -869,6 +875,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
     let mark = ctx.heap.temporary_mark();
+    let mut failed_site = false;
     let result = ctx.startup_sys().and_then(|_| {
         if ctx.config["faulthandler"].as_bool() == Some(true) {
             let handler = ctx.module("faulthandler")?;
@@ -896,6 +903,15 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             }
             ctx.heap.release_temporaries_since(mark);
         }
+        if ctx.config["sitecustomize"] == true {
+            let mark = ctx.heap.temporary_mark();
+            ctx.initialize_startup_site()
+                .inspect_err(|_| failed_site = true)?;
+            ctx.heap.release_temporaries_since(mark);
+            if ctx.config["path0"] == true {
+                ctx.insert_startup_path0()?;
+            }
+        }
         let main = ctx
             .load_bootstrap_module("__main__", None, NONE)?
             .ok_or_else(|| Context::missing_module("__main__"))?;
@@ -905,6 +921,12 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             Ok(main)
         }
     });
+    if failed_site && let Err(error) = result {
+        eprintln!("Fatal Python error: init_import_site: Failed to import the site module");
+        eprintln!("Python runtime state: initialized");
+        stdlib::traceback::report_chain(&mut ctx, error);
+        return 1;
+    }
     let mut interrupted = result
         .as_ref()
         .is_err_and(|e| ctx.is_builtin_error(e, "KeyboardInterrupt"));

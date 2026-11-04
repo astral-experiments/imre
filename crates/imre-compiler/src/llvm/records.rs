@@ -69,11 +69,19 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             let Some(metadata) = module.class_metadata.get(class) else {
                 return "null".to_owned();
             };
+            // These field owners may be dropped directly without scheduling child records.
+            let scalar_fields = module.class_fields[class].iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes
+                )
+            });
             let flags = u32::from(metadata.dataclass_eq)
                 | (u32::from(metadata.dataclass_repr) << 1)
                 | (u32::from(metadata.toml_hash) << 2)
                 | (u32::from(metadata.value_struct) << 3)
-                | (u32::from(metadata.fields.iter().any(|f| f.repr_text)) << 4);
+                | (u32::from(metadata.fields.iter().any(|f| f.repr_text)) << 4)
+                | (u32::from(scalar_fields) << 6);
             // The runtime walks the physical layout. Hidden cache and shadow fields
             // own their payloads, but have no public name, equality, or repr role.
             let layout = (0..module.class_fields[class].len()).map(|index| {

@@ -29,6 +29,34 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
+/// Return the package used to resolve imports originating in this module.
+pub(crate) fn import_package(module: &str, is_package: bool) -> &str {
+    if is_package {
+        module
+    } else {
+        module.rsplit_once('.').map_or("", |(parent, _)| parent)
+    }
+}
+
+/// Resolve an import against its containing package, counting the leading dots in `level`.
+pub(crate) fn resolve_import(package: &str, level: u32, name: &str) -> Option<String> {
+    if level == 0 {
+        return Some(name.to_owned());
+    }
+    if package.is_empty() {
+        return None;
+    }
+    let mut base = package;
+    for _ in 1..level {
+        base = base.rsplit_once('.')?.0;
+    }
+    Some(if name.is_empty() {
+        base.to_owned()
+    } else {
+        format!("{base}.{name}")
+    })
+}
+
 /// Mode constants and operations from the target's POSIX stat provider.
 fn stat_mode_source() -> Option<&'static str> {
     macro_rules! modes {
@@ -597,6 +625,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/_imre_gettext_locale.py"),
         )),
         "getopt" => Some(("getopt.py", include_str!("../stdlib/getopt.py"))),
+        // CPython 3.14.5 Lib/optparse.py. See licenses/Optik.txt and licenses/CPython.txt.
+        "optparse" => Some(("optparse.py", include_str!("../stdlib/optparse.py"))),
         "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => etree_source(name),
@@ -1893,6 +1923,7 @@ impl IntrinsicModule {
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
+            (Self::Builtins, "bin") => Intrinsic::ScopedObjectExport("builtins.bin"),
             (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
             (Self::Builtins, "oct") => Intrinsic::ScopedObjectExport("builtins.oct"),
             (Self::Builtins, "exec") => Intrinsic::ScopedObjectExport("builtins.exec"),
@@ -3205,16 +3236,7 @@ impl SourceGraph {
     /// The import package of a linked source module; direct script entries have no package.
     pub(crate) fn module_package(&self, module: ModuleId) -> Option<&str> {
         let source = &self.modules[module];
-        (module != self.entry).then(|| {
-            if source.is_package {
-                source.name.as_str()
-            } else {
-                source
-                    .name
-                    .rsplit_once('.')
-                    .map_or("", |(parent, _)| parent)
-            }
-        })
+        (module != self.entry).then(|| import_package(&source.name, source.is_package))
     }
 
     /// Record only this call's overload diagnostic. Nested arguments still get
@@ -3482,7 +3504,7 @@ impl SourceGraph {
         command: &crate::PythonCommand,
         options: &crate::CompileOptions,
         fs: FileSystem<'_>,
-        ordered_command_import: &mut bool,
+        import_failure: &mut Option<EntryImportFailure>,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let mut loader = Loader::new(
@@ -3502,14 +3524,7 @@ impl SourceGraph {
             &command.source,
             crate::SourceKind::Command,
         )?;
-        if let Err(error) = loader.scan(entry) {
-            // Only a valid command blocked at its own late import may switch to
-            // the boxed importer, which executes statements in source order.
-            *ordered_command_import = loader.late_entry_import
-                && loader.modules[entry].parsed.has_no_syntax_errors()
-                && loader.session.has_valid_semantic_syntax(entry);
-            return Err(error);
-        }
+        loader.scan_python_entry(entry, import_failure)?;
         let reachable_only = loader.reachable_only;
         let mut graph = loader.finish(
             entry,
@@ -3529,6 +3544,7 @@ impl SourceGraph {
         executable: &str,
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
+        import_failure: &mut Option<EntryImportFailure>,
     ) -> Result<Self, String> {
         let filename = std::env::current_dir()
             .map_err(|err| err.to_string())?
@@ -3561,7 +3577,7 @@ impl SourceGraph {
         let reachable = options.reachable_only || options.entry_profile.is_some();
         loader.reachable_only = reachable;
         let id = loader.add(entry.clone(), entry, "__main__".into(), false, &source)?;
-        loader.scan(id)?;
+        loader.scan_python_entry(id, import_failure)?;
         let mut graph = loader.finish(id, filename, reachable, options.entry_profile.as_deref())?;
         graph.command_startup = Some((flags.clone(), executable.to_owned()));
         Ok(graph)
@@ -3973,6 +3989,12 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     })
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum EntryImportFailure {
+    AfterStatement,
+    MissingModule,
+}
+
 struct Loader<'a> {
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
@@ -3991,7 +4013,7 @@ struct Loader<'a> {
     /// A from-import of a still-initializing module observes the value at that point.
     partial_value_imports: HashSet<DefinitionId>,
     ordered_imports: bool,
-    late_entry_import: bool,
+    import_failure: Option<EntryImportFailure>,
     import_depth: usize,
     allow_imports: bool,
     skip_current_root: bool,
@@ -4050,7 +4072,7 @@ impl<'a> Loader<'a> {
             loading: HashSet::new(),
             partial_value_imports: HashSet::new(),
             ordered_imports: false,
-            late_entry_import: false,
+            import_failure: None,
             import_depth: 0,
             allow_imports: true,
             skip_current_root: false,
@@ -4277,6 +4299,22 @@ impl<'a> Loader<'a> {
         Ok(graph)
     }
 
+    /// A valid Python entry may resolve certain failed imports when it executes.
+    fn scan_python_entry(
+        &mut self,
+        id: ModuleId,
+        failure: &mut Option<EntryImportFailure>,
+    ) -> Result<(), String> {
+        self.scan(id).inspect_err(|_| {
+            if self.import_failure.is_some()
+                && self.modules[id].parsed.has_no_syntax_errors()
+                && self.session.has_valid_semantic_syntax(id)
+            {
+                *failure = self.import_failure;
+            }
+        })
+    }
+
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
         let parsed = self.modules[id].parsed.clone();
         let mut imports = Vec::new();
@@ -4446,7 +4484,8 @@ impl<'a> Loader<'a> {
                                     || nested_source && matches!(stmt, ast::Stmt::Expr(_))
                             });
                         if id == 0 || !simple && !ordered {
-                            self.late_entry_import = id == 0;
+                            self.import_failure =
+                                (id == 0).then_some(EntryImportFailure::AfterStatement);
                             return Err(self.modules[id].error(
                                 statement,
                                 "imports must precede executable module statements",
@@ -5178,27 +5217,10 @@ impl<'a> Loader<'a> {
 
     fn import_name(&self, id: ModuleId, import: &ast::StmtImportFrom) -> Result<String, String> {
         let suffix = import.module.as_ref().map_or("", |name| name.as_str());
-        if import.level == 0 {
-            return Ok(suffix.to_owned());
-        }
         let module = &self.modules[id];
-        let package = if module.is_package {
-            module.name.as_str()
-        } else {
-            module
-                .name
-                .rsplit_once('.')
-                .map_or("", |(parent, _)| parent)
-        };
-        let mut parts: Vec<_> = package.split('.').filter(|part| !part.is_empty()).collect();
-        if import.level as usize > parts.len() {
-            return Err("relative import goes beyond the first-party package root".into());
-        }
-        parts.truncate(parts.len() + 1 - import.level as usize);
-        if !suffix.is_empty() {
-            parts.push(suffix);
-        }
-        Ok(parts.join("."))
+        let package = import_package(&module.name, module.is_package);
+        resolve_import(package, import.level, suffix)
+            .ok_or_else(|| "relative import goes beyond the first-party package root".into())
     }
 
     fn partial_source(&self, id: ModuleId) -> bool {
@@ -5494,6 +5516,7 @@ impl<'a> Loader<'a> {
         }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
             if portions.is_empty() {
+                self.import_failure = Some(EntryImportFailure::MissingModule);
                 return Err(format!(
                     "cannot resolve first-party module {name:?} under {}",
                     self.root.display()

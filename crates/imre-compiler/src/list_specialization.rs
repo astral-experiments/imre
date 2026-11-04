@@ -3,7 +3,7 @@
 //! own tagged word. Runtime identity guards exclude aliases of append targets.
 
 mod window_ranges;
-pub(crate) use window_ranges::is_window_range_guard;
+pub(crate) use window_ranges::{is_window_range_guard, reserved_append_window};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -601,6 +601,47 @@ mod tests {
         let source = include_str!("../../../tests/fixtures/iterables/buffered_integer_ranges.py");
         let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
         assert!(llvm.contains("; inductive list tail -2147483648..=2147483648"));
+    }
+
+    #[test]
+    fn bounds_integer_updates_after_successful_scalar_pulls() {
+        let source = include_str!("../../../tests/fixtures/iterables/scalar_cursor_counters.py");
+        let bounds_step_two = |source| {
+            let graph = crate::modules::SourceGraph::single(source).unwrap();
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            crate::specialize(&mut module).unwrap();
+            let mut bounded = false;
+            for function in &module.functions {
+                walk_expressions(&function.body, &mut |value| {
+                    bounded |= matches!(value.kind, ExprKind::Builtin(
+                        Builtin::BoundedCursorValue { max, .. }, _
+                    ) if max == 3 * i64::from(i32::MAX));
+                });
+            }
+            bounded
+        };
+        assert!(bounds_step_two(source));
+        let twice = source.replace(
+            "        counter += 2",
+            "        counter += 2\n        counter += 1",
+        );
+        assert!(!bounds_step_two(&twice));
+    }
+
+    #[test]
+    fn opens_a_spare_append_window_only_for_one_write_per_pull() {
+        let source = include_str!("../../../tests/fixtures/iterables/scalar_append_windows.py");
+        let uses_spare_window = |source| {
+            crate::compile(source, &crate::CompileOptions::default())
+                .unwrap()
+                .contains("call i32 @imre_list_try_open_append_window(")
+        };
+        assert!(uses_spare_window(source));
+        let twice = source.replace(
+            "        out.append(value)",
+            "        out.append(value)\n        out.append(value)",
+        );
+        assert!(!uses_spare_window(&twice));
     }
 
     #[test]

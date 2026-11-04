@@ -457,14 +457,40 @@ pub(crate) fn hex_text(bytes: &[u8]) -> Result<Str> {
     let mut text = Str::try_with_capacity(length).map_err(|_| Error::allocation())?;
     // SAFETY: every write is an ASCII digit within the reserved capacity.
     let space = unsafe { text.spare_capacity_mut() };
-    let (pairs, _) = space[..length].as_chunks_mut::<2>();
-    for (&byte, pair) in bytes.iter().zip(pairs) {
-        pair[0].write(HEX[usize::from(byte >> 4)]);
-        pair[1].write(HEX[usize::from(byte & 15)]);
-    }
+    write_hex_digits(bytes, b'a' - 10, &mut space[..length]);
     // SAFETY: the loop initialized exactly two valid UTF-8 bytes per input byte.
     unsafe { text.set_len(length) };
     Ok(text)
+}
+
+/// Encode contiguous input directly into the returned uppercase byte buffer.
+pub(crate) fn uppercase_hex_bytes(input: &[u8]) -> Result<Vec<u8>> {
+    let length = input.len().checked_mul(2).ok_or_else(Error::allocation)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(length)
+        .map_err(|_| Error::allocation())?;
+    write_hex_digits(input, b'A' - 10, &mut output.spare_capacity_mut()[..length]);
+    // SAFETY: each input byte initialized exactly two output bytes.
+    unsafe { output.set_len(length) };
+    Ok(output)
+}
+
+/// Write into the final buffer for either text or bytes, using one vectorizable loop.
+#[inline(never)]
+fn write_hex_digits(input: &[u8], letter_offset: u8, output: &mut [std::mem::MaybeUninit<u8>]) {
+    let (pairs, _) = output.as_chunks_mut::<2>();
+    let digit = |nibble| {
+        if nibble < 10 {
+            b'0' + nibble
+        } else {
+            letter_offset + nibble
+        }
+    };
+    for (&byte, pair) in input.iter().zip(pairs) {
+        pair[0].write(digit(byte >> 4));
+        pair[1].write(digit(byte & 15));
+    }
 }
 
 pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32) -> Result<Str> {

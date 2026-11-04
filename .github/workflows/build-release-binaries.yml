@@ -59,6 +59,7 @@ jobs:
           cp "target/$TARGET/dist/imre" "target/$TARGET/dist/libimre_runtime.a" LICENSE-APACHE LICENSE-MIT "$ARCHIVE_NAME/"
           "$ARCHIVE_NAME/imre" --emit-bundled-stdlib > "$ARCHIVE_NAME/imre-stdlib.zip"
           cp examples/conformance_report/upstream/LICENSE "$ARCHIVE_NAME/LICENSE-Ruff"
+          cp licenses/Optik.txt "$ARCHIVE_NAME/LICENSE-Optik"
           cargo metadata --locked --format-version 1 --filter-platform "$TARGET" > "$RUNNER_TEMP/imre-packages.json"
           typeshed_manifest=$(jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path' "$RUNNER_TEMP/imre-packages.json")
           cp "$(dirname "$typeshed_manifest")/vendor/typeshed/LICENSE" "$ARCHIVE_NAME/LICENSE-typeshed"

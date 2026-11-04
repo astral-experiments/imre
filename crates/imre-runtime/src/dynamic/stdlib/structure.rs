@@ -101,9 +101,21 @@ pub(super) fn parse(ctx: &Context, format: Id) -> Result<(&str, StructFormat)> {
 }
 
 pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Result<Id> {
-    let fields = layout
-        .unpack(ctx.bytes_like(buffer)?)
-        .map_err(|message| format_error(ctx, message))?;
+    let decode = |ctx: &mut Context, view| {
+        layout
+            .unpack(ctx.native_buffer_bytes(view)?)
+            .map_err(|message| format_error(ctx, message))
+    };
+    let method = match ctx.heap.get(ctx.scalar_value(buffer)) {
+        // Preserve the native read for bytes and bytearray subclasses with only a release hook.
+        Value::Bytes(_) | Value::ByteArray(_) => ctx.buffer_slot(buffer, "__buffer__").flatten(),
+        _ => ctx.python_buffer_method(buffer, true)?,
+    };
+    let fields = if let Some(method) = method {
+        ctx.with_contiguous_python_buffer(buffer, method, 0, decode)
+    } else {
+        decode(ctx, buffer)
+    }?;
     Ok(unpacked_tuple(ctx, fields))
 }
 
@@ -115,7 +127,8 @@ fn unpacked_tuple(ctx: &mut Context, fields: Vec<UnpackedField>) -> Id {
             UnpackedField::Integer(word) => ctx.alloc(Value::Int(crate::Int::new(word.into()))),
             UnpackedField::Signed(number) => ctx.int(number),
             UnpackedField::Float(number) => ctx.alloc(Value::Float(number)),
-            UnpackedField::Bytes(bytes) => ctx.alloc(Value::Bytes(bytes)),
+            UnpackedField::Byte(byte) => ctx.heap.bytes_from_data([byte]),
+            UnpackedField::Bytes(bytes) => ctx.heap.bytes_from_data(bytes),
         })
         .collect();
     ctx.alloc(Value::Tuple(items))

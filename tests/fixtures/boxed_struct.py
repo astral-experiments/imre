@@ -2,6 +2,7 @@ import struct
 
 
 def current():
+    from array import array
     from struct import error
 
     assert error is struct.error and error.__bases__ == (Exception,)
@@ -18,6 +19,29 @@ def current():
             raise AssertionError("short struct buffer was accepted")
     finally:
         struct.error = error
+
+    words = array("I", [0x12345678])
+    assert struct.unpack("@I", words) == (0x12345678,)
+    assert struct.Struct("@I").unpack(memoryview(words)) == (0x12345678,)
+
+    events = []
+
+    class Source(bytearray):
+        def __buffer__(self, flags):
+            events.append(flags)
+            return memoryview(b"XY")
+        def __release_buffer__(self, view):
+            events.append(view.tobytes())
+
+    source = Source(b"!")
+    assert struct.Struct(">H").unpack(source) == (0x5859,)
+    try:
+        struct.unpack(">I", source)
+    except struct.error as caught:
+        assert caught.args == ("unpack requires a buffer of 4 bytes",)
+    else:
+        raise AssertionError("short export was accepted")
+    assert events == [0, b"XY", 0, b"XY"]
 
     for prefix in ("", "@", "=", "<", ">", "!"):
         layout = struct.Struct(prefix + "B2xI")
@@ -90,6 +114,9 @@ def current():
     header = struct.Struct("!2cI")
     assert header.pack(Data(b"M"), b"\xff", 258) == b"M\xff\0\0\x01\x02"
     assert header.unpack_from(b"XM\xff\0\0\x01\x02", 1) == (b"M", b"\xff", 258)
+    a, b, c = struct.unpack("c1s2p", b"xx\x01x")
+    assert a is b is c
+    assert next(struct.iter_unpack("c", b"x"))[0] is a
     target = bytearray(b"1234")
     try:
         struct.pack_into("2c", target, 1, b"A", bytearray(b"B"))

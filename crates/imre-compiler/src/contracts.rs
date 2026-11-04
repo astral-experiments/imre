@@ -561,6 +561,7 @@ impl Builtin {
             | Self::ExceptionSuppressContext
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
+            | Self::BoundedCursorValue { .. }
             | Self::IntBounded { .. }
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
@@ -789,12 +790,14 @@ impl Builtin {
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
+            | Self::IntFitsI32
             | Self::CursorScanBudget(_)
             | Self::ListPresent
             | Self::DequeClear
             | Self::DequeReverse
             | Self::SetIter
             | Self::MatchingSplitIter(_)
+            | Self::SortedSplitByteIter(_)
             | Self::SplitByteIter(_)
             | Self::SplitLinesIter
             | Self::StringIter
@@ -870,7 +873,7 @@ impl Builtin {
                     && matches!(source.kind, ExprKind::Local(_))
                     && cursor.ty == Type::Int && index(cursor))
             }
-            Self::IntBounded { min, max } => {
+            Self::BoundedCursorValue { min, max } | Self::IntBounded { min, max } => {
                 signature(&[Type::Int], Type::Int)
                     && bounds(*min, *max)
                     && matches!(args[0].kind, ExprKind::Local(_))
@@ -889,6 +892,7 @@ impl Builtin {
                 ) && matches!(args[4].kind, ExprKind::Int(_))
                     && index(&args[4])
             }
+            Self::IntFitsI32 => signature(&[Type::Int], Type::Bool),
             Self::CursorScanBudget(_) => signature(&[], Type::Int),
             Self::ListPresent => signature(&[Type::ListInt], Type::Bool),
             Self::BeginListAppends(_) | Self::FinishListAppends(_) => signature(&[], Type::None),
@@ -951,7 +955,9 @@ impl Builtin {
                 signature(&[Type::Str, Type::Str, Type::Int], Type::Iterator)
             }
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
-            Self::SplitByteIter(byte) => byte.is_ascii() && signature(&[Type::Str], Type::Iterator),
+            Self::SplitByteIter(byte) | Self::SortedSplitByteIter(byte) => {
+                byte.is_ascii() && signature(&[Type::Str], Type::Iterator)
+            }
             Self::FunctionWrappedSet => {
                 matches!(result, Type::Callable(_)) && signature(&[result, result], result)
             }

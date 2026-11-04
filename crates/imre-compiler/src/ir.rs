@@ -1247,6 +1247,11 @@ pub(crate) enum Builtin {
     ListDistinct,
     /// Checks that a list local owns storage before borrowing its buffer.
     CursorScanBudget(usize),
+    IntFitsI32,
+    BoundedCursorValue {
+        min: i64,
+        max: i64,
+    },
     ListPresent,
     StringGet,
     StringIter,
@@ -1254,6 +1259,7 @@ pub(crate) enum Builtin {
     SplitLinesIter,
     /// Iterates every field of a forward split by a literal ASCII separator.
     SplitByteIter(u8),
+    SortedSplitByteIter(u8),
     MatchingSplitIter(u8),
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,
@@ -2476,6 +2482,8 @@ pub(crate) struct ExceptHandler {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IterNextKind {
     Generic,
+    /// An owned field from a private single-byte split cursor.
+    SplitField,
     String,
     CodePoint,
     /// One unsigned UTF-8 byte. The loop lowerer creates a hidden string
@@ -2642,6 +2650,15 @@ pub(crate) fn contains_loop(body: &[Statement]) -> bool {
         found |= matches!(statement, Statement::For { .. } | Statement::While(..));
     });
     found
+}
+
+/// Visits an operand and its nested expressions, including eager scope bodies.
+pub(crate) fn walk_operand_expressions<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
+    walk_expression(value, &mut |node| {
+        if let Node::Expression(expression) = node {
+            visit(expression);
+        }
+    });
 }
 
 /// Visits expression trees, including statements embedded in eager expressions.
