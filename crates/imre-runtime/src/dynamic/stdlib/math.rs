@@ -97,6 +97,20 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
     }
+    if operation == "acosh" {
+        let x = as_double(ctx, value)?;
+        let result = x.acosh();
+        if result.is_nan() && !x.is_nan() {
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "expected argument value not less than 1, got {}",
+                    crate::floats::render(x)
+                ),
+            ));
+        }
+        return Ok(ctx.alloc(Value::Float(result)));
+    }
     if operation == "cos" {
         let x = as_double(ctx, value)?;
         if x.is_infinite() {
