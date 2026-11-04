@@ -130,6 +130,14 @@ Seven originals in this additional module family exercise CPython implementation
 
 Omit `test.test_types.TypesTests.test_internal_sizes`, occurrence 1. The original requires positive values for `object.__basicsize__` and `tuple.__itemsize__`. CPython uses these attributes to describe the fixed part of a C instance and the stride of its variable-length tail. Imre stores a boxed tuple’s elements in a separate vector. A positive in-object stride would give memory-size tools an incorrect layout. Revisit this decision if Imre exposes an object-layout API with those guarantees. The original remains in the 141-test denominator. [Upstream test](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_types.py#L622-L624) · [CPython layout contract](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Doc/c-api/typeobj.rst#L592-L610) · [Imre tuple storage](https://github.com/astral-experiments/imre/blob/10841d802a8f485aa9da6a76e06e5a6e6d08b6b3/crates/imre-runtime/src/dynamic/value.rs#L1049-L1055)
 
+### `zoneinfo`
+
+Omit `test.test_zoneinfo.test_zoneinfo.ExtensionBuiltTest.test_cache_location`, occurrence 1. The test distinguishes CPython’s C provider from its Python provider by checking which class exposes `_weak_cache`. Imre keeps its own cache representation. The public contract covers reuse of a live zone for the same key. Pickle cache-hit tests passed on stock and at both native optimization levels. [Original test](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_zoneinfo/test_zoneinfo.py#L2092-L2096) · [Public cache behavior](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Doc/library/zoneinfo.rst#L173-L185).
+
+Omit `test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_deleted_weak_cache`, occurrence 1. The test deletes a subclass’s private `_weak_cache` and expects its next construction and cache clear to raise `AttributeError`. That exception depends on where CPython stores the cache. Imre must still invalidate the requested keys, preserve other live zones, and handle malformed state without crashing. The ordinary selective-clear tests passed on stock and at both native optimization levels. [Original test](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_zoneinfo/test_zoneinfo.py#L1630-L1640) · [Public cache behavior](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Doc/library/zoneinfo.rst#L173-L185).
+
+The two subclass tests for inconsistent cache lookups remain in scope. A caller can reproduce the wrong return type through the public constructor.
+
 ## Reviewed cases still in scope
 
 ### `collections`

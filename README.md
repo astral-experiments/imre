@@ -175,8 +175,8 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `warnings` | 181 | 187 | 0 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 204 | 383 | 0 | Three additional originals now pass on the public compiler in both modes. They cover the good password and two forms of CRC failure in deflated ZIP entries. Both stored-entry controls also passed. |
-| `zoneinfo` | 69 | 261 | 0 | Four intact upstream classes on an independent public build confirmed all 28 time-zone lookup and search-path originals that passed in the full 261-parent public run. |
-| **Measured total (19 of 19 families)** | **1,864** | **2,875** | **8** |  |
+| `zoneinfo` | 69 | 261 | 2 | Four intact upstream classes on an independent public build confirmed all 28 time-zone lookup and search-path originals that passed in the full 261-parent public run. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). |
+| **Measured total (19 of 19 families)** | **1,864** | **2,875** | **10** |  |
 
 ### Whole-suite baselines for later additions
 
