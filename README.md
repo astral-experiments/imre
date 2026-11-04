@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 4, 2026, Imre has a paired pass for **11,919 of 16,202 tests (73.6%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,934 of 16,202 tests (73.7%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -144,9 +144,9 @@ It passed **15,161**, skipped 1,023, and reported 7 errors.
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 91 | 228 | 1 | The whole suite reported 92 paired successes. Four signal tests and two shutdown tests with successful native child assertions bring the verified total to 91. A seventh apparent gain accepted an unrelated child compiler failure and stays uncredited. |
 | `typing` | 710 | 712 | 1 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. |
-| `unittest` | 597 | 1,090 | 0 | Two public workers passed four additional mock-helper originals on stock and both native profiles. One covers dataclass hashing. The other three appeared in a complete 84-parent replay and an independent selected run. |
+| `unittest` | 611 | 1,090 | 0 | Both native levels passed 20 of 24 focused `MockTest` originals. Fourteen newly counted tests cover forwarding calls to wrapped objects and precedence among side effects, return values, and the wrapped callable. Four autospec cases errored. [Public change](https://github.com/astral-experiments/imre/pull/5347). |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,713** | **13,327** | **34** | **3 complete suites match stock on `main`** |
+| **Total** | **9,727** | **13,327** | **34** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -167,7 +167,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `inspect` | 276 | 362 | 0 | An earlier whole run passed 274 of 362 cases on both native builds. The public getcomments change added two source-inspection passes on the pinned stock interpreter and both native builds. [Public change](https://github.com/astral-experiments/imre/pull/5310). |
 | `math` | 39 | 89 | 0 | Stock passed all 89 originals. Both native levels passed 39 on the public revision, including atan2, sine, and tangent. |
 | `ssl` | 50 | 195 | 0 | Stock passed 178 of 195 originals and skipped 17. Both native levels passed 50 in the complete public suite, including `test.test_ssl.SSLErrorTests.test_lib_reason` (occurrence 1). |
-| `struct` | 25 | 43 | 0 | Both native builds passed 25 of 43 originals in the complete public suite. Six iterator tests joined the 19 earlier passes. [Public change](https://github.com/astral-experiments/imre/pull/5291). |
+| `struct` | 26 | 43 | 0 | Both native levels passed 26 of 43 originals in the complete suite. The one new pass, `StructTest.test_unpack_with_buffer`, checks unpacking from an array and a memoryview. [Public change](https://github.com/astral-experiments/imre/pull/5309). |
 | `tokenize` | 53 | 130 | 0 | The unchanged test_max_indent passed on stock and public Imre at O0 and O3. It adds one new paired pass. |
 | `tomllib` | 17 | 17 | 0 | All 17 originals passed on stock and public O0/O3 through both the package entry point and the three explicit upstream test modules. |
 | `types` | 134 | 141 | 1 | Two Linux workers passed the integer and float locale-formatting originals at stock and both native levels with genuine en_US numeric data. |
@@ -176,7 +176,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 252 | 383 | 0 | Across two public revisions, 249 distinct ZIP originals passed on stock and both native levels. Of those, 48 are new and 201 repeat earlier passes. Three earlier CLI passes failed in the later complete runs. The cumulative ledger contains 252 of 383. |
 | `zoneinfo` | 228 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). |
-| **Measured total (19 of 19 families)** | **2,206** | **2,875** | **11** |  |
+| **Measured total (19 of 19 families)** | **2,207** | **2,875** | **11** |  |
 
 ### Whole-suite baselines for later additions
 
@@ -186,6 +186,7 @@ We track these families separately to keep the original 16,202-test baseline com
 | --- | ---: | ---: | --- | --- |
 | `binascii` | 32 | 93 | 76 passed, 17 skipped | 32 passed, 8 failures, 36 errors, 17 skipped |
 | `http.client` | 131 | 144 | 139 passed, 5 skipped | 131 passed, 9 errors, 4 skipped |
+| `optparse` | 151 | 154 | 154 passed | 151 passed, 2 skipped, 1 failure. The upstream `Tools/i18n/pygettext.py` found no messages at the module’s virtual source path. [Public revision](https://github.com/astral-experiments/imre/commit/276f0cbe28c37627fa4d0859dfe439303a208d74). |
 | `pyexpat` | 33 | 60 | 47 passed, 13 skipped | 33 passed, 13 errors, 14 skipped |
 | `shlex` | 18 | 19 | 19 passed | 18 passed, 1 skipped |
 | `zlib` | 57 | 76 | 74 passed, 2 skipped | 57 passed, 15 errors, 4 skipped |
