@@ -1,4 +1,5 @@
 from fractions import Fraction
+from numbers import Number, Rational
 
 for text in (" -18 / 24 ", "١_٢.５e-1", "-0.00", "+2_100", ".025", "2.e5"):
     value = Fraction(text)
@@ -23,3 +24,9 @@ try:
     Fraction(13, 0)
 except ZeroDivisionError as error:
     print(str(error))
+
+for value in (Fraction(1, 2), Fraction(0)):
+    print(isinstance(value, Number))
+    print(isinstance(value, Rational))
+print(isinstance(0.5, Rational))
+print(isinstance(False, Rational))
