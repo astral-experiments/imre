@@ -12257,6 +12257,18 @@ fn literal_binding_names(suite: &[ast::Stmt]) -> Option<std::collections::HashSe
 #[cfg(test)]
 mod tests {
     #[test]
+    fn fractions_use_python_numeric_equality() {
+        use crate::modules::SourceGraph;
+        let source = "from fractions import Fraction\nprint(Fraction(3, 6) == Fraction(1, 2))\n";
+        let graph = SourceGraph::single_with_mode(source, true).unwrap();
+        let error = super::lower(&graph)
+            .err()
+            .expect("numeric comparison requires the Python method");
+        assert!(error.contains("Fraction numeric comparison"), "{error}");
+        assert!(graph.needs_object_runtime.get());
+    }
+
+    #[test]
     fn reachable_literal_bindings_follow_the_known_instance_branch() {
         use crate::modules::SourceGraph;
         let source = r#"

@@ -2,7 +2,10 @@ from fractions import Fraction
 
 for text in (" -18 / 24 ", "١_٢.５e-1", "-0.00", "+2_100", ".025", "2.e5"):
     value = Fraction(text)
-    print(repr(value), str(value), value.as_integer_ratio(), value.is_integer())
+    print(repr(value))
+    print(str(value))
+    print(value.as_integer_ratio())
+    print(value.is_integer())
 
 for numerator, denominator in ((1, 4), (3, 4), (-3, 2), (-5, 2), (47, -19),
                                (2**201 + 33, 2**167 + 13)):
