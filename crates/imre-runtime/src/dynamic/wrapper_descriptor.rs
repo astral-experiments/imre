@@ -111,6 +111,16 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
+            Some((value::LZMA_COMPRESS_TYPE, attr)) => Some((
+                value::LZMA_COMPRESS_TYPE,
+                attr,
+                value::LZMA_COMPRESS_METHODS,
+            )),
+            Some((value::LZMA_DECOMPRESS_TYPE, attr)) => Some((
+                value::LZMA_DECOMPRESS_TYPE,
+                attr,
+                value::LZMA_DECOMPRESS_METHODS,
+            )),
             Some((value::ZLIB_DECOMPRESS_TYPE, attr)) => Some((
                 value::ZLIB_DECOMPRESS_TYPE,
                 attr,
@@ -455,6 +465,8 @@ impl BuiltinDescriptor {
             "list_iterator"
             | "tuple_iterator"
             | "memory_iterator"
+            | value::LZMA_COMPRESS_TYPE
+            | value::LZMA_DECOMPRESS_TYPE
             | value::STRUCT_UNPACK_ITERATOR
             | "generator"
             | "async_generator"
@@ -606,7 +618,7 @@ impl BuiltinDescriptor {
                 {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" || self.class() == "classmethod_descriptor" => ctx.class_qualname(receiver),
-                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => self.owner.rsplit('.').next()?,
+                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE | value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE) => self.owner.rsplit('.').next()?,
                         _ if matches!(self.owner, "builtin_function_or_method" | "method") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",

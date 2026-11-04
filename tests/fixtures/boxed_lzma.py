@@ -1,8 +1,13 @@
-import lzma
-from lzma import LZMAError
+import _lzma
+import gc
+from _lzma import *
 
 
 def current():
+    import lzma
+    from lzma import LZMAError
+
+    assert LZMAError is _lzma.LZMAError
     # XZ and legacy LZMA-alone streams compressed with preset 1.
     xz = bytes.fromhex(
         "fd377a585a000004e6d6b4460200210110000000a8708e86e1d4bf005d5d0024"
@@ -37,6 +42,89 @@ def current():
             print(label, str(error))
         else:
             raise AssertionError(label)
+
+    extension_stream()
+
+
+def mutable_filter_options():
+    lookups = []
+
+    class Spec(dict):
+        def __getitem__(self, name):
+            lookups.append(name)
+            return dict.__getitem__(self, name)
+
+    class FilterId:
+        def __index__(self):
+            spec["preset"] = 0
+            gc.collect()
+            return _lzma.FILTER_LZMA1
+
+    class DictionarySize:
+        def __index__(self):
+            spec["lc"] = 1
+            gc.collect()
+            return 65536
+
+    # Both old values are owned only by the spec. The field parser reads
+    # dict_size before lc even though they were inserted in the other order.
+    spec = Spec(id=FilterId(), preset=object(), lc=object(), dict_size=DictionarySize())
+    assert _lzma._encode_filter_properties(spec) == bytes.fromhex("5b00000100")
+    assert lookups == ["id", "preset"]
+
+
+def extension_stream():
+    from _lzma import _decode_filter_properties, _encode_filter_properties
+
+    # CPython's lzma.py takes the public names via * and imports these helpers explicitly.
+    exports = (
+        "CHECK_NONE CHECK_CRC32 CHECK_CRC64 CHECK_SHA256 CHECK_ID_MAX CHECK_UNKNOWN "
+        "FILTER_LZMA1 FILTER_LZMA2 FILTER_DELTA FILTER_X86 FILTER_IA64 FILTER_ARM "
+        "FILTER_ARMTHUMB FILTER_POWERPC FILTER_SPARC FORMAT_AUTO FORMAT_XZ FORMAT_ALONE "
+        "FORMAT_RAW MF_HC3 MF_HC4 MF_BT2 MF_BT3 MF_BT4 MODE_FAST MODE_NORMAL "
+        "PRESET_DEFAULT PRESET_EXTREME LZMACompressor LZMADecompressor LZMAError is_check_supported"
+    ).split()
+    for name in exports:
+        assert globals()[name] is getattr(_lzma, name)
+    assert "_encode_filter_properties" not in globals() and "_decode_filter_properties" not in globals()
+    assert is_check_supported(CHECK_NONE) is True
+    assert is_check_supported(CHECK_CRC32) is True
+    assert is_check_supported(CHECK_ID_MAX + 1) is False
+    for cls in (LZMACompressor, LZMADecompressor, LZMAError):
+        assert cls.__module__ == "_lzma"
+    mutable_filter_options()
+
+    default = {"id": FILTER_LZMA1}
+    assert _encode_filter_properties(default) == bytes.fromhex("5d00008000")
+    settings = dict(default, dict_size=1 << 17, lc=2, lp=1, pb=1)
+    props = _encode_filter_properties(settings)
+    assert props == bytes.fromhex("3800000200")
+    assert _decode_filter_properties(FILTER_LZMA1, props) == settings
+
+    encoder = _lzma.LZMACompressor(format=FORMAT_RAW, filters=[settings])
+    payload = b"abcdef" * 512
+    data = encoder.compress(payload[:19]) + encoder.compress(payload[19:]) + encoder.flush()
+    decoder = _lzma.LZMADecompressor(format=FORMAT_RAW, filters=[settings])
+    assert type(encoder) is LZMACompressor and type(decoder) is LZMADecompressor
+    assert decoder.needs_input and not decoder.eof and decoder.unused_data == b""
+    assert decoder.decompress(data[:1]) == b"" and decoder.needs_input
+    assert decoder.decompress(data[1:] + b"tail", max_length=11) == payload[:11]
+    assert not decoder.eof and not decoder.needs_input
+    assert decoder.decompress(b"") == payload[11:] and decoder.eof
+    assert decoder.unused_data == b"tail"
+
+    for error_type, operation, args in (
+        (ValueError, encoder.compress, (b"",)),
+        (ValueError, encoder.flush, ()),
+        (EOFError, decoder.decompress, (b"",)),
+        (LZMAError, _decode_filter_properties, (FILTER_LZMA1, b"\xff" * 5)),
+    ):
+        try:
+            operation(*args)
+        except (ValueError, EOFError, LZMAError) as error:
+            assert type(error) is error_type
+        else:
+            raise AssertionError("unexpected success")
 
 
 if __name__ == "__main__":

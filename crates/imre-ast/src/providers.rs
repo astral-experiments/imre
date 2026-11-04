@@ -73,6 +73,7 @@ fn is_builtin(name: &str) -> bool {
             | "_frozen_importlib"
             | "_frozen_importlib_external"
             | "_json"
+            | "_lzma"
             | "_socket"
             | "abc"
             | "array"

@@ -32,6 +32,7 @@ rustix = { version = "=1.1.5", features = ["fs"] }
 memchr = "=2.8.3"
 lz4_flex = { version = "=0.14.0", default-features = false, features = ["safe-encode", "safe-decode", "checked-decode"] }
 liblzma = { version = "=0.4.9", default-features = false, features = ["static"] }
+liblzma-sys = { version = "=0.4.9", default-features = false, features = ["static"] }
 corosensei = "=0.3.4"
 flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 zlib-rs = { version = "=0.6.8", default-features = false, features = ["__internal-api"] }

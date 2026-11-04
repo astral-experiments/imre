@@ -708,6 +708,7 @@ pub(crate) enum IntrinsicModule {
     IoNative,
     Gzip,
     Lzma,
+    LzmaNative,
     UnicodeData,
     WeakRef,
     Threading,
@@ -1280,6 +1281,7 @@ impl IntrinsicModule {
             "_io" => Some(Self::IoNative),
             "gzip" => Some(Self::Gzip),
             "lzma" => Some(Self::Lzma),
+            "_lzma" => Some(Self::LzmaNative),
             "types" => Some(Self::Types),
             "unicodedata" => Some(Self::UnicodeData),
             "weakref" => Some(Self::WeakRef),
@@ -1335,6 +1337,13 @@ impl IntrinsicModule {
         // The bundled ntpath binds platform-dependent names during module initialization.
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
+        }
+        if self == Self::LzmaNative
+            && let Some(&(_, value)) = imre_ast::lzma::INTEGER_CONSTANTS
+                .iter()
+                .find(|&&(attr, _)| attr == name)
+        {
+            return Some(Binding::Intrinsic(Intrinsic::IntConstant(value)));
         }
         if self == Self::Zlib
             && let Some(value) = imre_ast::zlib::integer_constant(name)

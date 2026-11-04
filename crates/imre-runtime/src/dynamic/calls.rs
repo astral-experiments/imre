@@ -132,6 +132,14 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         "binascii" if matches!(function, "a2b_qp" | "b2a_qp" | "crc32") => Some((module, function)),
         "zlib" if function == "compressobj" => Some((module, function)),
+        "_lzma"
+            if matches!(
+                function,
+                "is_check_supported" | "_encode_filter_properties" | "_decode_filter_properties"
+            ) =>
+        {
+            Some((module, function))
+        }
         "lzma" if function == "decompress" => Some((module, function)),
         "zlib"
             if matches!(
@@ -1437,6 +1445,11 @@ impl Context {
                 _ => unreachable!("unknown exception group member"),
             });
         }
+        if owner == value::LZMA_DECOMPRESS_TYPE
+            && matches!(self.heap.get(receiver), Value::LzmaDecompressor(_))
+        {
+            return stdlib::lzma::decompressor_attr(self, receiver, field);
+        }
         if owner == "super" {
             return self.super_field(receiver, field);
         }
@@ -1590,6 +1603,8 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | value::LZMA_COMPRESS_TYPE
+                            | value::LZMA_DECOMPRESS_TYPE
                             | value::ZLIB_COMPRESS_TYPE
                             | "socket.socket"
                             | "struct.Struct"
@@ -1775,6 +1790,8 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | (value::LZMA_COMPRESS_TYPE, Value::LzmaCompressor(_))
+            | (value::LZMA_DECOMPRESS_TYPE, Value::LzmaDecompressor(_))
             | (value::ZLIB_COMPRESS_TYPE, Value::ZlibCompressor(_))
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
@@ -2190,6 +2207,33 @@ impl Context {
                 typing::include_generic_alias_methods(self, obj, dictionary)?;
             }
             return Ok(self.alloc(Value::MappingProxy(dictionary)));
+        }
+        if let Value::Native(owner) = self.heap.get(obj)
+            && matches!(
+                owner.as_str(),
+                value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
+            )
+        {
+            if let Some(member) = self.own_class_attr(obj, name) {
+                return Ok(member);
+            }
+            match name {
+                "__name__" | "__qualname__" => {
+                    return Ok(self.text(owner.rsplit('.').next().unwrap().to_owned()));
+                }
+                "__base__" => return Ok(self.builtin("object")),
+                "__bases__" | "__mro__" => return Ok(self.builtin_hierarchy_tuple(obj, name)),
+                _ => {}
+            }
+        }
+        if matches!(
+            self.heap.get(obj),
+            Value::LzmaCompressor(_) | Value::LzmaDecompressor(_)
+        ) {
+            let class = self.exact_type(obj)?;
+            if let Some(member) = self.own_class_attr(class, name) {
+                return self.bind_attribute(member, obj, class);
+            }
         }
         if name == "__new__" {
             let class = self.heap.get(obj).instance_class().unwrap_or(obj);
@@ -5506,6 +5550,10 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if matches!(self.heap.get(obj), Value::LzmaDecompressor(_)) {
+            let class = self.builtin(value::LZMA_DECOMPRESS_TYPE);
+            return self.own_class_attr(class, name);
+        }
         if name == "_finalizing" && matches!(self.heap.get(obj), Value::TextFile(_)) {
             let owner = self.builtin("_io.TextIOWrapper");
             return self.own_class_attr(owner, name);

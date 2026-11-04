@@ -631,6 +631,15 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "ref"
         ),
         M::Gzip => exports!("gzip", "GzipFile"),
+        M::LzmaNative => exports!(
+            "_lzma",
+            "LZMACompressor",
+            "LZMADecompressor",
+            "LZMAError",
+            "_decode_filter_properties",
+            "_encode_filter_properties",
+            "is_check_supported"
+        ),
         M::Zlib => exports!("zlib", "compress", "crc32", "decompress"),
         _ => return None,
     };
