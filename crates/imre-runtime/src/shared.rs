@@ -1,5 +1,6 @@
 //! Single-threaded strong and weak owners for objects passed across the native ABI.
 
+use std::alloc::Layout;
 use std::borrow::Borrow;
 use std::cell::{Cell, UnsafeCell};
 use std::fmt;
@@ -35,12 +36,39 @@ fn increment(count: &Cell<usize>) {
     );
 }
 
+type Spare = Box<MaybeUninit<Allocation<crate::Str>>>;
+
+thread_local! {
+    // The last weak owner may leave one empty, layout-compatible slot for reuse.
+    // The TLS destructor returns the final unused slot to the global allocator.
+    static SPARE: Cell<Option<Spare>> = const { Cell::new(None) };
+}
+
+/// Reuses only storage with the same size and alignment as the original box.
+fn empty_slot<T>() -> Result<Box<MaybeUninit<Allocation<T>>>, AllocError> {
+    if Layout::new::<Allocation<T>>() == Layout::new::<Allocation<crate::Str>>()
+        && let Ok(Some(slot)) = SPARE.try_with(Cell::take)
+    {
+        let pointer = Box::into_raw(slot);
+        // SAFETY: both uninitialized boxes have equal layout and the same allocator.
+        return Ok(unsafe { Box::from_raw(pointer.cast()) });
+    }
+    Box::<Allocation<T>>::try_new_uninit()
+}
+
 fn release_weak<T>(pointer: NonNull<Allocation<T>>) {
     // SAFETY: the caller transfers a live weak count, including the implicit one.
     let allocation = unsafe { pointer.as_ref() };
     let count = allocation.weak.get() - 1;
     allocation.weak.set(count);
     if count == 0 {
+        if Layout::new::<Allocation<T>>() == Layout::new::<Allocation<crate::Str>>() {
+            // SAFETY: the value was dropped and every owner and observer is gone.
+            // The uninitialized box has the original allocation's size and alignment.
+            let slot: Spare = unsafe { Box::from_raw(pointer.cast().as_ptr()) };
+            let _ = SPARE.try_with(|spare| spare.set(Some(slot)));
+            return;
+        }
         // SAFETY: the last strong owner already dropped value. The final weak
         // owner releases the original Box with its exact type and allocator.
         drop(unsafe { Box::from_raw(pointer.as_ptr()) });
@@ -51,7 +79,7 @@ impl<T> Shared<T> {
     pub(crate) fn try_new(value: T) -> Result<Self, AllocError> {
         // Allocate before suppressing the value's destructor so a refused
         // slot allocation also drops any resources owned by value.
-        let mut slot = Box::<Allocation<T>>::try_new_uninit()?;
+        let mut slot = empty_slot::<T>()?;
         slot.write(Allocation {
             value: UnsafeCell::new(MaybeUninit::new(value)),
             strong: Cell::new(1),
@@ -308,6 +336,22 @@ mod tests {
         fn drop(&mut self) {
             self.0.set(self.0.get() + 1);
         }
+    }
+
+    #[test]
+    fn a_spare_slot_waits_for_the_last_weak_observer() {
+        let first = Shared::new(crate::Str::new("first"));
+        let address = Shared::as_ptr(&first);
+        let weak = Shared::downgrade(&first);
+        drop(first);
+        assert!(weak.upgrade().is_none());
+
+        let other = Shared::new(crate::Str::new("other"));
+        assert_ne!(Shared::as_ptr(&other), address);
+        drop(weak);
+        let next = Shared::new(crate::Str::new("next"));
+        assert_eq!(Shared::as_ptr(&next), address);
+        assert_eq!(next.as_str(), "next");
     }
 
     #[test]
