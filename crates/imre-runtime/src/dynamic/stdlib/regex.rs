@@ -110,6 +110,17 @@ pub(in crate::dynamic) struct Pattern {
 }
 
 impl Pattern {
+    fn for_subject(&self, ctx: &Context, string: Id) -> &Self {
+        if matches!(
+            ctx.heap.get(ctx.scalar_value(string)),
+            Value::SurrogateStr(_)
+        ) {
+            self.surrogate_literals.as_deref().unwrap_or(self)
+        } else {
+            self
+        }
+    }
+
     /// Synthetic Scanner patterns do not have a Python pattern object to compare.
     pub(in crate::dynamic) fn same_program(&self, other: &Self) -> bool {
         if self.source == NONE
@@ -1716,14 +1727,7 @@ pub(super) fn search(
             ));
         }
     };
-    let pattern = if matches!(
-        ctx.heap.get(ctx.scalar_value(string)),
-        Value::SurrogateStr(_)
-    ) {
-        pattern.surrogate_literals.as_deref().unwrap_or(&pattern)
-    } else {
-        &pattern
-    };
+    let pattern = pattern.for_subject(ctx, string);
     let subject = SearchSubject::new(ctx, pattern, string, method)?;
     let text = subject.bytes(ctx)?;
     let byte = |i: usize| {
