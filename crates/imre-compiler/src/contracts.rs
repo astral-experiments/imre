@@ -196,7 +196,8 @@ impl Builtin {
             | Self::ChainMapContains
             | Self::DictGetDefault
             | Self::DictTryGet(_)
-            | Self::SetContains => Contract::new(true, PreservesLists),
+            | Self::SetContains
+            | Self::SetCaseLengthPossible => Contract::new(true, PreservesLists),
             Self::Socket(op) => Contract::new(
                 !matches!(
                     op,

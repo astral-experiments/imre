@@ -259,8 +259,25 @@ pub(crate) fn encode_quoted_printable(
         ]
     };
     let mut output = allocate(input.len())?;
+    // A literal trailing tab or space in a full 76-column line can grow by two bytes.
+    let mut line = [0; 78];
     let mut column = 0;
+    let plain = istext && !quotetabs && !header;
     while let Some((&byte, rest)) = input.split_first() {
+        if plain && column <= 3 && input.len() > 8 && (column != 0 || byte != b'.') {
+            // Leave the wrapping column and EOF to the scalar rules.
+            let limit = (75 - column).min(input.len() - 1);
+            let run = input[..limit]
+                .iter()
+                .position(|&b| !(b' '..=b'~').contains(&b) || b == b'=')
+                .unwrap_or(limit);
+            if run >= 8 {
+                line[column..column + run].copy_from_slice(&input[..run]);
+                column += run;
+                input = &input[run..];
+                continue;
+            }
+        }
         input = rest;
         let next = rest.first().copied();
         if istext && (byte == b'\n' || (byte == b'\r' && next == Some(b'\n'))) {
@@ -269,15 +286,11 @@ pub(crate) fn encode_quoted_printable(
             }
             // Header spaces have already become underscores. Only a literal trailing
             // space or tab in the output needs protection before the hard break.
-            if let Some(&last @ (b' ' | b'\t')) = output.last() {
-                output.try_reserve(2).map_err(|_| Error::allocation())?;
-                output.pop();
-                output.extend_from_slice(&escape(last));
+            if let Some(&last @ (b' ' | b'\t')) = line[..column].last() {
+                line[column - 1..column + 2].copy_from_slice(&escape(last));
+                column += 2;
             }
-            output
-                .try_reserve(newline.len())
-                .map_err(|_| Error::allocation())?;
-            output.extend_from_slice(newline);
+            append_quoted_line(&mut output, &line[..column], newline)?;
             column = 0;
             continue;
         }
@@ -292,23 +305,30 @@ pub(crate) fn encode_quoted_printable(
         };
         let width = if quote { 3 } else { 1 };
         let wrap = column + width >= 76 && (quote || !matches!(next, None | Some(b'\n')));
-        let break_len = if wrap { 1 + newline.len() } else { 0 };
-        output
-            .try_reserve(break_len + width)
-            .map_err(|_| Error::allocation())?;
         if wrap {
-            output.push(b'=');
-            output.extend_from_slice(newline);
+            line[column] = b'=';
+            append_quoted_line(&mut output, &line[..column + 1], newline)?;
             column = 0;
         }
         if quote {
-            output.extend_from_slice(&escape(byte));
+            line[column..column + width].copy_from_slice(&escape(byte));
         } else {
-            output.push(if header && byte == b' ' { b'_' } else { byte });
+            line[column] = if header && byte == b' ' { b'_' } else { byte };
         }
         column += width;
     }
+    append_quoted_line(&mut output, &line[..column], &[])?;
     Ok(output)
+}
+
+/// Append a complete encoded line and its selected line ending with one capacity check.
+fn append_quoted_line(output: &mut Bytes, line: &[u8], ending: &[u8]) -> Result<()> {
+    output
+        .try_reserve(line.len() + ending.len())
+        .map_err(|_| Error::allocation())?;
+    output.extend_from_slice(line);
+    output.extend_from_slice(ending);
+    Ok(())
 }
 
 /// Decode ASCII hex pairs with binascii's strict length and alphabet rules.

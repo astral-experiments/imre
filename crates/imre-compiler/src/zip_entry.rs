@@ -1,7 +1,7 @@
 //! Discover imports of a ZIP application while leaving execution to zipimport and runpy.
 
 use std::fs::File;
-use std::io::{BufReader, Read, Seek};
+use std::io::{BufReader, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use zip::ZipArchive;
@@ -18,6 +18,29 @@ pub fn is_zip_path(path: &Path) -> bool {
     archive_path(path)
         .and_then(|path| File::open(path).ok())
         .is_some_and(|file| ZipArchive::new(BufReader::new(file)).is_ok())
+}
+
+/// Match parsed import names against the same member list used to package the stdlib.
+pub(crate) fn installed_member(name: &str) -> Option<&'static str> {
+    include_str!("../stdlib/installed-sources.txt")
+        .lines()
+        .find(|file| {
+            file.strip_suffix("/__init__.py")
+                .or_else(|| file.strip_suffix(".py"))
+                .is_some_and(|module| module.split('/').eq(name.split('.')))
+        })
+}
+
+fn read_source<R: Read + Seek>(archive: &mut ZipArchive<R>, member: &str) -> Option<String> {
+    std::io::read_to_string(archive.by_name(member).ok()?).ok()
+}
+
+/// Read a selected member only after checking earlier application sources.
+pub(crate) fn installed_source(member: &str) -> Result<String, String> {
+    const RESOURCE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip"));
+    let mut archive = ZipArchive::new(Cursor::new(RESOURCE)).map_err(|e| e.to_string())?;
+    read_source(&mut archive, member)
+        .ok_or_else(|| format!("cannot read installed source {member}"))
 }
 
 pub(crate) struct ZipSources {
@@ -74,12 +97,7 @@ impl ZipSources {
             if suffix.ends_with(".pyc") {
                 return None;
             }
-            let mut source = String::new();
-            self.archive
-                .by_name(&member)
-                .ok()?
-                .read_to_string(&mut source)
-                .ok()?;
+            let source = read_source(&mut self.archive, &member)?;
             return Some((member.into(), source, package));
         }
         None

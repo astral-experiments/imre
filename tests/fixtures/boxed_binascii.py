@@ -54,6 +54,8 @@ def current():
 
     print(b2a_qp(b"Lines: \xff \r\n.\r\n"), b2a_qp(b"first last_", header=True))
     print(b2a_qp(data=b"x" * 74 + b"\xff", istext=False))
+    assert b2a_qp(b"x" * 75 + b"=\r\n") == b"x" * 75 + b"=\r\n=3D\r\n"
+    assert b2a_qp(b"x" * 74 + b" \n.\n") == b"x" * 74 + b"=20\n=2E\n"
     raw = bytearray(b"A\x00")
     try:
         b2a_qp(raw, quotetabs=Resize(raw))

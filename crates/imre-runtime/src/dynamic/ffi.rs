@@ -1253,6 +1253,54 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     })
 }
 
+/// Look up an immediate call before evaluating its arguments. Exact string methods
+/// can pass their receiver as the first positional operand without allocating a method.
+///
+/// # Safety
+/// The caller supplies the active context, a NUL-terminated ordinary str method symbol, and a
+/// writable receiver slot. The slot is initialized on successful lookup.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
+    ctx: *mut Context,
+    receiver: Id,
+    name: *const c_char,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
+    let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
+    let result = ctx
+        .string_method_target(receiver, name)
+        .map(|(callable, receiver)| {
+            *bound_receiver = receiver;
+            callable
+        });
+    finish(ctx, result)
+}
+
+/// Invoke a prepared method. The leading operand is either the unbound method's
+/// receiver or None when lookup returned a bound callable.
+///
+/// # Safety
+/// The positional call ABI applies, with one additional leading receiver slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_positional_method_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    count: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
+    // SAFETY: the compiler writes and retains every operand through the call.
+    let values = unsafe { live_handles(values, count) };
+    let args = values.strip_prefix(&[NONE]).unwrap_or(values);
+    // SAFETY: the subslice belongs to the same live array and the remaining ABI is identical.
+    unsafe {
+        imre_dyn_positional_call_at(ctx, callable, args.as_ptr(), args.len(), mark, span, scope)
+    }
+}
+
 /// Invoke a call whose positional operands remain rooted in the caller's frame.
 ///
 /// # Safety
@@ -1849,9 +1897,11 @@ impl Context {
                 Ok(false) => {}
             }
         }
-        let (heap, roots) = self.heap_and_roots();
-        if let Some(callbacks) = heap.collect_if_due(roots) {
-            self.run_weak_callbacks(callbacks);
+        if self.heap.take_sweep_request() {
+            let (heap, roots) = self.heap_and_roots();
+            if let Some(callbacks) = heap.collect(roots) {
+                self.run_weak_callbacks(callbacks);
+            }
         }
     }
 
@@ -1864,11 +1914,23 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
+        self.discard_temporaries(mark, None);
+    }
+
+    /// Release discarded operands and root their result before any weak callbacks or finalizers run.
+    pub(super) fn discard_temporaries(&mut self, mark: usize, result: Option<Id>) {
+        let collect = if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
             || self.can_skip_finalizer_sweep()
         {
             self.heap.release_temporaries_since(mark);
-        } else if self.heap.discard_truth_operands(mark, self.modules) {
+            false
+        } else {
+            self.heap.discard_truth_operands(mark, self.modules)
+        };
+        if let Some(result) = result {
+            self.heap.keep(result);
+        }
+        if collect {
             self.collect_unreachable();
         }
     }

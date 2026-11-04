@@ -8681,6 +8681,17 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::SetCaseLengthPossible => {
+                let possible = self.instruction(format!(
+                    "call i32 @imre_set_case_length_possible(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {possible}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::DictContains | Builtin::SetContains | Builtin::ChainMapContains => {
                 let key = self.mapping_read_key(args[1].value.ty, &args[0].value);
                 let family = match builtin {
@@ -10672,6 +10683,7 @@ declare ptr @imre_dict_iter(ptr, i32)
 declare ptr @imre_set_new(i32)
 declare i64 @imre_set_len(ptr)
 declare i32 @imre_set_contains(ptr, i64)
+declare i32 @imre_set_case_length_possible(ptr, ptr)
 declare void @imre_set_add(ptr, i64)
 declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)

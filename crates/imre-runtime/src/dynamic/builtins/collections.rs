@@ -502,13 +502,32 @@ fn set_intersection(ctx: &mut Context, receiver: Id, operands: &[Id]) -> Result<
         } else {
             intersect_iterable(ctx, result, other)?
         };
-        let collect = ctx.heap.discard_truth_operands(roots, ctx.modules);
-        ctx.heap.keep(result);
-        if collect {
-            ctx.collect_unreachable();
-        }
+        ctx.discard_temporaries(roots, Some(result));
     }
     Ok(result)
+}
+
+/// Prove an exact string contains none of a set's single-byte string keys.
+fn disjoint_ascii_characters(ctx: &Context, receiver: Id, other: Id) -> bool {
+    let Value::Str(text) = ctx.heap.get(other) else {
+        return false;
+    };
+    let entries = ctx.stored_entries(receiver);
+    if entries.len() > 128 {
+        return false;
+    }
+    let mut members = 0_u128;
+    for &(key, _) in entries.iter() {
+        let Value::Str(character) = ctx.heap.get(key) else {
+            return false;
+        };
+        let [byte] = character.as_bytes() else {
+            return false;
+        };
+        members |= 1_u128 << byte;
+    }
+    text.bytes()
+        .all(|byte| !byte.is_ascii() || members & (1_u128 << byte) == 0)
 }
 
 /// Hash each yielded key once and stop on a match that completes the intersection.
@@ -518,6 +537,9 @@ fn intersect_iterable(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> 
         entries: Default::default(),
         frozen: matches!(ctx.heap.get(receiver), Value::Set { frozen: true, .. }),
     });
+    if disjoint_ascii_characters(ctx, receiver, other) {
+        return Ok(found);
+    }
     let iterator = ctx.iterator(other)?;
     ctx.heap.keep(iterator);
     let step = ctx.heap.temporary_mark();

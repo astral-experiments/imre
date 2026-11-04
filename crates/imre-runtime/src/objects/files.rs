@@ -114,21 +114,6 @@ impl FileState {
         )
     }
 
-    /// Open an owned binary gzip reader and defer parsing until its first read.
-    pub(crate) fn gzip_reader(path: &[u8]) -> Result<Self> {
-        let (file, metadata) = open_raw_file(path, 0, false)?;
-        let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
-        Ok(Self {
-            fd: Some(file.as_raw_fd()),
-            raw: false,
-            stream: Some(Stream::UnreadGzip { file, capacity }),
-            name: None,
-            encoding: None,
-            errors: None,
-            kind: FileKind::GzipBinaryRead,
-        })
-    }
-
     /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
     pub(crate) fn temporary(directory: Option<&str>) -> Result<Self> {
         let file = super::tempdirs::anonymous_file(directory)?;
@@ -169,9 +154,6 @@ impl FileState {
     }
 
     pub(crate) fn read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
-        if size == Some(0) && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
-            return Ok(Bytes::new());
-        }
         self.input()?.read_once(size)
     }
 
