@@ -1226,11 +1226,48 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
 ) -> Id {
     // SAFETY: the generated caller owns the context and supplies a null or static position.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    scoped_call(ctx, span, |ctx| {
+        ctx.call_packed(callable, args, kwargs, mark, scope)
+    })
+}
+
+/// Invoke a call whose positional operands remain rooted in the caller's frame.
+///
+/// # Safety
+/// The generated caller owns the context, supplies a null or static position,
+/// and provides a readable array of `count` handles whenever `count` is nonzero.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    count: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
+    // SAFETY: both pointers follow the generated call ABI.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    scoped_call(ctx, span, |ctx| {
+        // SAFETY: the generated caller retains all operands and writes the array before this call.
+        let args = copy_ids(unsafe { live_handles(values, count) })?;
+        let result = ctx.call_in_scope(scope, callable, args, Vec::new())?;
+        ctx.finish_call_operands(mark, result);
+        ctx.check_call_return(result)
+    })
+}
+
+/// Clear the recorded call position and publish the return value or exception.
+fn scoped_call(
+    ctx: &mut Context,
+    span: Option<&[u32; 4]>,
+    invoke: impl FnOnce(&mut Context) -> Result<Id>,
+) -> Id {
     if ctx.pending.is_some() {
         ctx.heap.set_call_position(None);
         return NONE;
     }
-    let result = ctx.call_packed(callable, args, kwargs, mark, scope);
+    let result = invoke(ctx);
     ctx.heap.set_call_position(None);
     finish_at(ctx, result, span)
 }
