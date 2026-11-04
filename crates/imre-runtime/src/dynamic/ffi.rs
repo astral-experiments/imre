@@ -1811,8 +1811,8 @@ impl Context {
     /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
     fn can_skip_finalizer_sweep(&self) -> bool {
         use super::stdlib::datetime::isocalendar::MODULE_REF;
-        // Each text stream has at most three owners: the wrapper, buffer and raw file.
-        self.heap.tracked_finalizer_count() <= 6
+        // Include the three owners retained by sys.__stdin__.
+        self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
             && !self.heap.full_collection_active()
             && (!self.heap.has_weak_values
                 || self.heap.weak_module_kept_by(

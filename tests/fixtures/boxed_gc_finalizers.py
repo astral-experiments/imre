@@ -174,6 +174,12 @@ def check_exception_finalizers():
 
 
 def current():
+    with open(__file__, encoding="utf-8") as retained:
+        released = open(__file__, encoding="utf-8")  # noqa: SIM115
+        raw = released.buffer.raw
+        del released
+        assert raw.closed and not retained.closed
+
     check_exception_finalizers()
     check_replacement_line()
     check_unraisable()
