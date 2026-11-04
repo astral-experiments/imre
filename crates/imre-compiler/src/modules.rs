@@ -2642,6 +2642,9 @@ impl IntrinsicModule {
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
             (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
             (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
+            (Self::Email, "message_from_bytes") => {
+                Intrinsic::ScopedObjectExport("email.message_from_bytes")
+            }
             (Self::Email, "message_from_string") => {
                 Intrinsic::ScopedObjectExport("email.message_from_string")
             }

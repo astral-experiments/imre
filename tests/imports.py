@@ -241,6 +241,14 @@ REJECTED = {
             "typed('wrong')\n"
         ),
     }, "expected int, got str"),
+    "email_message_from_bytes_preserves_typed_call": ({
+        "main.py": (
+            "from email import message_from_bytes\n"
+            "def typed(n: int) -> int: return n\n"
+            "message_from_bytes(b'body')\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "randbytes_call_preserves_typed_call": ({
         "main.py": (
             "from random import randbytes\n"
@@ -1193,9 +1201,14 @@ ACCEPTED = {
     },
     "email_address_parsers": {
         "main.py": (
+            "import email\n"
+            "from email import message_from_bytes\n"
             "from email._header_value_parser import get_addr_spec, get_angle_addr as angle\n"
             "import email._header_value_parser as parser\n"
             "assert angle is parser.get_angle_addr\n"
+            "assert email.message_from_bytes is message_from_bytes\n"
+            "print(email.message_from_bytes(b'Subject: hello\\r\\n\\r\\nbody')['Subject'])\n"
+            "print(message_from_bytes(b'\\r\\nraw\\xff').get_payload(decode=True))\n"
             "for parse, value in ((get_addr_spec, 'user@example.org SIZE=32'), (angle, '<>')):\n"
             "    address, rest = parse(value)\n"
             "    print(address.addr_spec, rest)\n"
