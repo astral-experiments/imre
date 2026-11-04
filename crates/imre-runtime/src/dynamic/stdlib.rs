@@ -653,7 +653,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "binascii",
-            "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
+            "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify"
+            | "crc32",
         ) => ctx.builtin(&format!("binascii.{name}")),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
@@ -1790,6 +1791,9 @@ pub(super) fn call(
         let [data] = required_arguments("b16encode", ["s"], args, kwargs)?;
         return binascii::b16encode(ctx, data);
     }
+    if matches!(name, "binascii.crc32" | "zlib.crc32" | "zlib.adler32") {
+        return binascii::checksum(ctx, name, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
@@ -1813,9 +1817,6 @@ pub(super) fn call(
     }
     if let Some(method @ ("compress" | "decompress")) = name.strip_prefix("zlib.") {
         return zlib::call(ctx, method, args, kwargs);
-    }
-    if let Some(method @ ("adler32" | "crc32")) = name.strip_prefix("zlib.") {
-        return binascii::checksum(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
