@@ -910,6 +910,7 @@ impl Context {
             Value::Class { .. }
                 | Value::GenericAlias(_)
                 | Value::Function { .. }
+                | Value::FractionHash(_)
                 | Value::AttrGetter(_)
                 | Value::ItemGetter(_)
                 | Value::StaticMethod { .. }
@@ -6973,6 +6974,9 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        if let Value::FractionHash(function) = *self.heap.get(callable) {
+            return stdlib::fraction_hash(self, function, args, kwargs);
+        }
         if let Value::ConstEvaluator(value) = *self.heap.get(callable) {
             return super::paramspec::eval(self, value, &args, &kwargs);
         }

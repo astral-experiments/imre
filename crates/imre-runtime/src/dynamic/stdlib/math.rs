@@ -8,6 +8,33 @@ use smallvec::SmallVec;
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
+/// Retain the original function's argument binding and live arithmetic hooks.
+pub(in crate::dynamic) fn fraction_hash(
+    ctx: &mut Context,
+    fallback: Id,
+    args: Vec<Id>,
+    kwargs: Vec<(String, Id)>,
+) -> Result<Id> {
+    if let &[n, d] = args.as_slice()
+        && kwargs.is_empty()
+        && let Value::Function { scope, .. } = *ctx.heap.get(fallback)
+        && let Some(p) = ctx.scope_name(scope, "_PyHASH_MODULUS")
+        && matches!(ctx.heap.get(p), Value::Int(p) if p.as_small() == Some(crate::python_hash::MODULUS))
+        && ["pow", "hash", "abs"].into_iter().all(|name| {
+            ctx.lookup(scope, name).is_ok_and(
+                |id| matches!(ctx.heap.get(id), Value::Native(current) if current == name),
+            )
+        })
+        && let (Value::Int(n), Value::Int(d)) = (ctx.heap.get(n), ctx.heap.get(d))
+        && let Some(hash) = crate::python_hash::fraction_hash(n, d)
+    {
+        return Ok(ctx.int(hash));
+    }
+    // Subclass operations, replaced builtins and a noninvertible denominator
+    // must use the module's live Python operations and infinity constant.
+    ctx.call(fallback, args, kwargs)
+}
+
 /// Compute the bounded candidates and the exact distance comparison for Fraction.
 pub(super) fn fraction_limit_candidates(
     ctx: &mut Context,
