@@ -12,6 +12,10 @@ with left, right:
         assert endpoint.fileno() >= 0 and not endpoint.get_inheritable()
         assert endpoint.getsockname() == endpoint.getpeername() == ""
     assert left.fileno() != right.fileno()
+    assert left.set_inheritable(inheritable=True) is None
+    assert os.get_inheritable(left.fileno())
+    left.set_inheritable(False)
+    assert not left.get_inheritable()
     left.sendall(b"left")
     assert right.recv(4) == b"left"
     right.sendall(b"right")

@@ -726,6 +726,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "settimeout"
                     | "gettimeout"
                     | "get_inheritable"
+                    | "set_inheritable"
                     | "getblocking"
                     | "__enter__"
                     | "__exit__"
