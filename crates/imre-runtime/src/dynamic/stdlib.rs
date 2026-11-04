@@ -2032,8 +2032,8 @@ pub(super) fn call(
     if name == "_imre_itertools._accumulate_allocate" {
         return itertools::accumulate_allocate(ctx, args, kwargs);
     }
-    if name == "_imre_itertools._accumulate_state" {
-        return itertools::accumulate_state(ctx, args, kwargs);
+    if name == "_imre_itertools._accumulate_next" {
+        return itertools::accumulate_next(ctx, args, kwargs);
     }
     if name == "_imre_itertools._cycle_allocate" {
         return itertools::cycle_allocate(ctx, args, kwargs);

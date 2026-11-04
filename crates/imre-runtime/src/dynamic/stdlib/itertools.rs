@@ -154,11 +154,56 @@ pub(in crate::dynamic) struct Cycle {
     index: usize,
 }
 
-impl Cycle {
+/// Native state of the bundled iterator classes. Subclasses keep their
+/// ordinary Python fields alongside the same traced cursor.
+#[derive(Clone)]
+pub(in crate::dynamic) enum Cursor {
+    Cycle(Cycle),
+    Accumulate(Accumulator),
+}
+
+#[derive(Clone)]
+pub(in crate::dynamic) struct Accumulator {
+    base: Id,
+    source: Id,
+    function: Id,
+    total: Option<Id>,
+    initial_pending: bool,
+}
+
+impl Cursor {
     pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
-        visit.extend(self.source);
-        visit.extend(&self.saved);
+        match self {
+            Self::Cycle(state) => {
+                visit.extend(state.source);
+                visit.extend(&state.saved);
+            }
+            Self::Accumulate(state) => {
+                visit.extend([state.base, state.source, state.function]);
+                visit.extend(state.total);
+            }
+        }
     }
+
+    pub(in crate::dynamic) fn is_exact_accumulate(&self, class: Id) -> bool {
+        matches!(self, Self::Accumulate(state) if state.base == class)
+    }
+}
+
+fn cursor(ctx: &mut Context, receiver: Id) -> Option<&mut Cursor> {
+    match ctx.heap.get_mut(receiver) {
+        Value::Instance { itertools, .. } => itertools.as_deref_mut(),
+        _ => None,
+    }
+}
+
+fn cursor_instance(ctx: &mut Context, class: Id, state: Cursor) -> Id {
+    let result = ctx.instance(class, None);
+    let Value::Instance { itertools, .. } = ctx.heap.get_mut(result) else {
+        unreachable!("fresh iterator instance")
+    };
+    *itertools = Some(Box::new(state));
+    result
 }
 
 pub(super) fn cycle_allocate(
@@ -180,26 +225,22 @@ pub(super) fn cycle_allocate(
     }
     let source = ctx.iterator(*iterable)?;
     ctx.heap.keep(source);
-    let result = ctx.instance(*class, None);
-    let Value::Instance { cycle, .. } = ctx.heap.get_mut(result) else {
-        unreachable!("fresh cycle instance")
-    };
-    *cycle = Some(Box::new(Cycle {
-        source: Some(source),
-        saved: Vec::new(),
-        index: 0,
-    }));
-    Ok(result)
+    Ok(cursor_instance(
+        ctx,
+        *class,
+        Cursor::Cycle(Cycle {
+            source: Some(source),
+            saved: Vec::new(),
+            index: 0,
+        }),
+    ))
 }
 
 pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [receiver] = args else {
         return Err(Error::new("TypeError", "expected a cycle instance"));
     };
-    let Value::Instance {
-        cycle: Some(state), ..
-    } = ctx.heap.get(*receiver)
-    else {
+    let Some(Cursor::Cycle(state)) = cursor(ctx, *receiver) else {
         return Err(Error::new("TypeError", "expected a cycle instance"));
     };
     if !kwargs.is_empty() {
@@ -213,10 +254,7 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         Some(source) => ctx.next_item(source)?,
         None => None,
     };
-    let Value::Instance {
-        cycle: Some(state), ..
-    } = ctx.heap.get_mut(*receiver)
-    else {
+    let Some(Cursor::Cycle(state)) = cursor(ctx, *receiver) else {
         unreachable!("live cycle instance")
     };
     if let Some(item) = item {
@@ -276,14 +314,24 @@ pub(super) fn accumulate_allocate(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if let [base, class, state] = args
+    if let [base, class, source, function, initial] = args
         && kwargs.is_empty()
         && ctx.itertools_layout(*base) == Some("itertools.accumulate")
         && matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
             if ancestors.iter().all(|&a| !matches!(ctx.heap.get(a), Value::Native(name) if name != "object")))
         && ctx.allocation_base(*class) == Some(*base)
     {
-        return Ok(instance_with_state(ctx, *base, *class, *state));
+        return Ok(cursor_instance(
+            ctx,
+            *class,
+            Cursor::Accumulate(Accumulator {
+                base: *base,
+                source: *source,
+                function: *function,
+                total: (*initial != NONE).then_some(*initial),
+                initial_pending: *initial != NONE,
+            }),
+        ));
     }
     Err(Error::new(
         "TypeError",
@@ -291,26 +339,68 @@ pub(super) fn accumulate_allocate(
     ))
 }
 
-pub(super) fn accumulate_state(
+fn accumulator(ctx: &mut Context, receiver: Id) -> Result<&mut Accumulator> {
+    match cursor(ctx, receiver) {
+        Some(Cursor::Accumulate(state)) => Ok(state),
+        _ => Err(Error::new(
+            "TypeError",
+            "expected an initialized accumulate",
+        )),
+    }
+}
+
+pub(super) fn accumulate_next(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if let [base, receiver] = args
         && kwargs.is_empty()
-        && ctx.itertools_layout(*base) == Some("itertools.accumulate")
-        && let Value::Instance {
-            member_values: Some(values),
-            ..
-        } = ctx.heap.get(*receiver)
-        && let Some(&state) = values.get(base)
+        && accumulator(ctx, *receiver)?.base == *base
     {
-        return Ok(state);
+        return next_accumulated(ctx, *receiver)?.ok_or_else(|| Error::new("StopIteration", ""));
     }
     Err(Error::new(
         "TypeError",
         "expected an initialized accumulate",
     ))
+}
+
+pub(in crate::dynamic) fn next_accumulated(ctx: &mut Context, receiver: Id) -> Result<Option<Id>> {
+    let state = accumulator(ctx, receiver)?;
+    if std::mem::take(&mut state.initial_pending) {
+        return Ok(state.total);
+    }
+    let source = state.source;
+    let Some(item) = ctx.next_result(source)? else {
+        return Ok(None);
+    };
+    // Fetch the total after the source returns since its __next__ can reenter us.
+    let state = accumulator(ctx, receiver)?;
+    let value = match (state.function, state.total) {
+        (_, None) => item,
+        (function, Some(total)) => {
+            if function == NONE
+                && let (Value::Int(left), Value::Int(right)) =
+                    (ctx.heap.get(total), ctx.heap.get(item))
+            {
+                let sum = crate::integer_binary(left, right, 0)?;
+                ctx.alloc(Value::Int(sum))
+            } else {
+                ctx.heap.keep(item);
+                ctx.heap.keep(total);
+                if function == NONE {
+                    ctx.binary("+", total, item)?
+                } else {
+                    ctx.call(function, vec![total, item], Vec::new())?
+                }
+            }
+        }
+    };
+    if let Some(old) = accumulator(ctx, receiver)?.total.replace(value) {
+        ctx.heap.weak_edge_removed(old);
+    }
+    Ok(Some(value))
 }
 
 fn compatible_cursor_class(ctx: &Context, base: Id, class: Id, layout: &str) -> bool {

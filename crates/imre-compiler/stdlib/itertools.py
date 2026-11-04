@@ -91,29 +91,7 @@ def _make_filterfalse(_allocate, _state):
 filterfalse = _make_filterfalse(_itertools._predicate_allocate, _itertools._predicate_state)
 
 
-def _make_accumulate(_allocate, _state):
-    class State:
-        __slots__ = ("source", "func", "total", "started", "pending")
-
-        def __init__(self, iterable, func, initial):
-            self.source = iter(iterable)
-            self.func = func
-            self.total = initial
-            self.pending = initial is not None
-            self.started = self.pending
-
-        def advance(self):
-            if self.pending:
-                self.pending = False
-                return self.total
-            item = next(self.source)
-            if self.started:
-                item = self.total + item if self.func is None else self.func(self.total, item)
-            self.total = item
-            self.started = True
-            return item
-
-
+def _make_accumulate(_allocate, _advance):
     class accumulate:
         """Return series of accumulated sums (or other binary function results)."""
 
@@ -122,7 +100,7 @@ def _make_accumulate(_allocate, _state):
         def __new__(cls, /, iterable, func=None, *, initial=None):
             if not issubclass(cls, __class__):
                 raise TypeError("expected an accumulate subclass")
-            return _allocate(__class__, cls, State(iterable, func, initial))
+            return _allocate(__class__, cls, iter(iterable), func, initial)
 
         def __init__(self, *args, **kwargs):
             if (args or kwargs) and type(self).__init__ is not __class__.__init__:
@@ -132,13 +110,13 @@ def _make_accumulate(_allocate, _state):
             return self
 
         def __next__(self):
-            return _state(__class__, self).advance()
+            return _advance(__class__, self)
 
     accumulate.__qualname__ = "accumulate"
     return accumulate
 
 
-accumulate = _make_accumulate(_itertools._accumulate_allocate, _itertools._accumulate_state)
+accumulate = _make_accumulate(_itertools._accumulate_allocate, _itertools._accumulate_next)
 
 
 def _make_starmap(_allocate, _advance):
