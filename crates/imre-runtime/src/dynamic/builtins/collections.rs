@@ -502,11 +502,7 @@ fn set_intersection(ctx: &mut Context, receiver: Id, operands: &[Id]) -> Result<
         } else {
             intersect_iterable(ctx, result, other)?
         };
-        let collect = ctx.heap.discard_truth_operands(roots, ctx.modules);
-        ctx.heap.keep(result);
-        if collect {
-            ctx.collect_unreachable();
-        }
+        ctx.discard_temporaries(roots, Some(result));
     }
     Ok(result)
 }
