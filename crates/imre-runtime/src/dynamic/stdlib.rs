@@ -656,7 +656,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify"
-            | "b2a_qp" | "crc32",
+            | "a2b_qp" | "b2a_qp" | "crc32",
         ) => ctx.builtin(&format!("binascii.{name}")),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
