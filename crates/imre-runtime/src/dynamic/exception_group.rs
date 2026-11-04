@@ -112,7 +112,6 @@ fn partition(
     keep_rest: bool,
     depth: usize,
 ) -> Result<(Id, Id)> {
-    ctx.check_call_depth(depth)?;
     if condition.matches(ctx, exc)? {
         return Ok((exc, NONE));
     }
@@ -126,9 +125,8 @@ fn partition(
     let mut matched = Vec::new();
     let mut rest = Vec::new();
     for child in children {
-        let (yes, no) = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-            partition(ctx, child, condition, keep_rest, depth + 1)
-        })?;
+        ctx.check_native_stack(depth, "maximum recursion depth exceeded")?;
+        let (yes, no) = partition(ctx, child, condition, keep_rest, depth + 1)?;
         if yes != NONE {
             matched.push(yes);
         }

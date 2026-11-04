@@ -1,3 +1,4 @@
+import sys
 from contextlib import suppress
 
 
@@ -60,3 +61,19 @@ for partition in (batch.subgroup, batch.split):
         assert exc is invalid_length
     else:
         raise AssertionError("discarded the exception from __len__")
+
+# Descending through groups does not add Python frames.
+saved_limit = sys.getrecursionlimit()
+try:
+    sys.setrecursionlimit(64)
+    deep = first
+    for _ in range(96):
+        deep = ExceptionGroup("layer", [deep])
+    match, rest = deep.split(ValueError)
+    assert rest is None
+    assert deep.subgroup(KeyError) is None
+    for _ in range(96):
+        match = match.exceptions[0]
+    assert match is first
+finally:
+    sys.setrecursionlimit(saved_limit)
