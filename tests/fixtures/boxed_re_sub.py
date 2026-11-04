@@ -170,3 +170,13 @@ def current():
         ((0, 1), ("\ud800", None)), ((1, 3), ("\ue000", "X")), ((3, 4), ("é", None)),
         ((4, 5), ("\udfff", None)), ((5, 6), ("!", None)),
     ]
+
+    edge = re.compile("[\ud7ff-\ud800\udfff-\ue000]+")
+    text = "\ud7ff\ud800\ud801\U000f0000\udfff\ue000"
+    assert edge.subn(lambda m: "<" + m[0] + ">", text) == (
+        "<\ud7ff\ud800>\ud801\U000f0000<\udfff\ue000>", 2,
+    )
+    assert edge.subn("-", "\ud7ff\U000f0000\ue000") == ("-\U000f0000-", 2)
+    assert re.compile("[^\ud800-\udfff]+").sub("-", text) == "-\ud800\ud801-\udfff-"
+    above = re.compile("[\udfff-\U0010ffff]+")
+    assert above.findall("\udc80\udfff\U000f04ff\udcff") == ["\udfff\U000f04ff"]
