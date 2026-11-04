@@ -149,6 +149,12 @@ impl Checker<'_> {
             })
             .collect();
         let args = self.arguments_with(call, &params, Some(receiver), |checker, index, arg| {
+            // The syscall takes the integer value of the public MsgFlag member.
+            if params[index].name == "flags"
+                && checker.resolve(arg) == Some(Binding::Intrinsic(Intrinsic::SOCKET_MSG_PEEK))
+            {
+                return Ok(constant("msg_peek"));
+            }
             if params[index].ty == Type::Int {
                 let value = checker.expr(arg)?;
                 if op == SetSockOpt && index == 2 && value.ty == Type::Bytes {

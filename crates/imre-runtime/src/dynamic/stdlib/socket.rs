@@ -28,6 +28,27 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("EAI_SERVICE", libc::EAI_SERVICE),
     ("EAI_NODATA", libc::EAI_NODATA),
     ("EAI_NONAME", libc::EAI_NONAME),
+    ("MSG_OOB", libc::MSG_OOB),
+    ("MSG_PEEK", libc::MSG_PEEK),
+    ("MSG_DONTROUTE", libc::MSG_DONTROUTE),
+    ("MSG_DONTWAIT", libc::MSG_DONTWAIT),
+    ("MSG_EOR", libc::MSG_EOR),
+    ("MSG_TRUNC", libc::MSG_TRUNC),
+    ("MSG_CTRUNC", libc::MSG_CTRUNC),
+    ("MSG_WAITALL", libc::MSG_WAITALL),
+    ("MSG_NOSIGNAL", libc::MSG_NOSIGNAL),
+    #[cfg(target_os = "linux")]
+    ("MSG_CMSG_CLOEXEC", libc::MSG_CMSG_CLOEXEC),
+    #[cfg(target_os = "linux")]
+    ("MSG_ERRQUEUE", libc::MSG_ERRQUEUE),
+    #[cfg(target_os = "linux")]
+    ("MSG_CONFIRM", libc::MSG_CONFIRM),
+    #[cfg(target_os = "linux")]
+    ("MSG_MORE", libc::MSG_MORE),
+    #[cfg(target_os = "linux")]
+    ("MSG_FASTOPEN", libc::MSG_FASTOPEN),
+    #[cfg(target_os = "macos")]
+    ("MSG_EOF", libc::MSG_EOF),
     ("SOL_TCP", libc::IPPROTO_TCP),
     ("NI_DGRAM", libc::NI_DGRAM),
     ("NI_NAMEREQD", libc::NI_NAMEREQD),
@@ -135,6 +156,7 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
     for (class_name, prefix, base_name) in [
         ("AddressFamily", "AF_", "enum.IntEnum"),
         ("SocketKind", "SOCK_", "enum.IntEnum"),
+        ("MsgFlag", "MSG_", "enum.IntFlag"),
         ("AddressInfo", "AI_", "enum.IntFlag"),
     ] {
         let enum_scope = ctx.scope("socket", None);
