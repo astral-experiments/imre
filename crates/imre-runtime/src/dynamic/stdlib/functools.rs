@@ -23,6 +23,32 @@ pub(super) fn placeholder(ctx: &mut Context) -> Id {
     value
 }
 
+/// Preserve the live fields consumed by `partial.__setstate__` without creating an instance dictionary.
+pub(super) fn partial_reduce(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let Value::Partial {
+        function,
+        args,
+        keywords,
+        dictionary,
+    } = *ctx.heap.get(ctx.scalar_value(receiver))
+    else {
+        unreachable!("validated partial receiver")
+    };
+    let namespace = match *ctx.heap.get(receiver) {
+        Value::Instance { namespace, .. } => namespace,
+        _ => dictionary,
+    };
+    let class = ctx.exact_type(receiver)?;
+    let constructor_args = ctx.alloc(Value::Tuple(vec![function]));
+    let state = ctx.alloc(Value::Tuple(vec![
+        function,
+        args,
+        keywords,
+        namespace.unwrap_or(NONE),
+    ]));
+    Ok(ctx.alloc(Value::Tuple(vec![class, constructor_args, state])))
+}
+
 pub(super) fn partial_setstate(
     ctx: &mut Context,
     args: &[Id],

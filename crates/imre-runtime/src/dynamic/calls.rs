@@ -4166,7 +4166,7 @@ impl Context {
                         return Ok(value);
                     }
                     let class = self.builtin(stdlib::functools::PARTIAL_CLASS);
-                    if let Some(member) = self.own_class_attr(class, name) {
+                    if let Some(member) = self.class_attr(class, name) {
                         return self.bind_attribute(member, obj, class);
                     }
                 }

@@ -2472,7 +2472,13 @@ impl Context {
         }
         if name == stdlib::functools::PARTIAL_CLASS {
             let mut entries = Vec::new();
-            for method in ["__new__", "__call__", "__get__", "__setstate__"] {
+            for method in [
+                "__new__",
+                "__call__",
+                "__get__",
+                "__reduce__",
+                "__setstate__",
+            ] {
                 let slot = self.builtin(&format!("{name}.{method}"));
                 entries.push((self.heap.code_name(method), slot));
             }

@@ -51,10 +51,14 @@ impl BuiltinDescriptor {
                 method: !matches!(name, "__eq__" | "__ne__" | "__iter__"),
             });
         }
-        if symbol == "functools.partial.__setstate__" {
+        if let Some((stdlib::functools::PARTIAL_CLASS, attr)) = symbol.rsplit_once('.')
+            && let Some(&name) = ["__reduce__", "__setstate__"]
+                .iter()
+                .find(|&&name| name == attr)
+        {
             return Some(Self {
                 owner: stdlib::functools::PARTIAL_CLASS,
-                name: "__setstate__",
+                name,
                 method: true,
             });
         }

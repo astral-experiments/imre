@@ -227,6 +227,9 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             _ => return Err(unsupported()),
         });
     }
+    if module == "functools" && name == "reduce" {
+        return Ok(("__builtin__", "reduce"));
+    }
     if module == "itertools" {
         return Ok(match name {
             "filterfalse" => (module, "ifilterfalse"),
@@ -264,7 +267,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "dbm.dumb",
         "dbm.gnu",
         "dbm.ndbm",
-        "functools",
         "html.entities",
         "html.parser",
         "http.client",
