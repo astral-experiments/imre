@@ -755,6 +755,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Struct { .. } if matches!(attr, "pack" | "unpack" | "unpack_from") => {
             "struct.Struct"
         }
+        Value::ZlibDecompressor { .. } if matches!(attr, "decompress" | "flush") => {
+            super::value::ZLIB_DECOMPRESS_TYPE
+        }
         Value::Hash(state)
             if crate::objects::HashState::is_provider_class(state.lock().class_name())
                 && matches!(attr, "update" | "copy" | "digest" | "hexdigest") =>

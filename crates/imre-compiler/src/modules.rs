@@ -2308,6 +2308,7 @@ impl IntrinsicModule {
             (Self::Lzma, "FORMAT_ALONE") => Intrinsic::IntConstant(2),
             (Self::Lzma, "LZMAError") => Intrinsic::ScopedObjectExport("lzma.LZMAError"),
             (Self::Lzma, "decompress") => Intrinsic::ScopedObjectExport("lzma.decompress"),
+            (Self::Zlib, "decompressobj") => Intrinsic::ScopedObjectExport("zlib.decompressobj"),
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,

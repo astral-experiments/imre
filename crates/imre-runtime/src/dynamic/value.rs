@@ -56,6 +56,7 @@ pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 pub(super) const EMPTY_TUPLE: Id = 5;
 
+pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
@@ -1344,6 +1345,10 @@ pub(super) enum Value {
     TextFile(BoxedTextFile),
     GzipReader(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
     GzipWriter(crate::Shared<std::cell::RefCell<Option<super::stdlib::zlib::Stream>>>),
+    ZlibDecompressor {
+        state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
+        dictionary: Option<Id>,
+    },
     RegexScanner {
         pattern: Id,
         subject: Id,
@@ -1457,6 +1462,7 @@ impl Value {
             Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GzipReader(_) | Self::GzipWriter(_) => "object",
+            Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::MemoryIterator { .. } => "memory_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -2137,6 +2143,7 @@ impl Value {
             | Self::TlsSession(_)
             | Self::TlsListener(_)
             | Self::TlsBioSession(_) => {}
+            Self::ZlibDecompressor { dictionary, .. } => visit.extend(*dictionary),
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }

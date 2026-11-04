@@ -67,6 +67,220 @@ pub(super) fn call(
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
+pub(in crate::dynamic) struct Decompressor {
+    stream: Option<Stream>,
+    eof: bool,
+    unused_data: Vec<u8>,
+    unconsumed_tail: Vec<u8>,
+}
+
+fn copy_bytes(data: &[u8]) -> Result<Vec<u8>> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(data.len())
+        .map_err(|_| crate::Error::allocation())?;
+    copy.extend_from_slice(data);
+    Ok(copy)
+}
+
+fn size_arg(ctx: &mut Context, value: Option<Id>, default: isize) -> Result<isize> {
+    let Some(value) = value else {
+        return Ok(default);
+    };
+    crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
+pub(in crate::dynamic) fn decompressor(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if name == "new" {
+        let [wbits, dictionary] =
+            builtins::bind_method_arguments("decompressobj", args, kwargs, ["wbits", "zdict"], 2)?;
+        let wbits = wbits.map(|n| os::c_int(ctx, n)).transpose()?.unwrap_or(15);
+        if let Some(id) = dictionary {
+            ctx.check_buffer_exporter(id)?;
+            if !matches!(
+                ctx.heap.get(ctx.scalar_value(id)),
+                Value::Bytes(_)
+                    | Value::ByteArray(_)
+                    | Value::Array(_)
+                    | Value::MemoryView { .. }
+                    | Value::BytesIoBuffer { .. }
+            ) {
+                return Err(Error::new(
+                    "TypeError",
+                    "zdict argument must support the buffer protocol",
+                ));
+            }
+        }
+        let mut stream = Stream::new(Codec::Decompress { wbits }).map_err(|e| {
+            if e.kind == "zlib.error" {
+                Error::new("ValueError", "Invalid initialization option")
+            } else {
+                e
+            }
+        })?;
+        if wbits < 0
+            && let Some(id) = dictionary
+        {
+            stream.set_dictionary(buffer(ctx, id)?)?;
+        }
+        let state = Decompressor {
+            stream: Some(stream),
+            eof: false,
+            unused_data: Vec::new(),
+            unconsumed_tail: Vec::new(),
+        };
+        let state = crate::Shared::try_new(std::cell::RefCell::new(state))
+            .map_err(|_| crate::Error::allocation())?;
+        return Ok(ctx.alloc(Value::ZlibDecompressor { state, dictionary }));
+    }
+
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "expected a zlib decompression object",
+        ));
+    };
+    let Value::ZlibDecompressor { state, dictionary } = ctx.heap.get(receiver) else {
+        return Err(Error::new(
+            "TypeError",
+            "expected a zlib decompression object",
+        ));
+    };
+    let (state, dictionary) = (state.clone(), *dictionary);
+    let bytes = match name {
+        "eof" => return Ok(builtins::boolean(state.borrow().eof)),
+        "unused_data" => copy_bytes(&state.borrow().unused_data)?,
+        "unconsumed_tail" => copy_bytes(&state.borrow().unconsumed_tail)?,
+        "decompress" => {
+            if args.is_empty() && kwargs.len() <= 2 {
+                return Err(Error::new(
+                    "TypeError",
+                    "decompress() takes at least 1 positional argument (0 given)",
+                ));
+            }
+            let [data, limit] =
+                builtins::bind_method_arguments(name, args, kwargs, ["", "max_length"], 2)?;
+            let data = data.expect("required positional argument");
+            ctx.check_buffer_exporter(data)?;
+            buffer(ctx, data)?;
+            ctx.with_buffer_export(data, |ctx| {
+                let limit = usize::try_from(size_arg(ctx, limit, 0)?)
+                    .map_err(|_| Error::new("ValueError", "max_length must be non-negative"))?;
+                let limit = if limit == 0 { usize::MAX } else { limit };
+                state.borrow_mut().decode(
+                    Some(buffer(ctx, data)?),
+                    limit.min(16 * 1024),
+                    limit,
+                    || dictionary.map(|id| buffer(ctx, id)).transpose(),
+                )
+            })?
+        }
+        "flush" => {
+            let [size] = builtins::bind_method_arguments(name, args, kwargs, [""], 1)?;
+            let size = size_arg(ctx, size, 16 * 1024)?;
+            if size <= 0 {
+                return Err(Error::new("ValueError", "length must be greater than zero"));
+            }
+            state
+                .borrow_mut()
+                .decode(None, size as usize, usize::MAX, || Ok(None))?
+        }
+        _ => unreachable!("registered decompressor operation"),
+    };
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
+impl Decompressor {
+    /// With no new input, flush drains the tail retained by the previous call.
+    fn decode<'a>(
+        &mut self,
+        data: Option<&[u8]>,
+        initial_size: usize,
+        limit: usize,
+        dictionary: impl Fn() -> Result<Option<&'a [u8]>>,
+    ) -> Result<Vec<u8>> {
+        let flushing = data.is_none();
+        let input = data.unwrap_or(&self.unconsumed_tail);
+        let mut output: Vec<u8> = Vec::new();
+        output
+            .try_reserve_exact(initial_size)
+            .map_err(|_| crate::Error::allocation())?;
+        let Some(stream) = &mut self.stream else {
+            if flushing {
+                return Ok(Vec::new());
+            }
+            self.unconsumed_tail = copy_bytes(input)?;
+            return Err(Error::new(
+                "zlib.error",
+                "Error -2 while decompressing data: inconsistent stream state",
+            ));
+        };
+        let flush = if flushing {
+            DeflateFlush::Finish
+        } else {
+            DeflateFlush::SyncFlush
+        };
+        let mut pos = 0;
+        let status = loop {
+            let len = output.len();
+            if len == output.capacity() {
+                output
+                    .try_reserve((limit - len).min(32 * 1024))
+                    .map_err(|_| crate::Error::allocation())?;
+            }
+            let spare = output.spare_capacity_mut();
+            let n = spare.len().min(limit - len);
+            let (status, consumed, produced, full) =
+                stream.step(&input[pos..], &mut spare[..n], flush);
+            pos += consumed;
+            // SAFETY: step initialized exactly produced bytes in output's spare capacity.
+            unsafe { output.set_len(len + produced) };
+            if status == ReturnCode::NeedDict
+                && let Some(dict) = dictionary()?
+            {
+                stream.set_dictionary(dict)?;
+                continue;
+            }
+            if !matches!(status, ReturnCode::Ok | ReturnCode::BufError)
+                || output.len() == limit
+                || (produced == 0 && consumed == 0)
+                || (!full && pos == input.len())
+            {
+                break status;
+            }
+        };
+        let tail = &input[pos..];
+        if status == ReturnCode::StreamEnd {
+            self.unused_data
+                .try_reserve(tail.len())
+                .map_err(|_| crate::Error::allocation())?;
+            self.unused_data.extend_from_slice(tail);
+        }
+        if status != ReturnCode::StreamEnd || !self.unconsumed_tail.is_empty() {
+            self.unconsumed_tail = copy_bytes(tail)?;
+        }
+        if status == ReturnCode::StreamEnd {
+            self.eof = true;
+            if flushing {
+                self.stream = None;
+            }
+        } else if !flushing && !matches!(status, ReturnCode::Ok | ReturnCode::BufError) {
+            return Err(stream.error(status));
+        }
+        crate::compact_bytes(&mut output);
+        Ok(output)
+    }
+}
+
 /// The gzip facade writes the framing and owns its file object. These primitives
 /// advance one raw DEFLATE stream and return just its newly produced bytes.
 pub(super) fn gzip_writer(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
@@ -212,6 +426,22 @@ impl Stream {
         }
     }
 
+    fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<()> {
+        if dictionary.len() > u32::MAX as usize {
+            return Err(Error::new(
+                "OverflowError",
+                "zdict length does not fit in an unsigned int",
+            ));
+        }
+        // SAFETY: only initialized decompressors accept a dictionary.
+        let stream = unsafe { inflate::InflateStream::from_stream_mut(&mut self.raw).unwrap() };
+        let status = inflate::set_dictionary(stream, dictionary);
+        if status != ReturnCode::Ok {
+            return Err(self.error_action(status, "setting zdict"));
+        }
+        Ok(())
+    }
+
     fn step(
         &mut self,
         input: &[u8],
@@ -235,30 +465,41 @@ impl Stream {
                 ),
                 Codec::Decompress { .. } => inflate::inflate(
                     inflate::InflateStream::from_stream_mut(&mut self.raw).unwrap(),
-                    if finish {
+                    if !finish {
+                        InflateFlush::NoFlush
+                    } else if flush == DeflateFlush::Finish {
                         InflateFlush::Finish
                     } else {
-                        InflateFlush::NoFlush
+                        InflateFlush::SyncFlush
                     },
                 ),
             }
         };
-        (
+        let result = (
             status,
             (count - self.raw.avail_in) as usize,
             (space - self.raw.avail_out) as usize,
             self.raw.avail_out == 0,
-        )
+        );
+        self.raw.next_in = std::ptr::null();
+        self.raw.next_out = std::ptr::null_mut();
+        self.raw.avail_in = 0;
+        self.raw.avail_out = 0;
+        result
     }
 
     fn error(&self, status: ReturnCode) -> Error {
+        let verb = match self.codec {
+            Codec::Compress { .. } => "compressing data",
+            Codec::Decompress { .. } => "decompressing data",
+        };
+        self.error_action(status, verb)
+    }
+
+    fn error_action(&self, status: ReturnCode, action: &str) -> Error {
         if status == ReturnCode::MemError {
             return mem_error(self.codec);
         }
-        let verb = match self.codec {
-            Codec::Compress { .. } => "compressing",
-            Codec::Decompress { .. } => "decompressing",
-        };
         let detail = if self.raw.msg.is_null() {
             match status {
                 ReturnCode::BufError => "incomplete or truncated stream",
@@ -273,10 +514,7 @@ impl Stream {
         let separator = if detail.is_empty() { "" } else { ": " };
         Error::new(
             "zlib.error",
-            format!(
-                "Error {} while {verb} data{separator}{detail}",
-                status as i32
-            ),
+            format!("Error {} while {action}{separator}{detail}", status as i32),
         )
     }
 }
