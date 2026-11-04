@@ -2014,6 +2014,12 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
             (Self::Socket, "MsgFlag") => Intrinsic::ScopedObjectExport("socket.MsgFlag"),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket, "AI_V4MAPPED") => Intrinsic::ScopedObjectExport("socket.AI_V4MAPPED"),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::SocketNative, "AI_V4MAPPED") => {
+                Intrinsic::ScopedObjectExport("_socket.AI_V4MAPPED")
+            }
             (Self::Socket, "MSG_PEEK") => Intrinsic::SOCKET_MSG_PEEK,
             (Self::SocketNative, "MSG_PEEK") => Intrinsic::ScopedObjectExport("_socket.MSG_PEEK"),
             (

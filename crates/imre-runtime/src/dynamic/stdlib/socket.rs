@@ -25,6 +25,8 @@ const CONSTANTS: &[(&str, i32)] = &[
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("AI_NUMERICHOST", libc::AI_NUMERICHOST),
     ("AI_NUMERICSERV", libc::AI_NUMERICSERV),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("AI_V4MAPPED", libc::AI_V4MAPPED),
     ("EAI_SERVICE", libc::EAI_SERVICE),
     ("EAI_NODATA", libc::EAI_NODATA),
     ("EAI_NONAME", libc::EAI_NONAME),
