@@ -1,0 +1,4317 @@
+{
+  "format": 1,
+  "source_bundle": {
+    "repository": "https://github.com/astral-experiments/imre",
+    "head": "718713e1ad06d4e4029efa76d10214be19455048",
+    "ref": "refs/heads/charlie/subprocess-communicate-followup",
+    "base_prerequisite": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+    "bundle_sha256": "cf1cad1d600b7d1081a8d5fca0be3f54de899e02ae451ca4eb66ad7568d3dc08",
+    "apply": "Fetch the public base prerequisite first. In that clone, run git bundle verify /path/to/source.bundle and git fetch /path/to/source.bundle refs/heads/charlie/subprocess-communicate-followup."
+  },
+  "cpython": {
+    "tag": "v3.14.5",
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "frozen_test_subprocess_py_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+    "stock_interpreter_sha256": "107a56456360b507e5d5e14d3594e723268b009cf415f8f7643da6600c8f664d"
+  },
+  "original": {
+    "id": "test.test_subprocess.ProcessTestCase.test_communicate",
+    "occurrence": 1,
+    "stock_optimization": "stock",
+    "imre_optimizations": [
+      "O0",
+      "O3"
+    ]
+  },
+  "product_sha256": {
+    "public": {
+      "cases-O0": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "cases-O3": "615d8b78b653e671e3383fa8305ce2b114aae9060935a6316e727586fd28cf99",
+      "imre": "d365134cc30a3c91b4d2defcc74a445f7d599ba794b354f57e4d1ebfd107abdb",
+      "libimre_runtime.a": "769deccbd7be5c7907cb446321042142ffc4c7ef0667ef5fe11724feae01beed",
+      "rebound-O0": "d4be21666fb7ffd6627bb039583496a99138674d74bd0176b1803a066c5955df",
+      "rebound-O3": "35b7717aec1445c0b299fdb44cd80e438cd34e28f8905f999ceb0c17b995dfb8",
+      "rewrapped-O0": "66469dac4104fab7a3c9ae9b4006347342d4b226e9c3dd8e97a5e24e8005baaa",
+      "rewrapped-O3": "4d41bf2250cc2facc0c6d68a9d795d7abea8ac4e116e2d9b199a57d8150048de"
+    },
+    "candidate": {
+      "cases-O0": "ca37dbeda59b09316e1efd52e11db8b84b22e534f1da03a5136a0a059d156068",
+      "cases-O3": "8ac20fe4b39d85947851c38f7e07cf23c0faaa0583e6965b5c34137aaf0a50e7",
+      "imre": "5bb1f223947afaba29255d10adadebe98d740e6849a8321e7a8383e70b84540f",
+      "libimre_runtime.a": "769deccbd7be5c7907cb446321042142ffc4c7ef0667ef5fe11724feae01beed",
+      "rewrapped-O0": "f504ffcf11d17ae4802a9a97d6f7b138d0da0d9e68f163d98303d95f2e819a0e",
+      "rewrapped-O3": "e9cdc2c684a2ee651e2007067693c2a21f8a9e8eabf5479dd46483e6f6807145",
+      "selected-O0": "e23071b4d2d4cd2e39b99fbe2c9984a608308086313e0e36d0dc0a26c19f187a",
+      "selected-O3": "ef1532e3d5021b40dd0f004aa7e2b5c1b1af9f680ca9951756cabcea2d1c9178"
+    }
+  },
+  "builds_and_smoke": [
+    {
+      "owner": "candidatebuild",
+      "optimization": "cargo-release",
+      "exit": 0,
+      "status_receipt": "evidence/candidatebuild/build.exit",
+      "streams": [
+        "evidence/candidatebuild/build.stdout",
+        "evidence/candidatebuild/build.stderr"
+      ],
+      "command_records": [
+        "evidence/candidatebuild/build.info"
+      ]
+    },
+    {
+      "owner": "imrebuild",
+      "optimization": "cargo-release",
+      "exit": 0,
+      "status_receipt": "evidence/imrebuild/build.exit",
+      "streams": [
+        "evidence/imrebuild/build.stdout",
+        "evidence/imrebuild/build.stderr"
+      ],
+      "command_records": [
+        "evidence/imrebuild/build.info"
+      ]
+    },
+    {
+      "owner": "imrebuild/smoke-build-O0",
+      "optimization": "O0",
+      "exit": 0,
+      "status_receipt": "evidence/imrebuild/smoke-build-O0.exit",
+      "streams": [
+        "evidence/imrebuild/smoke-build-O0.stdout",
+        "evidence/imrebuild/smoke-build-O0.stderr"
+      ],
+      "command_records": [
+        "evidence/imrebuild/howto",
+        "evidence/imrebuild/smoke.py"
+      ]
+    },
+    {
+      "owner": "imrebuild/smoke-build-O3",
+      "optimization": "O3",
+      "exit": 0,
+      "status_receipt": "evidence/imrebuild/smoke-build-O3.exit",
+      "streams": [
+        "evidence/imrebuild/smoke-build-O3.stdout",
+        "evidence/imrebuild/smoke-build-O3.stderr"
+      ],
+      "command_records": [
+        "evidence/imrebuild/howto",
+        "evidence/imrebuild/smoke.py"
+      ]
+    },
+    {
+      "owner": "imrebuild/smoke-run-O0",
+      "optimization": "O0",
+      "exit": 0,
+      "status_receipt": "evidence/imrebuild/smoke-run-O0.exit",
+      "streams": [
+        "evidence/imrebuild/smoke-run-O0.stdout",
+        "evidence/imrebuild/smoke-run-O0.stderr"
+      ],
+      "command_records": [
+        "evidence/imrebuild/howto",
+        "evidence/imrebuild/smoke.py"
+      ]
+    },
+    {
+      "owner": "imrebuild/smoke-run-O3",
+      "optimization": "O3",
+      "exit": 0,
+      "status_receipt": "evidence/imrebuild/smoke-run-O3.exit",
+      "streams": [
+        "evidence/imrebuild/smoke-run-O3.stdout",
+        "evidence/imrebuild/smoke-run-O3.stderr"
+      ],
+      "command_records": [
+        "evidence/imrebuild/howto",
+        "evidence/imrebuild/smoke.py"
+      ]
+    },
+    {
+      "owner": "reviewedbuild",
+      "optimization": "cargo-release",
+      "exit": 0,
+      "status_receipt": "evidence/reviewedbuild/build.exit",
+      "streams": [
+        "evidence/reviewedbuild/build.stdout",
+        "evidence/reviewedbuild/build.stderr"
+      ],
+      "command_records": [
+        "evidence/reviewedbuild/build.info"
+      ]
+    },
+    {
+      "owner": "stockbuild",
+      "optimization": "stock configure defaults",
+      "exit": 0,
+      "status_receipt": "evidence/stockbuild/exit-status",
+      "streams": [
+        "evidence/stockbuild/build.stderr",
+        "evidence/stockbuild/build.stdout",
+        "evidence/stockbuild/configure.stderr",
+        "evidence/stockbuild/configure.stdout",
+        "evidence/stockbuild/make.stderr",
+        "evidence/stockbuild/make.stdout"
+      ],
+      "command_records": [
+        "evidence/stockbuild/commands.log",
+        "evidence/stockbuild/build.sh"
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "owner": "candidate-build-O0",
+      "scope": "driver-build",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/imre",
+        "build",
+        "/workspace/imre-campaign/stage/run_original.py",
+        "--runtime-imports",
+        "--module-root",
+        "/workspace/imre-campaign/stage",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre-campaign/products/candidate/libimre_runtime.a",
+        "--clang",
+        "/workspace/imre-campaign/stage/clang19/root/usr/lib/llvm-19/bin/clang",
+        "-o",
+        "/workspace/imre-campaign/products/candidate/cases-O0"
+      ],
+      "started_utc": "2026-11-04T12:42:44.951833+00:00",
+      "pid": 24430,
+      "timed_out": false,
+      "command_image_sha256": "5bb1f223947afaba29255d10adadebe98d740e6849a8321e7a8383e70b84540f",
+      "classification": "original-driver-build",
+      "receipt": "evidence/runs/candidate-build-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-build-O0/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-build-O0/stderr",
+        "sha256": "b651076a332ccd772012abb031fe0ac16adbadb7df22ef7c3bb7e0b51db46c9f"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-build-O3",
+      "scope": "driver-build",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/imre",
+        "build",
+        "/workspace/imre-campaign/stage/run_original.py",
+        "--runtime-imports",
+        "--module-root",
+        "/workspace/imre-campaign/stage",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/imre-campaign/products/candidate/libimre_runtime.a",
+        "--clang",
+        "/workspace/imre-campaign/stage/clang19/root/usr/lib/llvm-19/bin/clang",
+        "-o",
+        "/workspace/imre-campaign/products/candidate/cases-O3"
+      ],
+      "started_utc": "2026-11-04T12:45:13.379787+00:00",
+      "pid": 24856,
+      "timed_out": false,
+      "command_image_sha256": "5bb1f223947afaba29255d10adadebe98d740e6849a8321e7a8383e70b84540f",
+      "classification": "original-driver-build",
+      "receipt": "evidence/runs/candidate-build-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-build-O3/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-build-O3/stderr",
+        "sha256": "e6833afe481ef48956fc5c5eff84b12b342107075cf528fa4c54c98f044626fa"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-communicate-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "strace",
+        "-ff",
+        "-yy",
+        "-s",
+        "160",
+        "-o",
+        "/workspace/imre-campaign/evidence/runs/candidate-communicate-O0/trace",
+        "-e",
+        "trace=execve,clone,clone3,fork,vfork,read,write,readv,writev,exit,exit_group,wait4",
+        "--",
+        "/workspace/imre-campaign/products/candidate/cases-O0",
+        "test.test_subprocess.ProcessTestCase.test_communicate"
+      ],
+      "started_utc": "2026-11-04T12:43:01.998368+00:00",
+      "pid": 24439,
+      "timed_out": false,
+      "command_image_sha256": "ca37dbeda59b09316e1efd52e11db8b84b22e534f1da03a5136a0a059d156068",
+      "classification": "original-communicate-occurrence-1",
+      "receipt": "evidence/runs/candidate-communicate-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-communicate-O0/stdout",
+        "sha256": "a16112d5e7e84ddb905ead45a17e46b239a20f3a076ee87866b37d8963a84a38"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-communicate-O0/stderr",
+        "sha256": "c255ebad596998d6d094d0b9245960c83d67c9f2eef11a8b82605bf793a6e0d9"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/candidate/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/candidate/imre",
+      "wire": {
+        "owner": "candidate-communicate-O0",
+        "optimization": "O0",
+        "leaf_pid": 24453,
+        "lineage": [
+          {
+            "pid": 24453,
+            "images": [
+              "execve(\"/workspace/imre-campaign/products/candidate/imre\", [\"/workspace/imre-campaign/products/candidate/imre\", \"-c\", \"import sys,os;sys.stderr.write(\\\"pineapple\\\");sys.stdout.write(sys.stdin.read())\"], 0x7ffdbbaa0e10 /* 10 vars */) = 0",
+              "execve(\"/tmp/.tmptvAsDa/.imre-exec-fd-4\", [\"-c\"], 0x7ffe1dfe1d68 /* 10 vars */) = 0"
+            ],
+            "exit": 0
+          },
+          {
+            "pid": 24442,
+            "images": [
+              "execve(\"/workspace/imre-campaign/products/candidate/cases-O0\", [\"/workspace/imre-campaign/products/candidate/cases-O0\", \"test.test_subprocess.ProcessTestCase.test_communicate\"], 0x7ffc37c82860 /* 10 vars */) = 0"
+            ],
+            "exit": 0
+          }
+        ],
+        "matched_pipe_events": [
+          {
+            "pid": 24442,
+            "op": "write",
+            "fd": 4,
+            "pipe": 37264,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 24442,
+            "op": "read",
+            "fd": 5,
+            "pipe": 37265,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 24442,
+            "op": "read",
+            "fd": 7,
+            "pipe": 37266,
+            "data": "pineapple",
+            "returned": 9
+          },
+          {
+            "pid": 24453,
+            "op": "read",
+            "fd": 0,
+            "pipe": 37264,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 24453,
+            "op": "write",
+            "fd": 1,
+            "pipe": 37265,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 24453,
+            "op": "write",
+            "fd": 2,
+            "pipe": 37266,
+            "data": "pineapple",
+            "returned": 9
+          }
+        ]
+      },
+      "wire_path": "evidence/runs/candidate-communicate-O0/wire.json"
+    },
+    {
+      "owner": "candidate-communicate-O3",
+      "scope": "unchanged-occurrence-1",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "strace",
+        "-ff",
+        "-yy",
+        "-s",
+        "160",
+        "-o",
+        "/workspace/imre-campaign/evidence/runs/candidate-communicate-O3/trace",
+        "-e",
+        "trace=execve,clone,clone3,fork,vfork,read,write,readv,writev,exit,exit_group,wait4",
+        "--",
+        "/workspace/imre-campaign/products/candidate/cases-O3",
+        "test.test_subprocess.ProcessTestCase.test_communicate"
+      ],
+      "started_utc": "2026-11-04T12:47:18.096294+00:00",
+      "pid": 25176,
+      "timed_out": false,
+      "command_image_sha256": "8ac20fe4b39d85947851c38f7e07cf23c0faaa0583e6965b5c34137aaf0a50e7",
+      "classification": "original-communicate-occurrence-1",
+      "receipt": "evidence/runs/candidate-communicate-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-communicate-O3/stdout",
+        "sha256": "a16112d5e7e84ddb905ead45a17e46b239a20f3a076ee87866b37d8963a84a38"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-communicate-O3/stderr",
+        "sha256": "3d05f74f35f15c473689e24460890b4bf1e8bd5b84b59107e5bcaebe55ba0050"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/candidate/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/candidate/imre",
+      "wire": {
+        "owner": "candidate-communicate-O3",
+        "optimization": "O3",
+        "leaf_pid": 25190,
+        "lineage": [
+          {
+            "pid": 25190,
+            "images": [
+              "execve(\"/workspace/imre-campaign/products/candidate/imre\", [\"/workspace/imre-campaign/products/candidate/imre\", \"-c\", \"import sys,os;sys.stderr.write(\\\"pineapple\\\");sys.stdout.write(sys.stdin.read())\"], 0x7ffe98ff2660 /* 10 vars */) = 0",
+              "execve(\"/tmp/.tmptpTKF6/.imre-exec-fd-4\", [\"-c\"], 0x7ffd30885368 /* 10 vars */) = 0"
+            ],
+            "exit": 0
+          },
+          {
+            "pid": 25179,
+            "images": [
+              "execve(\"/workspace/imre-campaign/products/candidate/cases-O3\", [\"/workspace/imre-campaign/products/candidate/cases-O3\", \"test.test_subprocess.ProcessTestCase.test_communicate\"], 0x7ffe57a4c210 /* 10 vars */) = 0"
+            ],
+            "exit": 0
+          }
+        ],
+        "matched_pipe_events": [
+          {
+            "pid": 25179,
+            "op": "write",
+            "fd": 4,
+            "pipe": 42109,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 25179,
+            "op": "read",
+            "fd": 5,
+            "pipe": 42110,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 25179,
+            "op": "read",
+            "fd": 7,
+            "pipe": 42111,
+            "data": "pineapple",
+            "returned": 9
+          },
+          {
+            "pid": 25190,
+            "op": "read",
+            "fd": 0,
+            "pipe": 42109,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 25190,
+            "op": "write",
+            "fd": 1,
+            "pipe": 42110,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 25190,
+            "op": "write",
+            "fd": 2,
+            "pipe": 42111,
+            "data": "pineapple",
+            "returned": 9
+          }
+        ]
+      },
+      "wire_path": "evidence/runs/candidate-communicate-O3/wire.json"
+    },
+    {
+      "owner": "candidate-controls-build-O0",
+      "scope": "selected-caller-build",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/imre",
+        "build",
+        "/workspace/imre-campaign/controls/selected.py",
+        "--runtime-imports",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--module-root",
+        "/workspace/imre-campaign/controls",
+        "-o",
+        "/workspace/imre-campaign/products/candidate/selected-O0"
+      ],
+      "started_utc": "2026-11-04T12:42:22.563702+00:00",
+      "pid": 24380,
+      "timed_out": false,
+      "command_image_sha256": "5bb1f223947afaba29255d10adadebe98d740e6849a8321e7a8383e70b84540f",
+      "classification": "selected-caller-build",
+      "receipt": "evidence/runs/candidate-controls-build-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-controls-build-O0/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-controls-build-O0/stderr",
+        "sha256": "20f7397599b96f3819e6d5978145fd983bb9861d998666e4bc23aa5e2c9c12ce"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-controls-build-O3",
+      "scope": "selected-caller-build",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/imre",
+        "build",
+        "/workspace/imre-campaign/controls/selected.py",
+        "--runtime-imports",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--module-root",
+        "/workspace/imre-campaign/controls",
+        "-o",
+        "/workspace/imre-campaign/products/candidate/selected-O3"
+      ],
+      "started_utc": "2026-11-04T12:42:22.165747+00:00",
+      "pid": 24379,
+      "timed_out": false,
+      "command_image_sha256": "5bb1f223947afaba29255d10adadebe98d740e6849a8321e7a8383e70b84540f",
+      "classification": "selected-caller-build",
+      "receipt": "evidence/runs/candidate-controls-build-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-controls-build-O3/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-controls-build-O3/stderr",
+        "sha256": "4d1ed00bec5f0fdc9a802a0e522f40227d10b668363048e373676d1f6b4b1488"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-finalizer-isolated-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/cases-O0",
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del"
+      ],
+      "started_utc": "2026-11-04T12:49:19.259574+00:00",
+      "pid": 25313,
+      "timed_out": false,
+      "command_image_sha256": "ca37dbeda59b09316e1efd52e11db8b84b22e534f1da03a5136a0a059d156068",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/candidate-finalizer-isolated-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-finalizer-isolated-O0/stdout",
+        "sha256": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-finalizer-isolated-O0/stderr",
+        "sha256": "2ce4a876f24b206109c6666761c73fe60478f866d18d8e34ee454024274682e0"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "candidate-finalizer-isolated-O3",
+      "scope": "unchanged-occurrence-1",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/cases-O3",
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del"
+      ],
+      "started_utc": "2026-11-04T12:49:23.045753+00:00",
+      "pid": 25355,
+      "timed_out": false,
+      "command_image_sha256": "8ac20fe4b39d85947851c38f7e07cf23c0faaa0583e6965b5c34137aaf0a50e7",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/candidate-finalizer-isolated-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-finalizer-isolated-O3/stdout",
+        "sha256": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-finalizer-isolated-O3/stderr",
+        "sha256": "bd1c9cdc2964fa1bddd4a29257ec7143f0217c691ae36433612339f35f2d88d5"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "candidate-fixture-O0",
+      "scope": "selected-caller",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/selected-O0",
+        "fixture"
+      ],
+      "started_utc": "2026-11-04T12:42:42.956230+00:00",
+      "pid": 24397,
+      "timed_out": false,
+      "command_image_sha256": "e23071b4d2d4cd2e39b99fbe2c9984a608308086313e0e36d0dc0a26c19f187a",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/candidate-fixture-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-fixture-O0/stdout",
+        "sha256": "2cda93b135cf16e7ce4e17be296665c7cfd693d48aeb631c21a51ea8a8bc54ab"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-fixture-O0/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-fixture-O3",
+      "scope": "selected-caller",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/selected-O3",
+        "fixture"
+      ],
+      "started_utc": "2026-11-04T12:45:10.684444+00:00",
+      "pid": 24819,
+      "timed_out": false,
+      "command_image_sha256": "ef1532e3d5021b40dd0f004aa7e2b5c1b1af9f680ca9951756cabcea2d1c9178",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/candidate-fixture-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-fixture-O3/stdout",
+        "sha256": "2cda93b135cf16e7ce4e17be296665c7cfd693d48aeb631c21a51ea8a8bc54ab"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-fixture-O3/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-full-stock-child-O0",
+      "scope": "full-suite-stock-child",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/cases-O0",
+        "all"
+      ],
+      "started_utc": "2026-11-04T12:43:25.476820+00:00",
+      "pid": 24498,
+      "timed_out": false,
+      "command_image_sha256": "ca37dbeda59b09316e1efd52e11db8b84b22e534f1da03a5136a0a059d156068",
+      "classification": "imre-full-suite-with-stock-child",
+      "receipt": "evidence/runs/candidate-full-stock-child-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-full-stock-child-O0/stdout",
+        "sha256": "cd3604cda50dfcdacc0f4f61267cacb5dfb28f6a7491d8d63521daffbc39268a"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-full-stock-child-O0/stderr",
+        "sha256": "8fe034c80228be1efc2b637cd1b3d1cb9b01b9555c855bc6379f4d78d4b5be9d"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [
+        [
+          25168,
+          0
+        ]
+      ],
+      "unittest_result": {
+        "ran": 353,
+        "passed": 299,
+        "failures": 1,
+        "errors": 8,
+        "skipped": 45
+      },
+      "suite_detail": {
+        "nonpassing_cases": [
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_bad_data",
+            "last_traceback_line": "AttributeError: <module 'subprocess'> does not have the attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_normal",
+            "last_traceback_line": "AttributeError: <module 'subprocess'> does not have the attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_preexec_exception",
+            "last_traceback_line": "AttributeError: module 'subprocess' has no attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_surrogates_error_message",
+            "last_traceback_line": "AttributeError: module 'subprocess' has no attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCase.test_double_close_on_error",
+            "last_traceback_line": "NotImplementedError: this thread target cannot run independently of the boxed Python heap"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCase.test_threadsafe_wait",
+            "last_traceback_line": "NotImplementedError: native workers require an ordinary Thread with the original run method"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_double_close_on_error",
+            "last_traceback_line": "NotImplementedError: this thread target cannot run independently of the boxed Python heap"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_threadsafe_wait",
+            "last_traceback_line": "NotImplementedError: native workers require an ordinary Thread with the original run method"
+          },
+          {
+            "kind": "FAIL",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del",
+            "last_traceback_line": "AssertionError: 45583 not found in []"
+          }
+        ],
+        "skips": [
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_empty_list",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_fork_exec",
+            "occurrence": 1,
+            "reason": "'implementation detail specific to cpython'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check",
+            "occurrence": 1,
+            "reason": "'implementation detail specific to cpython'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_group_error",
+            "occurrence": 1,
+            "reason": "'setregid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_stopped",
+            "occurrence": 1,
+            "reason": "'need _testcapi.W_STOPCODE'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_user_error",
+            "occurrence": 1,
+            "reason": "'setreuid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected",
+            "occurrence": 1,
+            "reason": "'vfork() not enabled by configure.'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env",
+            "occurrence": 1,
+            "reason": "'Maybe test trigger a leak on Ubuntu'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_call_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds_with_stdio",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_creationflags",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_attribute_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_handle_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_invalid_args",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_issue31471",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_encodings",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_sequence",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_copy",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_keywords",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          }
+        ],
+        "extra_skips_vs_stock_full_r2": [
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_fork_exec",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_stopped",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected",
+            1
+          ]
+        ],
+        "missing_skips_vs_stock_full_r2": []
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "candidate-full-stock-child-O3",
+      "scope": "full-suite-stock-child",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/cases-O3",
+        "all"
+      ],
+      "started_utc": "2026-11-04T12:49:24.500496+00:00",
+      "pid": 25362,
+      "timed_out": false,
+      "command_image_sha256": "8ac20fe4b39d85947851c38f7e07cf23c0faaa0583e6965b5c34137aaf0a50e7",
+      "classification": "imre-full-suite-with-stock-child",
+      "receipt": "evidence/runs/candidate-full-stock-child-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-full-stock-child-O3/stdout",
+        "sha256": "cd3604cda50dfcdacc0f4f61267cacb5dfb28f6a7491d8d63521daffbc39268a"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-full-stock-child-O3/stderr",
+        "sha256": "2e52af4e7ba6d8ee211578bbffae0e32bac81761ddc29fea4235ffb5d8f26a0e"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [
+        [
+          25870,
+          0
+        ]
+      ],
+      "unittest_result": {
+        "ran": 353,
+        "passed": 299,
+        "failures": 1,
+        "errors": 8,
+        "skipped": 45
+      },
+      "suite_detail": {
+        "nonpassing_cases": [
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_bad_data",
+            "last_traceback_line": "AttributeError: <module 'subprocess'> does not have the attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_normal",
+            "last_traceback_line": "AttributeError: <module 'subprocess'> does not have the attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_preexec_exception",
+            "last_traceback_line": "AttributeError: module 'subprocess' has no attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_surrogates_error_message",
+            "last_traceback_line": "AttributeError: module 'subprocess' has no attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCase.test_double_close_on_error",
+            "last_traceback_line": "NotImplementedError: this thread target cannot run independently of the boxed Python heap"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCase.test_threadsafe_wait",
+            "last_traceback_line": "NotImplementedError: native workers require an ordinary Thread with the original run method"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_double_close_on_error",
+            "last_traceback_line": "NotImplementedError: this thread target cannot run independently of the boxed Python heap"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_threadsafe_wait",
+            "last_traceback_line": "NotImplementedError: native workers require an ordinary Thread with the original run method"
+          },
+          {
+            "kind": "FAIL",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del",
+            "last_traceback_line": "AssertionError: 45584 not found in []"
+          }
+        ],
+        "skips": [
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_empty_list",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_fork_exec",
+            "occurrence": 1,
+            "reason": "'implementation detail specific to cpython'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check",
+            "occurrence": 1,
+            "reason": "'implementation detail specific to cpython'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_group_error",
+            "occurrence": 1,
+            "reason": "'setregid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_stopped",
+            "occurrence": 1,
+            "reason": "'need _testcapi.W_STOPCODE'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_user_error",
+            "occurrence": 1,
+            "reason": "'setreuid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected",
+            "occurrence": 1,
+            "reason": "'vfork() not enabled by configure.'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env",
+            "occurrence": 1,
+            "reason": "'Maybe test trigger a leak on Ubuntu'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_call_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds_with_stdio",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_creationflags",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_attribute_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_handle_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_invalid_args",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_issue31471",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_encodings",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_sequence",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_copy",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_keywords",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          }
+        ],
+        "extra_skips_vs_stock_full_r2": [
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_fork_exec",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_stopped",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected",
+            1
+          ]
+        ],
+        "missing_skips_vs_stock_full_r2": []
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "candidate-rebound-O0",
+      "scope": "selected-caller",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/selected-O0",
+        "rebound"
+      ],
+      "started_utc": "2026-11-04T12:42:42.398709+00:00",
+      "pid": 24390,
+      "timed_out": false,
+      "command_image_sha256": "e23071b4d2d4cd2e39b99fbe2c9984a608308086313e0e36d0dc0a26c19f187a",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/candidate-rebound-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-rebound-O0/stdout",
+        "sha256": "d84e1054ccc5011e64173d1697cc8bcb4c3b04e5e241ae66fa7911aa3bca6d7a"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-rebound-O0/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-rebound-O3",
+      "scope": "selected-caller",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/selected-O3",
+        "rebound"
+      ],
+      "started_utc": "2026-11-04T12:45:10.050632+00:00",
+      "pid": 24811,
+      "timed_out": false,
+      "command_image_sha256": "ef1532e3d5021b40dd0f004aa7e2b5c1b1af9f680ca9951756cabcea2d1c9178",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/candidate-rebound-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-rebound-O3/stdout",
+        "sha256": "d84e1054ccc5011e64173d1697cc8bcb4c3b04e5e241ae66fa7911aa3bca6d7a"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-rebound-O3/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-retry-O0",
+      "scope": "selected-caller",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/selected-O0",
+        "retry"
+      ],
+      "started_utc": "2026-11-04T12:42:44.080577+00:00",
+      "pid": 24425,
+      "timed_out": false,
+      "command_image_sha256": "e23071b4d2d4cd2e39b99fbe2c9984a608308086313e0e36d0dc0a26c19f187a",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/candidate-retry-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-retry-O0/stdout",
+        "sha256": "e715360c03be73984dca435600a1cefc0b27e1baeb26d3d98df2dc3be35a8d6c"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-retry-O0/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-retry-O3",
+      "scope": "selected-caller",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/selected-O3",
+        "retry"
+      ],
+      "started_utc": "2026-11-04T12:45:12.385405+00:00",
+      "pid": 24848,
+      "timed_out": false,
+      "command_image_sha256": "ef1532e3d5021b40dd0f004aa7e2b5c1b1af9f680ca9951756cabcea2d1c9178",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/candidate-retry-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-retry-O3/stdout",
+        "sha256": "e715360c03be73984dca435600a1cefc0b27e1baeb26d3d98df2dc3be35a8d6c"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-retry-O3/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-rewrapped-O0",
+      "scope": "selected-caller-rewrapped-streams",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/rewrapped-O0"
+      ],
+      "started_utc": "2026-11-04T12:45:16.232489+00:00",
+      "pid": 24870,
+      "timed_out": false,
+      "command_image_sha256": "f504ffcf11d17ae4802a9a97d6f7b138d0da0d9e68f163d98303d95f2e819a0e",
+      "classification": "selected-caller-rewrapped-streams",
+      "variant_of": "test_communicate_pipe_fd_leak",
+      "selected_caller_source": "stage/rewrapped.py",
+      "variant": "reopen child output streams",
+      "receipt": "evidence/runs/candidate-rewrapped-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-rewrapped-O0/stdout",
+        "sha256": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-rewrapped-O0/stderr",
+        "sha256": "6d49f00e5ec33d8f19dcc61f4e48897e8278ce47da0e4906e06a42e518f090b2"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-rewrapped-O3",
+      "scope": "selected-caller-rewrapped-streams",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/rewrapped-O3"
+      ],
+      "started_utc": "2026-11-04T12:48:39.364137+00:00",
+      "pid": 25233,
+      "timed_out": false,
+      "command_image_sha256": "e9cdc2c684a2ee651e2007067693c2a21f8a9e8eabf5479dd46483e6f6807145",
+      "classification": "selected-caller-rewrapped-streams",
+      "variant_of": "test_communicate_pipe_fd_leak",
+      "selected_caller_source": "stage/rewrapped.py",
+      "variant": "reopen child output streams",
+      "receipt": "evidence/runs/candidate-rewrapped-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-rewrapped-O3/stdout",
+        "sha256": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-rewrapped-O3/stderr",
+        "sha256": "310240bbcbf4a4c5b8b480ce29a307cabe50311181a6f5168f8c2157164fc279"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-rewrapped-build-O0",
+      "scope": "selected-caller-build",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/imre",
+        "build",
+        "/workspace/imre-campaign/stage/rewrapped.py",
+        "--module-root",
+        "/workspace/imre-campaign/stage",
+        "--runtime-imports",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "-o",
+        "/workspace/imre-campaign/products/candidate/rewrapped-O0"
+      ],
+      "started_utc": "2026-11-04T12:44:52.451422+00:00",
+      "pid": 24765,
+      "timed_out": false,
+      "command_image_sha256": "5bb1f223947afaba29255d10adadebe98d740e6849a8321e7a8383e70b84540f",
+      "classification": "selected-caller-build",
+      "receipt": "evidence/runs/candidate-rewrapped-build-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-rewrapped-build-O0/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-rewrapped-build-O0/stderr",
+        "sha256": "78e825d0ea9fa5bc15e87a78d00d047ab368f0e781e08963823d685373ad5c6c"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "candidate-rewrapped-build-O3",
+      "scope": "selected-caller-build",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/candidate/imre",
+        "build",
+        "/workspace/imre-campaign/stage/rewrapped.py",
+        "--module-root",
+        "/workspace/imre-campaign/stage",
+        "--runtime-imports",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "-o",
+        "/workspace/imre-campaign/products/candidate/rewrapped-O3"
+      ],
+      "started_utc": "2026-11-04T12:46:42.906758+00:00",
+      "pid": 25142,
+      "timed_out": false,
+      "command_image_sha256": "5bb1f223947afaba29255d10adadebe98d740e6849a8321e7a8383e70b84540f",
+      "classification": "selected-caller-build",
+      "receipt": "evidence/runs/candidate-rewrapped-build-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/candidate-rewrapped-build-O3/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/candidate-rewrapped-build-O3/stderr",
+        "sha256": "24d5643b0d363bfdafd6ff4b5c140e51e242528f16155778da5097246193f791"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "executor-closeout",
+      "scope": "executor-health",
+      "source": "718713e1ad06d4e4029efa76d10214be19455048",
+      "optimization": "na",
+      "exit": 0,
+      "argv": [
+        "/bin/bash",
+        "-c",
+        "echo \"owner=executor-closeout shell_pid=$$\"; /bin/sh -c \"echo child_pid=\\$\\$ ppid=\\$PPID\"; echo \"child_exit=$?\"; df -h /workspace; printf \"cgroup tasks \"; cat /sys/fs/cgroup/pids.current; printf \"cgroup ceiling \"; cat /sys/fs/cgroup/pids.max"
+      ],
+      "started_utc": "2026-11-04T12:52:18.290611+00:00",
+      "pid": 25798,
+      "timed_out": false,
+      "command_image_sha256": "223fe8564b60636bc738b6178d3ba9a50ef7d791266b0efae6363bb716e4c47f",
+      "classification": "executor-health",
+      "receipt": "evidence/runs/executor-closeout/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/executor-closeout/stdout",
+        "sha256": "e534807d242a42043a23fa88f1d36090945ee82dccbc4d11c508e9ef761dbd4a"
+      },
+      "stderr": {
+        "path": "evidence/runs/executor-closeout/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "executor-strace",
+      "scope": "preflight",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "na",
+      "exit": 0,
+      "argv": [
+        "strace",
+        "-ff",
+        "-yy",
+        "-s",
+        "160",
+        "-o",
+        "/workspace/imre-campaign/evidence/runs/executor-strace/trace",
+        "-e",
+        "trace=execve,clone,clone3,fork,vfork,read,write,readv,writev,exit,exit_group,wait4",
+        "--",
+        "/bin/sh",
+        "-c",
+        "printf \"%s\\n\" owned; /bin/true"
+      ],
+      "started_utc": "2026-11-04T12:18:48.487732+00:00",
+      "pid": 13560,
+      "timed_out": false,
+      "command_image_sha256": "a6f559e00b69a4aa4d8cb607be18d9386c5aee55c509e2c075549dcf00e00fc7",
+      "classification": "preflight",
+      "receipt": "evidence/runs/executor-strace/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/executor-strace/stdout",
+        "sha256": "33bff9108736f23280e9cd50cb1472e3a5b4403ed3f2da1fe67b8487a4fb75c6"
+      },
+      "stderr": {
+        "path": "evidence/runs/executor-strace/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-POSIXProcessTestCase.test_pipe_cloexec_real_tools-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec_real_tools"
+      ],
+      "started_utc": "2026-11-04T12:34:50.170534+00:00",
+      "pid": 23244,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-POSIXProcessTestCase.test_pipe_cloexec_real_tools-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-POSIXProcessTestCase.test_pipe_cloexec_real_tools-O0/stdout",
+        "sha256": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-POSIXProcessTestCase.test_pipe_cloexec_real_tools-O0/stderr",
+        "sha256": "04ff48e7b9eccf50788f725e52975c5c5d6297e6d1c96c75f2065f163a56edc1"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/public/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/public/imre"
+    },
+    {
+      "owner": "public-ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr"
+      ],
+      "started_utc": "2026-11-04T12:34:25.209501+00:00",
+      "pid": 23163,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr-O0/stdout",
+        "sha256": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr-O0/stderr",
+        "sha256": "fbf60c92e0527e6021986bde3d9c65ccc391c3f053b354130a0c0f07f97a6d30"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/public/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/public/imre"
+    },
+    {
+      "owner": "public-RunFuncTestCase.test_encoding_warning-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.RunFuncTestCase.test_encoding_warning"
+      ],
+      "started_utc": "2026-11-04T12:33:53.783346+00:00",
+      "pid": 23008,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-RunFuncTestCase.test_encoding_warning-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-RunFuncTestCase.test_encoding_warning-O0/stdout",
+        "sha256": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-RunFuncTestCase.test_encoding_warning-O0/stderr",
+        "sha256": "4c30b1d263257f75e57b3144603208a090006d62b4760a47c2677d4c4c1a721e"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/public/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/public/imre"
+    },
+    {
+      "owner": "public-build-O0",
+      "scope": "driver-build",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/imre",
+        "build",
+        "/workspace/imre-campaign/stage/run_original.py",
+        "--runtime-imports",
+        "--module-root",
+        "/workspace/imre-campaign/stage",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre-campaign/products/public/libimre_runtime.a",
+        "--clang",
+        "/workspace/imre-campaign/stage/clang19/root/usr/lib/llvm-19/bin/clang",
+        "-o",
+        "/workspace/imre-campaign/products/public/cases-O0"
+      ],
+      "started_utc": "2026-11-04T12:25:58.111399+00:00",
+      "pid": 21668,
+      "timed_out": false,
+      "command_image_sha256": "d365134cc30a3c91b4d2defcc74a445f7d599ba794b354f57e4d1ebfd107abdb",
+      "classification": "original-driver-build",
+      "receipt": "evidence/runs/public-build-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-build-O0/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-build-O0/stderr",
+        "sha256": "b006b4a61f985cf305970f9841bbd72fdd38eaca0f3946adac74909a1340280c"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-build-O3",
+      "scope": "driver-build",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/imre",
+        "build",
+        "/workspace/imre-campaign/stage/run_original.py",
+        "--runtime-imports",
+        "--module-root",
+        "/workspace/imre-campaign/stage",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/imre-campaign/products/public/libimre_runtime.a",
+        "--clang",
+        "/workspace/imre-campaign/stage/clang19/root/usr/lib/llvm-19/bin/clang",
+        "-o",
+        "/workspace/imre-campaign/products/public/cases-O3"
+      ],
+      "started_utc": "2026-11-04T12:26:36.615589+00:00",
+      "pid": 21709,
+      "timed_out": false,
+      "command_image_sha256": "d365134cc30a3c91b4d2defcc74a445f7d599ba794b354f57e4d1ebfd107abdb",
+      "classification": "original-driver-build",
+      "receipt": "evidence/runs/public-build-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-build-O3/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-build-O3/stderr",
+        "sha256": "ed0b6c0fdb86fcaf3a065aaf87bb87cf0d242764a072dad0ee3119b71f79458f"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-communicate-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "strace",
+        "-ff",
+        "-yy",
+        "-s",
+        "160",
+        "-o",
+        "/workspace/imre-campaign/evidence/runs/public-communicate-O0/trace",
+        "-e",
+        "trace=execve,clone,clone3,fork,vfork,read,write,readv,writev,exit,exit_group,wait4",
+        "--",
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.ProcessTestCase.test_communicate"
+      ],
+      "started_utc": "2026-11-04T12:26:15.146295+00:00",
+      "pid": 21686,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "original-communicate-occurrence-1",
+      "receipt": "evidence/runs/public-communicate-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-communicate-O0/stdout",
+        "sha256": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-communicate-O0/stderr",
+        "sha256": "153280c876bfb9e456de436e4e365e69e129440a9e654c6b3f19ac277fcbc856"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/public/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/public/imre",
+      "wire": {
+        "owner": "public-communicate-O0",
+        "optimization": "O0",
+        "leaf_pid": 21700,
+        "lineage": [
+          {
+            "pid": 21700,
+            "images": [
+              "execve(\"/workspace/imre-campaign/products/public/imre\", [\"/workspace/imre-campaign/products/public/imre\", \"-c\", \"import sys,os;sys.stderr.write(\\\"pineapple\\\");sys.stdout.write(sys.stdin.read())\"], 0x7ffcc8bcc2c0 /* 10 vars */) = 0",
+              "execve(\"/tmp/.tmp714Pwd/.imre-exec-fd-4\", [\"-c\"], 0x7fff2a1d9708 /* 10 vars */) = 0"
+            ],
+            "exit": 0
+          },
+          {
+            "pid": 21689,
+            "images": [
+              "execve(\"/workspace/imre-campaign/products/public/cases-O0\", [\"/workspace/imre-campaign/products/public/cases-O0\", \"test.test_subprocess.ProcessTestCase.test_communicate\"], 0x7ffc4aca9500 /* 10 vars */) = 0"
+            ],
+            "exit": 0
+          }
+        ],
+        "matched_pipe_events": [
+          {
+            "pid": 21689,
+            "op": "write",
+            "fd": 4,
+            "pipe": 26749,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 21689,
+            "op": "read",
+            "fd": 5,
+            "pipe": 26750,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 21689,
+            "op": "read",
+            "fd": 7,
+            "pipe": 26751,
+            "data": "pineapple",
+            "returned": 9
+          },
+          {
+            "pid": 21700,
+            "op": "read",
+            "fd": 0,
+            "pipe": 26749,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 21700,
+            "op": "write",
+            "fd": 1,
+            "pipe": 26750,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 21700,
+            "op": "write",
+            "fd": 2,
+            "pipe": 26751,
+            "data": "pineapple",
+            "returned": 9
+          }
+        ]
+      },
+      "wire_path": "evidence/runs/public-communicate-O0/wire.json"
+    },
+    {
+      "owner": "public-communicate-O3",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "strace",
+        "-ff",
+        "-yy",
+        "-s",
+        "160",
+        "-o",
+        "/workspace/imre-campaign/evidence/runs/public-communicate-O3/trace",
+        "-e",
+        "trace=execve,clone,clone3,fork,vfork,read,write,readv,writev,exit,exit_group,wait4",
+        "--",
+        "/workspace/imre-campaign/products/public/cases-O3",
+        "test.test_subprocess.ProcessTestCase.test_communicate"
+      ],
+      "started_utc": "2026-11-04T12:28:53.150847+00:00",
+      "pid": 21826,
+      "timed_out": false,
+      "command_image_sha256": "615d8b78b653e671e3383fa8305ce2b114aae9060935a6316e727586fd28cf99",
+      "classification": "original-communicate-occurrence-1",
+      "receipt": "evidence/runs/public-communicate-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-communicate-O3/stdout",
+        "sha256": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-communicate-O3/stderr",
+        "sha256": "bf95b7e34e1f050fcfc52fe2b265bae81ef2a49d347916caaed4460391e9c6d7"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/public/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/public/imre",
+      "wire": {
+        "owner": "public-communicate-O3",
+        "optimization": "O3",
+        "leaf_pid": 21840,
+        "lineage": [
+          {
+            "pid": 21840,
+            "images": [
+              "execve(\"/workspace/imre-campaign/products/public/imre\", [\"/workspace/imre-campaign/products/public/imre\", \"-c\", \"import sys,os;sys.stderr.write(\\\"pineapple\\\");sys.stdout.write(sys.stdin.read())\"], 0x7fffae6edc90 /* 10 vars */) = 0",
+              "execve(\"/tmp/.tmplbxjBM/.imre-exec-fd-4\", [\"-c\"], 0x7ffebe262c18 /* 10 vars */) = 0"
+            ],
+            "exit": 0
+          },
+          {
+            "pid": 21829,
+            "images": [
+              "execve(\"/workspace/imre-campaign/products/public/cases-O3\", [\"/workspace/imre-campaign/products/public/cases-O3\", \"test.test_subprocess.ProcessTestCase.test_communicate\"], 0x7ffd095de6a0 /* 10 vars */) = 0"
+            ],
+            "exit": 0
+          }
+        ],
+        "matched_pipe_events": [
+          {
+            "pid": 21840,
+            "op": "read",
+            "fd": 0,
+            "pipe": 28674,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 21840,
+            "op": "write",
+            "fd": 1,
+            "pipe": 28675,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 21840,
+            "op": "write",
+            "fd": 2,
+            "pipe": 28676,
+            "data": "pineapple",
+            "returned": 9
+          },
+          {
+            "pid": 21829,
+            "op": "write",
+            "fd": 4,
+            "pipe": 28674,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 21829,
+            "op": "read",
+            "fd": 5,
+            "pipe": 28675,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 21829,
+            "op": "read",
+            "fd": 7,
+            "pipe": 28676,
+            "data": "pineapple",
+            "returned": 9
+          }
+        ]
+      },
+      "wire_path": "evidence/runs/public-communicate-O3/wire.json"
+    },
+    {
+      "owner": "public-double-close-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.ProcessTestCase.test_double_close_on_error"
+      ],
+      "started_utc": "2026-11-04T12:32:53.996002+00:00",
+      "pid": 22646,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-double-close-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-double-close-O0/stdout",
+        "sha256": "06aa12f0d94f94b0e5967a6354274f0d0df087d553427c76bad9e636061fa6e1"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-double-close-O0/stderr",
+        "sha256": "b5ac89a39cfaa7f73561abaffeb644c36d9fdb09f0e57a0888f7bd43522ae003"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 0,
+        "failures": 0,
+        "errors": 1,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/public/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/public/imre"
+    },
+    {
+      "owner": "public-double-close-O3",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O3",
+        "test.test_subprocess.ProcessTestCase.test_double_close_on_error"
+      ],
+      "started_utc": "2026-11-04T12:33:06.867816+00:00",
+      "pid": 22711,
+      "timed_out": false,
+      "command_image_sha256": "615d8b78b653e671e3383fa8305ce2b114aae9060935a6316e727586fd28cf99",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-double-close-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-double-close-O3/stdout",
+        "sha256": "06aa12f0d94f94b0e5967a6354274f0d0df087d553427c76bad9e636061fa6e1"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-double-close-O3/stderr",
+        "sha256": "e4fd70ef3e6404118594c7efd05e9deb58620e95317a3f1d50ea03a12e06ccb5"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 0,
+        "failures": 0,
+        "errors": 1,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/products/public/imre",
+      "configured_child_executable": "/workspace/imre-campaign/products/public/imre"
+    },
+    {
+      "owner": "public-finalizer-isolated-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del"
+      ],
+      "started_utc": "2026-11-04T12:49:10.843849+00:00",
+      "pid": 25289,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-finalizer-isolated-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-finalizer-isolated-O0/stdout",
+        "sha256": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-finalizer-isolated-O0/stderr",
+        "sha256": "1b5451e105d5ebd9dec09c9a56a1b58f0e3832a0f2547fd5da68627e0d27ec22"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "public-finalizer-isolated-O3",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O3",
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del"
+      ],
+      "started_utc": "2026-11-04T12:49:14.734611+00:00",
+      "pid": 25301,
+      "timed_out": false,
+      "command_image_sha256": "615d8b78b653e671e3383fa8305ce2b114aae9060935a6316e727586fd28cf99",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-finalizer-isolated-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-finalizer-isolated-O3/stdout",
+        "sha256": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-finalizer-isolated-O3/stderr",
+        "sha256": "a91cf889314eaf1d8ee5dc0447393fb9f2c1053524f92b31ae0d9d10857129a6"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "public-full-stock-child-O0",
+      "scope": "full-suite-stock-child",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "all"
+      ],
+      "started_utc": "2026-11-04T12:31:01.767945+00:00",
+      "pid": 21928,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "imre-full-suite-with-stock-child",
+      "receipt": "evidence/runs/public-full-stock-child-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-full-stock-child-O0/stdout",
+        "sha256": "8e08358dd495237fb5683ceec1e787f7c171e1d5d320ee9040cc7289aaacf2e9"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-full-stock-child-O0/stderr",
+        "sha256": "b403846d834709fbf545c4f1aeb18fca6664f26b985714dec7feb538325aab3e"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [
+        [
+          23133,
+          0
+        ]
+      ],
+      "unittest_result": {
+        "ran": 353,
+        "passed": 300,
+        "failures": 0,
+        "errors": 8,
+        "skipped": 45
+      },
+      "suite_detail": {
+        "nonpassing_cases": [
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_bad_data",
+            "last_traceback_line": "AttributeError: <module 'subprocess'> does not have the attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_normal",
+            "last_traceback_line": "AttributeError: <module 'subprocess'> does not have the attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_preexec_exception",
+            "last_traceback_line": "AttributeError: module 'subprocess' has no attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_surrogates_error_message",
+            "last_traceback_line": "AttributeError: module 'subprocess' has no attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCase.test_double_close_on_error",
+            "last_traceback_line": "NotImplementedError: this thread target cannot run independently of the boxed Python heap"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCase.test_threadsafe_wait",
+            "last_traceback_line": "NotImplementedError: native workers require an ordinary Thread with the original run method"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_double_close_on_error",
+            "last_traceback_line": "NotImplementedError: this thread target cannot run independently of the boxed Python heap"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_threadsafe_wait",
+            "last_traceback_line": "NotImplementedError: native workers require an ordinary Thread with the original run method"
+          }
+        ],
+        "skips": [
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_empty_list",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_fork_exec",
+            "occurrence": 1,
+            "reason": "'implementation detail specific to cpython'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check",
+            "occurrence": 1,
+            "reason": "'implementation detail specific to cpython'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_group_error",
+            "occurrence": 1,
+            "reason": "'setregid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_stopped",
+            "occurrence": 1,
+            "reason": "'need _testcapi.W_STOPCODE'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_user_error",
+            "occurrence": 1,
+            "reason": "'setreuid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected",
+            "occurrence": 1,
+            "reason": "'vfork() not enabled by configure.'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env",
+            "occurrence": 1,
+            "reason": "'Maybe test trigger a leak on Ubuntu'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_call_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds_with_stdio",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_creationflags",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_attribute_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_handle_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_invalid_args",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_issue31471",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_encodings",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_sequence",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_copy",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_keywords",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          }
+        ],
+        "extra_skips_vs_stock_full_r2": [
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_fork_exec",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_stopped",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected",
+            1
+          ]
+        ],
+        "missing_skips_vs_stock_full_r2": []
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "public-full-stock-child-O3",
+      "scope": "full-suite-stock-child",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O3",
+        "all"
+      ],
+      "started_utc": "2026-11-04T12:31:01.704432+00:00",
+      "pid": 21927,
+      "timed_out": false,
+      "command_image_sha256": "615d8b78b653e671e3383fa8305ce2b114aae9060935a6316e727586fd28cf99",
+      "classification": "imre-full-suite-with-stock-child",
+      "receipt": "evidence/runs/public-full-stock-child-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-full-stock-child-O3/stdout",
+        "sha256": "cd3604cda50dfcdacc0f4f61267cacb5dfb28f6a7491d8d63521daffbc39268a"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-full-stock-child-O3/stderr",
+        "sha256": "f08486bf3f70fb0a0690ae31abe19cda0e45c61231e5be8fff75bc5ccbb179d0"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [
+        [
+          23220,
+          0
+        ]
+      ],
+      "unittest_result": {
+        "ran": 353,
+        "passed": 299,
+        "failures": 1,
+        "errors": 8,
+        "skipped": 45
+      },
+      "suite_detail": {
+        "nonpassing_cases": [
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_bad_data",
+            "last_traceback_line": "AttributeError: <module 'subprocess'> does not have the attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_normal",
+            "last_traceback_line": "AttributeError: <module 'subprocess'> does not have the attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_preexec_exception",
+            "last_traceback_line": "AttributeError: module 'subprocess' has no attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_surrogates_error_message",
+            "last_traceback_line": "AttributeError: module 'subprocess' has no attribute '_fork_exec'"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCase.test_double_close_on_error",
+            "last_traceback_line": "NotImplementedError: this thread target cannot run independently of the boxed Python heap"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCase.test_threadsafe_wait",
+            "last_traceback_line": "NotImplementedError: native workers require an ordinary Thread with the original run method"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_double_close_on_error",
+            "last_traceback_line": "NotImplementedError: this thread target cannot run independently of the boxed Python heap"
+          },
+          {
+            "kind": "ERROR",
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_threadsafe_wait",
+            "last_traceback_line": "NotImplementedError: native workers require an ordinary Thread with the original run method"
+          },
+          {
+            "kind": "FAIL",
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del",
+            "last_traceback_line": "AssertionError: 45575 not found in []"
+          }
+        ],
+        "skips": [
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_empty_list",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_fork_exec",
+            "occurrence": 1,
+            "reason": "'implementation detail specific to cpython'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check",
+            "occurrence": 1,
+            "reason": "'implementation detail specific to cpython'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_group_error",
+            "occurrence": 1,
+            "reason": "'setregid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_stopped",
+            "occurrence": 1,
+            "reason": "'need _testcapi.W_STOPCODE'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_user_error",
+            "occurrence": 1,
+            "reason": "'setreuid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected",
+            "occurrence": 1,
+            "reason": "'vfork() not enabled by configure.'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env",
+            "occurrence": 1,
+            "reason": "'Maybe test trigger a leak on Ubuntu'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_call_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds_with_stdio",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_creationflags",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_attribute_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_handle_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_invalid_args",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_issue31471",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_encodings",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_sequence",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_copy",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_keywords",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          }
+        ],
+        "extra_skips_vs_stock_full_r2": [
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_fork_exec",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_stopped",
+            1
+          ],
+          [
+            "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected",
+            1
+          ]
+        ],
+        "missing_skips_vs_stock_full_r2": []
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "public-rebound-O0",
+      "scope": "selected-caller",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/public/rebound-O0"
+      ],
+      "started_utc": "2026-11-04T12:34:37.480789+00:00",
+      "pid": 23187,
+      "timed_out": false,
+      "command_image_sha256": "d4be21666fb7ffd6627bb039583496a99138674d74bd0176b1803a066c5955df",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/public-rebound-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-rebound-O0/stdout",
+        "sha256": "f57875e36c50deb86a58b9abe7c449cce9158a40e27d0b2366191443ccf22fee"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-rebound-O0/stderr",
+        "sha256": "6898a9dc41740184fb0d40282aadbcba6e5d967d5577f8b618e0db7caff81573"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-rebound-O3",
+      "scope": "selected-caller",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/public/rebound-O3"
+      ],
+      "started_utc": "2026-11-04T12:36:22.501629+00:00",
+      "pid": 23539,
+      "timed_out": false,
+      "command_image_sha256": "35b7717aec1445c0b299fdb44cd80e438cd34e28f8905f999ceb0c17b995dfb8",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/public-rebound-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-rebound-O3/stdout",
+        "sha256": "f57875e36c50deb86a58b9abe7c449cce9158a40e27d0b2366191443ccf22fee"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-rebound-O3/stderr",
+        "sha256": "6898a9dc41740184fb0d40282aadbcba6e5d967d5577f8b618e0db7caff81573"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-rebound-build-O0",
+      "scope": "selected-caller-build",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/imre",
+        "build",
+        "/workspace/imre-campaign/probes/rebound_output.py",
+        "--runtime-imports",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--module-root",
+        "/workspace/imre-campaign/probes",
+        "-o",
+        "/workspace/imre-campaign/products/public/rebound-O0"
+      ],
+      "started_utc": "2026-11-04T12:34:09.429121+00:00",
+      "pid": 23088,
+      "timed_out": false,
+      "command_image_sha256": "d365134cc30a3c91b4d2defcc74a445f7d599ba794b354f57e4d1ebfd107abdb",
+      "classification": "selected-caller-build",
+      "receipt": "evidence/runs/public-rebound-build-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-rebound-build-O0/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-rebound-build-O0/stderr",
+        "sha256": "d8590000601132b11ca5cc00dfa628b5f42f617157230333553e76a99bdda83e"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-rebound-build-O3",
+      "scope": "selected-caller-build",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/imre",
+        "build",
+        "/workspace/imre-campaign/probes/rebound_output.py",
+        "--runtime-imports",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--module-root",
+        "/workspace/imre-campaign/probes",
+        "-o",
+        "/workspace/imre-campaign/products/public/rebound-O3"
+      ],
+      "started_utc": "2026-11-04T12:34:09.429212+00:00",
+      "pid": 23087,
+      "timed_out": false,
+      "command_image_sha256": "d365134cc30a3c91b4d2defcc74a445f7d599ba794b354f57e4d1ebfd107abdb",
+      "classification": "selected-caller-build",
+      "receipt": "evidence/runs/public-rebound-build-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-rebound-build-O3/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-rebound-build-O3/stderr",
+        "sha256": "efbcc481bf81dcabf4c4bb04078c7bca88a95c8cfc24f036ecad688c357dff46"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-rewrapped-O0",
+      "scope": "selected-caller-rewrapped-streams",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/public/rewrapped-O0"
+      ],
+      "started_utc": "2026-11-04T12:44:46.651193+00:00",
+      "pid": 24732,
+      "timed_out": false,
+      "command_image_sha256": "66469dac4104fab7a3c9ae9b4006347342d4b226e9c3dd8e97a5e24e8005baaa",
+      "classification": "selected-caller-rewrapped-streams",
+      "variant_of": "test_communicate_pipe_fd_leak",
+      "selected_caller_source": "stage/rewrapped.py",
+      "variant": "reopen child output streams",
+      "receipt": "evidence/runs/public-rewrapped-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-rewrapped-O0/stdout",
+        "sha256": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-rewrapped-O0/stderr",
+        "sha256": "284848e267dc036b5395d520d28224b53835e8615c17b42657b517c08422cd09"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-rewrapped-O3",
+      "scope": "selected-caller-rewrapped-streams",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 1,
+      "argv": [
+        "/workspace/imre-campaign/products/public/rewrapped-O3"
+      ],
+      "started_utc": "2026-11-04T12:46:36.966600+00:00",
+      "pid": 25077,
+      "timed_out": false,
+      "command_image_sha256": "4d41bf2250cc2facc0c6d68a9d795d7abea8ac4e116e2d9b199a57d8150048de",
+      "classification": "selected-caller-rewrapped-streams",
+      "variant_of": "test_communicate_pipe_fd_leak",
+      "selected_caller_source": "stage/rewrapped.py",
+      "variant": "reopen child output streams",
+      "receipt": "evidence/runs/public-rewrapped-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-rewrapped-O3/stdout",
+        "sha256": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-rewrapped-O3/stderr",
+        "sha256": "f2384cb62f670943933c87c162772c6cb4bab38565aa3e11fe835362c2c0b7e5"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-rewrapped-build-O0",
+      "scope": "selected-caller-build",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/imre",
+        "build",
+        "/workspace/imre-campaign/stage/rewrapped.py",
+        "--module-root",
+        "/workspace/imre-campaign/stage",
+        "--runtime-imports",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "-o",
+        "/workspace/imre-campaign/products/public/rewrapped-O0"
+      ],
+      "started_utc": "2026-11-04T12:44:29.457592+00:00",
+      "pid": 24678,
+      "timed_out": false,
+      "command_image_sha256": "d365134cc30a3c91b4d2defcc74a445f7d599ba794b354f57e4d1ebfd107abdb",
+      "classification": "selected-caller-build",
+      "receipt": "evidence/runs/public-rewrapped-build-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-rewrapped-build-O0/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-rewrapped-build-O0/stderr",
+        "sha256": "ce9831495ace793c044c89cb6a36d8f477a1bdfcc4b986213ca64333f3894ac2"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-rewrapped-build-O3",
+      "scope": "selected-caller-build",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O3",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/imre",
+        "build",
+        "/workspace/imre-campaign/stage/rewrapped.py",
+        "--module-root",
+        "/workspace/imre-campaign/stage",
+        "--runtime-imports",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "-o",
+        "/workspace/imre-campaign/products/public/rewrapped-O3"
+      ],
+      "started_utc": "2026-11-04T12:44:29.457571+00:00",
+      "pid": 24677,
+      "timed_out": false,
+      "command_image_sha256": "d365134cc30a3c91b4d2defcc74a445f7d599ba794b354f57e4d1ebfd107abdb",
+      "classification": "selected-caller-build",
+      "receipt": "evidence/runs/public-rewrapped-build-O3/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-rewrapped-build-O3/stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-rewrapped-build-O3/stderr",
+        "sha256": "342964616c63336a020c7a21209db308fbd23fba1d7c356a95e43f1e7f56a631"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "public-test_communicate_errors-stock-child-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.ProcessTestCase.test_communicate_errors"
+      ],
+      "started_utc": "2026-11-04T12:31:26.512266+00:00",
+      "pid": 22086,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-test_communicate_errors-stock-child-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-test_communicate_errors-stock-child-O0/stdout",
+        "sha256": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-test_communicate_errors-stock-child-O0/stderr",
+        "sha256": "e8f5864bd0ac88e76264f0285597f35f90ae172e00aa41bf874b280aef715d77"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "public-test_post_timeout_communicate_sends_input-stock-child-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input"
+      ],
+      "started_utc": "2026-11-04T12:31:32.126523+00:00",
+      "pid": 22123,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-test_post_timeout_communicate_sends_input-stock-child-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-test_post_timeout_communicate_sends_input-stock-child-O0/stdout",
+        "sha256": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-test_post_timeout_communicate_sends_input-stock-child-O0/stderr",
+        "sha256": "f38c03f1104e947d17585489ea21fceb744a0de3fb3bcc2242cc97e840c0a7a7"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "public-test_universal_newlines_and_text-stock-child-O0",
+      "scope": "unchanged-occurrence-1",
+      "source": "c038ac6fe7bf871e38402217ac9a19875ea2ec64",
+      "optimization": "O0",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/products/public/cases-O0",
+        "test.test_subprocess.ProcessTestCase.test_universal_newlines_and_text"
+      ],
+      "started_utc": "2026-11-04T12:31:42.645228+00:00",
+      "pid": 22183,
+      "timed_out": false,
+      "command_image_sha256": "e18b9d092f7bb558f41a606aff156fc028564aa52de9d5609f4417d154ae1f51",
+      "classification": "other-original-occurrence-1",
+      "receipt": "evidence/runs/public-test_universal_newlines_and_text-stock-child-O0/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/public-test_universal_newlines_and_text-stock-child-O0/stdout",
+        "sha256": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc"
+      },
+      "stderr": {
+        "path": "evidence/runs/public-test_universal_newlines_and_text-stock-child-O0/stderr",
+        "sha256": "cfbf8a2c8bda706475a90a2462c6e01b649d792e47ff8e8568b7ff37ed611016"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE imre EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": "/workspace/imre-campaign/cpython/python"
+    },
+    {
+      "owner": "stock-baseline-communicate",
+      "scope": "unchanged-occurrence-1",
+      "source": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "optimization": "stock",
+      "exit": 0,
+      "argv": [
+        "strace",
+        "-ff",
+        "-yy",
+        "-s",
+        "160",
+        "-o",
+        "/workspace/imre-campaign/evidence/runs/stock-baseline-communicate/trace",
+        "-e",
+        "trace=execve,clone,clone3,fork,vfork,read,write,readv,writev,exit,exit_group,wait4",
+        "--",
+        "/workspace/imre-campaign/cpython/python",
+        "-B",
+        "/workspace/imre-campaign/stage/run_original.py",
+        "test.test_subprocess.ProcessTestCase.test_communicate"
+      ],
+      "started_utc": "2026-11-04T12:19:18.846662+00:00",
+      "pid": 15682,
+      "timed_out": false,
+      "command_image_sha256": "107a56456360b507e5d5e14d3594e723268b009cf415f8f7643da6600c8f664d",
+      "classification": "original-communicate-occurrence-1",
+      "receipt": "evidence/runs/stock-baseline-communicate/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/stock-baseline-communicate/stdout",
+        "sha256": "6f4ae06d082f7f12775beff93185cc86343a47c0ac4ecf5100378bbfd45822ed"
+      },
+      "stderr": {
+        "path": "evidence/runs/stock-baseline-communicate/stderr",
+        "sha256": "167d63ec1615ad1704219e1ef4108e217726dfb0213fd12fc25b8ba5331ace6f"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [],
+      "unittest_result": {
+        "ran": 1,
+        "passed": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE cpython EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": null,
+      "wire": {
+        "owner": "stock-baseline-communicate",
+        "optimization": "stock",
+        "leaf_pid": 15839,
+        "lineage": [
+          {
+            "pid": 15839,
+            "images": [
+              "execve(\"/workspace/imre-campaign/cpython/python\", [\"/workspace/imre-campaign/cpython/python\", \"-c\", \"import sys,os;sys.stderr.write(\\\"pineapple\\\");sys.stdout.write(sys.stdin.read())\"], 0x7ffcb9f9f100 /* 5 vars */) = 0"
+            ],
+            "exit": 0
+          },
+          {
+            "pid": 15685,
+            "images": [
+              "execve(\"/workspace/imre-campaign/cpython/python\", [\"/workspace/imre-campaign/cpython/python\", \"-B\", \"/workspace/imre-campaign/stage/run_original.py\", \"test.test_subprocess.ProcessTestCase.test_communicate\"], 0x7fff20cd0160 /* 5 vars */) = 0"
+            ],
+            "exit": 0
+          }
+        ],
+        "matched_pipe_events": [
+          {
+            "pid": 15839,
+            "op": "read",
+            "fd": 0,
+            "pipe": 18477,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 15839,
+            "op": "write",
+            "fd": 1,
+            "pipe": 18478,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 15839,
+            "op": "write",
+            "fd": 2,
+            "pipe": 18479,
+            "data": "pineapple",
+            "returned": 9
+          },
+          {
+            "pid": 15685,
+            "op": "write",
+            "fd": 4,
+            "pipe": 18477,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 15685,
+            "op": "read",
+            "fd": 5,
+            "pipe": 18478,
+            "data": "banana",
+            "returned": 6
+          },
+          {
+            "pid": 15685,
+            "op": "read",
+            "fd": 7,
+            "pipe": 18479,
+            "data": "pineapple",
+            "returned": 9
+          }
+        ]
+      },
+      "wire_path": "evidence/runs/stock-baseline-communicate/wire.json"
+    },
+    {
+      "owner": "stock-fixture",
+      "scope": "selected-caller",
+      "source": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "optimization": "stock",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/cpython/python",
+        "-B",
+        "/workspace/imre-campaign/controls/selected.py",
+        "fixture"
+      ],
+      "started_utc": "2026-11-04T12:39:26.050583+00:00",
+      "pid": 24086,
+      "timed_out": false,
+      "command_image_sha256": "107a56456360b507e5d5e14d3594e723268b009cf415f8f7643da6600c8f664d",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/stock-fixture/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/stock-fixture/stdout",
+        "sha256": "2cda93b135cf16e7ce4e17be296665c7cfd693d48aeb631c21a51ea8a8bc54ab"
+      },
+      "stderr": {
+        "path": "evidence/runs/stock-fixture/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "stock-full",
+      "scope": "full-suite",
+      "source": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "optimization": "stock",
+      "exit": null,
+      "argv": [
+        "/workspace/imre-campaign/cpython/python",
+        "-B",
+        "/workspace/imre-campaign/stage/run_original.py",
+        "all"
+      ],
+      "started_utc": "2026-11-04T12:19:20.153435+00:00",
+      "pid": 15914,
+      "timed_out": null,
+      "command_image_sha256": "107a56456360b507e5d5e14d3594e723268b009cf415f8f7643da6600c8f664d",
+      "classification": "stock-full-suite",
+      "receipt": "evidence/runs/stock-full/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/stock-full/stdout",
+        "sha256": "1a41495cb4c7e895d49002fba33a298b18966018a544e437b2db74d00f5eafac"
+      },
+      "stderr": {
+        "path": "evidence/runs/stock-full/stderr",
+        "sha256": "daff52af27d029b1ec443d6d12c4ee157ae3e9197f1dcb6cdb103420ffd8b923"
+      },
+      "note": "Unittest printed OK (353, skipped=41). Supervisor failed during orphan collection after wait, before persisting the target exit. Repeated as stock-full-r2.",
+      "supervisor_exit": 1,
+      "terminal_wait": "unavailable",
+      "exit_status": "target exit unknown",
+      "unittest_result": {
+        "ran": 353,
+        "passed": 312,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 41
+      },
+      "suite_detail": {
+        "nonpassing_cases": [],
+        "skips": [
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_empty_list",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_group_error",
+            "occurrence": 1,
+            "reason": "'setregid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_user_error",
+            "occurrence": 1,
+            "reason": "'setreuid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env",
+            "occurrence": 1,
+            "reason": "'Maybe test trigger a leak on Ubuntu'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_call_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds_with_stdio",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_creationflags",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_attribute_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_handle_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_invalid_args",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_issue31471",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_encodings",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_sequence",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_copy",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_keywords",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          }
+        ],
+        "extra_skips_vs_stock_full_r2": [],
+        "missing_skips_vs_stock_full_r2": []
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE cpython EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": null
+    },
+    {
+      "owner": "stock-full-r2",
+      "scope": "full-suite",
+      "source": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "optimization": "stock",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/cpython/python",
+        "-B",
+        "/workspace/imre-campaign/stage/run_original.py",
+        "all"
+      ],
+      "started_utc": "2026-11-04T12:20:41.765772+00:00",
+      "pid": 20556,
+      "timed_out": false,
+      "command_image_sha256": "107a56456360b507e5d5e14d3594e723268b009cf415f8f7643da6600c8f664d",
+      "classification": "stock-full-suite",
+      "receipt": "evidence/runs/stock-full-r2/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/stock-full-r2/stdout",
+        "sha256": "1a41495cb4c7e895d49002fba33a298b18966018a544e437b2db74d00f5eafac"
+      },
+      "stderr": {
+        "path": "evidence/runs/stock-full-r2/stderr",
+        "sha256": "4cc377c7f5d6e4ceaac75bf498e8d723ae2fe5784795487ce8cbef3918f99906"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": [
+        [
+          21216,
+          -9
+        ]
+      ],
+      "unittest_result": {
+        "ran": 353,
+        "passed": 312,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 41
+      },
+      "suite_detail": {
+        "nonpassing_cases": [],
+        "skips": [
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_noshell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_sequence_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.CommandsWithSpaces.test_shell_string_with_spaces",
+            "occurrence": 1,
+            "reason": "'Windows-specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_empty_list",
+            "occurrence": 1,
+            "reason": "'setgroup() EPERM; this test may require root.'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_group_error",
+            "occurrence": 1,
+            "reason": "'setregid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.POSIXProcessTestCase.test_user_error",
+            "occurrence": 1,
+            "reason": "'setreuid() available on platform'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCase.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd",
+            "occurrence": 1,
+            "reason": "'need an installed Python. See #7774'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_leaking_fds_on_error",
+            "occurrence": 1,
+            "reason": "\"resource 'cpu' is not enabled\""
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes",
+            "occurrence": 1,
+            "reason": "'need msvcrt.CrtSetReportMode'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_negative_timeout",
+            "occurrence": 1,
+            "reason": "'need subprocess._winapi'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_invalid_env",
+            "occurrence": 1,
+            "reason": "'Windows only issue'"
+          },
+          {
+            "test": "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env",
+            "occurrence": 1,
+            "reason": "'Maybe test trigger a leak on Ubuntu'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_call_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_close_fds_with_stdio",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_creationflags",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_attribute_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_empty_handle_list",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_invalid_args",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_issue31471",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_kill_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_send_signal_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_encodings",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_sequence",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_shell_string",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_copy",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_keywords",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          },
+          {
+            "test": "test.test_subprocess.Win32ProcessTestCase.test_terminate_dead",
+            "occurrence": 1,
+            "reason": "'Windows specific tests'"
+          }
+        ],
+        "extra_skips_vs_stock_full_r2": [],
+        "missing_skips_vs_stock_full_r2": []
+      },
+      "driver": "MODULE /workspace/imre-campaign/stage/test/test_subprocess.py ENGINE cpython EXECUTABLE /workspace/imre-campaign/cpython/python",
+      "configured_child_executable": null
+    },
+    {
+      "owner": "stock-rebound-output",
+      "scope": "selected-caller",
+      "source": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "optimization": "stock",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/cpython/python",
+        "-B",
+        "/workspace/imre-campaign/probes/rebound_output.py"
+      ],
+      "started_utc": "2026-11-04T12:34:08.170024+00:00",
+      "pid": 23071,
+      "timed_out": false,
+      "command_image_sha256": "107a56456360b507e5d5e14d3594e723268b009cf415f8f7643da6600c8f664d",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/stock-rebound-output/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/stock-rebound-output/stdout",
+        "sha256": "d84e1054ccc5011e64173d1697cc8bcb4c3b04e5e241ae66fa7911aa3bca6d7a"
+      },
+      "stderr": {
+        "path": "evidence/runs/stock-rebound-output/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "stock-retry",
+      "scope": "selected-caller",
+      "source": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "optimization": "stock",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/cpython/python",
+        "-B",
+        "/workspace/imre-campaign/controls/selected.py",
+        "retry"
+      ],
+      "started_utc": "2026-11-04T12:39:26.239374+00:00",
+      "pid": 24111,
+      "timed_out": false,
+      "command_image_sha256": "107a56456360b507e5d5e14d3594e723268b009cf415f8f7643da6600c8f664d",
+      "classification": "selected-caller",
+      "receipt": "evidence/runs/stock-retry/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/stock-retry/stdout",
+        "sha256": "e715360c03be73984dca435600a1cefc0b27e1baeb26d3d98df2dc3be35a8d6c"
+      },
+      "stderr": {
+        "path": "evidence/runs/stock-retry/stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    },
+    {
+      "owner": "stock-rewrapped-upstream",
+      "scope": "selected-caller-rewrapped-streams",
+      "source": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "optimization": "stock",
+      "exit": 0,
+      "argv": [
+        "/workspace/imre-campaign/cpython/python",
+        "-B",
+        "/workspace/imre-campaign/stage/rewrapped.py"
+      ],
+      "started_utc": "2026-11-04T12:44:28.293769+00:00",
+      "pid": 24647,
+      "timed_out": false,
+      "command_image_sha256": "107a56456360b507e5d5e14d3594e723268b009cf415f8f7643da6600c8f664d",
+      "classification": "selected-caller-rewrapped-streams",
+      "variant_of": "test_communicate_pipe_fd_leak",
+      "selected_caller_source": "stage/rewrapped.py",
+      "variant": "reopen child output streams",
+      "receipt": "evidence/runs/stock-rewrapped-upstream/receipt.json",
+      "stdout": {
+        "path": "evidence/runs/stock-rewrapped-upstream/stdout",
+        "sha256": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f"
+      },
+      "stderr": {
+        "path": "evidence/runs/stock-rewrapped-upstream/stderr",
+        "sha256": "bd00581ae4b106de1fa125c28f2cd67ad1f5c848a0486f1744cc42be201c4f7e"
+      },
+      "terminal_wait": "ECHILD",
+      "adopted": []
+    }
+  ],
+  "notes": [
+    "Each owner identifies one physical invocation. See the full receipt for the child selection, command, and working directory.",
+    "The imre-full-suite-with-stock-child classification uses the Imre parent driver with pinned stock CPython as sys.executable.",
+    "RESULT gives observed unittest totals independently of process exit. stock-full lost its target exit during orphan collection and was repeated as stock-full-r2.",
+    "Selected callers use independent fixture sources and remain separate from original CPython outcomes.",
+    "Smoke status files record owner, optimization and phase; howto records the build command template.",
+    "Build and test binary contents are excluded from raw-streams.tar.gz. Product hashes identify the reviewed and public binaries."
+  ],
+  "files_in_stream_archive": {
+    "controls/boxed_subprocess_buffering.py": "ceb98bda4b10fdabc85abd9d600975dcb7375bd45bd167880db4245eea8f125f",
+    "controls/rebound_output.py": "bd063635c927491b001f751737395904d252729a9e5f63a5893223175fa66725",
+    "controls/retry_output.py": "e9f4afc714f14f9e6ab75a78852bf555410eeb8c11cfaf2fde4651a23d1bd664",
+    "controls/selected.py": "d285bde0c7ccc6f1aecbeb7c17119311c0a5ce264fdce548b7cfbc74fcf340a2",
+    "evidence/candidate.patch": "5dd395328733fc713dec646c1753d971943268bf866755c4feaed5669dc47c31",
+    "evidence/candidatebuild/build.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "evidence/candidatebuild/build.info": "cb703b5c8d00ce2cd63342e855fbb9bfa5efaa7f1fd67a5461ec21fde668caaf",
+    "evidence/candidatebuild/build.stderr": "905f8d87a50e7e1cc6abf8d66c53dcc51c8b6a664603cbb339e8a04817a4ae50",
+    "evidence/candidatebuild/build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/final.patch": "65f2ceaceca1bd70698b2eef9b2e3e49e5b9967340a09a91794cede98a035fbf",
+    "evidence/imrebuild/build.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "evidence/imrebuild/build.info": "4bbb986714259dedc74b3806ce3868428d542e0d7d532090a645d3f49baa3e3f",
+    "evidence/imrebuild/build.stderr": "621f971e1c1e27d8b8cbaf38e4c88424657daedcd6a1b0a6375928e9ea67cb9f",
+    "evidence/imrebuild/build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/imrebuild/howto": "c3e25023baa863437a9a07c8a8ce751c21900429a27cc75939b669be93ad8d4e",
+    "evidence/imrebuild/revision": "9e2c96c5a79465af0d5fac8faf0776fed7725c0915ad7d249b967f1f15d855ab",
+    "evidence/imrebuild/smoke-build-O0.exit": "1c8c57e02c096d543a4e8618855a8390f0e4893d774375588e62c57787ddc287",
+    "evidence/imrebuild/smoke-build-O0.stderr": "51ac0fcf63af8dcd18a1dc6b67ee14b04490200e049ebf79b42c744da33eb6de",
+    "evidence/imrebuild/smoke-build-O0.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/imrebuild/smoke-build-O3.exit": "846f0e42faa528836d5f4b886f8549a345da9a49ff5c775fce2857ed1fcad833",
+    "evidence/imrebuild/smoke-build-O3.stderr": "3c9b3450a7dcb0f399c51876a49fec7383173d074e7598b286b5c6726fc907eb",
+    "evidence/imrebuild/smoke-build-O3.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/imrebuild/smoke-run-O0.exit": "cd6d708d2db61876c0c238793d9003503bc37b1d2b7d34816188320e55703b85",
+    "evidence/imrebuild/smoke-run-O0.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/imrebuild/smoke-run-O0.stdout": "181210f8f9c779c26da1d9b2075bde0127302ee0e3fca38c9a83f5b1dd8e5d3b",
+    "evidence/imrebuild/smoke-run-O3.exit": "74d6223c0ac7cb620b055732fe1abbf900f8ae5153870d676e811b502667c1d1",
+    "evidence/imrebuild/smoke-run-O3.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/imrebuild/smoke-run-O3.stdout": "181210f8f9c779c26da1d9b2075bde0127302ee0e3fca38c9a83f5b1dd8e5d3b",
+    "evidence/imrebuild/smoke.py": "48bb5af48c47c6136f1fc21409201a0b398cf85f6b1601748480b0045b098100",
+    "evidence/preflight.txt": "c69e956f21cb9fdb22bb927a12ceb72d81c307d61786b7e30dc6e52afa0a6f5e",
+    "evidence/reviewedbuild/build.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "evidence/reviewedbuild/build.info": "2c2e776dc34ca2252eb528c0f11040af80873e2c0def740f7303c7735fd42adf",
+    "evidence/reviewedbuild/build.stderr": "ac604698f7b86ebc6f21c4371a91aa1139caf16879167826b1c350400e7728c2",
+    "evidence/reviewedbuild/build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/reviewedbuild/revision": "64c5f01f4a72fd581265d2834888921138f7b3b739446f10db9998a58167612a",
+    "evidence/runs/candidate-build-O0/receipt.json": "53a2d3c5b1d2a0d4aec327a18836f231e014b4bc08f061015031e70c777265a3",
+    "evidence/runs/candidate-build-O0/stderr": "b651076a332ccd772012abb031fe0ac16adbadb7df22ef7c3bb7e0b51db46c9f",
+    "evidence/runs/candidate-build-O0/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-build-O3/receipt.json": "d516cc9f3a6549f5e3578f14a9052be05303469d3160befe0f5de5fb308bfd02",
+    "evidence/runs/candidate-build-O3/stderr": "e6833afe481ef48956fc5c5eff84b12b342107075cf528fa4c54c98f044626fa",
+    "evidence/runs/candidate-build-O3/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-communicate-O0/receipt.json": "35b818f8034893e84f1f0555bb6d588c35357f63f27e45d7c2516923d4ab7d16",
+    "evidence/runs/candidate-communicate-O0/stderr": "c255ebad596998d6d094d0b9245960c83d67c9f2eef11a8b82605bf793a6e0d9",
+    "evidence/runs/candidate-communicate-O0/stdout": "a16112d5e7e84ddb905ead45a17e46b239a20f3a076ee87866b37d8963a84a38",
+    "evidence/runs/candidate-communicate-O0/trace.24442": "5fddf9b968a35a9ca042a5e5d94ce4cd1dbe176d4bbdaaa928f7e2b527a0ac8c",
+    "evidence/runs/candidate-communicate-O0/trace.24443": "be59f754081dd522030b51355a446c3833a13cec0b18c7823b82926c56191ad6",
+    "evidence/runs/candidate-communicate-O0/trace.24444": "32e8f81ec4e0759f81e79d058a1d67ce9ba00f185d576f967e9ecb48e6ed5955",
+    "evidence/runs/candidate-communicate-O0/trace.24445": "f61858ec0620a85ee607e925ff6b622e39257732507138888e7667e48a6ecb6e",
+    "evidence/runs/candidate-communicate-O0/trace.24446": "16a8ce5c4c8842ae5e5c6fde8bfb6932e26bb2b54cd0d8707613ede5e5860e67",
+    "evidence/runs/candidate-communicate-O0/trace.24447": "bcee7cc7c14efc6cf59154997fd319ebfbb5622075de1afdabbc2dd2b99f05c5",
+    "evidence/runs/candidate-communicate-O0/trace.24448": "f6bbe83ff71509bb8b79413b5b07176e77933f49b790abd7c2106ac70140c17b",
+    "evidence/runs/candidate-communicate-O0/trace.24449": "fa7e833212ad4b18b1586b15d305c12ce4d36186f4cc9be3db476f6e3a08a219",
+    "evidence/runs/candidate-communicate-O0/trace.24450": "9f3dd0d45ad81b9091ac511c6aab487d5d8fd743a92238afedc9ffa4a96948b9",
+    "evidence/runs/candidate-communicate-O0/trace.24451": "813939f10b0a4a731bdad99394102065437657ca62b20689749c57e5c416ea0f",
+    "evidence/runs/candidate-communicate-O0/trace.24452": "d3920ecc7e1e535abe822383e50b7433ea7714b1816ed08bc7e0ecab7b92a672",
+    "evidence/runs/candidate-communicate-O0/trace.24453": "b6e687cb20d4f9f881e6b859f88b247991f2223562308391f20692e1d7f5c9dc",
+    "evidence/runs/candidate-communicate-O0/trace.24454": "13563040e94ee4880f05c725367b7d60f7748d06102b336f0d57ad21d3cc98c3",
+    "evidence/runs/candidate-communicate-O0/trace.24455": "7531e3634689985f3f3c3c63b9eca3ca28871d2288daf81bcffb86d8314a1f8c",
+    "evidence/runs/candidate-communicate-O0/trace.24461": "1ad369660188fda68445c1ea12a57240244c95226754c40b855ac4791676cd7a",
+    "evidence/runs/candidate-communicate-O0/trace.24468": "a0ae03a702112850194eaadd685353c061e2a63baaf2dfce7be62e19778a1603",
+    "evidence/runs/candidate-communicate-O0/wire.json": "5b9696304a1a5c0a83ccf29ddbd25db67f9b0d96b4462369a6f34cff9e3dd9ce",
+    "evidence/runs/candidate-communicate-O3/receipt.json": "bd69fdd1cf5857ff8ce96d726c8e0dcb3218c83ccbbc6f17109e60c3cb1dcae8",
+    "evidence/runs/candidate-communicate-O3/stderr": "3d05f74f35f15c473689e24460890b4bf1e8bd5b84b59107e5bcaebe55ba0050",
+    "evidence/runs/candidate-communicate-O3/stdout": "a16112d5e7e84ddb905ead45a17e46b239a20f3a076ee87866b37d8963a84a38",
+    "evidence/runs/candidate-communicate-O3/trace.25179": "dbecf62e4c39fb68a58cc35964c098823eda3fe6657a86ad4bd2fe88a262eb4f",
+    "evidence/runs/candidate-communicate-O3/trace.25180": "4164e01f22a38fa4250b76c610a1909c67ed9d543c9246fc1932841467c40aa6",
+    "evidence/runs/candidate-communicate-O3/trace.25181": "3ff816fe07c620c2c0fb8f5ffaa4782ebaf26d348be40fb77292cacb063028a4",
+    "evidence/runs/candidate-communicate-O3/trace.25182": "79298e29712fa69e7f57b6118ef0bd1e0d52d206ce52f7aacef8552cf3c72e69",
+    "evidence/runs/candidate-communicate-O3/trace.25183": "2fadb333f7eb247e617cc6e003683fdfd44f8b93ca3d7944df83ebcaecf93d12",
+    "evidence/runs/candidate-communicate-O3/trace.25184": "0dc87ce62e5cfe8d42eb8c67891ace823898c73e2626029923743ee72970997e",
+    "evidence/runs/candidate-communicate-O3/trace.25185": "b91b8170c1bb79cb9321822d64125a711c93e9f89cb178d29c86bc8097b4c5e5",
+    "evidence/runs/candidate-communicate-O3/trace.25186": "fa7e833212ad4b18b1586b15d305c12ce4d36186f4cc9be3db476f6e3a08a219",
+    "evidence/runs/candidate-communicate-O3/trace.25187": "5a2f28c0ace276b5da73858227ba042bb3ec942bd015579223657268b3714f94",
+    "evidence/runs/candidate-communicate-O3/trace.25188": "e0822e2fc944da3dc017394c4c2c4c4d9eeaa854ae405cc37b7ea66c806fd2e6",
+    "evidence/runs/candidate-communicate-O3/trace.25189": "f0752f08ad453d84cb7de86c195d5e213179b4c6dacc2371ea6270a1f58ec848",
+    "evidence/runs/candidate-communicate-O3/trace.25190": "7026f117da1671efc4c221440b7d681fa1f860bbb15aad29577dd1482622f267",
+    "evidence/runs/candidate-communicate-O3/trace.25191": "99c4c7681b2410ee4975052de5f8de1002064851ce365bd915124728f0714eff",
+    "evidence/runs/candidate-communicate-O3/trace.25192": "061435eeacb160bee1b5505e006cbe08e8e553fa31cadb3030b5734abd6ab741",
+    "evidence/runs/candidate-communicate-O3/trace.25332": "3c396a3023e3d6b8668f6f5837029f38826514e8c15138608edd0d983bc24807",
+    "evidence/runs/candidate-communicate-O3/trace.25356": "a0de7063e530a405309f5363b0ca23cc3d400b119fc1ddffc5ef5044560ce5b3",
+    "evidence/runs/candidate-communicate-O3/wire.json": "dae1d559ebc4f78fa9e86d39cea2717c7b4d585c83ac82dc28b85016c799b300",
+    "evidence/runs/candidate-controls-build-O0/receipt.json": "d79efcf6ce718de2301f0d4954bfd7e0d913083320696f8b3d1931bf7d28f7c1",
+    "evidence/runs/candidate-controls-build-O0/stderr": "20f7397599b96f3819e6d5978145fd983bb9861d998666e4bc23aa5e2c9c12ce",
+    "evidence/runs/candidate-controls-build-O0/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-controls-build-O3/receipt.json": "7451485695a9826622c34c128012d2393868e90b6ce1428f3f38c0f9e12aa160",
+    "evidence/runs/candidate-controls-build-O3/stderr": "4d1ed00bec5f0fdc9a802a0e522f40227d10b668363048e373676d1f6b4b1488",
+    "evidence/runs/candidate-controls-build-O3/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-finalizer-isolated-O0/receipt.json": "12c542d14bbb683af8c279d368a1c748893307599c36bccbff0d5bc833c6311c",
+    "evidence/runs/candidate-finalizer-isolated-O0/stderr": "2ce4a876f24b206109c6666761c73fe60478f866d18d8e34ee454024274682e0",
+    "evidence/runs/candidate-finalizer-isolated-O0/stdout": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc",
+    "evidence/runs/candidate-finalizer-isolated-O3/receipt.json": "a71d00813d3f7635afce576602887738f84400517a7fd7e03e35227160136fea",
+    "evidence/runs/candidate-finalizer-isolated-O3/stderr": "bd1c9cdc2964fa1bddd4a29257ec7143f0217c691ae36433612339f35f2d88d5",
+    "evidence/runs/candidate-finalizer-isolated-O3/stdout": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc",
+    "evidence/runs/candidate-fixture-O0/receipt.json": "19583bb54f68bfccd33a4099d81d9bdc82ee0b0073917d062bd4d78f8e419319",
+    "evidence/runs/candidate-fixture-O0/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-fixture-O0/stdout": "2cda93b135cf16e7ce4e17be296665c7cfd693d48aeb631c21a51ea8a8bc54ab",
+    "evidence/runs/candidate-fixture-O3/receipt.json": "b25a98e2c849a9cd84655b4ee80701f0592a39000078e55c8e15968015e5b757",
+    "evidence/runs/candidate-fixture-O3/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-fixture-O3/stdout": "2cda93b135cf16e7ce4e17be296665c7cfd693d48aeb631c21a51ea8a8bc54ab",
+    "evidence/runs/candidate-full-stock-child-O0/receipt.json": "7bcb3d75cb893c02071de963c0c5b1009aa1f2360ee1ddcd82f58fc1c45ae91b",
+    "evidence/runs/candidate-full-stock-child-O0/stderr": "8fe034c80228be1efc2b637cd1b3d1cb9b01b9555c855bc6379f4d78d4b5be9d",
+    "evidence/runs/candidate-full-stock-child-O0/stdout": "cd3604cda50dfcdacc0f4f61267cacb5dfb28f6a7491d8d63521daffbc39268a",
+    "evidence/runs/candidate-full-stock-child-O3/receipt.json": "5fa93c68f351c3b8a594ea8d71de130f59cc42ec529678f6c7f7b2f79cd79c59",
+    "evidence/runs/candidate-full-stock-child-O3/stderr": "2e52af4e7ba6d8ee211578bbffae0e32bac81761ddc29fea4235ffb5d8f26a0e",
+    "evidence/runs/candidate-full-stock-child-O3/stdout": "cd3604cda50dfcdacc0f4f61267cacb5dfb28f6a7491d8d63521daffbc39268a",
+    "evidence/runs/candidate-rebound-O0/receipt.json": "563beee5679948eff99ef4310574392e656bedcc8c3c94ef01f4be4cd8a3631b",
+    "evidence/runs/candidate-rebound-O0/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-rebound-O0/stdout": "d84e1054ccc5011e64173d1697cc8bcb4c3b04e5e241ae66fa7911aa3bca6d7a",
+    "evidence/runs/candidate-rebound-O3/receipt.json": "4cf290d68aec16b618c4d5999e6c8caf78c9ffc344cab5ecb2829feb69e9b998",
+    "evidence/runs/candidate-rebound-O3/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-rebound-O3/stdout": "d84e1054ccc5011e64173d1697cc8bcb4c3b04e5e241ae66fa7911aa3bca6d7a",
+    "evidence/runs/candidate-retry-O0/receipt.json": "cac798d3ab8a7c253354fb3d5f3a9892988ead756fff2bd1493a6b71b629e723",
+    "evidence/runs/candidate-retry-O0/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-retry-O0/stdout": "e715360c03be73984dca435600a1cefc0b27e1baeb26d3d98df2dc3be35a8d6c",
+    "evidence/runs/candidate-retry-O3/receipt.json": "c90537d639473707cb6a71e37f8ccd5059bdd31cf516f98c78f1d100601db2fd",
+    "evidence/runs/candidate-retry-O3/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-retry-O3/stdout": "e715360c03be73984dca435600a1cefc0b27e1baeb26d3d98df2dc3be35a8d6c",
+    "evidence/runs/candidate-rewrapped-O0/receipt.json": "e8e26ea0d74e7b986342274c6cc06514e0173eff09554baec3d41e96e8b8320e",
+    "evidence/runs/candidate-rewrapped-O0/stderr": "6d49f00e5ec33d8f19dcc61f4e48897e8278ce47da0e4906e06a42e518f090b2",
+    "evidence/runs/candidate-rewrapped-O0/stdout": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f",
+    "evidence/runs/candidate-rewrapped-O3/receipt.json": "5f71daee52b78ca93b42ae50657abbf9095baee25035e15ab9c1b1baf2ed7677",
+    "evidence/runs/candidate-rewrapped-O3/stderr": "310240bbcbf4a4c5b8b480ce29a307cabe50311181a6f5168f8c2157164fc279",
+    "evidence/runs/candidate-rewrapped-O3/stdout": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f",
+    "evidence/runs/candidate-rewrapped-build-O0/receipt.json": "774e2660c7d5ca57aa6722fdf0e3383238338b872b03c5f5d9ce3ebc6908b23f",
+    "evidence/runs/candidate-rewrapped-build-O0/stderr": "78e825d0ea9fa5bc15e87a78d00d047ab368f0e781e08963823d685373ad5c6c",
+    "evidence/runs/candidate-rewrapped-build-O0/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/candidate-rewrapped-build-O3/receipt.json": "f95aca8b25d21e9c78b8eb1699b1bd1f2aa4ec3ae545d6b8ee95569a84c1d372",
+    "evidence/runs/candidate-rewrapped-build-O3/stderr": "24d5643b0d363bfdafd6ff4b5c140e51e242528f16155778da5097246193f791",
+    "evidence/runs/candidate-rewrapped-build-O3/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/executor-closeout/receipt.json": "6e7392e28516dbfe2a26d556505d7ed1b3afc861abcd5fb94505813d80a75460",
+    "evidence/runs/executor-closeout/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/executor-closeout/stdout": "e534807d242a42043a23fa88f1d36090945ee82dccbc4d11c508e9ef761dbd4a",
+    "evidence/runs/executor-strace/receipt.json": "35317947aae1b62d7b6b51e5d48d1beb435d2189cca3b14405908f2264fd6c8d",
+    "evidence/runs/executor-strace/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/executor-strace/stdout": "33bff9108736f23280e9cd50cb1472e3a5b4403ed3f2da1fe67b8487a4fb75c6",
+    "evidence/runs/executor-strace/trace.13563": "aa2aaa59dd253a2ff104a8cd3f07de49a5f52f80b8719889181cfa5af3ab0564",
+    "evidence/runs/executor-strace/trace.13564": "9d0394cce7662fc7b17ebb825e05cfe1e761dd03991b8e81a73101efbdba6e46",
+    "evidence/runs/public-POSIXProcessTestCase.test_pipe_cloexec_real_tools-O0/receipt.json": "bb94569f8818d36b74aec70e11318e900996d5cbbe694c6a32bbbe82839a657b",
+    "evidence/runs/public-POSIXProcessTestCase.test_pipe_cloexec_real_tools-O0/stderr": "04ff48e7b9eccf50788f725e52975c5c5d6297e6d1c96c75f2065f163a56edc1",
+    "evidence/runs/public-POSIXProcessTestCase.test_pipe_cloexec_real_tools-O0/stdout": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3",
+    "evidence/runs/public-ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr-O0/receipt.json": "237a31a0350063f1e1d7fa074d64686021b66e25e99001ff089bcd34fe0223a9",
+    "evidence/runs/public-ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr-O0/stderr": "fbf60c92e0527e6021986bde3d9c65ccc391c3f053b354130a0c0f07f97a6d30",
+    "evidence/runs/public-ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr-O0/stdout": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3",
+    "evidence/runs/public-RunFuncTestCase.test_encoding_warning-O0/receipt.json": "49bfa8a8b39462e1d0d8ed5c4f25a1becb1f8a06aeecb4ba25001e21420c5491",
+    "evidence/runs/public-RunFuncTestCase.test_encoding_warning-O0/stderr": "4c30b1d263257f75e57b3144603208a090006d62b4760a47c2677d4c4c1a721e",
+    "evidence/runs/public-RunFuncTestCase.test_encoding_warning-O0/stdout": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3",
+    "evidence/runs/public-build-O0/receipt.json": "77071492e3b0c1675351dca57d7588d352603552cd5a5b2c214cabf8ef94847a",
+    "evidence/runs/public-build-O0/stderr": "b006b4a61f985cf305970f9841bbd72fdd38eaca0f3946adac74909a1340280c",
+    "evidence/runs/public-build-O0/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/public-build-O3/receipt.json": "cbd865612f9c88db11f0b832dbaac6b0e7544f0a39d9ca7bc1509dd3a662d9c3",
+    "evidence/runs/public-build-O3/stderr": "ed0b6c0fdb86fcaf3a065aaf87bb87cf0d242764a072dad0ee3119b71f79458f",
+    "evidence/runs/public-build-O3/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/public-build-O3/wrapper.txt": "4bb45d27f09e8b0741005cb40155a9862a0e9979bbb377e4ac7f08607bbe4b15",
+    "evidence/runs/public-communicate-O0/receipt.json": "aed4440050c29666367334d67324e4b4f7400314609c1790854899e3993af97d",
+    "evidence/runs/public-communicate-O0/stderr": "153280c876bfb9e456de436e4e365e69e129440a9e654c6b3f19ac277fcbc856",
+    "evidence/runs/public-communicate-O0/stdout": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3",
+    "evidence/runs/public-communicate-O0/trace.21689": "cbf2d604f8141a15e178066193cafb82279ca03dcb69391f31c4a3378a8048fe",
+    "evidence/runs/public-communicate-O0/trace.21690": "e0a7b39ac03afad7b1f7700b96c7795cdbeae87827897a9116e9be79563cd944",
+    "evidence/runs/public-communicate-O0/trace.21691": "d27e577bde4dcda3ff83322c495763927fdfb51af106cf0c6dc26c48726bdbbd",
+    "evidence/runs/public-communicate-O0/trace.21692": "38f6b7e3d827e8800262c90fe909ef12e6e8d0c3d8263166b11867425730488c",
+    "evidence/runs/public-communicate-O0/trace.21693": "7159b556f1a388e43a9125d4347d8c38c79625d20d1d775793e28c5eebc72ab8",
+    "evidence/runs/public-communicate-O0/trace.21694": "66ad15497b30344c311767ea3f2bea061e8178afd09ebeb71f8877a505a5084c",
+    "evidence/runs/public-communicate-O0/trace.21695": "da9d27407de898f5a4a2688a910b77fc3e7d120d171148e34d6ef4eae72a0b1e",
+    "evidence/runs/public-communicate-O0/trace.21696": "fa7e833212ad4b18b1586b15d305c12ce4d36186f4cc9be3db476f6e3a08a219",
+    "evidence/runs/public-communicate-O0/trace.21697": "eb69a1c4059d0cad80a22ece4c8e40be6ad0616659dc96be7ddef4688253d4e9",
+    "evidence/runs/public-communicate-O0/trace.21698": "752dc558f8304a38e15268598f20acb03debf2d6e6216a8f55e52862a7b5a25f",
+    "evidence/runs/public-communicate-O0/trace.21699": "e09ded4b4c88ee49069fc769362a73b503aed169bb70fa3deee18a30db8b16b1",
+    "evidence/runs/public-communicate-O0/trace.21700": "8cbf5a6933cc6a5423a5ec40917c165981dad8a8934c1f06039439b0baa7d777",
+    "evidence/runs/public-communicate-O0/trace.21701": "ddeb92b46eee58f41be04be2907d3db112ccb4b9ecfe7aa79af941e9deec379b",
+    "evidence/runs/public-communicate-O0/trace.21702": "539aa0a2acbe8fe01dfa4e06405392e7be7ea98de7b02f470d89ed4b8c46ab29",
+    "evidence/runs/public-communicate-O0/trace.21703": "472b6dfa215933376b1d5304d03ed772aa67b7b176c99a387c9b7d6bc7d4ee90",
+    "evidence/runs/public-communicate-O0/trace.21704": "088f9284bf243cb85c9a7acc88fa946fe3c2e57bc81031580c5dcf073b28168b",
+    "evidence/runs/public-communicate-O0/wire.json": "ca619b5a5f671d0912ea11b5f9cf419ca227cfb77c43d186fbb4dfd934fae95e",
+    "evidence/runs/public-communicate-O3/receipt.json": "eeb31fabba0cc2777716ec24b8113ffa37b18083794afe3122efda93b8f9048b",
+    "evidence/runs/public-communicate-O3/stderr": "bf95b7e34e1f050fcfc52fe2b265bae81ef2a49d347916caaed4460391e9c6d7",
+    "evidence/runs/public-communicate-O3/stdout": "96f5c65ee714acd8af1f20b64c6781ad1d5b5ae0723abc8c3362c418004b31f3",
+    "evidence/runs/public-communicate-O3/trace.21829": "549141e8f48a02647e6e90dc08c15dde97afdadefd7f856e3858129a6192eed6",
+    "evidence/runs/public-communicate-O3/trace.21830": "69072c4ff2726671ada37a31f317c20eb4f2417d1e9abae102eb7d403ede30d6",
+    "evidence/runs/public-communicate-O3/trace.21831": "9dcd71594c2b3333e853c4a83a974e82ac83fa979d23c4e998c96253cf698710",
+    "evidence/runs/public-communicate-O3/trace.21832": "6a394b84feb99fcbc1f473fd9547e01817f7047a573964dae8d06421b71eb507",
+    "evidence/runs/public-communicate-O3/trace.21833": "1e983fe8824f7bb850b45b7ce5d5458140e5a938ba3ecef17ff5e06a0ce74ff0",
+    "evidence/runs/public-communicate-O3/trace.21834": "e61c910acd863a7e45a4ca114a3352e0019db3aedd952a42d27963026f89c3d6",
+    "evidence/runs/public-communicate-O3/trace.21835": "c1bc71c6f844c3dc82fb9952c9ee60c005f85529fbdcb4fa11a0df73e531b732",
+    "evidence/runs/public-communicate-O3/trace.21836": "fa7e833212ad4b18b1586b15d305c12ce4d36186f4cc9be3db476f6e3a08a219",
+    "evidence/runs/public-communicate-O3/trace.21837": "55aee07cd2012a3da416b3a04c2a430ce9d659fef3c80636b710488dcb6db02d",
+    "evidence/runs/public-communicate-O3/trace.21838": "9a860bdb417efaf371f06749c069f9e8d42b8af4c1b6dbad0b08e23dffcd66b4",
+    "evidence/runs/public-communicate-O3/trace.21839": "6adccbd1774797d3b87f400071685094ce0644ed529e4634bca88598ad7d94f7",
+    "evidence/runs/public-communicate-O3/trace.21840": "42089ce852d5ce3ddf6eff860cdd81a41470c7b3aba1549c3e8f88eaee14ca47",
+    "evidence/runs/public-communicate-O3/trace.21843": "36e85ec9c11d73c3ee2843d61531d9c01ac4e4bf6699731bbee2530cb3b66991",
+    "evidence/runs/public-communicate-O3/trace.21844": "d2b898d3958e008c86dfa7d9b8d329b46e8dea880d34c980f790d40d45d22967",
+    "evidence/runs/public-communicate-O3/trace.21915": "3909cbd3897f76940def8a1829bd045dd09f114f4d17532d21d8076269154c8c",
+    "evidence/runs/public-communicate-O3/trace.21916": "eced31de1cd65e37dfdebefa623d1ce6c9ef6b3be58d6cebe3673bebad9465e9",
+    "evidence/runs/public-communicate-O3/wire.json": "cee7978d09a18357177b4d8422414ee3db200ba6729be4f2ec2a40a0553dbc21",
+    "evidence/runs/public-double-close-O0/receipt.json": "8c5c3b86bf56fbea6def387a601ffa4ed9f22019922aebacdfe9fe254f063fab",
+    "evidence/runs/public-double-close-O0/stderr": "b5ac89a39cfaa7f73561abaffeb644c36d9fdb09f0e57a0888f7bd43522ae003",
+    "evidence/runs/public-double-close-O0/stdout": "06aa12f0d94f94b0e5967a6354274f0d0df087d553427c76bad9e636061fa6e1",
+    "evidence/runs/public-double-close-O3/receipt.json": "46f79144d563487ce88570eae2914bd8cfef8494a0e99b41f665a54d004cd38b",
+    "evidence/runs/public-double-close-O3/stderr": "e4fd70ef3e6404118594c7efd05e9deb58620e95317a3f1d50ea03a12e06ccb5",
+    "evidence/runs/public-double-close-O3/stdout": "06aa12f0d94f94b0e5967a6354274f0d0df087d553427c76bad9e636061fa6e1",
+    "evidence/runs/public-finalizer-isolated-O0/receipt.json": "cc48fee7235280c3b51c72ddc2d19be932163abd3a791b8ce34d30284aac47f5",
+    "evidence/runs/public-finalizer-isolated-O0/stderr": "1b5451e105d5ebd9dec09c9a56a1b58f0e3832a0f2547fd5da68627e0d27ec22",
+    "evidence/runs/public-finalizer-isolated-O0/stdout": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc",
+    "evidence/runs/public-finalizer-isolated-O3/receipt.json": "cc2ee123ee4f4a289dfa3d5dc73e6cf0328d2cddc0f9138f9c8cf201f677e0b4",
+    "evidence/runs/public-finalizer-isolated-O3/stderr": "a91cf889314eaf1d8ee5dc0447393fb9f2c1053524f92b31ae0d9d10857129a6",
+    "evidence/runs/public-finalizer-isolated-O3/stdout": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc",
+    "evidence/runs/public-full-stock-child-O0/receipt.json": "27125309e6eab108c7e4530bf3affab9ec36dea8c3a8ad5267a32909e36d46f6",
+    "evidence/runs/public-full-stock-child-O0/stderr": "b403846d834709fbf545c4f1aeb18fca6664f26b985714dec7feb538325aab3e",
+    "evidence/runs/public-full-stock-child-O0/stdout": "8e08358dd495237fb5683ceec1e787f7c171e1d5d320ee9040cc7289aaacf2e9",
+    "evidence/runs/public-full-stock-child-O3/receipt.json": "8ee64475f462e3b1228cb5d38894db040d787db1048904e36b38830054120fb9",
+    "evidence/runs/public-full-stock-child-O3/stderr": "f08486bf3f70fb0a0690ae31abe19cda0e45c61231e5be8fff75bc5ccbb179d0",
+    "evidence/runs/public-full-stock-child-O3/stdout": "cd3604cda50dfcdacc0f4f61267cacb5dfb28f6a7491d8d63521daffbc39268a",
+    "evidence/runs/public-rebound-O0/receipt.json": "966ae0f8cdcfad58a730de969e8d9168191384c559ed87f872baf90d916c0f27",
+    "evidence/runs/public-rebound-O0/stderr": "6898a9dc41740184fb0d40282aadbcba6e5d967d5577f8b618e0db7caff81573",
+    "evidence/runs/public-rebound-O0/stdout": "f57875e36c50deb86a58b9abe7c449cce9158a40e27d0b2366191443ccf22fee",
+    "evidence/runs/public-rebound-O3/receipt.json": "935a5f5d2b40ba4589f79d762786c252477b50f7b0f1f2e1880e709c83045214",
+    "evidence/runs/public-rebound-O3/stderr": "6898a9dc41740184fb0d40282aadbcba6e5d967d5577f8b618e0db7caff81573",
+    "evidence/runs/public-rebound-O3/stdout": "f57875e36c50deb86a58b9abe7c449cce9158a40e27d0b2366191443ccf22fee",
+    "evidence/runs/public-rebound-build-O0/receipt.json": "a8493c116d5b6a34903f06ad7037cca17d7fcfa2c9c3f2a49d30b6d5b4d17634",
+    "evidence/runs/public-rebound-build-O0/stderr": "d8590000601132b11ca5cc00dfa628b5f42f617157230333553e76a99bdda83e",
+    "evidence/runs/public-rebound-build-O0/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/public-rebound-build-O3/receipt.json": "5f9d51267743d6352abdc51227486ddc75a57bd859694677d04e71fbb21dee05",
+    "evidence/runs/public-rebound-build-O3/stderr": "efbcc481bf81dcabf4c4bb04078c7bca88a95c8cfc24f036ecad688c357dff46",
+    "evidence/runs/public-rebound-build-O3/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/public-rewrapped-O0/receipt.json": "9e776760458ab88743a010b13b428528d61ff9db3cb2fc3fa078e7fcad0624f4",
+    "evidence/runs/public-rewrapped-O0/stderr": "284848e267dc036b5395d520d28224b53835e8615c17b42657b517c08422cd09",
+    "evidence/runs/public-rewrapped-O0/stdout": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f",
+    "evidence/runs/public-rewrapped-O3/receipt.json": "078575e3804c0db8986245de753ae5b07136d1259512f39d53694b77ab4f08ec",
+    "evidence/runs/public-rewrapped-O3/stderr": "f2384cb62f670943933c87c162772c6cb4bab38565aa3e11fe835362c2c0b7e5",
+    "evidence/runs/public-rewrapped-O3/stdout": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f",
+    "evidence/runs/public-rewrapped-build-O0/receipt.json": "014621ffdbb2944a639b334e5125c7479f079874679819b86b91b4eb31f46936",
+    "evidence/runs/public-rewrapped-build-O0/stderr": "ce9831495ace793c044c89cb6a36d8f477a1bdfcc4b986213ca64333f3894ac2",
+    "evidence/runs/public-rewrapped-build-O0/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/public-rewrapped-build-O3/receipt.json": "5417278d153af408de982728864c66736270eebb6a21af252fe82b2c0d2339a8",
+    "evidence/runs/public-rewrapped-build-O3/stderr": "342964616c63336a020c7a21209db308fbd23fba1d7c356a95e43f1e7f56a631",
+    "evidence/runs/public-rewrapped-build-O3/stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/public-test_communicate_errors-stock-child-O0/receipt.json": "07b110ef173519769b0cbe3d965c7430f4b1fcf0c5e9e7e95fc546c84f74c925",
+    "evidence/runs/public-test_communicate_errors-stock-child-O0/stderr": "e8f5864bd0ac88e76264f0285597f35f90ae172e00aa41bf874b280aef715d77",
+    "evidence/runs/public-test_communicate_errors-stock-child-O0/stdout": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc",
+    "evidence/runs/public-test_post_timeout_communicate_sends_input-stock-child-O0/receipt.json": "b2550f5b147f1f6c8f19fda614abe28e8abe27f8b1315d7dc329fd9f66b4ac0c",
+    "evidence/runs/public-test_post_timeout_communicate_sends_input-stock-child-O0/stderr": "f38c03f1104e947d17585489ea21fceb744a0de3fb3bcc2242cc97e840c0a7a7",
+    "evidence/runs/public-test_post_timeout_communicate_sends_input-stock-child-O0/stdout": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc",
+    "evidence/runs/public-test_universal_newlines_and_text-stock-child-O0/receipt.json": "46a46ca527d3141c675839e3c390f8e4e5930234fee1f9493bc4fa29d141252f",
+    "evidence/runs/public-test_universal_newlines_and_text-stock-child-O0/stderr": "cfbf8a2c8bda706475a90a2462c6e01b649d792e47ff8e8568b7ff37ed611016",
+    "evidence/runs/public-test_universal_newlines_and_text-stock-child-O0/stdout": "373cac690b045a9919841f184c1a18472ab3ee4c899b0745d476561b830b4bfc",
+    "evidence/runs/stock-baseline-communicate/receipt.json": "47297d6f1fa9b8763b396241c58b3410a29e5d30881d34f2ba487385e283d303",
+    "evidence/runs/stock-baseline-communicate/stderr": "167d63ec1615ad1704219e1ef4108e217726dfb0213fd12fc25b8ba5331ace6f",
+    "evidence/runs/stock-baseline-communicate/stdout": "6f4ae06d082f7f12775beff93185cc86343a47c0ac4ecf5100378bbfd45822ed",
+    "evidence/runs/stock-baseline-communicate/trace.15685": "32bf9a93e0e6a68c93cf057d27b0af24f82896b3230c3174d194be2038a4406c",
+    "evidence/runs/stock-baseline-communicate/trace.15819": "3c76be275ea794686a9321faa9bb1f55d429ddf0af6dbf669b127439d079008d",
+    "evidence/runs/stock-baseline-communicate/trace.15832": "075be329de758fc22720cbe1bf482d1c8f4fda26813aa69ec4bfc5fbd843d984",
+    "evidence/runs/stock-baseline-communicate/trace.15835": "fa7e833212ad4b18b1586b15d305c12ce4d36186f4cc9be3db476f6e3a08a219",
+    "evidence/runs/stock-baseline-communicate/trace.15836": "bea8d86603e908058057b48bc81fc7cacc40b339f9456971b4f12f67b5dc49a9",
+    "evidence/runs/stock-baseline-communicate/trace.15837": "0cf96ba37d867bf7c386c90779f3cd57acf9a0797f1b7c20cc461604b22dd235",
+    "evidence/runs/stock-baseline-communicate/trace.15838": "b6772513e8ad3b5e942b86e91645cbb2736b45a06162ab8719964a604a1d8105",
+    "evidence/runs/stock-baseline-communicate/trace.15839": "dad78842b85470ce8ca0a5a9820d1772c190148aa852e94454cbfb0e19c9cddd",
+    "evidence/runs/stock-baseline-communicate/wire.json": "65cd883f6092403203282d235af93aab033101bdf78d0106bde62108493f8a44",
+    "evidence/runs/stock-fixture/receipt.json": "f8730bcf1f1d3c718c8786c58e06039bdb7931f0b69c77c794189c01fc72ad66",
+    "evidence/runs/stock-fixture/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/stock-fixture/stdout": "2cda93b135cf16e7ce4e17be296665c7cfd693d48aeb631c21a51ea8a8bc54ab",
+    "evidence/runs/stock-full/receipt.json": "1bca10f7926d6f5207697f901550fa1c304b16e0e57202fe6f9902e35229c197",
+    "evidence/runs/stock-full/stderr": "daff52af27d029b1ec443d6d12c4ee157ae3e9197f1dcb6cdb103420ffd8b923",
+    "evidence/runs/stock-full/stdout": "1a41495cb4c7e895d49002fba33a298b18966018a544e437b2db74d00f5eafac",
+    "evidence/runs/stock-full/supervisor.stderr": "c4bbb9e53069453e91d3b0d99707c95a30218352e4a5820dd1bd7680fd293432",
+    "evidence/runs/stock-full-r2/receipt.json": "503639a11e224701db8ff62891534565a4bdc7323540afaeeafee61345d2b920",
+    "evidence/runs/stock-full-r2/stderr": "4cc377c7f5d6e4ceaac75bf498e8d723ae2fe5784795487ce8cbef3918f99906",
+    "evidence/runs/stock-full-r2/stdout": "1a41495cb4c7e895d49002fba33a298b18966018a544e437b2db74d00f5eafac",
+    "evidence/runs/stock-rebound-output/receipt.json": "bfa3ee87364c3f264398c1c8d2212195230ee03cc1c2b49da18f3e8ca17527d4",
+    "evidence/runs/stock-rebound-output/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/stock-rebound-output/stdout": "d84e1054ccc5011e64173d1697cc8bcb4c3b04e5e241ae66fa7911aa3bca6d7a",
+    "evidence/runs/stock-retry/receipt.json": "75d87e5448327463727490b445a5b721fe3f1b461f698107181a9e4bf21118c1",
+    "evidence/runs/stock-retry/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/runs/stock-retry/stdout": "e715360c03be73984dca435600a1cefc0b27e1baeb26d3d98df2dc3be35a8d6c",
+    "evidence/runs/stock-rewrapped-upstream/receipt.json": "e2f1188fcf8f39c2eebea7d3c1ac43006e71252aac1563f7cb0b130192b6f471",
+    "evidence/runs/stock-rewrapped-upstream/stderr": "bd00581ae4b106de1fa125c28f2cd67ad1f5c848a0486f1744cc42be201c4f7e",
+    "evidence/runs/stock-rewrapped-upstream/stdout": "2b48b7c0e96aa78cd4f71925098c04cb1db1b0726c983a63d5a5adbbf1ae262f",
+    "evidence/source-sha256.txt": "ccbcbaf51c2ec940007b1732fca1c75575f9f8ead491bf787a93be69b1d8420e",
+    "evidence/stockbuild/build.sh": "39cb586efbb4ad6fbf0d5213f54e5817f61eb0c0ace244fb3f46de8fae4e030e",
+    "evidence/stockbuild/build.stderr": "247b2c2322fc909ee77a16fa34c986aca51a3311900cb87b2ca0599c5fbf3cce",
+    "evidence/stockbuild/build.stdout": "b59e5eacf04bf3dbcfe890d80ea7f09fc6e152ada39389d6ad34a7362fc4b097",
+    "evidence/stockbuild/commands.log": "bafe3733c674124f3b8dc5aa133d15aa7c9fa5330ed52e22815bb8b4f0dc6787",
+    "evidence/stockbuild/configure.stderr": "5bd2fda423f629fd51b6d0af708f9140d7e2bc359bfc28ee3b86e7592589e983",
+    "evidence/stockbuild/configure.stdout": "aa9770a677efd7b08a4b637114761dad444e6c6192c736be8caded3660744a85",
+    "evidence/stockbuild/exit-status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "evidence/stockbuild/make.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evidence/stockbuild/make.stdout": "d2e99c27a77373719a8e323572c2148bfcea2f0d5367ae7a0fbda7173272d193",
+    "evidence/stockbuild/revision": "70e782cbefed0ab11cd47448ca3d2f8370e1c5b148d66b4d3f842a14679f4421",
+    "evidence/stockbuild/sha256sums": "35b103e37a17ad5ab853525327fc5972b38b5c4e05076ca7f7449badbed89b15",
+    "evidence/stockbuild/usability": "5e1ca74197f28c7215b9d6f82f82d82dd515ba9f400642921ab93c03765ef75c",
+    "evidence/tools/native.sh": "7d1f8164e7cfc93112041eb328520755d6442f25ef9ac6f53f3e54c43c72e1e6",
+    "evidence/tools/package.py": "6e8e6d64f81b57d7633d57a44371893f9957984cfd9de0d8eaaeeda134f847a6",
+    "evidence/tools/pub-first.sh": "5c351aba33f8fd8516be6efc821ba16a2c9eb6830abf4527cd12d5cdd1681a0f",
+    "evidence/tools/reviewed.sh": "0790a9bbd4d91acb79b8e7a96f425fa45a11f738108c4539bef16c754c9abdcf",
+    "evidence/tools/rewrapped.py": "b62e8b2da57d5204b5e4eb63e71bf932282f725d73dbb1f38ff25f9f04b2d43e",
+    "evidence/tools/run.py": "d5a3ba6cb2adfb886aa6090c11161b2a7953dedd6a91536c4ed8e313761d91f7",
+    "evidence/tools/run_original.py": "8060ed7762b1e9d1939c2faf33d0ad11e77fb2690829a21790b8a93931edf425",
+    "evidence/tools/wire.py": "aa61c3ef43a9035f3093b749321488fa980da1b279b3b2264aeac8015947ce40",
+    "probes/rebound_output.py": "bd063635c927491b001f751737395904d252729a9e5f63a5893223175fa66725",
+    "products/candidate/build.sha256": "277b6420ec29ebb7253982c26eee0d342d7105a225baa64e8f37419908f2db64",
+    "products/candidate/native.sha256": "ef5cc8bd7ecc26388a50cbfe4e116f5339c59ea58479880279dd1943fd28e2f0",
+    "products/candidate/revision": "64c5f01f4a72fd581265d2834888921138f7b3b739446f10db9998a58167612a",
+    "products/public/build.sha256": "c5c3984f3f088e99dfa2e3b036a4c454a0c5b652822cd09f6491ce87ac01ad2c",
+    "products/public/native.sha256": "d75cae05b3467d283ec05b1c958c478c89e1a7838eb53a9933e6ad5e978aa635",
+    "products/public/revision": "9e2c96c5a79465af0d5fac8faf0776fed7725c0915ad7d249b967f1f15d855ab",
+    "stage/rewrapped.py": "b62e8b2da57d5204b5e4eb63e71bf932282f725d73dbb1f38ff25f9f04b2d43e",
+    "stage/run_original.py": "8060ed7762b1e9d1939c2faf33d0ad11e77fb2690829a21790b8a93931edf425",
+    "stage/test/test_subprocess.py": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7"
+  },
+  "raw_streams_sha256": "74abaa976f19ecb32b6bace50a26c7a3c46bba2239132724eaf9c6fd7a4738ee"
+}
