@@ -85,3 +85,11 @@ for path, pattern in [("SRC/lib/Test_main.PY", "src/*/test_*.py"),
     print(windows.match(pattern))
     print(windows.full_match(pattern))
     print(windows.full_match(pattern, case_sensitive=True))
+
+# Match character classes on each side of a star without sharing characters.
+for component, glob_pattern in [
+    ("é_雪", "[é]*[雪]"), ("雪", "[雪]*?"), ("abc", "a?c"),
+    ("test_x.py", "test_[a-z]*.py"), ("a/b", "a[!x]b"),
+]:
+    print(PurePosixPath(component).match(glob_pattern))
+    print(PurePosixPath(component).full_match(glob_pattern))
