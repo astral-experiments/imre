@@ -4230,7 +4230,21 @@ impl Context {
                 return self.native_class_dictionary(
                     obj,
                     "<collections.defaultdict namespace>",
-                    super::defaultdict::METHODS.iter().copied(),
+                    super::defaultdict::METHODS
+                        .iter()
+                        .copied()
+                        .chain(["__module__"]),
+                );
+            }
+            Value::Native(ref class) if class == "str" && name == "__dict__" => {
+                return self.native_class_dictionary(
+                    obj,
+                    "<str namespace>",
+                    builtins::STR_METHODS.iter().copied().chain([
+                        "__new__",
+                        "__sizeof__",
+                        "maketrans",
+                    ]),
                 );
             }
             Value::Native(ref class)

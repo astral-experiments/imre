@@ -220,6 +220,13 @@ impl Classes {
                         .iter()
                         .flat_map(|args| &args.args)
                         .find_map(|base| {
+                            if graph.session.is_known_class(
+                                module_id,
+                                base,
+                                ty_python_semantic::types::KnownClass::Str,
+                            ) {
+                                return Some((base, "str subclasses"));
+                            }
                             let Binding::Intrinsic(intrinsic) = graph.resolve(module_id, base)?
                             else {
                                 return None;

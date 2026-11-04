@@ -6364,8 +6364,22 @@ impl<'a> Checker<'a> {
         )
     }
 
+    fn boxed_descriptor(&self, expression: &ast::Expr) -> Option<&'static str> {
+        if let ast::Expr::Attribute(attribute) = expression
+            && attribute.attr.as_str() == "__hash__"
+            && self.graph.session.is_known_class(
+                self.module,
+                &attribute.value,
+                ty_python_semantic::types::KnownClass::Str,
+            )
+        {
+            return Some("str.__hash__");
+        }
+        self.graph.boxed_pattern_method(self.module, expression)
+    }
+
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        if let Some(method) = self.graph.boxed_pattern_method(self.module, expression) {
+        if let Some(method) = self.boxed_descriptor(expression) {
             return Err(self.scoped_builtin_error(method, expression));
         }
         if let ast::Expr::Attribute(attribute) = expression
@@ -8705,7 +8719,7 @@ impl<'a> Checker<'a> {
         {
             return Err(self.scoped_builtin_error("__import__", call));
         }
-        if let Some(method) = self.graph.boxed_pattern_method(self.module, &call.func) {
+        if let Some(method) = self.boxed_descriptor(&call.func) {
             return Err(self.scoped_builtin_error(method, call));
         }
         if let Some(local) = self.local_class(&call.func)?

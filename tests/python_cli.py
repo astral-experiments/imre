@@ -2417,6 +2417,22 @@ os.unlink(path)""")
             "    except NameError: print('unbound')\n",
         )
         compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
+        compare("-B", "-c", "print(str.__hash__('zone') == hash('zone'))")
+        compare("-B", "-c", "slot = str.__hash__; print(slot('zone') == hash('zone'))")
+        compare(
+            "-B", "-c",
+            "class Key(str):\n"
+            "    __hash__ = str.__hash__\n"
+            "print({Key('zone'): 1}['zone'])",
+        )
+        compare(
+            "-B", "-c",
+            "def make_key():\n"
+            "    class Key(str):\n"
+            "        __hash__ = str.__hash__\n"
+            "    return Key('zone')\n"
+            "print({'zone': 1}[make_key()])",
+        )
         if os.name == "posix":
             for base in ("list", "tuple"):
                 compare(

@@ -1949,10 +1949,16 @@ impl Context {
         let dictionary = if let Some(&dictionary) = self.builtins.get(storage) {
             dictionary
         } else {
-            let mut entries = Vec::with_capacity(members.size_hint().0 + 1);
-            for name in members.chain(["__module__"]) {
+            let mut entries = Vec::with_capacity(members.size_hint().0);
+            for name in members {
                 let key = self.heap.code_name(name);
                 let value = self.lookup_attr(class, name)?;
+                let value = if matches!(self.heap.get(value), Value::Native(symbol) if symbol == "str.maketrans")
+                {
+                    method_decorator::static_method(self, value)?
+                } else {
+                    value
+                };
                 entries.push((key, value));
             }
             let dictionary = self.dict(entries);

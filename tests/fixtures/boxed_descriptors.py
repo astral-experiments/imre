@@ -245,9 +245,10 @@ def current():
         __eq__ = str.__eq__
         __hash__ = str.__hash__
 
+    assert str.__dict__["__hash__"] is Key.__hash__ is str.__hash__
+    assert str.__hash__.__objclass__ is str
     for text in ("", "Málaga", "\ud800"):
         key = Key(text)
-        assert Key.__hash__ is str.__hash__
         assert key.__hash__() == hash(key) == hash(text)
         assert {key: 1}[text] == {text: 1}[key]
 
