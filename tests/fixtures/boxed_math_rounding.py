@@ -5,6 +5,7 @@ from fractions import Fraction
 from math import atan2, ceil, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
 from math import e, inf, nan, pi, tau
 from math import sin, tan
+from typing import get_overloads
 
 
 class Hooks:
@@ -121,6 +122,12 @@ def current():
     assert log(float("inf")) == float("inf") and isnan(log(float("nan")))
 
     assert exp is math.exp and sqrt is math.sqrt
+    for name, function in (("exp", exp), ("sqrt", sqrt)):
+        assert function.__module__ == "math"
+        assert function.__name__ == function.__qualname__ == name
+        assert function.__self__ is math
+        assert get_overloads(function) == []
+    assert not hasattr(pi, "__self__")
     operand = FloatOnly(2.25)
     assert exp(operand) == exp(2.25) and operand.calls == 1
     assert sqrt(operand) == 1.5 and operand.calls == 2

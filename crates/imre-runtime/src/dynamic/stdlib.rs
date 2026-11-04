@@ -364,6 +364,33 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
         .ok_or_else(|| Error::new("UnicodeError", "filesystem path contains surrogate escapes"))
 }
 
+pub(super) fn is_math_function(name: &str) -> bool {
+    matches!(
+        name,
+        "acosh"
+            | "atan2"
+            | "ceil"
+            | "copysign"
+            | "cos"
+            | "exp"
+            | "floor"
+            | "fma"
+            | "gcd"
+            | "isclose"
+            | "isfinite"
+            | "isinf"
+            | "isnan"
+            | "isqrt"
+            | "lcm"
+            | "log"
+            | "modf"
+            | "sin"
+            | "sqrt"
+            | "tan"
+            | "trunc"
+    )
+}
+
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
     #[cfg(target_os = "linux")]
     if module == "fcntl"
@@ -412,12 +439,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_codecs", "_imre_idna_label") => ctx.builtin("_codecs._imre_idna_label"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        (
-            "math",
-            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "atan2" | "cos" | "exp"
-            | "fma" | "gcd" | "isclose" | "isfinite" | "isinf" | "isnan" | "isqrt" | "lcm" | "log"
-            | "sin" | "sqrt" | "tan",
-        ) => ctx.builtin(&format!("math.{name}")),
+        ("math", name) if is_math_function(name) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
