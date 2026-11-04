@@ -140,6 +140,14 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(x.cos())));
     }
+    if operation == "exp" {
+        let x = as_double(ctx, value)?;
+        let result = x.exp();
+        if x.is_finite() && result.is_infinite() {
+            return Err(Error::new("OverflowError", "math range error"));
+        }
+        return Ok(ctx.alloc(Value::Float(result)));
+    }
     if operation == "isinf" {
         return Ok(builtins::boolean(as_double(ctx, value)?.is_infinite()));
     }
@@ -148,6 +156,19 @@ pub(super) fn call(
     }
     if operation == "modf" {
         return modf(ctx, value);
+    }
+    if operation == "sqrt" {
+        let x = as_double(ctx, value)?;
+        if x < 0.0 {
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "expected a nonnegative input, got {}",
+                    crate::floats::render(x)
+                ),
+            ));
+        }
+        return Ok(ctx.alloc(Value::Float(x.sqrt())));
     }
     let slot = match operation {
         "trunc" => "__trunc__",

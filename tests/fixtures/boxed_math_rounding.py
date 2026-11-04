@@ -2,7 +2,7 @@
 
 import math
 from fractions import Fraction
-from math import ceil, copysign, cos, floor, isinf, isnan, log, modf, trunc
+from math import ceil, copysign, cos, exp, floor, isinf, isnan, log, modf, sqrt, trunc
 from math import e, inf, nan, pi, tau
 
 
@@ -40,8 +40,13 @@ class After(int, Hooks):
 
 
 class FloatOnly:
+    def __init__(self, value=-1.25):
+        self.value = value
+        self.calls = 0
+
     def __float__(self):
-        return -1.25
+        self.calls += 1
+        return self.value
 
 
 class IndexOnly:
@@ -97,7 +102,22 @@ def current():
     assert log(10**1000, 10**500) == 2.0
     assert abs(log(10**1000) - 2302.5850929940457) < 1e-12
     assert log(float("inf")) == float("inf") and isnan(log(float("nan")))
+
+    assert exp is math.exp and sqrt is math.sqrt
+    operand = FloatOnly(2.25)
+    assert exp(operand) == exp(2.25) and operand.calls == 1
+    assert sqrt(operand) == 1.5 and operand.calls == 2
+    assert exp(-0.0) == 1.0 and math.isclose(exp(1), e)
+    assert exp(-745.0) == float.fromhex("0x0.0000000000001p-1022")
+    assert exp(-inf) == 0.0 and copysign(1.0, exp(-inf)) == 1.0
+    assert copysign(1.0, sqrt(-0.0)) == -1.0
+    assert sqrt(2**1000) == 2**500
+    assert exp(inf) == sqrt(inf) == inf
+    assert isnan(exp(nan)) and isnan(sqrt(nan))
     for call, error_type, message in (
+        (lambda: exp(710.0), OverflowError, "math range error"),
+        (lambda: sqrt(-1.0), ValueError, "expected a nonnegative input, got -1.0"),
+        (lambda: sqrt(-inf), ValueError, "expected a nonnegative input, got -inf"),
         (lambda: cos(float("inf")), ValueError, "expected a finite input, got inf"),
         (lambda: cos(10**1000), OverflowError, "int too large to convert to float"),
         (lambda: cos("1"), TypeError, "must be real number, not str"),
