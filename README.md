@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 4, 2026, Imre has a paired pass for **11,381 of 16,202 tests (70.2%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,385 of 16,202 tests (70.3%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -154,7 +154,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
-| `base64` | 32 | 41 | 0 | The complete public run passed 30 of 41 at O0 and O3. A later public run added both Base16 decoder originals, bringing the cumulative count to 32. |
+| `base64` | 33 | 41 | 0 | In a full run of all 41 originals, `test.test_base64.LegacyBase64TestCase.test_encodebytes` (occurrence 1) joined the pass set. Stock passed 41. Each native mode passed 33, failed five, errored on two, and skipped one. |
 | `configparser` | 326 | 344 | 0 | Stock and both native builds passed the same 19 original multiline parsing tests on public main. All 19 are new to the ledger. |
 | `contextlib` | 148 | 149 | 0 | All 58 async originals and 90 of 91 synchronous originals have paired passes. The module entry point passed nine of the ten `TestSuppress` cases on public Imre. The remaining case exercises exception groups. |
 | `copy` | 73 | 81 | 0 | Shallow and deep copies of list subclasses passed on stock and both public native levels. The full suite ran 81 cases. Stock passed 81 and both native levels passed the same 73. |
@@ -171,9 +171,9 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `uuid` | 38 | 120 | 0 | All three engines ran 120 originals. Stock CPython passed 49. Public Imre O0 and O3 passed the same 38, including 11 newly paired UUID generation and CLI cases. All three skipped 71. |
 | `warnings` | 181 | 187 | 0 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| `zipfile` | 201 | 383 | 0 | All eight encoded-metadata tests passed on stock and at both public native levels. The newly paired test is `test.test_zipfile.test_core.EncodedMetadataTests.test_read_with_incorrect_metadata_encoding` (occurrence 1). |
+| `zipfile` | 204 | 383 | 0 | Three additional originals now pass on the public compiler in both modes. They cover the good password and two forms of CRC failure in deflated ZIP entries. Both stored-entry controls also passed. |
 | `zoneinfo` | 41 | 261 | 0 | All 18 originals in WeirdZoneTest and CWeirdZoneTest passed on CPython and public Imre at O0 and O3 after LZMA decompression landed. The cumulative count includes the 23 previously passing properties. |
-| **Measured total (19 of 19 families)** | **1,746** | **2,875** | **8** |  |
+| **Measured total (19 of 19 families)** | **1,750** | **2,875** | **8** |  |
 
 ## Design
 
