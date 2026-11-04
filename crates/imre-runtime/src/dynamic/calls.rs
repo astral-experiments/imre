@@ -3807,7 +3807,10 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "tuple"
-                    && matches!(name, "__new__" | "__getitem__" | "count" | "index") =>
+                    && matches!(
+                        name,
+                        "__new__" | "__getitem__" | "__getnewargs__" | "count" | "index"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("tuple.{name}")));
             }
