@@ -648,7 +648,8 @@ pub(crate) fn reverse_slice(parts: &[Expr]) -> Option<(&Expr, i64, i64)> {
     Some((source, start, negative_component(step)?))
 }
 
-fn omitted(value: &Expr) -> bool {
+/// Whether a slice component is an omitted bound with no evaluation effects.
+pub(crate) fn omitted(value: &Expr) -> bool {
     matches!(&value.kind, ExprKind::Absent(inner) if matches!(inner.kind, ExprKind::None))
 }
 
@@ -1323,6 +1324,8 @@ pub(crate) enum Builtin {
     BytesValidateUtf8,
     /// Receiver followed by three nullable integer words for start, stop, step.
     Slice,
+    /// Compare two contiguous regions of immutable strings without copying them.
+    StringSliceEqual,
     Append,
     Pop,
     ListClear,

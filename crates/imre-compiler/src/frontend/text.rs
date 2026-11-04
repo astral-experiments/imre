@@ -4,6 +4,60 @@ use super::calls::parameter;
 use super::*;
 use crate::ir::TextOperation;
 
+/// A contiguous slice has no fallible stride or user-defined indexing operation.
+fn unit_string_slice(value: &Expr) -> bool {
+    let ExprKind::Builtin(Builtin::Slice, parts) = &value.kind else {
+        return false;
+    };
+    matches!(parts.as_slice(), [_, _, _, step] if ir::omitted(step)
+        || matches!(&step.kind, ExprKind::Present(one) if matches!(&one.kind, ExprKind::Int(n) if n == "1")))
+}
+
+/// Evaluates each receiver and its bounds in Python order. An unsliced operand
+/// uses omitted bounds, so the runtime can borrow its entire UTF-8 buffer.
+pub(super) fn slice_equality(
+    types: &Types,
+    values: &mut Vec<Expr>,
+    ops: &[ast::CmpOp],
+) -> Option<Expr> {
+    let ([left, right], [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)]) = (values.as_slice(), ops)
+    else {
+        return None;
+    };
+    if ![left, right]
+        .iter()
+        .all(|v| matches!(v.ty, Type::Str | Type::StrLiteral(_)))
+        || !(unit_string_slice(left) || unit_string_slice(right))
+    {
+        return None;
+    }
+    let absent = Expr::absent(types.optional(Type::Int));
+    let mut args = Vec::with_capacity(6);
+    for value in values.drain(..) {
+        if unit_string_slice(&value) {
+            let ExprKind::Builtin(_, mut parts) = value.kind else {
+                unreachable!()
+            };
+            parts.pop();
+            args.extend(parts);
+        } else {
+            args.extend([value, absent.clone(), absent.clone()]);
+        }
+    }
+    let equal = Expr {
+        ty: Type::Bool,
+        kind: ExprKind::Builtin(Builtin::StringSliceEqual, args),
+    };
+    Some(if *op == ast::CmpOp::NotEq {
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Not(Box::new(equal)),
+        }
+    } else {
+        equal
+    })
+}
+
 /// Constructs a fixed signature slot for the shared argument binder.
 impl Checker<'_> {
     pub(super) fn unicode_normalize(
@@ -774,5 +828,36 @@ impl Checker<'_> {
         let parameters = [parameter(name, Type::Str, None)];
         let arguments = self.arguments(call, &parameters, None)?;
         Ok(self.ordered_builtin(Builtin::Text(operation), Type::Str, arguments))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{CompileOptions, compile};
+
+    #[test]
+    fn compare_only_contiguous_exact_string_slices() {
+        for (expression, fused) in [
+            ("a[lo:hi] == b", true),
+            ("a != b[lo:hi:1]", true),
+            ("a[:hi] == b[lo:]", true),
+            ("a[::lo] == b", false),
+            ("a[::-1] != b", false),
+            ("a[:hi] == b == a", false),
+            ("a[:hi] < b", false),
+        ] {
+            let source = format!(
+                "def check(a: str, b: str, lo: int, hi: int) -> bool:\n    return {expression}\n"
+            );
+            let llvm = compile(&source, &CompileOptions::default()).unwrap();
+            assert_eq!(
+                llvm.contains("call i32 @imre_str_slice_equal("),
+                fused,
+                "{expression}"
+            );
+        }
+        let source = "def check(a: bytes, b: bytes) -> bool:\n    return a[:2] == b\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(!llvm.contains("call i32 @imre_str_slice_equal("));
     }
 }
