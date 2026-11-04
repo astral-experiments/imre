@@ -161,6 +161,12 @@ def _decode(data, stream):
     return data.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _pipe_replaced(stream, original_ref):
+    if stream is None:
+        return original_ref is not None
+    return original_ref is None or original_ref() is not stream
+
+
 def _flush_stdin(stream):
     try:
         stream.flush()
@@ -320,6 +326,8 @@ class Popen:
                 if self.stderr is not None:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
             self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
+            self._stdout_ref = None if self.stdout is None else _ref(self.stdout)
+            self._stderr_ref = None if self.stderr is None else _ref(self.stderr)
             self._replacement_output = None
             self._input = None
             self._execute_child(args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
@@ -480,10 +488,11 @@ class Popen:
         use_select = _PopenSelector is not selectors.PollSelector
         if use_select and _PopenSelector is not getattr(selectors, "SelectSelector", None):
             raise NotImplementedError("unsupported subprocess selector")
-        same_stdin = self._stdin_ref is None if self.stdin is None else (
-            self._stdin_ref is not None and self._stdin_ref() is self.stdin)
-        if self._replacement_output is not None or (not self._communication_started and not same_stdin):
-            return self._communicate_replaced_stdin(input, endtime, orig_timeout)
+        if self._replacement_output is not None or (not self._communication_started and (
+                _pipe_replaced(self.stdin, self._stdin_ref)
+                or _pipe_replaced(self.stdout, self._stdout_ref)
+                or _pipe_replaced(self.stderr, self._stderr_ref))):
+            return self._communicate_replaced_pipes(input, endtime, orig_timeout)
         if not self._communication_started and self.stdin is not None:
             # Publish earlier writes even if converting the new input raises.
             _flush_stdin(self.stdin)
@@ -521,57 +530,59 @@ class Popen:
             out, err = _decode(out, self.stdout), _decode(err, self.stderr)
         return out, err
 
-    def _communicate_replaced_stdin(self, input, deadline, timeout):
-        # The process handle still owns its original pipe. Use the public stream's
-        # descriptor for readiness and writes, and leave the original pipe alone.
+    def _communicate_replaced_pipes(self, input, deadline, timeout):
+        # The native handle knows only the original pipes. Select on the public
+        # streams and retain their output buffers by file object across retries.
         import os
         import select
 
         if self._replacement_output is None:
-            self._replacement_output = [[], []]
+            self._replacement_output = {stream: [] for stream in (self.stdout, self.stderr) if stream}
             self._replacement_input = b""
             self._replacement_offset = 0
             self._communication_started = True
             if self.stdin:
                 _flush_stdin(self.stdin)
-                if input:
-                    if self.text_mode:
-                        input = input.encode(self.stdin.encoding, self.stdin.errors)
-                    self._replacement_input = input
-                else:
+                if not input:
                     try:
                         self.stdin.close()
                     except BrokenPipeError:
                         pass
+                if input is not None and self.text_mode:
+                    input = input.encode(self.stdin.encoding, self.stdin.errors)
+                if input:
+                    self._replacement_input = input
         elif input:
             raise ValueError("Cannot send input after starting communication")
 
+        output = self._replacement_output
+        stdout = output[self.stdout] if self.stdout else None
+        stderr = output[self.stderr] if self.stderr else None
         input_bytes = self._replacement_input
         if isinstance(input_bytes, memoryview):
             # The write offset is in bytes. A strided view cannot be cast.
             input_bytes = input_bytes.cast("B")
         elif not isinstance(input_bytes, (bytes, bytearray)):
             input_bytes = bytes(memoryview(input_bytes))
-        output = self._replacement_output
         with _PopenSelector() as selector:
             pending = 0
             if (self.stdin and not self.stdin.closed and
                     self._replacement_offset < len(input_bytes)):
-                selector.register(self.stdin.fileno(), selectors.EVENT_WRITE, self.stdin)
+                selector.register(self.stdin, selectors.EVENT_WRITE)
                 pending += 1
             for stream in (self.stdout, self.stderr):
                 if stream and not stream.closed:
-                    selector.register(stream.fileno(), selectors.EVENT_READ, stream)
+                    selector.register(stream, selectors.EVENT_READ)
                     pending += 1
             while pending:
                 remaining = None if deadline is None else deadline - _time()
                 ready = selector.select(remaining) if remaining is None or remaining > 0 else []
                 if deadline is not None and _time() >= deadline:
                     raise TimeoutExpired(self.args, timeout,
-                                         output=b"".join(output[0]) if output[0] else None,
-                                         stderr=b"".join(output[1]) if output[1] else None)
+                                         output=b"".join(stdout) if stdout else None,
+                                         stderr=b"".join(stderr) if stderr else None)
                 for key, _ in ready:
-                    if key.data is self.stdin:
+                    if key.fileobj is self.stdin:
                         offset = self._replacement_offset
                         chunk = input_bytes[offset:offset + getattr(select, "PIPE_BUF", 512)]
                         try:
@@ -581,21 +592,25 @@ class Popen:
                         else:
                             if self._replacement_offset < len(input_bytes):
                                 continue
-                    else:
+                    elif key.fileobj in (self.stdout, self.stderr):
                         data = os.read(key.fd, 32768)
-                        output[0 if key.data is self.stdout else 1].append(data)
+                        output[key.fileobj].append(data)
                         if data:
                             continue
-                    selector.unregister(key.fd)
-                    key.data.close()
+                    else:
+                        continue
+                    selector.unregister(key.fileobj)
+                    key.fileobj.close()
                     pending -= 1
         try:
             self.wait(timeout=None if deadline is None else deadline - _time())
         except TimeoutExpired as exc:
             exc.timeout = timeout
             raise
-        stdout = None if self.stdout is None else b"".join(output[0])
-        stderr = None if self.stderr is None else b"".join(output[1])
+        if stdout is not None:
+            stdout = b"".join(stdout)
+        if stderr is not None:
+            stderr = b"".join(stderr)
         if self.text_mode:
             return _decode(stdout, self.stdout), _decode(stderr, self.stderr)
         return stdout, stderr
