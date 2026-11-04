@@ -553,7 +553,7 @@ fn integer_field(
     let value = ctx.index_value(id).and_then(|value| {
         value.ok_or_else(|| format_error(ctx, "required argument is not an integer"))
     });
-    if matches!(code, b'b' | b'h' | b'i' | b'l' | b'q') {
+    if matches!(code, b'b' | b'h' | b'i' | b'l' | b'q' | b'n') {
         let max = i64::MAX >> ((8 - width) * 8);
         let min = !max;
         let number = match value {
@@ -582,18 +582,26 @@ fn integer_field(
                 )
             });
     }
-    let value = value?;
-    let number = value.big().to_u64();
     let max = u64::MAX >> ((8 - width) * 8);
-    if let Some(n) = number.filter(|&n| n <= max) {
-        return Ok(n);
-    }
-    if code == b'P' {
-        return value
-            .to_i64()
-            .and_then(|v| isize::try_from(v).ok())
-            .map(|v| v as usize as u64)
-            .ok_or_else(|| format_error(ctx, "int too large to convert"));
+    match value {
+        Ok(value) => {
+            if let Some(n) = value.big().to_u64().filter(|&n| n <= max) {
+                return Ok(n);
+            }
+            if code == b'P' {
+                return value
+                    .to_i64()
+                    .and_then(|v| isize::try_from(v).ok())
+                    .map(|v| v as usize as u64)
+                    .ok_or_else(|| format_error(ctx, "int too large to convert"));
+            }
+        }
+        Err(error) => {
+            let overflow = ctx.builtin("OverflowError");
+            if code != b'N' || !ctx.raised_error_matches(&error, overflow) {
+                return Err(error);
+            }
+        }
     }
     Err(format_error(
         ctx,

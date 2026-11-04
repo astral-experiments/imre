@@ -86,7 +86,7 @@ impl StructFormat {
                 b'd' => (8, align_of::<f64>()),
                 b'q' | b'Q' => (8, align_of::<u64>()),
                 b'x' => (1, 1),
-                b'P' if result.native => (size_of::<usize>(), align_of::<usize>()),
+                b'n' | b'N' | b'P' if result.native => (size_of::<usize>(), align_of::<usize>()),
                 _ => return Err("bad char in struct format".into()),
             };
             let offset = if result.native {
@@ -224,7 +224,7 @@ impl StructFormat {
             };
             result.push(match code {
                 b'?' => UnpackedField::Bool(value != 0),
-                b'b' | b'h' | b'i' | b'l' | b'q' => {
+                b'b' | b'h' | b'i' | b'l' | b'q' | b'n' => {
                     // Move the field's sign bit into bit 63 before the arithmetic shift.
                     let shift = (8 - field.len()) * 8;
                     UnpackedField::Signed(((value << shift) as i64) >> shift)
