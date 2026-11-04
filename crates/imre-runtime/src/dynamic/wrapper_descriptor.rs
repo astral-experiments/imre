@@ -820,7 +820,10 @@ impl BuiltinDescriptor {
                     ("ljust", "__doc__") if matches!(self.owner, "bytes" | "bytearray") => {
                         "Return a left-justified string of length width.\n\nPadding is done using the specified fill character."
                     }
-                    ("ljust", _) if matches!(self.owner, "bytes" | "bytearray") => "($self, width, fillchar=b' ', /)",
+                    ("rjust", "__doc__") if self.owner == "bytes" => {
+                        "Return a right-justified string of length width.\n\nPadding is done using the specified fill character."
+                    }
+                    ("ljust" | "rjust", _) if matches!(self.owner, "bytes" | "bytearray") => "($self, width, fillchar=b' ', /)",
                     ("ljust", "__doc__") => {
                         "Return a left-justified string of length width.\n\nPadding is done using the specified fill character (default is a space)."
                     }

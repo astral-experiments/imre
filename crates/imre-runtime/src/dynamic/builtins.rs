@@ -546,6 +546,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "removeprefix",
     "replace",
     "rfind",
+    "rjust",
     "rsplit",
     "rstrip",
     "split",
