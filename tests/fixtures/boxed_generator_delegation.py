@@ -210,6 +210,31 @@ def delegate(child):
 
 
 def current():
+    from itertools import repeat
+
+    closed = []
+
+    def guarded(source):
+        try:
+            yield from source
+        finally:
+            closed.append("outer")
+
+    for source in (range(3), repeat(0, 3)):
+        stream = guarded(source)
+        assert next(stream) == 0
+        del stream
+        assert closed.pop() == "outer"
+
+    class ClosingRepeat(repeat):
+        def close(self):
+            closed.append("delegate")
+
+    stream = delegate(ClosingRepeat(1, 2))
+    assert next(stream) == 1
+    del stream
+    assert closed == ["delegate"]
+
     seen = []
     make = lambda value: (yield seen.append(value))
     stream = make(7)

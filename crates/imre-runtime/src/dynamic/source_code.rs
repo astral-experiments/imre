@@ -4163,9 +4163,14 @@ impl Context {
         // The public async-generator object owns its first-iteration/finalization hooks.
         let async_generator =
             self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
-        let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
+        // Closing an exact range iterator or repeat cannot call Python. A
+        // suspended outer try/finally still needs its own finalizer below.
+        let delegate_needs_close = matches!(&result, Ok(Step::Yield(_, ip))
             if matches!(&self.code_object(code).body, Body::Source(program)
-                if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate)))));
+                if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate))))
+            && active.last().is_none_or(|&iter| {
+                !matches!(self.heap.get(iter), Value::RangeIterator(_) | Value::Repeat(_))
+            }));
         let Value::Generator {
             running,
             offset,
@@ -4185,7 +4190,7 @@ impl Context {
                 // A failed lookup of the delegate's throw method leaves it suspended.
                 let needs_finalizer = matches!(step, Step::Rejected(..))
                     || (matches!(step, Step::Yield(..))
-                        && (!blocks.is_empty() || suspended_at_delegate));
+                        && (!blocks.is_empty() || delegate_needs_close));
                 *offset = Some(ip);
                 *iterators = active;
                 *protected = blocks;
