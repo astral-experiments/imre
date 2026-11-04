@@ -135,6 +135,32 @@ def current():
     assert args == (WithArgs, ([2, 3],), {'initial': 7})
     assert state is None and items is None and pairs is None
 
+    class ReentrantSource:
+        def __init__(self):
+            self.pulls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.pulls += 1
+            if self.pulls == 1:
+                assert next(cursor) == 7
+                return 5
+            if self.pulls == 2:
+                return 7
+            raise StopIteration
+
+    cursor = accumulate(ReentrantSource())
+    assert list(cursor) == [12]
+    assert list(accumulate([None, 4], lambda old, new: (old, new))) == [None, (None, 4)]
+
+    class Double(accumulate):
+        def __next__(self):
+            return 2 * super().__next__()
+
+    assert list(Double([1, 2, 3])) == [2, 6, 12]
+
     print('accumulate')
 
 

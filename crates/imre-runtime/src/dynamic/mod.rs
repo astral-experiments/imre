@@ -1430,6 +1430,13 @@ impl Context {
                 let [callable, sentinel] = *state;
                 return self.next_callable_item(id, callable, sentinel);
             }
+            Value::Instance {
+                class,
+                itertools: Some(cursor),
+                ..
+            } if cursor.is_exact_accumulate(*class) => {
+                return stdlib::itertools::next_accumulated(self, id);
+            }
             _ => {
                 if let Some(method) = self.bound_slot(id, "__next__")? {
                     return self.call(method, Vec::new(), Vec::new()).map(Some);
@@ -3303,7 +3310,7 @@ impl Context {
             "_imre_itertools" => {
                 for attr in [
                     "_accumulate_allocate",
-                    "_accumulate_state",
+                    "_accumulate_next",
                     "_cycle_allocate",
                     "_cycle_next",
                     "_pairwise_allocate",

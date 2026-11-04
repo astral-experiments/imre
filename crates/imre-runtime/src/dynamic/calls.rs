@@ -6495,7 +6495,7 @@ impl Context {
             dictionary,
             property,
             weak_reference: None,
-            cycle: None,
+            itertools: None,
             member_values: None,
             memory_stream: None,
             fields: Default::default(),
@@ -6880,7 +6880,7 @@ impl Context {
             scalar: Some(storage),
             property: None,
             weak_reference: None,
-            cycle: None,
+            itertools: None,
             member_values: None,
             memory_stream: None,
         }))
