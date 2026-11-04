@@ -570,7 +570,7 @@ class _MagicSlot:
 class CallableMixin:
     def __call__(self, /, *args, **kwargs):
         node = self._node
-        signature = getattr(node, "_spec_signature", None)
+        signature = getattr(node, "_call_signature", None)
         if signature is not None:
             signature.bind(*args, **kwargs)
         node.called = True
@@ -641,10 +641,20 @@ def _autospec_target(spec, name, value):
     return value
 
 
-def _make_autospec(spec, strict, as_instance, name=None, target=None):
+def _autospec_signature(target):
+    from inspect import signature
+
+    try:
+        return signature(target)
+    except ValueError:
+        # Some builtin callables do not expose a signature.
+        return None
+
+
+def _make_autospec(spec, strict, as_instance, name=None, target=None, *, eat_self=False):
     from dataclasses import fields, is_dataclass
     from functools import partial
-    from inspect import iscoroutinefunction, isdatadescriptor, signature
+    from inspect import iscoroutinefunction, isdatadescriptor
 
     if _is_instance_mock(spec):
         raise InvalidSpecError("Cannot autospec a Mock object")
@@ -654,20 +664,31 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
         # A property viewed through its class has no known result type.
         return MagicMock(name=name)
     is_class = isinstance(spec, type)
+    cls = MagicMock
     if is_class:
         if not as_instance:
             target = partial(spec.__init__, None)
-        elif _instance_callable(spec):
-            target = _autospec_target(spec, "__call__", spec.__call__)
+        else:
+            if not _instance_callable(spec):
+                cls = NonCallableMagicMock
+            target = getattr(spec, "__call__", _unset_return)
+            if cls is NonCallableMagicMock and callable(target):
+                # The metaclass constructor does not model an instance call.
+                target = _unset_return
     elif isinstance(spec, classmethod):
         target = partial(spec.__func__, None)
     elif isinstance(spec, staticmethod):
         target = spec.__func__
-    elif target is None and callable(spec):
+    elif target is None and isinstance(spec, (FunctionType, MethodType)):
         target = spec
-    if target is not None and iscoroutinefunction(target):
+    elif target is None:
+        # Inspect the call wrapper itself, as CPython does. Absence means no
+        # signature; an explicitly noncallable wrapper still raises TypeError.
+        target = getattr(spec, "__call__", _unset_return)
+        if target is _unset_return and not callable(spec):
+            cls = NonCallableMagicMock
+    if target is not _unset_return and iscoroutinefunction(target):
         raise NotImplementedError("autospeccing async callables is not supported")
-    cls = MagicMock if target is not None else NonCallableMagicMock
     mock = cls(spec_set=spec, name=name) if strict else cls(spec=spec, name=name)
     if spec is not None:
         # Capture the original attributes now; build their mocks on first access.
@@ -691,30 +712,31 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
                 if "__%s__" % field.name[2:-2] != field.name:
                     members[field.name] = (field.type, None)
         mock._node._autospec_members = members
-    if target is not None:
-        try:
-            sig = signature(target)
-        except ValueError:
-            # Some builtin callables do not expose a signature.
-            pass
-        else:
-            mock._node._spec_signature = sig
-            type(mock).__signature__ = sig
+    if target is not _unset_return:
+        # Calls supply the receiver. Assertions on an explicit instance spec
+        # use the raw signature, while a factory's return mock eats self too.
+        if eat_self:
+            target = partial(target, None)
+        sig = _autospec_signature(target)
+        call_sig = _autospec_signature(partial(target, None)) if is_class and as_instance and not eat_self else sig
+        mock._node._spec_signature = sig
+        if call_sig is not None:
+            mock._node._call_signature = call_sig
+            type(mock).__signature__ = call_sig
     if is_class and not as_instance:
-        mock.return_value = _make_autospec(spec, strict, True)
+        mock.return_value = _make_autospec(spec, strict, True, eat_self=True)
     return mock
 
 
 def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwargs):
     """Create a mock of a class or instance, checking calls against the source signatures."""
-    from inspect import isroutine
     from types import BuiltinFunctionType
 
     if _is_instance_mock(spec):
         raise InvalidSpecError("Cannot autospec a Mock object")
-    if isroutine(spec) and not isinstance(spec, (classmethod, staticmethod)):
-        # An explicit None signature on a bound builtin means the mock itself
-        # can handle calls. Signed methods need a function wrapper exposing .mock.
+    if isinstance(spec, (FunctionType, MethodType)):
+        # Python functions and methods need a delegating function exposing .mock.
+        # A bound builtin with an explicitly absent signature returns the mock itself.
         if not (
             isinstance(spec, MethodType)
             and isinstance(spec.__func__, BuiltinFunctionType)
