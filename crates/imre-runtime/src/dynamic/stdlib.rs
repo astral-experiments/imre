@@ -596,14 +596,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         #[cfg(target_os = "linux")]
         ("time", "CLOCK_REALTIME") => ctx.int(i64::from(libc::CLOCK_REALTIME)),
-        #[cfg(target_os = "linux")]
-        ("time", "clock_gettime" | "clock_gettime_ns") => ctx.builtin(&format!("time.{name}")),
-        (
-            "time",
-            "get_clock_info" | "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter"
-            | "perf_counter_ns" | "sleep" | "gmtime" | "localtime" | "mktime" | "strftime"
-            | "ctime" | "struct_time" | "tzset",
-        ) => ctx.builtin(&format!("time.{name}")),
+        ("time", "struct_time") => ctx.builtin("time.struct_time"),
+        ("time", name) if time::is_function(name) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
             if name != "md5"

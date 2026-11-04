@@ -1,4 +1,4 @@
-from types import MethodType
+from types import FunctionType, MethodType
 from unittest.util import safe_repr
 
 
@@ -370,6 +370,9 @@ class NonCallableMock(_FixedMock):
         if name in members:
             value, target = members[name]
             child = _make_autospec(value, self._mock_strict, False, target=target)
+            if isinstance(value, (FunctionType, MethodType)):
+                # A spec method has a return value even if first read after seal().
+                child.return_value = MagicMock()
             self._adopt(child, "." + name)
             object.__setattr__(self, name, child)
             if self._mock_sealed:
@@ -646,7 +649,6 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
     from dataclasses import fields, is_dataclass
     from functools import partial
     from inspect import iscoroutinefunction, isdatadescriptor, signature
-    from types import FunctionType
 
     if _is_instance_mock(spec):
         raise InvalidSpecError("Cannot autospec a Mock object")
@@ -704,19 +706,25 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
             type(mock).__signature__ = sig
     if is_class and not as_instance:
         mock.return_value = _make_autospec(spec, strict, True)
-    elif isinstance(spec, (FunctionType, MethodType)):
-        # A spec method has a return value even if first read after seal().
-        mock.return_value = MagicMock()
     return mock
 
 
 def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwargs):
     """Create a mock of a class or instance, checking calls against the source signatures."""
     from inspect import isroutine
+    from types import BuiltinFunctionType
+
     if _is_instance_mock(spec):
         raise InvalidSpecError("Cannot autospec a Mock object")
     if isroutine(spec) and not isinstance(spec, (classmethod, staticmethod)):
-        raise NotImplementedError("create_autospec does not yet support standalone routines")
+        # An explicit None signature on a bound builtin means the mock itself
+        # can handle calls. Signed methods need a function wrapper exposing .mock.
+        if not (
+            isinstance(spec, MethodType)
+            and isinstance(spec.__func__, BuiltinFunctionType)
+            and getattr(spec.__func__, "__text_signature__", False) is None
+        ):
+            raise NotImplementedError("create_autospec does not yet support standalone routines")
     if not unsafe:
         for typo in ("autospect", "auto_spec", "set_spec"):
             if typo in kwargs:

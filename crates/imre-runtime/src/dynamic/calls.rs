@@ -57,6 +57,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "operator" if stdlib::operator::Operation::named(function).is_some() => {
             Some(("_operator", function))
         }
+        "time" if stdlib::time::is_function(function) => Some((module, function)),
         "sys"
             if matches!(
                 function,
@@ -2718,6 +2719,10 @@ impl Context {
             }
             Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
+                    "__text_signature__" if module == "time" => {
+                        return Ok(stdlib::time::text_signature(function)
+                            .map_or(NONE, |sig| self.text(sig)));
+                    }
                     "__self__" if module == "sys" => {
                         if let Some(original) = self.threads.system_module {
                             return Ok(original);
