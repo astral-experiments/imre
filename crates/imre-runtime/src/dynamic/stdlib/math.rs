@@ -135,7 +135,13 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(result)));
     }
-    if operation == "cos" {
+    let trig: Option<fn(f64) -> f64> = match operation {
+        "cos" => Some(f64::cos),
+        "sin" => Some(f64::sin),
+        "tan" => Some(f64::tan),
+        _ => None,
+    };
+    if let Some(trig) = trig {
         let x = as_double(ctx, value)?;
         if x.is_infinite() {
             return Err(Error::new(
@@ -143,7 +149,7 @@ pub(super) fn call(
                 format!("expected a finite input, got {}", crate::floats::render(x)),
             ));
         }
-        return Ok(ctx.alloc(Value::Float(x.cos())));
+        return Ok(ctx.alloc(Value::Float(trig(x))));
     }
     if operation == "exp" {
         let x = as_double(ctx, value)?;
