@@ -648,16 +648,9 @@ pub(crate) fn compile<const SPLIT: bool>(
         ]
         .iter()
         .any(|name| src.contains(name));
-    // Python normalizes non-ASCII identifiers, including imported module names.
-    let provider_hint = startup.is_some()
-        && !options.runtime_imports
-        && (src.contains("logging")
-            || src.contains("tokenize")
-            || src.contains("configparser")
-            || src.contains("_pyio")
-            || !src.is_ascii());
+    let startup_fallback = startup.is_some() && !options.runtime_imports;
     let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
-    if !object_hint && !provider_hint && !ordered_command {
+    if !object_hint && !startup_fallback && !ordered_command {
         return Ok(None);
     }
     let Ok(mut first) = scan_imports(
@@ -673,8 +666,7 @@ pub(crate) fn compile<const SPLIT: bool>(
     };
     // Python entries can import these bundled sources when static lowering cannot handle the entry.
     let imports_provider = |provider: &str| {
-        startup.is_some()
-            && !options.runtime_imports
+        startup_fallback
             && first
                 .names
                 .iter()
@@ -693,11 +685,18 @@ pub(crate) fn compile<const SPLIT: bool>(
             || provider_script);
     // Existing object imports keep their normal project-module lookup. Only a new
     // startup fallback needs to verify that the imported provider is bundled.
-    let logging_script = !object_entry && provider_hint && first.imports_logging;
+    let logging_script = !object_entry && startup_fallback && first.imports_logging;
     let tokenize_script = !object_entry && imports_provider("tokenize");
     let configparser_script = !object_entry && imports_provider("configparser");
     let pyio_script = !object_entry && imports_provider("_pyio");
-    let fallback_script = logging_script || tokenize_script || configparser_script || pyio_script;
+    let installed_script = !object_entry
+        && startup_fallback
+        && first
+            .names
+            .iter()
+            .any(|(level, name)| *level == 0 && crate::zip_entry::installed_member(name).is_some());
+    let fallback_script =
+        logging_script || tokenize_script || configparser_script || pyio_script || installed_script;
     let ordered_only = !object_entry && !fallback_script;
     if ordered_only
         && (!ordered_command
@@ -800,7 +799,7 @@ pub(crate) fn compile<const SPLIT: bool>(
     let mut seen = HashSet::new();
     // Keep source hints on the winning regular package's path. The runtime finder
     // can still load a different child if a parent changes its __path__.
-    let mut entry_sources: HashMap<String, Option<PathBuf>> = HashMap::new();
+    let mut entry_sources: HashMap<String, (PathBuf, bool)> = HashMap::new();
     let mut before_site = HashSet::new();
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
@@ -809,6 +808,7 @@ pub(crate) fn compile<const SPLIT: bool>(
     let mut computed_import = registered_imports.computed;
     let mut bundled_only = false;
     let mut getters = VecDeque::new();
+    let mut bundled_imports = VecDeque::new();
     let mut through_getter = false;
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
@@ -817,6 +817,12 @@ pub(crate) fn compile<const SPLIT: bool>(
             // Keep project shadows for a bundled module's lazy attributes. The
             // ordinary graph has already checked any modules the user imported.
             through_getter = true;
+            next
+        } else if let Some((next, lazy)) = bundled_imports.pop_front() {
+            // The program can reach these providers through a ZIP or an extended package
+            // path. Their hints must not force unrequested application files to compile.
+            through_getter = lazy;
+            bundled_only = true;
             next
         } else {
             through_getter = false;
@@ -950,8 +956,12 @@ pub(crate) fn compile<const SPLIT: bool>(
                 continue;
             }
             let mut prefix = String::new();
+            let mut project_parent = false;
             for part in name.split('.').filter(|s| !s.is_empty()) {
                 if !prefix.is_empty() {
+                    project_parent |= entry_sources
+                        .get(&prefix)
+                        .is_some_and(|(root, _)| initial.contains(root));
                     prefix.push('.');
                 }
                 prefix.push_str(part);
@@ -962,8 +972,14 @@ pub(crate) fn compile<const SPLIT: bool>(
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
                 let bundled = bundled_module_source(&prefix);
+                let mut installed = if bundled.is_none() {
+                    crate::zip_entry::installed_member(&prefix)
+                } else {
+                    None
+                };
                 if implicit_site.is_some()
                     && (bundled.is_some()
+                        || installed.is_some()
                         || imre_ast::providers::provider(&prefix).is_some()
                         || prefix
                             .rsplit_once('.')
@@ -983,26 +999,36 @@ pub(crate) fn compile<const SPLIT: bool>(
                         imports.computed_import = false;
                         getter.computed_import = false;
                     }
+                    // An earlier regular project ancestor controls the live search path.
+                    // Keep the registered alternative without following it into the project.
+                    let mut enqueue = |hints, lazy| {
+                        let next = (prefix.clone(), package, hints);
+                        if project_parent {
+                            bundled_imports.push_back((next, lazy || through_getter));
+                        } else if lazy {
+                            getters.push_back(next);
+                        } else {
+                            work.push_back(next);
+                        }
+                    };
+                    enqueue(imports, false);
                     if !getter.names.is_empty() || getter.uses_exec {
-                        getters.push_back((prefix.clone(), package, getter));
+                        enqueue(getter, true);
                     }
                     sources.push((prefix.clone(), path, source.into_owned()));
-                    work.push_back((prefix.clone(), package, imports));
-                }
-                if bundled_only {
-                    continue;
                 }
                 // The interpreter bootstraps runpy from its frozen copy before executing the target.
                 if prefix == "runpy" {
                     continue;
                 }
-                for root in &roots {
+                for root in roots.iter().filter(|_| !bundled_only) {
                     if implicit_site == Some(root) && before_site.contains(&prefix) {
                         continue;
                     }
-                    if let Some((parent, _)) = prefix.rsplit_once('.')
-                        && let Some(selected) = entry_sources.get(parent)
-                        && selected.as_ref() != Some(root)
+                    if module_entry.is_some()
+                        && let Some((parent, _)) = prefix.rsplit_once('.')
+                        && let Some((selected, package)) = entry_sources.get(parent)
+                        && (!package || selected != root)
                     {
                         continue;
                     }
@@ -1010,6 +1036,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                         && initial.first() == Some(root)
                     {
                         if let Some((member, source, package)) = archive.module(&prefix) {
+                            installed = None;
                             if let Ok(imports) =
                                 imports_for_module(&member, source.trim_start_matches('\u{feff}'))
                             {
@@ -1018,7 +1045,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                             if implicit_site.is_some() {
                                 before_site.insert(prefix.clone());
                             }
-                            entry_sources.insert(prefix.clone(), package.then(|| root.clone()));
+                            entry_sources.insert(prefix.clone(), (root.clone(), package));
                             break;
                         }
                         continue;
@@ -1067,6 +1094,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                     {
                         return Ok(None);
                     }
+                    installed = None;
                     let src = std::fs::read_to_string(&path)
                         .map_err(|e| format!("{}: {e}", path.display()))?;
                     let imports = imports_for_module(&path, &src)?;
@@ -1077,10 +1105,20 @@ pub(crate) fn compile<const SPLIT: bool>(
                     ));
                     sources.push((prefix.clone(), path, src));
                     work.push_back((prefix.clone(), package, imports));
+                    entry_sources
+                        .entry(prefix.clone())
+                        .or_insert_with(|| (root.clone(), package));
                     if module_entry.is_some() {
-                        entry_sources.insert(prefix.clone(), package.then(|| root.clone()));
                         break;
                     }
+                }
+                if let Some(member) = installed {
+                    let source = crate::zip_entry::installed_source(member)?;
+                    let imports = imports_for_module(Path::new(member), &source)?;
+                    bundled_imports.push_back((
+                        (prefix.clone(), member.ends_with("/__init__.py"), imports),
+                        false,
+                    ));
                 }
             }
         }

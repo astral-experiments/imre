@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
@@ -88,10 +89,21 @@ def check_installed_site(imre, root, run):
         if companion.exists():
             (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
     name = "xml.etree.ElementTree"
-    use_xml = "import importlib, sys; print(importlib.import_module(sys.argv[1]).Element('root').tag)"
+    sample = root / "sample.tar"
+    member = root / "payload"
+    member.write_bytes(b"archive member")
+    with tarfile.open(sample, "w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "sample"}) as tar:
+        tar.add(member, arcname="payload")
+    use_sources = (
+        "import importlib, sys, tarfile\n"
+        "print(importlib.import_module(sys.argv[1]).Element('root').tag)\n"
+        "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
+        "    with tar.extractfile('payload') as member:\n"
+        "        assert member.read() == b'archive member'\n"
+    )
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
-    bare = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    bare = run(launcher, "-IB", "-c", use_sources, name, sample, timeout=300)
     assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
     opaque = run(
         launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
@@ -108,8 +120,17 @@ def check_installed_site(imre, root, run):
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported
     archive.write_bytes(exported.stdout)
-    packaged = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
+    reader = root / "read_tar_entry.py"
+    reader.write_text(
+        "from tarfile import open as open_archive\n"
+        f"with open_archive({str(sample.resolve())!r}, 'r:') as archive:\n"
+        "    with archive.extractfile('payload') as member:\n"
+        "        print(member.read().decode('ascii'))\n"
+    )
+    direct = run(launcher, "-B", reader, timeout=300)
+    assert (direct.returncode, direct.stdout, direct.stderr) == (0, b"archive member\n", b""), direct
     shadow = root / "shadow_xml"
     shadow.mkdir()
     (shadow / "xml.py").write_text("marker = 73\n")
@@ -117,6 +138,22 @@ def check_installed_site(imre, root, run):
     probe.write_text("import importlib, sys\nprint(importlib.import_module(sys.argv[1]).marker)\n")
     local = run(launcher, "-B", probe, "xml", timeout=300)
     assert (local.returncode, local.stdout, local.stderr) == (0, b"73\n", b""), local
+    # The absent registered child must not pull its sibling into the local package.
+    etree = root / "regular_parent" / "xml" / "etree"
+    etree.mkdir(parents=True)
+    (etree.parent / "__init__.py").write_text("")
+    (etree / "__init__.py").write_text("")
+    (etree / "ElementPath.py").write_text("def select(\n")
+    consumer = etree.parent.parent / "read_xml.py"
+    consumer.write_text(
+        "print('start', flush=True)\n"
+        "try:\n"
+        "    import xml.etree.ElementTree\n"
+        "except ModuleNotFoundError as error:\n"
+        "    print(error.name)\n"
+    )
+    missing = run(launcher, "-B", consumer, timeout=300)
+    assert (missing.returncode, missing.stdout, missing.stderr) == (0, b"start\nxml.etree.ElementTree\n", b""), missing
     target = run(launcher, "build-target")
     assert target.returncode == 0, target.stderr
     version = json.loads(target.stdout)["python_version"]
