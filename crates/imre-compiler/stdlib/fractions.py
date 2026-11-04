@@ -10,7 +10,7 @@ import operator
 import re
 import sys
 
-_convergents = __import__('_imre_fractions')._convergents
+_limit_candidates = __import__('_imre_fractions')._limit_candidates
 
 __all__ = ['Fraction']
 
@@ -422,17 +422,19 @@ class Fraction(numbers.Rational):
 
         p0, q0, p1, q1 = 0, 1, 1, 0
         n, d = self._numerator, self._denominator
-        state = _convergents(n, d, max_denominator)
-        if state is None:
-            while True:
-                a = n//d
-                q2 = q0+a*q1
-                if q2 > max_denominator:
-                    break
-                p0, q0, p1, q1 = p1, q1, p0+a*p1, q2
-                n, d = d, n-a*d
-        else:
-            p0, q0, p1, q1, d = state
+        candidates = _limit_candidates(n, d, max_denominator)
+        if candidates is not None:
+            p1, q1, p2, q2, distance = candidates
+            if distance <= self._denominator:
+                return Fraction._from_coprime_ints(p1, q1)
+            return Fraction._from_coprime_ints(p2, q2)
+        while True:
+            a = n//d
+            q2 = q0+a*q1
+            if q2 > max_denominator:
+                break
+            p0, q0, p1, q1 = p1, q1, p0+a*p1, q2
+            n, d = d, n-a*d
         k = (max_denominator-q0)//q1
 
         # Determine which of the candidates (p0+k*p1)/(q0+k*q1) and p1/q1 is

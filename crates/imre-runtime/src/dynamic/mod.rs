@@ -3301,8 +3301,8 @@ impl Context {
                 }
             }
             "_imre_fractions" => {
-                let value = self.builtin("_imre_fractions._convergents");
-                self.bind(scope, "_convergents", value);
+                let value = self.builtin("_imre_fractions._limit_candidates");
+                self.bind(scope, "_limit_candidates", value);
             }
             "_imre_itertools" => {
                 for attr in [

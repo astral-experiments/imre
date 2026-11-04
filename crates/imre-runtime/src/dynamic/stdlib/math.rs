@@ -7,8 +7,8 @@ use num_traits::{One, ToPrimitive, Zero};
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
-/// Compute the final adjacent convergents without boxing the Euclidean steps.
-pub(super) fn fraction_convergents(
+/// Compute the bounded candidates and the exact distance comparison for Fraction.
+pub(super) fn fraction_limit_candidates(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -16,13 +16,13 @@ pub(super) fn fraction_convergents(
     let &[n, d, limit] = args else {
         return Err(Error::new(
             "TypeError",
-            "_convergents requires three integers",
+            "_limit_candidates requires three integers",
         ));
     };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            "_convergents takes no keyword arguments",
+            "_limit_candidates takes no keyword arguments",
         ));
     }
     let small = |id| match ctx.heap.get(id) {
@@ -40,10 +40,17 @@ pub(super) fn fraction_convergents(
         let a = n.div_euclid(d);
         let q2 = q0 + a * q1;
         if q2 > limit {
-            // Each convergent fits the input magnitudes. Keep products wide
-            // until the loop finishes, then box the five live integers once.
-            let values = [p0, q0, p1, q1, d].map(|v| ctx.int(v as i64));
-            return Ok(ctx.alloc(Value::Tuple(values.into())));
+            let k = (limit - q0) / q1;
+            let (p2, q2) = (p0 + k * p1, q0 + k * q1);
+            // Both candidates fit the input magnitudes. The distance product
+            // can occupy twice as many bits and must stay exact for ties.
+            let distance = 2 * d * q2;
+            let distance = match i64::try_from(distance) {
+                Ok(value) => ctx.int(value),
+                Err(_) => ctx.alloc(Value::Int(crate::Int::new(BigInt::from(distance)))),
+            };
+            let [p1, q1, p2, q2] = [p1, q1, p2, q2].map(|v| ctx.int(v as i64));
+            return Ok(ctx.alloc(Value::Tuple(vec![p1, q1, p2, q2, distance])));
         }
         (p0, q0, p1, q1) = (p1, q1, p0 + a * p1, q2);
         (n, d) = (d, n.rem_euclid(d));
