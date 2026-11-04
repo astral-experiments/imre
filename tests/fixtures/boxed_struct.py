@@ -204,6 +204,12 @@ def current():
     else:
         raise AssertionError("lost index error")
 
+    sample = struct.Struct("<h?")
+    assert sample.pack(Field(-32768), [1]) == b"\x00\x80\x01"
+    value, flag = sample.unpack(b"\xff\x7f\x80")
+    assert value == 32767 and flag is True
+    assert struct.pack(">h?", -2, []) == b"\xff\xfe\x00"
+
     assert struct.calcsize("@B0l") == struct.calcsize("@B0L")
     bcm = struct.Struct("@3I4l2I")
     fields = (1, 2, 3, -1, 17, -19, 23, 29, 31)
