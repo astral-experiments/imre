@@ -3,9 +3,13 @@
 use super::*;
 
 /// A sealed literal must still be valid when checked in unreachable code.
-fn boxed_lookahead(spelling: &str, verbose: bool) -> bool {
-    let Ok((source, names)) =
-        imre_regex::lookahead_source(spelling, verbose, imre_regex::Alphabet::Unicode, false)
+fn boxed_lookahead(spelling: &str, verbose: bool, ascii: bool) -> bool {
+    let alphabet = if ascii {
+        imre_regex::Alphabet::Ascii
+    } else {
+        imre_regex::Alphabet::Unicode
+    };
+    let Ok((source, names)) = imre_regex::lookahead_source(spelling, verbose, alphabet, false)
     else {
         return false;
     };
@@ -23,6 +27,10 @@ pub(super) struct CaptureLayout {
     groups: std::rc::Rc<[crate::fixed_regex::Capture]>,
     nonempty_match: bool,
 }
+
+const ASCII_FLAG: u16 = 256;
+const UNICODE_FLAG: u16 = 32;
+const VERBOSE_FLAG: u16 = 64;
 
 impl std::ops::Deref for CaptureLayout {
     type Target = [crate::fixed_regex::Capture];
@@ -223,7 +231,7 @@ impl Checker<'_> {
     }
 
     /// Accepts the optional flags parameter in either of its source spellings.
-    fn regex_flags(&self, call: &ast::ExprCall, required: usize) -> Result<u8, String> {
+    fn regex_flags(&self, call: &ast::ExprCall, required: usize) -> Result<u16, String> {
         let args = &call.arguments;
         let flags = match (args.args.get(required..), args.keywords.as_ref()) {
             (Some([]), []) => return Ok(0),
@@ -241,8 +249,16 @@ impl Checker<'_> {
             // Emitting a fresh diagnostic uses the current Python stdout on each compile.
             return Err(self.scoped_builtin_error("re.DEBUG", flags));
         }
-        self.fixed_flags(flags).ok_or_else(|| error(self.source, flags,
-            "regex flags must be literal 0, re.VERBOSE or re.UNICODE, optionally combined with |"))
+        let bits = self.fixed_flags(flags).ok_or_else(|| error(self.source, flags,
+            "regex flags must be literal 0, re.ASCII, re.VERBOSE or re.UNICODE, optionally combined with |"))?;
+        if bits & ASCII_FLAG != 0 && bits & UNICODE_FLAG != 0 {
+            return Err(error(
+                self.source,
+                flags,
+                "ASCII and UNICODE flags are incompatible",
+            ));
+        }
+        Ok(bits)
     }
 
     fn debug_flags(&self, expression: &ast::Expr) -> bool {
@@ -259,10 +275,11 @@ impl Checker<'_> {
 
     /// UNICODE is already the matching mode for a str pattern, but is still a
     /// nonzero flag when re.search receives an already compiled Pattern.
-    fn fixed_flags(&self, expression: &ast::Expr) -> Option<u8> {
+    fn fixed_flags(&self, expression: &ast::Expr) -> Option<u16> {
         match self.resolve(expression) {
-            Some(Binding::Intrinsic(Intrinsic::RegexVerbose)) => return Some(64),
-            Some(Binding::Intrinsic(Intrinsic::RegexUnicode)) => return Some(32),
+            Some(Binding::Intrinsic(Intrinsic::RegexVerbose)) => return Some(VERBOSE_FLAG),
+            Some(Binding::Intrinsic(Intrinsic::RegexUnicode)) => return Some(UNICODE_FLAG),
+            Some(Binding::Intrinsic(Intrinsic::RegexAscii)) => return Some(ASCII_FLAG),
             _ => {}
         }
         match expression {
@@ -276,7 +293,7 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn fixed_regex(&self, pattern: &ast::Expr, verbose: bool) -> Result<Expr, String> {
+    pub(super) fn fixed_regex(&self, pattern: &ast::Expr, flags: u16) -> Result<Expr, String> {
         let ast::Expr::StringLiteral(literal) = pattern else {
             return Err(error(
                 self.source,
@@ -286,15 +303,23 @@ impl Checker<'_> {
         };
         check_string(literal, self.source)?;
         let spelling = literal.value.to_str();
-        let pattern = crate::fixed_regex::translate(spelling, verbose).map_err(|message| {
-            if message == crate::fixed_regex::NEEDS_CLASS_WARNING {
-                return self.object_builtin_error("regex class warning", literal);
-            }
-            if boxed_lookahead(spelling, verbose) {
-                return self.object_builtin_error("regex lookahead", literal);
-            }
-            error(self.source, literal, &message)
-        })?;
+        let ascii = flags & ASCII_FLAG != 0;
+        let verbose = flags & VERBOSE_FLAG != 0;
+        let pattern = crate::fixed_regex::translate_with_flags(spelling, verbose, ascii, false)
+            .map_err(|message| {
+                if message == crate::fixed_regex::NEEDS_CLASS_WARNING {
+                    return self.object_builtin_error("regex class warning", literal);
+                }
+                if boxed_lookahead(spelling, verbose, ascii) {
+                    return self.object_builtin_error("regex lookahead", literal);
+                }
+                error(self.source, literal, &message)
+            })?;
+        // CPython can use the outer ASCII alphabet when scanning for a match
+        // that starts with a scoped Unicode character class.
+        if ascii && spelling.contains("(?u:") {
+            return Err(self.scoped_builtin_error("re.compile", literal));
+        }
         self.globals
             .regex_literals
             .borrow_mut()
@@ -328,8 +353,7 @@ impl Checker<'_> {
         {
             return Err(self.scoped_builtin_error("re.compile", call));
         }
-        let verbose = flags? & 64 != 0;
-        self.fixed_regex(&call.arguments.args[0], verbose)
+        self.fixed_regex(&call.arguments.args[0], flags?)
     }
 
     pub(super) fn sub_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -351,7 +375,7 @@ impl Checker<'_> {
                 "re.sub expects a literal str pattern, a literal str replacement, and a str input",
             ));
         };
-        let pattern = self.fixed_regex(pattern, false)?;
+        let pattern = self.fixed_regex(pattern, 0)?;
         self.pattern_sub(pattern, replacement, text)
     }
 
@@ -391,10 +415,16 @@ impl Checker<'_> {
         let flags = self.regex_flags(call, 2)?;
         let pattern = &call.arguments.args[0];
         let pattern = if matches!(pattern, ast::Expr::StringLiteral(_)) {
-            self.fixed_regex(pattern, flags & 64 != 0)?
+            self.fixed_regex(pattern, flags)?
         } else {
             let value = self.expr(pattern)?;
             if value.ty == Type::Str {
+                if flags & ASCII_FLAG != 0 {
+                    return Err(self.scoped_builtin_error(
+                        if anchored { "re.match" } else { "re.search" },
+                        call,
+                    ));
+                }
                 // Evaluate both arguments before compiling the runtime pattern.
                 let text = self.expr_expected(&call.arguments.args[1], Type::Str)?;
                 return Ok(Expr {
@@ -402,7 +432,7 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(
                         Builtin::RegexSearchText {
                             anchored,
-                            verbose: flags & 64 != 0,
+                            verbose: flags & VERBOSE_FLAG != 0,
                         },
                         vec![value, text],
                     ),
