@@ -11,8 +11,9 @@ from projection_audit import stage_test_tree
 
 HERE = Path(__file__).resolve().parent
 SOURCE = 'Lib/test/test_unittest/testmock/testpatch.py'
-REVIEWED = {'test_patch_dict_as_context_manager', 'test_patch_dict_start_stop',
-            'test_patch_dict_stop_without_start', 'test_patch_dict_decorator_resolution'}
+REVIEWED = {'test_dotted_but_module_not_loaded', 'test_patch_dict_as_context_manager',
+            'test_patch_dict_start_stop', 'test_patch_dict_stop_without_start',
+            'test_patch_dict_decorator_resolution'}
 
 
 def methods():
