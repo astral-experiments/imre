@@ -102,6 +102,16 @@ def current():
     assert decompress(compress(data, Seed(data, False))) == bytes(data) == b"\xffnput"
     data.extend(b"!")
 
+    broken = zlib.decompressobj()
+    for chunk in (b"bad!", zstream):
+        try:
+            broken.decompress(chunk)
+        except ZlibError as error:
+            assert str(error) == "Error -3 while decompressing data: incorrect header check"
+        else:
+            raise AssertionError("corrupt stream accepted")
+    assert not broken.eof and broken.unconsumed_tail == zstream
+
     clean = zlib.compressobj()
     clean.flush()
     finished = zlib.compressobj()

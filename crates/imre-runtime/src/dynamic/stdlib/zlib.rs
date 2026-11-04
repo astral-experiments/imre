@@ -82,6 +82,7 @@ pub(super) fn call(
 pub(in crate::dynamic) struct Decompressor {
     stream: Option<Stream>,
     eof: bool,
+    data_error: bool,
     unused_data: Tail,
     unconsumed_tail: Tail,
 }
@@ -207,6 +208,7 @@ pub(in crate::dynamic) fn decompressor(
         let state = Decompressor {
             stream: Some(stream),
             eof: false,
+            data_error: false,
             unused_data: Tail::Buffer(Vec::new()),
             unconsumed_tail: Tail::Buffer(Vec::new()),
         };
@@ -345,6 +347,7 @@ impl Decompressor {
                 raw,
             }),
             eof: self.eof,
+            data_error: self.data_error,
             unused_data: Tail::Published(self.unused_data.expose(ctx)),
             unconsumed_tail: Tail::Published(self.unconsumed_tail.expose(ctx)),
         })
@@ -382,6 +385,11 @@ impl Decompressor {
         };
         let mut pos = 0;
         let status = loop {
+            // A corrupt inflater consumes no more input. Stepping it again would
+            // replace the original zlib-rs diagnostic with a generic error.
+            if self.data_error {
+                break ReturnCode::DataError;
+            }
             let len = output.len();
             if len == output.capacity() {
                 output
@@ -409,6 +417,7 @@ impl Decompressor {
                 break status;
             }
         };
+        self.data_error = status == ReturnCode::DataError;
         let tail = &input[pos..];
         if status == ReturnCode::StreamEnd {
             self.unused_data.append(ctx, tail)?;
