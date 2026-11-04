@@ -3204,10 +3204,12 @@ impl Context {
                 super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
             self.bind_local(scope, "__annotate_func__", annotate);
             self.set_attr(new, "__annotate__", annotate)?;
+            let name = self.text(name);
             if self.scope_name(scope, "__repr__").is_none() {
-                let name = self.text(name);
                 super::namedtuple::bind_repr(self, scope, name, fields)?;
             }
+            super::namedtuple::bind_replace(self, scope, name, fields)?;
+            super::namedtuple::bind_make(self, scope, name, fields)?;
             super::namedtuple::bind_fields(self, scope, &named_fields);
             return Ok(Some(named_fields.into()));
         }
