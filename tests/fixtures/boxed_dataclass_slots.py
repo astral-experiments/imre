@@ -1,6 +1,7 @@
 import gc
 import weakref
 from dataclasses import FrozenInstanceError, dataclass, field
+from inspect import getattr_static
 
 
 def current():
@@ -11,7 +12,20 @@ def current():
         def owner(self) -> type:
             return __class__
 
+    old_namespace = Original.__dict__
+    dict_descriptor = old_namespace['__dict__']
+    old_instance = Original()
+    old_instance.note = 'kept'
+    old_ref = weakref.ref(old_instance)
     Slotted = dataclass(frozen=True, slots=True)(Original)
+    assert '__dict__' not in old_namespace and '__weakref__' not in old_namespace
+    assert not hasattr(old_instance, '__dict__') and not hasattr(old_instance, '__weakref__')
+    names = dir(old_instance)
+    assert '__dict__' not in names and 'note' not in names
+    assert getattr_static(old_instance, '__dict__', None) is None
+    assert getattr_static(old_instance, 'note', None) is None
+    assert old_ref() is old_instance
+    assert dict_descriptor.__get__(old_instance, Original)['note'] == old_instance.note == 'kept'
     assert Slotted is not Original and Slotted.__qualname__ == Original.__qualname__
     assert Slotted.__slots__ == ('number', 'label')
     obj = Slotted(4)
@@ -80,10 +94,12 @@ def current():
     class Bad(IteratorSlots):
         y: list = []
 
+    bad_namespace = Bad.__dict__
     try:
         dataclass(Bad, slots=True)
     except ValueError as exc:
         assert 'mutable default' in str(exc)
+        assert '__dict__' in bad_namespace and '__weakref__' in bad_namespace
     else:
         raise AssertionError('slot inspection preceded field validation')
 
@@ -101,11 +117,13 @@ def current():
     class Late(IteratorSlots):
         y: int
 
+    late_namespace = Late.__dict__
     try:
         dataclass(Late, slots=True)
     except TypeError as exc:
         assert str(exc) == "Slots of 'IteratorSlots' cannot be determined"
         assert '__init__' in Late.__dict__
+        assert '__dict__' not in late_namespace and '__weakref__' not in late_namespace
     else:
         raise AssertionError('accepted an iterator as an inherited slot declaration')
 

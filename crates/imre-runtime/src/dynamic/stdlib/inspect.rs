@@ -257,6 +257,9 @@ fn static_member(ctx: &mut Context, obj: Id, attr: Id, missing: Id) -> Result<Id
     let is_class = matches!(ctx.heap.get(obj), Value::Class { .. })
         || ctx.builtin_type_name(obj) == Some("type");
     let class = if is_class { obj } else { objtype };
+    let cleared = !is_class
+        && ctx.layout_descriptors_cleared(class)
+        && ctx.class_attr(class, "__dict__").is_none();
     let instance = if is_class
         || shadowed_dict(ctx, class).is_some_and(|shadow| {
             !matches!(
@@ -267,6 +270,7 @@ fn static_member(ctx: &mut Context, obj: Id, attr: Id, missing: Id) -> Result<Id
         None
     } else {
         let dict = match *ctx.heap.get(obj) {
+            Value::Instance { .. } if cleared => ctx.raw_instance_field(obj, "__dict__"),
             Value::Instance { .. } if ctx.class_instances_have_dict(class) => {
                 Some(ctx.instance_dictionary(obj, class))
             }
@@ -320,7 +324,7 @@ fn static_member(ctx: &mut Context, obj: Id, attr: Id, missing: Id) -> Result<Id
         return Ok(value);
     }
     if name == "__class__"
-        || (name == "__dict__" && (is_class || ctx.class_instances_have_dict(class)))
+        || (name == "__dict__" && (is_class || (!cleared && ctx.class_instances_have_dict(class))))
         || (is_class && name == "__qualname__")
     {
         return Err(super::Error::new(

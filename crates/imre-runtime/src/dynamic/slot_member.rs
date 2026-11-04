@@ -116,6 +116,64 @@ impl Context {
         Ok(self.alloc(Value::Tuple(entries)))
     }
 
+    /// Snapshot a class namespace, removing the old type's descriptors before slot replacement.
+    pub(super) fn dataclass_members(&mut self, class: Id, for_slots: bool) -> Result<Id> {
+        let Value::Class { scope, .. } = *self.heap.get(class) else {
+            return Err(Error::new(
+                "TypeError",
+                "invalid arguments to _imre_dataclasses.members",
+            ));
+        };
+        if for_slots {
+            self.dataclass_slot_ancestors(class)?;
+            let layout = self
+                .scope_data(scope)
+                .class_namespace
+                .as_deref()
+                .expect("ordinary class");
+            if layout.immutable_type || self.heap.get(class).heap_type().is_some() {
+                return Err(Error::new("TypeError", "expected a mutable dataclass type"));
+            }
+            for name in ["__dict__", "__weakref__"] {
+                if let Some(previous) = self.namespace_binding(self.scope_data(scope), name) {
+                    self.heap.keep(previous);
+                }
+                let key = self.heap.code_name(name);
+                if self.remove_binding(scope, name, key)? {
+                    let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                        unreachable!()
+                    };
+                    frame
+                        .class_namespace
+                        .as_mut()
+                        .expect("ordinary class")
+                        .layout_descriptors_cleared = true;
+                }
+            }
+        }
+        let dictionary = self.class_namespace_dict(scope, false);
+        let members = self
+            .dict_entries(dictionary)
+            .expect("class dictionary")
+            .to_vec();
+        Ok(self.dict(members))
+    }
+
+    /// Cleared layout descriptors must not be synthesized again for an instance or subclass.
+    pub(super) fn layout_descriptors_cleared(&self, class: Id) -> bool {
+        self.find_in_mro(class, |owner| {
+            let Value::Class { scope, .. } = *self.heap.get(owner) else {
+                return None;
+            };
+            self.scope_data(scope)
+                .class_namespace
+                .as_ref()
+                .is_some_and(|ns| ns.layout_descriptors_cleared)
+                .then_some(())
+        })
+        .is_some()
+    }
+
     /// Construct the replacement using only layouts with real member storage.
     pub(super) fn slotted_dataclass(&mut self, old: Id, namespace: Id) -> Result<Id> {
         let ancestors = self.dataclass_slot_ancestors(old)?;

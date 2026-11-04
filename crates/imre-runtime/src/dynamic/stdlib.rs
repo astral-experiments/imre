@@ -2321,7 +2321,7 @@ pub(super) fn call(
                 return Ok(ctx.public_registered_module(*name)?.unwrap_or(NONE));
             }
             ("retarget_class_cell", [method, old, new], []) => {
-                // Compiled methods keep the implicit __class__ cell apart from ordinary freevars.
+                // Repair the method's shared __class__ cell only while it still owns the old type.
                 if let Value::Function {
                     class_cell: Some(cell),
                     code,
@@ -2351,15 +2351,8 @@ pub(super) fn call(
             ("slotted_type", [old, namespace], []) => {
                 return ctx.slotted_dataclass(*old, *namespace);
             }
-            ("members", [class], []) => {
-                if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
-                    let dictionary = ctx.class_namespace_dict(scope, false);
-                    let members = ctx
-                        .dict_entries(dictionary)
-                        .expect("class dictionary")
-                        .to_vec();
-                    return Ok(ctx.dict(members));
-                }
+            ("members", [class] | [class, TRUE], []) => {
+                return ctx.dataclass_members(*class, args.len() == 2);
             }
             _ => {}
         }

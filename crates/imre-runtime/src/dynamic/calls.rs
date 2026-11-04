@@ -2315,7 +2315,11 @@ impl Context {
                 return inline.ok_or_else(|| self.missing_attribute(obj, name));
             }
             let member = self.class_attr(class, name);
-            if name == "__dict__" && member.is_none() && layout.dictionary {
+            if name == "__dict__"
+                && member.is_none()
+                && layout.dictionary
+                && !self.layout_descriptors_cleared(class)
+            {
                 return Ok(self.instance_dictionary(obj, class));
             }
             if let Some(member) = member
@@ -5360,7 +5364,8 @@ impl Context {
             }
             Value::Instance { class, .. } if self.builtins.get("object") != Some(&class) => {
                 let layout = self.instance_layout(class, name);
-                if name == "__dict__" && member.is_none() {
+                if name == "__dict__" && member.is_none() && !self.layout_descriptors_cleared(class)
+                {
                     if !layout.dictionary {
                         return Err(self.missing_attribute(obj, name));
                     }
@@ -6398,7 +6403,11 @@ impl Context {
         } = *self.heap.get(obj)
         {
             let layout = self.instance_layout(class, name);
-            if layout.dictionary && name == "__dict__" && member.is_none() {
+            if layout.dictionary
+                && name == "__dict__"
+                && member.is_none()
+                && !self.layout_descriptors_cleared(class)
+            {
                 if self.dict_storage(value).is_none() {
                     return Err(Error::new(
                         "TypeError",

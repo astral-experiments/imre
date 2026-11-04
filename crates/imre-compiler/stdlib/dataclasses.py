@@ -524,9 +524,10 @@ def _dataclass_setstate(self, state):
 
 
 def _add_slots(cls, real_fields, params, slot_bases):
-    namespace = _members(cls)
-    if '__slots__' in namespace:
+    if '__slots__' in cls.__dict__:
         raise TypeError(f'{cls.__name__} already specifies __slots__')
+    # Detach the original type's layout descriptors before copying its namespace.
+    namespace = _members(cls, True)
     inherited = set()
     for base, implicit in slot_bases:
         declared = base.__dict__.get('__slots__')
@@ -544,8 +545,6 @@ def _add_slots(cls, real_fields, params, slot_bases):
     namespace['__slots__'] = slots if any(doc is not None for doc in slots.values()) else tuple(slots)
     for f in real_fields:
         namespace.pop(f.name, None)
-    namespace.pop('__dict__', None)
-    namespace.pop('__weakref__', None)
     namespace['__qualname__'] = cls.__qualname__
     newcls = _slotted_type(cls, namespace)
 
