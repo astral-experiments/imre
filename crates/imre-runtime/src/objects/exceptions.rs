@@ -735,6 +735,7 @@ impl Error {
         let kind = match self.kind {
             Kind::BadGzipFile => "gzip.BadGzipFile",
             Kind::ZlibError => "zlib.error",
+            Kind::LzmaError => "_lzma.LZMAError",
             kind => kind.name(),
         };
         let error = self.into_object();
