@@ -30,12 +30,14 @@ def current():
         current_error = fresh.UnsupportedOperation
         assert current_error is not initial and current_error.__module__ == "io"
         fresh.UnsupportedOperation = LookupError
-        for stream, expected in (
-            (io.BufferedIOBase(), initial),
-            (fresh._BufferedIOBase(), current_error),
+        for method, expected in (
+            (io.BufferedIOBase().detach, initial),
+            (fresh._BufferedIOBase().detach, current_error),
+            (io.BytesIO().fileno, initial),
+            (fresh.BytesIO().fileno, current_error),
         ):
             try:
-                stream.detach()
+                method()
             except expected as raised:
                 assert type(raised) is expected
             else:

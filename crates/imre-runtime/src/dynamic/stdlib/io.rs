@@ -391,6 +391,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             "writelines",
             "close",
             "flush",
+            "fileno",
             "readable",
             "writable",
             "seekable",
@@ -851,7 +852,10 @@ pub(in super::super) fn call(
     let buffered = owner_kind == Some("BufferedIOBase");
     let text = owner_kind == Some("TextIOBase");
     let bytes_io = owner_kind == Some("BytesIO");
-    let descriptor = if raw {
+    let base_fileno = owner_kind == Some("IOBase") && name == "fileno";
+    let descriptor = if base_fileno {
+        Some("_IOBase")
+    } else if raw {
         Some("_RawIOBase")
     } else if buffered {
         Some("_BufferedIOBase")
@@ -1010,11 +1014,14 @@ pub(in super::super) fn call(
         }
         return Ok(NONE);
     }
-    if name == "detach" && (text || buffered) {
+    if base_fileno || (text || buffered) && name == "detach" {
         if !rest.is_empty() || !kwargs.is_empty() {
-            return Err(Error::new("TypeError", "detach() takes no arguments"));
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no arguments"),
+            ));
         }
-        return Err(Error::new("UnsupportedOperation", "detach"));
+        return Err(Error::new("UnsupportedOperation", name));
     }
     if (text || buffered) && matches!(name, "write" | "read" | "read1" | "readline") {
         return unsupported_transfer(ctx, name, rest, kwargs, text);
