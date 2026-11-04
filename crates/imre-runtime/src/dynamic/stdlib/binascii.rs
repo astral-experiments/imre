@@ -1,4 +1,4 @@
-//! Base64 codecs and zlib checksums for runtime-loaded callers.
+//! Binary-to-text codecs and zlib checksums for runtime-loaded callers.
 use super::{Context, Error, Id, Result, Value};
 
 fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
@@ -15,14 +15,51 @@ fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
             )),
         };
     }
-    ctx.native_buffer_bytes(value).map_err(|_| {
-        let name = ctx.type_name(value);
-        let name = &name[..name.floor_char_boundary(100)];
-        Error::new(
-            "TypeError",
-            format!("argument should be bytes, buffer or ASCII string, not '{name}'"),
-        )
-    })
+    ctx.native_buffer_bytes(value)
+        .map_err(|_| ascii_buffer_error(ctx, value))
+}
+
+fn ascii_buffer_error(ctx: &Context, value: Id) -> Error {
+    let name = ctx.type_name(value);
+    let name = &name[..name.floor_char_boundary(100)];
+    Error::new(
+        "TypeError",
+        format!("argument should be bytes, buffer or ASCII string, not '{name}'"),
+    )
+}
+
+/// Acquire the ASCII string or contiguous buffer before calling the header flag's truth test.
+fn a2b_qp(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(data), header] = crate::dynamic::builtins::bind_builtin_arguments(
+        "a2b_qp",
+        args,
+        kwargs,
+        ["data", "header"],
+        1,
+    )?
+    else {
+        unreachable!()
+    };
+    let decode = |ctx: &mut Context, view| {
+        let header = ctx.optional_truth(header, false)?;
+        Ok(crate::objects::decode_quoted_printable(
+            input(ctx, view, true)?,
+            header,
+        )?)
+    };
+    let bytes = if ctx.string_storage(data).is_none()
+        && let Some(method) = ctx.python_buffer_method(data, true)?
+    {
+        let view = ctx
+            .acquire_python_buffer(data, method, 0)
+            .and_then(|view| ctx.view_bytes(view).map(|_| view))
+            .map_err(|_| ascii_buffer_error(ctx, data))?;
+        ctx.with_python_buffer_export(data, view, |ctx| decode(ctx, view))?
+    } else {
+        input(ctx, data, true)?;
+        ctx.with_buffer_export(data, |ctx| decode(ctx, data))?
+    };
+    Ok(ctx.alloc(Value::Bytes(bytes)))
 }
 
 /// Hold the contiguous input buffer while converting the three flags in their declared order.
@@ -154,6 +191,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "a2b_qp" {
+        return a2b_qp(ctx, args, kwargs);
+    }
     if name == "b2a_qp" {
         return b2a_qp(ctx, args, kwargs);
     }
