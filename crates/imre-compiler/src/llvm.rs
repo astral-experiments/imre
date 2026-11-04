@@ -410,6 +410,7 @@ fn emit_program(
         forward_cursors: BTreeMap::new(),
         uses_forward_cursors: false,
         append_windows: BTreeMap::new(),
+        reserved_append_window: None,
         uses_append_windows: false,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
@@ -664,6 +665,7 @@ struct Emitter<'a, 'module> {
     forward_cursors: BTreeMap<usize, ForwardCursor>,
     uses_forward_cursors: bool,
     append_windows: BTreeMap<usize, String>,
+    reserved_append_window: Option<usize>,
     uses_append_windows: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
@@ -1280,6 +1282,11 @@ impl Emitter<'_, '_> {
             if let ExprKind::Builtin(Builtin::ListAllI32 | Builtin::ListPresent, args) = &guard.kind
                 && let ExprKind::Local(slot) = args[0].kind
             {
+                if self.reserved_append_window == Some(slot)
+                    || self.guarded_list_buffer(&args[0]).is_some()
+                {
+                    continue;
+                }
                 let receiver = self.borrow_slot(slot);
                 let length = self.list_length(&receiver);
                 let length = self.index_word(&length, true);
@@ -2744,8 +2751,6 @@ impl Emitter<'_, '_> {
                 self.route(Completion::Return(value));
             }
             Statement::If(test, yes, no) => {
-                let condition = self.expr(test);
-                let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
                 let mut bounded = false;
                 if crate::list_specialization::is_window_range_guard(test)
                     && let [Statement::While(_, body, _)] = yes.as_slice()
@@ -2763,13 +2768,29 @@ impl Emitter<'_, '_> {
                 } else {
                     Vec::new()
                 };
+                let reserve = bounded
+                    .then(|| crate::list_specialization::reserved_append_window(yes))
+                    .flatten();
+                let reserve = reserve.and_then(|(slot, cursor)| {
+                    self.forward_cursors
+                        .get(&cursor)
+                        .cloned()
+                        .map(|c| (slot, c))
+                });
+                let previous = self.reserved_append_window;
+                if let Some((slot, _)) = &reserve {
+                    self.reserved_append_window = Some(*slot);
+                }
+                let condition = self.expr(test);
+                self.reserved_append_window = previous;
+                let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
                 let mut guard = condition.operand;
-                let unchecked = slots
+                let unknown = slots
                     .iter()
                     .copied()
                     .filter(|slot| !self.ranges.starts_small(statement, *slot))
                     .collect::<Vec<_>>();
-                if let Some((first, rest)) = unchecked.split_first() {
+                if let Some((first, rest)) = unknown.split_first() {
                     let mut words = self.borrow_slot(*first).operand;
                     for slot in rest {
                         let word = self.borrow_slot(*slot).operand;
@@ -2778,7 +2799,22 @@ impl Emitter<'_, '_> {
                     let tagged = self.instruction(format!("trunc i64 {words} to i1"));
                     guard = self.instruction(format!("and i1 {guard}, {tagged}"));
                 }
-                self.branch(&guard, &yes_label, &no_label);
+                if let Some((slot, cursor)) = reserve {
+                    let check = self.label();
+                    self.branch(&guard, &check, &no_label);
+                    self.start(&check);
+                    let bytes = self.remaining_cursor_bytes(&cursor);
+                    let list = self.borrow_slot(slot).operand;
+                    let window = self.append_window(slot);
+                    let success = self.instruction(format!(
+                        "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
+                    ));
+                    let opened = self.instruction(format!("icmp ne i32 {success}, 0"));
+                    self.branch(&opened, &yes_label, &no_label);
+                    self.reserved_append_window = Some(slot);
+                } else {
+                    self.branch(&guard, &yes_label, &no_label);
+                }
                 self.start(&yes_label);
                 let prior = self.guarded_integer_lists.len();
                 self.borrow_guarded_integer_lists(test);
@@ -2786,6 +2822,7 @@ impl Emitter<'_, '_> {
                     self.small_locals[*slot] = true;
                 }
                 self.block(yes);
+                self.reserved_append_window = previous;
                 for slot in slots {
                     self.small_locals[slot] = false;
                 }
@@ -7573,6 +7610,13 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
+            Builtin::ListAllI32 if matches!(expressions[0].kind,ExprKind::Local(slot) if Some(slot)==self.reserved_append_window) => {
+                Value {
+                    ty: Type::Bool,
+                    operand: "true".to_owned(),
+                    small_integer: false,
+                }
+            }
             Builtin::ListAllI32 => {
                 let result = self.instruction(format!(
                     "call i32 @imre_list_all_i32(ptr {}, i64 {}, i64 {}, i64 {})",
@@ -7611,19 +7655,11 @@ impl Emitter<'_, '_> {
             }
             Builtin::CursorScanBudget(slot) => {
                 let operand = if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
-                    let next = self.instruction(format!("load ptr, ptr {}", cursor.next));
-                    let end = self.instruction(format!("load ptr, ptr {}", cursor.end));
-                    let next = self.instruction(format!("ptrtoint ptr {next} to i64"));
-                    let end = self.instruction(format!("ptrtoint ptr {end} to i64"));
-                    let remaining = self.instruction(format!("sub i64 {end}, {next}"));
-                    let fits = self.instruction(format!(
-                        "icmp ule i64 {remaining}, {}",
-                        i64::from(i32::MAX) + 1
-                    ));
-                    let count = self.instruction(format!(
-                        "select i1 {fits}, i64 {remaining}, i64 {}",
-                        i64::from(i32::MAX) + 1
-                    ));
+                    let remaining = self.remaining_cursor_bytes(&cursor);
+                    // Zero disables the guarded loop when its byte bound cannot fit i32.
+                    let fits = self.instruction(format!("icmp ule i64 {remaining}, {}", i32::MAX));
+                    let count =
+                        self.instruction(format!("select i1 {fits}, i64 {remaining}, i64 0"));
                     let tagged = self.instruction(format!("shl i64 {count}, 1"));
                     self.instruction(format!("or i64 {tagged}, 1"))
                 } else {
@@ -8534,6 +8570,33 @@ impl Emitter<'_, '_> {
                 self.line(format!("call void @finish_list_appends(ptr {window})"));
                 none()
             }
+            Builtin::AppendInWindow(output) if self.reserved_append_window == Some(*output) => {
+                let window = self.append_window(*output);
+                let cursor = self.instruction(format!(
+                    "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+                ));
+                let next = self.instruction(format!("load ptr, ptr {cursor}"));
+                self.line(format!("store i64 {}, ptr {next}", args[1].value.operand));
+                let after = self.instruction(format!("getelementptr i64, ptr {next}, i64 1"));
+                self.line(format!("store ptr {after}, ptr {cursor}"));
+                none()
+            }
+            Builtin::GetBoundedInAppendWindow { output, .. }
+                if self.reserved_append_window == Some(*output) =>
+            {
+                let window = self.append_window(*output);
+                let cursor = self.instruction(format!(
+                    "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+                ));
+                let next = self.instruction(format!("load ptr, ptr {cursor}"));
+                let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
+                let word = self.instruction(format!("load i64, ptr {last}"));
+                Value {
+                    ty: Type::Int,
+                    operand: word,
+                    small_integer: true,
+                }
+            }
             Builtin::AppendInWindow(output) => {
                 let window = self.append_window(*output);
                 self.checked_status(format!(
@@ -9259,6 +9322,15 @@ impl Emitter<'_, '_> {
         } else {
             self.release(&old);
         }
+    }
+
+    /// The unconsumed UTF-8 bytes bound the number of successful scalar pulls.
+    fn remaining_cursor_bytes(&mut self, cursor: &ForwardCursor) -> String {
+        let next = self.instruction(format!("load ptr, ptr {}", cursor.next));
+        let end = self.instruction(format!("load ptr, ptr {}", cursor.end));
+        let next = self.instruction(format!("ptrtoint ptr {next} to i64"));
+        let end = self.instruction(format!("ptrtoint ptr {end} to i64"));
+        self.instruction(format!("sub i64 {end}, {next}"))
     }
 
     /// Keeps one native append window per guarded destination in this activation.
