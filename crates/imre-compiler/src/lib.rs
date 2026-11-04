@@ -64,6 +64,7 @@ pub struct CommandFlags {
     pub optimize: i32,
     pub safe_path: bool,
     pub no_user_site: bool,
+    pub no_site: bool,
     pub dont_write_bytecode: bool,
     pub unbuffered: bool,
     /// A missing override lets the runtime select the mode from the startup locale.
@@ -126,6 +127,13 @@ impl CompileOptions {
                     .as_ref()
                     .map(|(flags, executable)| (flags, executable.as_str()))
             })
+    }
+
+    fn implicit_site(&self) -> Option<&PathBuf> {
+        self.system_site.as_ref().filter(|_| {
+            self.python_startup()
+                .is_none_or(|(flags, _)| !flags.no_site)
+        })
     }
 
     fn load_graph(

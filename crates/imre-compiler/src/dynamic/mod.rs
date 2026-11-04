@@ -780,10 +780,11 @@ pub(crate) fn compile<const SPLIT: bool>(
         initial.push(root);
     }
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
-    let site = options
+    let installed_layout = options
         .system_site
         .as_ref()
-        .filter(|p| !initial.contains(p));
+        .is_some_and(|p| !initial.contains(p));
+    let site = options.implicit_site().filter(|_| installed_layout);
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
     let implicit_site = site.filter(|p| !roots.contains(p));
@@ -1148,11 +1149,10 @@ pub(crate) fn compile<const SPLIT: bool>(
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
-        .filter(|_| site.is_some())
+        .filter(|_| installed_layout)
         .map(|(_, executable)| Path::new(executable).join(bundled_root));
-    if let (Some(bundle), Some(site)) = (&bundle_entry, site) {
-        initial.extend([bundle.clone(), site.clone()]);
-    }
+    initial.extend(bundle_entry.iter().cloned());
+    initial.extend(site.cloned());
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
@@ -1164,6 +1164,7 @@ pub(crate) fn compile<const SPLIT: bool>(
         "implementation_version":env!("CARGO_PKG_VERSION"),
         "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
+        "no_site":startup.is_some_and(|(flags, _)| flags.no_site),
         "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
         "cpu_count":startup.map(|(flags, _)| flags.cpu_count),
