@@ -197,6 +197,7 @@ enum Instruction {
     EnterFinally {
         handler: usize,
         end: usize,
+        annotation_count: usize,
     },
     EnterWith {
         item: ast::WithItem,
@@ -568,7 +569,7 @@ enum Transfer {
 
 #[derive(Clone, Copy)]
 enum HandlerKind {
-    Finally,
+    Finally(usize),
     Except,
     With(Id),
 }
@@ -2653,15 +2654,15 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Try(_)
-                    if !function
+                Stmt::Try(s)
+                    if s.is_star
+                        && !function
                         && self.class_attributes.is_none()
                         && !self.string_annotations()
                         && imre_ast::annotations::has_variable_annotation(
                             std::slice::from_ref(&stmt),
                         ) =>
                 {
-                    // CPython duplicates finally suites on unwind and numbers else before handlers.
                     return Err(unsupported("deferred module annotations in try suites"));
                 }
                 Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
@@ -2672,7 +2673,7 @@ impl Program {
                     // On fallthrough, leave the protected body before running the else suite.
                     self.instructions.push((line, Instruction::StartFinally));
                     let handler = self.instructions.len();
-                    let before_handlers = self.conditional_fields.len();
+                    let before_handlers = self.deferred_annotations.len();
                     let mut handled = Vec::new();
                     let count = s.handlers.len();
                     for (i, ast::ExceptHandler::ExceptHandler(h)) in
@@ -2698,10 +2699,7 @@ impl Program {
                             self.instructions
                                 .push((handler_line, Instruction::BindException(name.clone())));
                             let entry = self.instructions.len();
-                            self.instructions.push((
-                                handler_line,
-                                Instruction::EnterFinally { handler: 0, end: 0 },
-                            ));
+                            self.instructions.push((handler_line, Instruction::Jump(0)));
                             (entry, name)
                         });
                         self.lower(h.body, lines, function, active.as_deref_mut())?;
@@ -2715,7 +2713,11 @@ impl Program {
                             self.instructions
                                 .push((handler_line, Instruction::EndFinally));
                             let end = self.instructions.len();
-                            self.instructions[entry].1 = Instruction::EnterFinally { handler, end };
+                            self.instructions[entry].1 = Instruction::EnterFinally {
+                                handler,
+                                end,
+                                annotation_count: 0,
+                            };
                         }
                         handled.push(self.instructions.len());
                         self.instructions.push((handler_line, Instruction::Jump(0)));
@@ -2732,15 +2734,23 @@ impl Program {
                     self.instructions.push((line, Instruction::EndFinally));
                     let end = self.instructions.len();
                     self.instructions[entry].1 = Instruction::EnterExcept { handler, end };
-                    let before_else = self.conditional_fields.len();
+                    let before_else = self.deferred_annotations.len();
                     self.lower(s.orelse, lines, function, active.as_deref_mut())?;
-                    // CPython collects the else declarations before those in the handlers.
-                    if before_handlers != before_else
-                        && before_else != self.conditional_fields.len()
-                    {
-                        return Err(unsupported(
-                            "conditional class annotations in both except and else",
-                        ));
+                    // The interpreter lays out handlers first, but the annotation provider
+                    // visits the else suite first, even if both paths ran in different iterations.
+                    let handler_count = before_else - before_handlers;
+                    let else_count = self.deferred_annotations.len() - before_else;
+                    if handler_count != 0 && else_count != 0 {
+                        self.deferred_annotations[before_handlers..].rotate_left(handler_count);
+                        for (i, (_, op)) in self.instructions[handler..].iter_mut().enumerate() {
+                            if let Instruction::MarkAnnotation(index) = op {
+                                if i < end - handler {
+                                    *index += else_count;
+                                } else {
+                                    *index -= handler_count;
+                                }
+                            }
+                        }
                     }
                     let done = self.instructions.len();
                     for i in handled {
@@ -2751,8 +2761,7 @@ impl Program {
                 Stmt::Try(mut s) if !s.is_star && !s.finalbody.is_empty() => {
                     let finalbody = std::mem::take(&mut s.finalbody);
                     let enter = self.instructions.len();
-                    self.instructions
-                        .push((line, Instruction::EnterFinally { handler: 0, end: 0 }));
+                    self.instructions.push((line, Instruction::Jump(0)));
                     // The finally surrounds the handlers and else suite as well as the try body.
                     let protected = if s.handlers.is_empty() {
                         s.body
@@ -2762,15 +2771,35 @@ impl Program {
                     self.lower(protected, lines, function, active.as_deref_mut())?;
                     self.instructions.push((line, Instruction::StartFinally));
                     let handler = self.instructions.len();
-                    let before_finally = self.conditional_fields.len();
+                    let first = self.deferred_annotations.len();
                     self.lower(finalbody, lines, function, active.as_deref_mut())?;
-                    // CPython duplicates finally annotations for different unwind paths.
-                    if before_finally != self.conditional_fields.len() {
-                        return Err(unsupported("conditional class annotation in finally"));
+                    let annotation_count = self.deferred_annotations.len() - first;
+                    if annotation_count != 0 {
+                        // A break or continue crossing this finally has its own inlined
+                        // annotation sites at the jump, before the fallthrough copy.
+                        if active.is_some()
+                            && self.instructions[enter + 1..handler].iter().any(|(_, op)| {
+                                matches!(op, Instruction::Jump(target) if *target <= enter)
+                            })
+                        {
+                            return Err(unsupported("loop exit across an annotated finally"));
+                        }
+                        // CPython emits another copy of finally for exception unwinding.
+                        // Share its executable suite, but keep the two deferred site ranges.
+                        let exceptional = self.deferred_annotations.len();
+                        self.deferred_annotations.extend_from_within(first..);
+                        if self.class_attributes.is_some() {
+                            self.conditional_fields
+                                .extend(exceptional..exceptional + annotation_count);
+                        }
                     }
                     self.instructions.push((line, Instruction::EndFinally));
                     let end = self.instructions.len();
-                    self.instructions[enter].1 = Instruction::EnterFinally { handler, end };
+                    self.instructions[enter].1 = Instruction::EnterFinally {
+                        handler,
+                        end,
+                        annotation_count,
+                    };
                     continue;
                 }
                 Stmt::Match(s) => {
@@ -4519,7 +4548,7 @@ impl Context {
                 } else if let Some((_, op)) = op {
                     cursor.ip += 1;
                     match op {
-                        Instruction::EnterFinally { handler, end }
+                        Instruction::EnterFinally { handler, end, .. }
                         | Instruction::EnterExcept { handler, end } => {
                             cursor.protected.push(FinallyBlock {
                                 start: cursor.ip,
@@ -4527,10 +4556,13 @@ impl Context {
                                 end: *end,
                                 depth: cursor.iterators.len(),
                                 pending: None,
-                                kind: if matches!(op, Instruction::EnterExcept { .. }) {
-                                    HandlerKind::Except
+                                kind: if let Instruction::EnterFinally {
+                                    annotation_count, ..
+                                } = op
+                                {
+                                    HandlerKind::Finally(*annotation_count)
                                 } else {
-                                    HandlerKind::Finally
+                                    HandlerKind::Except
                                 },
                             });
                             continue;
@@ -5272,7 +5304,15 @@ impl Context {
                 } else {
                     self.module_annotation_name(scope, CONDITIONAL)?
                 };
-                let index = self.int(*index as i64);
+                let mut index = *index;
+                for block in cursor.protected.iter() {
+                    if let (HandlerKind::Finally(annotation_count), Some(Transfer::Raise(_))) =
+                        (block.kind, block.pending)
+                    {
+                        index += annotation_count;
+                    }
+                }
+                let index = self.int(index as i64);
                 self.mark_annotation(active, index)?;
             }
             Instruction::ClassAnnotator(provider) => {
