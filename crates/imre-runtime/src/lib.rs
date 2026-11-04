@@ -2389,12 +2389,13 @@ pub unsafe extern "C" fn imre_list_all_i32(
             if values.len().div_ceil(4) > trips {
                 return false;
             }
-            // Biasing moves the tagged i32 interval into the low 33 bits.
-            // Its one extra lower endpoint has an even tag and is rejected by
-            // the second term. An integer OR reduction exposes SIMD lowering.
-            values.iter().fold(0_usize, |invalid, value| {
-                invalid | (value.0.wrapping_add(1_usize << 32) >> 33) | (!value.0 & 1)
-            }) == 0
+            // Subtract the tagged i32 minimum from each word. Valid words become
+            // even offsets in 0..=2*u32::MAX; boxed handles give odd offsets.
+            let bias = u32::MAX as usize;
+            let bits = values
+                .iter()
+                .fold(0, |bits, value| bits | value.0.wrapping_add(bias));
+            bits & !(bias << 1) == 0
         })
     };
     u32::from(valid)

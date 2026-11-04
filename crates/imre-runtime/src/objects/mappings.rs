@@ -420,16 +420,26 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         Ok(None)
     }
 
-    /// Probe an exact rooted key once. Only a miss acquires the table's key owner.
-    unsafe fn setdefault(&mut self, word: usize, default: V) -> Result<(V, bool), Error> {
+    /// Insert a borrowed key and optionally replace its value on a hit. Only a
+    /// new entry acquires the key. The boolean reports whether insertion occurred.
+    unsafe fn store_borrowed<const REPLACE: bool>(
+        &mut self,
+        word: usize,
+        value: V,
+    ) -> Result<(V, bool), Error> {
         // SAFETY: the caller roots an exact key of this table's representation.
         let key = unsafe { K::borrow(word) };
         let hash = key.try_hash()?;
         if let Some(index) = self.key_position(hash, &key)? {
-            return Ok((self.entries[index].as_ref().unwrap().value, false));
+            let slot = &mut self.entries[index].as_mut().unwrap().value;
+            let old = *slot;
+            if REPLACE {
+                *slot = value;
+            }
+            return Ok((old, false));
         }
-        self.insert_absent(hash, (*key).clone(), default)?;
-        Ok((default, true))
+        self.insert_absent(hash, (*key).clone(), value)?;
+        Ok((value, true))
     }
 
     /// Transfers the removed key and value so they can drop outside the mutation.
@@ -2594,7 +2604,7 @@ pub unsafe extern "C" fn imre_dict_setdefault(
         object(value).0.with_mut(|s| {
             let mapping = s.dictionary_mut();
             let (word, inserted) =
-                table!(&mut mapping.tables, table => table.setdefault(key, default))?;
+                table!(&mut mapping.tables, table => table.store_borrowed::<false>(key, default))?;
             if inserted {
                 mapping.value_kind.acquire(word).into_word();
                 mapping.update_ascii_int(key, word);
@@ -2618,20 +2628,22 @@ pub unsafe extern "C" fn imre_dict_set(value: *const Object, key: usize, word: u
 /// # Safety
 /// The rooted container and words must have the exact declared kinds.
 pub(super) unsafe fn dict_set(value: *const Object, key: usize, word: usize) -> Result<(), Error> {
-    // SAFETY: only copied descriptor metadata leaves storage.
-    let (key_kind, value_kind) = unsafe {
-        object(value).0.with(|s| {
-            let mapping = s.dictionary();
-            (WordKind::new(mapping.tables.key_kind()), mapping.value_kind)
-        })
-    };
-    // SAFETY: both arguments are rooted before replacing any old owners.
-    let (key, new) = unsafe { (key_kind.acquire(key), value_kind.acquire(word)) };
-    // SAFETY: only the displaced owners leave the non-reentrant mutation.
+    // SAFETY: all inputs remain rooted throughout the nonreentrant probe. Acquire
+    // the new value before releasing any displaced owner outside the storage borrow.
     let old = unsafe {
-        object(value)
-            .0
-            .with_mut(|s| s.dictionary_mut().insert(key, new))
+        object(value).0.with_mut(|storage| {
+            let mapping = storage.dictionary_mut();
+            let (previous, inserted) =
+                table!(&mut mapping.tables, table => table.store_borrowed::<true>(key, word))?;
+            mapping.value_kind.acquire(word).into_word();
+            mapping.update_ascii_int(key, word);
+            if inserted {
+                mapping.keys_changed();
+                Ok(None)
+            } else {
+                Ok(Some(OwnedWord::from_owned(previous, mapping.value_kind)))
+            }
+        })
     };
     old.map(drop)
 }
