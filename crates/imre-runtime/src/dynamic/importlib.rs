@@ -478,6 +478,7 @@ impl Context {
         let filename = self.text(path.to_string_lossy());
         let name_id = self.text("<module>");
         self.alloc(Value::Code(value::CodeObject {
+            parsed_parameters: Default::default(),
             body: value::Body::Native(entry),
             parameters: NONE,
             nested: Vec::new(),

@@ -3267,6 +3267,7 @@ impl Context {
             .and_then(|range| program.literals.get(&range).copied())
             .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
+            parsed_parameters: Default::default(),
             name,
             qualname,
             doc,

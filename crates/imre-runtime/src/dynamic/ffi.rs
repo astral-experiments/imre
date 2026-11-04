@@ -1443,6 +1443,7 @@ impl Context {
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
+            parsed_parameters: Default::default(),
             body,
             name,
             qualname,

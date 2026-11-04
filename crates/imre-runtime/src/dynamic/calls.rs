@@ -7611,8 +7611,7 @@ impl Context {
                 let closure = allocator_api2::boxed::Box::try_new(value::ClosureScope::default())
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 let local = self.scope_with_closure(module, Some(scope), closure);
-                let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
-                    .map_err(|e| Error::new("SystemError", e.to_string()))?;
+                let sig = self.parsed_parameters(code)?;
                 let names = |key: &str| -> Result<Vec<String>> {
                     let mut names = Vec::new();
                     for name in sig[key].as_array().into_iter().flatten() {
