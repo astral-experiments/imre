@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **11,379 of 16,202 tests (70.2%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,381 of 16,202 tests (70.2%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -141,9 +141,9 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 710 | 712 | 1 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. |
-| `unittest` | 587 | 1,090 | 0 | The 15 original command-line tests produced 14 passes on stock and 12 at each native optimization level. All 12 paired passes are new to the family ledger. |
+| `unittest` | 589 | 1,090 | 0 | Two more original exception tests passed on stock CPython and public Imre at O0 and O3. The independent runs covered TestAsyncCase.test_exception_in_test and Test_TestCase.test_no_exception_leak. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,633** | **13,327** | **32** | **4 complete suites match stock on `main`** |
+| **Total** | **9,635** | **13,327** | **32** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
