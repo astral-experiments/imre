@@ -356,6 +356,19 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         executable
     };
+    // The hook receives a new argv list. It can edit that list, but the executable
+    // is already selected and can outlive its original entry at argv[0].
+    let audited_args = if ctx.audit_hooks.is_empty() {
+        None
+    } else {
+        ctx.heap.reserve_temporaries(2)?;
+        ctx.heap.keep(program);
+        let list = ctx.alloc(Value::List(std::mem::take(&mut items)));
+        ctx.heap.keep(list);
+        super::audit::event(ctx, "subprocess.Popen", &[program, list, cwd, env])?;
+        Some(list)
+    };
+    let probe = probe || audited_args.is_some();
     // CPython's dirname probe can call __fspath__ before the actual executable conversion.
     let probed_directory = if probe && BoxedPopen::probes_executable() {
         let probe = posixpath::fspath(ctx, program)?;
@@ -477,15 +490,34 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         return Err(Error::new("ValueError", "embedded null byte"));
     }
     // On the prepared path, argv[0] is converted independently of the executable.
-    let (alternate, arguments) = if probe {
-        (Some(program_bytes), items.as_slice())
+    let alternate = if let Some(list) = audited_args {
+        // Path conversions can call back into Python and edit later slots.
+        let (count, _) = ctx.sequence_at(list, 0).expect("normalized argv list");
+        argv.try_reserve_exact(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for i in 0..count {
+            let (len, arg) = ctx.sequence_at(list, i).expect("normalized argv list");
+            if direct == Some(false) && len != count {
+                return Err(Error::new("RuntimeError", "args changed during iteration"));
+            }
+            let arg = arg.ok_or_else(|| Error::new("IndexError", "list index out of range"))?;
+            ctx.heap.reserve_temporaries(1)?;
+            ctx.heap.keep(arg);
+            argv.push(path(ctx, arg, false)?);
+        }
+        Some(program_bytes)
     } else {
-        argv.push(program_bytes);
-        (None, &items[1..])
+        let (alternate, arguments) = if probe {
+            (Some(program_bytes), items.as_slice())
+        } else {
+            argv.push(program_bytes);
+            (None, &items[1..])
+        };
+        for arg in arguments {
+            argv.push(path(ctx, *arg, false)?);
+        }
+        alternate
     };
-    for arg in arguments {
-        argv.push(path(ctx, *arg, false)?);
-    }
     if direct == Some(true) {
         child_env = environment(ctx, env, false)?;
     } else if has_child_settings
