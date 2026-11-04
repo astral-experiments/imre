@@ -1345,6 +1345,7 @@ pub(super) enum Value {
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(BoxedTextFile),
     GzipReader(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
+    GzipDecoder(crate::Shared<std::cell::RefCell<Option<crate::objects::GzipDecoder>>>),
     GzipWriter(crate::Shared<std::cell::RefCell<Option<super::stdlib::zlib::Stream>>>),
     ZlibDecompressor {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
@@ -1462,6 +1463,7 @@ impl Value {
             Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
             Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
+            Self::GzipDecoder(_) => "object",
             Self::GzipReader(_) | Self::GzipWriter(_) => "object",
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
@@ -2137,6 +2139,7 @@ impl Value {
             | Self::TokenMissing
             | Self::ProcessPreparation(_)
             | Self::GzipReader(_)
+            | Self::GzipDecoder(_)
             | Self::GzipWriter(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]

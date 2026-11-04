@@ -8,7 +8,7 @@ use std::mem::MaybeUninit;
 use smallvec::SmallVec;
 
 use super::super::codecs::Codec;
-use super::gzip::{GzipError, GzipReader};
+use super::gzip::GzipDecoder;
 use super::{Bytes, Error, Kind, Result, Str, decode_text, errno_error};
 use crate::{BinaryOutput, StrOwner};
 
@@ -142,7 +142,12 @@ impl Output {
 
 enum Source {
     Plain(File),
-    Gzip(Box<GzipReader>),
+    Gzip(Box<GzipFile>),
+}
+
+struct GzipFile {
+    file: BufReader<File>,
+    decoder: GzipDecoder,
 }
 
 impl Source {
@@ -153,16 +158,7 @@ impl Source {
                 rustix::io::read(&*file, &mut *buf).map(|(initialized, _)| initialized.len())
             })
             .map_err(Into::into),
-            Self::Gzip(gzip) => gzip.read(buf).map_err(|err| {
-                if err.kind() == io::ErrorKind::UnexpectedEof {
-                    io::Error::other(GzipError(
-                        Kind::EOFError,
-                        "Compressed file ended before the end-of-stream marker was reached",
-                    ))
-                } else {
-                    err
-                }
-            }),
+            Self::Gzip(gzip) => gzip.decoder.read_file(&mut gzip.file, buf),
         }
     }
 }
@@ -307,7 +303,10 @@ pub(super) struct Input {
 impl Input {
     pub(super) fn new(file: File, gzip: bool, binary: bool, capacity: usize) -> Self {
         let source = if gzip {
-            Source::Gzip(Box::new(GzipReader::new(file, capacity)))
+            Source::Gzip(Box::new(GzipFile {
+                file: BufReader::with_capacity(capacity, file),
+                decoder: GzipDecoder::new(),
+            }))
         } else {
             Source::Plain(file)
         };
@@ -346,7 +345,7 @@ impl Input {
     pub(super) fn into_file(self) -> File {
         match self.raw.into_inner().into_inner() {
             Source::Plain(file) => file,
-            Source::Gzip(reader) => reader.into_file(),
+            Source::Gzip(gzip) => gzip.file.into_inner(),
         }
     }
 
@@ -358,7 +357,7 @@ impl Input {
     pub(super) fn binary_position(&mut self) -> Result<u64> {
         let position = match self.raw.get_mut().get_mut() {
             Source::Plain(file) => file.stream_position().map_err(super::errno_error)?,
-            Source::Gzip(reader) => reader.position,
+            Source::Gzip(gzip) => gzip.decoder.position(),
         };
         Ok(position - self.raw.buffer().len() as u64)
     }
