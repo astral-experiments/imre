@@ -3387,6 +3387,12 @@ def report(text):
             compare("-IB", regex_entry, native_args=("run", regex_entry, "--quiet"))
         radix_entry = root / "radix_entry.py"
         for program in (
+            "def binary(value: int) -> str:\n    return bin(value)\n"
+            "print(binary(0), binary(-(1 << 150) + 1))",
+            "import builtins\nfrom builtins import bin as formatter\n"
+            "class Number:\n    def __index__(self): return -33\n"
+            "print(formatter is builtins.bin is bin, formatter(Number()), formatter(True))\n"
+            "try: formatter(number=1)\nexcept TypeError as error: print(error)",
             "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
             "formatter = hex\nprint(formatter(31))",
             "formatter = oct\nprint(formatter(0), oct(-(1 << 150)), oct(True))",

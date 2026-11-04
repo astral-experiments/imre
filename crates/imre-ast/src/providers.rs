@@ -11,6 +11,7 @@ pub const BUILTIN_FUNCTIONS: &[&str] = &[
     "max",
     "ord",
     "chr",
+    "bin",
     "hex",
     "oct",
     "divmod",

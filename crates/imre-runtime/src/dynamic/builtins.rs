@@ -2284,14 +2284,14 @@ pub(super) fn call(
             ctx.compile_source(args[0], args[1], args[2], false)
         }
         "eval" | "exec" => ctx.call_eval_exec(ctx.heap.current_scope(), name, args, kwargs),
-        "hex" | "oct" => {
+        "bin" | "hex" | "oct" => {
             let value = one_positional_arg(name, args, kwargs)?;
             let number = ctx.index_integer(value)?;
             let number = number.big();
-            let text = if name == "oct" {
-                format!("{:#o}", number.as_ref())
-            } else {
-                format!("{:#x}", number.as_ref())
+            let text = match name {
+                "bin" => format!("{:#b}", number.as_ref()),
+                "oct" => format!("{:#o}", number.as_ref()),
+                _ => format!("{:#x}", number.as_ref()),
             };
             Ok(ctx.text(text))
         }

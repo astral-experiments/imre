@@ -6444,7 +6444,7 @@ impl<'a> Checker<'a> {
     }
 
     fn boxed_builtin_callable(&self, expression: &ast::Expr) -> Option<&'static str> {
-        ["exec", "hex", "oct"]
+        ["bin", "exec", "hex", "oct"]
             .into_iter()
             .find(|name| self.unshadowed_builtin(expression, name))
     }
