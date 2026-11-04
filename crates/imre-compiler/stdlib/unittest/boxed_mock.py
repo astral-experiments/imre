@@ -434,7 +434,7 @@ class NonCallableMock(_FixedMock):
             child = _make_autospec(value, self._mock_strict, False, target=target)
             if isinstance(value, (FunctionType, MethodType)):
                 # A spec method has a return value even if first read after seal().
-                child.return_value = MagicMock()
+                child.return_value = child._get_child_mock()
             self._adopt(child, "." + name)
             object.__setattr__(self, name, child)
             if self._mock_sealed:
@@ -908,8 +908,10 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None, *, eat_sel
         target = getattr(spec, "__call__", _unset_return)
         if target is _unset_return and not callable(spec):
             cls = NonCallableMagicMock
-    if target is not _unset_return and iscoroutinefunction(target):
-        raise NotImplementedError("autospeccing async callables is not supported")
+    if getattr(spec, "__code__", None) and iscoroutinefunction(spec):
+        if as_instance:
+            raise RuntimeError("Instance can not be True when create_autospec is mocking an async function")
+        cls = AsyncMock
     spec_arg = {"spec_set": spec} if strict else {"spec": spec}
     mock = cls(name=name, wraps=wraps, **spec_arg)
     if spec is not None:
@@ -992,9 +994,15 @@ class _FunctionMockState(_Node):
 def _autospec_function(spec, mock, return_value):
     sig = mock._node._spec_signature
 
-    def funcopy(*args, **kwargs):
-        sig.bind(*args, **kwargs)
-        return mock(*args, **kwargs)
+    is_async = issubclass(type(mock), AsyncMock)
+    if is_async:
+        async def funcopy(*args, **kwargs):
+            sig.bind(*args, **kwargs)
+            return await mock(*args, **kwargs)
+    else:
+        def funcopy(*args, **kwargs):
+            sig.bind(*args, **kwargs)
+            return mock(*args, **kwargs)
 
     name = spec.__name__
     funcopy.__name__ = funcopy.__qualname__ = name if name.isidentifier() else "funcopy"
@@ -1005,7 +1013,6 @@ def _autospec_function(spec, mock, return_value):
         # Constructor-supplied mocks keep their own call histories.
         mock._nodes[mock._return_index()]._configured_return = return_value
     funcopy.return_value = mock.return_value
-    funcopy.mock_calls = mock.mock_calls
     funcopy.method_calls = _CallList()
     mock._node = _FunctionMockState(funcopy, mock._node)
     # Only the wrapper enforces the signature. Direct backing calls still use
@@ -1020,10 +1027,18 @@ def _autospec_function(spec, mock, return_value):
     # Each mock already has a private type for its protocol slots.
     owner = type(mock)
     owner.return_value = property(get_return, lambda backing, value: setattr(funcopy, "return_value", value))
-    owner.mock_calls = property(lambda backing: funcopy.mock_calls,
-                                lambda backing, value: setattr(funcopy, "mock_calls", value))
-    for assertion in ("assert_called", "assert_called_once", "assert_not_called", "assert_called_with",
-                      "assert_called_once_with", "assert_any_call", "assert_has_calls"):
+    histories = ("mock_calls",)
+    assertions = ("assert_called", "assert_called_once", "assert_not_called", "assert_called_with",
+                  "assert_called_once_with", "assert_any_call", "assert_has_calls")
+    if is_async:
+        histories += ("await_count", "await_args", "await_args_list")
+        assertions += ("assert_awaited", "assert_awaited_once", "assert_awaited_with", "assert_awaited_once_with",
+                       "assert_any_await", "assert_has_awaits", "assert_not_awaited")
+    for field in histories:
+        setattr(funcopy, field, getattr(mock, field))
+        setattr(owner, field, property(lambda backing, key=field: getattr(funcopy, key),
+                                       lambda backing, value, key=field: setattr(funcopy, key, value)))
+    for assertion in assertions:
         setattr(funcopy, assertion, getattr(mock, assertion))
 
     def reset_mock():

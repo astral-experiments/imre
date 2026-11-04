@@ -1,3 +1,5 @@
+import asyncio
+import inspect
 from unittest import TestCase
 from unittest.mock import DEFAULT, Mock, call, create_autospec
 
@@ -49,3 +51,26 @@ checkout(audit.deliver)
 assert audit.method_calls == [call.deliver(order="A17")]
 assert orders.mock_calls == [call.send(order="A17")]
 assert "name='audit.deliver'" in repr(send.mock)
+
+
+async def dispatch(*, order):
+    return f"queued:{order}"
+
+
+async def check_dispatch():
+    submit = create_autospec(dispatch, side_effect=dispatch)
+    assert inspect.iscoroutinefunction(submit)
+    invalid = submit("A17")
+    pending = submit(order="B18")
+    with check.assertRaises(TypeError):
+        await invalid
+    submit.assert_not_called()
+    submit.assert_not_awaited()
+    reply = await pending
+    assert reply == "queued:B18"
+    submit.assert_awaited_once_with(order="B18")
+    assert submit.mock.await_args_list is submit.await_args_list
+    assert submit.mock_calls == [call(order="B18")]
+
+
+asyncio.run(check_dispatch())
