@@ -116,6 +116,9 @@ A **paired pass** means that CPython 3.14.5 passed the original test and Imre pa
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
 in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain each original included in the omitted column.
 
+On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
+It passed **15,161**, skipped 1,023, and reported 7 errors.
+
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
 | `argparse` | 1,887 | 1,893 | 6 | All 1,887 eligible originals have paired passes across public revisions. The translations test ran the real pygettext child and produced all 32 expected messages. Six explicitly documented compiled-entry omissions remain in the 1,893-test denominator. A complete run on one revision is tracked separately. |
