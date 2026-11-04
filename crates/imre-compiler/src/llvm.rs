@@ -411,6 +411,7 @@ fn emit_program(
         uses_forward_cursors: false,
         append_windows: BTreeMap::new(),
         reserved_append_window: None,
+        cursor_index_proofs: BTreeSet::new(),
         uses_append_windows: false,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
@@ -666,6 +667,7 @@ struct Emitter<'a, 'module> {
     uses_forward_cursors: bool,
     append_windows: BTreeMap<usize, String>,
     reserved_append_window: Option<usize>,
+    cursor_index_proofs: BTreeSet<usize>,
     uses_append_windows: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
@@ -1387,6 +1389,63 @@ impl Emitter<'_, '_> {
             ordinary.operand
         ));
         Some(self.unpack_word(result, Type::Int))
+    }
+
+    /// Check the range from start + low through start + bytes - 1 + high.
+    /// A successful pull consumes at least one byte. A tagged start and an
+    /// i32-sized byte budget keep both endpoint calculations within i64.
+    fn block_with_cursor_indices(
+        &mut self,
+        body: &[Statement],
+        span: crate::list_specialization::cursor_indices::Span,
+        bytes: &str,
+    ) {
+        let Some((length, _)) = self.guarded_list_buffer(&Expr::local(span.list, Type::ListInt))
+        else {
+            self.block(body);
+            return;
+        };
+        self.line("; stable list covers cursor index span");
+        // Fewer than eight bytes cannot supply eight pulls to amortize the range check.
+        let (check, fast, slow, done) = (self.label(), self.label(), self.label(), self.label());
+        let long = self.instruction(format!("icmp uge i64 {bytes}, 8"));
+        self.branch(&long, &check, &slow);
+        self.start(&check);
+        let word = self.borrow_slot(span.counter).operand;
+        let tag = self.instruction(format!("trunc i64 {word} to i1"));
+        let start = self.instruction(format!("ashr i64 {word}, 1"));
+        let min = self.instruction(format!("add i64 {start}, {}", span.low));
+        let end = self.instruction(format!("add i64 {start}, {bytes}"));
+        let max = self.instruction(format!("add i64 {end}, {}", i64::from(span.high) - 1));
+        let short_budget = self.instruction(format!("icmp ule i64 {bytes}, 2147483647"));
+        let nonnegative = self.instruction(format!("icmp sge i64 {min}, 0"));
+        let covered = self.instruction(format!("icmp ult i64 {max}, {length}"));
+        let bounds = self.instruction(format!("and i1 {covered}, {nonnegative}"));
+        let small = self.instruction(format!("and i1 {tag}, {short_budget}"));
+        let guard = self.instruction(format!("and i1 {small}, {bounds}"));
+        self.branch(&guard, &fast, &slow);
+        self.start(&fast);
+        let previous = std::mem::replace(
+            &mut self.cursor_index_proofs,
+            span.indices.into_iter().collect(),
+        );
+        self.block(body);
+        self.cursor_index_proofs = previous;
+        let fast_ends = self.terminated;
+        if !fast_ends {
+            self.jump(&done);
+        }
+        self.start(&slow);
+        self.block(body);
+        let slow_ends = self.terminated;
+        if !slow_ends {
+            self.jump(&done);
+        }
+        self.start(&done);
+        if fast_ends && slow_ends {
+            self.line("unreachable");
+            self.terminated = true;
+        }
     }
 
     fn load_list_word(&mut self, data: &str, index: &str) -> String {
@@ -2775,10 +2834,10 @@ impl Emitter<'_, '_> {
                     self.forward_cursors
                         .get(&cursor)
                         .cloned()
-                        .map(|c| (slot, c))
+                        .map(|c| (slot, cursor, c))
                 });
                 let previous = self.reserved_append_window;
-                if let Some((slot, _)) = &reserve {
+                if let Some((slot, _, _)) = &reserve {
                     self.reserved_append_window = Some(*slot);
                 }
                 let condition = self.expr(test);
@@ -2799,7 +2858,7 @@ impl Emitter<'_, '_> {
                     let tagged = self.instruction(format!("trunc i64 {words} to i1"));
                     guard = self.instruction(format!("and i1 {guard}, {tagged}"));
                 }
-                if let Some((slot, cursor)) = reserve {
+                let span = if let Some((slot, id, cursor)) = reserve {
                     let check = self.label();
                     self.branch(&guard, &check, &no_label);
                     self.start(&check);
@@ -2812,16 +2871,23 @@ impl Emitter<'_, '_> {
                     let opened = self.instruction(format!("icmp ne i32 {success}, 0"));
                     self.branch(&opened, &yes_label, &no_label);
                     self.reserved_append_window = Some(slot);
+                    crate::list_specialization::cursor_indices::span(yes, id)
+                        .map(|span| (span, bytes))
                 } else {
                     self.branch(&guard, &yes_label, &no_label);
-                }
+                    None
+                };
                 self.start(&yes_label);
                 let prior = self.guarded_integer_lists.len();
                 self.borrow_guarded_integer_lists(test);
                 for slot in &slots {
                     self.small_locals[*slot] = true;
                 }
-                self.block(yes);
+                if let Some((span, bytes)) = span {
+                    self.block_with_cursor_indices(yes, span, &bytes);
+                } else {
+                    self.block(yes);
+                }
                 self.reserved_append_window = previous;
                 for slot in slots {
                     self.small_locals[slot] = false;
@@ -7536,7 +7602,17 @@ impl Emitter<'_, '_> {
                 };
                 debug_assert!(min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62));
                 let in_bounds = matches!(builtin, Builtin::ListGetBoundedInBounds { .. });
-                let word = if in_bounds {
+                let word = if self
+                    .cursor_index_proofs
+                    .contains(&(std::ptr::from_ref(&expressions[1]) as usize))
+                {
+                    self.line("; cursor-proven list access");
+                    let (_, data) = self
+                        .guarded_list_buffer(&expressions[0])
+                        .expect("the span guard captured this stable buffer");
+                    let offset = self.instruction(format!("ashr i64 {}, 1", args[1].value.operand));
+                    self.load_list_word(&data, &offset)
+                } else if in_bounds {
                     let ExprKind::Local(slot) = expressions[0].kind else {
                         unreachable!("the in-bounds proof identifies the stable list local")
                     };
@@ -12197,6 +12273,22 @@ def transform(values: list[int], count: int) -> int:
         assert!(fast.contains("icmp ult i64"));
         assert!(fast.contains("getelementptr inbounds i64"));
         assert!(fast.contains("call i64 @imre_list_borrow_index("));
+    }
+
+    #[test]
+    fn direct_cursor_indices_require_an_unchanged_ordinal() {
+        let source = include_str!("../../../tests/fixtures/iterables/scalar_index_spans.py")
+            .replace("\r\n", "\n");
+        let direct = "; cursor-proven list access";
+        let llvm = compile(&source, &CompileOptions::default()).unwrap();
+        assert!(llvm.matches(direct).count() >= 2);
+        let rebound = source.replacen(
+            "        ordinal = index\n",
+            "        ordinal = index\n        if ch == \"!\":\n            ordinal = len(data) + 10\n",
+            1,
+        );
+        let llvm = compile(&rebound, &CompileOptions::default()).unwrap();
+        assert!(!llvm.contains(direct));
     }
 
     #[test]
