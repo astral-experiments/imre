@@ -232,16 +232,6 @@ pub(super) fn read_field(ctx: &Context, index: i64, receiver: Id) -> Result<Id> 
         Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
             pos.and_then(|i| items.get(i)).copied()
         }
-        Value::Instance { class, fields, .. }
-            if let Value::Class {
-                namedtuple_fields: Some(names),
-                ..
-            } = ctx.heap.get(*class) =>
-        {
-            pos.and_then(|i| names.get(i))
-                .and_then(|name| fields.get(name))
-                .copied()
-        }
         _ => {
             return Err(Error::new(
                 "TypeError",
@@ -576,66 +566,4 @@ pub(super) fn bind_new(
     ctx.bind(scope, "__getnewargs__", methods[0]);
     ctx.bind(scope, "_asdict", methods[1]);
     Ok(new)
-}
-
-/// Allocate the requested tuple subtype from the iterable before invoking any initializer.
-pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let Some((&class, args)) = args.split_first() else {
-        return Err(Error::new(
-            "TypeError",
-            "tuple.__new__(): not enough arguments",
-        ));
-    };
-    let tuple = ctx.builtin("tuple");
-    // This native tuple subtype must allocate through its scalar constructor.
-    if matches!(ctx.heap.get(class), Value::Native(name) if name == super::stdlib::fixed_structseq::SCHED_PARAM)
-    {
-        return Err(Error::new(
-            "TypeError",
-            "tuple.__new__(posix.sched_param) is not safe, use posix.sched_param.__new__()",
-        ));
-    }
-    if ctx.heap.get(class).heap_type() == Some(super::stdlib::datetime::isocalendar::CLASS) {
-        return Err(Error::new(
-            "TypeError",
-            "tuple.__new__(datetime.IsoCalendarDate) is not safe, use datetime.IsoCalendarDate.__new__()",
-        ));
-    }
-    let names = ctx.namedtuple_fields(class);
-    if names.is_none() && !ctx.subclass(class, tuple) {
-        return Err(ctx.invalid_new_subtype("tuple", class));
-    }
-    if !kwargs.is_empty()
-        && (class == tuple
-            || ctx.class_attr(class, "__init__").is_none_or(|init| {
-                matches!(ctx.heap.get(init), Value::Native(name) if name == "object.__init__")
-            }))
-    {
-        return Err(Error::new("TypeError", "tuple() takes no keyword arguments"));
-    }
-    let storage = builtins::call(ctx, "tuple", args, &[])?;
-    if class == tuple {
-        return Ok(storage);
-    }
-    let Value::Tuple(items) = ctx.heap.get(storage) else {
-        unreachable!()
-    };
-    let (fields, scalar) = if let Some(names) = names {
-        let fields = names.iter().cloned().zip(items.iter().copied()).collect();
-        (fields, (names.len() != items.len()).then_some(storage))
-    } else {
-        (Default::default(), Some(storage))
-    };
-    Ok(ctx.alloc(Value::Instance {
-        class,
-        fields,
-        scalar,
-        namespace: None,
-        dictionary: None,
-        property: None,
-        weak_reference: None,
-        cycle: None,
-        member_values: None,
-        memory_stream: None,
-    }))
 }

@@ -34,11 +34,11 @@ pub(super) fn warn_explicit(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
         .iter()
         .find(|(key, _)| !FIELDS.contains(&key.as_str()))
     {
-        let mut message = format!("warn_explicit() got an unexpected keyword argument '{name}'");
-        if let Some(hint) = crate::objects::exceptions::keyword_suggestion(name, FIELDS) {
-            message.push_str(&format!(". Did you mean '{hint}'?"));
-        }
-        return Err(Error::new("TypeError", message));
+        return Err(crate::dynamic::calls::unexpected_keyword_error(
+            "warn_explicit",
+            name,
+            FIELDS,
+        ));
     }
     if ctx.string_storage(filename).is_none() {
         let actual = diagnostic_type_name(ctx, filename);

@@ -163,19 +163,15 @@ pub unsafe extern "C" fn imre_str_get(value: *const Str, at: usize) -> *const St
 
 /// Shares Unicode indexing and exact failure messages between owned strings and
 /// caller-buffer fragments; negative indices avoid a complete length scan.
-pub(super) fn string_character(value: &str, at: &Int) -> Result<char> {
+pub(super) fn string_character(value: &Str, at: &Int) -> Result<char> {
     let at = crate::decode_index(at).map_err(|_| {
         Error::new(
             Kind::IndexError,
             "cannot fit 'int' into an index-sized integer",
         )
     })?;
-    let character = if at < 0 {
-        value.chars().rev().nth(at.unsigned_abs() - 1)
-    } else {
-        value.chars().nth(at as usize)
-    };
-    character.ok_or_else(|| Error::new(Kind::IndexError, "string index out of range"))
+    crate::string_cursor::character(value, at)
+        .ok_or_else(|| Error::new(Kind::IndexError, "string index out of range"))
 }
 
 /// Copies selected code points in one forward or backward pass. UTF-8 offsets
@@ -406,21 +402,87 @@ pub(super) struct StringIterator {
 }
 
 impl StringIterator {
-    pub(super) fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
-        let character = if self.reverse {
-            let character = self.owner[..self.position].chars().next_back()?;
-            self.position -= character.len_utf8();
-            character
+    /// The cursor starts at a UTF-8 boundary and advances by a whole scalar.
+    #[inline(always)]
+    fn next_character(&mut self) -> Option<char> {
+        let text = self.owner.as_str();
+        if self.reverse {
+            let last = self.position.checked_sub(1)?;
+            let byte = text.as_bytes()[last];
+            let ch = if byte.is_ascii() {
+                char::from(byte)
+            } else {
+                text[..self.position].chars().next_back()?
+            };
+            self.position -= ch.len_utf8();
+            Some(ch)
         } else {
-            let character = self.owner[self.position..].chars().next()?;
-            self.position += character.len_utf8();
-            character
-        };
-        let value = owned_string(character.encode_utf8(&mut [0; 4]));
-        let word = StrOwner::into_raw(value) as usize;
+            let byte = *text.as_bytes().get(self.position)?;
+            let ch = if byte.is_ascii() {
+                char::from(byte)
+            } else {
+                text[self.position..].chars().next()?
+            };
+            self.position += ch.len_utf8();
+            Some(ch)
+        }
+    }
+
+    fn next_string(&mut self) -> Option<StrOwner> {
+        let before = self.position;
+        self.next_character()?;
+        let bytes = before.min(self.position)..before.max(self.position);
+        Some(owned_string(&self.owner[bytes]))
+    }
+
+    pub(super) fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
+        let word = StrOwner::into_raw(self.next_string()?) as usize;
         // SAFETY: the string transfers one owner of the exact string kind.
         let value = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
         Some((value, None))
+    }
+}
+
+/// Returns an owned character string, or zero when the cursor is exhausted.
+///
+/// # Safety
+/// The caller roots an exact native string cursor and adopts every nonzero result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_iter_next_owned(cursor: *const Object) -> usize {
+    // SAFETY: the caller roots this exact cursor throughout its nonreentrant pull.
+    unsafe {
+        string_iter_next(cursor, |iter| {
+            Some(StrOwner::into_raw(iter.next_string()?) as usize)
+        })
+    }
+}
+
+/// Returns a tagged Unicode scalar, or zero when the cursor is exhausted.
+///
+/// # Safety
+/// The caller roots an exact native string cursor throughout this nonreentrant pull.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_iter_next_codepoint(cursor: *const Object) -> usize {
+    // SAFETY: the caller roots this exact cursor. Even NUL has a nonzero tagged word.
+    unsafe {
+        string_iter_next(cursor, |iter| {
+            Int::small(i64::from(iter.next_character()? as u32)).map(Int::into_raw)
+        })
+    }
+}
+
+unsafe fn string_iter_next(
+    cursor: *const Object,
+    pull: impl FnOnce(&mut StringIterator) -> Option<usize>,
+) -> usize {
+    // SAFETY: the caller roots the cursor; neither pull can reenter its storage.
+    unsafe {
+        object(cursor).0.with_mut(|storage| {
+            let Storage::StringIterator(iter) = storage else {
+                unreachable!("exact string iterator")
+            };
+            pull(iter).unwrap_or(0)
+        })
     }
 }
 
@@ -1010,6 +1072,24 @@ mod tests {
             }
         }
         assert_eq!(imre_error_pending(), 0);
+    }
+
+    #[test]
+    fn specialized_string_pulls_share_position_and_distinguish_nul_from_exhaustion() {
+        let source = StrOwner::new(Str::new("a🙂\0"));
+        // SAFETY: the cursor acquires the source. The owned string is adopted once.
+        unsafe {
+            let cursor =
+                crate::ObjectOwner::from_raw(imre_str_reverse_iter(StrOwner::as_ptr(&source)));
+            let ptr = crate::ObjectOwner::as_ptr(&cursor);
+            drop(source);
+            assert_eq!(Int(imre_str_iter_next_codepoint(ptr)).as_small(), Some(0));
+            let emoji = StrOwner::from_raw(imre_str_iter_next_owned(ptr) as *const Str);
+            assert_eq!(emoji.as_str(), "🙂");
+            assert_eq!(Int(imre_str_iter_next_codepoint(ptr)).as_small(), Some(97));
+            assert_eq!(imre_str_iter_next_codepoint(ptr), 0);
+            assert_eq!(imre_str_iter_next_owned(ptr), 0);
+        }
     }
 
     #[test]

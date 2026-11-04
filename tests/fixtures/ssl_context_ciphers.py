@@ -29,3 +29,35 @@ class GuardedContext(ssl.SSLContext):
 
 guarded = GuardedContext(ssl.PROTOCOL_TLS_CLIENT)
 assert guarded.get_ciphers() == ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).get_ciphers()
+
+
+class CurveName:
+    def __init__(self, name):
+        self.name = name
+
+    def __fspath__(self):
+        return self.name
+
+    def __repr__(self):
+        return "curve argument"
+
+
+assert guarded.set_ecdh_curve(CurveName(b"prime256v1")) is None
+try:
+    guarded.set_ecdh_curve(CurveName("unknown-ecdh-test-curve"))
+except ValueError as exc:
+    assert str(exc) == "unknown elliptic curve name curve argument"
+else:
+    raise AssertionError("accepted an unsupported short name")
+try:
+    guarded.set_ecdh_curve(b"prime256v1\0suffix")
+except ValueError as exc:
+    assert str(exc) == "embedded null byte"
+else:
+    raise AssertionError("accepted an embedded NUL")
+try:
+    guarded.set_ecdh_curve("RSA")
+except ssl.SSLError as exc:
+    assert isinstance(exc.errno, int)
+else:
+    raise AssertionError("accepted a known object that is not a TLS group")

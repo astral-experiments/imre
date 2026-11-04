@@ -215,12 +215,9 @@ impl Context {
     }
 
     fn alloc(&mut self, value: Value) -> Id {
-        let finalizer = matches!(&value, Value::Instance { class, .. }
-            if self.class_attr(*class, "__del__").is_some());
+        let class = value.finalizer_class();
         let id = self.heap.alloc(value);
-        if finalizer {
-            self.heap.register_finalizer(id);
-        }
+        self.register_instance_finalizer(id, class);
         id
     }
     fn text(&mut self, value: impl Into<String>) -> Id {
@@ -311,7 +308,6 @@ impl Context {
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
             }
-            ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (_, Value::DictView { .. }) => {
                 Self::dict_view_owner(self.type_name(object)) == Some(owner)
             }
@@ -450,7 +446,17 @@ impl Context {
         let view = self.acquire_python_buffer(object, method, flags)?;
         // A failed export of the returned view does not call the provider's release hook.
         self.view_bytes(view)?;
-        let result = self.with_buffer_export(view, |ctx| consume(ctx, view));
+        self.with_python_buffer_export(object, view, |ctx| consume(ctx, view))
+    }
+
+    /// Run the consumer of a successfully acquired Python export, then release it.
+    fn with_python_buffer_export<T>(
+        &mut self,
+        object: Id,
+        view: Id,
+        consume: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let result = self.with_buffer_export(view, consume);
         if let Err(error) = &result {
             for id in error.roots() {
                 self.heap.keep(id);
@@ -1513,16 +1519,6 @@ impl Context {
         {
             return copy_ids(items).map(Some);
         }
-        if let Value::Instance { class, fields, .. } = self.heap.get(id)
-            && let Some(names) = self.namedtuple_fields(*class)
-        {
-            let mut items = Vec::new();
-            items
-                .try_reserve_exact(names.len())
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            items.extend(names.iter().map(|name| fields[name]));
-            return Ok(Some(items));
-        }
         Ok(None)
     }
 
@@ -2360,12 +2356,27 @@ impl Context {
             .chain(["__new__"])
             .chain((owner == "int").then_some("__sizeof__"))
             .chain(fields);
-        let entries = members
+        let mut entries: Vec<_> = members
             .map(|member| {
                 let key = self.heap.code_name(member);
                 (key, self.builtin(&format!("{owner}.{member}")))
             })
             .collect();
+        if owner == "int" {
+            let doc = self.text(concat!(
+                "int([x]) -> integer\nint(x, base=10) -> integer\n\n",
+                "Convert a number or string to an integer, or return 0 if no arguments\n",
+                "are given.  If x is a number, return x.__int__().  For floating-point\n",
+                "numbers, this truncates towards zero.\n\n",
+                "If x is not a number or if base is given, then x must be a string,\n",
+                "bytes, or bytearray instance representing an integer literal in the\n",
+                "given base.  The literal can be preceded by '+' or '-' and be surrounded\n",
+                "by whitespace.  The base defaults to 10.  Valid bases are 0 and 2-36.\n",
+                "Base 0 means to interpret the base from the string as an integer literal.\n",
+                ">>> int('0b100', base=0)\n4",
+            ));
+            entries.push((self.heap.code_name("__doc__"), doc));
+        }
         let dictionary = self.dict(entries);
         self.native_type_dicts.insert(class, dictionary);
     }
@@ -2414,6 +2425,12 @@ impl Context {
                 let member = self.readonly_member(stdlib::functools::PARTIAL_CLASS, field);
                 entries.push((self.heap.code_name(field), member));
             }
+            let repr = self.builtin("functools.partial.__repr__");
+            entries.push((self.heap.code_name("__repr__"), repr));
+            let module = self.heap.code_name("functools");
+            entries.push((self.heap.code_name("__module__"), module));
+            let doc = self.text("Create a new function with partial application of the given arguments\nand keywords.");
+            entries.push((self.heap.code_name("__doc__"), doc));
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
@@ -2517,6 +2534,7 @@ impl Context {
             "float" => &[
                 "__format__",
                 "__getformat__",
+                "fromhex",
                 "as_integer_ratio",
                 "__repr__",
             ],
@@ -3185,6 +3203,14 @@ impl Context {
                     self.finder_external
                 };
                 self.bind(scope, "_finder_external", finder);
+                // The Python launcher (or standalone program) owns its installed sources.
+                let archive = self.executable.with_file_name("imre-stdlib.zip");
+                let archive = if archive.is_absolute() {
+                    archive.to_str().map_or(NONE, |path| self.text(path))
+                } else {
+                    NONE
+                };
+                self.bind(scope, "_installed_stdlib", archive);
             }
             "_imre_importlib" => {
                 // All bootstrap instances invalidate the finders used by the native path search.
@@ -3467,6 +3493,7 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
+            "random" if source.is_none() => stdlib::random::instance::install(self, scope)?,
             "math" if source.is_none() => {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
@@ -3661,6 +3688,8 @@ impl Context {
                     "big"
                 });
                 self.bind(scope, "byteorder", byteorder);
+                let float_info = stdlib::fixed_structseq::float_info(self);
+                self.bind(scope, "float_info", float_info);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
                 for name in [

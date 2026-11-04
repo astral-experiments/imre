@@ -120,7 +120,7 @@ impl Emitter<'_, '_> {
 
     /// A record's header retains its actual descriptor through base-class views.
     pub(super) fn exact_record_test(&mut self, value: &Value, class: usize) -> String {
-        let layout = self.output.global_ref(format!("layout_class_{class}"));
+        let layout = self.output.record_layout(Type::Class(class));
         let matched = self.instruction(format!(
             "call i32 @imre_record_has_type(ptr {}, ptr @{layout})",
             value.operand
@@ -130,7 +130,7 @@ impl Emitter<'_, '_> {
 
     /// Borrow the payload only if this erased value retains the exact record.
     pub(super) fn boxed_record(&mut self, value: &Value, class: usize) -> String {
-        let layout = self.output.global_ref(format!("layout_class_{class}"));
+        let layout = self.output.record_layout(Type::Class(class));
         self.instruction(format!(
             "call ptr @imre_object_record_payload(ptr {}, ptr @{layout})",
             value.operand

@@ -1,6 +1,7 @@
 //! Adapt a boxed Python iterator to the row parser also used by typed readers.
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::csv::{Dialect, Row};
+use crate::dynamic::operators::surrogate_repr;
+use crate::objects::csv::{Dialect, Field, Row};
 use crate::objects::exceptions::{Kind, string_repr};
 
 fn character(ctx: &Context, id: Id) -> Result<u32> {
@@ -58,22 +59,33 @@ pub(super) fn read_row(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
     );
     let mode = integer(ctx, mode)?;
     let mut fields = Vec::new();
-    let mut row = Row::new(|text, quoted| {
-        let value = if !quoted && text.is_empty() && matches!(mode, 4 | 5) {
-            Value::None
-        } else if !quoted && !text.is_empty() && matches!(mode, 2 | 4) {
-            let value = crate::floats::parse(&text).ok_or_else(|| {
-                crate::Error::new(
+    let mut row = Row::new(|field, quoted| {
+        let numeric = !quoted && matches!(mode, 2 | 4);
+        let value = match field {
+            Field::Text(text) if !quoted && text.is_empty() && matches!(mode, 4 | 5) => Value::None,
+            Field::Text(text) if numeric && !text.is_empty() => {
+                let value = crate::floats::parse(&text).ok_or_else(|| {
+                    crate::Error::new(
+                        Kind::ValueError,
+                        format!(
+                            "could not convert string to float: {}",
+                            string_repr(&text).as_str()
+                        ),
+                    )
+                })?;
+                Value::Float(value)
+            }
+            Field::Surrogates(points) if numeric => {
+                return Err(crate::Error::new(
                     Kind::ValueError,
                     format!(
                         "could not convert string to float: {}",
-                        string_repr(&text).as_str()
+                        surrogate_repr(&points)
                     ),
-                )
-            })?;
-            Value::Float(value)
-        } else {
-            Value::Str(text)
+                ));
+            }
+            Field::Text(text) => Value::Str(text),
+            Field::Surrogates(points) => Value::SurrogateStr(points),
         };
         fields
             .try_reserve(1)
@@ -97,10 +109,17 @@ pub(super) fn read_row(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
                 let &[line, limit] = items.as_slice() else {
                     return Err(Error::new("TypeError", "expected (line, limit)"));
                 };
-                if row
-                    .line(&dialect, ctx.str_value(line)?, integer(ctx, limit)?)
-                    .map_err(parse_error)?
-                {
+                let limit = integer(ctx, limit)?;
+                let complete = match ctx.string_storage(line).map(|id| ctx.heap.get(id)) {
+                    Some(Value::Str(text)) => {
+                        row.line(&dialect, text.chars().map(u32::from), limit)
+                    }
+                    Some(Value::SurrogateStr(points)) => {
+                        row.line(&dialect, points.iter().copied(), limit)
+                    }
+                    _ => return Err(Error::new("TypeError", "expected str")),
+                };
+                if complete.map_err(parse_error)? {
                     break;
                 }
             }

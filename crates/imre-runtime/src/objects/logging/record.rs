@@ -852,8 +852,17 @@ fn percent_value_in<'a>(
             };
             let spec = format!("%{flags}.{precision}{c}");
             let pattern = std::ffi::CString::new(spec).unwrap();
+            unsafe extern "C" {
+                fn imre_format_ascii_double(
+                    buffer: *mut libc::c_char,
+                    size: usize,
+                    format: *const libc::c_char,
+                    value: f64,
+                ) -> libc::c_int;
+            }
             // SAFETY: pattern is assembled from flags, a decimal precision and one double conversion.
-            let len = unsafe { libc::snprintf(std::ptr::null_mut(), 0, pattern.as_ptr(), n) };
+            let len =
+                unsafe { imre_format_ascii_double(std::ptr::null_mut(), 0, pattern.as_ptr(), n) };
             if len < 0 {
                 return Err(Error::new(Kind::ValueError, "float formatting failed"));
             }
@@ -863,7 +872,17 @@ fn percent_value_in<'a>(
                 .map_err(|_| Error::allocation())?;
             bytes.resize(len as usize + 1, 0u8);
             // SAFETY: snprintf reported the exact writable capacity including the trailing NUL.
-            unsafe { libc::snprintf(bytes.as_mut_ptr().cast(), bytes.len(), pattern.as_ptr(), n) };
+            let written = unsafe {
+                imre_format_ascii_double(
+                    bytes.as_mut_ptr().cast(),
+                    bytes.len(),
+                    pattern.as_ptr(),
+                    n,
+                )
+            };
+            if written != len {
+                return Err(Error::new(Kind::ValueError, "float formatting failed"));
+            }
             bytes.pop();
             let text = String::from_utf8_lossy(&bytes);
             if flags.contains('0') && !flags.contains('-') && width > text.len() {

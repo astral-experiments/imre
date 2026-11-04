@@ -53,7 +53,9 @@ for raw, expected in [
     path = Path(raw)
     alias = path
     actual = path.resolve()
+    assert (base / raw).resolve() == actual
     print(repr((raw, actual == base / expected, actual.is_absolute(), alias == Path(raw))))
+assert (base / "input.txt").resolve(strict=True) == base / "input.txt"
 print(Path("chain-0").resolve(True) == base / "input.txt")
 print(Path("absolute-link").resolve(True) == Path("/tmp"))
 for raw in [

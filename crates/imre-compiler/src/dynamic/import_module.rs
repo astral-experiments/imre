@@ -198,7 +198,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("Arguments = namedtuple(", "def getargs(co):"),
                         section("FullArgSpec = namedtuple(", "def formatannotation("),
-                        section("def formatargvalues(", "def _missing_arguments("),
+                        section("def formatargvalues(", "ClosureVars = namedtuple("),
                         section("_NonUserDefinedCallables =", "def _signature_get_user_defined_method("),
                         section("def _signature_get_partial(", "def _signature_strip_non_python_syntax("),
                         &text_signatures,

@@ -57,7 +57,7 @@ pub(super) fn call(
     } else {
         "obj"
     };
-    let mut obj = super::single_argument(name, param, args, kwargs)?;
+    let [mut obj] = super::required_arguments(name, [param], args, kwargs)?;
     match name {
         "_abstract_flags" => {
             let target = ctx.weak_proxy_target(obj)?;

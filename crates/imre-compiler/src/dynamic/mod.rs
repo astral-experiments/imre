@@ -127,6 +127,13 @@ impl Imports {
                     | "pathlib._local"
                     | "pathlib.types"
                     | "platform"
+                    | "pyexpat"
+                    | "pyexpat.errors"
+                    | "pyexpat.model"
+                    | "xml.parsers"
+                    | "xml.parsers.expat"
+                    | "xml.parsers.expat.errors"
+                    | "xml.parsers.expat.model"
                     | "keyword"
                     | "site"
                     | "importlib.abc"
@@ -135,6 +142,10 @@ impl Imports {
                     | "tomllib._parser"
                     | "tomllib._re"
                     | "tomllib._types"
+                    | "xml"
+                    | "xml.etree"
+                    | "xml.etree.ElementPath"
+                    | "xml.etree.ElementTree"
                     | "zoneinfo"
                     | "zoneinfo._common"
                     | "zoneinfo._tzpath"
@@ -345,7 +356,10 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.uses_import_builtin = true;
             self.add(0, "importlib");
-            if name.value.to_str().split('.').next() == Some("zoneinfo") {
+            if matches!(
+                name.value.to_str().split('.').next(),
+                Some("pyexpat" | "xml" | "zoneinfo")
+            ) {
                 self.add(0, name.value.to_str());
             }
             self.visit_arguments(&call.arguments);
@@ -628,6 +642,8 @@ pub(crate) fn compile(
             "pathlib",
             "sys",
             "platform",
+            "pyexpat",
+            "xml.parsers",
             "keyword",
             "site",
             "importlib",
@@ -635,6 +651,7 @@ pub(crate) fn compile(
             "json",
             "tomllib",
             "zoneinfo",
+            "xml",
             "opcode",
             "operator",
             "struct",
@@ -839,6 +856,9 @@ pub(crate) fn compile(
                 && !seen.contains("urllib.robotparser")
             {
                 imports.add(0, "urllib.robotparser");
+            }
+            if computed_import && !seen.contains("xml.parsers.expat") {
+                imports.names.push((0, "xml.parsers.expat".to_owned()));
             }
             // Register the mock provider for imports from source-loaded modules.
             if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {
@@ -1104,6 +1124,22 @@ pub(crate) fn compile(
             ));
         }
     }
+    if let Some(archive) = &options.stdlib_fallback {
+        // Both bootstrap names use this bundled source. One may be supplied only by
+        // the runtime providers above, after the application's imports were scanned.
+        let origin = Path::new(bundled_root).join("importlib/_bootstrap_external.py");
+        let literal = serde_json::to_string(archive).map_err(|e| e.to_string())?;
+        for (name, path, source) in &mut sources {
+            if *path == origin
+                && matches!(
+                    name.as_str(),
+                    "_frozen_importlib_external" | "importlib._bootstrap_external"
+                )
+            {
+                source.push_str(&format!("\n_installed_stdlib = {literal}\n"));
+            }
+        }
+    }
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
@@ -1153,6 +1189,7 @@ pub(crate) fn compile(
         Path::new(bundled_root),
         &providers,
     )?;
+    inputs.boxed_imports = true;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),
@@ -1192,8 +1229,10 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "encodings.utf_8",
     "encodings.utf_8_sig",
     "encodings.cp1251",
+    "encodings.cp1252",
     "encodings.cp424",
     "encodings.cp437",
+    "encodings.koi8_u",
     "encodings.shift_jis",
     "enum",
     "fractions",

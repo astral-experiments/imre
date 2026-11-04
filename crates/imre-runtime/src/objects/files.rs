@@ -15,6 +15,7 @@ use super::{
 };
 mod buffered;
 mod gzip;
+pub(crate) use gzip::GzipDecoder;
 mod path_text;
 mod random;
 pub(crate) use random::Random;
@@ -566,7 +567,7 @@ impl Storage {
     }
 }
 
-pub(super) fn os_error(error: io::Error) -> Error {
+pub(crate) fn os_error(error: io::Error) -> Error {
     if let Some(gzip) = error
         .get_ref()
         .and_then(|error| error.downcast_ref::<gzip::GzipError>())

@@ -152,9 +152,7 @@ impl Emitter<'_, '_> {
                 }
                 let list = self.borrow_slot(*list);
                 let row = self.borrow_slot(row);
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(item.ty)));
+                let layout = self.output.record_layout(item.ty);
                 self.instruction(format!("call i1 @imre_struct_try_fill_empty(ptr {}, ptr @{layout}, ptr {}, i64 {stop})", list.operand, row.operand))
             }
             _ => return,
@@ -182,6 +180,118 @@ impl Emitter<'_, '_> {
         self.start(&fallback);
     }
 
+    /// The scalar iteration establishes the current index and performs all potentially
+    /// raising operations before we try to batch a run of invariant record stores.
+    ///
+    /// ```python
+    /// for i in range(start, stop):
+    ///     at = (i * stride + offset) % modulus
+    ///     rows[at] = replacement
+    /// ```
+    pub(super) fn batch_modular_writes(
+        &mut self,
+        body: &[Statement],
+        target: usize,
+        cursor: usize,
+        stop: usize,
+    ) {
+        let [
+            Statement::Assign(index, subscript),
+            Statement::SetItem(list, at, row),
+        ] = body
+        else {
+            return;
+        };
+        let (ExprKind::Local(list_slot), ExprKind::Local(at_slot), ExprKind::Local(row_slot)) =
+            (&list.kind, &at.kind, &row.kind)
+        else {
+            return;
+        };
+        if *at_slot != *index
+            || *index == target
+            || !self.module.source_frames.is_empty()
+            || !matches!(list.ty, Type::List(_))
+            || !self.module.types.is_value_struct(row.ty)
+            || self.module.types.indexed_element(list.ty) != Some(row.ty)
+            || self.struct_locals[*row_slot]
+        {
+            return;
+        }
+        let ExprKind::Binary(Binary::Modulo, numerator, modulus) = &subscript.kind else {
+            return;
+        };
+        let ExprKind::Binary(Binary::Add, product, offset) = &numerator.kind else {
+            return;
+        };
+        let ExprKind::Binary(Binary::Multiply, ordinal, stride) = &product.kind else {
+            return;
+        };
+        if !matches!(ordinal.kind, ExprKind::Local(slot) if slot == target) {
+            return;
+        }
+        // A nonnegative integer divided by a positive constant is bounded by its
+        // numerator. The first scalar iteration has already evaluated the offset.
+        let bound = match &offset.kind {
+            ExprKind::Binary(Binary::FloorDivide, value, divisor) if matches!(&divisor.kind, ExprKind::Int(n) if n.parse::<i64>().is_ok_and(|v| (1..=i64::MAX / 2).contains(&v))) => {
+                value.as_ref()
+            }
+            _ => offset.as_ref(),
+        };
+        let invariant = |e: &Expr| {
+            e.ty == Type::Int
+                && match &e.kind {
+                    ExprKind::Local(slot) => *slot != target && *slot != *index,
+                    ExprKind::Int(n) => n
+                        .parse::<i64>()
+                        .is_ok_and(|v| (0..=i64::MAX / 2).contains(&v)),
+                    _ => false,
+                }
+        };
+        if ![stride.as_ref(), bound, modulus.as_ref()]
+            .into_iter()
+            .all(invariant)
+        {
+            return;
+        }
+        let current = self.borrow_slot(cursor);
+        // Most lists begin with sparse overrides. Probe again once ordinary stores
+        // have had a chance to promote them, without a runtime call on every store.
+        let phase = self.instruction(format!("and i64 {}, 2047", current.operand));
+        let sample = self.instruction(format!("icmp eq i64 {phase}, 1"));
+        let (inspect, publish, resume) = (self.label(), self.label(), self.label());
+        self.branch(&sample, &inspect, &resume);
+        self.start(&inspect);
+        let mut word = |e: &Expr| match &e.kind {
+            ExprKind::Local(slot) => self.borrow_slot(*slot).operand,
+            ExprKind::Int(n) => small(n.parse().unwrap()).operand,
+            _ => unreachable!(),
+        };
+        let (stride, upper, modulus) = (word(stride), word(bound), word(modulus));
+        let (list, row_value) = (self.borrow_slot(*list_slot), self.borrow_slot(*row_slot));
+        let (at, stop) = (self.borrow_slot(*index), self.borrow_slot(stop));
+        let layout = self.output.record_layout(row.ty);
+        let last_index = self.entry_alloca("i64");
+        let last = self.instruction(format!("call i64 @imre_struct_set_modular(ptr {}, ptr @{layout}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {stride}, i64 {upper}, i64 {modulus}, ptr {last_index})",list.operand,row_value.operand,current.operand,stop.operand,at.operand));
+        let advanced = self.instruction(format!("icmp ne i64 {last}, 0"));
+        self.branch(&advanced, &publish, &resume);
+        self.start(&publish);
+        let last = Value {
+            ty: Type::Int,
+            operand: last,
+            small_integer: true,
+        };
+        self.store(target, &last);
+        self.store(cursor, &last);
+        let at = Value {
+            ty: Type::Int,
+            operand: self.instruction(format!("load i64, ptr {last_index}")),
+            small_integer: true,
+        };
+        self.store(*index, &at);
+        self.jump(&resume);
+        self.start(&resume);
+    }
+
     /// Evaluate constructor operands in source order; copy only their checked
     /// scalar values to the destination in declared field order.
     pub(super) fn append_struct_constructor(&mut self, list: &Value, item: &Expr) -> bool {
@@ -191,7 +301,7 @@ impl Emitter<'_, '_> {
         if !self.module.types.is_value_struct(item.ty) {
             return false;
         }
-        let name = record_name(item.ty);
+        let name = self.output.record_type(item.ty);
         let scratch = self.entry_alloca(format!("%{name}"));
         let layout = self.output.global_ref(format!("layout_{name}"));
         let values = self.call_operands(args);
@@ -222,7 +332,7 @@ impl Emitter<'_, '_> {
         let (op, args) = packed_get(item)?;
         let list = self.operand(&args[0]);
         let index = self.operand(&args[1]);
-        let name = record_name(item.ty);
+        let name = self.output.record_type(item.ty);
         let src = if matches!(op, Builtin::SequenceGetInBounds) {
             let ExprKind::Local(slot) = args[0].kind else {
                 unreachable!()

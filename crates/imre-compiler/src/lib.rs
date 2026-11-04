@@ -1,6 +1,7 @@
 mod analysis;
 mod borrows;
 mod callables;
+mod character_locals;
 mod classes;
 mod contracts;
 mod digit_sums;
@@ -106,6 +107,8 @@ pub struct CompileOptions {
     pub address_sanitizer: bool,
     /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
     pub bundled_provider_archive: Option<PathBuf>,
+    /// Compiler-owned archive for a Python launcher missing its installed companion.
+    pub stdlib_fallback: Option<PathBuf>,
     /// Existing pure-Python site directory of a Python-style launcher.
     pub system_site: Option<PathBuf>,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
@@ -186,6 +189,9 @@ pub struct Compilation {
 /// Files and failed import lookups observed by the source loader.
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct SourceInputs {
+    /// A native run of this image can request Python source modules at runtime.
+    #[serde(default)]
+    pub boxed_imports: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
     /// Existing namespace portions and the canonical directories they resolve to.
@@ -355,7 +361,14 @@ fn object_fallback<T>(
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
     let check_returns = || {
-        if checked_file && let Some(graph) = &graph {
+        if let Some(graph) = &graph {
+            let requested = graph.check_fallback_calls.get();
+            if !checked_file
+                && (options.runtime_imports
+                    || !matches!(requested, analysis::FallbackCalls::FunctionBodies))
+            {
+                return Ok(());
+            }
             let (skipped, overloads) = graph.diagnostic_scopes();
             let entry = &graph.modules[graph.entry];
             // A deferred probe can call typed functions while initializing additional names.
@@ -365,12 +378,14 @@ fn object_fallback<T>(
                     .values()
                     .any(|names| names.len() > 1)
             });
-            let all_calls = graph.check_decorated_method_calls.get()
+            let all_calls = !matches!(requested, analysis::FallbackCalls::None)
                 || !entry.optional_imports.is_empty()
                 || compound_probe
                 || !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error);
-            let checked_calls = if graph.check_method_factories.get() {
+            let checked_calls = if !checked_file {
+                requested
+            } else if graph.check_method_factories.get() {
                 analysis::FallbackCalls::DecoratorFactories
             } else if all_calls {
                 analysis::FallbackCalls::All
@@ -622,6 +637,8 @@ fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);
     verify_after(module, "tuple scalarization")?;
+    character_locals::specialize(module);
+    verify_after(module, "character local specialization")?;
     digit_sums::specialize(module);
     verify_after(module, "digit reduction fusion")?;
     split_fields::specialize(module);

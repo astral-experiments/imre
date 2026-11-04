@@ -39,6 +39,15 @@ The deque size original passed on stock and reported the upstream CPython-specif
 | `test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc` | 1 | The pure-Python subclass checks the collector's tracking bit after its first item. A different tuple lifetime strategy can satisfy the subclass iteration contract. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `PurePythonOrderedDictSubclassTests.test_views` |
 | `test.test_ordered_dict.PurePythonOrderedDictTests.test_ordered_dict_items_result_gc` | 1 | The pure-Python provider runs the same tuple-tracking assertion. The required item values are observable regardless of the collector's tracking policy. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `PurePythonOrderedDictTests.test_views` |
 
+### `csv`
+
+The pinned stock suite passed both methods. Public Imre at O0 and O3 took each method’s CPython-only skip.
+
+| Original test | Occurrence | Reason for omission | Public behavior checked |
+| --- | --- | --- | --- |
+| [`test.test_csv.MiscTestCase.test_disallow_instantiation`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_csv.py#L1657-L1662) | 1 | The test calls CPython’s private `_csv.Reader` and `_csv.Writer` types directly and through `__new__`. Imre implements the public `csv.reader` and `csv.writer` factories with its own types. | The public writer and reader round-tripped a row containing a quoted comma on stock and at O0 and O3. The native factory types also allowed explicit `__new__`. |
+| [`test.test_csv.MiscTestCase.test_lazy_import`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_csv.py#L1649-L1651) | 1 | The test specifies when CPython loads re during an import of csv. Imre can load parser dependencies independently of its public CSV behavior. | Fresh stock, O0 and O3 processes imported csv, then called `Sniffer.sniff` on a semicolon-delimited sample. All three first loaded re during sniffing and returned the semicolon delimiter. |
+
 ### `io`
 
 These two originals come from the SizeofTest mixin on CBufferedWriterTest. Stock passed both. The ordinary native runs reported the upstream CPython-specific skip at both optimization levels. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/daf27ebdd244b9654a3183ab822fef2be8cf4c80)

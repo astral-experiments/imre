@@ -896,7 +896,7 @@ fn collect_class(
                         "unittest method skips require native class construction",
                     );
                     graph.class_layout_error.borrow_mut().get_or_insert(error);
-                    graph.check_decorated_method_calls.set(true);
+                    graph.require_fallback_calls();
                     decorators.has_runtime_method = true;
                     MethodKind::Instance
                 } else {

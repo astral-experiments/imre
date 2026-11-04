@@ -69,7 +69,7 @@ impl Builtin {
                 }
             }
             Self::SplitIntSource(_) => Contract::new(false, PreservesLists),
-            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
+            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
@@ -671,6 +671,7 @@ impl Builtin {
             | Self::ZipMinReadSize
             | Self::ZipField(_)
             | Self::ZipOpen
+            | Self::ZipImportIndex
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
@@ -776,6 +777,7 @@ impl Builtin {
             | Self::DequeReverse
             | Self::SetIter
             | Self::MatchingSplitIter(_)
+            | Self::SplitByteIter(_)
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
@@ -917,6 +919,7 @@ impl Builtin {
                 signature(&[Type::Str, Type::Str, Type::Int], Type::Iterator)
             }
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::SplitByteIter(byte) => byte.is_ascii() && signature(&[Type::Str], Type::Iterator),
             Self::FunctionWrappedSet => {
                 matches!(result, Type::Callable(_)) && signature(&[result, result], result)
             }
@@ -1391,6 +1394,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_zip_test"
                 | "imre_zip_min_read_size"
                 | "imre_zip_open"
+                | "imre_zip_import_index"
                 | "imre_zip_namelist"
                 | "imre_zip_close"
                 | "imre_int_str"

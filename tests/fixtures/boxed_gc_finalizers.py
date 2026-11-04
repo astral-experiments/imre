@@ -147,7 +147,34 @@ def check_replacement_line():
     assert observed == [("release", line) for line in expected], observed
 
 
+def check_exception_finalizers():
+    finalized = []
+
+    class BaseError(Exception):
+        pass
+
+    class ChildError(BaseError):
+        pass
+
+    before = ChildError("before")
+
+    def finalize(error):
+        finalized.append(error.args[0])
+
+    BaseError.__del__ = finalize
+    after = ChildError("after")
+    gc.collect()
+    assert finalized == []
+    del before
+    gc.collect()
+    assert finalized == ["before"]
+    del after
+    gc.collect()
+    assert finalized == ["before", "after"]
+
+
 def current():
+    check_exception_finalizers()
     check_replacement_line()
     check_unraisable()
     # Keep another pending finalizer reachable while cyclic and acyclic owners die.

@@ -540,66 +540,6 @@ pub(crate) enum JsonDefault {
     EmptyList,
 }
 
-impl Module {
-    pub(crate) fn changes_stdout(&self) -> bool {
-        let mut used = false;
-        for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |e| {
-                used |= matches!(
-                    e.kind,
-                    ExprKind::Builtin(Builtin::SysStdoutSet | Builtin::SysStdoutDelete, _)
-                );
-            });
-        }
-        used
-    }
-    /// Release the rooted namespace bindings at shutdown if this program uses them.
-    pub(crate) fn uses_builtins_last(&self) -> bool {
-        let mut used = false;
-        for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| {
-                used |= matches!(
-                    value.kind,
-                    ExprKind::Builtin(
-                        Builtin::BuiltinsSetLast
-                            | Builtin::SysDisplayHook
-                            | Builtin::BuiltinsLen
-                            | Builtin::BuiltinsSetLen,
-                        _
-                    )
-                );
-            });
-        }
-        used
-    }
-
-    /// Capture arguments, the original invocation, and source search paths only
-    /// for modules that use them; a bare import needs no runtime state.
-    pub(crate) fn startup_usage(&self) -> (bool, bool, bool, bool) {
-        let mut linecache = false;
-        let mut cache_paths = false;
-        let mut argv = false;
-        let mut original = false;
-        for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| match &value.kind {
-                ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
-                ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
-                ExprKind::Builtin(Builtin::Linecache(..), _) => linecache = true,
-                ExprKind::Builtin(Builtin::CachePath(_) | Builtin::ModuleCacheFromOrigin, _) => {
-                    cache_paths = true
-                }
-                ExprKind::Builtin(Builtin::WarningFormat { .. }, args)
-                    if args[5].ty != Type::Str =>
-                {
-                    linecache = true
-                }
-                _ => {}
-            });
-        }
-        (argv || original, original, linecache, cache_paths)
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct Function {
     pub params: Vec<usize>,
@@ -668,18 +608,25 @@ impl Expr {
         }
     }
 
-    /// Arguments of an explicit right split with a single split and final-field access.
-    pub(crate) fn last_rsplit_args(&self, index: &Self) -> Option<&[Expr]> {
-        let ExprKind::Builtin(Builtin::Text(TextOperation::Split(true)), args) = &self.kind else {
+    /// A single explicit split whose immediately selected field is its prefix
+    /// (`split(sep, 1)[0]`) or its suffix (`rsplit(sep, 1)[-1]`).
+    pub(crate) fn selected_split_args(&self, index: &Self) -> Option<(bool, &[Expr])> {
+        let ExprKind::Builtin(Builtin::Text(TextOperation::Split(reverse)), args) = &self.kind
+        else {
             return None;
         };
         let [_, separator, limit] = args.as_slice() else {
             return None;
         };
-        (matches!(separator.kind, ExprKind::Present(_))
-            && matches!(&limit.kind, ExprKind::Int(n) if n == "1")
-            && matches!(&index.kind, ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(n) if n == "1")))
-            .then_some(args)
+        let selected = if *reverse {
+            matches!(&index.kind, ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(n) if n == "1"))
+        } else {
+            matches!(&index.kind, ExprKind::Int(n) if n == "0")
+        };
+        (selected
+            && matches!(separator.kind, ExprKind::Present(_))
+            && matches!(&limit.kind, ExprKind::Int(n) if n == "1"))
+        .then_some((*reverse, args))
     }
 }
 
@@ -1277,6 +1224,8 @@ pub(crate) enum Builtin {
     StringIter,
     /// Iterates Python line boundaries on a rooted immutable string.
     SplitLinesIter,
+    /// Iterates every field of a forward split by a literal ASCII separator.
+    SplitByteIter(u8),
     MatchingSplitIter(u8),
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,
@@ -1355,6 +1304,7 @@ pub(crate) enum Builtin {
     ZipMinReadSize,
     ZipField(ZipField),
     ZipOpen,
+    ZipImportIndex,
     ZipNamelist,
     ZipClose,
     /// Encodes an integer with an explicit width, byte order, and sign policy.
@@ -1392,6 +1342,8 @@ pub(crate) enum Builtin {
     StringListCopy,
     /// Select by up to two prefixes, optionally exclude one, then slice each match.
     StringListFilter(u32),
+    /// Collect characters in a set or below a Unicode scalar threshold.
+    FilterCharacterSet(u32),
     /// Stable sort by the suffix after a fixed number of Unicode code points.
     StringListSortSuffix(u32),
     /// Ask whether a source has an item before evaluating a comprehension predicate.
@@ -2483,6 +2435,14 @@ pub(crate) struct ExceptHandler {
     pub body: Vec<Statement>,
 }
 
+/// Selects the pull ABI for a cursor created by the compiler.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IterNextKind {
+    Generic,
+    String,
+    CodePoint,
+}
+
 #[derive(Clone)]
 pub(crate) enum Statement {
     Assign(usize, Expr),
@@ -2515,6 +2475,7 @@ pub(crate) enum Statement {
     /// Transfers iterator results into owned output locals only on success.
     /// `ready` is always written; exhausted cursors preserve both output locals.
     IterNext {
+        kind: IterNextKind,
         iterator: usize,
         key: usize,
         value: Option<usize>,

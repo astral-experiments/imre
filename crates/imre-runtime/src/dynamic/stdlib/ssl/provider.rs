@@ -9,6 +9,7 @@ pub(in crate::dynamic) mod bio;
 pub(super) mod certificate;
 pub(super) mod ciphers;
 pub(in crate::dynamic) mod objects;
+mod reasons;
 mod trust;
 pub(super) use trust::CaData;
 pub(in crate::dynamic) mod versions;
@@ -69,6 +70,7 @@ functions! {
     OpenSSL_version(c_int) -> *const c_char;
     OpenSSL_version_num() -> c_ulong;
     OBJ_txt2obj(*const c_char, c_int) -> Handle;
+    OBJ_sn2nid(*const c_char) -> c_int;
     OBJ_nid2obj(c_int) -> Handle;
     OBJ_obj2nid(Handle) -> c_int;
     OBJ_nid2sn(c_int) -> *const c_char;
@@ -904,6 +906,35 @@ impl Credentials {
 }
 
 impl Context {
+    /// Set one TLS group by its OpenSSL short name. Return false for an unknown name.
+    pub(super) fn set_ecdh_curve(&mut self, name: &CStr) -> Result<bool, Failure> {
+        self.api.clear();
+        // SAFETY: the name is NUL-terminated and borrowed only during lookup.
+        let mut nid = unsafe { (self.api.OBJ_sn2nid)(name.as_ptr()) };
+        if nid == 0 {
+            return Ok(false);
+        }
+        // SSL_CTX_set1_groups copies the supplied group list to the context.
+        const SSL_CTRL_SET_GROUPS: c_int = 91;
+        // SAFETY: the live context and one-element NID array outlive SSL_CTX_ctrl.
+        let ok = unsafe {
+            (self.api.SSL_CTX_ctrl)(
+                self.handle.as_ptr(),
+                SSL_CTRL_SET_GROUPS,
+                1,
+                (&raw mut nid).cast(),
+            )
+        };
+        if ok == 0 {
+            // SAFETY: this thread's last OpenSSL error belongs to the failed call.
+            let code = unsafe { (self.api.ERR_peek_last_error)() };
+            let error = self.api.trust_error(code, None);
+            self.api.clear();
+            return Err(error);
+        }
+        Ok(true)
+    }
+
     pub(crate) fn set_ciphers(&mut self, ciphers: &CStr) -> Result<(), Failure> {
         self.api.clear();
         // SAFETY: the context is live and OpenSSL copies the supplied cipher list.
@@ -1001,7 +1032,7 @@ impl Session {
         socket: crate::ObjectOwner,
         host: Option<&str>,
         server: bool,
-    ) -> Result<Self, Failure> {
+    ) -> Result<Self, bio::BioFailure> {
         let api = ctx.api;
         api.clear();
         // SAFETY: SSL_new takes its own reference to this live context.
@@ -1019,7 +1050,7 @@ impl Session {
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
         if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
-            return Err(api.error("SSL_set_fd"));
+            return Err(api.error("SSL_set_fd").into());
         }
         let handshake = session.blocking_io(
             if server {
@@ -1027,7 +1058,7 @@ impl Session {
             } else {
                 Operation::Connect
             },
-            |api, _, label| api.error(label),
+            Api::ssl_failure_kind,
         );
         api.verify_peer(handle.as_ptr(), !server && handshake.is_ok())?;
         handshake?;

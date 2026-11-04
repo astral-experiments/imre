@@ -9,13 +9,13 @@ def current():
     csv.register_dialect("pipes", Pipes)
     try:
         Pipes.delimiter = ";"
-        fmt = csv.get_dialect("pipes")
+        fmt = csv.get_dialect(name="pipes")
         print(fmt.delimiter, fmt.doublequote, fmt.quoting)
         lines = iter(['a|"b\n', 'c"|d', 'x||y'])
         rows = csv.reader(lines, fmt)
         print(next(rows), rows.line_num, list(rows), rows.line_num)
     finally:
-        csv.unregister_dialect("pipes")
+        csv.unregister_dialect(name="pipes")
 
     print(list(csv.reader(['"2",3,,'], quoting=csv.QUOTE_STRINGS)))
     print(list(csv.reader(['"a"'], quotechar=None)))
@@ -59,3 +59,18 @@ def current():
     stream = StringIO()
     assert csv.writer(stream).writerow([Product()]) == 12
     assert stream.getvalue() == '"12"" box"\r\n'
+
+    escaped_byte = b"\xff".decode("utf-8", "surrogateescape")
+    name = "report_" + escaped_byte + ".csv"
+    lines = [name + ",tail", '"bad"' + escaped_byte, "\\" + escaped_byte, '"\\' + escaped_byte + '"']
+    rows = csv.reader(iter(lines), strict=True, escapechar="\\")
+    first = next(rows)
+    try:
+        next(rows)
+    except csv.Error:
+        pass
+    else:
+        raise AssertionError("expected strict quote error")
+    assert next(rows) == [escaped_byte]
+    assert next(rows) == [escaped_byte]
+    assert first == [name, "tail"]

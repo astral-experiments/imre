@@ -1,75 +1,111 @@
+pub(in crate::dynamic) mod instance;
+
 use num_bigint::Sign;
 
 use super::super::range::Range;
 use super::{Context, Error, Id, NONE, Result, Value, builtins};
 use crate::{Int, objects};
 
-/// Bind positional and keyword arguments after the implicit module generator.
-fn arguments<const N: usize>(
-    name: &str,
-    names: [&str; N],
-    positional: usize,
-    expected: &str,
-    args: &[Id],
+/// The module exports bound methods. The receiver already fills the self parameter.
+fn bound(args: &[Id]) -> impl Iterator<Item = &Id> {
+    std::iter::once(&NONE).chain(args)
+}
+
+/// CPython's version-1 string seed folds Unicode code points (Latin-1 for bytes).
+fn legacy_seed(points: impl ExactSizeIterator<Item = u32>) -> objects::Generator {
+    let length = points.len() as u64;
+    let mut points = points.peekable();
+    let initial = u64::from(points.peek().copied().unwrap_or(0)) << 7;
+    let hash = points.fold(initial, |h, point| {
+        h.wrapping_mul(1_000_003) ^ u64::from(point)
+    });
+    objects::Generator::from_integer(&Int::new((hash ^ length).into()))
+}
+
+/// Construct independent MT state from the seed formats accepted by Random.seed().
+fn seeded<'a>(
+    ctx: &mut Context,
+    args: impl IntoIterator<Item = &'a Id>,
     kwargs: &[(String, Id)],
-) -> Result<[Option<Id>; N]> {
-    let mut values = [None; N];
-    for (target, value) in values[..positional].iter_mut().zip(args) {
-        *target = Some(*value);
-    }
-    for (key, value) in kwargs {
-        if key == "self" {
+) -> Result<objects::Generator> {
+    let [_, seed, version] =
+        super::python_arguments("Random.seed", ["self", "a", "version"], 3, 2, args, kwargs)?;
+    let seed = seed.unwrap_or(NONE);
+    let scalar = ctx.scalar_value(seed);
+    let version = if let Some(version) = version {
+        let one = ctx.int(1);
+        let two = ctx.int(2);
+        if ctx.checked_equal(version, one)? {
+            1
+        } else if ctx.checked_equal(version, two)? {
+            2
+        } else {
+            0
+        }
+    } else {
+        2
+    };
+    Ok(match ctx.heap.get(scalar) {
+        Value::None => objects::Generator::from_entropy(),
+        Value::Bool(_) | Value::Int(_) => objects::Generator::from_integer(&ctx.as_int(seed)?),
+        Value::Bytes(bytes) if version == 1 => legacy_seed(bytes.iter().copied().map(u32::from)),
+        Value::Str(_) | Value::SurrogateStr(_) if version == 1 => {
+            legacy_seed(ctx.string_codepoints(scalar)?.iter().copied())
+        }
+        Value::Bytes(bytes) | Value::ByteArray(bytes) if version == 2 => {
+            objects::Generator::from_seed_bytes(bytes)
+        }
+        Value::Str(_) | Value::SurrogateStr(_) if version == 2 => {
+            let bytes = super::codecs::encode_text(ctx, scalar, None, None)?;
+            objects::Generator::from_seed_bytes(&bytes)
+        }
+        Value::Float(_)
+        | Value::Str(_)
+        | Value::SurrogateStr(_)
+        | Value::Bytes(_)
+        | Value::ByteArray(_) => {
+            // _random casts an object's signed hash to size_t before splitting the key into words.
+            let hash = ctx.dictionary_hash(seed)? as usize;
+            objects::Generator::from_integer(&Int::new(hash.into()))
+        }
+        _ => {
             return Err(Error::new(
                 "TypeError",
-                format!("{name}() got multiple values for argument 'self'"),
+                "The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.",
             ));
         }
-        let Some(index) = names.iter().position(|&param| param == key) else {
-            let mut message = format!("{name}() got an unexpected keyword argument '{key}'");
-            let parameters = std::iter::once("self").chain(names).collect::<Vec<_>>();
-            if let Some(hint) = objects::exceptions::keyword_suggestion(key, &parameters) {
-                message.push_str(&format!(". Did you mean '{hint}'?"));
-            }
-            return Err(Error::new("TypeError", message));
-        };
-        if values[index].replace(*value).is_some() {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() got multiple values for argument '{key}'"),
-            ));
-        }
-    }
-    if args.len() > positional {
-        let mut given = (args.len() + 1).to_string();
-        let keywords = values[positional..].iter().flatten().count();
-        if keywords != 0 {
-            let suffix = if keywords == 1 { "" } else { "s" };
-            given.push_str(&format!(
-                " positional arguments (and {keywords} keyword-only argument{suffix})"
-            ));
-        }
+    })
+}
+
+pub(super) fn bit_count(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Int> {
+    let arg = builtins::one_positional_arg("Random.getrandbits", args, kwargs)?;
+    ctx.index_integer(arg)
+}
+
+pub(super) fn random_args(args: &[Id], kwargs: &[(String, Id)]) -> Result<()> {
+    if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("{name}() takes {expected} positional arguments but {given} were given"),
+            "Random.random() takes no keyword arguments",
         ));
     }
-    Ok(values)
+    if !args.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("Random.random() takes no arguments ({} given)", args.len()),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn seed(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    objects::seed_shared(seeded(ctx, bound(args), kwargs)?);
+    Ok(NONE)
 }
 
 pub(super) fn randint(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let bounds = arguments("Random.randint", ["a", "b"], 2, "3", args, kwargs)?;
-    let [Some(start), Some(stop)] = bounds else {
-        let missing: Vec<_> = ["a", "b"]
-            .into_iter()
-            .zip(bounds)
-            .filter_map(|(name, value)| value.is_none().then_some(name))
-            .collect();
-        return Err(super::super::calls::missing_arguments_error(
-            "Random.randint",
-            "positional",
-            &missing,
-        ));
-    };
+    let [_, start, stop] =
+        super::required_arguments("Random.randint", ["self", "a", "b"], bound(args), kwargs)?;
     let start = ctx.index_integer(start)?;
     let stop = ctx.index_integer(stop)?;
     let draw = objects::randint(&start.big(), &stop.big())?;
@@ -77,10 +113,8 @@ pub(super) fn randint(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
 }
 
 pub(super) fn randbytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [length] = arguments("Random.randbytes", ["n"], 1, "2", args, kwargs)?;
-    let length = length.ok_or_else(|| {
-        super::super::calls::missing_arguments_error("Random.randbytes", "positional", &["n"])
-    })?;
+    let [_, length] =
+        super::required_arguments("Random.randbytes", ["self", "n"], bound(args), kwargs)?;
     // Random.randbytes calls getrandbits(n * 8) before to_bytes indexes n.
     let eight = ctx.int(8);
     let count = ctx.binary("*", length, eight)?;
@@ -98,13 +132,8 @@ pub(super) fn choice(
     kwargs: &[(String, Id)],
     secure: bool,
 ) -> Result<Id> {
-    let [seq] = arguments("Random.choice", ["seq"], 1, "2", args, kwargs)?;
-    let seq = seq.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            "Random.choice() missing 1 required positional argument: 'seq'",
-        )
-    })?;
+    let [_, seq] =
+        super::required_arguments("Random.choice", ["self", "seq"], bound(args), kwargs)?;
     // Random.choice checks for emptiness and then reads the sampling bound separately.
     let first = builtins::call(ctx, "len", &[seq], &[])?;
     let bound = if ctx.truth(first)? {
@@ -215,20 +244,15 @@ fn weighted_index(ctx: &mut Context, cumulative: Id, needle: Id, mut hi: i64) ->
 }
 
 pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [population, weights, cumulative, k] = arguments(
+    let [_, population, weights, cumulative, k] = super::python_arguments(
         "Random.choices",
-        ["population", "weights", "cum_weights", "k"],
-        2,
-        "from 2 to 3",
-        args,
+        ["self", "population", "weights", "cum_weights", "k"],
+        3,
+        1,
+        bound(args),
         kwargs,
     )?;
-    let population = population.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            "Random.choices() missing 1 required positional argument: 'population'",
-        )
-    })?;
+    let population = population.unwrap();
     let length = builtins::call(ctx, "len", &[population], &[])?;
     let n = ctx.as_integer(length)?;
     let preparation = ctx.heap.temporary_mark();
@@ -319,13 +343,7 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
 
 /// Shuffle by subscription, preserving the read and assignment order of Python's tuple swap.
 pub(super) fn shuffle(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [x] = arguments("Random.shuffle", ["x"], 1, "2", args, kwargs)?;
-    let x = x.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            "Random.shuffle() missing 1 required positional argument: 'x'",
-        )
-    })?;
+    let [_, x] = super::required_arguments("Random.shuffle", ["self", "x"], bound(args), kwargs)?;
     let roots = ctx.heap.temporary_mark();
     ctx.heap.keep(x);
     let step = ctx.heap.temporary_mark();
@@ -372,20 +390,15 @@ fn empty_range(ctx: &mut Context, operands: &[Id]) -> Result<Id> {
 }
 
 pub(super) fn randrange(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [start, stop, step] = arguments(
+    let [_, start, stop, step] = super::python_arguments(
         "Random.randrange",
-        ["start", "stop", "step"],
-        3,
-        "from 2 to 4",
-        args,
+        ["self", "start", "stop", "step"],
+        4,
+        2,
+        bound(args),
         kwargs,
     )?;
-    let start = start.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            "Random.randrange() missing 1 required positional argument: 'start'",
-        )
-    })?;
+    let start = start.unwrap();
     let istart = ctx.index_integer(start)?;
     let step = step.unwrap_or_else(|| ctx.int(1));
     let stop = stop.unwrap_or(NONE);

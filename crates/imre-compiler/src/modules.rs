@@ -8,7 +8,7 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
-use crate::analysis::{CheckedDiagnostic, Session};
+use crate::analysis::{CheckedDiagnostic, FallbackCalls, Session};
 use crate::ir::{
     CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, WrapperAttributes,
 };
@@ -43,6 +43,22 @@ fn stat_mode_source() -> Option<&'static str> {
     match std::env::consts::OS {
         "linux" => Some(modes!("../stdlib/stat/linux.py")),
         "macos" => Some(modes!("../stdlib/stat/darwin.py")),
+        _ => None,
+    }
+}
+
+/// Pinned CPython 3.14.5 XML packages and the modules used by ElementTree.
+pub(crate) fn etree_source(name: &str) -> Option<(&'static str, &'static str)> {
+    macro_rules! source {
+        ($path:literal) => {
+            Some(($path, include_str!(concat!("../stdlib/", $path))))
+        };
+    }
+    match name {
+        "xml" => source!("xml/__init__.py"),
+        "xml.etree" => source!("xml/etree/__init__.py"),
+        "xml.etree.ElementPath" => source!("xml/etree/ElementPath.py"),
+        "xml.etree.ElementTree" => source!("xml/etree/ElementTree.py"),
         _ => None,
     }
 }
@@ -223,6 +239,16 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
         "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
+        "pyexpat" => Some(("pyexpat.py", include_str!("../stdlib/pyexpat.py"))),
+        "xml" => Some(("xml/__init__.py", include_str!("../stdlib/xml/__init__.py"))),
+        "xml.parsers" => Some((
+            "xml/parsers/__init__.py",
+            include_str!("../stdlib/xml/parsers/__init__.py"),
+        )),
+        "xml.parsers.expat" => Some((
+            "xml/parsers/expat.py",
+            include_str!("../stdlib/xml/parsers/expat.py"),
+        )),
         // CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
         "pprint" => Some(("pprint.py", include_str!("../stdlib/pprint.py"))),
         "difflib" => Some((
@@ -272,21 +298,24 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                     const UPSTREAM: &str = include_str!(
                         "../../../benchmarks/cpython_stdlib/full/base64/upstream/Lib/base64.py"
                     );
+                    let from = |start: &str| {
+                        &UPSTREAM[UPSTREAM.find(start).expect("pinned base64 section")..]
+                    };
                     let section = |start: &str, end: &str| {
-                        let start = UPSTREAM.find(start).expect("pinned base64 section");
-                        let (section, _) = UPSTREAM[start..]
+                        from(start)
                             .split_once(end)
-                            .expect("pinned base64 section end");
-                        section
+                            .expect("pinned base64 section end")
+                            .0
                     };
                     [
                         "import binascii\nimport struct\n",
                         // The runtime supplies the URL-safe codecs.
                         section("bytes_types =", "_urlsafe_encode_translation ="),
                         section("# Base32 encoding/decoding", "# RFC 3548, Base 16"),
+                        section("def b16decode(", "# Ascii85 encoding/decoding"),
                         include_str!("../stdlib/base85_encode.py"),
                         section("def a85decode(", "# The following code is originally taken"),
-                        section("def b85decode(", "def main():"),
+                        from("def b85decode("),
                     ]
                     .join("\n")
                 }),
@@ -325,6 +354,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/cp1251.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
+        "encodings.cp1252" => Some((
+            "encodings/cp1252.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
         "encodings.cp424" => Some((
             "encodings/cp424.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
@@ -335,6 +368,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "encodings.cp437" => Some((
             "encodings/cp437.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
+        "encodings.koi8_u" => Some((
+            "encodings/koi8_u.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
@@ -544,7 +581,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "getopt" => Some(("getopt.py", include_str!("../stdlib/getopt.py"))),
         "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
-        _ => None,
+        _ => etree_source(name),
     }
 }
 
@@ -707,6 +744,7 @@ pub(crate) enum IntrinsicModule {
     Io,
     IoNative,
     Gzip,
+    Lzma,
     UnicodeData,
     WeakRef,
     Threading,
@@ -982,6 +1020,7 @@ pub(crate) enum Intrinsic {
         guaranteed: bool,
     },
     ZipFile,
+    ZipImportIndex,
     ZipInfo,
     BytesIo,
     StringIo,
@@ -1274,6 +1313,7 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "_io" => Some(Self::IoNative),
             "gzip" => Some(Self::Gzip),
+            "lzma" => Some(Self::Lzma),
             "types" => Some(Self::Types),
             "unicodedata" => Some(Self::UnicodeData),
             "weakref" => Some(Self::WeakRef),
@@ -1750,6 +1790,17 @@ impl IntrinsicModule {
             (Self::Locale | Self::LocaleNative, "getencoding") => {
                 Intrinsic::SysEncoding(SysEncoding::Locale)
             }
+            (Self::Locale | Self::LocaleNative, "CHAR_MAX") => {
+                Intrinsic::IntConstant(i64::from(std::ffi::c_char::MAX))
+            }
+            (Self::LocaleNative, "localeconv") => {
+                Intrinsic::ScopedObjectExport("_locale.localeconv")
+            }
+            (Self::Locale, "localeconv") => Intrinsic::ScopedObjectExport("locale.localeconv"),
+            (Self::Locale, "format_string") => {
+                Intrinsic::ScopedObjectExport("locale.format_string")
+            }
+            (Self::Locale, "localize") => Intrinsic::ScopedObjectExport("locale.localize"),
             (Self::LocaleNative, "setlocale") => {
                 Intrinsic::ObjectRuntimeExport("_locale.setlocale")
             }
@@ -1785,6 +1836,7 @@ impl IntrinsicModule {
             (Self::Sys, "intern") => Intrinsic::SysIntern { query: false },
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
+            (Self::Sys, "float_info") => Intrinsic::ScopedObjectExport("sys.float_info"),
             (Self::Sys, "implementation") => Intrinsic::SysImplementation,
             (Self::Sys, "pycache_prefix") => Intrinsic::SysPycachePrefix,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
@@ -1887,6 +1939,7 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Gzip, "compress") => Intrinsic::ScopedObjectExport("gzip.compress"),
             (Self::Types, "GenericAlias") => Intrinsic::ScopedObjectExport("types.GenericAlias"),
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
@@ -1934,6 +1987,24 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
+            #[cfg(unix)]
+            (Self::Socket | Self::SocketNative, "SO_ERROR") => {
+                Intrinsic::IntConstant(i64::from(libc::SO_ERROR))
+            }
+            #[cfg(target_os = "linux")]
+            (Self::Socket, "SOCK_NONBLOCK") => {
+                Intrinsic::ScopedObjectExport("socket.SOCK_NONBLOCK")
+            }
+            #[cfg(target_os = "linux")]
+            (Self::SocketNative, "SOCK_NONBLOCK") => {
+                Intrinsic::IntConstant(i64::from(libc::SOCK_NONBLOCK))
+            }
+            #[cfg(target_os = "linux")]
+            (Self::Socket, "SOCK_CLOEXEC") => Intrinsic::ScopedObjectExport("socket.SOCK_CLOEXEC"),
+            #[cfg(target_os = "linux")]
+            (Self::SocketNative, "SOCK_CLOEXEC") => {
+                Intrinsic::IntConstant(i64::from(libc::SOCK_CLOEXEC))
+            }
             (Self::Socket, "timeout") => Intrinsic::ScopedObjectExport("socket.timeout"),
             (Self::SocketNative, "timeout") => Intrinsic::ScopedObjectExport("_socket.timeout"),
             (Self::SocketNative, "getdefaulttimeout") => {
@@ -2138,6 +2209,7 @@ impl IntrinsicModule {
             (Self::Base64, "encodebytes") => Intrinsic::ScopedObjectExport("base64.encodebytes"),
             (Self::Base64, "b64encode") => Intrinsic::Base64Encode,
             (Self::Base64, "b64decode") => Intrinsic::Base64Decode,
+            (Self::Base64, "b16decode") => Intrinsic::ScopedObjectExport("base64.b16decode"),
             (Self::Base64, "b32encode") => Intrinsic::ScopedObjectExport("base64.b32encode"),
             (Self::Base64, "b32decode") => Intrinsic::ScopedObjectExport("base64.b32decode"),
             (Self::Base64, "b32hexencode") => Intrinsic::ScopedObjectExport("base64.b32hexencode"),
@@ -2226,6 +2298,8 @@ impl IntrinsicModule {
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
+            (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
@@ -2252,6 +2326,12 @@ impl IntrinsicModule {
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
+            (Self::Lzma, "FORMAT_AUTO") => Intrinsic::IntConstant(0),
+            (Self::Lzma, "FORMAT_XZ") => Intrinsic::IntConstant(1),
+            (Self::Lzma, "FORMAT_ALONE") => Intrinsic::IntConstant(2),
+            (Self::Lzma, "LZMAError") => Intrinsic::ScopedObjectExport("lzma.LZMAError"),
+            (Self::Lzma, "decompress") => Intrinsic::ScopedObjectExport("lzma.decompress"),
+            (Self::Zlib, "decompressobj") => Intrinsic::ScopedObjectExport("zlib.decompressobj"),
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
@@ -2277,6 +2357,7 @@ impl IntrinsicModule {
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
             (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
+            (Self::Random, "Random") => Intrinsic::ScopedObjectExport("random.Random"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
@@ -2682,6 +2763,17 @@ impl SourceModule {
                 "platform.win32_is_iot",
             )));
         }
+        if self.is_bundled("doctest") {
+            let export = match name {
+                "DocFileCase" => Some("doctest.DocFileCase"),
+                "DocFileTest" => Some("doctest.DocFileTest"),
+                "DocFileSuite" => Some("doctest.DocFileSuite"),
+                _ => None,
+            };
+            if let Some(export) = export {
+                return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export)));
+            }
+        }
         if self.is_bundled("socketserver")
             && matches!(
                 name,
@@ -2715,6 +2807,9 @@ impl SourceModule {
             )));
         }
         let binding = *self.bindings.get(name)?;
+        if binding == Binding::Intrinsic(Intrinsic::ZipImportIndex) {
+            return None;
+        }
         (self.archive.is_none() || matches!(binding, Binding::Definition(_))).then_some(binding)
     }
 
@@ -2743,7 +2838,7 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
-    pub(crate) check_decorated_method_calls: std::cell::Cell<bool>,
+    pub(crate) check_fallback_calls: std::cell::Cell<FallbackCalls>,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
     pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
@@ -2769,6 +2864,13 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Request checked-file diagnostics without replacing checks requested by a Python entry.
+    pub(crate) fn require_fallback_calls(&self) {
+        if matches!(self.check_fallback_calls.get(), FallbackCalls::None) {
+            self.check_fallback_calls.set(FallbackCalls::All);
+        }
+    }
+
     /// Select object class construction while preserving checked calls and typed module layouts.
     pub(crate) fn require_object_class_layout(&self, error: String) -> String {
         self.class_layout_error.replace(Some(error.clone()));
@@ -4035,7 +4137,7 @@ impl<'a> Loader<'a> {
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             float_components: Default::default(),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
-            check_decorated_method_calls: Default::default(),
+            check_fallback_calls: Default::default(),
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
             object_builtin_errors: Default::default(),
@@ -4557,6 +4659,24 @@ impl<'a> Loader<'a> {
                     });
                     return Ok(());
                 }
+                if import.level == 0
+                    && name == "imre._zipimport"
+                    && let [alias] = import.names.as_slice()
+                    && alias.name.as_str() == "open_index"
+                {
+                    if !self.modules[id].is_bundled("zipimport") {
+                        return Err(
+                            "the private zipimport directory opener is not importable".into()
+                        );
+                    }
+                    let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                    return self.bind(
+                        id,
+                        local.as_str(),
+                        Binding::Intrinsic(Intrinsic::ZipImportIndex),
+                        alias,
+                    );
+                }
                 if import.level == 0 && name == "imre._logging" {
                     if !self.modules[id].is_bundled(LOGGING_CLASSES) {
                         return Err("the private logging implementation is not importable".into());
@@ -4727,7 +4847,10 @@ impl<'a> Loader<'a> {
                             ));
                         }
                         binding
-                    } else if self.modules[target].is_bundled("zoneinfo") {
+                    } else if self.modules[target].is_bundled("zoneinfo")
+                        || self.modules[target].is_bundled("pyexpat")
+                        || self.modules[target].is_bundled("xml.parsers.expat")
+                    {
                         Binding::ConditionalValue
                     } else if self.modules[target].is_package {
                         let child_name = format!("{name}.{}", alias.name);
@@ -4744,9 +4867,10 @@ impl<'a> Loader<'a> {
                         }
                     } else if self.modules[target].is_bundled("http.client")
                         || self.modules[target].is_bundled("dis")
+                        || self.modules[target].is_bundled("xml.etree.ElementTree")
+                        || self.modules[target].is_bundled("xml.etree.ElementPath")
                     {
-                        // http.client supplies names beyond its checked header types.
-                        // dis imports opcode's public names with a wildcard.
+                        // These source providers resolve additional exports at runtime.
                         Binding::ConditionalValue
                     } else {
                         return Err(format!(
@@ -4799,8 +4923,16 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::ImportlibBootstrapExternal
                     | IntrinsicModule::ImportlibResourcesAbc
             ) || module == IntrinsicModule::SocketNative
-                && imports
-                    .is_none_or(|names| names.iter().any(|alias| alias.name.as_str() != "timeout"));
+                && imports.is_none_or(|names| {
+                    names.iter().any(|alias| {
+                        let name = alias.name.as_str();
+                        name != "timeout"
+                            && !matches!(
+                                module.symbol(name),
+                                Some(Binding::Intrinsic(Intrinsic::IntConstant(_)))
+                            )
+                    })
+                });
         }
         if module == Some(IntrinsicModule::Dataclasses)
             && imports.is_none_or(|names| {
@@ -5057,6 +5189,11 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/doctest_typed.py"),
                 ),
             )),
+            // The parser type and the public expat exports are initialized by the object runtime.
+            "pyexpat" | "xml.parsers.expat" => {
+                self.needs_object_imports = true;
+                bundled_runtime_source(name).map(|(path, _)| (path, ""))
+            }
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "zipimport" if cfg!(unix) => Some((
                 "zipimport.py",
@@ -5081,6 +5218,11 @@ impl<'a> Loader<'a> {
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),
             )),
+            // The Python evaluator resolves ElementTree's optional C accelerator and the
+            // globals that ElementPath initializes from its tokenizer.
+            "xml.etree.ElementTree" | "xml.etree.ElementPath" => {
+                etree_source(name).map(|(filename, _)| (filename, ""))
+            }
             // ZoneInfo exports belong to the boxed provider. Loading the package's children
             // while scanning this typed namespace would recursively enter its initializer.
             "zoneinfo" => Some(("zoneinfo/__init__.py", "")),
@@ -5100,8 +5242,10 @@ impl<'a> Loader<'a> {
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
             // token initializes its public tables from the live module globals.
-            self.needs_object_imports |=
-                matches!(name, "token" | "http.client" | "fractions" | "zoneinfo");
+            self.needs_object_imports |= matches!(
+                name,
+                "token" | "http.client" | "fractions" | "xml" | "zoneinfo"
+            );
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;

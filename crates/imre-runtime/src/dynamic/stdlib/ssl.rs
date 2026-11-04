@@ -2,7 +2,7 @@
 
 use std::{cell::RefCell, ffi::CString, io, rc::Rc};
 
-use super::{Context, Error, Id, NONE, Result, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, Value};
 use crate::objects::{errno_error, socket};
 
 pub(crate) mod provider;
@@ -49,6 +49,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "set_post_handshake_auth",
         "get_ciphers",
         "set_ciphers",
+        "set_ecdh_curve",
         "load_verify_locations",
         "load_cert_chain",
         "wrap",
@@ -165,8 +166,8 @@ fn bio_failure(ctx: &mut Context, error: provider::bio::BioFailure) -> Result<Id
         BioFailure::UnexpectedEof => "UNEXPECTED_EOF_WHILE_READING",
         BioFailure::ProtocolIsShutdown => "PROTOCOL_IS_SHUTDOWN",
         BioFailure::ShutdownInInit => "SHUTDOWN_WHILE_IN_INIT",
-        BioFailure::RecordError { reason, message } => {
-            let reason = ctx.text(reason);
+        BioFailure::ProtocolError { reason, message } => {
+            let reason = reason.map_or(NONE, |s| ctx.text(s));
             let message = ctx.text(message);
             return Ok(ctx.alloc(Value::Tuple(vec![reason, message])));
         }
@@ -699,6 +700,15 @@ pub(super) fn call(
             );
             trust_result(ctx, result)
         }
+        ("set_ecdh_curve", &[handle, name]) => {
+            let path = super::posixpath::fspath(ctx, name)?;
+            let name = super::os::c_path(ctx, path, "embedded null byte")?;
+            let result = context(ctx, handle)?.borrow_mut().set_ecdh_curve(&name);
+            match result {
+                Ok(false) => Ok(FALSE),
+                result => trust_result(ctx, result.map(|_| ())),
+            }
+        }
         ("get_ciphers", &[handle]) => provider::ciphers::get(ctx, handle),
         ("set_ciphers", &[handle, text]) => {
             let ciphers = CString::new(ctx.str_value(text)?)
@@ -845,10 +855,7 @@ pub(super) fn call(
                 Ok(session) => {
                     Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))
                 }
-                Err(provider::Failure::Verify { code, message }) => {
-                    Ok(verify_failure(ctx, code, message))
-                }
-                Err(e) => Err(provider_error(ctx, e)),
+                Err(error) => bio_failure(ctx, error),
             }
         }
         ("release_session", &[handle]) => match ctx.heap.get(handle) {
@@ -979,11 +986,11 @@ pub(super) fn call(
                         .map(|&id| ctx.index_c_int(id))
                         .transpose()?
                         .unwrap_or(0);
-                    let bytes = ctx.native_buffer_bytes(*data)?;
                     if name == "sendall" {
-                        socket::send_all(&raw, bytes, flags)?;
+                        super::socket::send_all_exported(ctx, &raw, *data, flags)?;
                         return Ok(NONE);
                     }
+                    let bytes = ctx.native_buffer_bytes(*data)?;
                     Ok(ctx.int(socket::send(&raw, bytes, flags)? as i64))
                 });
             }

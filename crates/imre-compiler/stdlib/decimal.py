@@ -142,6 +142,20 @@ class Decimal:
         return "Decimal('" + self._text + "')"
 
     # Object-protocol methods for the boxed runtime.
+    def __float__(self, /) -> float:
+        if not issubclass(type(self), Decimal):
+            raise TypeError(
+                f"descriptor '__float__' requires a 'decimal.Decimal' object "
+                f"but received a '{type(self).__name__}'"
+            )
+        text = self._text
+        magnitude = text.lstrip("-")
+        if magnitude.startswith("sNaN"):
+            raise ValueError("cannot convert signaling NaN to float")
+        if magnitude.startswith("NaN"):
+            text = "-nan" if text.startswith("-") else "nan"
+        return float(text)
+
     def __eq__(self, other: object):
         if not isinstance(other, Decimal):
             return NotImplemented

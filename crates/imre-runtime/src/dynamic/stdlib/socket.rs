@@ -37,9 +37,14 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
     ("SOL_SOCKET", libc::SOL_SOCKET),
     ("SO_TYPE", libc::SO_TYPE),
+    ("SO_ERROR", libc::SO_ERROR),
     ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),
+    #[cfg(target_os = "linux")]
+    ("SOCK_CLOEXEC", libc::SOCK_CLOEXEC),
+    #[cfg(target_os = "linux")]
+    ("SOCK_NONBLOCK", libc::SOCK_NONBLOCK),
     ("SOCK_RAW", libc::SOCK_RAW),
     ("SOCK_RDM", libc::SOCK_RDM),
     ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
@@ -1321,15 +1326,15 @@ pub(super) fn call(
             return Ok(ctx.alloc(Value::Bytes(bytes)));
         }
         "send" | "sendall" => {
-            let (Value::Bytes(bytes) | Value::ByteArray(bytes)) = ctx.heap.get(argument(args, 0)?)
-            else {
+            let data = argument(args, 0)?;
+            let (Value::Bytes(bytes) | Value::ByteArray(bytes)) = ctx.heap.get(data) else {
                 return Err(Error::new("TypeError", "a bytes-like object is required"));
             };
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
             if method == "send" {
                 return Ok(ctx.int(native::send(&s, bytes, flags)? as i64));
             }
-            native::send_all(&s, bytes, flags)?;
+            ctx.with_buffer_export(data, |ctx| send_all_exported(ctx, &s, data, flags))?;
         }
         _ => {
             return Err(Error::new(
@@ -1339,4 +1344,18 @@ pub(super) fn call(
         }
     }
     Ok(NONE)
+}
+
+/// Reacquire the exported bytes after dispatch, when a signal handler may have mutated them.
+pub(super) fn send_all_exported(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    data: Id,
+    flags: i32,
+) -> Result<()> {
+    native::SendAll::run(socket, flags, |send| {
+        let done = send.step(ctx.native_buffer_bytes(data)?)?;
+        ctx.dispatch_signals()?;
+        Ok(done)
+    })
 }

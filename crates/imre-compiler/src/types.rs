@@ -1085,21 +1085,6 @@ impl Types {
         };
         fields.clone()
     }
-    pub(crate) fn module_spec_layouts(&self) -> Vec<(Type, Vec<Type>)> {
-        self.0
-            .borrow()
-            .shapes
-            .iter()
-            .enumerate()
-            .filter_map(|(id, shape)| {
-                if let Shape::ModuleSpec(fields) = shape {
-                    Some((Type::ModuleSpec(id), fields.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
     /// The type can also appear inside a tuple or optional without an annotation.
     pub(crate) fn contains_module_spec(&self, ty: Type) -> bool {
         if matches!(ty, Type::ModuleSpec(_)) {

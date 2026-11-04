@@ -72,19 +72,19 @@ impl Source {
         }
     }
 
-    pub(super) fn directory(&self) -> Result<Vec<Info>> {
+    pub(super) fn directory(&self, empty_unicode_path: fn() -> Result<()>) -> Result<Vec<Info>> {
         match self {
             Self::Owned(disk) => {
                 let mut disk = disk.borrow_mut();
                 disk.next = None;
-                directory::entries(&mut disk.reader)
+                directory::entries(&mut disk.reader, empty_unicode_path)
             }
             Self::Borrowed(object) => {
                 let mut cursor = BorrowedCursor {
                     object,
                     error: None,
                 };
-                let result = directory::entries(&mut cursor);
+                let result = directory::entries(&mut cursor, empty_unicode_path);
                 // zipfile turns OS errors during EOCD lookup into BadZipFile, but
                 // a closed file-like object reports ValueError from the input.
                 match cursor.error {

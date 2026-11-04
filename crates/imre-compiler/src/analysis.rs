@@ -105,6 +105,10 @@ impl Session {
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
             (
+                "imre/_zipimport",
+                "from zipfile import ZipFile as _ZipFile\ndef open_index(path: str) -> _ZipFile: ...\n",
+            ),
+            (
                 "_imre_mock",
                 "def mark_call_list(values: list, /) -> bool: ...\ndef is_call_list(values: list, /) -> bool: ...\n",
             ),
@@ -756,20 +760,16 @@ impl Session {
         calls: FallbackCalls,
         runtime_provider: Option<usize>,
     ) -> Result<(), String> {
-        let all_calls = matches!(
-            calls,
-            FallbackCalls::All | FallbackCalls::DecoratorFactories
-        );
+        let checks = match calls {
+            FallbackCalls::All | FallbackCalls::DecoratorFactories => FileChecks::FallbackCalls,
+            FallbackCalls::FunctionBodies => FileChecks::FunctionBodyCalls,
+            FallbackCalls::None | FallbackCalls::Entry(_) => FileChecks::FallbackReturns,
+        };
         self.set_fallback_rules(
-            all_calls,
+            checks != FileChecks::FallbackReturns,
             matches!(calls, FallbackCalls::DecoratorFactories),
         );
         let provider = runtime_provider.map(|index| self.files[index]);
-        let checks = if all_calls {
-            FileChecks::FallbackCalls
-        } else {
-            FileChecks::FallbackReturns
-        };
         self.errors(skipped, overloads, checks, provider)?;
         if let FallbackCalls::Entry(entry) = calls {
             // Only the entry gained a new statement order. Imported modules retain
@@ -878,12 +878,17 @@ struct CheckedFile<'db> {
 enum FileChecks {
     Full,
     FallbackReturns,
+    FunctionBodyCalls,
     FallbackCalls,
 }
 
 /// Files in which a checked object fallback also enforces call arguments.
+#[derive(Clone, Copy, Default)]
 pub(crate) enum FallbackCalls {
+    #[default]
     None,
+    /// Local annotated calls in function bodies when a Python script needs a boxed operation.
+    FunctionBodies,
     Entry(usize),
     All,
     /// A factory must return a callable to decorate the method.
@@ -1080,7 +1085,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (checks == FileChecks::FallbackCalls
+                            || (matches!(checks, FileChecks::FallbackCalls | FileChecks::FunctionBodyCalls)
                                 && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
                                 && runtime_argument(
                                     db,
@@ -1088,6 +1093,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                                     range,
                                     diagnostic.id().as_str(),
                                     checked.runtime_provider(db),
+                                    checks == FileChecks::FunctionBodyCalls,
                                 ))
                             // ty also reports implicit None returns at the annotation span.
                             || (diagnostic.id().as_str() == "invalid-return-type"
@@ -1121,6 +1127,7 @@ fn runtime_argument(
     range: TextRange,
     rule: &str,
     runtime_provider: Option<File>,
+    function_bodies: bool,
 ) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::Type;
@@ -1128,7 +1135,7 @@ fn runtime_argument(
     let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
     let root = AnyNodeRef::from(parsed.syntax());
     if !root.range().contains_range(range) {
-        return false;
+        return function_bodies;
     }
     let nodes = covering_node(root, range);
     // ty points to the entire call for missing arguments and overload mismatches.
@@ -1145,26 +1152,42 @@ fn runtime_argument(
         };
         owns_range.then_some(call)
     }) else {
-        return false;
+        return function_bodies;
     };
     let model = SemanticModel::new(db, file);
     let Some(callee) = call.func.inferred_type(&model) else {
-        return false;
+        return function_bodies;
     };
-    if rule == "too-many-positional-arguments"
-        && call.arguments.args.iter().any(|arg| arg.range() == range)
-        && matches!(callee, Type::FunctionLiteral(_))
+    if matches!(callee, Type::FunctionLiteral(_))
         && let Some(ty_python_semantic::types::TypeDefinition::Function(definition)) =
             callee.definition(db, &model.program_environment())
         && definition.file(db) == file.file(db)
         && let ty_python_core::definition::DefinitionKind::Function(function) = definition.kind(db)
     {
-        let index = ty_python_core::semantic_index(db, file);
-        if let Some(scope) = untyped_generator_local(index, function.node(&parsed))
-            && index.try_expression_scope_id(call.func.as_ref()) == Some(scope)
-        {
-            return true;
+        let function = function.node(&parsed);
+        if function_bodies {
+            // A Python entry binds dynamic calls at runtime. Preserve the contracts
+            // typed lowering checks in first-party function bodies before a fallback.
+            let in_body = nodes.ancestors().any(|node| {
+                matches!(node,
+                AnyNodeRef::StmtFunctionDef(caller)
+                    if caller.body.iter().any(|stmt| stmt.range().contains_range(call.range())))
+            });
+            return !(in_body && function.parameters.iter().any(|p| p.annotation().is_some()));
         }
+        if rule == "too-many-positional-arguments"
+            && call.arguments.args.iter().any(|arg| arg.range() == range)
+        {
+            let index = ty_python_core::semantic_index(db, file);
+            if let Some(scope) = untyped_generator_local(index, function)
+                && index.try_expression_scope_id(call.func.as_ref()) == Some(scope)
+            {
+                return true;
+            }
+        }
+    }
+    if function_bodies {
+        return true;
     }
     let uses_runtime_provider = |ty: Type<'_>| {
         ty.definition(db, &model.program_environment())

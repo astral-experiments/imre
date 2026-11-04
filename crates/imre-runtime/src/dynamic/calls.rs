@@ -14,6 +14,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::XOF_CLASS
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
+            | value::ZLIB_DECOMPRESS_TYPE
             | "anext_awaitable"
             | "_buffer_wrapper"
             | value::REGEX_PATTERN_TYPE
@@ -135,7 +136,13 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => {
+        "lzma" if function == "decompress" => Some((module, function)),
+        "zlib"
+            if matches!(
+                function,
+                "adler32" | "crc32" | "compress" | "decompress" | "decompressobj"
+            ) =>
+        {
             Some((module, function))
         }
         #[cfg(unix)]
@@ -154,7 +161,16 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
 }
 
-fn excess_positional_error(
+/// Format a Python call's unexpected keyword and any spelling suggestion.
+pub(super) fn unexpected_keyword_error(name: &str, key: &str, params: &[&str]) -> Error {
+    let mut message = format!("{name}() got an unexpected keyword argument '{key}'");
+    if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, params) {
+        message.push_str(&format!(". Did you mean '{hint}'?"));
+    }
+    Error::new("TypeError", message)
+}
+
+pub(super) fn excess_positional_error(
     name: &str,
     allowed: usize,
     defaults: usize,
@@ -878,8 +894,6 @@ impl Context {
                 | Value::AttrGetter(_)
                 | Value::ItemGetter(_)
                 | Value::StaticMethod { .. }
-                | Value::CacheParameters { .. }
-                | Value::CacheDecorator { .. }
                 | Value::KeyWrapper { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
@@ -940,7 +954,10 @@ impl Context {
             .heap_type()
             .expect("native heap type method");
         if self.heap.get(receiver).instance_class() == Some(owner)
-            || (declaring == value::SSL_ERROR_TYPE && self.instance_of(receiver, owner))
+            || (matches!(
+                declaring,
+                value::SSL_ERROR_TYPE | stdlib::random::instance::CLASS
+            ) && self.instance_of(receiver, owner))
         {
             return Ok(());
         }
@@ -958,7 +975,10 @@ impl Context {
             stdlib::datetime::validate_classmethod_receiver(self, "dict", "fromkeys", owner)?;
             return Ok(self.bind_native_classmethod(value, owner));
         }
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
+        if matches!(self.heap.get(value), Value::Native(name) if name == "float.fromhex") {
+            stdlib::datetime::validate_classmethod_receiver(self, "float", "fromhex", owner)?;
+        }
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.fromhex" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -1341,12 +1361,15 @@ impl Context {
     fn builtin_numeric_member(&mut self, obj: Id, name: &str) -> Option<Id> {
         let kind = match self.heap.get(obj) {
             Value::Native(kind) => kind.as_str(),
-            Value::Int(_) | Value::Bool(_) => "int",
+            Value::Int(_) => "int",
+            Value::Bool(_) => "bool",
             Value::Float(_) => "float",
             _ => return None,
         };
         let owner = match (kind, name) {
-            ("int" | "bool", "numerator" | "denominator") => self.builtin("int"),
+            ("int", "__doc__") | ("int" | "bool", "numerator" | "denominator") => {
+                self.builtin("int")
+            }
             ("float", "real" | "imag") => self.builtin("float"),
             _ => return None,
         };
@@ -1429,11 +1452,6 @@ impl Context {
             return Err(self.member_receiver_error(owner, field, ty));
         }
         Err(Error::new("AttributeError", "readonly attribute"))
-    }
-
-    /// Check whether an inline value is an immutable tuple position.
-    fn has_namedtuple_field(&self, class: Id, name: &str) -> bool {
-        matches!(self.heap.get(class), Value::Class { namedtuple_fields: Some(names), .. } if names.iter().any(|field| field == name))
     }
 
     pub(super) fn is_type_object(&self, obj: Id) -> bool {
@@ -1545,6 +1563,7 @@ impl Context {
                             | stdlib::datetime::TZINFO
                             | "socket.socket"
                             | "struct.Struct"
+                            | value::ZLIB_DECOMPRESS_TYPE
                             | "hmac.HMAC"
                             | "collections.defaultdict"
                             | "_contextvars.Context"
@@ -1729,6 +1748,7 @@ impl Context {
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
+            | (value::ZLIB_DECOMPRESS_TYPE, Value::ZlibDecompressor { .. })
             | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
             | ("socket.socket", Value::Socket(_))
@@ -1779,7 +1799,6 @@ impl Context {
             {
                 true
             }
-            ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (
                 name,
                 Value::NamedTuple {
@@ -1844,7 +1863,11 @@ impl Context {
             let class = &class[..class.floor_char_boundary(100)];
             format!("type object '{class}' has no attribute '{name}'")
         } else {
-            format!("'{}' object has no attribute '{name}'", self.type_name(obj))
+            let class = match self.heap.get(obj) {
+                Value::Partial { .. } => stdlib::functools::PARTIAL_CLASS,
+                _ => self.type_name(obj),
+            };
+            format!("'{class}' object has no attribute '{name}'")
         };
         Error::new("AttributeError", message)
     }
@@ -2135,7 +2158,9 @@ impl Context {
         }
         let builtin_member = match name {
             "mapping" => self.dict_view_mapping_member(obj),
-            "numerator" | "denominator" | "real" | "imag" => self.builtin_numeric_member(obj, name),
+            "numerator" | "denominator" | "real" | "imag" | "__doc__" => {
+                self.builtin_numeric_member(obj, name)
+            }
             _ => None,
         };
         if let Some(descriptor) = builtin_member {
@@ -2252,8 +2277,7 @@ impl Context {
             {
                 return self.bind_attribute(member, obj, class);
             }
-            let inline =
-                inline.filter(|_| !layout.declared_slot && !self.has_namedtuple_field(class, name));
+            let inline = inline.filter(|_| !layout.declared_slot);
             let field = if inline.is_some()
                 || namespace.is_none()
                 || member.is_some_and(|member| self.data_descriptor(member))
@@ -3359,6 +3383,12 @@ impl Context {
                             return Ok(self.text(text));
                         }
                         let value = match name {
+                            "__doc__" if method == "_locale.localeconv" => {
+                                Some("Returns numeric and monetary locale-specific parameters.")
+                            }
+                            "__text_signature__" if method == "_locale.localeconv" => {
+                                Some("($module, /)")
+                            }
                             "__doc__" if method == "posix.sysconf" => {
                                 Some("Return an integer-valued system configuration variable.")
                             }
@@ -3760,6 +3790,11 @@ impl Context {
                 }
             }
             Value::Native(ref class)
+                if class == value::ZLIB_DECOMPRESS_TYPE && matches!(name, "copy" | "__copy__") =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
+            Value::Native(ref class)
                 if class == "tuple"
                     && matches!(name, "__new__" | "__getitem__" | "count" | "index") =>
             {
@@ -4032,6 +4067,12 @@ impl Context {
                     }
                 }
             },
+            Value::Native(ref class)
+                if class == stdlib::functools::PARTIAL_CLASS
+                    && matches!(name, "__name__" | "__qualname__") =>
+            {
+                return Ok(self.heap.code_name("partial"));
+            }
             Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));
             }
@@ -4135,13 +4176,15 @@ impl Context {
                 let method = self.builtin("int.from_bytes");
                 return Ok(self.bind_native_classmethod(method, obj));
             }
-            Value::Float(_) if name == "__getformat__" => {
+            Value::Float(_) if matches!(name, "__getformat__" | "fromhex") => {
                 let owner = self.builtin("float");
-                let method = self.builtin("float.__getformat__");
+                let method = self.builtin(&format!("float.{name}"));
                 return Ok(self.bind_native_classmethod(method, owner));
             }
-            Value::Native(ref class) if class == "float" && name == "__getformat__" => {
-                let method = self.builtin("float.__getformat__");
+            Value::Native(ref class)
+                if class == "float" && matches!(name, "__getformat__" | "fromhex") =>
+            {
+                let method = self.builtin(&format!("float.{name}"));
                 return Ok(self.bind_native_classmethod(method, obj));
             }
             Value::Native(ref class) if class == stdlib::flags::TYPE => {
@@ -4215,6 +4258,11 @@ impl Context {
                 "size" => return Ok(self.int(layout.size as i64)),
                 _ => {}
             },
+            Value::ZlibDecompressor { .. }
+                if matches!(name, "eof" | "unused_data" | "unconsumed_tail") =>
+            {
+                return stdlib::zlib::decompressor(self, name, &[obj], &[]);
+            }
             Value::Hash(ref hash) => {
                 let owner = hash.lock().class_name();
                 match name {
@@ -4322,6 +4370,7 @@ impl Context {
                     "gzip.BadGzipFile"
                         | "binascii.Error"
                         | "binascii.Incomplete"
+                        | "_lzma.LZMAError"
                         | "socket.gaierror"
                         | "socket.herror"
                         | "zlib.error"
@@ -4709,8 +4758,14 @@ impl Context {
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
-            if matches!(self.heap.get(obj), Value::Native(owner) if owner == "type") {
-                return Ok(self.builtin("type.__init__"));
+            if let Value::Native(owner) = self.heap.get(obj) {
+                match owner.as_str() {
+                    "type" => return Ok(self.builtin("type.__init__")),
+                    "bool" | "int" | "float" | "complex" | "str" | "bytes" => {
+                        return Ok(self.builtin("object.__init__"));
+                    }
+                    _ => {}
+                }
             }
             let tuple = self.builtin("tuple");
             if self.direct_subclass(obj, tuple) {
@@ -4767,6 +4822,7 @@ impl Context {
                 Value::Dict(_) | Value::DefaultDict { .. } => {
                     return Ok(self.builtin("dict.__new__"));
                 }
+                Value::List(_) => return Ok(self.builtin("list.__new__")),
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::Cell(_) => return Ok(self.builtin("cell.__new__")),
@@ -4959,7 +5015,9 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
-        if let Some(class) = self.heap.get(obj).heap_type() {
+        if let Some(class) = self.heap.get(obj).heap_type()
+            && class != stdlib::random::instance::CLASS
+        {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot set '{name}' attribute of immutable type '{class}'"),
@@ -5198,9 +5256,7 @@ impl Context {
                 if self.heap.get(class).heap_type().is_some() {
                     self.check_instance_field(obj, name)?;
                 }
-                if (layout.declared_slot && !layout.active_slot)
-                    || self.has_namedtuple_field(class, name)
-                {
+                if layout.declared_slot && !layout.active_slot {
                     return Err(self.missing_attribute(obj, name));
                 }
                 let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
@@ -5403,11 +5459,7 @@ impl Context {
         let mut ordinary = Vec::new();
         let mut retained = indexmap::IndexMap::new();
         for (name, value) in original {
-            if self.instance_layout(class, &name).declared_slot
-                || self
-                    .namedtuple_fields(class)
-                    .is_some_and(|names| names.contains(&name))
-            {
+            if self.instance_layout(class, &name).declared_slot {
                 retained.insert(name, value);
             } else {
                 ordinary.push((name, value));
@@ -5925,7 +5977,9 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
-        if let Some(class) = self.heap.get(obj).heap_type() {
+        if let Some(class) = self.heap.get(obj).heap_type()
+            && class != stdlib::random::instance::CLASS
+        {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot set '{name}' attribute of immutable type '{class}'"),
@@ -6237,10 +6291,8 @@ impl Context {
             }
             if !layout.active_slot {
                 let storage = namespace.or_else(|| {
-                    (layout.materialize_dictionary_on_write
-                        || layout.declared_slot
-                        || self.has_namedtuple_field(class, name))
-                    .then(|| self.instance_dictionary(obj, class))
+                    (layout.materialize_dictionary_on_write || layout.declared_slot)
+                        .then(|| self.instance_dictionary(obj, class))
                 });
                 if let Some(storage) = storage {
                     return self.update_dictionary_field(obj, storage, name, Some(value));
@@ -6583,6 +6635,73 @@ impl Context {
         Ok(self.instance(class, None))
     }
 
+    /// Allocate empty list storage without consuming arguments reserved for the initializer.
+    fn new_list(&mut self, args: &[Id]) -> Result<Id> {
+        let Some(&class) = args.first() else {
+            return Err(Error::new(
+                "TypeError",
+                "list.__new__(): not enough arguments",
+            ));
+        };
+        let list = self.builtin("list");
+        if !self.direct_subclass(class, list) {
+            return Err(self.invalid_new_subtype("list", class));
+        }
+        let storage = self.alloc(Value::List(Vec::new()));
+        if class == list {
+            return Ok(storage);
+        }
+        let instance = self.instance(class, None);
+        let Value::Instance { scalar, .. } = self.heap.get_mut(instance) else {
+            unreachable!()
+        };
+        *scalar = Some(storage);
+        Ok(instance)
+    }
+
+    /// Allocate the requested tuple subtype from the iterable before invoking any initializer.
+    fn new_tuple(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&class, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "tuple.__new__(): not enough arguments",
+            ));
+        };
+        let name = match self.heap.get(class) {
+            Value::Native(name) => Some(name.as_str()),
+            class => class.heap_type(),
+        };
+        match name {
+            Some(stdlib::flags::TYPE) => {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot create 'sys.flags' instances",
+                ));
+            }
+            Some(
+                name
+                @ (stdlib::fixed_structseq::SCHED_PARAM | stdlib::datetime::isocalendar::CLASS),
+            ) => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("tuple.__new__({name}) is not safe, use {name}.__new__()"),
+                ));
+            }
+            _ => {}
+        }
+        if !kwargs.is_empty() {
+            let tuple = self.builtin("tuple");
+            if self.subclass(class, tuple)
+                && (class == tuple || self.class_attr(class, "__init__").is_none_or(|init| {
+                    matches!(self.heap.get(init), Value::Native(name) if name == "object.__init__")
+                }))
+            {
+                return Err(Error::new("TypeError", "tuple() takes no keyword arguments"));
+            }
+        }
+        self.new_immutable_scalar("tuple", class, args, &[])
+    }
+
     /// Create empty mapping storage for the requested type without running its initializer.
     fn new_dict(&mut self, args: &[Id]) -> Result<Id> {
         let Some(&class) = args.first() else {
@@ -6902,15 +7021,11 @@ impl Context {
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
+            Value::Native(name) if name == "list.__new__" => self.new_list(&args),
             Value::Native(name) if name == "_thread._local.__new__" => {
                 super::thread_local::allocate(self, &args, &kwargs)
             }
-            Value::Native(name) if name == "tuple.__new__" => {
-                if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
-                    return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
-                }
-                super::namedtuple::allocate(self, &args, &kwargs)
-            }
+            Value::Native(name) if name == "tuple.__new__" => self.new_tuple(&args, &kwargs),
             Value::Native(name)
                 if name
                     .strip_suffix(".__sizeof__")
@@ -6951,6 +7066,7 @@ impl Context {
                             | "SystemExit.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
+                            | "float.fromhex"
                             | "bool.__repr__"
                             | "float.__repr__"
                             | "float.as_integer_ratio"
@@ -7035,6 +7151,9 @@ impl Context {
                 if self.heap.get(owner).heap_type() == Some(stdlib::ssl::provider::bio::CLASS) {
                     return stdlib::ssl::provider::bio::call(self, owner, name, &args, &kwargs);
                 }
+                if self.heap.get(owner).heap_type() == Some(stdlib::random::instance::CLASS) {
+                    return stdlib::random::instance::call(self, owner, name, &args, &kwargs);
+                }
                 if self.heap.get(owner).heap_type() == Some(stdlib::datetime::isocalendar::CLASS) {
                     stdlib::datetime::isocalendar::call(self, owner, name, &args, &kwargs)
                 } else {
@@ -7106,26 +7225,6 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
-            Value::CacheDecorator { maxsize, typed } => {
-                let function = stdlib::single_argument(
-                    "lru_cache.<locals>.decorating_function",
-                    "user_function",
-                    &args,
-                    &kwargs,
-                )?;
-                stdlib::functools::wrap_cache(self, function, maxsize, typed)
-            }
-            Value::CacheParameters { maxsize, typed } => {
-                if !args.is_empty() || !kwargs.is_empty() {
-                    return Err(Error::new(
-                        "TypeError",
-                        "cache_parameters() takes no arguments",
-                    ));
-                }
-                let size_key = self.text("maxsize");
-                let typed_key = self.text("typed");
-                Ok(self.dict(vec![(size_key, maxsize), (typed_key, typed)]))
-            }
             Value::Cached {
                 function,
                 table,
@@ -7394,8 +7493,6 @@ impl Context {
                 } else {
                     let storage = if rlock_subclass {
                         Some(self.alloc(Value::HandlerLock(Default::default())))
-                    } else if self.has_base(callable, "list") {
-                        Some(self.alloc(Value::List(Vec::new())))
                     } else if let Some(kind) = collection_kind {
                         let custom_init = self.class_attr(callable, "__init__").is_some();
                         let items = if kind != "frozenset" && custom_init {
@@ -7548,14 +7645,7 @@ impl Context {
                             .chain(&kwonly)
                             .map(String::as_str)
                             .collect();
-                        let mut message =
-                            format!("{name}() got an unexpected keyword argument '{n}'");
-                        if let Some(hint) =
-                            crate::objects::exceptions::keyword_suggestion(&n, &candidates)
-                        {
-                            message.push_str(&format!(". Did you mean '{hint}'?"));
-                        }
-                        return Err(Error::new("TypeError", message));
+                        return Err(unexpected_keyword_error(&name, &n, &candidates));
                     }
                 }
                 if let Some(n) = sig["kwargs"].as_str() {

@@ -230,6 +230,7 @@ fn private_lists(
             key,
             value,
             ready,
+            ..
         } => {
             hidden |= [Some(iterator), Some(key), value.as_ref(), Some(ready)]
                 .into_iter()

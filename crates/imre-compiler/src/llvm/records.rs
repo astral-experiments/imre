@@ -239,6 +239,21 @@ mod tests {
     use crate::{CompileOptions, compile};
 
     #[test]
+    fn reading_a_tuple_field_only_needs_its_llvm_type() {
+        let ir = compile(
+            "def read(row: tuple[int, str]) -> int:\n    return row[0]\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(
+            ir.lines()
+                .any(|line| line.starts_with("%tuple_") && line.ends_with(" = type { i64, ptr }"))
+        );
+        assert!(!ir.contains("@layout_tuple_"));
+        assert!(!ir.contains("@layout_completed_process ="));
+    }
+
+    #[test]
     fn repr_checks_for_failure_before_using_the_result() {
         let source = "from collections import Counter\ncounts: Counter[int] = Counter()\ntry:\n    print(len(repr(counts)))\nexcept MemoryError:\n    print(0)\n";
         let ir = compile(source, &CompileOptions::default()).unwrap();

@@ -3293,7 +3293,10 @@ impl Context {
                 ));
             }
             if let Some(name) = self.heap.get(base).heap_type()
-                && name != super::value::SSL_ERROR_TYPE
+                && !matches!(
+                    name,
+                    super::value::SSL_ERROR_TYPE | super::stdlib::random::instance::CLASS
+                )
             {
                 return Err(Error::new(
                     "TypeError",

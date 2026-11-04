@@ -262,7 +262,17 @@ impl Verifier<'_> {
                 key,
                 value,
                 ready,
+                kind,
             } => {
+                let item_type = match kind {
+                    crate::ir::IterNextKind::String => Some(Type::Str),
+                    crate::ir::IterNextKind::CodePoint => Some(Type::Int),
+                    crate::ir::IterNextKind::Generic => None,
+                };
+                if let Some(ty) = item_type {
+                    same(self.local(*key)?, ty)?;
+                    require(value.is_none(), "a string cursor yields one item")?;
+                }
                 let ty = self.local(*iterator)?;
                 if let Some(element) = self.module.types.cursor_element(ty) {
                     same(self.local(*key)?, element)?;

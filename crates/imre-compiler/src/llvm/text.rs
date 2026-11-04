@@ -62,21 +62,27 @@ impl Emitter<'_, '_> {
 
     /// Elides a temporary split sequence only when its selected field is known.
     /// Ordinary argument evaluation and rooting still precede separator checks.
-    pub(super) fn rsplit_last(&mut self, builtin: &Builtin, expressions: &[Expr]) -> Option<Value> {
-        let (expressions, function) = match (builtin, expressions) {
-            (Builtin::ListGet, args) => (args, "imre_str_rsplit_last"),
+    pub(super) fn selected_split(
+        &mut self,
+        builtin: &Builtin,
+        expressions: &[Expr],
+    ) -> Option<Value> {
+        let (fields, unquote) = match (builtin, expressions) {
+            (Builtin::ListGet, args) => (args, false),
             (Builtin::Text(TextOperation::Unquote), [arg]) => match &arg.kind {
-                ExprKind::Builtin(Builtin::ListGet, args) => {
-                    (args.as_slice(), "imre_str_unquote_rsplit_last")
-                }
+                ExprKind::Builtin(Builtin::ListGet, args) => (args.as_slice(), true),
                 _ => return None,
             },
             _ => return None,
         };
-        let [split, index] = expressions else {
-            return None;
+        let [split, index] = fields else { return None };
+        let (reverse, args) = split.selected_split_args(index)?;
+        let function = match (reverse, unquote) {
+            (false, false) => "imre_str_split_first",
+            (true, false) => "imre_str_rsplit_last",
+            (true, true) => "imre_str_unquote_rsplit_last",
+            (false, true) => return None,
         };
-        let args = split.last_rsplit_args(index)?;
         let args = args.iter().map(|arg| self.operand(arg)).collect::<Vec<_>>();
         let separator = self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
         let operand = self.checked_instruction(format!(
@@ -251,9 +257,7 @@ impl Emitter<'_, '_> {
                     "null".into()
                 };
                 let pair = self.module.types.element(returns).unwrap();
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(pair)));
+                let layout = self.output.record_layout(pair);
                 self.checked_instruction(format!("call ptr @imre_parse_qsl(ptr {query}, i32 {bytes}, i32 {keep}, i32 {strict}, ptr {encoding}, ptr {errors}, i64 {max}, ptr {separator}, i32 {separator_bytes}, ptr @{layout})"))
             }
             TextOperation::UrlSplit => {
@@ -331,6 +335,25 @@ mod tests {
                 fused
             );
             assert_eq!(llvm.contains("call ptr @imre_str_unquote("), !fused);
+        }
+    }
+
+    #[test]
+    fn only_selects_the_first_field_of_an_ephemeral_explicit_split() {
+        for (body, fused) in [
+            ("s.split(sep, 1)[0]", true),
+            ("s.split(sep, n)[0]", false),
+            ("s.split(sep, 1)[n]", false),
+            ("s.split(None, 1)[0]", false),
+            ("s.rsplit(sep, 1)[0]", false),
+        ] {
+            let source = format!("def head(s: str, sep: str, n: int) -> str:\n    return {body}\n");
+            let llvm = compile(&source, &CompileOptions::default()).unwrap();
+            assert_eq!(
+                llvm.contains("call ptr @imre_str_split_first("),
+                fused,
+                "{body}"
+            );
         }
     }
 

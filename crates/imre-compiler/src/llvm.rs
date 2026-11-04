@@ -330,23 +330,54 @@ fn emit_program(
     let borrows = borrows::analyze(module, &callable_targets);
     let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
+    let mut literal_globals = vec![None; module.globals.len()];
     let mut extension_modules = std::collections::BTreeSet::new();
     let mut function_link_types = HashSet::new();
     let mut declared_caches = HashSet::new();
+    let mut uses_sys_argv = false;
+    let mut uses_orig_argv = false;
+    let mut uses_linecache = false;
+    let mut uses_cache_paths = false;
+    let mut uses_builtins_last = false;
+    let mut changes_stdout = false;
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::ExtensionImport(name), _) = &expr.kind {
-                extension_modules.insert(name.clone());
-            }
-            if let ExprKind::Builtin(
-                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet,
-                args,
-            ) = &expr.kind
-            {
-                function_link_types.insert(args[0].ty);
-            }
-            if let ExprKind::Builtin(Builtin::ModuleCache(id), _) = &expr.kind {
-                declared_caches.insert(*id);
+            let ExprKind::Builtin(builtin, args) = &expr.kind else {
+                return;
+            };
+            match builtin {
+                Builtin::ExtensionImport(name) => {
+                    extension_modules.insert(name.clone());
+                }
+                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
+                    function_link_types.insert(args[0].ty);
+                }
+                Builtin::ModuleCache(id) => {
+                    declared_caches.insert(*id);
+                }
+                Builtin::GlobalSet(slot) => {
+                    // A checked module binding has only one initializer.
+                    if let [
+                        Expr {
+                            kind: ExprKind::Str(value),
+                            ..
+                        },
+                    ] = args.as_slice()
+                    {
+                        literal_globals[*slot] = Some(value.clone());
+                    }
+                }
+                Builtin::SysArgv => uses_sys_argv = true,
+                Builtin::SysOrigArgv => uses_orig_argv = true,
+                Builtin::Linecache(..) => uses_linecache = true,
+                Builtin::WarningFormat { .. } if args[5].ty != Type::Str => uses_linecache = true,
+                Builtin::CachePath(_) | Builtin::ModuleCacheFromOrigin => uses_cache_paths = true,
+                Builtin::BuiltinsSetLast
+                | Builtin::SysDisplayHook
+                | Builtin::BuiltinsLen
+                | Builtin::BuiltinsSetLen => uses_builtins_last = true,
+                Builtin::SysStdoutSet | Builtin::SysStdoutDelete => changes_stdout = true,
+                _ => {}
             }
         });
     }
@@ -362,7 +393,6 @@ fn emit_program(
     }) {
         return Err("Imre: wrapper links require a callable signature with only known, unbound native functions".to_owned());
     }
-    let (uses_sys_argv, uses_orig_argv, uses_linecache, uses_cache_paths) = module.startup_usage();
     let mut emitter = Emitter {
         module,
         output,
@@ -375,13 +405,16 @@ fn emit_program(
         uses_sequence_layout: false,
         tuple_literals: BTreeMap::new(),
         static_functions: BTreeSet::new(),
+        async_frames: BTreeMap::new(),
+        async_invoke_frames: BTreeMap::new(),
         function_link_types,
+        json_schema_roots: Vec::new(),
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         http_members: Vec::new(),
-        literal_globals: literal_globals(module),
+        literal_globals,
         next_value: 0,
         next_label: 0,
         current: "entry".to_owned(),
@@ -416,13 +449,13 @@ fn emit_program(
         inline_dispatch,
         callable_targets,
         integer_regions: integer_regions::analyze(module),
-        uses_sys_argv,
+        uses_sys_argv: uses_sys_argv || uses_orig_argv,
         uses_orig_argv,
         uses_linecache,
         uses_percent_tuple: false,
-        uses_builtins_last: module.uses_builtins_last(),
+        uses_builtins_last,
         uses_cache_paths,
-        changes_stdout: module.changes_stdout(),
+        changes_stdout,
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -529,8 +562,8 @@ fn emit_program(
         )
         .unwrap();
     }
+    json::schemas(module, &emitter.json_schema_roots, emitter.output);
     record_layouts(module, emitter.output);
-    json::schemas(module, emitter.output);
     callables::adapters(
         module,
         sanitize,
@@ -538,7 +571,7 @@ fn emit_program(
         !emitter.function_link_types.is_empty(),
         emitter.output,
     );
-    asyncio::adapters(module, sanitize, &emitter.resource_types, emitter.output);
+    asyncio::adapters(&mut emitter);
     emitter.output.common().push_str(&integer_helpers());
     emitter
         .output
@@ -615,7 +648,10 @@ struct Emitter<'a, 'module> {
     uses_sequence_layout: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
+    async_frames: BTreeMap<usize, String>,
+    async_invoke_frames: BTreeMap<usize, (String, Type)>,
     function_link_types: HashSet<Type>,
+    json_schema_roots: Vec<Type>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -957,7 +993,7 @@ impl Emitter<'_, '_> {
         self.temporaries = temporaries;
     }
 
-    /// Borrows direct locals only when no expression can replace their slot.
+    /// Borrows pooled literals and direct locals whose slots cannot be replaced.
     /// Earlier operands of a call or operator must survive a later `:=` write.
     /// Stable caller roots also protect projections in edge-preserving functions.
     fn operand(&mut self, expression: &Expr) -> Operand {
@@ -972,6 +1008,11 @@ impl Emitter<'_, '_> {
         {
             let mut value = self.borrow_slot(*slot);
             value.small_integer |= self.ranges.integer(expression).is_some();
+            Operand {
+                value,
+                ownership: Ownership::Borrowed,
+            }
+        } else if let Some(value) = self.borrow_literal_operand(expression) {
             Operand {
                 value,
                 ownership: Ownership::Borrowed,
@@ -2428,8 +2469,9 @@ impl Emitter<'_, '_> {
                 key,
                 value,
                 ready,
+                kind,
             } => {
-                self.iter_next(*iterator, *key, *value, *ready);
+                self.iter_next(*iterator, *key, *value, *ready, *kind);
             }
             Statement::SetItem(list, index, expression) => {
                 if self.copy_item(list, index, expression) {
@@ -2710,6 +2752,9 @@ impl Emitter<'_, '_> {
                 self.block(body);
                 self.loops.pop();
                 if !self.terminated {
+                    if unit_step {
+                        self.batch_modular_writes(body, *target, *cursor, *stop);
+                    }
                     self.jump(&increment);
                 }
                 self.start(&increment);
@@ -2863,9 +2908,7 @@ impl Emitter<'_, '_> {
                 } else {
                     let element = self.module.types.element(expression.ty).unwrap();
                     let op = if self.module.types.is_value_struct(element) {
-                        let layout = self
-                            .output
-                            .global_ref(format!("layout_{}", record_name(element)));
+                        let layout = self.output.record_layout(element);
                         format!("call ptr @imre_struct_list_new(ptr @{layout})")
                     } else {
                         format!(
@@ -3768,6 +3811,15 @@ impl Emitter<'_, '_> {
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
+                Type::Str | Type::StrLiteral(_)
+                    if !matches!(op, Compare::Equal | Compare::NotEqual) =>
+                {
+                    let order = self.instruction(format!(
+                        "call i32 @imre_str_compare(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
                 Type::Str | Type::StrLiteral(_) | Type::BuiltinClass | Type::Optional(_) => {
                     let equal = if matches!(left.ty, Type::Optional(_))
                         || matches!(right.ty, Type::Optional(_))
@@ -4307,7 +4359,7 @@ impl Emitter<'_, '_> {
                 ..value
             };
         }
-        if let Some(value) = self.rsplit_last(builtin, expressions) {
+        if let Some(value) = self.selected_split(builtin, expressions) {
             return value;
         }
         // Truth consumes immediately and cannot rebind the slot. Transfer the
@@ -5028,9 +5080,7 @@ impl Emitter<'_, '_> {
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::WarningFormat { entry, environment } => {
                 let line = self.optional_object_pointer(&args[5].value);
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(*entry)));
+                let layout = self.output.record_layout(*entry);
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_warning_format(ptr {}, ptr {}, ptr {}, ptr {}, i64 {}, ptr {line}, ptr {}, ptr {}, i32 {}, ptr @{layout})",
                     args[0].value.operand, args[1].value.operand, args[2].value.operand,
@@ -5134,9 +5184,7 @@ impl Emitter<'_, '_> {
                 self.unpack_word(word, returns)
             }
             Builtin::ClockParts(utc) => {
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self.output.record_layout(returns);
                 let stamp = &args[0].value;
                 let function = if stamp.ty == Type::Int {
                     "imre_clock_int_parts"
@@ -5305,7 +5353,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::JsonEncoderEncode(schema) => {
-                let schema = self.output.global_ref(json::schema_name(*schema));
+                let schema = self.json_schema(*schema);
                 let word = self.word(&args[1].value);
                 Value {
                     ty: returns,
@@ -5377,7 +5425,7 @@ impl Emitter<'_, '_> {
                 } else {
                     "json"
                 };
-                let schema = self.output.global_ref(json::schema_name(*schema));
+                let schema = self.json_schema(*schema);
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
@@ -5390,11 +5438,11 @@ impl Emitter<'_, '_> {
             Builtin::JsonEncode(schema)
             | Builtin::JsonDumps(schema)
             | Builtin::JsonDump(schema) => {
-                let schema = self.output.global_ref(json::schema_name(*schema));
                 let word = self.word(&args[0].value);
                 let ascii = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 let indent = self.word(&args[1].value);
                 let operand = if matches!(builtin, Builtin::JsonEncode(_)) {
+                    let schema = self.json_schema(*schema);
                     self.checked_instruction(format!("call ptr @imre_json_encode(i64 {word}, ptr @{schema}, i64 {indent}, i32 {ascii})"))
                 } else {
                     let indent_ty = self
@@ -5408,7 +5456,8 @@ impl Emitter<'_, '_> {
                     let sort =
                         self.instruction(format!("zext i1 {} to i32", args[4].value.operand));
                     let separators = self.word(&args[5].value);
-                    let sep_schema = self.output.global_ref(json::schema_name(args[5].value.ty));
+                    let sep_schema = self.json_schema(args[5].value.ty);
+                    let schema = self.json_schema(*schema);
                     let common = format!(
                         "i64 {word}, ptr @{schema}, i64 {indent}, i32 {text_indent}, i32 {ascii}, i32 {nan}, i32 {sort}, i64 {separators}, ptr @{sep_schema}"
                     );
@@ -5648,7 +5697,8 @@ impl Emitter<'_, '_> {
                 let root = self.output.global_ref(format!("static_function_{name}"));
                 self.static_functions.insert(root.clone());
                 self.rooted_record(returns, &root, |emitter| {
-                    let value = emitter.record_with_layout(returns, "callable");
+                    let layout = emitter.output.global_ref("layout_callable".to_owned());
+                    let value = emitter.record_with_layout(returns, layout);
                     emitter.line(format!(
                         "store ptr @imre_{name}_callback, ptr {}",
                         value.operand
@@ -6022,18 +6072,14 @@ impl Emitter<'_, '_> {
                 process_argv,
             } => {
                 let pair_layout = if matches!(returns, Type::Tuple(_)) {
-                    format!(
-                        "@{}",
-                        self.output
-                            .global_ref(format!("layout_{}", record_name(returns)))
-                    )
+                    format!("@{}", self.output.record_layout(returns))
                 } else {
                     "null".to_owned()
                 };
                 let [schema, description, argv] = args.as_slice() else {
                     unreachable!()
                 };
-                let layout = self.output.global_ref(format!("layout_class_{namespace}"));
+                let layout = self.output.record_layout(Type::Class(*namespace));
                 let child_layouts = if children.is_empty() {
                     "null".to_owned()
                 } else {
@@ -6042,10 +6088,7 @@ impl Emitter<'_, '_> {
                     let layouts = children
                         .iter()
                         .map(|child| {
-                            format!(
-                                "ptr @{}",
-                                self.output.global_ref(format!("layout_class_{child}"))
-                            )
+                            format!("ptr @{}", self.output.record_layout(Type::Class(*child)))
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -6386,9 +6429,7 @@ impl Emitter<'_, '_> {
                     Op::Getline | Op::Getlines | Op::Update => {
                         let globals = if *op == Op::Getline { 2 } else { 1 };
                         let root = globals + 1;
-                        let layout = self
-                            .output
-                            .global_ref(format!("layout_{}", record_name(*entry)));
+                        let layout = self.output.record_layout(*entry);
                         let list = self.checked_instruction(format!(
                             "call ptr @imre_linecache_lines(ptr {}, ptr {}, ptr {}, ptr {}, i32 {}, i32 {}, ptr @{layout})",
                             pointer(0), pointer(globals), pointer(root), pointer(root+1), u32::from(*env), u32::from(*op == Op::Update)
@@ -6522,10 +6563,8 @@ impl Emitter<'_, '_> {
                 match operation {
                     Op::Newlines => {
                         let mut layout = |n| {
-                            self.output.global_ref(format!(
-                                "layout_{}",
-                                record_name(self.module.types.tuple(vec![Type::Str; n]))
-                            ))
+                            self.output
+                                .record_layout(self.module.types.tuple(vec![Type::Str; n]))
                         };
                         let pair = layout(2);
                         let triple = layout(3);
@@ -6632,6 +6671,9 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::ZipOpen => self.call("imre_zip_open", returns, &[&args[0].value]),
+            Builtin::ZipImportIndex => {
+                self.call("imre_zip_import_index", returns, &[&args[0].value])
+            }
             Builtin::ZipNamelist => self.call("imre_zip_namelist", returns, &[&args[0].value]),
             Builtin::ZipClose => {
                 self.void_call("imre_zip_close", &[&args[0].value]);
@@ -7327,9 +7369,7 @@ impl Emitter<'_, '_> {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
                 let word = self.word(source);
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self.output.record_layout(returns);
                 let operand = self.checked_pointer(format!(
                     "call ptr @imre_tee(i32 {mode}, i64 {word}, ptr @{layout})"
                 ));
@@ -7433,17 +7473,13 @@ impl Emitter<'_, '_> {
             Builtin::FormatCursor { split } => {
                 let (cursor, outer) = if *split {
                     let fields = self.module.types.fields(returns).unwrap();
-                    let layout = self
-                        .output
-                        .global_ref(format!("layout_{}", record_name(returns)));
+                    let layout = self.output.record_layout(returns);
                     (fields[1], Some(layout))
                 } else {
                     (returns, None)
                 };
                 let row = self.module.types.cursor_element(cursor).unwrap();
-                let row = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(row)));
+                let row = self.output.record_layout(row);
                 let input = &args[0].value.operand;
                 let operand = match outer {
                     Some(outer) => self.checked_pointer(format!("call ptr @imre_formatter_field_name_split(ptr {input}, ptr @{outer}, ptr @{row})")),
@@ -7469,6 +7505,14 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::StringIter => self.call("imre_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::SplitByteIter(separator) => Value {
+                ty: Type::Iterator,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_str_split_byte_iter(ptr {}, i8 {separator})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::MatchingSplitIter(separator) => {
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_str_matching_split_iter(ptr {}, ptr {}, i64 {}, i8 {separator})",
@@ -7775,9 +7819,7 @@ impl Emitter<'_, '_> {
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
             Builtin::CounterMostCommon => {
                 let pair = self.module.types.element(returns).unwrap();
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(pair)));
+                let layout = self.output.record_layout(pair);
                 let limit = self.word(&args[1].value);
                 let operand = self.checked_pointer(format!(
                     "call ptr @imre_counter_most_common(ptr {}, i64 {limit}, ptr @{layout})",
@@ -7877,7 +7919,7 @@ impl Emitter<'_, '_> {
                 }
                 let instruction = if let Builtin::SortedRecordRows { class, columns } = builtin {
                     let name = self.byte_array(columns.clone());
-                    let layout = self.output.global_ref(format!("layout_class_{class}"));
+                    let layout = self.output.record_layout(Type::Class(*class));
                     format!(
                         "call ptr @imre_sorted_record_rows(ptr {handles}, i64 {}, ptr @{layout}, ptr @{name})",
                         args.len()
@@ -8228,6 +8270,17 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::FilterCharacterSet(below) => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_filter_character_set(ptr {}, ptr {}, i32 {below})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::StringListFilter(strip) => {
                 let second =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
@@ -8337,9 +8390,7 @@ impl Emitter<'_, '_> {
         roots: &mut Vec<Value>,
     ) -> Operand {
         let scratch = self.entry_alloca(format!("[{} x i64]", fields.len() + 2));
-        let layout = self
-            .output
-            .global_ref(format!("layout_{}", record_name(ty)));
+        let layout = self.output.record_layout(ty);
         let payload = self.instruction(format!(
             "call ptr @imre_tuple_probe(ptr {scratch}, ptr @{layout})"
         ));
@@ -8437,12 +8488,18 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// The runtime transfers independent owned words only on success. Output
-    /// locals have distinct slots and may be narrower than a word, so scratch
-    /// values are converted before publication. Exhaustion never reads scratch
-    /// or replaces an output owner; nested loops can safely reuse both scratch
-    /// words after this synchronous conversion.
-    fn iter_next(&mut self, iterator: usize, key: usize, value: Option<usize>, ready: usize) {
+    /// Pulls and publishes independently owned words only when a cursor advances.
+    /// Exact string cursors return their word directly. Generic iterators use
+    /// shared scratch slots for keys and values, including two-word mapping pulls.
+    /// Exhaustion leaves the caller's output locals untouched.
+    fn iter_next(
+        &mut self,
+        iterator: usize,
+        key: usize,
+        value: Option<usize>,
+        ready: usize,
+        kind: ir::IterNextKind,
+    ) {
         debug_assert!(matches!(
             self.locals[iterator],
             Type::Iterator | Type::Cursor(_)
@@ -8457,26 +8514,45 @@ impl Emitter<'_, '_> {
             debug_assert_ne!(ready, value);
         }
         let iterator = self.borrow_slot(iterator);
-        self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
-        let value_output = if value.is_some() {
-            "%mapping_value_word"
-        } else {
-            "null"
+        let (available, direct_key) = match kind {
+            ir::IterNextKind::Generic => {
+                self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
+                let value_output = if value.is_some() {
+                    "%mapping_value_word"
+                } else {
+                    "null"
+                };
+                let byte = self.checked_instruction(format!(
+                    "call i32 @imre_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
+                    iterator.operand
+                ));
+                (self.instruction(format!("icmp ne i32 {byte}, 0")), None)
+            }
+            ir::IterNextKind::String | ir::IterNextKind::CodePoint => {
+                debug_assert!(value.is_none());
+                let next = if kind == ir::IterNextKind::String {
+                    "imre_str_iter_next_owned"
+                } else {
+                    "imre_str_iter_next_codepoint"
+                };
+                let word = self.instruction(format!("call i64 @{next}(ptr {})", iterator.operand));
+                (
+                    self.instruction(format!("icmp ne i64 {word}, 0")),
+                    Some(word),
+                )
+            }
         };
-        let byte = self.checked_instruction(format!(
-            "call i32 @imre_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
-            iterator.operand
-        ));
         let ready_value = Value {
             ty: Type::Bool,
-            operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+            operand: available,
             small_integer: false,
         };
         self.store(ready, &ready_value);
         let (success, end) = (self.label(), self.label());
         self.branch(&ready_value.operand, &success, &end);
         self.start(&success);
-        let word = self.instruction("load i64, ptr %mapping_key_word");
+        let word =
+            direct_key.unwrap_or_else(|| self.instruction("load i64, ptr %mapping_key_word"));
         let key_value = self.unpack_word(word, self.locals[key]);
         self.store(key, &key_value);
         if let Some(value) = value {
@@ -8594,11 +8670,11 @@ impl Emitter<'_, '_> {
     /// The zeroed payload is safe to destroy before every initializer completes.
     /// The checked constructor cannot expose a partially initialized record.
     fn record(&mut self, ty: Type) -> Value {
-        self.record_with_layout(ty, &record_name(ty))
+        let layout = self.output.record_layout(ty);
+        self.record_with_layout(ty, layout)
     }
 
-    fn record_with_layout(&mut self, ty: Type, name: &str) -> Value {
-        let layout = self.output.global_ref(format!("layout_{name}"));
+    fn record_with_layout(&mut self, ty: Type, layout: String) -> Value {
         // A loop can produce many small, independently escaping ordinary tuples.
         // Batch only the layouts for which several records fit in one block.
         let allocate = if !self.loops.is_empty()
@@ -8641,9 +8717,7 @@ impl Emitter<'_, '_> {
         let write = self.label();
         self.branch(&empty, &allocate, &cached);
         self.start(&allocate);
-        let layout = self
-            .output
-            .global_ref(format!("layout_{}", record_name(previous.ty)));
+        let layout = self.output.record_layout(previous.ty);
         let fresh = self.checked_pointer(format!("call ptr @imre_record_try_new(ptr @{layout})"));
         let allocated = self.current.clone();
         self.jump(&write);
@@ -8670,9 +8744,9 @@ impl Emitter<'_, '_> {
     }
 
     fn field_pointer(&mut self, receiver: &Value, field: usize) -> String {
+        let name = self.output.record_type(receiver.ty);
         self.instruction(format!(
-            "getelementptr inbounds %{}, ptr {}, i32 0, i32 {field}",
-            record_name(receiver.ty),
+            "getelementptr inbounds %{name}, ptr {}, i32 0, i32 {field}",
             receiver.operand
         ))
     }
@@ -9009,24 +9083,6 @@ fn concat_leaves<'e>(emitter: &Emitter<'_, '_>, expression: &'e Expr) -> Vec<&'e
     result
 }
 
-/// The checked IR publishes each module binding once and forbids later rebinding.
-/// Retaining only direct literal initializers avoids evaluating any user code or
-/// assuming a mutable container's contents are constant.
-fn literal_globals(module: &Module) -> Vec<Option<String>> {
-    let mut strings = vec![None; module.globals.len()];
-    for function in module.functions.iter().chain([&module.entry]) {
-        crate::ir::walk_expressions(&function.body, &mut |expression| {
-            if let ExprKind::Builtin(Builtin::GlobalSet(slot), args) = &expression.kind
-                && let [value] = args.as_slice()
-                && let ExprKind::Str(value) = &value.kind
-            {
-                strings[*slot] = Some(value.clone());
-            }
-        });
-    }
-    strings
-}
-
 /// Only the sealed integer conversion can use the eager scratch formatter.
 fn integer_string_argument(expression: &Expr) -> Option<&Expr> {
     if let ExprKind::Builtin(Builtin::Str, args) = &expression.kind
@@ -9103,56 +9159,35 @@ fn storage_type(ty: Type) -> &'static str {
 /// runtime tag or presence bitmap is needed: owning fields reserve zero until
 /// initialization, and their exact kinds are shared by every instance.
 fn record_layouts(module: &Module, output: &mut Output) {
-    let classes = module
-        .class_fields
-        .iter()
-        .enumerate()
-        .map(|(id, fields)| (Type::Class(id), fields.clone()));
-    let mut implementation = false;
-    let mut captures = std::collections::BTreeSet::from([(crate::ir::ProcessCapture::TEXT, None)]);
-    for function in module.functions.iter().chain([&module.entry]) {
-        for ty in function.locals.iter().chain([&function.returns]) {
-            implementation |= *ty == Type::SysImplementation;
-            if let Type::CompletedProcess(c, cmd) = ty {
-                captures.insert((*c, *cmd));
-            }
-        }
-        crate::ir::walk_expressions(&function.body, &mut |value| {
-            implementation |= value.ty == Type::SysImplementation;
-            if let Type::CompletedProcess(c, cmd) = value.ty {
-                captures.insert((c, cmd));
-            }
-        });
-    }
-    let processes = captures.into_iter().map(|(c, cmd)| {
-        (
-            Type::CompletedProcess(c, cmd),
-            vec![
+    let mut records: Vec<_> = std::mem::take(&mut output.record_types)
+        .into_iter()
+        .map(|(ty, descriptor)| (record_name(ty), ty, descriptor))
+        .collect();
+    records.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    for (name, ty, descriptor) in records {
+        let fields = match ty {
+            Type::Class(id) => module.class_fields[id].clone(),
+            Type::Tuple(_) => module.types.fields(ty).unwrap(),
+            Type::ModuleSpec(id) => module.types.module_spec_fields(id),
+            Type::SysImplementation => crate::version::implementation_fields(&module.types),
+            Type::CompletedProcess(capture, cmd) => vec![
                 module.types.completed_command(cmd),
                 Type::Int,
-                c.stream(true),
-                c.stream(false),
+                capture.stream(true),
+                capture.stream(false),
             ],
-        )
-    });
-    let implementation = implementation.then(|| {
-        (
-            Type::SysImplementation,
-            crate::version::implementation_fields(&module.types),
-        )
-    });
-    for (ty, fields) in classes
-        .chain(module.types.tuples())
-        .chain(module.types.module_spec_layouts())
-        .chain(processes)
-        .chain(implementation)
-    {
-        let name = record_name(ty);
+            Type::Callable(_) => continue, // Callable adapters define this shared layout.
+            _ => unreachable!("only fixed records have named LLVM types"),
+        };
         let storage = fields
             .iter()
             .map(|&ty| storage_type(ty))
             .collect::<Vec<_>>()
             .join(", ");
+        writeln!(output.common(), "%{name} = type {{ {storage} }}").unwrap();
+        if !descriptor {
+            continue;
+        }
         let extra = module.types.time_attributes(ty);
         let kind_count = fields.len() + extra.map_or(0, |tail| tail.len());
         let kinds = fields
@@ -9163,7 +9198,6 @@ fn record_layouts(module: &Module, output: &mut Output) {
             .collect::<Vec<_>>()
             .join(", ");
         let count = fields.len();
-        writeln!(output.common(), "%{name} = type {{ {storage} }}").unwrap();
         writeln!(
             output.entry_buffer(),
             "@kinds_{name} = private unnamed_addr constant [{kind_count} x i32] [{kinds}]"
@@ -9641,6 +9675,7 @@ declare i64 @imre_zip_info_method(ptr)
 declare i64 @imre_zip_info_external_attr(ptr)
 declare i32 @imre_zip_info_is_dir(ptr)
 declare ptr @imre_zip_open(ptr)
+declare ptr @imre_zip_import_index(ptr)
 declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
 declare ptr @imre_int_to_bytes(i64, i64, ptr, i1)
@@ -9791,6 +9826,7 @@ declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
 declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
+declare i64 @imre_struct_set_modular(ptr, ptr, ptr, i64, i64, i64, i64, i64, i64, ptr) nounwind
 declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
 declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
@@ -9905,6 +9941,8 @@ declare i32 @imre_set_contains(ptr, i64)
 declare void @imre_set_add(ptr, i64)
 declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)
+declare i64 @imre_str_iter_next_owned(ptr)
+declare i64 @imre_str_iter_next_codepoint(ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)
@@ -9919,6 +9957,7 @@ declare ptr @imre_str_split_whitespace(ptr)
 declare i64 @imre_str_split_int_field(ptr, i32)
 declare void @imre_str_prepare_int_fields(ptr, ptr, i32) nounwind
 declare ptr @imre_str_split(ptr, ptr, i64, i32)
+declare ptr @imre_str_split_first(ptr, ptr)
 declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
@@ -9952,9 +9991,11 @@ declare i32 @imre_str_isalpha(ptr)
 declare i32 @imre_str_isdigit(ptr)
 declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
+declare ptr @imre_str_split_byte_iter(ptr, i8)
 declare ptr @imre_str_matching_split_iter(ptr, ptr, i64, i8)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
+declare ptr @imre_filter_character_set(ptr, ptr, i32)
 declare ptr @imre_str_list_filter(ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_str_list_sorted_suffix(ptr, i32)
 declare i32 @imre_str_list_nonempty(ptr)
@@ -10283,6 +10324,7 @@ declare i64 @imre_enum_find_int(i64, i64, i64)
 declare void @imre_http_enum_table(ptr)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
+declare i32 @imre_str_compare(ptr, ptr)
 declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
@@ -10919,6 +10961,31 @@ print(show("x"))
                 "def check(s: str) -> bool:\n    return s.startswith({tuple})\n"
             ));
             assert!(!body.contains("@imre_str_affix_ascii("), "{body}");
+        }
+    }
+
+    #[test]
+    fn transient_literal_operands_borrow_the_pool_root() {
+        for (source, operation, retain) in [
+            (
+                "def tail(text: str) -> bool:\n    return text.endswith('!')\n",
+                "@imre_str_affix(",
+                "@imre_str_retain(",
+            ),
+            (
+                "def trimmed(text: str) -> str:\n    return text.strip(' .')\n",
+                "@imre_str_strip(",
+                "@imre_str_retain(",
+            ),
+            (
+                "def matches(blob: bytes) -> bool:\n    return blob == b'start'\n",
+                "@imre_bytes_literal_once(",
+                "@imre_bytes_retain(",
+            ),
+        ] {
+            let body = function_body(source);
+            assert!(body.contains(operation), "{body}");
+            assert!(!body.contains(retain), "{body}");
         }
     }
 

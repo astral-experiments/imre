@@ -36,8 +36,35 @@ fn immutable_literal(value: &Expr) -> bool {
 }
 
 impl Emitter<'_, '_> {
+    /// Borrows text and bytes from the literal pool, including nullable arguments.
+    pub(super) fn borrow_literal_operand(&mut self, expression: &Expr) -> Option<Value> {
+        Some(match &expression.kind {
+            ExprKind::Str(text) => Value {
+                ty: expression.ty,
+                ..self.literal_root(text.as_bytes(), Type::Str)
+            },
+            ExprKind::Bytes(bytes) => self.literal_root(bytes, Type::Bytes),
+            ExprKind::Present(inner) => {
+                let value = self.borrow_literal_operand(inner)?;
+                Value {
+                    ty: expression.ty,
+                    operand: self.word(&value),
+                    small_integer: false,
+                }
+            }
+            _ => return None,
+        })
+    }
+
     /// Returns an owned reference while the pool keeps its root until main exits.
     pub(super) fn pooled_literal(&mut self, contents: &[u8], ty: Type) -> Value {
+        let value = self.literal_root(contents, ty);
+        self.retain(&value);
+        value
+    }
+
+    /// Loads the pool's reference, materializing lazy literals on first use.
+    fn literal_root(&mut self, contents: &[u8], ty: Type) -> Value {
         let id = self.intern_literal(contents, ty);
         let name = self.output.literal_ref(id);
         let repr = ty.llvm();
@@ -51,13 +78,11 @@ impl Emitter<'_, '_> {
         } else {
             self.instruction(format!("load {repr}, ptr @{name}"))
         };
-        let value = Value {
+        Value {
             ty,
             operand,
             small_integer: false,
-        };
-        self.retain(&value);
-        value
+        }
     }
 
     pub(super) fn intern_literal(&mut self, contents: &[u8], ty: Type) -> usize {

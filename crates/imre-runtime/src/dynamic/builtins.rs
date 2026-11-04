@@ -30,6 +30,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
         "socket.gaierror" => Some(Kind::GaiError),
         "socket.herror" => Some(Kind::HError),
+        "_lzma.LZMAError" => Some(Kind::LzmaError),
         "zlib.error" => Some(Kind::ZlibError),
         "gzip.BadGzipFile" => Some(Kind::BadGzipFile),
         "binascii.Error" => Some(Kind::BinasciiError),
@@ -186,6 +187,7 @@ pub(super) fn exception_new_owner(name: &str) -> &str {
         | "StopIteration"
         | "StopAsyncIteration"
         | "binascii.Incomplete"
+        | "_lzma.LZMAError"
         | "zlib.error" => "Exception",
         "binascii.Error" => "ValueError",
         name if exception_subclass(name, "OSError") == Some(true) => "OSError",
@@ -253,6 +255,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
         owner,
         "object"
             | "dict"
+            | "list"
             | "mappingproxy"
             | "float"
             | "function"
@@ -415,6 +418,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
+    "__new__",
     "__add__",
     "__getitem__",
     "__iadd__",
@@ -748,8 +752,13 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "bytearray"
         }
-        Value::Struct { .. } if matches!(attr, "pack" | "unpack" | "unpack_from") => {
+        Value::Struct { .. } if matches!(attr, "pack" | "pack_into" | "unpack" | "unpack_from") => {
             "struct.Struct"
+        }
+        Value::ZlibDecompressor { .. }
+            if matches!(attr, "decompress" | "flush" | "copy" | "__copy__") =>
+        {
+            super::value::ZLIB_DECOMPRESS_TYPE
         }
         Value::Hash(state)
             if crate::objects::HashState::is_provider_class(state.lock().class_name())
@@ -1053,6 +1062,25 @@ pub(super) fn bind_builtin_arguments<const N: usize>(
         }
     }
     bind_method_arguments(builtin, args, kwargs, names, N)
+}
+
+/// Bind two required positional-or-keyword operands followed by keyword-only options.
+pub(super) fn bind_two_positional<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    if args.len() > 2 && args.len() + kwargs.len() <= N {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() takes exactly 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    bind_builtin_arguments(name, args, kwargs, names, 2)
 }
 
 /// Bind the positional or named operands of `pow` before selecting its numeric operation.
@@ -1861,6 +1889,7 @@ pub(super) fn call(
                 text::builtin_format(ctx, owner, args[0], Some(args[1]))
             }
             "module" => ctx.module_method(method, args, kwargs),
+            "float" if method == "fromhex" => float::fromhex(ctx, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "int" | "float" if matches!(method, "__abs__" | "__int__" | "__float__") => {
                 collections::builtin_slot(ctx, name, args, kwargs)

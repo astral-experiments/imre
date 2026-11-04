@@ -74,6 +74,17 @@ def check_shift_jis():
     assert len(errors) == 2
     assert all(error.object is source and (error.start, error.end) == (1, 2) for error in errors)
 
+    def second_handler(error):
+        codecs.register_error("test.sjis_switch", codecs.replace_errors)
+        return b"B", error.end
+
+    def switch_handler(error):
+        codecs.register_error("test.sjis_switch", second_handler)
+        return b"A", error.end
+
+    codecs.register_error("test.sjis_switch", switch_handler)
+    assert "☃😀☃".encode("shift_jis", "test.sjis_switch") == b"AB?"
+
 
 def check_raw_unicode_escape():
     source = "\0\n\\u1234\x1aÿĀ€\ud800\udfff😀"
@@ -264,6 +275,16 @@ def check_incremental_decoder_factory():
         entry.incrementaldecoder = IncrementalDecoder
 
 
+def check_utf8_error_handler():
+    def replace_surrogate(error):
+        return "?", error.end
+
+    codecs.register_error("test.utf8_scalar", replace_surrogate)
+    for encoding in ("utf-8", "utf-8-sig"):
+        assert "é東🚉".encode(encoding, "test.utf8_scalar") == "é東🚉".encode(encoding)
+        assert "A\ud800B".encode(encoding, "test.utf8_scalar") == "A?B".encode(encoding)
+
+
 def check_utf8_buffer_slice():
     from array import array
 
@@ -279,6 +300,7 @@ def check_utf8_buffer_slice():
 
 
 def current():
+    check_utf8_error_handler()
     check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
     check_incremental_decoder_factory()
@@ -388,6 +410,11 @@ def current():
         text = wire.decode(name)
         assert text[128:131] == "Çüé" and text.encode(name) == wire
         assert codecs.lookup(name).name == "cp437"
+
+    entry_koi8 = codecs.lookup("KOI8_U")
+    assert entry_koi8.name == "koi8-u"
+    assert entry_koi8.decode(bytes.fromhex("a4 b4 ad bd a6 b6 a7 b7")) == ("єЄґҐіІїЇ", 8)
+    assert wire.decode("koi8-u").encode("koi8-u") == wire
     text = entry.decode(wire)[0]
     for name in ("latin-1", "LATIN_1", "iso-8859-1", "cp819"):
         print(text.encode(name) == wire, text.encode(name, "strict") == wire)

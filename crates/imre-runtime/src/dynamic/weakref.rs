@@ -274,6 +274,7 @@ impl Context {
             | Value::Code(_)
             | Value::Set { .. }
             | Value::Deque(_)
+            | Value::Array(_)
             | Value::MemoryView { .. }
             | Value::File(_)
             | Value::Partial { .. }

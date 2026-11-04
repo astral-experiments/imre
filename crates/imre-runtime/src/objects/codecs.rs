@@ -14,19 +14,21 @@ use std::sync::LazyLock;
 
 pub(crate) struct CodePage {
     index: usize,
+    pub(crate) module_name: &'static str,
     decode: Charmap,
     encode: HashMap<char, u8>,
 }
 
 impl CodePage {
     /// Reuse the pinned source decoding table in both directions.
-    fn new(index: usize, name: &str) -> Self {
-        let decode = Charmap::named(name).unwrap();
+    fn new(index: usize, module_name: &'static str) -> Self {
+        let decode = Charmap::named(module_name).unwrap();
         let encode = (0..=u8::MAX)
             .filter_map(|byte| decode.decode(byte).map(|ch| (ch, byte)))
             .collect();
         Self {
             index,
+            module_name,
             decode,
             encode,
         }
@@ -36,8 +38,10 @@ impl CodePage {
 static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
 static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
 static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
+static KOI8_U: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(8, "koi8_u"));
+static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"));
 
-const CODEC_NAMES: [&str; 8] = [
+const CODEC_NAMES: [&str; 10] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -46,6 +50,8 @@ const CODEC_NAMES: [&str; 8] = [
     "cp424",
     "cp437",
     "shift_jis",
+    "koi8-u",
+    "cp1252",
 ];
 
 thread_local! {
@@ -536,8 +542,10 @@ impl Codec {
                 Ok(Self::ShiftJis)
             }
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
+            "cp1252" | "1252" | "windows_1252" => Ok(Self::CodePage(&CP1252)),
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
             "cp437" | "437" | "cspc8codepage437" | "ibm437" => Ok(Self::CodePage(&CP437)),
+            "koi8_u" => Ok(Self::CodePage(&KOI8_U)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
@@ -691,6 +699,22 @@ impl Codec {
         }
     }
 
+    /// Text substituted for one unencodable Python code point by a built-in error handler.
+    pub(crate) fn error_replacement(name: &str, code: u32) -> Str {
+        match name {
+            "replace" => Str::const_new("?"),
+            "backslashreplace" => escaped(code),
+            "xmlcharrefreplace" => compact_str::format_compact!("&#{code};"),
+            "namereplace" => char::from_u32(code)
+                .and_then(unicode_names2::name)
+                .map_or_else(
+                    || escaped(code),
+                    |name| compact_str::format_compact!("\\N{{{name}}}"),
+                ),
+            _ => unreachable!("text replacement policy"),
+        }
+    }
+
     pub(crate) fn encoding_error_reason(self) -> (&'static str, &'static str) {
         match self {
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
@@ -732,13 +756,9 @@ impl Codec {
             }
             let replacement = match errors.unwrap_or("strict") {
                 "ignore" => continue,
-                "replace" => Str::const_new("?"),
-                "backslashreplace" => escaped(ch),
-                "xmlcharrefreplace" => compact_str::format_compact!("&#{};", u32::from(ch)),
-                "namereplace" => unicode_names2::name(ch).map_or_else(
-                    || escaped(ch),
-                    |name| compact_str::format_compact!("\\N{{{name}}}"),
-                ),
+                name @ ("replace" | "backslashreplace" | "xmlcharrefreplace" | "namereplace") => {
+                    Self::error_replacement(name, u32::from(ch))
+                }
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
                     if !matches!(self, Self::ShiftJis) {
@@ -789,7 +809,7 @@ fn encoding_error(
     ch: char,
 ) -> Error {
     let at = if start == end {
-        format!("character '{}' in position {start}", escaped(ch))
+        format!("character '{}' in position {start}", escaped(u32::from(ch)))
     } else {
         format!("characters in position {start}-{end}")
     };
@@ -827,8 +847,7 @@ pub(super) fn normalize_newlines(bytes: &mut Vec<u8>) {
     bytes.truncate(written);
 }
 
-fn escaped(ch: char) -> Str {
-    let code = u32::from(ch);
+fn escaped(code: u32) -> Str {
     match code {
         0..=255 => compact_str::format_compact!("\\x{code:02x}"),
         256..=65535 => compact_str::format_compact!("\\u{code:04x}"),

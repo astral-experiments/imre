@@ -94,7 +94,8 @@ mod random;
 #[cfg(target_os = "linux")]
 pub(crate) use random::reseed_after_fork;
 pub(crate) use random::{
-    choice_index, imre_random_float, randint, random_below, random_bits, shuffle_swaps,
+    Generator, choice_index, imre_random_float, randint, random_below, random_bits, seed_shared,
+    shuffle_swaps,
 };
 pub(crate) mod readiness;
 pub(crate) mod records;
@@ -133,7 +134,10 @@ mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::{FileState, Memory, Random, errno_error, open_file, open_raw_file};
+pub(crate) use files::{
+    FileState, GzipDecoder, Memory, Random, errno_error, open_file, open_raw_file,
+    os_error as gzip_read_error,
+};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
@@ -222,6 +226,7 @@ enum Storage {
     Repeat(Repeat<OwnedWord>),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
+    SplitFields(SplitFields),
     MatchingFields(matching_fields::MatchingFields),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
@@ -914,11 +919,20 @@ pub unsafe extern "C" fn imre_str_get_part(
     buffer: *mut u8,
     part: *mut StringPart,
 ) -> u32 {
-    // SAFETY: both immutable inputs remain rooted throughout Unicode indexing.
-    let (value, at) = unsafe { (&*value, Int::borrow(at)) };
-    let character = match sequences::string_character(value, &at) {
-        Ok(character) => character,
-        Err(error) => return error.returning(0),
+    // SAFETY: the caller roots the immutable string and canonical integer.
+    let value = unsafe { &*value };
+    let character = if at == 1
+        && let Some(&first) = value.as_bytes().first()
+        && first.is_ascii()
+    {
+        char::from(first)
+    } else {
+        // SAFETY: the caller roots the index throughout Unicode indexing.
+        let at = unsafe { Int::borrow(at) };
+        match sequences::string_character(value, &at) {
+            Ok(character) => character,
+            Err(error) => return error.returning(0),
+        }
     };
     // SAFETY: the caller provides four disjoint writable bytes, enough for every
     // Unicode scalar. No output is touched before all recoverable checks succeed.
@@ -1355,11 +1369,26 @@ pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const 
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value)) };
     let mut result = Words::new(3);
-    for part in value
-        .split(python_whitespace)
-        .filter(|part| !part.is_empty())
-    {
-        text::push_part(&mut result, &value, part);
+    if value.is_ascii() {
+        // Python also treats the four ASCII information separators as whitespace.
+        for part in value
+            .as_bytes()
+            .split(|byte| matches!(byte, b'\t'..=b'\r' | 0x1c..=b' '))
+        {
+            if !part.is_empty() {
+                // SAFETY: every byte of the source is ASCII.
+                text::push_part(&mut result, &value, unsafe {
+                    std::str::from_utf8_unchecked(part)
+                });
+            }
+        }
+    } else {
+        for part in value
+            .split(python_whitespace)
+            .filter(|part| !part.is_empty())
+        {
+            text::push_part(&mut result, &value, part);
+        }
     }
     crate::ObjectOwner::into_raw(result.into_object())
 }
@@ -1457,6 +1486,52 @@ impl LineOffsets {
 struct LineIterator {
     owner: StrOwner,
     offsets: LineOffsets,
+}
+
+struct SplitFields {
+    source: StrOwner,
+    separator: u8,
+    start: usize,
+}
+
+impl SplitFields {
+    fn next(&mut self) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
+        let start = self.start;
+        let Some(remaining) = self.source.as_bytes().get(start..) else {
+            return Ok(None);
+        };
+        let end = memchr::memchr(self.separator, remaining)
+            .map_or(self.source.len(), |offset| start + offset);
+        let field = owned_line(&self.source, start..end)?;
+        // A separator at the end leaves one final empty field to yield.
+        self.start = end + 1;
+        // SAFETY: the field transfers its owned string reference to the caller.
+        let word = unsafe {
+            OwnedWord::from_owned(StrOwner::into_raw(field) as usize, words::WordKind::new(3))
+        };
+        Ok(Some((word, None)))
+    }
+}
+
+/// Creates a cursor for an immediately consumed `text.split(sep)`.
+///
+/// # Safety
+/// The caller roots the string for this call and passes an ASCII separator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_split_byte_iter(
+    value: *const Str,
+    separator: u8,
+) -> *const Object {
+    // SAFETY: the caller roots the immutable source while the cursor acquires it.
+    let source = unsafe { StrOwner::acquire_word(value as usize) };
+    let fields = SplitFields {
+        source,
+        separator,
+        start: 0,
+    };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::SplitFields(fields),
+    ))))
 }
 
 fn owned_line(source: &StrOwner, range: std::ops::Range<usize>) -> Result<StrOwner, Error> {

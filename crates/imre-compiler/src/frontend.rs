@@ -1175,7 +1175,7 @@ fn lower_graph(
     if let Some(cache) = cache {
         cache.finish(&types);
     }
-    Ok((
+    let lowered = (
         ir::Module {
             command_flags: graph
                 .command_startup
@@ -1192,7 +1192,48 @@ fn lower_graph(
             entry,
         },
         owners,
-    ))
+    );
+    if needs_object_string_order(&lowered.0) {
+        let error = format!(
+            "{}: Imre: ordering strings from chr() with possible surrogate values requires native Python object operations",
+            graph.modules[graph.entry].path.display()
+        );
+        graph.needs_object_runtime.set(true);
+        graph
+            .object_builtin_errors
+            .borrow_mut()
+            .insert(error.clone());
+        return Err(error);
+    }
+    Ok(lowered)
+}
+
+/// Native text is UTF-8. Use object comparisons when a call to `chr` could
+/// construct a lone surrogate.
+fn needs_object_string_order(module: &ir::Module) -> bool {
+    let mut orders_strings = false;
+    let mut code_points = Vec::new();
+    for function in module.functions.iter().chain([&module.entry]) {
+        ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::Chr, args) => code_points.push(&args[0]),
+            ExprKind::Compare(values, operators) => {
+                orders_strings |= values.iter().zip(operators).any(|(value, op)| {
+                    matches!(value.ty, Type::Str | Type::StrLiteral(_))
+                        && !matches!(op, Compare::Equal | Compare::NotEqual)
+                });
+            }
+            _ => {}
+        });
+    }
+    if !orders_strings || code_points.is_empty() {
+        return false;
+    }
+    let ranges = crate::ranges::analyze(module);
+    code_points.into_iter().any(|value| {
+        ranges
+            .integer(value)
+            .is_none_or(|range| range.min <= 0xdfff && range.max >= 0xd800)
+    })
 }
 
 #[derive(Clone)]
@@ -2689,9 +2730,19 @@ impl<'a> Checker<'a> {
         None
     }
 
-    fn boxed_float_component(&self, attribute: &ast::ExprAttribute, receiver: Type) -> bool {
-        matches!(attribute.attr.as_str(), "real" | "imag")
-            && (receiver == Type::Float || self.unshadowed_builtin(&attribute.value, "float"))
+    fn boxed_float_attribute(
+        &self,
+        attribute: &ast::ExprAttribute,
+        receiver: Type,
+    ) -> Option<&'static str> {
+        if receiver != Type::Float && !self.unshadowed_builtin(&attribute.value, "float") {
+            return None;
+        }
+        match attribute.attr.as_str() {
+            "real" | "imag" => Some("float components"),
+            "fromhex" => Some("float.fromhex"),
+            _ => None,
+        }
     }
 
     fn field_value(
@@ -2713,8 +2764,8 @@ impl<'a> Checker<'a> {
         if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "cr_origin" {
             return Err(self.object_builtin_error("coroutine.cr_origin", attribute));
         }
-        if self.boxed_float_component(attribute, receiver.ty) {
-            return Err(self.scoped_builtin_error("float components", attribute));
+        if let Some(name) = self.boxed_float_attribute(attribute, receiver.ty) {
+            return Err(self.scoped_builtin_error(name, attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -3948,7 +3999,7 @@ impl<'a> Checker<'a> {
         } else {
             self.iteration_input(&loop_.iter, self.split_guard(loop_))?
         };
-        input = self.fuse_splitlines(input);
+        input = self.fuse_split(input);
         if let Iteration::Container {
             iterable,
             items: false,
@@ -4126,7 +4177,7 @@ impl<'a> Checker<'a> {
             let breaks = self.loop_breaks.pop().unwrap();
             self.assigned = before;
             self.narrowed = facts;
-            let (mut orelse, falls) = self.loop_else(orelse, breaks)?;
+            let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
             let cursor = self.hidden(Type::Int);
             let stop = self.hidden(Type::Int);
             let step = self.hidden(Type::Int);
@@ -4310,6 +4361,11 @@ impl<'a> Checker<'a> {
             let value = items.then(|| self.hidden(value_type));
             let ready = self.hidden(Type::Bool);
             body.push(Statement::IterNext {
+                kind: if string {
+                    ir::IterNextKind::String
+                } else {
+                    ir::IterNextKind::Generic
+                },
                 iterator,
                 key,
                 value,
@@ -4402,7 +4458,7 @@ impl<'a> Checker<'a> {
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned = before;
         self.narrowed = facts;
-        let (mut orelse, falls) = self.loop_else(orelse, breaks)?;
+        let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
         cleanup.extend(counter);
         if !orelse.is_empty() {
             // CPython drops the exhausted iterator before entering else. A
@@ -4452,9 +4508,13 @@ impl<'a> Checker<'a> {
         &mut self,
         orelse: &[ast::Stmt],
         mut breaks: Option<LocalState>,
+        can_exhaust: bool,
     ) -> Result<(Vec<Statement>, bool), String> {
+        let reachable = self.reachable;
+        self.reachable &= can_exhaust;
         let (orelse, falls) = self.block(orelse)?;
-        if falls {
+        self.reachable = reachable;
+        if can_exhaust && falls {
             self.merge_exit(&mut breaks);
         }
         let falls = breaks.is_some();
@@ -4650,6 +4710,14 @@ impl<'a> Checker<'a> {
     ) -> Result<(Vec<Statement>, bool), String> {
         let result = self.lower_statement(statement);
         if let Err(error) = &result {
+            // A boxed operation in a checked source file must not hide a bad call in
+            // another function, whether this operation is deferred or stops lowering.
+            if self.inference.is_none()
+                && !self.graph.modules[self.module].bundled
+                && self.failure_kind(error) == Some(FailureKind::ObjectOperation)
+            {
+                self.graph.require_fallback_calls();
+            }
             let discarded = match statement {
                 ast::Stmt::Expr(expr) => narrowing::expression_assignments(&expr.value).is_empty(),
                 // At function scope this suffix includes every later use of the binding.
@@ -4957,8 +5025,8 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
-                        if self.boxed_float_component(attr, receiver.ty) {
-                            return Err(self.scoped_builtin_error("float components", attr));
+                        if let Some(name) = self.boxed_float_attribute(attr, receiver.ty) {
+                            return Err(self.scoped_builtin_error(name, attr));
                         }
                         if matches!(receiver.ty, Type::Coroutine(_))
                             && attr.attr.as_str() == "cr_origin"
@@ -5069,7 +5137,15 @@ impl<'a> Checker<'a> {
                 self.assigned = before;
                 self.narrowed = facts;
                 self.apply_facts(&loop_.test, false);
-                let (orelse, falls) = self.loop_else(&loop_.orelse, breaks)?;
+                let can_exhaust = match &*loop_.test {
+                    ast::Expr::BooleanLiteral(literal) => !literal.value,
+                    ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
+                        value: ast::Number::Int(value),
+                        ..
+                    }) => value.as_i64() == Some(0),
+                    _ => true,
+                };
+                let (orelse, falls) = self.loop_else(&loop_.orelse, breaks, can_exhaust)?;
                 return Ok((vec![Statement::While(test, body, orelse)], falls));
             }
             ast::Stmt::For(loop_) if !loop_.is_async => {
@@ -5738,7 +5814,8 @@ impl<'a> Checker<'a> {
                         if let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                             name @ ("_pickle.PickleError"
                             | "_pickle.PicklingError"
-                            | "_pickle.UnpicklingError"),
+                            | "_pickle.UnpicklingError"
+                            | "lzma.LZMAError"),
                         ))) = self.resolve(target)
                         {
                             return Err(self.scoped_builtin_error(name, target));
@@ -7223,6 +7300,20 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                    && values
+                        .iter()
+                        .all(|value| self.types.element(value.ty).is_some())
+                    && values.iter().any(
+                        |value| matches!(&value.kind, ExprKind::List(items) if items.is_empty()),
+                    )
+                {
+                    // With one empty list, equality only compares emptiness. No elements are read.
+                    values = values
+                        .into_iter()
+                        .map(|list| self.truth_value(list))
+                        .collect();
+                }
                 if values.iter().any(|v| matches!(v.ty, Type::WeakProxy(_))) {
                     return self.weak_proxy_comparison(values, &compare.ops, expression);
                 }
@@ -7518,7 +7609,10 @@ impl<'a> Checker<'a> {
                     if !numeric && !records && !paths && !tuples && !variable_tuple && !dates {
                         self.expect(ty, right, expression)?;
                     }
+                    let strings = matches!(ty, Type::Str | Type::StrLiteral(_))
+                        && matches!(right, Type::Str | Type::StrLiteral(_));
                     let ordered = numeric
+                        || strings
                         || matches!(
                             ty,
                             Type::Bytes
@@ -8541,6 +8635,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Type::Class(class) = receiver.ty
                     && (self.classes.methods[class].contains_key(attribute.attr.as_str())
+                        || (attribute.attr.as_str() == "__float__" && self.decimal_class(class))
                         || matches!(
                             self.classes.declarations.definitions[class]
                                 .static_bindings
@@ -8763,6 +8858,12 @@ impl<'a> Checker<'a> {
                 || self.unshadowed_builtin(&method.value, "bytearray"))
         {
             return Err(self.object_builtin_error("fromhex", call));
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "fromhex"
+            && self.unshadowed_builtin(&method.value, "float")
+        {
+            return Err(self.scoped_builtin_error("float.fromhex", call));
         }
         if receiver.is_none()
             && let ast::Expr::Attribute(method) = call.func.as_ref()
@@ -9532,6 +9633,10 @@ impl<'a> Checker<'a> {
                 return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BytesIO, args));
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
+            Some(Binding::Intrinsic(Intrinsic::ZipImportIndex)) => {
+                let args = self.arguments(call, &[parameter("path", Type::Str, None)], None)?;
+                return Ok(self.ordered_builtin(Builtin::ZipImportIndex, Type::ZipFile, args));
+            }
             Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
@@ -11623,6 +11728,12 @@ impl<'a> Checker<'a> {
             {
                 (Builtin::Int, Type::Int)
             }
+            "float"
+                if args.len() == 1
+                    && matches!(args[0].ty, Type::Class(class) if self.decimal_class(class)) =>
+            {
+                return Err(self.scoped_builtin_error("Decimal.__float__", call));
+            }
             "float" if args.is_empty() => {
                 return Ok(Expr {
                     ty: Type::Float,
@@ -11945,6 +12056,20 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn byte_split_fuses_only_the_immediately_consumed_list() {
+        let llvm = crate::compile(
+            include_str!("../../../tests/fixtures/iterator_pipelines/split_fields.py"),
+            &crate::CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @imre_str_split_byte_iter(").count(),
+            2
+        );
+        assert_eq!(llvm.matches("call ptr @imre_str_split(").count(), 4);
     }
 
     #[test]

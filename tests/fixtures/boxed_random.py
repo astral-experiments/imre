@@ -3,6 +3,24 @@ from random import choice, choices, randbytes, randint, random as draw, shuffle
 
 
 def current():
+    seed = (1 << 100) + 7
+    random.seed(seed)
+    first = random.Random(seed)
+    second = random.Random(-seed)
+    for source in (random, first, second):
+        assert source.getrandbits(0) == 0
+        try:
+            source.getrandbits(-1)
+        except ValueError as error:
+            print(str(error))
+        else:
+            raise AssertionError("negative bit width accepted")
+    for width in (1, 32, 33, 64, 129):
+        value = random.getrandbits(width)
+        assert first.getrandbits(width) == second.getrandbits(width) == value
+        print(value)
+    print(random.random(), first.random(), second.random())
+
     assert draw is random.random
     for sample in (draw(), random.random(), draw()):
         assert type(sample) is float and 0.0 <= sample < 1.0

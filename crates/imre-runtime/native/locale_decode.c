@@ -1,6 +1,29 @@
+#include <locale.h>
+#include <pthread.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <wchar.h>
+
+/* Python's percent formatting always uses an ASCII radix. This immutable C
+ * locale is shared by threads, each of which restores its own previous locale. */
+static locale_t numeric_c_locale;
+static pthread_once_t numeric_c_once = PTHREAD_ONCE_INIT;
+
+static void init_numeric_c_locale(void) {
+    numeric_c_locale = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+}
+
+int imre_format_ascii_double(char *buffer, size_t size, const char *format, double value) {
+    if (pthread_once(&numeric_c_once, init_numeric_c_locale) != 0 || !numeric_c_locale)
+        return -1;
+    locale_t previous = uselocale(numeric_c_locale);
+    if (!previous)
+        return -1;
+    int written = snprintf(buffer, size, format, value);
+    uselocale(previous);
+    return written;
+}
 
 /* The caller holds the locale lock and provides one output slot per input byte.
  * Return the first undecodable byte offset, or length on success. */

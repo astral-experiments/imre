@@ -74,10 +74,13 @@ def current():
         definition = source.splitlines()[code.co_firstlineno - 1]
         assert definition.lstrip().startswith("def " + code.co_name + "(")
         assert spec.origin == code.co_filename
+        assert spec.loader.get_code(spec.name).co_filename == spec.origin
         assert linecache.lazycache(code.co_filename, module.__dict__)
         assert linecache.getline(code.co_filename, code.co_firstlineno) == definition + "\n"
         assert linecache.getlines(code.co_filename) is linecache.getlines(code.co_filename)
+    assert zlib.__spec__.loader.get_code("zlib") is None
     assert zlib.__spec__.loader.get_source("zlib") is None
     if __hello__.__spec__.origin == "frozen":
+        assert __hello__.__spec__.loader.get_code("__hello__").co_name == "<module>"
         assert __hello__.__spec__.loader.get_source("__hello__") is None
     linecache.clearcache()

@@ -531,7 +531,8 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         Codec::Latin1 => "latin_1",
         Codec::Utf8 { signature: false } => "utf_8",
         Codec::Utf8 { signature: true } => "utf_8_sig",
-        Codec::CodePage(_) | Codec::ShiftJis => codec.name(),
+        Codec::CodePage(page) => page.module_name,
+        Codec::ShiftJis => codec.name(),
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     // Keep the pending constructor arguments across Python-visible module lookups.
@@ -616,8 +617,16 @@ pub(in crate::dynamic) fn encode_text(
     let errors = if let StrEncoder::Registered(codec) = encoder {
         match encode_error::registered(ctx, codec, errors) {
             Some(encode_error::Handler::Python(callback)) => {
-                let escape_prefix = errors == "surrogateescape";
-                return encode_error::encode(ctx, id, codec, callback, escape_prefix);
+                // A scalar string already contains its valid UTF-8 encoding.
+                if matches!(codec, Codec::Utf8 { .. })
+                    && let Ok(text) = ctx.str_value(id)
+                {
+                    return encoder
+                        .encode_str(text, errors)
+                        .map_err(|error| ctx.encode_error(error, id));
+                }
+                let errors = errors.to_owned();
+                return encode_error::encode(ctx, id, codec, callback, &errors);
             }
             Some(encode_error::Handler::Builtin(name)) => name,
             None => errors,

@@ -336,6 +336,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "getargvalues",
             "getasyncgenlocals",
             "getasyncgenstate",
+            "getcallargs",
             "getcoroutinelocals",
             "getcoroutinestate",
             "getfullargspec",
@@ -398,6 +399,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "calcsize",
             "error",
             "pack",
+            "pack_into",
             "unpack",
             "unpack_from"
         ),
@@ -454,7 +456,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "tzname",
             "tzset"
         ),
-        M::Traceback => exports!("traceback", "extract_tb", "print_stack"),
+        M::Traceback => exports!("traceback", "extract_tb", "print_stack", "walk_tb"),
         M::Types => exports!(
             "types",
             "BuiltinMethodType",

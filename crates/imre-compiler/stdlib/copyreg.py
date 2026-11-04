@@ -134,9 +134,14 @@ def _reduce_newobj(self, arguments, extended):
             raise TypeError(f"__getnewargs__ should return a tuple, not {type(args).__name__!r}")
     cls = type(self)
     if kwargs is not None and dict.__len__(kwargs):
-        return __newobj_ex__, (cls, args, kwargs), self.__getstate__(), None, None
-    args = tuple.__getitem__(args, slice(None))
-    return __newobj__, (cls, *args), self.__getstate__(), None, None
+        constructor, newargs = __newobj_ex__, (cls, args, kwargs)
+    else:
+        args = tuple.__getitem__(args, slice(None))
+        constructor, newargs = __newobj__, (cls, *args)
+    state = self.__getstate__()
+    listitems = iter(self) if issubclass(cls, list) else None
+    dictitems = iter(self.items()) if issubclass(cls, dict) else None
+    return constructor, newargs, state, listitems, dictitems
 
 
 def _has_type_dict(cls):

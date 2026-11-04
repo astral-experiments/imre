@@ -291,6 +291,17 @@ assert spec == FullArgSpec(["a", "b"], "args", "kwargs", (3,), ["flag"], {"flag"
                            {"b": int, "return": str})
 assert getfullargspec(wrapper).varargs == "values"
 assert getfullargspec(C().method).args == ["self", "value"]
+receiver = C()
+assert inspect.getcallargs(receiver.method) == {"self": receiver, "value": b"x"}
+assert inspect.getcallargs(original, 1, 2, 3, extra=4) == {
+    "a": 1, "b": 2, "args": (3,), "flag": False, "kwargs": {"extra": 4},
+}
+try:
+    inspect.getcallargs(receiver.method, b"x", value=b"y")
+except TypeError as exc:
+    assert str(exc) == "method() got multiple values for argument 'value'"
+else:
+    raise AssertionError("getcallargs accepted two values for the same parameter")
 assert getfullargspec(partial(C().method, b"x")).args == ["value"]
 sig = Signature.from_callable(wrapper)
 assert type(sig.parameters.copy()) is OrderedDict
@@ -403,6 +414,8 @@ assert sig.parameters["instance"].kind is Parameter.POSITIONAL_ONLY
 
 assert str(inspect.signature(object.__init__)) == "(self, /, *args, **kwargs)"
 assert str(inspect.signature(object().__init__)) == "(*args, **kwargs)"
+assert str(inspect.signature(list.append)) == "(self, object, /)"
+assert str(inspect.signature([].append)) == "(object, /)"
 
 assert str(inspect.signature(object.__new__, follow_wrapped=False)) == "(*args, **kwargs)"
 assert getfullargspec(object.__new__).args == ["type"]
@@ -414,6 +427,12 @@ except ValueError as exc:
     assert str(exc) == f"no signature found for builtin {min!r}"
 else:
     raise AssertionError("min has no text signature")
+try:
+    inspect.signature(bytes.count)
+except ValueError as exc:
+    assert str(exc) == f"{bytes.count!r} builtin has invalid signature"
+else:
+    raise AssertionError("invalid bytes.count text signature was accepted")
 
 documented.__self__ = object()
 documented.__text_signature__ = "($self, /, value, *, retries=1)"
