@@ -2452,6 +2452,30 @@ impl Context {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
             self.builtins.insert("object.__class__".into(), descriptor);
         }
+        if matches!(
+            name,
+            value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
+        ) {
+            let mut entries = vec![(
+                self.heap.code_name("__module__"),
+                self.heap.code_name("_lzma"),
+            )];
+            let methods = if name == value::LZMA_DECOMPRESS_TYPE {
+                for &field in value::LZMA_DECOMPRESS_FIELDS {
+                    let member = self.readonly_member(value::LZMA_DECOMPRESS_TYPE, field);
+                    entries.push((self.heap.code_name(field), member));
+                }
+                value::LZMA_DECOMPRESS_METHODS
+            } else {
+                value::LZMA_COMPRESS_METHODS
+            };
+            for &method in methods {
+                let member = self.builtin(&format!("{name}.{method}"));
+                entries.push((self.heap.code_name(method), member));
+            }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == "super" {
             let mut entries = Vec::new();
             for name in [
@@ -3752,6 +3776,24 @@ impl Context {
             "pwd" => stdlib::pwd::install(self, scope),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "termios" if source.is_none() => stdlib::termios::install(self, module, scope)?,
+            "_lzma" if source.is_none() => {
+                for name in [
+                    "is_check_supported",
+                    "_encode_filter_properties",
+                    "_decode_filter_properties",
+                ] {
+                    let function = self.builtin(&format!("_lzma.{name}"));
+                    self.bind(scope, name, function);
+                }
+                for &(name, value) in imre_ast::lzma::INTEGER_CONSTANTS {
+                    let value = self.int(value);
+                    self.bind(scope, name, value);
+                }
+                for name in ["LZMAError", "LZMACompressor", "LZMADecompressor"] {
+                    let class = self.builtin(&format!("_lzma.{name}"));
+                    self.bind(scope, name, class);
+                }
+            }
             "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [

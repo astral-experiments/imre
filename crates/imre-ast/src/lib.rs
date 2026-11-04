@@ -5,6 +5,7 @@ pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' 
 
 pub mod exceptions;
 pub mod layout;
+pub mod lzma;
 pub mod providers;
 pub mod python_nodes;
 pub mod startup;

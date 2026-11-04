@@ -780,6 +780,7 @@ dependencies = [
  "itoa",
  "libc",
  "liblzma",
+ "liblzma-sys",
  "linux-raw-sys",
  "lz4_flex",
  "md-5",
