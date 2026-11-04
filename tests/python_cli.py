@@ -3508,6 +3508,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_rounding.py",
             "boxed_math_acosh.py",
             "boxed_math_fma.py",
+            "boxed_math_fsum.py",
             "boxed_math_gcd.py",
             "boxed_math_isclose.py",
             "boxed_float_arithmetic.py",

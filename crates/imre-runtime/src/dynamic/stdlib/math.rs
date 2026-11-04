@@ -3,6 +3,7 @@
 use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{One, ToPrimitive, Zero};
+use smallvec::SmallVec;
 
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
@@ -111,6 +112,9 @@ pub(super) fn call(
             ),
         ));
     };
+    if operation == "fsum" {
+        return fsum(ctx, value);
+    }
     if operation == "isqrt" {
         let n = ctx.index_integer(value)?;
         if n.big().sign() == num_bigint::Sign::Minus {
@@ -297,6 +301,83 @@ fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
         ));
     }
     Ok(x.ln())
+}
+
+/// Accumulate non-overlapping partial sums, as in CPython's math_fsum.
+fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
+    let iterator = ctx.iterator(values)?;
+    ctx.heap.keep(iterator);
+    let mark = ctx.heap.temporary_mark();
+    let mut limit = ctx.heap.streaming_collection_limit();
+    let mut partials = SmallVec::<[f64; 32]>::new();
+    let mut last_nan = None;
+    let mut inf_sum = 0.0_f64;
+
+    while let Some(item) = ctx.next_item(iterator)? {
+        ctx.heap.keep(item);
+        let mut x = as_double(ctx, item)?;
+        ctx.heap.release_temporaries_since(mark);
+        ctx.collect_streaming_garbage(&mut limit);
+
+        if !x.is_finite() {
+            if x.is_nan() {
+                // Quiet a signaling NaN while preserving its sign and payload.
+                last_nan = Some(x + 0.0);
+            } else {
+                inf_sum += x;
+            }
+            partials.clear();
+            continue;
+        }
+        partials.retain_mut(|partial| {
+            let mut y = *partial;
+            if x.abs() < y.abs() {
+                std::mem::swap(&mut x, &mut y);
+            }
+            let hi = x + y;
+            // With |x| >= |y|, this recovers the exact rounding error.
+            *partial = y - (hi - x);
+            x = hi;
+            *partial != 0.0
+        });
+        if !x.is_finite() {
+            return Err(Error::new("OverflowError", "intermediate overflow in fsum"));
+        }
+        if x != 0.0 {
+            partials
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", "math.fsum partials"))?;
+            partials.push(x);
+        }
+    }
+    if inf_sum.is_nan() {
+        return Err(Error::new("ValueError", "-inf + inf in fsum"));
+    }
+    let special_sum = last_nan.unwrap_or(inf_sum);
+    if special_sum != 0.0 {
+        return Ok(ctx.alloc(Value::Float(special_sum)));
+    }
+
+    let mut hi = partials.pop().unwrap_or(0.0);
+    while let Some(y) = partials.pop() {
+        let x = hi;
+        hi = x + y;
+        let lo = y - (hi - x);
+        if lo != 0.0 {
+            // A smaller partial of the same sign can tip a halfway tie.
+            if let Some(&next) = partials.last()
+                && lo.is_sign_positive() == next.is_sign_positive()
+            {
+                let twice_lo = lo * 2.0;
+                let adjusted = hi + twice_lo;
+                if adjusted - hi == twice_lo {
+                    hi = adjusted;
+                }
+            }
+            break;
+        }
+    }
+    Ok(ctx.alloc(Value::Float(hi)))
 }
 
 /// Read a float subclass's stored double before trying the numeric conversion protocol.
