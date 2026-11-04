@@ -653,7 +653,6 @@ pub(crate) enum IntrinsicModule {
     LocaleNative,
     Functools,
     Calendar,
-    CalendarNative,
     Fnmatch,
     Time,
     Warnings,
@@ -1203,7 +1202,6 @@ impl IntrinsicModule {
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "calendar" => Some(Self::Calendar),
-            "_imre_calendar" => Some(Self::CalendarNative),
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
@@ -1319,11 +1317,6 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
-        if self == Self::CalendarNative && name == "_monthgrid" {
-            return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
-                "_imre_calendar._monthgrid",
-            )));
-        }
         if self == Self::Calendar {
             return Some(match name {
                 "Calendar" | "TextCalendar" => return None,
@@ -4728,6 +4721,28 @@ impl<'a> Loader<'a> {
                         self.modules[id].error(import, "wildcard imports require runtime binding")
                     });
                     return Ok(());
+                }
+                if import.level == 0
+                    && name == "imre._calendar"
+                    && let [alias] = import.names.as_slice()
+                    && alias.name.as_str() == "month_grid"
+                {
+                    if !self.modules[id].is_bundled(CALENDAR_CLASSES) {
+                        return Err("the private calendar grid builder is not importable".into());
+                    }
+                    if let Some(module) = &import.module {
+                        self.checked_builtin_imports.push((id, module.range()));
+                    }
+                    self.checked_builtin_imports.push((id, alias.range()));
+                    let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                    return self.bind(
+                        id,
+                        local.as_str(),
+                        Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                            "_imre_calendar._monthgrid",
+                        )),
+                        alias,
+                    );
                 }
                 if import.level == 0
                     && name == "imre._zipimport"

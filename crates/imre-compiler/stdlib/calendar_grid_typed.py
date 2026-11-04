@@ -1,5 +1,5 @@
 """Checked layouts for the ordinary integer month grid methods."""
-from _imre_calendar import _monthgrid
+from imre._calendar import month_grid as _monthgrid
 
 
 class Calendar:
