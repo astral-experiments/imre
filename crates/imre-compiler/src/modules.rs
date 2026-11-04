@@ -5057,7 +5057,8 @@ impl<'a> Loader<'a> {
             self.reject_stdlib_shadow(name)?;
             self.needs_object_imports |= matches!(
                 module,
-                IntrinsicModule::Ast
+                IntrinsicModule::Calendar
+                    | IntrinsicModule::Ast
                     | IntrinsicModule::NtPath
                     | IntrinsicModule::Blake2
                     | IntrinsicModule::OperatorNative
