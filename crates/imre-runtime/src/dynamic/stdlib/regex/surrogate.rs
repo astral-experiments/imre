@@ -45,43 +45,82 @@ fn encode(point: u32) -> char {
     char::from_u32(scalar).unwrap()
 }
 
-/// Project an enumerated character class onto the scalar and surrogate matchers.
+/// Write a nonempty interval of Unicode scalars into an open character class.
+fn push_range(class: &mut String, first: u32, last: u32) {
+    if first <= last {
+        class.push(char::from_u32(first).unwrap());
+        if first < last {
+            class.push('-');
+            class.push(char::from_u32(last).unwrap());
+        }
+    }
+}
+
+/// Project a standalone literal class, including ranges and a simple repeat.
 fn literal_class(points: &[u32]) -> Option<(String, String)> {
+    let (points, repeat) = match points.split_last()? {
+        (0x2a, rest) => (rest, "*"),
+        (0x2b, rest) => (rest, "+"),
+        (0x3f, rest) => (rest, "?"),
+        _ => (points, ""),
+    };
     let members = points
         .strip_prefix(&[u32::from('[')])?
         .strip_suffix(&[u32::from(']')])?;
-    let (negated, members) = match members.strip_prefix(&[u32::from('^')]) {
+    let (negated, mut members) = match members.strip_prefix(&[u32::from('^')]) {
         Some(rest) => (true, rest),
         None => (false, members),
     };
-    // Ranges, escapes and set operators need the class parser. The encoded
-    // matcher also reserves private-use characters which a literal may not alias.
-    if members.iter().any(|&p| {
-        matches!(p, 0xf0000..=0xf0800)
-            || matches!(
-                char::from_u32(p),
-                Some('[' | ']' | '-' | '\\' | '^' | '&' | '|' | '~')
-            )
-    }) {
-        return None;
-    }
-
+    // The full parser handles escaped endpoints, literal hyphens and set operators.
+    let endpoint = |p| {
+        !matches!(
+            char::from_u32(p),
+            Some('[' | ']' | '-' | '\\' | '^' | '&' | '|' | '~')
+        )
+    };
     let prefix = if negated { "[^" } else { "[" };
     let mut plain = String::from(prefix);
     let mut encoded = String::from(prefix);
-    for &point in members {
-        if let Some(c) = char::from_u32(point) {
-            plain.push(c);
+    while let Some((&first, rest)) = members.split_first() {
+        let (last, tail) = match rest {
+            [0x2d, last, tail @ ..] => (*last, tail),
+            _ => (first, rest),
+        };
+        members = tail;
+        if !endpoint(first) || !endpoint(last) || first > last {
+            return None;
         }
-        encoded.push(encode(point));
+
+        // A scalar-only subject has no code points in the surrogate interval.
+        push_range(&mut plain, first, last.min(0xd7ff));
+        push_range(&mut plain, first.max(0xe000), last);
+
+        // The encoded order differs from Python's. Partition the range before
+        // translating it, so crossing a boundary cannot include unrelated points.
+        push_range(&mut encoded, first, last.min(0xd7ff));
+        let low = first.max(0xd800);
+        let high = last.min(0xdfff);
+        if low <= high {
+            push_range(&mut encoded, encode(low) as u32, encode(high) as u32);
+        }
+        push_range(&mut encoded, first.max(0xe000), last.min(0xeffff));
+        if first <= 0xf0800 && last >= 0xf0000 {
+            // All genuine scalars in this window project to the same sentinel.
+            if first > 0xf0000 || last < 0xf0800 {
+                return None;
+            }
+            encoded.push('\u{f0800}');
+        }
+        push_range(&mut encoded, first.max(0xf0801), last);
     }
     if plain.len() == prefix.len() {
-        // A scalar subject contains no surrogates, even under IGNORECASE.
         plain = if negated { r"[\s\S]" } else { r"[^\s\S]" }.into();
     } else {
         plain.push(']');
     }
     encoded.push(']');
+    plain.push_str(repeat);
+    encoded.push_str(repeat);
     Some((plain, encoded))
 }
 
@@ -154,7 +193,7 @@ impl Projection {
     pub(super) fn for_literals(method: &str, points: &[u32]) -> Result<Self> {
         if !matches!(
             method,
-            "match" | "search" | "fullmatch" | "findall" | "split"
+            "match" | "search" | "fullmatch" | "findall" | "split" | "sub"
         ) {
             return Err(Error::new(
                 "NotImplementedError",
