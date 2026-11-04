@@ -184,12 +184,15 @@ We track these families separately to keep the original 16,202-test baseline com
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
+| `http.client` | 105 | 144 | 139 passed, 5 skipped | 105 passed, 1 failure, 34 errors, 4 skipped |
 | `pyexpat` | 33 | 60 | 47 passed, 13 skipped | 33 passed, 13 errors, 14 skipped |
 | `zlib` | 57 | 76 | 74 passed, 2 skipped | 57 passed, 15 errors, 4 skipped |
 
 Seven XML encoding tests account for the increase from 26 to 33 passes. Both independent Linux workers registered all 60 originals. One class-setup skip occurred before its method ran, so unittest reported 59 tests. [Public Imre revision](https://github.com/astral-experiments/imre/commit/56f7c1d949541a578424c7fdb6db103c7b30beab)
 
 The zlib suite retained 55 earlier passes and added two tests for copying decompressors. Two Linux workers reproduced the 57 passing originals across the earlier suite, the public copy fix, and a complete later run. [Public copy fix](https://github.com/astral-experiments/imre/pull/5158) and [full-suite revision](https://github.com/astral-experiments/imre/commit/dab64ec6ec1617f7cf6cca400351881e13f90044).
+
+Two independent Linux workers ran the complete, unchanged HTTP client suite. Both public revisions agreed on all 144 test outcomes at both native optimization levels. [First revision](https://github.com/astral-experiments/imre/commit/a493f72aeec8eb5620ececd930349f9921f8011f) and [second revision](https://github.com/astral-experiments/imre/commit/aa7c410703258cc9e195499d42eed9dd68faef2f).
 
 ## Design
 
