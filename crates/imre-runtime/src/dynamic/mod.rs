@@ -1125,6 +1125,34 @@ impl Context {
             })
     }
 
+    /// PySequence_Length only calls the sequence length slot. Python dict subclasses
+    /// acquire it through their type, while the native mappings only have mp_length.
+    fn sequence_protocol_len(&mut self, source: Id) -> Result<usize> {
+        let kind = match self.heap.get(source) {
+            Value::Dict(_) => "dict",
+            Value::DefaultDict { .. } => defaultdict::CLASS,
+            Value::MappingProxy(_) => "mappingproxy",
+            Value::Context(_) => "_contextvars.Context",
+            Value::FrameLocalsProxy { .. } => frame_locals::CLASS,
+            // The accelerated OrderedDict is an immutable class backed by a dict.
+            Value::Instance {
+                class,
+                dictionary: Some(_),
+                ..
+            } if let Value::Class { scope, .. } = self.heap.get(*class)
+                && self
+                    .scope_data(*scope)
+                    .class_namespace
+                    .as_ref()
+                    .is_some_and(|ns| ns.immutable_type) =>
+            {
+                "collections.OrderedDict"
+            }
+            _ => return self.sequence_len(source),
+        };
+        Err(Error::new("TypeError", format!("{kind} is not a sequence")))
+    }
+
     /// Sequence-protocol iteration consults the current __getitem__ at each index.
     fn next_sequence_item(&mut self, id: Id, source: Option<Id>, index: i64) -> Result<Option<Id>> {
         let Some(source) = source else {
@@ -1599,21 +1627,24 @@ impl Context {
     /// Check the Python sequence protocol without consuming iterators.
     pub(super) fn is_sequence(&self, id: Id) -> bool {
         // PySequence_Check excludes dict subclasses even if they override __getitem__.
-        self.dict_storage(id).is_none()
-            && (matches!(
-                self.heap.get(self.scalar_value(id)),
-                Value::List(_)
-                    | Value::Tuple(_)
-                    | Value::NamedTuple { .. }
-                    | Value::Range(_)
-                    | Value::Deque(_)
-                    | Value::Str(_)
-                    | Value::SurrogateStr(_)
-                    | Value::Bytes(_)
-                    | Value::ByteArray(_)
-                    | Value::Array(_)
-                    | Value::MemoryView { .. }
-            ) || self.slot(id, "__getitem__").is_some())
+        self.dict_storage(id).is_none() && self.has_sequence_item_slot(id)
+    }
+
+    fn has_sequence_item_slot(&self, id: Id) -> bool {
+        matches!(
+            self.heap.get(self.scalar_value(id)),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::NamedTuple { .. }
+                | Value::Range(_)
+                | Value::Deque(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Array(_)
+                | Value::MemoryView { .. }
+        ) || self.slot(id, "__getitem__").is_some()
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {

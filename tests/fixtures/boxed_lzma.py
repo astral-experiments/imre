@@ -73,6 +73,74 @@ def mutable_filter_options():
     assert lookups == ["id", "preset"]
 
 
+def raw_filter_sequences():
+    delta = {"id": FILTER_DELTA, "dist": 2}
+    lzma2 = {"id": FILTER_LZMA2, "dict_size": 1 << 16}
+    payload = b"stream with two filters" * 32
+    events = []
+
+    class Sequence:
+        def __init__(self, items):
+            self.items = items
+
+        def __len__(self):
+            events.append("len")
+            return len(self.items)
+
+        def __getitem__(self, index):
+            events.append(index)
+            return self.items[index]
+
+        def keys(self):
+            raise AssertionError("keys() used for a filter chain")
+
+        def get(self, key, default=None):
+            raise AssertionError("get() used for a filter chain")
+
+    class InheritedDict(dict):
+        pass
+
+    class DictSequence(dict):
+        def __len__(self):
+            events.append("len")
+            return dict.__len__(self)
+
+        def __getitem__(self, index):
+            events.append(index)
+            return dict.__getitem__(self, index)
+
+    class MutatingList(list):
+        def __getitem__(self, index):
+            events.append(index)
+            if index == 0:
+                self[1] = lzma2
+                gc.collect()
+            return list.__getitem__(self, index)
+
+    for container, items, expected in (
+        (list, [delta, lzma2], []),
+        (tuple, [delta, lzma2], []),
+        (Sequence, [delta, lzma2], ["len", 0, 1]),
+        (InheritedDict, {0: delta, 1: lzma2}, []),
+        (DictSequence, {0: delta, 1: lzma2}, ["len", 0, 1]),
+        (MutatingList, [delta, None], [0, 1]),
+    ):
+        events.clear()
+        encoder = LZMACompressor(format=FORMAT_RAW, filters=container(items))
+        compressed = encoder.compress(payload) + encoder.flush()
+        decoder = LZMADecompressor(format=FORMAT_RAW, filters=container(items))
+        assert decoder.decompress(compressed) == payload and decoder.eof
+        assert events == expected * 2
+
+    for constructor in (LZMACompressor, LZMADecompressor):
+        try:
+            constructor(format=FORMAT_RAW, filters={0: lzma2})
+        except TypeError as error:
+            assert str(error) == "dict is not a sequence"
+        else:
+            raise AssertionError("accepted a plain dictionary as a filter chain")
+
+
 def extension_stream():
     from _lzma import _decode_filter_properties, _encode_filter_properties
 
@@ -93,6 +161,7 @@ def extension_stream():
     for cls in (LZMACompressor, LZMADecompressor, LZMAError):
         assert cls.__module__ == "_lzma"
     mutable_filter_options()
+    raw_filter_sequences()
 
     default = {"id": FILTER_LZMA1}
     assert _encode_filter_properties(default) == bytes.fromhex("5d00008000")
