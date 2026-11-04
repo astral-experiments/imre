@@ -49,7 +49,7 @@ pub(in crate::dynamic) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let Some((&receiver, args)) = args.split_first() else {
+    let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
             format!("unbound method Random.{method}() needs an argument"),
@@ -58,34 +58,32 @@ pub(in crate::dynamic) fn call(
     ctx.check_heap_method_receiver(owner, method, receiver)?;
     match method {
         "__init__" => {
-            let [seed] =
-                super::arguments("Random.__init__", ["x"], 1, "from 1 to 2", args, kwargs)?;
+            let [_, seed] = super::super::python_arguments(
+                "Random.__init__",
+                ["self", "x"],
+                2,
+                1,
+                args,
+                kwargs,
+            )?;
             let reseed = ctx.lookup_attr(receiver, "seed")?;
             ctx.call(reseed, vec![seed.unwrap_or(NONE)], vec![])?;
             ctx.set_attr(receiver, "gauss_next", NONE)?;
             Ok(NONE)
         }
         "seed" => {
-            let [seed, version] = super::arguments(
-                "Random.seed",
-                ["a", "version"],
-                2,
-                "from 1 to 3",
-                args,
-                kwargs,
-            )?;
-            let generator = super::seeded(ctx, seed.unwrap_or(NONE), version)?;
+            let generator = super::seeded(ctx, args, kwargs)?;
             *state(ctx, receiver).borrow_mut() = generator;
             ctx.set_attr(receiver, "gauss_next", NONE)?;
             Ok(NONE)
         }
         "random" => {
-            super::random_args(args, kwargs)?;
+            super::random_args(rest, kwargs)?;
             let value = state(ctx, receiver).borrow_mut().random();
             Ok(ctx.alloc(Value::Float(value)))
         }
         "getrandbits" => {
-            let width = super::bit_count(ctx, args, kwargs)?;
+            let width = super::bit_count(ctx, rest, kwargs)?;
             let value = state(ctx, receiver).borrow_mut().getrandbits(&width)?;
             Ok(ctx.alloc(Value::Int(Int::new(value))))
         }
