@@ -370,7 +370,13 @@ def getcontext():
 
 def setcontext(context):
     """Set this thread's context to context."""
-    if context in (DefaultContext, BasicContext, ExtendedContext):
+    if _public_boxed:
+        if not issubclass(type(context), Context):
+            raise TypeError("argument must be a context")
+        template = context is DefaultContext or context is BasicContext or context is ExtendedContext
+    else:
+        template = context in (DefaultContext, BasicContext, ExtendedContext)
+    if template:
         context = context.copy()
         context.clear_flags()
     _current_context_var.set(context)
