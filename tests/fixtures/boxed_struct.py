@@ -114,6 +114,9 @@ def current():
     header = struct.Struct("!2cI")
     assert header.pack(Data(b"M"), b"\xff", 258) == b"M\xff\0\0\x01\x02"
     assert header.unpack_from(b"XM\xff\0\0\x01\x02", 1) == (b"M", b"\xff", 258)
+    a, b, c = struct.unpack("c1s2p", b"xx\x01x")
+    assert a is b is c
+    assert next(struct.iter_unpack("c", b"x"))[0] is a
     target = bytearray(b"1234")
     try:
         struct.pack_into("2c", target, 1, b"A", bytearray(b"B"))

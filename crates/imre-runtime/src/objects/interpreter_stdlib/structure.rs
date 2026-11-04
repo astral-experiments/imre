@@ -15,6 +15,7 @@ pub(crate) enum UnpackedField {
     Integer(u64),
     Signed(i64),
     Float(f64),
+    Byte(u8),
     Bytes(Vec<u8>),
 }
 
@@ -211,7 +212,10 @@ impl StructFormat {
                     (b'p', [length, data @ ..]) => &data[..usize::from(*length).min(data.len())],
                     _ => field,
                 };
-                result.push(UnpackedField::Bytes(data.to_vec()));
+                result.push(match data {
+                    [byte] => UnpackedField::Byte(*byte),
+                    _ => UnpackedField::Bytes(data.to_vec()),
+                });
                 continue;
             }
             let mut word = [0u8; 8];

@@ -727,7 +727,9 @@ impl<'a> CompiledStrings<'a, '_> {
             ast::Expr::EllipsisLiteral(_) => Ok(value::ELLIPSIS),
             ast::Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             ast::Expr::StringLiteral(v) => self.literal_text(v),
-            ast::Expr::BytesLiteral(v) => Ok(self.heap.bytes_from_data(v.value.bytes().collect())),
+            ast::Expr::BytesLiteral(v) => Ok(self
+                .heap
+                .bytes_from_data(v.value.bytes().collect::<Vec<_>>())),
             ast::Expr::NumberLiteral(v) => {
                 let number = match &v.value {
                     ast::Number::Float(n) => Value::Float(*n),
