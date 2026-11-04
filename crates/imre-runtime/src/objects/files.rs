@@ -1188,6 +1188,22 @@ pub unsafe extern "C" fn imre_text_write_parts(
     parts: *const StringPart,
     count: usize,
 ) -> u32 {
+    if count != 0 {
+        // SAFETY: the rooted arguments supply immutable UTF-8 fragments disjoint
+        // from the private file buffer. The fast path cannot allocate, flush, or reenter.
+        let buffered = unsafe {
+            let parts = std::slice::from_raw_parts(parts, count);
+            object(value).0.with_mut(|storage| {
+                let Some(Stream::Write(writer)) = &mut storage.file_mut().stream else {
+                    return false;
+                };
+                writer.try_write_parts(parts.iter().map(|part| part.as_str().as_bytes()))
+            })
+        };
+        if buffered {
+            return 1;
+        }
+    }
     // SAFETY: all fragments remain rooted and immutable through assembly.
     let text = match unsafe { concat_parts(parts, count) } {
         Ok(text) => text,
