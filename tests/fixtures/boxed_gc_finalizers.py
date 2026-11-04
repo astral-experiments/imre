@@ -173,7 +173,31 @@ def check_exception_finalizers():
     assert finalized == ["before", "after"]
 
 
+def check_star_import_replacement():
+    from types import ModuleType
+
+    def exported(name):
+        if name == "seen":
+            return events.copy()
+        raise AttributeError(name)
+
+    module = ModuleType("_imre_finalizer_exports")
+    module.__all__ = ["owner", "seen"]
+    module.owner = None
+    module.__getattr__ = exported
+    namespace = {"owner": Owner()}
+    sys.modules[module.__name__] = module
+    try:
+        exec("from _imre_finalizer_exports import *", namespace)
+    finally:
+        del sys.modules[module.__name__]
+    assert namespace["seen"] == ["finalize"]
+    saved.clear()
+    events.clear()
+
+
 def current():
+    check_star_import_replacement()
     with open(__file__, encoding="utf-8") as retained:
         released = open(__file__, encoding="utf-8")  # noqa: SIM115
         raw = released.buffer.raw

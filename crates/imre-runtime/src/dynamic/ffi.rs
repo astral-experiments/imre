@@ -1655,8 +1655,7 @@ pub(super) unsafe extern "C" fn imre_dyn_named_assignment(
     // SAFETY: the mark and result belong to the current generated expression.
     let ctx = unsafe { &mut *ctx };
     if replaced == TRUE && ctx.heap.named_assignment(mark, value) {
-        ctx.collect_unreachable();
-        ctx.heap.release_unbound_finalizers();
+        ctx.finish_binding_release();
     }
 }
 
@@ -1877,6 +1876,14 @@ impl Context {
         } else if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
         }
+    }
+
+    /// Finish an assignment that dropped a possible finalizer owner.
+    pub(super) fn finish_binding_release(&mut self) {
+        if !self.can_skip_finalizer_sweep() {
+            self.collect_unreachable();
+        }
+        self.heap.release_unbound_finalizers();
     }
 
     /// Sweep using the active frames and the context's roots before running callbacks.
