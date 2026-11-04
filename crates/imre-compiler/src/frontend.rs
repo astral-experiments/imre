@@ -10505,7 +10505,11 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::CodecWriter {
                 return self.codec_writer_method(receiver, attribute, call);
             }
-            if attribute.attr.as_str() == "to_bytes"
+            let method = attribute.attr.as_str();
+            if (method == "to_bytes"
+                || (method == "bit_length"
+                    && call.arguments.args.is_empty()
+                    && call.arguments.keywords.is_empty()))
                 && (matches!(receiver.ty, Type::Int | Type::Bool)
                     || self.types.is_bool_or_int(receiver.ty))
             {
@@ -10517,6 +10521,12 @@ impl<'a> Checker<'a> {
                 } else {
                     powers::integer(receiver)
                 };
+                if method == "bit_length" {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::IntBitLength, vec![receiver]),
+                    });
+                }
                 let params = [
                     parameter("length", Type::Int, Some(Expr::integer(1))),
                     parameter("byteorder", Type::Str, Some(unpacking::string("big"))),

@@ -1106,6 +1106,7 @@ pub(crate) enum Builtin {
     IntExtremum {
         minimum: bool,
     },
+    IntBitLength,
     IntSignAsFloat,
     Bool,
     Str,
