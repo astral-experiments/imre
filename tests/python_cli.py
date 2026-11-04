@@ -3659,6 +3659,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_fsum.py",
             "boxed_math_gcd.py",
             "boxed_math_isclose.py",
+            "boxed_math_ldexp.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
