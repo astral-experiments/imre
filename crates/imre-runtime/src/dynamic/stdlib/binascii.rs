@@ -25,6 +25,38 @@ fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
     })
 }
 
+/// Hold the contiguous input buffer while converting the three flags in their declared order.
+fn b2a_qp(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(data), quotetabs, istext, header] = crate::dynamic::builtins::bind_builtin_arguments(
+        "b2a_qp",
+        args,
+        kwargs,
+        ["data", "quotetabs", "istext", "header"],
+        1,
+    )?
+    else {
+        unreachable!()
+    };
+    let encode = |ctx: &mut Context, view| {
+        let quotetabs = ctx.optional_truth(quotetabs, false)?;
+        let istext = ctx.optional_truth(istext, true)?;
+        let header = ctx.optional_truth(header, false)?;
+        Ok(crate::objects::encode_quoted_printable(
+            ctx.native_buffer_bytes(view)?,
+            quotetabs,
+            istext,
+            header,
+        )?)
+    };
+    let bytes = if let Some(method) = ctx.python_buffer_method(data, true)? {
+        ctx.with_contiguous_python_buffer(data, method, 0, encode)?
+    } else {
+        ctx.native_buffer_bytes(data)?;
+        ctx.with_buffer_export(data, |ctx| encode(ctx, data))?
+    };
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
 /// Leave subclass operations, unfamiliar alphabets and custom truth tests to the Python helper.
 pub(super) fn base32(
     ctx: &mut Context,
@@ -124,6 +156,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "b2a_qp" {
+        return b2a_qp(ctx, args, kwargs);
+    }
     if matches!(name, "a2b_hex" | "unhexlify") {
         if !kwargs.is_empty() {
             return Err(Error::new(
