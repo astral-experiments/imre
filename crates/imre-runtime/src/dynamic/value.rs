@@ -873,6 +873,8 @@ pub(super) struct ClassNamespace {
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
+    /// Slot replacement removed the original type's own instance layout descriptors.
+    pub layout_descriptors_cleared: bool,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
     /// The field dictionary (NONE if unbound) and executed offsets while the class body runs.

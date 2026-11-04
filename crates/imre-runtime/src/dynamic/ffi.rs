@@ -1447,6 +1447,23 @@ impl Context {
         Some(freevars)
     }
 
+    /// A method captures __class__ from its class and other names from the enclosing function.
+    pub(super) fn method_freevars<'a>(
+        &self,
+        scope: Id,
+        reads: impl Iterator<Item = &'a str>,
+        captures_class: bool,
+    ) -> Option<Vec<String>> {
+        let enclosing = self.scope_data(scope).parent?;
+        let mut freevars =
+            self.enclosing_freevars(enclosing, reads.filter(|&name| name != "__class__"))?;
+        if captures_class {
+            freevars.push("__class__".to_owned());
+            freevars.sort();
+        }
+        Some(freevars)
+    }
+
     /// Determine whether a read resolves to an enclosing function rather than module globals.
     pub(super) fn is_enclosing_freevar(&self, mut scope: Id, name: &str) -> Option<bool> {
         loop {
@@ -1534,10 +1551,15 @@ impl Context {
         } else {
             scope
         };
-        let freevars = (metadata["scope_complete"].as_bool() == Some(true)
-            && metadata["class_cell"].as_bool() != Some(true))
-        .then(|| self.enclosing_freevars(lexical, reads))
-        .flatten()
+        let freevars = if metadata["scope_complete"] != true {
+            None
+        } else if let Some(captures_class) = metadata["method_class_cell"].as_bool() {
+            self.method_freevars(scope, reads, captures_class)
+        } else if metadata["class_cell"] == true {
+            None
+        } else {
+            self.enclosing_freevars(lexical, reads)
+        }
         .map(|mut freevars| {
             if annotation_class {
                 freevars.push("__classdict__".to_owned());
@@ -1649,15 +1671,15 @@ impl Context {
         let names = self.code_object(code).freevars.clone();
         let mut cells = Vec::new();
         for name in &names {
-            if signature["annotation_class"] == true {
-                if name == "__classdict__" {
-                    cells.push(self.class_annotation_dict_cell(scope));
-                    continue;
-                }
-                if name == "__class__" {
-                    cells.push(class_cell.expect("class annotation scope"));
-                    continue;
-                }
+            if name == "__classdict__" && signature["annotation_class"] == true {
+                cells.push(self.class_annotation_dict_cell(scope));
+                continue;
+            }
+            if name == "__class__"
+                && (signature["method_class_cell"] == true || signature["annotation_class"] == true)
+            {
+                cells.push(class_cell.expect("class scope"));
+                continue;
             }
             cells.push(self.capture_free_cell(scope, name));
         }

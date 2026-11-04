@@ -1,3 +1,4 @@
+import dataclasses
 import types
 
 
@@ -27,7 +28,71 @@ def decorated_factory(value):
     return read
 
 
+def class_closure(label):
+    class Base:
+        def label(self):
+            return "base"
+
+    class Owner(Base):
+        def identify(self):
+            return __class__, label
+
+        def label(self):
+            return "owner"
+
+        def inherited(self):
+            return super().label()
+
+        def explicit(self, __class__):
+            return __class__
+
+    class Derived(Owner):
+        pass
+
+    identify = Owner.identify
+    cell, other = identify.__closure__
+    assert identify.__code__.co_freevars == ("__class__", "label")
+    assert (cell.cell_contents, other.cell_contents) == identify(None) == (Owner, label)
+    assert Owner.inherited.__closure__[0] is cell
+    assert Owner.explicit.__closure__ is None
+    # Reconstruct the method with a different starting point for super().
+    def replacement():
+        return Derived
+
+    copied = types.FunctionType(Owner.inherited.__code__, globals(), closure=replacement.__closure__)
+    assert copied.__closure__[0] is replacement.__closure__[0]
+    assert (Owner.inherited(Derived()), copied(Derived())) == ("base", "owner")
+    return cell
+
+
+def slotted_class_cells():
+    class Foreign:
+        def owner(self):
+            return __class__
+
+    class Record:
+        foreign = Foreign.owner
+
+        def owners(self):
+            return __class__, payload
+
+    # Both cells start with the old class. Only the declaring-class cell moves.
+    payload = Record
+    assert Record.owners.__code__.co_freevars == ("__class__", "payload")
+    owner, other = Record.owners.__closure__
+    foreign, = Foreign.owner.__closure__
+    replacement = dataclasses.dataclass(slots=True)(Record)
+    assert replacement.owners.__closure__[0] is owner
+    assert replacement.owners.__closure__[1] is other
+    assert (owner.cell_contents, other.cell_contents) == (replacement, Record)
+    assert replacement().owners() == (replacement, Record)
+    assert replacement.foreign.__closure__[0] is foreign
+    assert replacement().foreign() is foreign.cell_contents is Foreign
+
+
 def current():
+    assert class_closure("first") is not class_closure("second")
+    slotted_class_cells()
     decorated = decorated_factory(7)
     assert decorated.__code__.co_freevars == ("captured",)
     assert decorated.__closure__[0].cell_contents == 7

@@ -15,6 +15,37 @@ pub fn dict_needed(body: &[ast::Stmt], string_annotations: bool) -> bool {
     needed_for(body, string_annotations, DICT)
 }
 
+/// Whether the function body reads a free __class__, including through zero-argument super.
+pub fn function_needed(
+    body: &[ast::Stmt],
+    parameters: Option<&ast::Parameters>,
+    string_annotations: bool,
+) -> bool {
+    let mut scope = function_scope(parameters, string_annotations);
+    scope.visit_body(body);
+    scope.free()
+}
+
+/// Apply the same lexical rules to the body of a lambda.
+pub fn expression_needed(
+    body: &ast::Expr,
+    parameters: Option<&ast::Parameters>,
+    string_annotations: bool,
+) -> bool {
+    let mut scope = function_scope(parameters, string_annotations);
+    scope.visit_expr(body);
+    scope.free()
+}
+
+fn function_scope(parameters: Option<&ast::Parameters>, string_annotations: bool) -> Scope {
+    Scope {
+        name: CLASS,
+        string_annotations,
+        shadows: parameters.is_some_and(|p| p.iter().any(|arg| arg.name().as_str() == CLASS)),
+        ..Scope::default()
+    }
+}
+
 fn needed_for(body: &[ast::Stmt], string_annotations: bool, name: &'static str) -> bool {
     let mut s = Scope {
         name,

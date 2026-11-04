@@ -23,6 +23,7 @@ pub(super) struct Program {
     nested_global: bool,
     class_attributes: Option<BTreeSet<String>>,
     class_cell: bool,
+    method_class_cell: Option<bool>,
     class_nonlocal: bool,
     needs_class_cell: bool,
     needs_dict_cell: bool,
@@ -1491,6 +1492,13 @@ impl Program {
             child.first_line = line_at(expr.start().to_usize());
             let params = match expr {
                 ast::Expr::Lambda(lambda) => {
+                    if !in_comprehension && self.class_attributes.is_some() {
+                        child.method_class_cell = Some(imre_ast::class_cell::expression_needed(
+                            &lambda.body,
+                            lambda.parameters.as_deref(),
+                            stringized,
+                        ));
+                    }
                     if self.has_named_bindings {
                         let mut named = NamedBindings::default();
                         named.visit_expr(&lambda.body);
@@ -1816,6 +1824,7 @@ impl Program {
             nested_global: false,
             class_attributes: None,
             class_cell: false,
+            method_class_cell: None,
             class_nonlocal: false,
             needs_class_cell: false,
             needs_dict_cell: false,
@@ -2359,6 +2368,13 @@ impl Program {
                 }
                 Stmt::FunctionDef(mut s) => {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    if self.class_attributes.is_some() && s.type_params.is_none() {
+                        child.method_class_cell = Some(imre_ast::class_cell::function_needed(
+                            &s.body,
+                            Some(&s.parameters),
+                            self.string_annotations(),
+                        ));
+                    }
                     if let Some(params) = &s.type_params {
                         child.validate_type_params(params, "function")?;
                     }
@@ -3478,6 +3494,10 @@ impl Context {
             dict: globals,
             builtins,
         });
+        let class_cell = freevars
+            .iter()
+            .position(|name| name == "__class__")
+            .map(|index| cells[index]);
         let scope = self.closure_environment(scope, freevars, &cells);
         let fields = super::function_fields::FunctionFields::new(
             self,
@@ -3492,7 +3512,7 @@ impl Context {
             closure,
             code,
             scope,
-            class_cell: None,
+            class_cell,
             defaults,
             kwdefaults,
         }))
@@ -5363,7 +5383,10 @@ impl Context {
                     frame.class_cell = class_cell;
                     type_params = self.lookup(defining_scope, ".type_params")?;
                 }
-                sig["class_cell"] = serde_json::json!(child.class_cell);
+                if let Some(captures_class) = child.method_class_cell {
+                    sig["method_class_cell"] = captures_class.into();
+                }
+                sig["class_cell"] = child.method_class_cell.unwrap_or(child.class_cell).into();
                 sig["scope_locals"] = serde_json::json!(child.locals.iter().collect::<Vec<_>>());
                 sig["scope_locals_complete"] = true.into();
                 sig
@@ -5378,7 +5401,13 @@ impl Context {
             *existing
         } else {
             let parameters = self.text(sig.to_string());
-            let freevars = if type_params != NONE {
+            let freevars = if let Some(captures_class) = child.method_class_cell {
+                self.method_freevars(
+                    scope,
+                    child.reads.iter().map(String::as_str),
+                    captures_class,
+                )
+            } else if type_params != NONE {
                 self.enclosing_freevars(defining_scope, child.reads.iter().map(String::as_str))
             } else if (code.name != "<module>" || self.scope_data(scope).comprehension.is_some())
                 && !matches!(

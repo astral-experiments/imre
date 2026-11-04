@@ -124,10 +124,14 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             return namespace_directory(ctx, object, true);
         }
         value if value.is_weak_proxy() => return namespace_directory(ctx, object, true),
-        Value::Class { .. } if ctx.has_base(object, "tuple") => {
+        Value::Class { .. }
+            if ctx.has_base(object, "tuple") || ctx.layout_descriptors_cleared(object) =>
+        {
             return namespace_directory(ctx, object, false);
         }
-        Value::Instance { class, .. } if ctx.has_base(*class, "tuple") => {
+        Value::Instance { class, .. }
+            if ctx.has_base(*class, "tuple") || ctx.layout_descriptors_cleared(*class) =>
+        {
             return namespace_directory(ctx, object, true);
         }
         Value::Class { .. } | Value::Native(_) => object,
@@ -245,7 +249,10 @@ fn contributes_dict_descriptor(ctx: &mut Context, class: Id, mapping: Id) -> Res
         .class_namespace
         .as_deref()
         .expect("class namespace");
-    if layout.dictionary != Some(mapping) || !ctx.class_instances_have_dict(class) {
+    if layout.layout_descriptors_cleared
+        || layout.dictionary != Some(mapping)
+        || !ctx.class_instances_have_dict(class)
+    {
         return Ok(false);
     }
     let bases = ctx.items(layout.bases)?;

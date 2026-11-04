@@ -783,8 +783,26 @@ impl Function<'_, '_> {
                 &self.source.private_names
             ));
         }
-        if (params.is_some() || matches!(body, Body::YieldingLambda(_))) && uses_class_cell(&body) {
-            signature["class_cell"] = json!(true);
+        let class_cell = match &body {
+            Body::Statements(body) | Body::GeneratorFunction(body, _) => Some(
+                imre_ast::class_cell::function_needed(body, params, self.source.string_annotations),
+            ),
+            Body::Expression(body) | Body::YieldingLambda(body) => {
+                Some(imre_ast::class_cell::expression_needed(
+                    body,
+                    params,
+                    self.source.string_annotations,
+                ))
+            }
+            _ => None,
+        };
+        if let Some(captures_class) = class_cell {
+            if captures_class {
+                signature["class_cell"] = json!(true);
+            }
+            if self.class_locals.is_some() && !self.annotation_lookup && type_params.is_none() {
+                signature["method_class_cell"] = json!(captures_class);
+            }
         }
         let generator = match &body {
             Body::GeneratorFunction(stmts, flag) => {
@@ -1456,33 +1474,6 @@ impl Function<'_, '_> {
         self.raise(&exc, None, true);
         self.label(&done);
     }
-}
-
-/// A nested function can close over the declaring class through its enclosing method.
-fn uses_class_cell(body: &Body<'_>) -> bool {
-    struct ClassCell(bool);
-    impl<'a> Visitor<'a> for ClassCell {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if !self.0 && !matches!(stmt, ast::Stmt::ClassDef(_)) {
-                visitor::walk_stmt(self, stmt);
-            }
-        }
-        fn visit_expr(&mut self, expr: &'a ast::Expr) {
-            if matches!(expr, ast::Expr::Name(n) if matches!(n.id.as_str(), "super" | "__class__"))
-            {
-                self.0 = true;
-            } else if !self.0 {
-                visitor::walk_expr(self, expr);
-            }
-        }
-    }
-    let mut captures = ClassCell(false);
-    match body {
-        Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => captures.visit_body(stmts),
-        Body::Expression(expr) | Body::YieldingLambda(expr) => captures.visit_expr(expr),
-        _ => return false,
-    }
-    captures.0
 }
 
 fn scalar_annotation(expr: &ast::Expr) -> Option<&'static str> {
