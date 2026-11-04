@@ -197,17 +197,19 @@ impl Checker<'_> {
                     if self.graph.is_protocol_base(self.module, base) {
                         return Err(self.object_runtime_export("typing.Protocol", base));
                     }
-                    let python_calendar = match self.resolve(base) {
-                        Some(crate::modules::Binding::Intrinsic(kind)) => {
-                            kind.is_subclassable_calendar()
+                    let python_subclasses = match self.resolve(base) {
+                        Some(crate::modules::Binding::Intrinsic(kind))
+                            if kind.is_subclassable_calendar() =>
+                        {
+                            Some("calendar subclasses")
                         }
-                        Some(crate::modules::Binding::Definition(parent)) => self.graph.modules
-                            [parent.module]
-                            .is_bundled(crate::modules::CALENDAR_CLASSES),
-                        _ => false,
+                        Some(crate::modules::Binding::Definition(parent)) => {
+                            self.graph.modules[parent.module].python_subclasses()
+                        }
+                        _ => None,
                     };
-                    if python_calendar {
-                        return Err(self.object_runtime_export("calendar subclasses", base));
+                    if let Some(name) = python_subclasses {
+                        return Err(self.object_runtime_export(name, base));
                     }
                     return Err(error(
                         self.source,

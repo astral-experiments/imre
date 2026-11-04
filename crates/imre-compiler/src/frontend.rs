@@ -56,6 +56,7 @@ mod expansions;
 mod fixed_tuples;
 mod fnmatch;
 mod format_cursors;
+mod fractions;
 mod fromkeys;
 mod fspath;
 mod function_caches;
@@ -7416,6 +7417,19 @@ impl<'a> Checker<'a> {
                 if values.iter().any(|v| matches!(v.ty, Type::WeakProxy(_))) {
                     return self.weak_proxy_comparison(values, &compare.ops, expression);
                 }
+                if values
+                    .iter()
+                    .any(|v| matches!(v.ty, Type::Class(id) if self.fraction_class(id)))
+                    && compare
+                        .ops
+                        .iter()
+                        .any(|op| !matches!(op, ast::CmpOp::Is | ast::CmpOp::IsNot))
+                {
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "Fraction numeric comparison",
+                        expression,
+                    ));
+                }
                 let decimal =
                     |value: &Expr| matches!(value.ty, Type::Class(id) if self.decimal_class(id));
                 if values.iter().any(decimal) {
@@ -12242,6 +12256,18 @@ fn literal_binding_names(suite: &[ast::Stmt]) -> Option<std::collections::HashSe
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fractions_use_python_numeric_equality() {
+        use crate::modules::SourceGraph;
+        let source = "from fractions import Fraction\nprint(Fraction(3, 6) == Fraction(1, 2))\n";
+        let graph = SourceGraph::single_with_mode(source, true).unwrap();
+        let error = super::lower(&graph)
+            .err()
+            .expect("numeric comparison requires the Python method");
+        assert!(error.contains("Fraction numeric comparison"), "{error}");
+        assert!(graph.needs_object_runtime.get());
+    }
+
     #[test]
     fn reachable_literal_bindings_follow_the_known_instance_branch() {
         use crate::modules::SourceGraph;

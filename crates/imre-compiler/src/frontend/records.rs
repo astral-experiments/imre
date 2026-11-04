@@ -1428,6 +1428,9 @@ impl Checker<'_> {
         ty: Type,
         at: &ast::Expr,
     ) -> Result<Expr, String> {
+        if self.fraction_class(class) {
+            return Err(self.object_builtin_error("Fraction constructor callback", at));
+        }
         let declared = &self.classes.declarations.definitions[class];
         if (class != base && !declared.bases.contains(&base))
             || !declared.abstract_methods.is_empty()
@@ -1578,6 +1581,11 @@ impl Checker<'_> {
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
         self.check_unittest_class_fixtures(call, class)?;
+        if self.fraction_class(class)
+            && !self.graph.modules[self.module].is_bundled(crate::modules::FRACTION_CLASS)
+        {
+            return self.fraction_constructor(call, class);
+        }
         if self.decimal_class(class) {
             return self.decimal_constructor(call, class);
         }

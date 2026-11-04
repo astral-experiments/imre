@@ -653,6 +653,7 @@ pub(crate) enum IntrinsicModule {
     LocaleNative,
     Functools,
     Calendar,
+    Fractions,
     Fnmatch,
     Time,
     Warnings,
@@ -1202,6 +1203,7 @@ impl IntrinsicModule {
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "calendar" => Some(Self::Calendar),
+            "fractions" => Some(Self::Fractions),
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
@@ -1317,6 +1319,9 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Fractions {
+            return (name != "Fraction").then_some(Binding::ConditionalValue);
+        }
         if self == Self::Calendar {
             return Some(match name {
                 "Calendar" | "TextCalendar" => return None,
@@ -1440,6 +1445,7 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
             (Self::Numbers, "Number") => Intrinsic::Number,
+            (Self::Numbers, "Rational") => Intrinsic::ScopedObjectExport("numbers.Rational"),
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
@@ -2793,6 +2799,15 @@ impl SourceModule {
         self.bundled && self.name == name
     }
 
+    /// Subclasses of these fixed-layout stdlib types can override their protocols.
+    pub(crate) fn python_subclasses(&self) -> Option<&'static str> {
+        match self.name.as_str() {
+            CALENDAR_CLASSES if self.bundled => Some("calendar subclasses"),
+            FRACTION_CLASS if self.bundled => Some("Fraction subclasses"),
+            _ => None,
+        }
+    }
+
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
         if self.is_bundled("uuid") {
@@ -3887,6 +3902,7 @@ const METADATA_VERSION: &str = "__imre_metadata_version__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
+pub(crate) const FRACTION_CLASS: &str = "__imre_fraction_class__";
 pub(crate) const CALENDAR_CLASSES: &str = "__imre_calendar_classes__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
@@ -3926,6 +3942,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
             IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
+            IntrinsicModule::Fractions if name == "Fraction" => FRACTION_CLASS,
             IntrinsicModule::Calendar if matches!(name, "Calendar" | "TextCalendar") => CALENDAR_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
             _ => return None,
@@ -3937,7 +3954,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Calendar | IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
+                    (IntrinsicModule::Calendar | IntrinsicModule::Fractions | IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::ImportlibMetadata | IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
@@ -5037,9 +5054,16 @@ impl<'a> Loader<'a> {
         });
         if let Some(module) = module {
             self.reject_stdlib_shadow(name)?;
+            if module == IntrinsicModule::Fractions {
+                // The checked representation has the same import shadowing rules as fractions.py.
+                for dependency in ["functools", "math", "numbers", "operator", "re", "sys"] {
+                    self.reject_stdlib_shadow(dependency)?;
+                }
+            }
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Calendar
+                    | IntrinsicModule::Fractions
                     | IntrinsicModule::Ast
                     | IntrinsicModule::NtPath
                     | IntrinsicModule::Blake2
@@ -5103,6 +5127,9 @@ impl<'a> Loader<'a> {
         // A named import loads only the bundled definitions it can call.
         let bundles = [
             metadata.as_deref().map(|source| (METADATA_VERSION, source)),
+            (module == Some(IntrinsicModule::Fractions)
+                && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "Fraction")))
+            .then_some((FRACTION_CLASS, include_str!("../stdlib/fraction_pair.py"))),
             (module == Some(IntrinsicModule::Calendar)
                 && imports.is_none_or(|names| {
                     names
@@ -5260,6 +5287,9 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == FRACTION_CLASS {
+            return Err("the private Fraction implementation is not an importable module".into());
+        }
         if name == METADATA_VERSION {
             return Err(
                 "the private importlib.metadata implementation is not an importable module".into(),
