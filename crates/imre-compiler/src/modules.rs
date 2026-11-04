@@ -625,6 +625,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_gettext_locale.py",
             include_str!("../stdlib/_imre_gettext_locale.py"),
         )),
+        // CPython 3.14.5 Lib/colorsys.py. See licenses/CPython.txt.
+        "colorsys" => Some(("colorsys.py", include_str!("../stdlib/colorsys.py"))),
         "getopt" => Some(("getopt.py", include_str!("../stdlib/getopt.py"))),
         // CPython 3.14.5 Lib/optparse.py. See licenses/Optik.txt and licenses/CPython.txt.
         "optparse" => Some(("optparse.py", include_str!("../stdlib/optparse.py"))),
