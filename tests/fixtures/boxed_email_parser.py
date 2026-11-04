@@ -14,6 +14,12 @@ def current():
     msg = message_from_bytes(b"X-Trace: wire\r\n\r\nbody\xff")
     assert msg.items() == [("X-Trace", "wire")]
     assert msg.get_payload(decode=True) == b"body\xff"
+    msg["Content-Type"] = "text/plain; charset=UTF-8"
+    assert msg.get_content_charset() == "utf-8"
+    assert msg.get_charset() is None
+    payload_charset = object()
+    msg._charset = payload_charset
+    assert msg.get_charset() is payload_charset
     with BytesIO(b"X-Trace: wire\r\nbroken\r\nbody\xff") as fp:
         msg = message_from_binary_file(fp)
         assert fp.read() == b""
