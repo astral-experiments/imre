@@ -181,9 +181,9 @@ We track these families separately to keep the original 16,202-test baseline com
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
-| `pyexpat` | 26 | 60 | 47 passed, 13 skipped | 26 passed, 20 errors, 14 skipped |
+| `pyexpat` | 33 | 60 | 47 passed, 13 skipped | 33 passed, 13 errors, 14 skipped |
 
-The XML parser suite registered 60 tests. A class setup skipped one before its method ran, so unittest reported 59. Two independent Linux workers agreed on every outcome across [public revision 9917551a](https://github.com/astral-experiments/imre/commit/9917551a0e66b70a6170bd27e9d39588395c093d) and [public revision f4232093](https://github.com/astral-experiments/imre/commit/f4232093422470c62027647aa893635fb8ec0f5a).
+Seven XML encoding tests account for the increase from 26 to 33 passes. Both independent Linux workers registered all 60 originals. One class-setup skip occurred before its method ran, so unittest reported 59 tests. [Public Imre revision](https://github.com/astral-experiments/imre/commit/56f7c1d949541a578424c7fdb6db103c7b30beab)
 
 ## Design
 
