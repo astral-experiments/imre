@@ -6268,6 +6268,13 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if matches!(op, ast::Operator::Add | ast::Operator::Mult)
+            && [left.ty, right.ty]
+                .into_iter()
+                .any(|ty| matches!(ty, Type::Class(id) if self.decimal_class(id)))
+        {
+            return Err(self.scoped_builtin_error("Decimal arithmetic", node));
+        }
         let optional_str = |ty| self.types.payload(ty) == Some(Type::Str);
         if op == ast::Operator::Add
             && (optional_str(left.ty) || optional_str(right.ty))

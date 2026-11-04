@@ -2886,6 +2886,20 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        invoice = Path(__file__).resolve().with_name("fixtures") / "decimal_invoice.py"
+        compare("-IB", invoice, native_args=("run", invoice, "--quiet"))
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nsys.path.insert(0, sys.argv[1])\nimportlib.import_module(sys.argv[2])",
+            invoice.parent, invoice.stem,
+        )
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nD = importlib.import_module(sys.argv[1]).Decimal\n"
+            "print((D('-4.225') * D('3.5')).quantize(D('0.01')))",
+            "decimal",
+        )
+
         decimal_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
         (helpers / "decimal_values.py").write_text(
             "from decimal import Decimal\n"

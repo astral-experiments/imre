@@ -1005,7 +1005,7 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(receiver, value))
     }
 
-    /// Route inherited unittest operations to the object runtime when a typed class lacks the member.
+    /// Route members supplied by the object runtime when the typed class lacks them.
     pub(super) fn missing_class_member(
         &self,
         class: usize,
@@ -1013,6 +1013,9 @@ impl Checker<'_> {
         node: &impl Ranged,
         diagnostic: &str,
     ) -> String {
+        if name == "quantize" && self.decimal_class(class) {
+            return self.scoped_builtin_error("Decimal.quantize", node);
+        }
         if matches!(
             name,
             "addTypeEqualityFunc"
