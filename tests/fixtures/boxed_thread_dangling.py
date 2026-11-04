@@ -38,6 +38,7 @@ def check():
     running.start()
     try:
         assert running.is_alive() and _thread._count() == 1
+        assert set(filter(threading.Thread.is_alive, threading.enumerate())) == {main, running}
         running.join(0)
         del running
         gc.collect()
@@ -48,6 +49,7 @@ def check():
         gate.release()
     stopped.join(5)
     assert not stopped.is_alive() and _thread._count() == 0
+    assert list(filter(threading.Thread.is_alive, [main, second, stopped])) == [main]
     assert set(_dangling) == {main, second, stopped}
     del second, stopped
     gc.collect()
