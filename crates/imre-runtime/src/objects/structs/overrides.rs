@@ -721,12 +721,14 @@ impl Overrides {
         if let Self::Sparse(sparse) = self {
             use num_integer::Integer;
             let words = n.div_ceil(BLOCK);
-            if sparse.len != 1
-                || row == base
-                || words > MAX_BATCH_GROWTH
-                || count < words
-                || n / n.gcd(&step) < words
-            {
+            if sparse.len != 1 || row == base || words > MAX_BATCH_GROWTH {
+                return None;
+            }
+            // Include the first scalar store when comparing the bytes needed
+            // for distinct row payloads with the cost of the bitmap.
+            let required_rows =
+                (words * size_of::<u64>()).div_ceil(std::mem::size_of_val(row).max(1));
+            if count.saturating_add(1) < required_rows || n / n.gcd(&step) < required_rows {
                 return None;
             }
             // The scalar store immediately preceding this call wrote the only exception.
@@ -855,6 +857,31 @@ mod page_tests {
         );
         for (&at, value) in expected {
             assert_eq!(rows.get(at, 2), Some(value.as_slice()));
+        }
+    }
+
+    #[test]
+    fn modular_promotion_uses_distinct_payload_bytes() {
+        let row = [1usize; 4];
+        let base = [0usize; 4];
+        let words = 256;
+        let required = (words * size_of::<u64>()).div_ceil(std::mem::size_of_val(&row));
+        let n = words * BLOCK;
+        for (step, count, eligible) in [
+            (BLOCK, required - 2, false),
+            (BLOCK, required - 1, true),
+            (n / 2, required, false),
+        ] {
+            let mut sparse = Sparse::default();
+            assert!(sparse.put(0, &row).is_ok());
+            let mut edits = Overrides::Sparse(sparse);
+            assert_eq!(
+                edits
+                    .for_modular_writes(0, &row, &base, n, step, count)
+                    .is_some(),
+                eligible
+            );
+            assert_eq!(edits.get(0, row.len()), Some(row.as_slice()));
         }
     }
 
