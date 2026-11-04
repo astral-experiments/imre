@@ -46,6 +46,32 @@ def create_project(root):
     return entry
 
 
+def provider_symbols(path):
+    symbols = subprocess.check_output(['nm', '-g', '--defined-only', path])
+    return {line.split()[-1] for line in symbols.splitlines() if b' imre_provider_' in line}
+
+
+def check_command_reuse(root, compiler, opt_level, env):
+    settings = root / 'settings.py'
+    settings.write_text('value = "blue"\n')
+    (root / 'stable.py').write_text('value = "stable"\n')
+    env = dict(env, IMRE_CACHE_DIR=str(root / 'cache'), IMRE_CACHE_TRACE='1',
+               IMRE_ENCODED_FLAGS='\x1f'.join(['--opt-level', opt_level]))
+    for label, settings_action, stable_action in [
+        ('first', 'miss', 'miss'), ('second', 'hit', 'hit'), ('edited', 'miss', 'hit'),
+    ]:
+        if label == 'edited':
+            settings.write_text('value = "green"\n')
+        source = f"import sys, settings, stable; print({label!r}, sys.modules['settings'].value, stable.value)"
+        command = ['-B', '-c', source]
+        stock = subprocess.check_output([sys.executable, *command], cwd=root, env=env)
+        native = subprocess.run([compiler, *command], cwd=root, env=env, capture_output=True, check=True)
+        assert native.stdout == stock, (native.stdout, stock)
+        events = native.stderr.decode().splitlines()
+        assert f'imre object {settings_action} settings' in events, events
+        assert f'imre object {stable_action} stable' in events, events
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', type=Path, required=True)
@@ -61,8 +87,9 @@ def main():
         binary = root / 'program'
         subprocess.run([compiler, 'build', entry, '--runtime-imports', '--opt-level', args.opt_level,
                         '--no-cache', '-o', binary], cwd=root, env=env, check=True)
-        symbols = subprocess.check_output(['nm', '-g', '--defined-only', binary])
-        assert b' imre_provider_' in symbols, 'no provider from the installed archive was linked'
+        archives = compiler.parent / 'imre-toolchain' / 'lib' / 'imre-stdlib'
+        assert provider_symbols(binary) & provider_symbols(archives / f'O{args.opt_level}/providers.a'), (
+            'no provider from the installed archive was linked')
 
         env['IMRE_ENCODED_FLAGS'] = '\x1f'.join(['--opt-level', args.opt_level, '--no-cache'])
         for flags, command in [([], [binary]), (['-OO'], [compiler, '-B', '-OO', entry])]:
@@ -71,6 +98,8 @@ def main():
             assert stock.returncode == native.returncode == 0, (native.stderr, stock.stderr)
             assert native.stdout == stock.stdout, (flags, native.stdout, stock.stdout)
             assert native.stderr == stock.stderr == b'', (native.stderr, stock.stderr)
+
+        check_command_reuse(root, compiler, args.opt_level, env)
 
 
 if __name__ == '__main__':

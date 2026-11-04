@@ -255,7 +255,7 @@ fn check_file_with(
         let (module, _) = checked_lower_with(graph, cache)?;
         verify_after(&module, "lowering")
     };
-    object_fallback(path, module_root, options, filesystem, typed, |_| ())
+    object_fallback::<false, _>(path, module_root, options, filesystem, typed, |_| ())
 }
 
 fn named_bytecode(path: &Path) -> bool {
@@ -300,16 +300,16 @@ fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
 }
 
 /// Compile runtime import paths with native object operations when static lowering cannot resolve them.
-fn object_fallback<T>(
+fn object_fallback<const SPLIT: bool, T>(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
     filesystem: watch::FileSystem<'_>,
     lower: impl FnOnce(&mut modules::SourceGraph) -> Result<T, String>,
-    boxed: impl FnOnce(Compilation) -> T,
+    boxed: impl FnOnce(UnitCompilation) -> T,
 ) -> Result<T, String> {
     if options.module_entry.is_some() {
-        return dynamic::compile(path, module_root, options, true, None, None, || Ok(()))?
+        return dynamic::compile::<SPLIT>(path, module_root, options, true, None, None, || Ok(()))?
             .map(boxed)
             .ok_or_else(|| "could not compile the module entry".to_owned());
     }
@@ -405,7 +405,7 @@ fn object_fallback<T>(
         }
         Ok(())
     };
-    match dynamic::compile(
+    match dynamic::compile::<SPLIT>(
         path,
         module_root,
         options,
@@ -442,7 +442,23 @@ pub fn compile_file(
             input_paths,
         })
     };
-    object_fallback(path, module_root, options, Default::default(), typed, |c| c)
+    object_fallback::<false, _>(
+        path,
+        module_root,
+        options,
+        Default::default(),
+        typed,
+        |mut c| Compilation {
+            llvm_ir: c
+                .units
+                .pop()
+                .expect("whole boxed program has one unit")
+                .llvm_ir,
+            input_paths: c.input_paths,
+            source_inputs: c.source_inputs,
+            extension_archives: c.extension_archives,
+        },
+    )
 }
 
 pub struct CodegenUnit {
@@ -577,17 +593,7 @@ fn compile_file_units_with(
             source_inputs,
         })
     };
-    object_fallback(path, module_root, options, Default::default(), typed, |c| {
-        UnitCompilation {
-            units: vec![CodegenUnit {
-                name: "__main__".into(),
-                llvm_ir: c.llvm_ir,
-            }],
-            input_paths: c.input_paths,
-            source_inputs: c.source_inputs,
-            extension_archives: c.extension_archives,
-        }
-    })
+    object_fallback::<true, _>(path, module_root, options, Default::default(), typed, |c| c)
 }
 
 /// Reject unsupported operations before ty renders potentially exponential types.

@@ -12,7 +12,7 @@ use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
-use crate::{Compilation, CompileOptions, SourceInputs, SourceKind};
+use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
 
 /// Finds literal directories made available to imports by a startup script.
 /// The generated program still evaluates the assignment and consults its actual
@@ -589,7 +589,7 @@ pub(crate) enum ObjectOperation {
     ClassLayout,
 }
 
-pub(crate) fn compile(
+pub(crate) fn compile<const SPLIT: bool>(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
@@ -597,7 +597,7 @@ pub(crate) fn compile(
     operation: Option<ObjectOperation>,
     typed_graph: Option<&crate::modules::SourceGraph>,
     check_returns: impl FnOnce() -> Result<(), String>,
-) -> Result<Option<Compilation>, String> {
+) -> Result<Option<UnitCompilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
     let command = invocation.map(|i| &i.source);
@@ -1182,16 +1182,17 @@ pub(crate) fn compile(
         .filter(|_| keep_docstrings)
         .and_then(provider_archive::symbols)
         .unwrap_or_default();
-    let (llvm_ir, used_archive) = emit::emit(
+    let (units, used_archive) = emit::emit(
         &sources,
         &config.to_string(),
         keep_docstrings,
         Path::new(bundled_root),
         &providers,
+        SPLIT,
     )?;
     inputs.boxed_imports = true;
-    Ok(Some(Compilation {
-        llvm_ir,
+    Ok(Some(UnitCompilation {
+        units,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),
         source_inputs: inputs,
         extension_archives: options

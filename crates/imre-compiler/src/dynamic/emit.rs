@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
+use crate::CodegenUnit;
+
 mod boolean;
 mod expressions;
 mod patterns;
@@ -41,7 +43,10 @@ pub(crate) fn emit(
     keep_docstrings: bool,
     bundled_root: &Path,
     providers: &HashSet<String>,
-) -> Result<(String, bool), String> {
+    split: bool,
+) -> Result<(Vec<CodegenUnit>, bool), String> {
+    let mut units = Vec::new();
+    let mut used_archive = false;
     let mut output = Output {
         keep_docstrings,
         ..Output::default()
@@ -54,22 +59,33 @@ pub(crate) fn emit(
     let mut declarations = HashSet::new();
     for (unit, (name, path, source)) in modules.iter().enumerate() {
         let bundled = path.starts_with(bundled_root);
-        let external = if bundled && !providers.is_empty() {
-            provider(name, path, source, keep_docstrings)?
-                .map(|(symbol, _)| symbol)
-                .filter(|symbol| providers.contains(symbol))
-        } else {
-            None
-        };
+        let check_archive = bundled && !providers.is_empty();
+        // Without a matching pack (including -OO), keep the bundled library in the entry.
+        let separate = split && unit != 0 && !source.is_empty() && (!bundled || check_archive);
+        let mut external = None;
+        if (check_archive || separate)
+            && let Some((symbol, ir)) = initializer(name, path, source, keep_docstrings, bundled)?
+        {
+            let archived = check_archive && providers.contains(&symbol);
+            if archived || separate {
+                if declarations.insert(symbol.clone()) {
+                    writeln!(output.functions, "declare i64 @{symbol}(ptr, i64)").unwrap();
+                    if !archived {
+                        units.push(CodegenUnit {
+                            name: name.clone(),
+                            llvm_ir: ir,
+                        });
+                    }
+                }
+                used_archive |= archived;
+                external = Some(format!("@{symbol}"));
+            }
+        }
         let module_name = output.data(name.as_bytes());
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
-        let code = if let Some(symbol) = external {
-            if declarations.insert(symbol.clone()) {
-                writeln!(output.functions, "declare i64 @{symbol}(ptr, i64)").unwrap();
-            }
-            format!("@{symbol}")
-        } else {
-            output.module(unit, name, path, source, &file, bundled)?
+        let code = match external {
+            Some(symbol) => symbol,
+            None => output.module(unit, name, path, source, &file, bundled)?,
         };
         // Retain the text of virtual providers alongside the installed initializer.
         let (text, len) = if bundled {
@@ -84,18 +100,23 @@ pub(crate) fn emit(
         .unwrap();
     }
     main.push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
-    Ok((
-        format!("{ABI}\n{}\n{}\n{main}", output.constants, output.functions),
-        !declarations.is_empty(),
-    ))
+    units.insert(
+        0,
+        CodegenUnit {
+            name: "__main__".into(),
+            llvm_ir: format!("{ABI}\n{}\n{}\n{main}", output.constants, output.functions),
+        },
+    );
+    Ok((units, used_archive))
 }
 
-/// Emit one bundled initializer with a symbol determined by its source and native body.
-pub(super) fn provider(
+/// Emit one standalone initializer with a symbol determined by its source and native body.
+pub(super) fn initializer(
     name: &str,
     path: &Path,
     source: &str,
     keep_docstrings: bool,
+    bundled: bool,
 ) -> Result<Option<(String, String)>, String> {
     let mut output = Output {
         keep_docstrings,
@@ -103,7 +124,7 @@ pub(super) fn provider(
     };
     let filename = path.to_str().ok_or("module path must be UTF-8")?;
     let file = output.data(filename.as_bytes());
-    let entry = output.module(0, name, path, source, &file, true)?;
+    let entry = output.module(0, name, path, source, &file, bundled)?;
     // These slots are numbered across the whole program and must stay in its codegen unit.
     if !output.string_constant_slots.is_empty() {
         return Ok(None);
@@ -805,7 +826,9 @@ mod tests {
         let path = Path::new("<imre stdlib>/example.py");
         let declare = "declare void @imre_dyn_set_statement_line";
         for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
-            let (_, ir) = provider("example", path, source, true).unwrap().unwrap();
+            let (_, ir) = initializer("example", path, source, true, true)
+                .unwrap()
+                .unwrap();
             assert_eq!(ir.matches(declare).count(), expected);
         }
     }
@@ -815,8 +838,9 @@ mod tests {
         let root = Path::new("<imre stdlib>");
         let path = root.join("example.py");
         let source = "value = 1";
-        let compiled =
-            |name, path: &Path, src, docs| provider(name, path, src, docs).unwrap().unwrap().0;
+        let compiled = |name, path: &Path, src, docs| {
+            initializer(name, path, src, docs, true).unwrap().unwrap().0
+        };
         let symbol = compiled("example", &path, source, true);
         assert_ne!(symbol, compiled("other", &path, source, true));
         assert_ne!(
@@ -826,7 +850,7 @@ mod tests {
         assert_ne!(symbol, compiled("example", &path, "value = 2", true));
         assert_ne!(symbol, compiled("example", &path, source, false));
         assert!(
-            provider("example", &path, "value = t'{123}'", true)
+            initializer("example", &path, "value = t'{123}'", true, true)
                 .unwrap()
                 .is_none()
         );
@@ -839,7 +863,8 @@ mod tests {
         );
         let symbols = HashSet::from([symbol.clone()]);
         let refs = |modules: &[_]| {
-            let (ir, used) = emit(modules, "{}", true, root, &symbols).unwrap();
+            let (units, used) = emit(modules, "{}", true, root, &symbols, false).unwrap();
+            let ir = &units[0].llvm_ir;
             assert!(used);
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
             assert_eq!(ir.lines().filter(|line| *line == declared).count(), 1);
@@ -853,10 +878,36 @@ mod tests {
             [true, false, true]
         );
         assert!(
-            !emit(std::slice::from_ref(&project), "{}", true, root, &symbols)
-                .unwrap()
-                .1
+            !emit(
+                std::slice::from_ref(&project),
+                "{}",
+                true,
+                root,
+                &symbols,
+                false
+            )
+            .unwrap()
+            .1
         );
-        assert_eq!(refs(&[project, bundled]), [false, true]);
+        assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
+
+        let shadow = (
+            project.0.clone(),
+            PathBuf::from("/other/example.py"),
+            project.2.clone(),
+        );
+        let (units, used) = emit(
+            &[bundled, project.clone(), shadow, project],
+            "{}",
+            true,
+            root,
+            &symbols,
+            true,
+        )
+        .unwrap();
+        assert!(used);
+        assert_eq!(units.len(), 3);
+        assert_eq!(units[1].name, units[2].name);
+        assert_ne!(units[1].llvm_ir, units[2].llvm_ir);
     }
 }
