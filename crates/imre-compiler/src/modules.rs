@@ -2312,6 +2312,11 @@ impl IntrinsicModule {
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
             (Self::Math, "prod") => Intrinsic::MathProd,
+            (Self::Math, "pi") => Intrinsic::ScopedObjectExport("math.pi"),
+            (Self::Math, "e") => Intrinsic::ScopedObjectExport("math.e"),
+            (Self::Math, "tau") => Intrinsic::ScopedObjectExport("math.tau"),
+            (Self::Math, "inf") => Intrinsic::ScopedObjectExport("math.inf"),
+            (Self::Math, "nan") => Intrinsic::ScopedObjectExport("math.nan"),
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
             (Self::Itertools, "product") => {

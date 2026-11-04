@@ -132,6 +132,14 @@ REJECTED = {
             "typed('wrong')\n"
         ),
     }, "invalid-argument-type"),
+    "math_constants_preserve_typed_call": ({
+        "main.py": (
+            "from math import e, inf, nan, pi, tau\n"
+            "def typed(value: int) -> int: return value\n"
+            "print(inf, pi)\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "custom_dir_preserves_typed_call": ({
         "main.py": (
             "class Subject:\n"

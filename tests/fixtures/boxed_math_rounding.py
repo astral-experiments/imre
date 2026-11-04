@@ -3,6 +3,7 @@
 import math
 from fractions import Fraction
 from math import ceil, copysign, cos, floor, isinf, isnan, log, modf, trunc
+from math import e, inf, nan, pi, tau
 
 
 class Hooks:
@@ -64,8 +65,11 @@ def current():
     assert int.__trunc__.__objclass__ is int
     assert float.__trunc__.__get__(2.5, float)() == 2
 
-    pi = math.pi
     assert pi == 3.141592653589793 and vars(math)["pi"] is pi
+    assert e == 2.718281828459045 and tau == 2 * pi
+    assert inf == float("inf") and isnan(nan) and copysign(1.0, nan) == 1.0
+    for name, value in (("e", e), ("inf", inf), ("nan", nan), ("tau", tau)):
+        assert type(value) is float and vars(math)[name] is value
     math.pi = None
     assert math.pi is None
     del math.pi
