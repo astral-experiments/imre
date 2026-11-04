@@ -433,6 +433,29 @@ enum ResolvePart {
     ResolvedLink(Str),
 }
 
+/// A successful lookup proves that every component exists and none is a symlink.
+#[cfg(target_os = "linux")]
+fn resolve_existing(base: &str, path: &str) -> Option<Str> {
+    use rustix::fs::{CWD, Mode, OFlags, ResolveFlags, openat2};
+
+    let tail = path.strip_prefix('/').unwrap_or(path);
+    // Opening and closing one descriptor replaces at least three metadata lookups.
+    let mut parts = tail.split('/');
+    if parts.clone().nth(2).is_none() || parts.any(|part| matches!(part, "" | "." | "..")) {
+        return None;
+    }
+    let absolute = join(base, tail);
+    let _fd = openat2(
+        CWD,
+        absolute.as_str(),
+        OFlags::PATH | OFlags::CLOEXEC,
+        Mode::empty(),
+        ResolveFlags::NO_SYMLINKS,
+    )
+    .ok()?;
+    Some(absolute)
+}
+
 /// Resolve links component by component, retaining missing suffixes when not
 /// strict. An explicit stack and link cache handle long acyclic link chains
 /// without recursion or the kernel's per-lookup symlink traversal limit.
@@ -443,6 +466,10 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         let directory = std::env::current_dir().map_err(files::errno_error)?;
         path_utf8(directory.into_os_string())?
     };
+    #[cfg(target_os = "linux")]
+    if let Some(absolute) = resolve_existing(&resolved, path) {
+        return Ok(absolute);
+    }
     let mut source = path.split('/');
     let mut remaining = source.clone().count();
     // Only expanded symlink targets and their completion markers need a stack.
@@ -465,34 +492,30 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
             continue;
         }
         if part == ".." {
-            resolved = Str::from(parent(&resolved));
+            resolved.truncate(parent(&resolved).len());
             continue;
         }
-        let mut next = resolved.clone();
-        if next != "/" {
-            next.push('/');
+        let base_len = resolved.len();
+        if resolved != "/" {
+            resolved.push('/');
         }
-        next.push_str(&part);
+        resolved.push_str(&part);
         // Validate at the actual lookup, so an earlier strict filesystem error
         // still precedes a later component containing a NUL.
-        check_nul(&next, "lstat: embedded null character in path")?;
-        let component_error = |error| files::errno_with_filename(error, Some(&next));
-        let metadata = match fs::symlink_metadata(next.as_str()) {
+        check_nul(&part, "lstat: embedded null character in path")?;
+        let component_error = |error| files::errno_with_filename(error, Some(&resolved));
+        let metadata = match fs::symlink_metadata(resolved.as_str()) {
             Ok(metadata) => metadata,
             Err(error) if strict => return Err(component_error(error)),
-            Err(_) => {
-                resolved = next;
-                continue;
-            }
+            Err(_) => continue,
         };
         if !metadata.file_type().is_symlink() {
             if strict && remaining != 0 && !metadata.is_dir() {
                 return Err(component_error(io::Error::from_raw_os_error(libc::ENOTDIR)));
             }
-            resolved = next;
             continue;
         }
-        match links.get(&next) {
+        match links.get(&resolved) {
             Some(Some(target)) => {
                 resolved = target.clone();
                 continue;
@@ -501,24 +524,18 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
                 if strict {
                     return Err(component_error(io::Error::from_raw_os_error(libc::ELOOP)));
                 }
-                resolved = next;
                 continue;
             }
             None => {}
         }
-        let target = match fs::read_link(next.as_str()) {
+        let target = match fs::read_link(resolved.as_str()) {
             Ok(target) => path_utf8(target.into_os_string())?,
             Err(error) if strict => return Err(component_error(error)),
-            Err(_) => {
-                resolved = next;
-                continue;
-            }
+            Err(_) => continue,
         };
-        if target.starts_with('/') {
-            resolved = Str::from("/");
-        }
-        links.insert(next.clone(), None);
-        parts.push(ResolvePart::ResolvedLink(next));
+        links.insert(resolved.clone(), None);
+        parts.push(ResolvePart::ResolvedLink(resolved.clone()));
+        resolved.truncate(if target.starts_with('/') { 1 } else { base_len });
         remaining += target.split('/').count();
         parts.extend(
             target
