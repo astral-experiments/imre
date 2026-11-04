@@ -21,7 +21,6 @@ pub(super) fn function(name: &str) -> bool {
             | "wait"
             | "signal"
             | "communicate"
-            | "close_wait"
             | "cleanup"
     )
 }
@@ -772,10 +771,6 @@ pub(super) fn call(
                 stderr,
                 builtins::boolean(exchange.timed_out),
             ])))
-        }
-        ("close_wait", []) => {
-            child.close_wait()?;
-            Ok(NONE)
         }
         _ => Err(Error::new("TypeError", "invalid native process operation")),
     }
