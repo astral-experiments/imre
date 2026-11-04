@@ -3307,6 +3307,10 @@ impl Context {
                     self.bind(scope, attr, value);
                 }
             }
+            "_imre_fractions" => {
+                let value = self.builtin("_imre_fractions._limit_candidates");
+                self.bind(scope, "_limit_candidates", value);
+            }
             "_imre_itertools" => {
                 for attr in [
                     "_accumulate_allocate",

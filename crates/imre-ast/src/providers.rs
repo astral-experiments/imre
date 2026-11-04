@@ -85,6 +85,7 @@ fn is_builtin(name: &str) -> bool {
             | "_md5"
             | "_sha3"
             | "_datetime"
+            | "_imre_fractions"
             | "_imre_itertools"
             | "_imre_ordered_dict"
             | "operator"
