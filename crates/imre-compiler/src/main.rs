@@ -30,7 +30,7 @@ const STDLIB_ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/imre-std
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--runtime-imports] [--entry-profile FILE] [--watch | -w]
-       imre [-I] [-E] [-S] [-B] [-O] [-u] [-W OPTION] [-X faulthandler] [-X tracemalloc[=NFRAME]] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
+       imre [-I] [-E] [-s] [-S] [-B] [-O] [-u] [-W OPTION] [-X faulthandler] [-X tracemalloc[=NFRAME]] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
        On Linux, -X cpu_count=N|default sets the number of logical CPUs.
        imre extension-header
        imre build-target [--output-dir DIRECTORY]

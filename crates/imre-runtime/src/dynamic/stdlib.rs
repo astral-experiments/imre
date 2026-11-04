@@ -301,6 +301,37 @@ fn layout(ctx: &Context) -> Result<system::InterpreterLayout> {
     system::InterpreterLayout::new(&ctx.executable, language_version(ctx)?).map_err(os_error)
 }
 
+/// Initialize the cached site attributes before the Python-level directory helpers run.
+pub(super) fn initialize_site(ctx: &mut Context, scope: Id) -> Result<()> {
+    let get_path = ctx.builtin("site._get_path");
+    ctx.bind(scope, "_get_path", get_path);
+    let layout = layout(ctx)?;
+    let mut enabled = NONE;
+    let mut base = NONE;
+    let mut directory = NONE;
+    if ctx.config["no_site"] != true {
+        let allowed = system::InterpreterLayout::user_site_enabled(
+            ctx.config["no_user_site"] == true,
+            layout.venv_system_site(),
+        );
+        enabled = match allowed {
+            Some(true) => TRUE,
+            Some(false) => FALSE,
+            None => NONE,
+        };
+        if let Some(path) = ctx.config["initial_user_base"].as_str().map(PathBuf::from) {
+            base = path_text(ctx, &path)?;
+            directory = path_text(ctx, &layout.user_site(&path))?;
+        } else {
+            enabled = FALSE;
+        }
+    }
+    ctx.bind(scope, "ENABLE_USER_SITE", enabled);
+    ctx.bind(scope, "USER_BASE", base);
+    ctx.bind(scope, "USER_SITE", directory);
+    Ok(())
+}
+
 /// Resolve a native package's search directory relative to this executable's installation.
 pub(super) fn package_path(ctx: &Context, name: &str) -> Result<PathBuf> {
     let stdlib = layout(ctx)?
@@ -2930,6 +2961,7 @@ pub(super) fn call(
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
         | "sysconfig.get_preferred_scheme"
+        | "site._get_path"
         | "os.confstr"
         | "struct.calcsize"
         | "_string.formatter_parser"
@@ -3096,6 +3128,11 @@ pub(super) fn call(
             }
         }
         "sysconfig.get_platform" => ctx.text(system::sysconfig_platform().map_err(os_error)?),
+        "site._get_path" => {
+            let base = ctx.str_value(argument(args, 0)?)?;
+            let path = layout(ctx)?.user_site(Path::new(base));
+            path_text(ctx, &path)?
+        }
         "site.getsitepackages" => {
             let site = ctx.text(layout(ctx)?.path("posix_prefix", "purelib", true).unwrap());
             ctx.alloc(Value::List(vec![site]))

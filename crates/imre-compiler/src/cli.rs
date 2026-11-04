@@ -147,17 +147,49 @@ impl BuildOptions {
             .path("posix_prefix", "purelib", true)
             .map(PathBuf::from)
             .filter(|p| p.is_dir());
+        let venv = layout.venv_system_site();
+        let user_site = if !flags.no_site
+            && imre_ast::layout::InterpreterLayout::user_site_enabled(flags.no_user_site, venv)
+                == Some(true)
+        {
+            imre_ast::layout::InterpreterLayout::user_base()
+                .map(|base| layout.user_site(&base))
+                .filter(|p| p.is_dir())
+                .map(|p| std::path::absolute(p).map_err(|e| e.to_string()))
+                .transpose()?
+        } else {
+            None
+        };
+        let process_pth = user_site.as_ref().is_some_and(|p| {
+            std::fs::read_dir(p).is_ok_and(|mut entries| {
+                entries.any(|e| {
+                    e.is_ok_and(|e| {
+                        let name = e.file_name();
+                        name.to_str()
+                            .is_some_and(|name| !name.starts_with('.') && name.ends_with(".pth"))
+                    })
+                })
+            })
+        });
+        let site_dirs: Vec<_> = if venv.is_some() {
+            system_site.into_iter().chain(user_site.clone()).collect()
+        } else {
+            user_site.clone().into_iter().chain(system_site).collect()
+        };
         // site runs before Python prepends the script directory or command cwd.
-        options.compile.sitecustomize = !flags.no_site
-            && options
-                .compile
-                .extension_paths
-                .iter()
-                .chain(&system_site)
-                .any(|root| {
-                    root.join("sitecustomize.py").is_file() || root.join("sitecustomize").is_dir()
-                });
-        options.compile.system_site = system_site;
+        options.compile.sitecustomize = process_pth
+            || (!flags.no_site
+                && options
+                    .compile
+                    .extension_paths
+                    .iter()
+                    .chain(&site_dirs)
+                    .any(|root| {
+                        root.join("sitecustomize.py").is_file()
+                            || root.join("sitecustomize").is_dir()
+                    }));
+        options.compile.user_site_pth = user_site.filter(|_| process_pth);
+        options.compile.site_dirs = site_dirs;
         Ok(options)
     }
 

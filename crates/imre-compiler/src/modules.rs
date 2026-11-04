@@ -3429,7 +3429,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"), &[], None, FileSystem::default())?;
+        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
@@ -3455,7 +3455,7 @@ impl SourceGraph {
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
-            options.implicit_site().map(PathBuf::as_path),
+            options.implicit_sites(),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3512,12 +3512,7 @@ impl SourceGraph {
             .parent()
             .ok_or("script has no parent directory")?
             .to_path_buf();
-        let mut loader = Loader::new(
-            root,
-            &options.extension_paths,
-            options.implicit_site().map(PathBuf::as_path),
-            fs,
-        )?;
+        let mut loader = Loader::new(root, &options.extension_paths, options.implicit_sites(), fs)?;
         loader.skip_current_root = flags.safe_path;
         let reachable = options.reachable_only || options.entry_profile.is_some();
         loader.reachable_only = reachable;
@@ -3602,7 +3597,7 @@ impl SourceGraph {
         let source = fs
             .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root, extension_paths, None, fs)?;
+        let mut loader = Loader::new(root, extension_paths, &[], fs)?;
         loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
@@ -3973,7 +3968,7 @@ impl<'a> Loader<'a> {
     fn new(
         root: PathBuf,
         extension_paths: &[PathBuf],
-        system_site: Option<&Path>,
+        site_dirs: &[PathBuf],
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
@@ -3993,7 +3988,7 @@ impl<'a> Loader<'a> {
         }
         let archive_roots = search_roots.len();
         let mut inputs = crate::SourceInputs::default();
-        if let Some(site) = system_site {
+        for site in site_dirs {
             let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
             inputs
                 .directories
@@ -5395,8 +5390,9 @@ impl<'a> Loader<'a> {
                 || imre_ast::providers::provider(first).is_some()
                 || !self
                     .search_roots
-                    .get(self.archive_roots)
-                    .is_some_and(|site| {
+                    .iter()
+                    .skip(self.archive_roots)
+                    .any(|site| {
                         // A typeshed declaration alone does not supply an importable module.
                         let path = site.join(first);
                         self.fs.is_file(&path.with_extension("py"))

@@ -1,8 +1,66 @@
-# Directory and .pth processing from CPython 3.14.5 Lib/site.py. See licenses/CPython.txt.
+# User site and directory processing from CPython 3.14.5 Lib/site.py. See licenses/CPython.txt.
 import sys
 import os
 import _io as io
 import stat
+
+
+def _get_implementation():
+    return 'Python'
+
+# Copy of sysconfig._getuserbase()
+def _getuserbase():
+    env_base = os.environ.get("PYTHONUSERBASE", None)
+    if env_base:
+        return env_base
+
+    # Emscripten, iOS, tvOS, VxWorks, WASI, and watchOS have no home directories
+    if sys.platform in {"emscripten", "ios", "tvos", "vxworks", "wasi", "watchos"}:
+        return None
+
+    def joinuser(*args):
+        return os.path.expanduser(os.path.join(*args))
+
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or "~"
+        return joinuser(base, _get_implementation())
+
+    if sys.platform == "darwin" and getattr(sys, "_framework", None):
+        return joinuser("~", "Library", sys._framework,
+                        "%d.%d" % sys.version_info[:2])
+
+    return joinuser("~", ".local")
+
+
+def getuserbase():
+    """Returns the `user base` directory path.
+
+    The `user base` directory can be used to store data. If the global
+    variable ``USER_BASE`` is not initialized yet, this function will also set
+    it.
+    """
+    global USER_BASE
+    if USER_BASE is None:
+        USER_BASE = _getuserbase()
+    return USER_BASE
+
+
+def getusersitepackages():
+    """Returns the user-specific site-packages directory path.
+
+    If the global variable ``USER_SITE`` is not initialized yet, this
+    function will also set it.
+    """
+    global USER_SITE, ENABLE_USER_SITE
+    userbase = getuserbase() # this will also set USER_BASE
+
+    if USER_SITE is None:
+        if userbase is None:
+            ENABLE_USER_SITE = False # disable user site and return None
+        else:
+            USER_SITE = _get_path(userbase)
+
+    return USER_SITE
 
 
 def _trace(message):

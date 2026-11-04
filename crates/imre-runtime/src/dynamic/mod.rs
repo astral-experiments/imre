@@ -2960,6 +2960,22 @@ impl Context {
         self.bind(scope, "__loader__", loader);
         self.publish_module("__main__", main)?;
         let site = self.module("site")?;
+        if let Some(path) = self.config["user_site_pth"].as_str().map(str::to_owned) {
+            let add = self.lookup_attr(site, "addsitedir")?;
+            let path = self.text(path);
+            self.call(add, vec![path], Vec::new())?;
+            let later: Vec<String> =
+                serde_json::from_value(self.config["after_user_site"].clone()).unwrap_or_default();
+            for path in later {
+                let sys = self.module("sys")?;
+                let paths = self.lookup_attr(sys, "path")?;
+                let path = self.text(path);
+                if !self.contains(path, paths)? {
+                    let append = self.lookup_attr(paths, "append")?;
+                    self.call(append, vec![path], Vec::new())?;
+                }
+            }
+        }
         let hook = self.lookup_attr(site, "execsitecustomize")?;
         self.call(hook, Vec::new(), Vec::new())?;
         Ok(())
@@ -3811,6 +3827,7 @@ impl Context {
                 }
             }
             "site" => {
+                stdlib::initialize_site(self, scope)?;
                 let text = self.text(include_str!("stdlib/site.py"));
                 let filename = self.text("<imre stdlib>/site.py");
                 let mode = self.text("exec");

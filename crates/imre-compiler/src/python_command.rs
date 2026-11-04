@@ -52,6 +52,7 @@ pub(super) fn parse(
 ) -> Result<Invocation, ParseError> {
     let mut isolated = false;
     let mut no_site = false;
+    let mut no_user_site = false;
     let mut ignore_environment = false;
     let mut context_option = None;
     let mut warn_default_encoding = false;
@@ -82,6 +83,7 @@ pub(super) fn parse(
                 }
                 'E' => ignore_environment = true,
                 'S' => no_site = true,
+                's' => no_user_site = true,
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
                 'u' => unbuffered = true,
@@ -231,7 +233,7 @@ pub(super) fn parse(
         cpu_count,
         optimize: optimize.max(env_flag("PYTHONOPTIMIZE")),
         safe_path: isolated || env_present("PYTHONSAFEPATH"),
-        no_user_site: isolated || env_flag("PYTHONNOUSERSITE") != 0,
+        no_user_site: no_user_site || isolated || env_flag("PYTHONNOUSERSITE") != 0,
         no_site,
         dont_write_bytecode: dont_write_bytecode || env_flag("PYTHONDONTWRITEBYTECODE") != 0,
         unbuffered: unbuffered || env_flag("PYTHONUNBUFFERED") != 0,
@@ -243,8 +245,9 @@ pub(super) fn parse(
         faulthandler: faulthandler || env_present("PYTHONFAULTHANDLER"),
         tracemalloc,
     };
-    let executable = env::current_exe()
-        .map_err(|e| e.to_string())?
+    let executable = env::current_exe().map_err(|e| e.to_string())?;
+    let executable = venv_launcher(&executable)
+        .unwrap_or(executable)
         .into_os_string()
         .into_string()
         .map_err(|_| "interpreter path is not UTF-8")?;
@@ -265,6 +268,28 @@ pub(super) fn parse(
             executable,
         },
     })
+}
+
+/// Retain the invocation path when a virtual environment symlinks the public launcher.
+fn venv_launcher(executable: &std::path::Path) -> Option<PathBuf> {
+    let arg = PathBuf::from(env::args_os().next()?);
+    let path = if arg.is_absolute() || arg.components().count() > 1 {
+        std::path::absolute(arg).ok()?
+    } else {
+        env::split_paths(&env::var_os("PATH")?)
+            .map(|dir| dir.join(&arg))
+            .find(|path| path.is_file())?
+    };
+    let path = std::path::absolute(path).ok()?;
+    let bin = path.parent()?;
+    if path != executable
+        && (bin.join("pyvenv.cfg").is_file() || bin.parent()?.join("pyvenv.cfg").is_file())
+        && path.canonicalize().ok()?.as_path() == executable
+    {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 /// CPython parses -X operands as wide characters, unlike its byte environment.

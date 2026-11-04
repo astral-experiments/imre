@@ -760,16 +760,33 @@ pub(crate) fn compile<const SPLIT: bool>(
     } else if !safe_path {
         initial.push(root);
     }
-    initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
-    let installed_layout = options
-        .system_site
-        .as_ref()
-        .is_some_and(|p| !initial.contains(p));
-    let site = options.implicit_site().filter(|_| installed_layout);
+    // site removes duplicate startup paths before Python prepends path[0].
+    let path0_len = initial.len();
+    let dedup = startup.is_some_and(|(flags, _)| !flags.no_site);
+    let mut seen = HashSet::new();
+    initial.extend(
+        options
+            .extension_paths
+            .iter()
+            .map(|p| cwd.join(p))
+            .filter(|p| !dedup || seen.insert(p.clone())),
+    );
+    let startup_paths = &initial[path0_len..];
+    let installed_layout = options.site_dirs.iter().any(|p| !startup_paths.contains(p));
+    let sites: Vec<_> = options
+        .implicit_sites()
+        .iter()
+        .filter(|p| !startup_paths.contains(p))
+        .cloned()
+        .collect();
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
-    let implicit_site = site.filter(|p| !roots.contains(p));
-    roots.extend(implicit_site.cloned());
+    let implicit_sites: Vec<_> = sites
+        .iter()
+        .filter(|p| !roots.contains(p))
+        .cloned()
+        .collect();
+    roots.extend(implicit_sites.iter().cloned());
     // Discover each search directory once even when it appears twice in sys.path.
     let mut seen_roots = HashSet::new();
     roots.retain(|root| seen_roots.insert(root.clone()));
@@ -872,6 +889,12 @@ pub(crate) fn compile<const SPLIT: bool>(
                         imports.names.push((0, name.to_owned()));
                     }
                 }
+            }
+            // The runtime's site module calls os.path even when the entry never imports it.
+            if (options.user_site_pth.is_some() || seen.contains("site"))
+                && !seen.contains("posixpath")
+            {
+                imports.add(0, "posixpath");
             }
             // The native time.strptime classmethod imports its Python parser on first use.
             if seen.contains("_datetime") && !seen.contains("_strptime") {
@@ -977,7 +1000,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                 } else {
                     None
                 };
-                if implicit_site.is_some()
+                if !implicit_sites.is_empty()
                     && (bundled.is_some()
                         || installed.is_some()
                         || imre_ast::providers::provider(&prefix).is_some()
@@ -1022,7 +1045,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                     continue;
                 }
                 for root in roots.iter().filter(|_| !bundled_only) {
-                    if implicit_site == Some(root) && before_site.contains(&prefix) {
+                    if implicit_sites.contains(root) && before_site.contains(&prefix) {
                         continue;
                     }
                     if module_entry.is_some()
@@ -1042,7 +1065,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                             {
                                 work.push_back((prefix.clone(), package, imports));
                             }
-                            if implicit_site.is_some() {
+                            if !implicit_sites.is_empty() {
                                 before_site.insert(prefix.clone());
                             }
                             entry_sources.insert(prefix.clone(), (root.clone(), package));
@@ -1074,7 +1097,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                         }
                         continue;
                     };
-                    if implicit_site.is_some() && implicit_site != Some(root) {
+                    if !implicit_sites.is_empty() && !implicit_sites.contains(root) {
                         before_site.insert(prefix.clone());
                     }
                     // A late command import can use the runtime's builtins and bundled
@@ -1181,13 +1204,27 @@ pub(crate) fn compile<const SPLIT: bool>(
         .filter(|_| installed_layout)
         .map(|(_, executable)| Path::new(executable).join(bundled_root));
     initial.extend(bundle_entry.iter().cloned());
-    initial.extend(site.cloned());
+    let mut after_user_site = Vec::new();
+    if let Some(user) = &options.user_site_pth
+        && let Some(i) = options.site_dirs.iter().position(|p| p == user)
+    {
+        // A user's .pth files run before the following prefix site is visible.
+        for site in sites {
+            if options.site_dirs[i + 1..].contains(&site) {
+                after_user_site.push(site);
+            } else {
+                initial.push(site);
+            }
+        }
+    } else {
+        initial.extend(sites);
+    }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
-        "sitecustomize":options.sitecustomize,"path0":options.path_entry || !safe_path,
+        "sitecustomize":options.sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":options.path_entry || !safe_path,
         "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
