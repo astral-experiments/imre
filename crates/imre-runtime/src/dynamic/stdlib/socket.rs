@@ -1326,15 +1326,15 @@ pub(super) fn call(
             return Ok(ctx.alloc(Value::Bytes(bytes)));
         }
         "send" | "sendall" => {
-            let (Value::Bytes(bytes) | Value::ByteArray(bytes)) = ctx.heap.get(argument(args, 0)?)
-            else {
+            let data = argument(args, 0)?;
+            let (Value::Bytes(bytes) | Value::ByteArray(bytes)) = ctx.heap.get(data) else {
                 return Err(Error::new("TypeError", "a bytes-like object is required"));
             };
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
             if method == "send" {
                 return Ok(ctx.int(native::send(&s, bytes, flags)? as i64));
             }
-            native::send_all(&s, bytes, flags)?;
+            ctx.with_buffer_export(data, |ctx| send_all_exported(ctx, &s, data, flags))?;
         }
         _ => {
             return Err(Error::new(
@@ -1344,4 +1344,18 @@ pub(super) fn call(
         }
     }
     Ok(NONE)
+}
+
+/// Reacquire the exported bytes after dispatch, when a signal handler may have mutated them.
+pub(super) fn send_all_exported(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    data: Id,
+    flags: i32,
+) -> Result<()> {
+    native::SendAll::run(socket, flags, |send| {
+        let done = send.step(ctx.native_buffer_bytes(data)?)?;
+        ctx.dispatch_signals()?;
+        Ok(done)
+    })
 }

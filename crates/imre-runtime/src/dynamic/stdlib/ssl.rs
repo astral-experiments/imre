@@ -986,11 +986,11 @@ pub(super) fn call(
                         .map(|&id| ctx.index_c_int(id))
                         .transpose()?
                         .unwrap_or(0);
-                    let bytes = ctx.native_buffer_bytes(*data)?;
                     if name == "sendall" {
-                        socket::send_all(&raw, bytes, flags)?;
+                        super::socket::send_all_exported(ctx, &raw, *data, flags)?;
                         return Ok(NONE);
                     }
+                    let bytes = ctx.native_buffer_bytes(*data)?;
                     Ok(ctx.int(socket::send(&raw, bytes, flags)? as i64))
                 });
             }
