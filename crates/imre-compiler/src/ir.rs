@@ -1248,6 +1248,7 @@ pub(crate) enum Builtin {
     SplitLinesIter,
     /// Iterates every field of a forward split by a literal ASCII separator.
     SplitByteIter(u8),
+    SortedSplitByteIter(u8),
     MatchingSplitIter(u8),
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,

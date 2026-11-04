@@ -3198,6 +3198,7 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
             Storage::RegexIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => iterator.next(),
             Storage::SplitFields(iterator) => iterator.next(),
+            Storage::SortedSplitFields(iterator) => iterator.next(),
             Storage::MatchingFields(iterator) => iterator.next(),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
             Storage::DequeIterator(iterator) => iterator.next(),

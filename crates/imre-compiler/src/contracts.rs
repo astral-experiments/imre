@@ -793,6 +793,7 @@ impl Builtin {
             | Self::DequeReverse
             | Self::SetIter
             | Self::MatchingSplitIter(_)
+            | Self::SortedSplitByteIter(_)
             | Self::SplitByteIter(_)
             | Self::SplitLinesIter
             | Self::StringIter
@@ -945,7 +946,9 @@ impl Builtin {
                 signature(&[Type::Str, Type::Str, Type::Int], Type::Iterator)
             }
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
-            Self::SplitByteIter(byte) => byte.is_ascii() && signature(&[Type::Str], Type::Iterator),
+            Self::SplitByteIter(byte) | Self::SortedSplitByteIter(byte) => {
+                byte.is_ascii() && signature(&[Type::Str], Type::Iterator)
+            }
             Self::FunctionWrappedSet => {
                 matches!(result, Type::Callable(_)) && signature(&[result, result], result)
             }

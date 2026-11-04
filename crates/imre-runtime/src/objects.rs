@@ -106,8 +106,10 @@ mod regexes;
 mod sequences;
 mod shutil;
 pub(crate) mod socket;
+mod sorted_split_fields;
 mod source_modules;
 pub(crate) mod stdio;
+use sorted_split_fields::SortedSplitFields;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
 pub(crate) use stdlib::{format_fixed_float, format_index, replace_text};
@@ -230,6 +232,7 @@ enum Storage {
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     SplitFields(SplitFields),
+    SortedSplitFields(Box<SortedSplitFields>),
     MatchingFields(matching_fields::MatchingFields),
     BytesIterator(bytes::BytesIterator),
     ByteArray(Vec<u8>),
@@ -1492,6 +1495,15 @@ struct LineIterator {
     offsets: LineOffsets,
 }
 
+/// Turns a range in a rooted split source into an independently owned string word.
+fn owned_split_field(source: &StrOwner, range: std::ops::Range<usize>) -> Result<OwnedWord, Error> {
+    let field = owned_line(source, range)?;
+    // SAFETY: the owned field transfers one string reference to the caller.
+    Ok(unsafe {
+        OwnedWord::from_owned(StrOwner::into_raw(field) as usize, words::WordKind::new(3))
+    })
+}
+
 struct SplitFields {
     source: StrOwner,
     separator: u8,
@@ -1506,13 +1518,9 @@ impl SplitFields {
         };
         let end = memchr::memchr(self.separator, remaining)
             .map_or(self.source.len(), |offset| start + offset);
-        let field = owned_line(&self.source, start..end)?;
+        let word = owned_split_field(&self.source, start..end)?;
         // A separator at the end leaves one final empty field to yield.
         self.start = end + 1;
-        // SAFETY: the field transfers its owned string reference to the caller.
-        let word = unsafe {
-            OwnedWord::from_owned(StrOwner::into_raw(field) as usize, words::WordKind::new(3))
-        };
         Ok(Some((word, None)))
     }
 }
