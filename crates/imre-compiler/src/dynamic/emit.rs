@@ -32,6 +32,7 @@ declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_call_position(ptr, ptr)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
+declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
 declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
@@ -569,6 +570,12 @@ impl Output {
     }
 }
 
+/// Pack expanded operands in Python containers or pass evaluated positional handles directly.
+enum CallArguments {
+    Packed { args: String, kwargs: String },
+    Positional { array: &'static str, count: usize },
+}
+
 struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
@@ -885,9 +892,15 @@ impl Function<'_, '_> {
 
     /// Store the handles that must survive the next statement or assignment target.
     fn live_handles(&mut self) -> (&'static str, usize) {
-        let count = self.live.len();
+        self.handle_array(&self.live.clone())
+    }
+
+    /// Copy evaluated handles into reusable storage in this activation's entry block.
+    fn handle_array(&mut self, values: &[impl AsRef<str>]) -> (&'static str, usize) {
+        let count = values.len();
         self.max_live = self.max_live.max(count);
-        for (i, value) in self.live.clone().iter().enumerate() {
+        for (i, value) in values.iter().enumerate() {
+            let value = value.as_ref();
             let ptr = self.value(&format!("getelementptr i64, ptr %live, i64 {i}"));
             self.line(&format!("store i64 {value}, ptr {ptr}"));
         }
@@ -907,25 +920,36 @@ impl Function<'_, '_> {
 
     fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
         let mark = self.temporary_mark();
-        let args = self.op("list", &[]);
-        for value in values {
-            self.op("append", &[&args, value]);
-        }
-        self.call_at(callable, &args, "0", &mark, None)
+        let (ptr, count) = self.handle_array(values);
+        self.call_at(
+            callable,
+            CallArguments::Positional { array: ptr, count },
+            &mark,
+            None,
+        )
     }
 
     /// Pass the caller's temporary root boundary and optional traceback position.
     fn call_at(
         &mut self,
         callable: &str,
-        args: &str,
-        kwargs: &str,
+        operands: CallArguments,
         mark: &str,
         span: Option<[usize; 4]>,
     ) -> String {
         let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
         let scope = &self.scope;
-        self.checked(&format!("call i64 @imre_dyn_scoped_call_at(ptr %ctx, i64 {callable}, i64 {args}, i64 {kwargs}, i64 {mark}, ptr {position}, i64 {scope})"))
+        let (function, args) = match operands {
+            CallArguments::Packed { args, kwargs } => (
+                "imre_dyn_scoped_call_at",
+                format!("i64 {args}, i64 {kwargs}"),
+            ),
+            CallArguments::Positional { array: ptr, count } => (
+                "imre_dyn_positional_call_at",
+                format!("ptr {ptr}, i64 {count}"),
+            ),
+        };
+        self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope})"))
     }
 }
 

@@ -83,6 +83,19 @@ def proxy_repr():
 
 def current():
     import _datetime
+    from gc import collect
+
+    argument_refs = []
+
+    def first_argument():
+        value = Item()
+        argument_refs.append(ref(value))
+        return value
+
+    def survived_collection(value, _):
+        return argument_refs[0]() is value
+
+    assert survived_collection(first_argument(), collect())
 
     truth_refs = []
 

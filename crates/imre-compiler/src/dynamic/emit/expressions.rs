@@ -2,7 +2,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::boolean::{Context as BooleanContext, Flow, Target};
-use super::{Body, DefinitionName, Function};
+use super::{Body, CallArguments, DefinitionName, Function};
 
 enum Element<'a> {
     Value(&'a ast::Expr),
@@ -132,7 +132,15 @@ impl Function<'_, '_> {
             }
             ast::Expr::Call(v) => {
                 let mark = self.temporary_mark();
-                let args = self.op("list", &[]);
+                // Cap the fixed entry-block scratch space even for calls in cold branches.
+                let direct = v.arguments.args.len() <= 64
+                    && v.arguments.keywords.is_empty()
+                    && !v
+                        .arguments
+                        .args
+                        .iter()
+                        .any(|value| matches!(value, ast::Expr::Starred(_)));
+                let packed = (!direct).then(|| self.op("list", &[]));
                 let callable = if let Some(field) = imre_ast::direct_method(
                     v,
                     &self.source.method_imports,
@@ -143,7 +151,15 @@ impl Function<'_, '_> {
                 } else {
                     self.expr(&v.func)
                 };
-                let kwargs = self.arguments(&args, &v.arguments, &callable);
+                let operands = if let Some(args) = packed {
+                    let kwargs = self.arguments(&args, &v.arguments, &callable);
+                    CallArguments::Packed { args, kwargs }
+                } else {
+                    let values: Vec<_> =
+                        v.arguments.args.iter().map(|arg| self.expr(arg)).collect();
+                    let (ptr, count) = self.handle_array(&values);
+                    CallArguments::Positional { array: ptr, count }
+                };
                 let span = self.expression_span(expr, &v.func, b'(');
                 // A caller inspecting this live frame needs the full call range, including
                 // simple and multiline calls for which traceback highlighting is suppressed.
@@ -155,7 +171,7 @@ impl Function<'_, '_> {
                 self.line(&format!(
                     "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
                 ));
-                self.call_at(&callable, &args, &kwargs, &mark, span)
+                self.call_at(&callable, operands, &mark, span)
             }
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
