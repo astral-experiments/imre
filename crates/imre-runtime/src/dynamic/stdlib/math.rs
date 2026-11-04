@@ -40,16 +40,21 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(result))));
     }
-    if operation == "copysign" {
-        let &[x, y] = args else {
+    if matches!(operation, "atan2" | "copysign") {
+        let &[first, second] = args else {
             return Err(Error::new(
                 "TypeError",
-                format!("copysign expected 2 arguments, got {}", args.len()),
+                format!("{operation} expected 2 arguments, got {}", args.len()),
             ));
         };
-        let x = as_double(ctx, x)?;
-        let y = as_double(ctx, y)?;
-        return Ok(ctx.alloc(Value::Float(x.copysign(y))));
+        let first = as_double(ctx, first)?;
+        let second = as_double(ctx, second)?;
+        let result = if operation == "atan2" {
+            first.atan2(second)
+        } else {
+            first.copysign(second)
+        };
+        return Ok(ctx.alloc(Value::Float(result)));
     }
     if operation == "fma" {
         let &[x, y, z] = args else {
