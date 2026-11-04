@@ -415,7 +415,12 @@ print(point(), value("wrong"))
     "set_add_arity": "values = {1}\nvalues.add(2, 3)\n",
     "set_discard_arity": "values = {1}\nvalues.discard()\n",
     "set_add_keyword": "values = {1}\nvalues.add(element=2)\n",
-    "set_copy_method": "values = {1}\ncopy = values.copy()\n",
+    "set_copy_wrong_return": """\
+def copy_names(values: set[int]) -> set[str]:
+    return values.copy()
+
+copy_names({1})
+""",
     "set_pop_method": "values = {1}\nvalues.pop()\n",
     "set_remove_method": "values = {1}\nvalues.remove(1)\n",
     "set_union_mismatched_keys": 'values = {1} | {"two"}\n',
