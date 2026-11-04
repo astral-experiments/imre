@@ -420,18 +420,12 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let fields = bind_field_metadata(ctx, scope, &names, &defaults);
     bind_fields(ctx, scope, &names);
     bind_repr(ctx, scope, name, fields)?;
-    let collections = ctx.module("collections")?;
-    let factory = ctx.lookup_attr(collections, "_namedtuple_replace")?;
-    let replace = ctx.call(factory, vec![name, fields], Vec::new())?;
-    ctx.bind(scope, "_replace", replace);
-    ctx.bind(scope, "__replace__", replace);
+    bind_replace(ctx, scope, name, fields)?;
     let slots = ctx.alloc(Value::Tuple(Vec::new()));
     ctx.bind(scope, "__slots__", slots);
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
     ctx.bind(scope, "__doc__", doc);
-    let factory = ctx.lookup_attr(collections, "_namedtuple_make")?;
-    let make = ctx.call(factory, vec![name, fields], Vec::new())?;
-    ctx.bind(scope, "_make", make);
+    bind_make(ctx, scope, name, fields)?;
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
     bind_new(ctx, scope, &typename, &names, defaults)?;
     let tuple = ctx.builtin("tuple");
@@ -478,6 +472,25 @@ pub(super) fn bind_repr(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> R
     let factory = ctx.lookup_attr(module, "_namedtuple_repr")?;
     let repr = ctx.call(factory, vec![name, fields], Vec::new())?;
     ctx.bind(scope, "__repr__", repr);
+    Ok(())
+}
+
+/// Install both replacement names as aliases of the same generated function.
+pub(super) fn bind_replace(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_replace")?;
+    let replace = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "_replace", replace);
+    ctx.bind(scope, "__replace__", replace);
+    Ok(())
+}
+
+/// Install the class method that builds an instance from an iterable.
+pub(super) fn bind_make(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_make")?;
+    let make = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "_make", make);
     Ok(())
 }
 

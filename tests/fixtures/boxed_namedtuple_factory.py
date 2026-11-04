@@ -47,6 +47,9 @@ def current():
     assert Declared.__orig_bases__ == (NamedTuple,)
     assert Declared("kept").label == "kept"
     assert Declared("kept")._asdict() == {"label": "kept"}
+    assert Declared.__replace__ is Declared._replace
+    updated = Declared("kept")._replace(label="new")
+    assert type(updated) is Declared and updated.label == "new"
 
     Point = namedtuple('Point', 'self y')
     class Pixel(Point):
