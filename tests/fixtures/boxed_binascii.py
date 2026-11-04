@@ -32,7 +32,11 @@ def current():
                 print(decode(value))
             except (ValueError, TypeError) as error:
                 print(type(error).__name__, str(error))
-    from binascii import Error, Incomplete, a2b_base64, b2a_base64
+    from binascii import Error, Incomplete, a2b_base64, b2a_base64, crc32
+
+    data = memoryview(bytearray(b".123456789."))[1:-1]
+    print(crc32 is binascii.crc32, crc32(data), crc32(data[4:], crc32(data[:4])))
+    print(crc32(b"", -(1 << 80) - 1))
 
     print(type(a2b_base64) is type(len), a2b_base64 is binascii.a2b_base64)
     print(Error.__module__, Error.__name__, Error.__bases__ == (ValueError,))

@@ -183,29 +183,23 @@ pub(super) fn call(
     Ok(ctx.alloc(Value::Bytes(result)))
 }
 
-/// Convert the exported buffer before the seed, as required by the zlib checksum functions.
+/// Hold a contiguous buffer export while converting the checksum's optional initial value.
 pub(super) fn checksum(
     ctx: &mut Context,
-    method: &str,
+    name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("zlib.{method}() takes no keyword arguments"),
+            format!("{name}() takes no keyword arguments"),
         ));
     }
-    let (data, seed) = match args {
-        [data] => (
-            *data,
-            crate::Int::from_usize(usize::from(method == "adler32")),
-        ),
-        [data, seed] => {
-            ctx.bytes_like(*data)?;
-            let seed = ctx.with_buffer_export(*data, |ctx| ctx.index_integer(*seed))?;
-            (*data, seed)
-        }
+    let method = name.rsplit('.').next().unwrap();
+    let (data, initial) = match args {
+        [data] => (*data, None),
+        [data, seed] => (*data, Some(*seed)),
         [] => {
             return Err(Error::new(
                 "TypeError",
@@ -219,11 +213,25 @@ pub(super) fn checksum(
             ));
         }
     };
-    let bytes = ctx.bytes_like(data)?;
-    let checksum = if method == "crc32" {
-        crate::objects::crc32(bytes, &seed)
+    let calculate = |ctx: &mut Context, view| {
+        let seed = match initial {
+            Some(value) => ctx.index_integer(value)?,
+            None => crate::Int::from_usize(usize::from(method == "adler32")),
+        };
+        let bytes = ctx.native_buffer_bytes(view)?;
+        Ok(if method == "adler32" {
+            crate::objects::adler32(bytes, &seed)
+        } else {
+            crate::objects::crc32(bytes, &seed)
+        })
+    };
+    let checksum = if name == "binascii.crc32"
+        && let Some(export) = ctx.python_buffer_method(data, true)?
+    {
+        ctx.with_contiguous_python_buffer(data, export, 0, calculate)?
     } else {
-        crate::objects::adler32(bytes, &seed)
+        ctx.native_buffer_bytes(data)?;
+        ctx.with_buffer_export(data, |ctx| calculate(ctx, data))?
     };
     Ok(ctx.int(i64::from(checksum)))
 }
