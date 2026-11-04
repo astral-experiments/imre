@@ -5070,6 +5070,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn small_integer_identity_survives_collection() {
+        let mut heap = Heap::new();
+        let values = SMALL_INT_MIN..=SMALL_INT_MAX;
+        let ids: Vec<_> = values
+            .clone()
+            .map(|n| heap.alloc(Value::Int(crate::Int::from(n))))
+            .collect();
+        heap.collect(std::iter::empty());
+        for (n, id) in values.zip(ids) {
+            assert!(matches!(heap.get(id), Value::Int(value) if value.as_small() == Some(n)));
+            assert_eq!(heap.alloc(Value::Int(crate::Int::from(n))), id);
+        }
+    }
+
+    #[test]
     fn reusing_an_object_slot_replaces_its_allocation_trace() {
         let mut heap = Heap::new();
         heap.allocation_traces.start(1);
