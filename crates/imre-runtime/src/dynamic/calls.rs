@@ -2584,14 +2584,6 @@ impl Context {
                 if let Some(member) = self.class_attr(class, name) {
                     return self.bind_attribute(member, obj, class);
                 }
-                if matches!(name, "cache_clear" | "cache_info") {
-                    let callable = self.builtin(&format!("functools._lru_cache_wrapper.{name}"));
-                    return Ok(self.alloc(Value::Method {
-                        callable,
-                        receiver: obj,
-                        explicit: false,
-                    }));
-                }
             }
             Value::ClassMethod {
                 callable,
