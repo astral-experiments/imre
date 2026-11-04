@@ -139,8 +139,13 @@ pub(super) fn fromisoformat(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let (class, args) = calendar_class_args(ctx, owner, "fromisoformat", args)?;
-    let name = ctx.class_qualname(class);
-    let input = builtins::one_positional_arg(&format!("{name}.fromisoformat"), args, kwargs)?;
+    let input = match (args, kwargs) {
+        ([input], []) => *input,
+        _ => {
+            let name = ctx.class_qualname(class);
+            builtins::one_positional_arg(&format!("{name}.fromisoformat"), args, kwargs)?
+        }
+    };
     let Some(storage) = ctx.string_storage(input) else {
         return Err(Error::new(
             "TypeError",

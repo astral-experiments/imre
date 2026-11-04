@@ -1382,6 +1382,9 @@ pub(in crate::dynamic) fn validate_classmethod_receiver(
         .get(owner)
         .copied()
         .unwrap_or_else(|| ctx.builtin(owner));
+    if class == base {
+        return Ok(());
+    }
     let is_type = ctx.is_type_object(class);
     if is_type && ctx.direct_subclass(class, base) {
         return Ok(());

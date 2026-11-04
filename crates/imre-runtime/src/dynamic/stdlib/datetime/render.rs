@@ -127,6 +127,16 @@ pub(super) fn date_isoformat(
     Ok(ctx.text(format!("{year:04}-{month:02}-{day:02}")))
 }
 
+/// Append a validated calendar field, including its leading zeroes.
+fn push_digits<const WIDTH: usize>(out: &mut String, mut value: i64) {
+    let mut bytes = [b'0'; WIDTH];
+    for digit in bytes.iter_mut().rev() {
+        *digit += (value % 10) as u8;
+        value /= 10;
+    }
+    out.extend(bytes.map(char::from));
+}
+
 pub(super) fn isoformat(
     ctx: &mut Context,
     method: &str,
@@ -223,24 +233,38 @@ pub(super) fn isoformat(
         let [y, m, d, h, min, s, us, _] = value.fields().map(|n| n as i64);
         (y, m, d, h, min, s, us)
     };
-    use std::fmt::Write;
-
+    let (components, precision) = match spec {
+        "hours" => (1, 0),
+        "minutes" => (2, 0),
+        "seconds" => (3, 0),
+        "milliseconds" => (3, 3),
+        "microseconds" => (3, 6),
+        "auto" => (3, if us == 0 { 0 } else { 6 }),
+        _ => return Err(Error::new("ValueError", "Unknown timespec value")),
+    };
     let mut text = String::with_capacity(32);
     let scalar_separator = char::from_u32(separator);
     if kind != "time" {
-        write!(text, "{y:04}-{m:02}-{d:02}").unwrap();
+        push_digits::<4>(&mut text, y);
+        text.push('-');
+        push_digits::<2>(&mut text, m);
+        text.push('-');
+        push_digits::<2>(&mut text, d);
         text.push(scalar_separator.unwrap_or('T'));
     }
-    match spec {
-        "hours" => write!(text, "{h:02}"),
-        "minutes" => write!(text, "{h:02}:{min:02}"),
-        "seconds" => write!(text, "{h:02}:{min:02}:{s:02}"),
-        "milliseconds" => write!(text, "{h:02}:{min:02}:{s:02}.{:03}", us / 1000),
-        "auto" if us == 0 => write!(text, "{h:02}:{min:02}:{s:02}"),
-        "microseconds" | "auto" => write!(text, "{h:02}:{min:02}:{s:02}.{us:06}"),
-        _ => return Err(Error::new("ValueError", "Unknown timespec value")),
+    push_digits::<2>(&mut text, h);
+    for &part in &[min, s][..components - 1] {
+        text.push(':');
+        push_digits::<2>(&mut text, part);
     }
-    .unwrap();
+    if precision != 0 {
+        text.push('.');
+        if precision == 3 {
+            push_digits::<3>(&mut text, us / 1000);
+        } else {
+            push_digits::<6>(&mut text, us);
+        }
+    }
     let Value::Calendar { tzinfo, .. } = *ctx.heap.get(ctx.scalar_value(receiver)) else {
         unreachable!()
     };
