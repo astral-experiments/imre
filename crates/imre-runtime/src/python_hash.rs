@@ -98,8 +98,8 @@ pub(crate) fn fraction_hash(numerator: &Int, denominator: &Int) -> Option<i64> {
 /// Both arguments are borrowed, live tagged integer handles.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_fraction_hash(numerator: usize, denominator: usize) -> usize {
-    let n = unsafe { Int::borrow(numerator) };
-    let d = unsafe { Int::borrow(denominator) };
+    // SAFETY: The calling Fraction keeps both integer fields alive for this borrow.
+    let (n, d) = unsafe { (Int::borrow(numerator), Int::borrow(denominator)) };
     let hash = fraction_hash(&n, &d).unwrap_or_else(|| {
         let negative = n
             .as_small()
