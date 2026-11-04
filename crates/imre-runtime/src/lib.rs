@@ -2065,6 +2065,7 @@ pub unsafe extern "C" fn imre_list_append_open_window(
 }
 
 /// Reads the ordinary last element and borrows the allocation for an immediate tail.
+/// Returns an owned nonzero integer word, or raw zero with a pending index error.
 ///
 /// # Safety
 /// The list and closed window must be live. After a successful immediate read,

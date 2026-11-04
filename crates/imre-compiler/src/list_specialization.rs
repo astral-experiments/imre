@@ -609,6 +609,18 @@ mod tests {
             calls
         };
         assert_eq!(operations(source), (1, 1, 1));
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        let (_, after_call) = llvm
+            .split_once(" = call i64 @get_in_append_window(")
+            .unwrap();
+        assert!(
+            after_call
+                .lines()
+                .nth(1)
+                .unwrap()
+                .contains(" = icmp eq i64 ")
+        );
+
         for observed in ["out[-2]", "out[-1] + len(out)", "out[-1] + len(data)"] {
             assert_eq!(operations(&source.replace("out[-1]", observed)), (0, 0, 0));
         }
