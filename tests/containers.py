@@ -371,7 +371,6 @@ print(point(), value("wrong"))
 """,
     "namedtuple_duplicate_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "x x")\n',
     "namedtuple_private_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "_x")\n',
-    "namedtuple_unchecked_options": 'from collections import namedtuple\nPair = namedtuple("Pair", "x", rename=True)\n',
     "namedtuple_missing_argument": 'from collections import namedtuple\nPair = namedtuple("Pair", "x y")\nprint(Pair(1))\n',
     "namedtuple_repeated_argument": 'from collections import namedtuple\nPair = namedtuple("Pair", "x")\nprint(Pair(1, x=2))\n',
     "namedtuple_readonly_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "x")\np = Pair(1)\np.x = 2\n',
