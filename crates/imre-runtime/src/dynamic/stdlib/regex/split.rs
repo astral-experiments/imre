@@ -46,6 +46,7 @@ pub(super) fn split(
     let mut cursor = 0;
     let mut previous = None;
     let mut count = 0;
+    let groups = pattern.group_count();
     let mut caps = pattern.regex.create_captures();
     while limit == 0 || count < limit {
         let span = match next_span(pattern, text, 0, previous, &mut caps) {
@@ -53,9 +54,8 @@ pub(super) fn split(
             Ok(None) => break,
             Err(message) => return Err(pattern.match_error(ctx, message)),
         };
-        let eol = caps.group_info().to_index(PatternID::ZERO, "imre.eol");
         pieces.push(Some(Span::from(cursor..span.start)));
-        pieces.extend((1..eol.unwrap_or(caps.group_len())).map(|i| caps.get_group(i)));
+        pieces.extend((1..=groups).map(|i| caps.get_group(i)));
         cursor = span.end;
         previous = Some(span);
         count += 1;
