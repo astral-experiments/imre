@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 4, 2026, Imre has a paired pass for **11,735 of 16,202 tests (72.4%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,787 of 16,202 tests (72.8%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -163,9 +163,9 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `copy` | 81 | 81 | 0 | Complete suite. Two independent machines ran all 81 upstream originals on stock and public `b9dfd225` at O0 and O3. All six runs passed and exited successfully. |
 | `fractions` | 50 | 50 | 0 | The ordinary fractions module ran all 50 original parents. Every parent passed on pinned stock and on public Imre O0 and O3. |
 | `glob` | 22 | 24 | 0 | On Linux, CPython and both native builds passed 22 of the 24 tests in the complete module, including the open-file stress test. All three skipped the two Windows tests. |
-| `gzip` | 66 | 75 | 0 | All native runs passed 66 of 75 upstream originals. Both O3 runs and two O0 runs passed 67. One earlier O0 run hit a child compiler error in `test_compress_stdin_outfile`, so that original remains uncredited. |
+| `gzip` | 68 | 75 | 0 | All 66 previous passes repeated. The public whole suite passed 69 of 75 at both native levels. The two new eligible originals cover peek and a file object without a name. A prior compiler failure keeps one CLI result under review. |
 | `inspect` | 185 | 362 | 0 | Two independent public builds passed all seven TestGetcallargsMethods originals. Four new keys cover plain, keyword-only, variable-keyword and mixed argument binding. |
-| `math` | 32 | 89 | 0 | Both native levels passed the six fused multiply-add originals on two public builds. The 1,030 numerical control outputs matched stock. |
+| `math` | 34 | 89 | 0 | The pinned exponential and square-root methods passed on stock and on clean public Imre at O0 and O3. The cumulative ledger contains 34 of 89. |
 | `ssl` | 49 | 195 | 0 | Stock and public Imre at O0 and O3 passed `test.test_ssl.ContextTests.test_load_dh_params` (occurrence 1). The source qualification also exercised real TLS handshakes using the loaded parameters. |
 | `struct` | 8 | 43 | 0 | The complete suite ran the same 43 original tests on all three engines. Stock CPython passed all 43. Public Imre O0 and O3 passed the same eight. |
 | `tokenize` | 53 | 130 | 0 | The unchanged test_max_indent passed on stock and public Imre at O0 and O3. It adds one new paired pass. |
@@ -174,9 +174,9 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `uuid` | 38 | 120 | 0 | All three engines ran 120 originals. Stock CPython passed 49. Public Imre O0 and O3 passed the same 38, including 11 newly paired UUID generation and CLI cases. All three skipped 71. |
 | `warnings` | 181 | 187 | 0 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| `zipfile` | 204 | 383 | 0 | Three additional originals now pass on the public compiler in both modes. They cover the good password and two forms of CRC failure in deflated ZIP entries. Both stored-entry controls also passed. |
+| `zipfile` | 252 | 383 | 0 | Across two public revisions, 249 distinct ZIP originals passed on stock and both native levels. Of those, 48 are new and 201 repeat earlier passes. Three earlier CLI passes failed in the later complete runs. The cumulative ledger contains 252 of 383. |
 | `zoneinfo` | 227 | 261 | 2 | One full public run passed 227 of 261 originals. A second machine verified 217 on the preceding public version and all ten additional cache originals on the newer one. Stock passed 233 and skipped 28. Two private-cache omissions remain in the denominator. |
-| **Measured total (19 of 19 families)** | **2,028** | **2,875** | **10** |  |
+| **Measured total (19 of 19 families)** | **2,080** | **2,875** | **10** |  |
 
 ### Whole-suite baselines for later additions
 
