@@ -188,11 +188,30 @@ def _instance_callable(spec):
     return getattr(spec, "__call__", None) is not None
 
 
+def _spec_async_methods(spec, names):
+    from inspect import getattr_static, iscoroutinefunction, unwrap
+
+    result = set()
+    for name in names:
+        member = getattr_static(spec, name, None)
+        if isinstance(member, (classmethod, staticmethod)):
+            member = member.__func__
+        try:
+            member = unwrap(member)
+        except ValueError:
+            # A wrapper cycle can still carry its own coroutine marker.
+            pass
+        if iscoroutinefunction(member):
+            result.add(name)
+    return result
+
+
 class NonCallableMock(_FixedMock):
     _mock_sealed = False
     _mock_methods = None
     _mock_strict = False
     _spec_class = None
+    _spec_asyncs = ()
     _mock_auto_magics = ()
 
     def __new__(cls, spec=None, *, spec_set=None, **kwargs):
@@ -204,6 +223,7 @@ class NonCallableMock(_FixedMock):
         methods = spec_set if spec_set is not None else spec
         if _is_instance_mock(methods):
             raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
+        original_spec = methods
         spec_class = None
         if issubclass(type(methods), type):
             spec_class = methods
@@ -211,6 +231,8 @@ class NonCallableMock(_FixedMock):
         elif methods is not None and type(methods) not in (list, tuple):
             spec_class = type(methods)
             methods = dir(methods)
+        if spec_class is not None:
+            object.__setattr__(self, "_spec_asyncs", _spec_async_methods(original_spec, methods))
         object.__setattr__(self, "_spec_class", spec_class)
         owner = type(self)
         for magic in owner._mock_auto_magics:
@@ -345,7 +367,13 @@ class NonCallableMock(_FixedMock):
     def _get_child_mock(self, /, **kwargs):
         # Each instance has a private subclass for its own protocol slots.
         factory = type(self).__mro__[1]
-        if not issubclass(factory, CallableMixin):
+        name = kwargs.get("_new_name")
+        if name in self._spec_asyncs:
+            factory = AsyncMock
+        elif issubclass(factory, AsyncMock):
+            is_sync = name in _mock_magics or name in (self._mock_methods or ())
+            factory = MagicMock if is_sync else AsyncMock
+        elif not issubclass(factory, CallableMixin):
             factory = MagicMock if issubclass(factory, NonCallableMagicMock) else Mock
         return factory(**kwargs)
 
@@ -435,6 +463,8 @@ class NonCallableMock(_FixedMock):
                 if "__%s__" % name[2:-2] == name:
                     clear_return = False
             node._reset_state(clear_return, clear_effect)
+            if issubclass(type(current), AsyncMock):
+                current._reset_await_state()
             current.mock_calls = _CallList()
             current.method_calls = _CallList()
             if node._result != -1:
@@ -474,8 +504,10 @@ class NonCallableMock(_FixedMock):
         return call(name, bound.args, bound.kwargs)
 
     def _assert_called_with(self, args, kwargs):
+        self._assert_last_with(args, kwargs, self._node.call_args, "call")
+
+    def _assert_last_with(self, args, kwargs, observed, action):
         expected = _new_call(args, kwargs)
-        observed = self._node.call_args
         cause = None
         if observed is not None:
             match = self._call_matcher(expected)
@@ -484,9 +516,12 @@ class NonCallableMock(_FixedMock):
             if isinstance(match, Exception):
                 cause = match
         name = self._name()
-        actual = "not called." if observed is None else _format_recorded_call(observed, name)
-        raise AssertionError("expected call not found.\nExpected: " +
-                             _format_recorded_call(expected, name) + "\n  Actual: " + actual) from cause
+        expected_text = _format_recorded_call(expected, name)
+        if action == "await" and observed is None:
+            raise AssertionError(f"Expected await: {expected_text}\nNot awaited")
+        latest = self._node.call_args if action == "await" else observed
+        actual = "not called." if latest is None else _format_recorded_call(latest, name)
+        raise AssertionError(f"expected {action} not found.\nExpected: {expected_text}\n  Actual: {actual}") from cause
 
     def assert_called_with(self, /, *args, **kwargs):
         self._assert_called_with(args, kwargs)
@@ -519,15 +554,18 @@ class NonCallableMock(_FixedMock):
             raise AssertionError(f"{self._name()!r} does not contain all of {tuple(missing)!r} in its call list, found {remaining!r} instead") from cause
 
     def assert_any_call(self, /, *args, **kwargs):
+        self._assert_any(args, kwargs, self._node.call_args_list, "call")
+
+    def _assert_any(self, args, kwargs, history, action):
         expected = _new_call(args, kwargs)
         match = self._call_matcher(expected)
         cause = match if isinstance(match, Exception) else None
         # Equality hooks may record more calls. Check only the history at entry.
         if cause is None:
-            for actual in [self._call_matcher(item) for item in self._node.call_args_list]:
+            for actual in [self._call_matcher(item) for item in history]:
                 if all([left == right for left, right in zip(match, actual)]):
                     return
-        raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found") from cause
+        raise AssertionError(f"{_format_recorded_call(expected, self._name())} {action} not found") from cause
 
 
 # CPython's protocol names must not fall through to ordinary attribute children.
@@ -602,7 +640,10 @@ class CallableMixin:
             parent.mock_calls.append(_Call((path, args, kwargs)))
             current = parent._node
 
-        effect = node.side_effect
+        return self._execute_mock_call(*args, **kwargs)
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        effect = self.side_effect
         if effect is not None:
             if _is_exception(effect):
                 raise effect
@@ -623,6 +664,95 @@ class Mock(CallableMixin, NonCallableMock):
 
 class MagicMock(Mock):
     _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__setitem__", "__hash__", "__int__", "__iter__", "__next__")
+
+
+class AsyncMock(Mock):
+    """Record calls immediately, then execute their effects when awaited."""
+
+    _mock_auto_magics = MagicMock._mock_auto_magics
+
+    def __init__(self, /, *args, **kwargs):
+        from inspect import markcoroutinefunction
+
+        super().__init__(*args, **kwargs)
+        # The marker belongs to the instance, including when spec_set restricts writes.
+        object.__setattr__(self, "_is_coroutine_marker", None)
+        markcoroutinefunction(self)
+        self._reset_await_state()
+
+    def _reset_await_state(self):
+        object.__setattr__(self, "await_count", 0)
+        object.__setattr__(self, "await_args", None)
+        object.__setattr__(self, "await_args_list", _CallList())
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        from inspect import iscoroutinefunction
+
+        recorded = _new_call(args, kwargs)
+        self.await_count += 1
+        self.await_args = recorded
+        self.await_args_list.append(recorded)
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            if not _callable(effect):
+                try:
+                    result = next(effect)
+                except StopIteration:
+                    raise StopAsyncIteration
+                if _is_exception(result):
+                    raise result
+            elif iscoroutinefunction(effect):
+                result = await effect(*args, **kwargs)
+            else:
+                result = effect(*args, **kwargs)
+            if result is not DEFAULT:
+                return result
+        return self.return_value
+
+    def assert_not_awaited(self):
+        if self.await_count != 0:
+            raise AssertionError(f"Expected {self._name()} to not have been awaited. Awaited {self.await_count} times.")
+
+    def assert_awaited(self):
+        if self.await_count == 0:
+            raise AssertionError(f"Expected {self._name()} to have been awaited.")
+
+    def assert_awaited_once(self):
+        if self.await_count != 1:
+            raise AssertionError(f"Expected {self._name()} to have been awaited once. Awaited {self.await_count} times.")
+
+    def assert_awaited_with(self, /, *args, **kwargs):
+        self._assert_last_with(args, kwargs, self.await_args, "await")
+
+    def assert_awaited_once_with(self, /, *args, **kwargs):
+        self.assert_awaited_once()
+        self.assert_awaited_with(*args, **kwargs)
+
+    def assert_any_await(self, /, *args, **kwargs):
+        self._assert_any(args, kwargs, self.await_args_list, "await")
+
+    def assert_has_awaits(self, calls, any_order=False):
+        expected = [self._call_matcher(item) for item in calls]
+        cause = next((item for item in expected if isinstance(item, Exception)), None)
+        actual = _CallList(self._call_matcher(item) for item in self.await_args_list)
+        if not any_order:
+            if expected not in actual:
+                problem = "Awaits not found."
+                if cause is not None:
+                    errors = [item if isinstance(item, Exception) else None for item in expected]
+                    problem = f"Error processing expected awaits.\nErrors: {errors}"
+                raise AssertionError(f"{problem}\nExpected: {_CallList(calls)}\nActual: {self.await_args_list}") from cause
+            return
+        missing = []
+        for item in expected:
+            try:
+                actual.remove(item)
+            except ValueError:
+                missing.append(item)
+        if missing:
+            raise AssertionError(f"{tuple(missing)!r} not all found in await list") from cause
 
 
 class NonCallableMagicMock(NonCallableMock):
