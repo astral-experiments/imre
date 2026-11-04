@@ -1990,6 +1990,7 @@ fn grow_int_list(list: &mut Vec<Int>, hint: &Cell<usize>) -> bool {
     true
 }
 
+#[inline]
 fn try_append_int(list: &mut Vec<Int>, value: &Int, hint: &Cell<usize>) -> bool {
     if list.len() == list.capacity() && !grow_int_list(list, hint) {
         objects::exceptions::sequence_allocation_failed();
