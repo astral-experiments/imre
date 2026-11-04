@@ -2458,18 +2458,24 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 .try_reserve_exact(length)
                 .map_err(|_| Error::allocation())?;
             if ascii_small {
+                // Every present small integer is odd. Accumulate its tag while
+                // copying, and turn missing entries into tagged integer zeros.
+                let mut present = 1;
                 for (slot, &character) in values.spare_capacity_mut()[..length]
                     .iter_mut()
                     .zip(text.as_bytes())
                 {
-                    // SAFETY: ascii_small proved this immutable text is ASCII,
-                    // so every byte indexes within the 128-entry lookup cache.
+                    // SAFETY: every byte in this immutable text is ASCII.
                     let word = *ascii.values.get_unchecked(usize::from(character));
-                    slot.write(Int(if word == 0 {
-                        missing(char::from(character))?
-                    } else {
-                        word
-                    }));
+                    present &= word;
+                    slot.write(Int(word | 1));
+                }
+                if present == 0 && mapping.missing != Missing::Zero {
+                    let character = text
+                        .bytes()
+                        .find(|&byte| ascii.values[usize::from(byte)] == 0)
+                        .expect("an ASCII key was missing");
+                    return Err(missing(char::from(character)).expect_err("missing key raises"));
                 }
                 // SAFETY: the equal-length zip initialized every slot. The
                 // cache proves all words are small integers, so an earlier
