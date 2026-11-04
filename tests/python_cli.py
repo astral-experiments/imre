@@ -1950,7 +1950,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             app.writestr("mailcli.py", mail_module)
         (later.parent / "quopri.py").write_text(codec % b"directory:")
         (later.parent / "mailcli.py").write_text(mail_module)
-        for roots in ((archive, later.parent), (later.parent, archive)):
+        for roots in ((archive, archive, later.parent), (later.parent, archive)):
             for args in ((mailapp,), ("-c", mail_command), ("-m", "mailcli")):
                 compare("-B", *args, extra={"PYTHONPATH": os.pathsep.join(map(str, roots))},
                         native_timeout=300)

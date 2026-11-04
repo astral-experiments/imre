@@ -801,10 +801,10 @@ pub(crate) fn compile<const SPLIT: bool>(
         .map(|(_, path)| cwd.join(path))
         .chain((options.path_entry && !entry.is_dir()).then(|| entry.clone()))
     {
-        archives.insert(
-            path.clone(),
-            crate::zip_entry::ZipSources::open(&path, &mut inputs)?,
-        );
+        if let std::collections::hash_map::Entry::Vacant(entry) = archives.entry(path) {
+            let archive = crate::zip_entry::ZipSources::open(entry.key(), &mut inputs)?;
+            entry.insert(archive);
+        }
     }
     let mut sources = vec![(
         "__main__".to_owned(),
