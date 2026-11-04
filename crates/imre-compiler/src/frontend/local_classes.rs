@@ -68,17 +68,26 @@ impl Checker<'_> {
         if crate::classes::defines_pickle_reducer(node) {
             return Err(self.object_runtime_export("pickle reducers", node));
         }
-        if let Some(base) = node
-            .arguments
-            .iter()
-            .flat_map(|args| &args.args)
-            .find(|base| {
-                self.graph
-                    .session
-                    .is_collections_storage_base(self.module, base)
-            })
-        {
-            return Err(self.scoped_builtin_error("collections storage subclasses", base));
+        for base in node.arguments.iter().flat_map(|args| &args.args) {
+            if self.graph.session.is_known_class(
+                self.module,
+                base,
+                ty_python_semantic::types::KnownClass::Str,
+            ) {
+                let error = self.object_export_error("str subclasses", base);
+                self.graph.require_object_class_layout(format!(
+                    "{}:{error}",
+                    self.graph.modules[self.module].path.display()
+                ));
+                return Err(error);
+            }
+            if self
+                .graph
+                .session
+                .is_collections_storage_base(self.module, base)
+            {
+                return Err(self.scoped_builtin_error("collections storage subclasses", base));
+            }
         }
         if let Some(base) = node
             .arguments

@@ -241,6 +241,30 @@ def current():
     keys = {first: 1, second: 2}
     assert keys[first] == 1 and keys[second] == 2
 
+    class Key(str):
+        __eq__ = str.__eq__
+        __hash__ = str.__hash__
+
+    assert str.__dict__["__hash__"] is Key.__hash__ is str.__hash__
+    assert str.__hash__.__objclass__ is str
+    for text in ("", "Málaga", "\ud800"):
+        key = Key(text)
+        assert key.__hash__() == hash(key) == hash(text)
+        assert {key: 1}[text] == {text: 1}[key]
+
+    class CustomHash(Key):
+        def __hash__(self):
+            return 42
+
+    key = CustomHash("zone")
+    assert hash(key) == 42 and str.__hash__(key) == hash("zone")
+    try:
+        str.__hash__(42)
+    except TypeError as error:
+        assert str(error) == "descriptor '__hash__' requires a 'str' object but received a 'int'"
+    else:
+        raise AssertionError("str.__hash__ accepted an integer")
+
     class Number(int):
         def __radd__(self, other):
             return "reflected"

@@ -267,6 +267,7 @@ impl BuiltinDescriptor {
             "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
             "str.__eq__" => ("str", "__eq__"),
+            "str.__hash__" => ("str", "__hash__"),
             "str.__format__" => ("str", "__format__"),
             "str.__mod__" => ("str", "__mod__"),
             "str.__rmod__" => ("str", "__rmod__"),
