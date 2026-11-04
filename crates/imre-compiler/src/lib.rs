@@ -887,7 +887,7 @@ mod tests {
                     runtime_imports,
                     ..Default::default()
                 };
-                let ordinary = super::object_fallback(
+                let ordinary = super::object_fallback::<false, _>(
                     &path,
                     None,
                     &options,
