@@ -132,6 +132,12 @@ impl BuiltinDescriptor {
                 Some(("tuple_iterator", attr, &["__iter__", "__next__"][..]))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("struct.Struct", attr)) => Some(("struct.Struct", attr, &["iter_unpack"][..])),
+            Some((value::STRUCT_UNPACK_ITERATOR, attr)) => Some((
+                value::STRUCT_UNPACK_ITERATOR,
+                attr,
+                builtins::UNPACK_ITERATOR_METHODS,
+            )),
             Some(("memory_iterator", attr)) => {
                 Some(("memory_iterator", attr, &["__iter__", "__next__"][..]))
             }
@@ -222,7 +228,9 @@ impl BuiltinDescriptor {
                 owner,
                 name,
                 method: !name.starts_with("__")
-                    || (deque::iterator_class(owner).is_some() && name == "__length_hint__")
+                    || (name == "__length_hint__"
+                        && (owner == value::STRUCT_UNPACK_ITERATOR
+                            || deque::iterator_class(owner).is_some()))
                     || (owner == "list" && name == "__getitem__")
                     || (matches!(owner, "set" | "frozenset") && name == "__contains__")
                     || (owner == defaultdict::CLASS && name == "__missing__")
@@ -445,6 +453,7 @@ impl BuiltinDescriptor {
             "list_iterator"
             | "tuple_iterator"
             | "memory_iterator"
+            | value::STRUCT_UNPACK_ITERATOR
             | "generator"
             | "async_generator"
             | "async_generator_asend"
@@ -490,6 +499,7 @@ impl BuiltinDescriptor {
             "memoryview" => matches!(ctx.heap.get(receiver), Value::MemoryView { .. }),
             "array.array" => matches!(ctx.heap.get(receiver), Value::Array(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
+            "struct.Struct" => matches!(ctx.heap.get(receiver), Value::Struct { .. }),
             "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
             "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => {
                 ctx.builtin_type_name(receiver) == Some(self.owner)

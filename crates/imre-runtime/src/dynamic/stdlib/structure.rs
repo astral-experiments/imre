@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
-use super::super::builtins::{bind_builtin_arguments, boolean};
+use super::super::builtins::{bind_builtin_arguments, boolean, one_positional_arg};
 use super::{
     Context, Error, Id, NONE, Result, Value,
     system::{StructFormat, UnpackedField},
@@ -121,6 +121,135 @@ fn unpacked_tuple(ctx: &mut Context, fields: Vec<UnpackedField>) -> Id {
     ctx.alloc(Value::Tuple(items))
 }
 
+pub(super) fn module_iter_unpack(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_struct.iter_unpack() takes no keyword arguments",
+        ));
+    }
+    let [_, buffer] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("iter_unpack expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let record = new(ctx, &args[..1], &[])?;
+    iter_unpack(ctx, record, *buffer)
+}
+
+fn iter_unpack(ctx: &mut Context, record: Id, source: Id) -> Result<Id> {
+    let Value::Struct { layout, .. } = ctx.heap.get(record) else {
+        unreachable!("parsed Struct")
+    };
+    let size = layout.size;
+    if size == 0 {
+        return Err(format_error(
+            ctx,
+            "cannot iteratively unpack with a struct of length 0",
+        ));
+    }
+
+    let (buffer, exporter) = if let Some(method) = ctx.python_buffer_method(source, true)? {
+        (ctx.acquire_python_buffer(source, method, 0)?, Some(source))
+    } else {
+        (source, None)
+    };
+    // The iterator exports the original view, so even memoryview.release() must wait.
+    let length = ctx.native_buffer_bytes(buffer)?.len();
+    if !length.is_multiple_of(size) {
+        if let Some(exporter) = exporter {
+            ctx.release_python_buffer(exporter, buffer);
+        }
+        return Err(format_error(
+            ctx,
+            format!("iterative unpacking requires a buffer of a multiple of {size} bytes"),
+        ));
+    }
+    ctx.heap.note_buffer_view(ctx.view_storage_id(buffer));
+    let id = ctx.alloc(Value::StructUnpackIterator {
+        record: Some(record),
+        buffer: Some(buffer),
+        exporter,
+        offset: 0,
+        remaining: length / size,
+    });
+    if exporter.is_some() {
+        ctx.heap.register_finalizer(id);
+    }
+    Ok(id)
+}
+
+pub(in super::super) fn advance_iterator(ctx: &mut Context, id: Id) -> Result<Option<Id>> {
+    let Value::StructUnpackIterator {
+        record: Some(record),
+        buffer: Some(buffer),
+        offset,
+        remaining,
+        ..
+    } = *ctx.heap.get(id)
+    else {
+        return Ok(None);
+    };
+    if remaining == 0 {
+        release_iterator(ctx, id);
+        return Ok(None);
+    }
+    let Value::Struct { layout, .. } = ctx.heap.get(record) else {
+        unreachable!("iterator holds a Struct")
+    };
+    let bytes = ctx.native_buffer_bytes(buffer)?;
+    let end = offset + layout.size;
+    let bytes = bytes
+        .get(offset..end)
+        .ok_or_else(|| Error::new("BufferError", "exported buffer changed size"))?;
+    let fields = layout.unpack(bytes);
+    let Value::StructUnpackIterator {
+        offset, remaining, ..
+    } = ctx.heap.get_mut(id)
+    else {
+        unreachable!()
+    };
+    *offset = end;
+    *remaining -= 1;
+    let fields = fields.map_err(|e| format_error(ctx, e))?;
+    Ok(Some(unpacked_tuple(ctx, fields)))
+}
+
+pub(in super::super) fn release_iterator(ctx: &mut Context, id: Id) {
+    let Value::StructUnpackIterator {
+        record,
+        buffer,
+        exporter,
+        remaining,
+        ..
+    } = ctx.heap.get_mut(id)
+    else {
+        unreachable!()
+    };
+    // Detach before invoking a Python release hook, which may call next() again.
+    let (record, buffer, exporter) = (record.take(), buffer.take(), exporter.take());
+    *remaining = 0;
+    if let Some(record) = record {
+        ctx.heap.weak_edge_removed(record);
+    }
+    let Some(buffer) = buffer else { return };
+    ctx.heap.weak_edge_removed(buffer);
+    if let Some(exporter) = exporter {
+        ctx.heap.weak_edge_removed(exporter);
+        if ctx.heap.is_pending_finalizer(id) {
+            ctx.heap.take_finalizer(id, true);
+        }
+        ctx.heap.keep(buffer);
+        ctx.heap.keep(exporter);
+        ctx.release_python_buffer(exporter, buffer);
+    }
+}
+
 pub(super) fn module_unpack_from(
     ctx: &mut Context,
     args: &[Id],
@@ -170,10 +299,25 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (&receiver, args) = args.split_first().expect("bound Struct method");
-    let Value::Struct { layout, .. } = ctx.heap.get(receiver) else {
-        unreachable!("bound Struct method")
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method Struct.{name}() needs an argument"),
+        ));
     };
+    let Value::Struct { layout, .. } = ctx.heap.get(receiver) else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{name}' for '_struct.Struct' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            ),
+        ));
+    };
+    if name == "iter_unpack" {
+        let buffer = one_positional_arg("Struct.iter_unpack", args, kwargs)?;
+        return iter_unpack(ctx, receiver, buffer);
+    }
     let layout = Rc::clone(layout);
     if name == "unpack_from" {
         let [Some(buffer), offset] =

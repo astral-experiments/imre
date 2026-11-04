@@ -104,8 +104,18 @@ impl Context {
         };
         let async_generator = matches!(self.heap.get(owner), Value::AsyncGenerator { .. });
         let generator = matches!(self.heap.get(owner), Value::Generator { .. });
-        let found =
-            scan.is_some() || generator || async_generator || self.slot(owner, "__del__").is_some();
+        let unpack_iterator = matches!(
+            self.heap.get(owner),
+            Value::StructUnpackIterator {
+                exporter: Some(_),
+                ..
+            }
+        );
+        let found = scan.is_some()
+            || generator
+            || async_generator
+            || unpack_iterator
+            || self.slot(owner, "__del__").is_some();
         self.heap.take_finalizer(owner, found);
         super::stdlib::io::note_writer_finalizer(self, owner);
         if !found {
@@ -123,6 +133,8 @@ impl Context {
         }
         if let Some(scan) = scan {
             super::stdlib::os::scandir::finalize(self, owner, &scan);
+        } else if unpack_iterator {
+            super::stdlib::structure::release_iterator(self, owner);
         } else if async_generator {
             if let Err(error) = self.finalize_async_generator(owner) {
                 eprintln!(

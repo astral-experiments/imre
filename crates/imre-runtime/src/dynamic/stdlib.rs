@@ -816,7 +816,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
-        | ("struct", "calcsize" | "pack" | "pack_into" | "unpack" | "unpack_from")
+        | (
+            "struct",
+            "calcsize" | "iter_unpack" | "pack" | "pack_into" | "unpack" | "unpack_from",
+        )
         | ("base64", "b16encode" | "urlsafe_b64encode" | "urlsafe_b64decode")
         | (
             "random",
@@ -1727,6 +1730,9 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::ThreadLocal(Default::default())));
+    }
+    if name == "struct.iter_unpack" {
+        return structure::module_iter_unpack(ctx, args, kwargs);
     }
     if name == "struct.unpack_from" {
         return structure::module_unpack_from(ctx, args, kwargs);
