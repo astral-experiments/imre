@@ -2491,7 +2491,7 @@ impl Context {
         }
         if name == stdlib::functools::LRU_CACHE_CLASS {
             let mut entries = Vec::new();
-            for &member in stdlib::functools::COPY_METHODS {
+            for &member in stdlib::functools::LRU_METHODS {
                 let method = self.builtin(&format!("{name}.{member}"));
                 entries.push((self.heap.code_name(member), method));
             }

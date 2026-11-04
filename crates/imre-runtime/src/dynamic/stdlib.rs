@@ -2856,22 +2856,19 @@ pub(super) fn call(
         }
         return Ok(receiver);
     }
-    if let Some((functools::LRU_CACHE_CLASS, method)) = name.rsplit_once('.')
-        && functools::COPY_METHODS.contains(&method)
+    if let Some((owner @ functools::LRU_CACHE_CLASS, method)) = name.rsplit_once('.')
+        && functools::LRU_METHODS.contains(&method)
     {
-        if method == "__reduce__" {
-            let wrapper = builtins::noargs_method_receiver(
-                ctx,
-                functools::LRU_CACHE_CLASS,
-                method,
-                args,
-                kwargs,
-            )?;
-            return ctx.lookup_attr(wrapper, "__qualname__");
+        if matches!(method, "__copy__" | "__deepcopy__") {
+            let (wrapper, _) = builtins::method_receiver_args(ctx, owner, method, args, kwargs)?;
+            return Ok(wrapper);
         }
-        let (wrapper, _) =
-            builtins::method_receiver_args(ctx, functools::LRU_CACHE_CLASS, method, args, kwargs)?;
-        return Ok(wrapper);
+        let wrapper = builtins::noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+        return if method == "__reduce__" {
+            ctx.lookup_attr(wrapper, "__qualname__")
+        } else {
+            functools::cache_method(ctx, method, wrapper)
+        };
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
@@ -2942,8 +2939,6 @@ pub(super) fn call(
         | "collections.defaultdict.copy"
         | "collections.defaultdict.__copy__"
         | "collections.defaultdict.__reduce__"
-        | "functools._lru_cache_wrapper.cache_clear"
-        | "functools._lru_cache_wrapper.cache_info"
         | "file.__enter__" => (1, &[]),
         _ => (0, &[]),
     };
@@ -3150,9 +3145,6 @@ pub(super) fn call(
             argument(args, 1)?,
             argument(args, 2)?,
         )?,
-        "functools._lru_cache_wrapper.cache_info" | "functools._lru_cache_wrapper.cache_clear" => {
-            functools::cache_method(ctx, name, argument(args, 0)?)?
-        }
         "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;
             if let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) {

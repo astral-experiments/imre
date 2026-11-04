@@ -5,7 +5,13 @@ use crate::dynamic::{
 
 pub(in crate::dynamic) const PARTIAL_CLASS: &str = "functools.partial";
 pub(in crate::dynamic) const LRU_CACHE_CLASS: &str = "functools._lru_cache_wrapper";
-pub(in crate::dynamic) const COPY_METHODS: &[&str] = &["__reduce__", "__copy__", "__deepcopy__"];
+pub(in crate::dynamic) const LRU_METHODS: &[&str] = &[
+    "__reduce__",
+    "__copy__",
+    "__deepcopy__",
+    "cache_info",
+    "cache_clear",
+];
 
 pub(super) fn placeholder(ctx: &mut Context) -> Id {
     let key = "functools.Placeholder";
@@ -403,7 +409,7 @@ pub(super) fn cache_method(ctx: &mut Context, name: &str, wrapper: Id) -> Result
     else {
         return Err(Error::new("TypeError", "expected a cache wrapper"));
     };
-    if name.ends_with(".cache_clear") {
+    if name == "cache_clear" {
         let Value::Cached {
             entries,
             hits,
