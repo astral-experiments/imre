@@ -2808,7 +2808,7 @@ def report(text):
             "print(value == Peer(), value < Peer())\n"
         )
         compare("-IB", "-c", decimal_import + "import decimal_reflected")
-        for expression in ("Decimal('1.00') < Decimal(1)", "Decimal('1.00') == 1"):
+        for expression in ("Decimal('1.00') < Decimal(1)", "Decimal('1.00') == 1.0"):
             (helpers / "decimal_boundary.py").write_text(
                 f"from decimal import Decimal\nprint({expression})\n"
             )

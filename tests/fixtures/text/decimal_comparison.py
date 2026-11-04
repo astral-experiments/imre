@@ -31,3 +31,9 @@ for left, right in (
 
 value = Decimal("1")
 print(value == "1", "1" != value)
+print(value == 1, True == value, False != Decimal("-0.00"))
+one = 1
+print(value == one is value, value == one is not value)
+large = 9007199254740993
+print(large == Decimal("9007199254740993.0"), Decimal("9007199254740992") != large)
+print(Decimal("1e999999999") == 1, 0 != Decimal("1e-999999999"))
