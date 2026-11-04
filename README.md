@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 4, 2026, Imre has a paired pass for **11,474 of 16,202 tests (70.8%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,481 of 16,202 tests (70.9%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -142,11 +142,11 @@ It passed **15,161**, skipped 1,023, and reported 7 errors.
 | `subprocess` | 302 | 353 | 3 | Both original empty-environment cases passed on stock and on public Imre at O0 and O3. They exercise child execution when the supplied environment has no PATH. |
 | `tempfile` | 110 | 118 | 2 | All three runs registered the same 118 original parents. CPython passed 112 and skipped six. Public Imre passed 110 and skipped eight at both levels. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
-| `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
+| `threading` | 85 | 228 | 1 | Event and lock reset after fork each pass on public builds at O0 and O3. An independent run also forked and waited for a real child. These two originals were previously uncredited. |
 | `typing` | 710 | 712 | 1 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. |
 | `unittest` | 597 | 1,090 | 0 | Two public workers passed four additional mock-helper originals on stock and both native profiles. One covers dataclass hashing. The other three appeared in a complete 84-parent replay and an independent selected run. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,653** | **13,327** | **34** | **3 complete suites match stock on `main`** |
+| **Total** | **9,655** | **13,327** | **34** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -160,7 +160,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `base64` | 38 | 41 | 0 | Both native runs of the full suite passed 38 of 41 originals. The five new passes cover command-line decoding, file and stdin encoding, help, and invalid flags. Two originals errored on b16encode and one skipped. Stock passed all 41. |
 | `configparser` | 326 | 344 | 0 | Stock and both native builds passed the same 19 original multiline parsing tests on public main. All 19 are new to the ledger. |
 | `contextlib` | 148 | 149 | 0 | All 58 async originals and 90 of 91 synchronous originals have paired passes. The module entry point passed nine of the ten `TestSuppress` cases on public Imre. The remaining case exercises exception groups. |
-| `copy` | 76 | 81 | 0 | Two tuple-subclass originals passed after #5183, both in a complete 81-parent public run and in a second public replay. |
+| `copy` | 81 | 81 | 0 | Complete suite. Two independent machines ran all 81 upstream originals on stock and public `b9dfd225` at O0 and O3. All six runs passed and exited successfully. |
 | `fractions` | 50 | 50 | 0 | The ordinary fractions module ran all 50 original parents. Every parent passed on pinned stock and on public Imre O0 and O3. |
 | `glob` | 22 | 24 | 0 | On Linux, CPython and both native builds passed 22 of the 24 tests in the complete module, including the open-file stress test. All three skipped the two Windows tests. |
 | `gzip` | 32 | 75 | 0 | Two independent public #5196 workers ran the same three upstream gzip timestamp originals, including a real file-backed round-trip. |
@@ -176,7 +176,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 204 | 383 | 0 | Three additional originals now pass on the public compiler in both modes. They cover the good password and two forms of CRC failure in deflated ZIP entries. Both stored-entry controls also passed. |
 | `zoneinfo` | 69 | 261 | 0 | Four intact upstream classes on an independent public build confirmed all 28 time-zone lookup and search-path originals that passed in the full 261-parent public run. |
-| **Measured total (19 of 19 families)** | **1,821** | **2,875** | **8** |  |
+| **Measured total (19 of 19 families)** | **1,826** | **2,875** | **8** |  |
 
 ### Whole-suite baselines for later additions
 
