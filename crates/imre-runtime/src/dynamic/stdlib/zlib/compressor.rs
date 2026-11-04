@@ -102,6 +102,7 @@ fn copy_stream(stream: &mut Stream) -> Result<Stream> {
     match status {
         ReturnCode::Ok => Ok(Stream {
             codec: stream.codec,
+            // SAFETY: deflateCopy initialized the destination stream on success.
             raw: unsafe { raw.assume_init() },
         }),
         ReturnCode::MemError => Err(Error::new(
