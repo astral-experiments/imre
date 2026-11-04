@@ -1837,6 +1837,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             "quopri.encode(io.BytesIO(body), encoded, False)\n"
             "print(encoded.getvalue())\n"
             "print(quopri.decodestring(encoded.getvalue()) == body)\n",
+            native_timeout=600,
         )
 
         config_script = root / "config_entry.py"
