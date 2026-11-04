@@ -16,7 +16,9 @@ pub(crate) mod base32;
 mod base85;
 pub(crate) use base85::encode as base85_encode;
 mod binascii;
-pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, crc32, unhexlify};
+pub(crate) use binascii::{
+    adler32, binascii_decode, binascii_encode, crc32, encode_quoted_printable, unhexlify,
+};
 pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;

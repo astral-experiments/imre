@@ -146,7 +146,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "binascii" if function == "crc32" => Some((module, function)),
+        "binascii" if matches!(function, "b2a_qp" | "crc32") => Some((module, function)),
         "zlib" if function == "compressobj" => Some((module, function)),
         "lzma" if function == "decompress" => Some((module, function)),
         "zlib"
@@ -2768,6 +2768,19 @@ impl Context {
                         if let Some(original) = self.threads.system_module {
                             return Ok(original);
                         }
+                    }
+                    "__text_signature__" if symbol == "binascii.b2a_qp" => {
+                        return Ok(self.text(
+                            "($module, /, data, quotetabs=False, istext=True, header=False)",
+                        ));
+                    }
+                    "__doc__" if symbol == "binascii.b2a_qp" => {
+                        return Ok(self.text(concat!(
+                            "Encode a string using quoted-printable encoding.\n\n",
+                            "On encoding, when istext is set, newlines are not encoded, and white\n",
+                            "space at end of lines is.  When istext is not set, \\r and \\n (CR/LF)\n",
+                            "are both encoded.  When quotetabs is set, space and tabs are encoded."
+                        )));
                     }
                     "__text_signature__" if symbol == "sys.set_coroutine_origin_tracking_depth" => {
                         return Ok(self.text("($module, /, depth)"));
