@@ -14,3 +14,4 @@ import nameinfo
 import numeric_host
 import resolver
 import packed_addresses
+import buffered_reader
