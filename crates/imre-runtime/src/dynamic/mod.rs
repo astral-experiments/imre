@@ -825,6 +825,7 @@ impl Context {
                 | Value::RangeIterator(_)
                 | Value::GenericAliasIterator(_)
                 | Value::MemoryIterator { .. }
+                | Value::StructUnpackIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -997,6 +998,7 @@ impl Context {
             Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
                 | Value::MemoryIterator { .. }
+                | Value::StructUnpackIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1337,6 +1339,9 @@ impl Context {
                 self.alloc(Value::GenericAlias(alias.unpacked_copy()))
             }));
         }
+        if matches!(self.heap.get(id), Value::StructUnpackIterator { .. }) {
+            return stdlib::structure::advance_iterator(self, id);
+        }
         if let Value::MemoryIterator {
             view,
             index,
@@ -1629,6 +1634,7 @@ impl Context {
                 | Value::GenericAliasIterator(_)
                 | Value::MemoryView { .. }
                 | Value::MemoryIterator { .. }
+                | Value::StructUnpackIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }

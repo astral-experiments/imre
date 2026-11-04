@@ -67,6 +67,7 @@ pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
 pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
 
+pub(super) const STRUCT_UNPACK_ITERATOR: &str = "_struct.unpack_iterator";
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const REGEX_SCANNER_TYPE: &str = "_sre.SRE_Scanner";
@@ -1087,6 +1088,13 @@ pub(super) enum Value {
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
+    StructUnpackIterator {
+        record: Option<Id>,
+        buffer: Option<Id>,
+        exporter: Option<Id>,
+        offset: usize,
+        remaining: usize,
+    },
     MemoryIterator {
         view: Option<Id>,
         index: usize,
@@ -1512,6 +1520,7 @@ impl Value {
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
             Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
+            Self::StructUnpackIterator { .. } => STRUCT_UNPACK_ITERATOR,
             Self::MemoryIterator { .. } => "memory_iterator",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1712,6 +1721,16 @@ impl Value {
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
+            Self::StructUnpackIterator {
+                record,
+                buffer,
+                exporter,
+                ..
+            } => {
+                visit.extend(record);
+                visit.extend(buffer);
+                visit.extend(exporter);
+            }
             Self::MemoryIterator { view: source, .. }
             | Self::SequenceIterator { source, .. }
             | Self::ReverseSequence { source, .. }
@@ -3971,9 +3990,15 @@ impl Heap {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
         let exports = |slot: &Slot| match slot.value {
-            Some(Value::MemoryView {
-                owner: Some(owner), ..
-            }) => {
+            Some(
+                Value::MemoryView {
+                    owner: Some(owner), ..
+                }
+                | Value::StructUnpackIterator {
+                    buffer: Some(owner),
+                    ..
+                },
+            ) => {
                 owner == storage
                     || matches!(self.get(owner),
                     Value::Instance { scalar: Some(backing), .. } | Value::BytesIoBuffer { storage: backing, .. }

@@ -21,6 +21,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | value::REGEX_PATTERN_TYPE
             | value::REGEX_MATCH_TYPE
             | value::REGEX_SCANNER_TYPE
+            | value::STRUCT_UNPACK_ITERATOR
     )
 }
 
@@ -3778,6 +3779,7 @@ impl Context {
                         | value::REGEX_PATTERN_TYPE
                         | value::REGEX_MATCH_TYPE
                         | value::REGEX_SCANNER_TYPE
+                        | value::STRUCT_UNPACK_ITERATOR
                         | "_contextvars.Context"
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
@@ -3821,6 +3823,12 @@ impl Context {
                     "__dict__" if class == super::deque::CLASS => {
                         return super::deque::class_dictionary(self, obj);
                     }
+                    "__base__" if class == value::STRUCT_UNPACK_ITERATOR => {
+                        return Ok(self.builtin("object"));
+                    }
+                    "__bases__" | "__mro__" if class == value::STRUCT_UNPACK_ITERATOR => {
+                        return Ok(self.builtin_hierarchy_tuple(obj, name));
+                    }
                     "__module__" if class == super::deque::CLASS => {
                         return Ok(self.heap.code_name(module));
                     }
@@ -3831,7 +3839,10 @@ impl Context {
                     }
                     _ if matches!(
                         class.as_str(),
-                        KEY_WRAPPER | value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE
+                        KEY_WRAPPER
+                            | value::REGEX_PATTERN_TYPE
+                            | value::REGEX_MATCH_TYPE
+                            | value::STRUCT_UNPACK_ITERATOR
                     ) && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
@@ -4332,6 +4343,9 @@ impl Context {
                     && let Some(member) = self.own_class_attr(obj, name) =>
             {
                 return Ok(member);
+            }
+            Value::Native(ref class) if class == "struct.Struct" && name == "iter_unpack" => {
+                return Ok(self.builtin("struct.Struct.iter_unpack"));
             }
             Value::Struct {
                 ref format,
@@ -4998,7 +5012,11 @@ impl Context {
     /// Subclasses keep their writable namespaces when the defining type is immutable.
     fn check_immutable_type_write(&self, obj: Id, attr: &str) -> Result<()> {
         if let Value::Native(class) = self.heap.get(obj)
-            && (super::deque::iterator_class(class).is_some() || class == value::REGEX_SCANNER_TYPE)
+            && (super::deque::iterator_class(class).is_some()
+                || matches!(
+                    class.as_str(),
+                    value::REGEX_SCANNER_TYPE | value::STRUCT_UNPACK_ITERATOR
+                ))
         {
             return Err(Error::new(
                 "TypeError",
@@ -7138,6 +7156,12 @@ impl Context {
             }
             Value::Native(name) if builtins::is_enum_base(&name) => {
                 self.functional_enum(callable, args, kwargs)
+            }
+            Value::Native(ref name)
+                if let Some((value::STRUCT_UNPACK_ITERATOR, method)) = name.rsplit_once('.')
+                    && builtins::UNPACK_ITERATOR_METHODS.contains(&method) =>
+            {
+                self.iterator_method(value::STRUCT_UNPACK_ITERATOR, method, &args, &kwargs)
             }
             Value::Native(name) if nonconstructible_result_type(&name) => Err(Error::new(
                 "TypeError",

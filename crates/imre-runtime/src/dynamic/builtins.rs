@@ -289,6 +289,8 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
         )
 }
 
+pub(super) const UNPACK_ITERATOR_METHODS: &[&str] = &["__iter__", "__next__", "__length_hint__"];
+
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
     is_final_iterator_type(name)
@@ -337,6 +339,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "items"
             | super::deque::ITERATOR
             | super::deque::REVERSE_ITERATOR
+            | value::STRUCT_UNPACK_ITERATOR
     )
 }
 
@@ -717,7 +720,15 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "bytearray"
         }
-        Value::Struct { .. } if matches!(attr, "pack" | "pack_into" | "unpack" | "unpack_from") => {
+        Value::StructUnpackIterator { .. } if UNPACK_ITERATOR_METHODS.contains(&attr) => {
+            value::STRUCT_UNPACK_ITERATOR
+        }
+        Value::Struct { .. }
+            if matches!(
+                attr,
+                "pack" | "pack_into" | "unpack" | "unpack_from" | "iter_unpack"
+            ) =>
+        {
             "struct.Struct"
         }
         Value::ZlibDecompressor { .. }

@@ -301,3 +301,42 @@ def current():
             assert str(error) == "required argument is not a float"
         else:
             raise AssertionError("invalid double accepted")
+
+    from operator import length_hint
+
+    data = bytearray(b"\x00\x01\x00\x02")
+    events = []
+
+    class Source:
+        def __buffer__(self, flags):
+            events.append(flags)
+            self.view = memoryview(data)
+            return self.view
+
+        def __release_buffer__(self, view):
+            assert view is self.view
+            view.release()
+            events.append("released")
+
+    source = Source()
+    rows = struct.Struct(">H").iter_unpack(source)
+    assert iter(rows) is rows and length_hint(rows) == 2
+    assert next(rows) == (1,)
+    data[3] = 7
+    assert next(rows) == (7,) and rows.__length_hint__() == 0
+    try:
+        source.view.release()
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("iterator released the view before exhaustion")
+    assert next(rows, None) is None and next(rows, None) is None
+    assert events == [0, "released"]
+    data.append(0)
+    try:
+        struct.iter_unpack(">H", source)
+    except struct.error as caught:
+        assert caught.args == ("iterative unpacking requires a buffer of a multiple of 2 bytes",)
+    else:
+        raise AssertionError("partial record was accepted")
+    assert events == [0, "released", 0, "released"]

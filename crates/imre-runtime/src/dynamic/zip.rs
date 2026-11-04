@@ -226,6 +226,7 @@ impl Context {
         }
         match name {
             "__iter__" => Ok(cursor),
+            "__length_hint__" => self.length_hint(cursor, None),
             "__next__" => self
                 .next_result(cursor)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
