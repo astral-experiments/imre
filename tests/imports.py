@@ -1696,6 +1696,20 @@ def main() -> None:
             require_success(run(command + ["--runtime-imports"], temporary))
             checks += 3
 
+        caller = "def gzip_caller() -> bytes: return compress(b'payload')\n"
+        typed = "def typed(n: int) -> int: return n\n"
+        unused = "def unused() -> int: return typed('wrong')\n"
+        for name, definitions, error_line in (
+            ("caller_first", caller + typed + unused, 4),
+            ("caller_last", unused + typed + caller, 2),
+        ):
+            case = temporary / f"gzip_compress_{name}"
+            write_files(case, {"main.py": "from gzip import compress\n" + definitions + "print(gzip_caller())\n"})
+            result = run([compiler, "check", str(case / "main.py")], temporary)
+            assert result.returncode != 0 and f"main.py:{error_line}:" in result.stderr, result
+            assert "expected int, got str" in result.stderr or "invalid-argument-type" in result.stderr, result
+            checks += 1
+
         # A TypeError raised while evaluating a return operand can still be caught.
         caught = temporary / "object_return_operand"
         write_files(caught, {
