@@ -4077,20 +4077,23 @@ impl Heap {
         })
     }
 
-    /// Check the current frame binding and native edges from a text wrapper to its raw file.
+    /// Check each registration against the surviving frame bindings and native stream edges.
     fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
-        self.ordinary_finalizers.iter().any(|&owner| {
-            !stdin.is_some_and(|input| input.contains(&owner))
-                && super::stdlib::io::text_descriptor_chain(self, owner).is_some_and(|chain| {
-                    self.ordinary_finalizers.iter().chain(writers).all(|id| {
-                        chain.contains(id) || stdin.is_some_and(|input| input.contains(id))
-                    }) && (self.bound_in_active_frame(owner)
-                        || self.frames.iter().any(|frame| {
-                            // Materialized scopes can retain additional native local names.
-                            matches!(self.get(frame.scope), Value::Scope(scope)
-                                    if scope.namespace.is_some()
-                                        && scope.names.values().any(|&bound| bound == owner))
-                        }))
+        let frame_keeps = |owner| {
+            self.bound_in_active_frame(owner)
+                || self.frames.iter().any(|frame| {
+                    // Materialized scopes can retain additional native local names.
+                    matches!(self.get(frame.scope), Value::Scope(scope)
+                        if scope.namespace.is_some()
+                            && scope.names.values().any(|&bound| bound == owner))
+                })
+        };
+        self.ordinary_finalizers.iter().chain(writers).all(|owner| {
+            stdin.is_some_and(|input| input.contains(owner))
+                || frame_keeps(*owner)
+                || self.ordinary_finalizers.iter().any(|&stream| {
+                    super::stdlib::io::text_descriptor_chain(self, stream)
+                        .is_some_and(|chain| chain.contains(owner) && frame_keeps(stream))
                 })
         })
     }
@@ -5166,6 +5169,38 @@ mod tests {
         assert!(!heap.discard_operands(mark, NONE, modules));
         *heap.get_mut(modules) = Value::Dict(Default::default());
         assert!(heap.discard_operands(mark, NONE, modules));
+    }
+
+    #[test]
+    fn every_finalizer_must_survive_the_released_operands() {
+        use super::super::{ffi, stdlib};
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let scope = ctx.scope("__main__", None);
+        ctx.heap.frames.last_mut().unwrap().scope = scope;
+        let owner = ctx.alloc(Value::List(Vec::new()));
+        let writer = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.register_finalizer(owner);
+        let input = stdlib::io::rooted_input_chain(&ctx);
+
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names.insert("owner".into(), owner);
+        bindings.names.insert("writer".into(), writer);
+        assert!(
+            ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+        );
+
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names.shift_remove("writer");
+        assert!(
+            !ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+        );
     }
 
     #[test]
