@@ -55,30 +55,7 @@ class _WriteBuffer(io.RawIOBase):
         self.fileobj.write(_imre_gzip.flush_writer(self.encoder, mode))
 
 
-class _PathReader:
-    def __init__(self, name):
-        self.handle = _imre_gzip.open(name)
-
-    def read(self, size):
-        return _imre_gzip.read(self.handle, size)
-
-    def read1(self, size):
-        return _imre_gzip.read1(self.handle, size)
-
-    def readline(self, size):
-        return _imre_gzip.readline(self.handle, size)
-
-    def tell(self):
-        return _imre_gzip.tell(self.handle)
-
-    def fileno(self):
-        return _imre_gzip.fileno(self.handle)
-
-    def close(self):
-        _imre_gzip.close(self.handle)
-
-
-class _BorrowedRaw(io.RawIOBase):
+class _GzipRawReader(io.RawIOBase):
     def __init__(self, fileobj):
         self.fileobj = fileobj
         self.decoder = _imre_gzip.decoder()
@@ -137,7 +114,6 @@ class GzipFile(io.BufferedIOBase):
     _reader = None
     _writer = None
     myfileobj = None
-    _borrowed_reader = False
 
     def __init__(self, filename=None, mode=None, compresslevel=9, fileobj=None, mtime=None):
         if mode is None and fileobj is not None:
@@ -180,16 +156,21 @@ class GzipFile(io.BufferedIOBase):
             self.myfileobj = fileobj if owned else None
             self._writer = buffer
             return
-        if fileobj is None:
-            reader = _PathReader(name)
-        else:
-            reader = io.BufferedReader(_BorrowedRaw(fileobj))
-        if not self.closed:
-            self.close()
+        owned = fileobj is None
+        if owned:
+            fileobj = io.open(name, "rb")
+        try:
+            reader = io.BufferedReader(_GzipRawReader(fileobj))
+            if not self.closed:
+                self.close()
+        except BaseException:
+            if owned:
+                fileobj.close()
+            raise
         self.mode = READ
-        self._borrowed_reader = fileobj is not None
         self.name = name
         self.fileobj = fileobj
+        self.myfileobj = fileobj if owned else None
         self._reader = reader
 
     @property
@@ -228,10 +209,13 @@ class GzipFile(io.BufferedIOBase):
     def readline(self, size=-1):
         return self._open_reader().readline(size)
 
+    def rewind(self):
+        if self.mode != READ:
+            raise OSError("Can't rewind in write mode")
+        self._open_reader().seek(0)
+
     def seekable(self):
-        if self.mode == WRITE or self._borrowed_reader:
-            return True
-        return super().seekable()
+        return True
 
     def tell(self):
         self._check_open()
@@ -242,9 +226,7 @@ class GzipFile(io.BufferedIOBase):
 
     def seek(self, offset, whence=io.SEEK_SET):
         if self.mode != WRITE:
-            if self._borrowed_reader:
-                return self._open_reader().seek(offset, whence)
-            return super().seek(offset, whence)
+            return self._open_reader().seek(offset, whence)
         position = self.tell()
         if whence == io.SEEK_CUR:
             offset += position
@@ -262,9 +244,7 @@ class GzipFile(io.BufferedIOBase):
         return self._writer.raw.size
 
     def fileno(self):
-        if self.mode == WRITE or self._borrowed_reader:
-            return self.fileobj.fileno()
-        return self._open_reader().fileno()
+        return self.fileobj.fileno()
 
     def flush(self, zlib_mode=_Z_SYNC_FLUSH):
         self._check_open()
@@ -278,26 +258,26 @@ class GzipFile(io.BufferedIOBase):
         return self
 
     def close(self):
+        reader = self._reader
         writer = self._writer
-        if writer is not None:
-            self._writer = None
-            raw = writer.raw
-            try:
+        if reader is None and writer is None:
+            return
+        try:
+            if reader is not None:
+                self._reader = None
+                reader.close()
+            else:
+                self._writer = None
+                raw = writer.raw
                 writer.close()
                 raw.flush_compressor(_Z_FINISH)
                 self.fileobj.write(struct.pack("<II", raw.crc, raw.size & 0xffffffff))
-            finally:
-                self.fileobj = None
-                if self.myfileobj is not None:
-                    owned = self.myfileobj
-                    self.myfileobj = None
-                    owned.close()
-            return
-        reader = self._reader
-        if reader is not None:
-            self._reader = None
+        finally:
             self.fileobj = None
-            reader.close()
+            if self.myfileobj is not None:
+                owned = self.myfileobj
+                self.myfileobj = None
+                owned.close()
 
 
 def open(filename, mode="rb", compresslevel=9, encoding=None, errors=None, newline=None):
