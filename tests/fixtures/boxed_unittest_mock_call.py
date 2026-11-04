@@ -67,3 +67,15 @@ history_items = []
 unused.call_args_list = HintedHistory(history_items, lambda: history_items.append(((7,), {})))
 with check.assertRaises(AssertionError):
     unused.assert_any_call(7)
+
+integer = mock.MagicMock()
+assert int(integer) == 1
+integer.__int__.return_value = 7
+assert int(integer) == 7
+assert integer.mock_calls == [call.__int__(), call.__int__()]
+assert integer.method_calls == []
+integer.reset_mock(return_value=True)
+assert integer.mock_calls == []
+assert int(integer) == 7
+with check.assertRaises(TypeError):
+    int(mock.MagicMock(spec_set=object))
