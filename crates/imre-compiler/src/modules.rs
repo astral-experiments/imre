@@ -597,6 +597,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/_imre_gettext_locale.py"),
         )),
         "getopt" => Some(("getopt.py", include_str!("../stdlib/getopt.py"))),
+        // CPython 3.14.5 Lib/optparse.py. See licenses/Optik.txt and licenses/CPython.txt.
+        "optparse" => Some(("optparse.py", include_str!("../stdlib/optparse.py"))),
         "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => etree_source(name),
