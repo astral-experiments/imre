@@ -2,8 +2,6 @@
 
 
 class Fraction:
-    __module__ = "fractions"
-
     _numerator: int
     _denominator: int
 

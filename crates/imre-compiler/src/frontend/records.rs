@@ -1056,6 +1056,9 @@ impl Checker<'_> {
                 "private native mock operations cannot be accessed directly",
             ));
         }
+        if attribute.attr.as_str() == "__module__" && self.fraction_class(class) {
+            return Ok(self.evaluated_receiver(receiver, unpacking::string("fractions")));
+        }
         if attribute.attr.as_str() == "__float__" && self.decimal_class(class) {
             return Err(self.scoped_builtin_error("Decimal.__float__", attribute));
         }
