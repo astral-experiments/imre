@@ -14,26 +14,17 @@ pub(crate) struct PendingText(Vec<u8>);
 const CHUNK_SIZE: usize = 8192;
 impl PendingText {
     /// Append a whole fragmented write only if it fits without allocation or a flush.
-    pub(crate) fn try_append_parts<'a>(
-        &mut self,
-        parts: impl Iterator<Item = &'a [u8]> + Clone,
-    ) -> bool {
-        let Some(room) = self
-            .0
-            .capacity()
-            .min(CHUNK_SIZE - 1)
-            .checked_sub(self.0.len())
-        else {
+    pub(crate) fn try_append_parts<'a>(&mut self, parts: impl Iterator<Item = &'a [u8]>) -> bool {
+        let initial = self.0.len();
+        let Some(mut room) = self.0.capacity().min(CHUNK_SIZE - 1).checked_sub(initial) else {
             return false;
         };
-        if parts
-            .clone()
-            .try_fold(room, |left, part| left.checked_sub(part.len()))
-            .is_none()
-        {
-            return false;
-        }
         for part in parts {
+            if part.len() > room {
+                self.0.truncate(initial);
+                return false;
+            }
+            room -= part.len();
             self.0.extend_from_slice(part);
         }
         true

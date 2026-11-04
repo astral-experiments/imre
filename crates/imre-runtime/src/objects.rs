@@ -1011,6 +1011,45 @@ pub unsafe extern "C" fn imre_int_str_part(
     }
 }
 
+/// Formats directly into the caller's scratch space. Returns null for borrowed
+/// digits, an owned string for boxed integers, or address one on a digit-limit error.
+///
+/// # Safety
+/// Root the canonical integer and supply 40 writable bytes and a disjoint writable
+/// descriptor. Keep the resulting span or string owner alive through concatenation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_str_part_into(
+    value: usize,
+    buffer: *mut u8,
+    part: *mut StringPart,
+) -> *const Str {
+    const {
+        assert!(size_of::<itoa::Buffer>() <= 40 && align_of::<itoa::Buffer>() == 1);
+        assert!(!std::mem::needs_drop::<itoa::Buffer>() && align_of::<Str>() > 1);
+    }
+    // SAFETY: the caller roots the integer throughout the conversion.
+    if let Some(value) = unsafe { Int::borrow(value) }.as_small() {
+        // SAFETY: the scratch has the checked size and alignment. Its initialized
+        // digits remain in the caller's frame until the concatenation finishes.
+        unsafe {
+            let formatter = &mut *buffer.cast::<std::mem::MaybeUninit<itoa::Buffer>>();
+            let digits = formatter.write(itoa::Buffer::new()).format(value);
+            part.write(StringPart {
+                data: digits.as_ptr(),
+                length: digits.len(),
+            });
+        }
+        return std::ptr::null();
+    }
+    // SAFETY: the boxed conversion shares the original digit-limit and ownership contract.
+    let owner = unsafe { imre_int_str_part(value, buffer, part) };
+    if owner.is_null() {
+        std::ptr::without_provenance(1)
+    } else {
+        owner
+    }
+}
+
 /// Joins already evaluated fragments into one owned string without intermediate
 /// strings or a temporary fragment vector. Capacity is checked before copying.
 ///
@@ -1817,6 +1856,39 @@ mod tests {
             StrOwner::get_mut(&mut reused).unwrap().push_str("!");
             assert_eq!(result.as_str(), format!("{expected}!"));
             assert_eq!(reused.as_str(), result.as_str());
+        }
+    }
+
+    #[test]
+    fn formats_small_integer_parts_in_the_callers_scratch() {
+        for value in [
+            crate::MIN_SMALL,
+            -1001,
+            -1,
+            0,
+            9,
+            10,
+            99,
+            1000,
+            crate::MAX_SMALL,
+        ] {
+            let integer = Int::small(value).unwrap();
+            let mut scratch = [0xcc; 42];
+            let mut part = std::mem::MaybeUninit::<StringPart>::uninit();
+            // SAFETY: the tagged integer is live and the 40 middle bytes and
+            // descriptor are disjoint and writable for the complete conversion.
+            let owner = unsafe {
+                imre_int_str_part_into(integer.0, scratch[1..41].as_mut_ptr(), part.as_mut_ptr())
+            };
+            assert!(owner.is_null());
+            assert_eq!((scratch[0], scratch[41]), (0xcc, 0xcc));
+            // SAFETY: a tagged integer always initializes the descriptor.
+            let part = unsafe { part.assume_init() };
+            let range = scratch[1..41].as_ptr_range();
+            assert!(range.contains(&part.data));
+            assert!(part.data.wrapping_add(part.length) <= range.end);
+            // SAFETY: the checked span remains live and immutable in scratch.
+            assert_eq!(unsafe { part.as_str() }, value.to_string());
         }
     }
 
