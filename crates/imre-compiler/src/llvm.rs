@@ -110,6 +110,7 @@ impl Type {
             | Self::StringKeys
             | Self::Iterator
             | Self::Cursor(_)
+            | Self::ByteArray
             | Self::ByteOutput
             | Self::TupleBuffer
             | Self::Exception
@@ -4011,6 +4012,7 @@ impl Emitter<'_, '_> {
                 | Type::CacheState(_)
                 | Type::Iterator
                 | Type::Cursor(_)
+                | Type::ByteArray
                 | Type::ByteOutput
                 | Type::TupleBuffer
                 | Type::Callable(_)
@@ -6170,7 +6172,32 @@ impl Emitter<'_, '_> {
             Builtin::UrlsafeB64encode => {
                 self.call("imre_urlsafe_b64encode", Type::Bytes, &[&args[0].value])
             }
+            Builtin::ByteArrayNew => self.call("imre_bytearray_new", Type::ByteArray, &[]),
+            Builtin::ByteArrayReverse => {
+                self.line(format!(
+                    "call void @imre_bytearray_reverse(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            Builtin::ByteArrayAppend | Builtin::ByteArrayExtend => {
+                let (symbol, item_type) = if matches!(builtin, Builtin::ByteArrayAppend) {
+                    ("imre_bytearray_append", "i64")
+                } else if args[1].value.ty == Type::Bytes {
+                    ("imre_bytearray_extend_bytes", "ptr")
+                } else {
+                    ("imre_bytearray_extend", "ptr")
+                };
+                self.checked_status(format!(
+                    "call i32 @{symbol}(ptr {}, {item_type} {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::Bytes => match args[0].value.ty {
+                Type::ByteArray => {
+                    self.call("imre_bytearray_snapshot", Type::Bytes, &[&args[0].value])
+                }
                 Type::Bytes => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("imre_bytes_count", Type::Bytes, &[&args[0].value]),
                 Type::ListInt => self.call("imre_bytes_list", Type::Bytes, &[&args[0].value]),
@@ -7093,6 +7120,7 @@ impl Emitter<'_, '_> {
                         match args[0].value.ty {
                             Type::Str => "imre_str_len",
                             Type::Bytes => "imre_bytes_len",
+                            Type::ByteArray => "imre_bytearray_len",
                             Type::VarTuple(_) => "imre_tuple_len",
                             Type::ListInt => "imre_list_len",
                             Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
@@ -9523,6 +9551,13 @@ declare i64 @imre_bytes_get_index(ptr, i64)
 declare ptr @imre_bytes_slice(ptr, i64, i64, i64)
 declare ptr @imre_bytes_count(i64)
 declare ptr @imre_bytes_list(ptr)
+declare ptr @imre_bytearray_new()
+declare i32 @imre_bytearray_append(ptr, i64)
+declare i32 @imre_bytearray_extend(ptr, ptr)
+declare i32 @imre_bytearray_extend_bytes(ptr, ptr)
+declare void @imre_bytearray_reverse(ptr)
+declare i64 @imre_bytearray_len(ptr)
+declare ptr @imre_bytearray_snapshot(ptr)
 declare ptr @imre_byte_output_new()
 declare void @imre_byte_output_reserve_range(ptr, i64, i64, i64, i64)
 declare ptr @imre_byte_output_finish(ptr)
@@ -11617,6 +11652,13 @@ def transform(values: list[int], count: int) -> int:
             "def pair(x: int, y: float) -> tuple[float, float]:\n    return divmod(x, y)\n";
         let llvm = compile(source, &CompileOptions::default()).unwrap();
         assert_eq!(llvm.matches("call i32 @imre_float_divmod(").count(), 1);
+    }
+
+    #[test]
+    fn mutable_bytearray_operations_use_native_storage() {
+        let source = include_str!("../../../tests/fixtures/bytes/bytearray_builder.py");
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_bytearray_new()"));
     }
 
     #[test]

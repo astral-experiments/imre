@@ -45,6 +45,7 @@ pub(crate) enum Type {
     Bytes,
     ListInt,
     /// Native storage for a private append-only integer list consumed by bytes().
+    ByteArray,
     ByteOutput,
     /// Private, owning accumulator for a tuple display with runtime arity.
     TupleBuffer,
@@ -342,6 +343,7 @@ impl std::fmt::Display for Type {
             Self::StringKeys => "collections.abc.Set[str]",
             Self::FrozenStrings => "frozenset[str]",
             Self::ListInt => "list[int]",
+            Self::ByteArray => "bytearray",
             Self::ByteOutput => "private byte output",
             Self::TupleBuffer => "private tuple buffer",
             Self::CacheState(_) => "private function cache",
@@ -909,6 +911,10 @@ pub(crate) enum PairTableOp {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    ByteArrayNew,
+    ByteArrayAppend,
+    ByteArrayExtend,
+    ByteArrayReverse,
     PairTable(PairTableOp),
     Combinatorial(Combinatorial),
     DecimalIntegerText,
