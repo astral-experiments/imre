@@ -8863,17 +8863,41 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::FilterCharacterSet(below) => {
+            Builtin::FilterCharacterSet(filter) => {
+                let below = filter.below;
                 let optional = matches!(returns, Type::Optional(_));
                 let symbol = if optional {
                     "imre_filter_nonempty_character_set"
                 } else {
                     "imre_filter_character_set"
                 };
-                let operand = self.checked_instruction(format!(
-                    "call ptr @{symbol}(ptr {}, ptr {}, i32 {below})",
-                    args[0].value.operand, args[1].value.operand
-                ));
+                let text = &args[0].value.operand;
+                let keys = &args[1].value.operand;
+                let call = format!("call ptr @{symbol}(ptr {text}, ptr {keys}, i32 {below})");
+                let operand = if optional && let Some(table) = filter.ascii_table() {
+                    let table = self.byte_array(table);
+                    self.output.local_helper(
+                        "text_has_table_byte",
+                        include_str!("llvm/text_has_table_byte.ll"),
+                    );
+                    let hit = self.instruction(format!(
+                        "call i1 @text_has_table_byte(ptr {text}, ptr @{table})"
+                    ));
+                    let unbound = self.instruction(format!("icmp eq ptr {keys}, null"));
+                    let collect = self.instruction(format!("or i1 {hit}, {unbound}"));
+                    let empty = self.current.clone();
+                    let select = self.label();
+                    let done = self.label();
+                    self.branch(&collect, &select, &done);
+                    self.start(&select);
+                    let result = self.checked_instruction(call);
+                    let selected = self.current.clone();
+                    self.jump(&done);
+                    self.start(&done);
+                    self.instruction(format!("phi ptr [null, %{empty}], [{result}, %{selected}]"))
+                } else {
+                    self.checked_instruction(call)
+                };
                 let operand = if optional {
                     self.instruction(format!("ptrtoint ptr {operand} to i64"))
                 } else {

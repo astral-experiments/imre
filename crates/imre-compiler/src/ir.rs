@@ -923,6 +923,30 @@ pub(crate) enum SetCasePrefix {
     ThreeByteHashes(u64),
 }
 
+/// Select characters in the given set or below the Unicode scalar threshold.
+#[derive(Clone)]
+pub(crate) struct CharacterFilter {
+    pub(crate) below: u32,
+    /// Exact members of a read-only literal set of single-byte strings.
+    pub(crate) ascii_keys: Option<[u64; 2]>,
+}
+
+impl CharacterFilter {
+    /// A byte scan matches exactly when both the keys and threshold select only ASCII.
+    pub(crate) fn ascii_table(&self) -> Option<Vec<u8>> {
+        let keys = self.ascii_keys?;
+        if self.below > 128 {
+            return None;
+        }
+        let mut table = vec![0; 256];
+        for (byte, entry) in table[..128].iter_mut().enumerate() {
+            let member = keys[byte / 64] & (1_u64 << (byte % 64)) != 0;
+            *entry = u8::from((byte as u32) < self.below || member);
+        }
+        Some(table)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     ByteArrayNew,
@@ -1397,7 +1421,7 @@ pub(crate) enum Builtin {
     StringListFilter(u32),
     /// Collect characters in a set or below a Unicode scalar threshold. An
     /// optional result represents an empty selection as an absent set.
-    FilterCharacterSet(u32),
+    FilterCharacterSet(CharacterFilter),
     /// Stable sort by the suffix after a fixed number of Unicode code points.
     StringListSortSuffix(u32),
     /// Ask whether a source has an item before evaluating a comprehension predicate.

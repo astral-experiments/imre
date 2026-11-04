@@ -1,4 +1,4 @@
-//! Skip exact string transformations when a set excludes the resulting key.
+//! Use known set keys to skip string transformations and empty character filters.
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Module, Statement, TextOperation, Type};
 use crate::types::Types;
 
@@ -50,15 +50,37 @@ fn literal_prefix_mask(values: &[Expr]) -> Option<ir::SetCasePrefix> {
     })
 }
 
-/// A single literal initializer describes the set for its lifetime only if every
-/// read is the receiver of membership. Assignments, calls and aliases disqualify it.
-fn constant_set_masks(module: &Module) -> Vec<Option<ir::SetCasePrefix>> {
+/// Summaries of exact keys whose set is only used by read-only operations.
+#[derive(Clone, Copy, Default)]
+struct LiteralSet {
+    prefix: Option<ir::SetCasePrefix>,
+    ascii_keys: Option<[u64; 2]>,
+}
+
+/// A single UTF-8 byte denotes an ASCII character. Longer keys need the ordinary filter.
+fn ascii_character_keys(values: &[Expr]) -> Option<[u64; 2]> {
+    let mut bits = [0; 2];
+    for value in values {
+        let ExprKind::Str(key) = &value.kind else {
+            return None;
+        };
+        let &[byte] = key.as_bytes() else {
+            return None;
+        };
+        bits[usize::from(byte / 64)] |= 1_u64 << (byte % 64);
+    }
+    Some(bits)
+}
+
+/// A single literal initializer describes the set only if every read is a lookup
+/// or character filter. Assignments, calls, and aliases disqualify it.
+fn constant_sets(module: &Module) -> Vec<LiteralSet> {
     #[derive(Clone, Default)]
     struct Uses {
         writes: usize,
         reads: usize,
-        membership: usize,
-        masks: Option<ir::SetCasePrefix>,
+        read_only: usize,
+        literal: LiteralSet,
     }
     let mut globals = vec![Uses::default(); module.globals.len()];
     for function in module.functions.iter().chain([&module.entry]) {
@@ -75,13 +97,16 @@ fn constant_set_masks(module: &Module) -> Vec<Option<ir::SetCasePrefix>> {
                         values,
                     } = &value.kind
                     {
-                        uses.masks = literal_prefix_mask(values);
+                        uses.literal = LiteralSet {
+                            prefix: literal_prefix_mask(values),
+                            ascii_keys: ascii_character_keys(values),
+                        };
                     }
                 }
                 (Builtin::GlobalGet(slot), []) => globals[*slot].reads += 1,
-                (Builtin::SetContains, [_, set]) => {
+                (Builtin::SetContains | Builtin::FilterCharacterSet(_), [_, set]) => {
                     if let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = set.kind {
-                        globals[slot].membership += 1;
+                        globals[slot].read_only += 1;
                     }
                 }
                 _ => {}
@@ -91,9 +116,11 @@ fn constant_set_masks(module: &Module) -> Vec<Option<ir::SetCasePrefix>> {
     globals
         .into_iter()
         .map(|uses| {
-            (uses.writes == 1 && uses.reads == uses.membership)
-                .then_some(uses.masks)
-                .flatten()
+            if uses.writes == 1 && uses.reads == uses.read_only {
+                uses.literal
+            } else {
+                LiteralSet::default()
+            }
         })
         .collect()
 }
@@ -133,12 +160,12 @@ fn prefix_local(value: &Expr) -> Option<usize> {
 }
 
 /// Tests the original string before computing a prefix when the lookup set is constant.
-fn prefix_check(set: &Expr, source: &Expr, masks: &[Option<ir::SetCasePrefix>]) -> Option<Expr> {
+fn prefix_check(set: &Expr, source: &Expr, sets: &[LiteralSet]) -> Option<Expr> {
     let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = set.kind else {
         return None;
     };
     Some(possible(
-        Builtin::SetCasePrefixPossible(masks[slot]?),
+        Builtin::SetCasePrefixPossible(sets[slot].prefix?),
         set,
         prefix_local(source)?,
     ))
@@ -169,7 +196,7 @@ fn independent(value: &Expr, target: usize) -> bool {
 
 /// A normalizer may return the converted spelling on a hit. On a definite
 /// miss, its final return bypasses the assignment without exposing the local.
-fn guard_return(function: &mut Function, types: &Types, masks: &[Option<ir::SetCasePrefix>]) {
+fn guard_return(function: &mut Function, types: &Types, sets: &[LiteralSet]) {
     let [
         ..,
         assignment,
@@ -207,7 +234,7 @@ fn guard_return(function: &mut Function, types: &Types, masks: &[Option<ir::SetC
         Statement::If(skip, vec![Statement::Return(miss.clone())], vec![])
     };
     let mut body = Vec::new();
-    if let Some(check) = prefix_check(set, &source, masks) {
+    if let Some(check) = prefix_check(set, &source, sets) {
         body.push(miss_unless(check));
     }
     body.push(Statement::Assign(temp, source));
@@ -241,12 +268,18 @@ fn when_possible(check: Expr, value: Expr) -> Expr {
 /// Guard inline membership and normalize-and-return functions. A private slot
 /// evaluates the source exactly once, even when obtaining it has side effects.
 pub(crate) fn specialize(module: &mut Module) {
-    let masks = constant_set_masks(module);
+    let sets = constant_sets(module);
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
         let original_locals = function.locals.len();
         let types = &module.types;
-        guard_return(function, types, &masks);
+        guard_return(function, types, &sets);
         ir::walk_expressions_mut(&mut function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::FilterCharacterSet(filter), args) = &mut expr.kind
+                && let [_, keys] = args.as_slice()
+                && let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = keys.kind
+            {
+                filter.ascii_keys = sets[slot].ascii_keys;
+            }
             let ExprKind::Builtin(Builtin::SetContains, args) = &mut expr.kind else {
                 return;
             };
@@ -264,7 +297,7 @@ pub(crate) fn specialize(module: &mut Module) {
             let temp = function.locals.len();
             function.locals.push(Type::Str);
             let source = std::mem::replace(input, Expr::local(temp, Type::Str));
-            let prefix = prefix_check(set, &source, &masks);
+            let prefix = prefix_check(set, &source, &sets);
             let check = possible(Builtin::SetCaseLengthPossible, set, temp);
             let ordinary = std::mem::replace(expr, Expr::none());
             let guarded = Expr {

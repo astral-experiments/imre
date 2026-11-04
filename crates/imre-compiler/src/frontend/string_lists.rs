@@ -87,7 +87,10 @@ impl Checker<'_> {
         let selected = Expr {
             ty,
             kind: ExprKind::Builtin(
-                Builtin::FilterCharacterSet(below),
+                Builtin::FilterCharacterSet(crate::ir::CharacterFilter {
+                    below,
+                    ascii_keys: None,
+                }),
                 vec![self.local(source), keys],
             ),
         };
