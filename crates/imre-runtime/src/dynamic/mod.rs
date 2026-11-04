@@ -2538,7 +2538,11 @@ impl Context {
             self.builtin("BaseException.add_note");
             self.builtin("BaseException.with_traceback");
         }
-        if matches!(name, "BaseExceptionGroup" | "ExceptionGroup") {
+        if name == "ExceptionGroup" {
+            self.builtin("BaseExceptionGroup");
+        }
+        if name == "BaseExceptionGroup" {
+            self.builtin("BaseExceptionGroup.__class_getitem__");
             self.readonly_member("BaseExceptionGroup", "message");
             self.readonly_member("BaseExceptionGroup", "exceptions");
         }
@@ -2546,7 +2550,7 @@ impl Context {
             self.builtin(symbol);
         }
         let methods = match name {
-            "BaseExceptionGroup" | "ExceptionGroup" => {
+            "BaseExceptionGroup" => {
                 for method in exception_group::METHODS {
                     self.builtin(&format!("BaseExceptionGroup.{method}"));
                 }

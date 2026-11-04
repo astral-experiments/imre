@@ -3314,6 +3314,12 @@ def report(text):
             "reference = union.__args__[-1]\n"
             "print(type(reference).__name__, reference.__forward_arg__)",
         )
+        group_alias = root / "exception_group_alias.py"
+        group_alias.write_text(
+            "from types import GenericAlias\n"
+            "assert isinstance(ExceptionGroup[OSError], GenericAlias)\n"
+        )
+        compare("-IB", group_alias)
         split_entry = root / "split_identity.py"
         split_entry.write_text(
             "from urllib.parse import urlsplit\n"
@@ -3706,6 +3712,7 @@ for name in ("md4", "ripemd160"):
             "boxed_exception_repr.py",
             "boxed_exception_notes.py",
             "boxed_exception_groups.py",
+            "boxed_exception_group_alias.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
             "boxed_warnings_accelerator.py",

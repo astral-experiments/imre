@@ -3058,6 +3058,12 @@ impl Context {
         if let Some(value) = super::typing::subscribe(self, alias, key) {
             return value;
         }
+        if self.is_type_object(obj) {
+            return Err(Error::new(
+                "TypeError",
+                format!("type '{}' is not subscriptable", self.class_name(obj)),
+            ));
+        }
         if matches!(self.heap.get(obj), Value::MappingProxy(_)) {
             return self.get_item(self.mapping_proxy_target(obj), key);
         }

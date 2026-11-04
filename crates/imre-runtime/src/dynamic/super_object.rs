@@ -493,7 +493,12 @@ impl Context {
     ) -> Result<Option<Id>> {
         if owner != NONE {
             let exception_method = builtins::base_exception_method(name).is_some()
-                || super::exception_group::METHODS.contains(&name);
+                || super::exception_group::METHODS.contains(&name)
+                || (name == "__class_getitem__"
+                    && self
+                        .builtins
+                        .get("BaseExceptionGroup")
+                        .is_some_and(|&base| self.direct_subclass(owner, base)));
             let lineage = self.base_lineage(owner, exception_method);
             let after = lineage.iter().skip_while(|&&class| class != start).skip(1);
             let instance = if owner == receiver { NONE } else { receiver };

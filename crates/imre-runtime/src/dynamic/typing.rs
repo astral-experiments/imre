@@ -910,13 +910,12 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             ))
         }));
     }
-    if matches!(ctx.heap.get(target), Value::Class { .. })
-        && ctx.class_attr(target, "__class_getitem__").is_some()
-    {
-        return Some(
-            ctx.lookup_attr(target, "__class_getitem__")
-                .and_then(|method| ctx.call(method, vec![index], vec![])),
-        );
+    if ctx.is_type_object(target) && ctx.class_attr(target, "__class_getitem__").is_some() {
+        return match ctx.lookup_attr(target, "__class_getitem__") {
+            Ok(NONE) => None,
+            Ok(method) => Some(ctx.call(method, vec![index], vec![])),
+            Err(error) => Some(Err(error)),
+        };
     }
     let kind = match ctx.heap.get(target) {
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {

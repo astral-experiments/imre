@@ -262,8 +262,7 @@ impl Context {
                 return mro.iter().find_map(|&base| self.own_class_attr(base, name));
             }
         }
-        if (super::exception_group::METHODS.contains(&name)
-            || matches!(name, "message" | "exceptions"))
+        if super::exception_group::declares(name)
             && let Some(mro) = self.published_mro(class)
             && self
                 .builtins
@@ -424,10 +423,7 @@ impl Context {
                 Some(NONE)
             }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
-                name if kind == "BaseExceptionGroup"
-                    && (super::exception_group::METHODS.contains(&name)
-                        || matches!(name, "message" | "exceptions")) =>
-                {
+                name if kind == "BaseExceptionGroup" && super::exception_group::declares(name) => {
                     self.builtins
                         .get(&format!("BaseExceptionGroup.{name}"))
                         .copied()
@@ -1013,7 +1009,7 @@ impl Context {
         if matches!(self.heap.get(value), Value::Native(name) if name == "float.fromhex") {
             stdlib::datetime::validate_classmethod_receiver(self, "float", "fromhex", owner)?;
         }
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.fromhex" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "BaseExceptionGroup.__class_getitem__" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.fromhex" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -4598,8 +4594,7 @@ impl Context {
                             "__new__" | "__init__" | "add_note" | "with_traceback"
                         ))
                     || (matches!(class.as_str(), "BaseExceptionGroup" | "ExceptionGroup")
-                        && (super::exception_group::METHODS.contains(&name)
-                            || matches!(name, "message" | "exceptions")))
+                        && super::exception_group::declares(name))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "complex" && super::complex::METHODS.contains(&name))
@@ -4619,6 +4614,9 @@ impl Context {
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
                 if let Some(method) = self.class_attr(obj, name) {
+                    if name == "__class_getitem__" {
+                        return self.bind_attribute(method, NONE, obj);
+                    }
                     return Ok(method);
                 }
             }
@@ -7178,6 +7176,7 @@ impl Context {
                             | "type.__init__"
                             | "BaseException.__init__"
                             | "BaseException.add_note"
+                            | "BaseExceptionGroup.__class_getitem__"
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
