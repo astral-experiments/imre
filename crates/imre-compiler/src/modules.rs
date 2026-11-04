@@ -1374,6 +1374,11 @@ impl IntrinsicModule {
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
         }
+        if self == Self::Lzma
+            && let Some(value) = imre_ast::lzma::integer_constant(name)
+        {
+            return Some(Binding::Intrinsic(Intrinsic::IntConstant(value)));
+        }
         if self == Self::Zlib
             && let Some(value) = imre_ast::zlib::integer_constant(name)
         {
@@ -2378,9 +2383,16 @@ impl IntrinsicModule {
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
-            (Self::Lzma, "FORMAT_AUTO") => Intrinsic::IntConstant(0),
-            (Self::Lzma, "FORMAT_XZ") => Intrinsic::IntConstant(1),
-            (Self::Lzma, "FORMAT_ALONE") => Intrinsic::IntConstant(2),
+            (Self::Lzma, "LZMACompressor") => Intrinsic::ScopedObjectExport("lzma.LZMACompressor"),
+            (Self::Lzma, "LZMADecompressor") => {
+                Intrinsic::ScopedObjectExport("lzma.LZMADecompressor")
+            }
+            (Self::Lzma, "_encode_filter_properties") => {
+                Intrinsic::ScopedObjectExport("lzma._encode_filter_properties")
+            }
+            (Self::Lzma, "_decode_filter_properties") => {
+                Intrinsic::ScopedObjectExport("lzma._decode_filter_properties")
+            }
             (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
             (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
                 Intrinsic::StringConstant(imre_ast::zlib::VERSION)

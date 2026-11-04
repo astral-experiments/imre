@@ -1,6 +1,13 @@
-//! One-shot XZ and LZMA-alone decompression for the public lzma module.
+//! LZMA codecs used by the public lzma module and ZIP method 14.
+mod filters;
+mod streams;
+
+pub(in crate::dynamic) use filters::properties;
 use liblzma::stream::{Action, Error as CodecError, Status, Stream};
-use num_traits::{Signed, ToPrimitive};
+use streams::DecoderOptions;
+pub(in crate::dynamic) use streams::{
+    Compressor, Decompressor, compressor, decompressor, decompressor_attr,
+};
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins, os};
 
@@ -28,66 +35,19 @@ pub(super) fn call(
         .map(|id| os::c_int(ctx, id))
         .transpose()?
         .unwrap_or(0);
-    let memlimit = match memlimit {
-        Some(id) if id != NONE => {
-            if format == 3 {
-                return Err(Error::new(
-                    "ValueError",
-                    "Cannot specify memory limit with FORMAT_RAW",
-                ));
-            }
-            let number = ctx.index_integer(id)?;
-            let number = number.big();
-            if number.is_negative() {
-                return Err(Error::new("ValueError", "Cannot convert negative int"));
-            }
-            number
-                .to_u64()
-                .ok_or_else(|| Error::new("OverflowError", "Python int too large for C uint64_t"))?
-        }
-        _ => u64::MAX,
-    };
-    let filters = filters.unwrap_or(NONE);
-    if format == 3 {
-        return Err(if filters == NONE {
-            Error::new("ValueError", "Must specify filters for FORMAT_RAW")
-        } else {
-            Error::new(
-                "NotImplementedError",
-                "raw LZMA filter chains are not supported",
-            )
-        });
-    }
-    if filters != NONE {
-        return Err(Error::new(
-            "ValueError",
-            "Cannot specify filters except with FORMAT_RAW",
-        ));
-    }
-    let decoder: Decoder = match format {
-        0 => |limit| Stream::new_auto_decoder(limit, 0),
-        1 => |limit| Stream::new_stream_decoder(limit, 0),
-        2 => Stream::new_lzma_decoder,
-        _ => {
-            return Err(Error::new(
-                "ValueError",
-                format!("Invalid container format: {format}"),
-            ));
-        }
-    };
-    ctx.check_buffer_exporter(data)?;
-    let output = decompress(ctx.native_buffer_bytes(data)?, decoder, memlimit)?;
+    let options = DecoderOptions::new(ctx, format, memlimit, filters.unwrap_or(NONE))?;
+    let output = streams::with_input(ctx, data, |ctx, view| {
+        decompress(ctx.native_buffer_bytes(view)?, &options)
+    })?;
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
-type Decoder = fn(u64) -> std::result::Result<Stream, CodecError>;
-
-fn decompress(mut input: &[u8], decoder: Decoder, memlimit: u64) -> Result<Vec<u8>> {
+fn decompress(mut input: &[u8], options: &DecoderOptions) -> Result<Vec<u8>> {
     let mut output = Vec::new();
     let mut first = true;
     loop {
         let start = output.len();
-        let mut stream = decoder(memlimit).map_err(codec_error)?;
+        let mut stream = options.stream(0)?;
         match decode_member(&mut stream, input, &mut output) {
             Ok(true) => {}
             Ok(false) => {
@@ -136,14 +96,5 @@ fn decode_member(stream: &mut Stream, input: &[u8], output: &mut Vec<u8>) -> Res
 }
 
 fn codec_error(err: CodecError) -> Error {
-    let message = match err {
-        CodecError::Data => "Corrupt input data",
-        CodecError::Format => "Input format not supported by decoder",
-        CodecError::Options => "Invalid or unsupported options",
-        CodecError::MemLimit => "Memory usage limit exceeded",
-        CodecError::Mem => return Error::new("MemoryError", ""),
-        CodecError::UnsupportedCheck => "Unsupported integrity check",
-        CodecError::NoCheck | CodecError::Program => "Internal error",
-    };
-    Error::new(LZMA_ERROR, message)
+    crate::objects::lzma::codec_error(err).into()
 }

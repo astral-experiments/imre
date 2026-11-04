@@ -1,7 +1,9 @@
 //! Independent member cursors with incremental CRC. Compressed and inflated
 //! buffers are each bounded even when the caller requests the entire member.
 use crate::StrOwner;
+use crate::objects::lzma::codec_error;
 use flate2::{Crc, Decompress, FlushDecompress, Status};
+use liblzma::stream::{Action as LzmaAction, Filters, Status as LzmaStatus, Stream as LzmaStream};
 use num_bigint::Sign;
 use num_traits::ToPrimitive;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
@@ -108,6 +110,7 @@ pub(in crate::objects) struct Member {
     packed_left: u64,
     left: u64,
     inflater: Option<Inflate>,
+    lzma: Option<LzmaStream>,
     packed: Bytes,
     packed_pos: usize,
     buffer: Bytes,
@@ -178,12 +181,12 @@ impl Member {
             ));
         }
         match info.method {
-            0 | 8 => {}
-            12 | 14 | 93 => {
-                let module = match info.method {
-                    12 => "bz2",
-                    14 => "lzma",
-                    _ => "compression.zstd",
+            0 | 8 | 14 => {}
+            12 | 93 => {
+                let module = if info.method == 12 {
+                    "bz2"
+                } else {
+                    "compression.zstd"
                 };
                 return Err(Error::new(
                     Kind::RuntimeError,
@@ -204,6 +207,7 @@ impl Member {
             packed_left: info.compress_size,
             left: info.file_size,
             inflater: (info.method == 8).then(raw_inflater),
+            lzma: None,
             info,
             packed: Vec::new(),
             packed_pos: 0,
@@ -264,12 +268,66 @@ impl Member {
         self.read_block(want).inspect_err(|_| self.buffer.clear())
     }
 
+    /// Read the method 14 prefix once per cursor, including after a backward seek.
+    /// The two version bytes are informational. The next two bytes specify the
+    /// size of the liblzma filter properties that precede the raw LZMA1 stream.
+    fn read_lzma(&mut self, n: usize) -> Result<()> {
+        if self.lzma.is_none() {
+            let mut needed = 4;
+            loop {
+                let packed = &self.packed[self.packed_pos..];
+                if packed.len() >= 4 {
+                    needed = 4 + usize::from(u16_at(packed, 2));
+                    if packed.len() > needed {
+                        let mut filters = Filters::new();
+                        filters
+                            .lzma1_properties(&packed[4..needed])
+                            .map_err(codec_error)?;
+                        self.lzma =
+                            Some(LzmaStream::new_raw_decoder(&filters).map_err(codec_error)?);
+                        self.packed_pos += needed;
+                        break;
+                    }
+                }
+                if self.packed_left == 0 {
+                    self.eof = true;
+                    return Ok(());
+                }
+                // Include the first compressed byte, as zipfile.LZMADecompressor does.
+                self.input(needed + 1)?;
+            }
+        }
+        let decoder = self.lzma.as_mut().expect("parsed LZMA properties");
+        let limit = n.max(self.min_read).min(BLOCK);
+        self.buffer
+            .try_reserve(limit)
+            .map_err(|_| Error::allocation())?;
+        self.buffer.resize(limit, 0);
+        let before_in = decoder.total_in();
+        let before_out = decoder.total_out();
+        let status = decoder.process(
+            &self.packed[self.packed_pos..],
+            &mut self.buffer,
+            LzmaAction::Run,
+        );
+        self.packed_pos += (decoder.total_in() - before_in) as usize;
+        self.buffer
+            .truncate((decoder.total_out() - before_out) as usize);
+        self.eof = status.map_err(codec_error)? == LzmaStatus::StreamEnd
+            || (self.packed_left == 0
+                && self.packed_pos == self.packed.len()
+                && self.buffer.len() < limit);
+        Ok(())
+    }
+
     /// Fill the member buffer with one decoded block and advance its logical size.
     fn read_block(&mut self, want: usize) -> Result<()> {
         let n = want.min(BLOCK);
         while !self.eof && self.buffer.is_empty() {
             self.input(n)?;
-            if let Some(inflater) = &mut self.inflater {
+            if self.info.method == 14 {
+                self.read_lzma(n)?;
+            } else if let Some(inflater) = &mut self.inflater {
                 let len = n.max(self.min_read).min(BLOCK);
                 // A small member may produce only a few bytes of a full read buffer.
                 self.buffer
@@ -547,7 +605,8 @@ impl Member {
                 self.packed_at = self.start;
                 self.packed_left = self.info.compress_size;
                 self.left = self.info.file_size;
-                self.inflater = Some(raw_inflater());
+                self.inflater = (self.info.method == 8).then(raw_inflater);
+                self.lzma = None;
                 self.crc = Some(Crc::new());
                 self.eof = false;
                 self.packed.clear();
