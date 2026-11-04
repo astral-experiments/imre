@@ -104,6 +104,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/_imre_ordered_dict.py"),
         )),
         "runpy" => Some(("runpy.py", include_str!("../../stdlib/runpy.py"))),
+        // CPython 3.14.5 Lib/trace.py. See licenses/CPython.txt.
+        "trace" => Some(("trace.py", include_str!("../../stdlib/trace.py"))),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),

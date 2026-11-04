@@ -1784,6 +1784,14 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         )
         compare("-B", "-m", "shell_words")
 
+        (root / "merge_counts.py").write_text(
+            "from trace import CoverageResults\n"
+            "counts = CoverageResults({('app.py', 3): 2})\n"
+            "counts.update(CoverageResults({('app.py', 3): 4, ('app.py', 5): 1}))\n"
+            "print(sorted(counts.counts.items()))\n"
+        )
+        compare("-B", "-m", "merge_counts")
+
         tokenize_script = root / "tokenize_entry.py"
         tokenize_script.write_text(
             "from io import StringIO\n"
