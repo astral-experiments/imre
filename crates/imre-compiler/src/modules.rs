@@ -1893,6 +1893,7 @@ impl IntrinsicModule {
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
+            (Self::Builtins, "bin") => Intrinsic::ScopedObjectExport("builtins.bin"),
             (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
             (Self::Builtins, "oct") => Intrinsic::ScopedObjectExport("builtins.oct"),
             (Self::Builtins, "exec") => Intrinsic::ScopedObjectExport("builtins.exec"),
