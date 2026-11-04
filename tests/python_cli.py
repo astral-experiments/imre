@@ -3352,6 +3352,15 @@ for name in ("md4", "ripemd160"):
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
         compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
+        patch_multiple = root / "patch_multiple.py"
+        for call in ("with patch.multiple", "replace = patch.multiple\nwith replace"):
+            patch_multiple.write_text(
+                "from unittest.mock import patch\n"
+                "class Service:\n    port = 1\n"
+                f"{call}(Service, port=2):\n    assert Service.port == 2\n"
+                "assert Service.port == 1\n"
+            )
+            compare("-B", patch_multiple, extra=mock_compile_flags, native_timeout=300)
         compare(
             "-B", "-c",
             "from unittest.mock import Mock\n"

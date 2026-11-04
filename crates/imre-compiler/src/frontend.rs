@@ -8706,11 +8706,14 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
                     });
                 }
-                if attribute.attr.as_str() == "object"
+                if matches!(attribute.attr.as_str(), "object" | "multiple")
                     && let Type::Class(class) = receiver.ty
                     && self.bundled_mock_class(class, "_PatchFactory")
                 {
-                    return Err(self.object_runtime_export("unittest.mock.patch.object", attribute));
+                    return Err(self.object_runtime_export(
+                        &format!("unittest.mock.patch.{}", attribute.attr.as_str()),
+                        attribute,
+                    ));
                 }
                 if matches!(attribute.attr.as_str(), "args" | "kwargs")
                     && self.mock_call_record(receiver.ty)

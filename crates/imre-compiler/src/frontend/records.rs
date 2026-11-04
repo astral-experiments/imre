@@ -1316,7 +1316,9 @@ impl Checker<'_> {
         {
             return Ok(context);
         }
-        if attribute.attr.as_str() == "object" && self.bundled_mock_class(class, "_PatchFactory") {
+        if matches!(attribute.attr.as_str(), "object" | "multiple")
+            && self.bundled_mock_class(class, "_PatchFactory")
+        {
             // Class and module references are valid patch operands in the object runtime.
             for arg in call
                 .arguments
@@ -1333,7 +1335,10 @@ impl Checker<'_> {
                     self.expr(arg)?;
                 }
             }
-            return Err(self.object_runtime_export("unittest.mock.patch.object", call));
+            return Err(self.object_runtime_export(
+                &format!("unittest.mock.patch.{}", attribute.attr.as_str()),
+                call,
+            ));
         }
         if attribute.attr.as_str() == "dict"
             && self.bundled_mock_class(class, "_PatchFactory")

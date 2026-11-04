@@ -1,7 +1,8 @@
 """Attribute patching on live Python objects, including module namespaces."""
 
 import builtins
-from contextlib import ContextDecorator
+import sys
+from contextlib import ContextDecorator, ExitStack
 from functools import wraps
 from importlib import import_module
 from types import ModuleType
@@ -78,6 +79,7 @@ def _is_async_spec(spec):
 
 
 class _patch:
+    attribute_name = None
     _active_patches = []
 
     def __init__(self, getter, attribute, new, create, *, spec=None, spec_set=None,
@@ -104,6 +106,7 @@ class _patch:
         self.spec_set = spec_set
         self.new_callable = new_callable
         self.mock_kwargs = kwargs
+        self.additional_patchers = []
         self.is_started = False
 
     def _new_mock(self, original, spec, spec_set):
@@ -168,12 +171,26 @@ class _patch:
             replacement = self._new_mock(original, spec, spec_set)
         elif self.mock_kwargs:
             raise TypeError("Can't pass kwargs to a mock we aren't creating")
-        setattr(target, name, replacement)
         self.target = target
         self.original = original
         self.local = local
+        self._exit_stack = ExitStack()
         self.is_started = True
-        return replacement
+        try:
+            setattr(target, name, replacement)
+            if self.attribute_name is None:
+                return replacement
+            replacements = {}
+            if self.new is DEFAULT:
+                replacements[self.attribute_name] = replacement
+            for patcher in self.additional_patchers:
+                member = self._exit_stack.enter_context(patcher)
+                if patcher.new is DEFAULT:
+                    replacements.update(member)
+            return replacements
+        except BaseException:
+            if not self.__exit__(*sys.exc_info()):
+                raise
 
     def __exit__(self, *exc_info):
         if self.is_started:
@@ -191,7 +208,9 @@ class _patch:
             del self.target
             del self.original
             self.is_started = False
-            return False
+            stack = self._exit_stack
+            del self._exit_stack
+            return stack.__exit__(*exc_info)
 
     def start(self):
         replacement = self.__enter__()
@@ -205,6 +224,14 @@ class _patch:
             return None
         return self.__exit__(None, None, None)
 
+    def copy(self):
+        patcher = _patch(self.getter, self.attribute, self.new, self.create,
+                         spec=self.spec, spec_set=self.spec_set,
+                         new_callable=self.new_callable, **self.mock_kwargs)
+        patcher.attribute_name = self.attribute_name
+        patcher.additional_patchers = [child.copy() for child in self.additional_patchers]
+        return patcher
+
     def __call__(self, func):
         if isinstance(func, type):
             for name in dir(func):
@@ -212,10 +239,7 @@ class _patch:
                     method = getattr(func, name)
                     # Some boxed builtins are callable without exposing __call__.
                     if hasattr(method, '__call__') or isinstance(method, type(len)):
-                        patcher = _patch(self.getter, self.attribute, self.new, self.create,
-                                         spec=self.spec, spec_set=self.spec_set,
-                                         new_callable=self.new_callable, **self.mock_kwargs)
-                        setattr(func, name, patcher(method))
+                        setattr(func, name, self.copy()(method))
             return func
         if hasattr(func, 'patchings'):
             func.patchings.append(self)
@@ -223,12 +247,13 @@ class _patch:
 
         @wraps(func)
         def patched(*args, **kwargs):
-            from contextlib import ExitStack
             with ExitStack() as stack:
                 extra = []
                 for patching in patched.patchings:
                     replacement = stack.enter_context(patching)
-                    if patching.new is DEFAULT:
+                    if patching.attribute_name is not None:
+                        kwargs.update(replacement)
+                    elif patching.new is DEFAULT:
                         extra.append(replacement)
                 return func(*args, *extra, **kwargs)
         patched.patchings = [self]
@@ -244,6 +269,23 @@ def _patch_object(target, attribute, new=DEFAULT, spec=None, create=False, spec_
     if type(target) is str:
         raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
     return _patch(lambda: target, attribute, new, create, spec=spec, spec_set=spec_set, **kwargs)
+
+
+def _patch_multiple(target, spec=None, create=False, spec_set=None,
+                    autospec=None, new_callable=None, **kwargs):
+    if not kwargs:
+        raise ValueError('Must supply at least one keyword argument with patch.multiple')
+    getter = (lambda: _patch_owner(target)) if type(target) is str else (lambda: target)
+    options = {} if autospec is None else {'autospec': autospec}
+    patchers = []
+    for name, replacement in kwargs.items():
+        patcher = _patch(getter, name, replacement, create, spec=spec, spec_set=spec_set,
+                         new_callable=new_callable, **options)
+        patcher.attribute_name = name
+        patchers.append(patcher)
+    first = patchers[0]
+    first.additional_patchers = patchers[1:]
+    return first
 
 
 class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
@@ -291,6 +333,7 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
 _PatchFactory.__call__ = _patch_attribute
 _PatchFactory.dict = staticmethod(_BoxedDictionaryPatch)
 _PatchFactory.object = staticmethod(_patch_object)
+_PatchFactory.multiple = staticmethod(_patch_multiple)
 
 
 patch = _PatchFactory()

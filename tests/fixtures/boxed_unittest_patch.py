@@ -281,4 +281,31 @@ class ReaderTests:
 ReaderTests().test_spec()
 assert Service.resource is Owner
 
+
+class Group:
+    first = property(lambda self: 1)
+    second = 2
+
+
+first_descriptor = Group.__dict__['first']
+with patch.multiple('__main__.Group', first=DEFAULT, second=3) as replacements:
+    assert list(replacements) == ['first']
+    assert replacements['first'] is Group.first and Group.second == 3
+assert Group.first is first_descriptor and Group.second == 2
+
+with check.assertRaises(AttributeError):
+    patch.multiple(Group, first=0, second=0, missing=0).start()
+assert Group.first is first_descriptor and Group.second == 2
+
+@patch.multiple(Group, first=DEFAULT, second=DEFAULT)
+class GroupTests:
+    @patch('sys.exit')
+    def test_call(self, exit_mock, first, second):
+        assert sys.exit is exit_mock and Group.first is first and Group.second is second
+        assert first is not second
+
+
+GroupTests().test_call()
+assert sys.exit is original_exit and Group.first is first_descriptor and Group.second == 2
+
 print("patch restored")
