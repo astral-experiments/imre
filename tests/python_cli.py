@@ -1822,6 +1822,23 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         local_script.write_text("import _pyio\nprint(_pyio.marker)\n")
         compare("-B", local_script)
 
+        quopri_project = root / "quopri_project"
+        quopri_project.mkdir()
+        (quopri_project / "quopri.py").write_text("marker = 'project quopri'\n")
+        local_quopri = quopri_project / "entry.py"
+        local_quopri.write_text("import quopri\nprint(quopri.marker)\n")
+        compare("-B", local_quopri)
+
+        compare(
+            "-IB", "-c",
+            "import io, quopri\n"
+            "body = b'a \\r\\nb\\t\\r\\n' + b'=' * 40 + b'\\xff'\n"
+            "encoded = io.BytesIO()\n"
+            "quopri.encode(io.BytesIO(body), encoded, False)\n"
+            "print(encoded.getvalue())\n"
+            "print(quopri.decodestring(encoded.getvalue()) == body)\n",
+        )
+
         config_script = root / "config_entry.py"
         config_script.write_text(
             "from configparser import ConfigParser\n"
