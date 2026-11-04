@@ -56,6 +56,7 @@ mod expansions;
 mod fixed_tuples;
 mod fnmatch;
 mod format_cursors;
+mod fractions;
 mod fromkeys;
 mod fspath;
 mod function_caches;
@@ -7415,6 +7416,19 @@ impl<'a> Checker<'a> {
                 }
                 if values.iter().any(|v| matches!(v.ty, Type::WeakProxy(_))) {
                     return self.weak_proxy_comparison(values, &compare.ops, expression);
+                }
+                if values
+                    .iter()
+                    .any(|v| matches!(v.ty, Type::Class(id) if self.fraction_class(id)))
+                    && compare
+                        .ops
+                        .iter()
+                        .any(|op| !matches!(op, ast::CmpOp::Is | ast::CmpOp::IsNot))
+                {
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "Fraction numeric comparison",
+                        expression,
+                    ));
                 }
                 let decimal =
                     |value: &Expr| matches!(value.ty, Type::Class(id) if self.decimal_class(id));
