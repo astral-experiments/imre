@@ -2,7 +2,7 @@
 
 import math
 from fractions import Fraction
-from math import ceil, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
+from math import atan2, ceil, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
 from math import e, inf, nan, pi, tau
 
 
@@ -144,6 +144,16 @@ def current():
             assert str(error) == message
         else:
             raise AssertionError(message)
+
+    assert atan2 is math.atan2
+    y = FloatOnly(-1.0)
+    x = FloatOnly(-0.0)
+    assert atan2(y, x) == -pi / 2
+    assert y.calls == x.calls == 1
+    assert atan2(-0.0, -0.0) == -pi
+    assert copysign(1.0, atan2(-0.0, 1.0)) == -1.0
+    assert atan2(inf, -inf) == 3 * pi / 4
+    assert isnan(atan2(nan, 1.0))
 
     assert copysign is math.copysign
     assert copysign(FloatOnly(), IndexOnly()) == 1.25

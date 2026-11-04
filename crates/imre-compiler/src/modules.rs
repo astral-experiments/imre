@@ -2342,6 +2342,7 @@ impl IntrinsicModule {
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
+            (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
             (Self::Math, "fma") => Intrinsic::ScopedObjectExport("math.fma"),
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
