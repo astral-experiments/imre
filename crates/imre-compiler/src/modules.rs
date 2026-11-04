@@ -739,6 +739,7 @@ pub(crate) enum IntrinsicModule {
     Locale,
     LocaleNative,
     Functools,
+    Calendar,
     Fnmatch,
     Time,
     Warnings,
@@ -1287,6 +1288,7 @@ impl IntrinsicModule {
             "_locale" => Some(Self::LocaleNative),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "calendar" => Some(Self::Calendar),
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
@@ -1402,6 +1404,20 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Calendar {
+            return Some(match name {
+                "monthcalendar" => {
+                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.monthcalendar"))
+                }
+                "firstweekday" => {
+                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.firstweekday"))
+                }
+                "setfirstweekday" => {
+                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.setfirstweekday"))
+                }
+                _ => Binding::ConditionalValue,
+            });
+        }
         // The bundled ntpath binds platform-dependent names during module initialization.
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
@@ -2844,20 +2860,6 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
-        if self.is_bundled("calendar") {
-            return Some(match name {
-                "monthcalendar" => {
-                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.monthcalendar"))
-                }
-                "firstweekday" => {
-                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.firstweekday"))
-                }
-                "setfirstweekday" => {
-                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.setfirstweekday"))
-                }
-                _ => Binding::ConditionalValue,
-            });
-        }
         if self.is_bundled("uuid") {
             let export = match name {
                 "uuid1" => Some("uuid.uuid1"),
@@ -5331,9 +5333,6 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/zipimport_typed.py"),
                 ),
             )),
-            // The checked month-grid calls only need the three module bindings above.
-            // Other members and observed Python objects use the full bundled source.
-            "calendar" => Some(("calendar.py", "")),
             "platform" => Some((
                 "platform.py",
                 concat!(
