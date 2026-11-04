@@ -2503,7 +2503,14 @@ impl Context {
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => &["__get__"],
-            "tuple" => &["__repr__", "__getitem__", "__len__", "count", "index"],
+            "tuple" => &[
+                "__repr__",
+                "__getitem__",
+                "__getnewargs__",
+                "__len__",
+                "count",
+                "index",
+            ],
             "set" | "frozenset" => builtins::set_methods(name),
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
