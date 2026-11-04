@@ -79,3 +79,14 @@ assert integer.mock_calls == []
 assert int(integer) == 7
 with check.assertRaises(TypeError):
     int(mock.MagicMock(spec_set=object))
+
+key = mock.MagicMock()
+assert hash(key) == object.__hash__(key)
+key.__hash__.return_value = 17
+assert hash(key) == 17
+assert key.mock_calls == [call.__hash__(), call.__hash__()]
+assert key.method_calls == []
+key.__hash__.return_value = "invalid"
+with check.assertRaises(TypeError):
+    hash(key)
+assert key.__hash__.call_count == 3
