@@ -1076,7 +1076,7 @@ pub(super) enum Value {
     Hmac(Hmac),
     Struct {
         format: String,
-        layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
+        layout: Option<std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>>,
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     ExpatParser(std::rc::Rc<super::stdlib::pyexpat::NativeParser>),
@@ -1100,7 +1100,7 @@ pub(super) enum Value {
         buffer: Option<Id>,
         exporter: Option<Id>,
         offset: usize,
-        remaining: usize,
+        length: usize,
     },
     MemoryIterator {
         view: Option<Id>,
@@ -1525,6 +1525,7 @@ impl Value {
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
             Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
+            Self::Struct { .. } => "struct.Struct",
             Self::StructUnpackIterator { .. } => STRUCT_UNPACK_ITERATOR,
             Self::MemoryIterator { .. } => "memory_iterator",
             Self::SequenceIterator { .. } => "iterator",

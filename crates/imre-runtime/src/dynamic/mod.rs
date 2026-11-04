@@ -2508,6 +2508,25 @@ impl Context {
             let dictionary = self.dict(vec![(key, origin)]);
             self.native_type_dicts.insert(value, dictionary);
         }
+        if name == "struct.Struct" {
+            let mut entries = Vec::new();
+            for member in builtins::STRUCT_METHODS.iter().copied().chain(["__new__"]) {
+                let key = self.heap.code_name(member);
+                entries.push((key, self.builtin(&format!("struct.Struct.{member}"))));
+            }
+            for field in ["size", "format"] {
+                let get = self.builtin(&format!("struct.Struct.{field}"));
+                let member = self.alloc(Value::GetSetDescriptor {
+                    owner: "struct.Struct",
+                    name: field,
+                    get,
+                    set: None,
+                });
+                entries.push((self.heap.code_name(field), member));
+            }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == deque::CLASS {
             deque::install(self);
         }
