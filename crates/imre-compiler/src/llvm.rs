@@ -405,6 +405,7 @@ fn emit_program(
         uses_sequence_layout: false,
         tuple_literals: BTreeMap::new(),
         static_functions: BTreeSet::new(),
+        callable_uses: callables::Uses::default(),
         async_frames: BTreeMap::new(),
         async_invoke_frames: BTreeMap::new(),
         function_link_types,
@@ -564,13 +565,7 @@ fn emit_program(
     }
     json::schemas(module, &emitter.json_schema_roots, emitter.output);
     record_layouts(module, emitter.output);
-    callables::adapters(
-        module,
-        sanitize,
-        &emitter.resource_types,
-        !emitter.function_link_types.is_empty(),
-        emitter.output,
-    );
+    callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
     emitter.output.common().push_str(&integer_helpers());
     emitter
@@ -648,6 +643,7 @@ struct Emitter<'a, 'module> {
     uses_sequence_layout: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
+    callable_uses: callables::Uses,
     async_frames: BTreeMap<usize, String>,
     async_invoke_frames: BTreeMap<usize, (String, Type)>,
     function_link_types: HashSet<Type>,
@@ -4296,6 +4292,7 @@ impl Emitter<'_, '_> {
         }
         if let Builtin::MarkCoroutine(id) = builtin {
             let function = self.expr(&expressions[0]);
+            self.callable_uses.marked.insert(*id);
             let marker = self.output.global_ref(format!("coroutine_mark_{id}"));
             self.line(format!("store i8 1, ptr @{marker}"));
             return function;
@@ -5252,10 +5249,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::EmptyPartial => self.empty_partial(&args[0].value),
             Builtin::CallableContext => {
-                let address = self.instruction(format!(
-                    "getelementptr %callable, ptr {}, i32 0, i32 1",
-                    args[0].value.operand
-                ));
+                let address = self.callable_context_slot(&args[0].value);
                 let value = Value {
                     ty: returns,
                     operand: self.instruction(format!("load ptr, ptr {address}")),
@@ -5694,7 +5688,7 @@ impl Emitter<'_, '_> {
                 let root = self.output.global_ref(format!("static_function_{name}"));
                 self.static_functions.insert(root.clone());
                 self.rooted_record(returns, &root, |emitter| {
-                    let layout = emitter.output.global_ref("layout_callable".to_owned());
+                    let layout = emitter.callable_layout("callable");
                     let value = emitter.record_with_layout(returns, layout);
                     emitter.line(format!(
                         "store ptr @imre_{name}_callback, ptr {}",
@@ -5704,7 +5698,7 @@ impl Emitter<'_, '_> {
                 })
             }
             Builtin::BuiltinsLen => {
-                let layout = self.output.global_ref("layout_callable".to_owned());
+                let layout = self.callable_layout("callable");
                 let value = Value {
                     ty: returns,
                     operand: self
@@ -6460,6 +6454,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
             Builtin::IsCoroutineFunction => {
+                self.callable_uses.inspected = true;
                 let table = self.output.global_ref("coroutine_targets".to_owned());
                 Value {
                     ty: Type::Bool,
