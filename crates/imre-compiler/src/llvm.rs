@@ -2469,8 +2469,9 @@ impl Emitter<'_, '_> {
                 key,
                 value,
                 ready,
+                kind,
             } => {
-                self.iter_next(*iterator, *key, *value, *ready);
+                self.iter_next(*iterator, *key, *value, *ready, *kind);
             }
             Statement::SetItem(list, index, expression) => {
                 if self.copy_item(list, index, expression) {
@@ -8475,12 +8476,18 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// The runtime transfers independent owned words only on success. Output
-    /// locals have distinct slots and may be narrower than a word, so scratch
-    /// values are converted before publication. Exhaustion never reads scratch
-    /// or replaces an output owner; nested loops can safely reuse both scratch
-    /// words after this synchronous conversion.
-    fn iter_next(&mut self, iterator: usize, key: usize, value: Option<usize>, ready: usize) {
+    /// Pulls and publishes independently owned words only when a cursor advances.
+    /// Exact string cursors return their word directly. Generic iterators use
+    /// shared scratch slots for keys and values, including two-word mapping pulls.
+    /// Exhaustion leaves the caller's output locals untouched.
+    fn iter_next(
+        &mut self,
+        iterator: usize,
+        key: usize,
+        value: Option<usize>,
+        ready: usize,
+        kind: ir::IterNextKind,
+    ) {
         debug_assert!(matches!(
             self.locals[iterator],
             Type::Iterator | Type::Cursor(_)
@@ -8495,26 +8502,45 @@ impl Emitter<'_, '_> {
             debug_assert_ne!(ready, value);
         }
         let iterator = self.borrow_slot(iterator);
-        self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
-        let value_output = if value.is_some() {
-            "%mapping_value_word"
-        } else {
-            "null"
+        let (available, direct_key) = match kind {
+            ir::IterNextKind::Generic => {
+                self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
+                let value_output = if value.is_some() {
+                    "%mapping_value_word"
+                } else {
+                    "null"
+                };
+                let byte = self.checked_instruction(format!(
+                    "call i32 @imre_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
+                    iterator.operand
+                ));
+                (self.instruction(format!("icmp ne i32 {byte}, 0")), None)
+            }
+            ir::IterNextKind::String | ir::IterNextKind::CodePoint => {
+                debug_assert!(value.is_none());
+                let next = if kind == ir::IterNextKind::String {
+                    "imre_str_iter_next_owned"
+                } else {
+                    "imre_str_iter_next_codepoint"
+                };
+                let word = self.instruction(format!("call i64 @{next}(ptr {})", iterator.operand));
+                (
+                    self.instruction(format!("icmp ne i64 {word}, 0")),
+                    Some(word),
+                )
+            }
         };
-        let byte = self.checked_instruction(format!(
-            "call i32 @imre_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
-            iterator.operand
-        ));
         let ready_value = Value {
             ty: Type::Bool,
-            operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+            operand: available,
             small_integer: false,
         };
         self.store(ready, &ready_value);
         let (success, end) = (self.label(), self.label());
         self.branch(&ready_value.operand, &success, &end);
         self.start(&success);
-        let word = self.instruction("load i64, ptr %mapping_key_word");
+        let word =
+            direct_key.unwrap_or_else(|| self.instruction("load i64, ptr %mapping_key_word"));
         let key_value = self.unpack_word(word, self.locals[key]);
         self.store(key, &key_value);
         if let Some(value) = value {
@@ -9903,6 +9929,8 @@ declare i32 @imre_set_contains(ptr, i64)
 declare void @imre_set_add(ptr, i64)
 declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)
+declare i64 @imre_str_iter_next_owned(ptr)
+declare i64 @imre_str_iter_next_codepoint(ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)

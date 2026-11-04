@@ -855,6 +855,7 @@ impl Checker<'_> {
                 Expr::boolean(true),
                 vec![
                     Statement::IterNext {
+                        kind: crate::ir::IterNextKind::Generic,
                         iterator,
                         key,
                         value: Some(item),

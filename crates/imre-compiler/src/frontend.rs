@@ -4320,6 +4320,11 @@ impl<'a> Checker<'a> {
             let value = items.then(|| self.hidden(value_type));
             let ready = self.hidden(Type::Bool);
             body.push(Statement::IterNext {
+                kind: if string {
+                    ir::IterNextKind::String
+                } else {
+                    ir::IterNextKind::Generic
+                },
                 iterator,
                 key,
                 value,

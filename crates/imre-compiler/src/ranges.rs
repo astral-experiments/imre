@@ -102,11 +102,19 @@ impl RangeFacts<'_> {
             Statement::Assign(slot, value) => small[*slot] &= self.integer(value).is_some(),
             Statement::Move(target, source) => moves.push((*source, *target)),
             Statement::IterNext {
-                key, value, ready, ..
+                key,
+                value,
+                ready,
+                kind,
+                ..
             } => {
-                for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
-                    small[slot] = false;
+                if *kind != crate::ir::IterNextKind::CodePoint {
+                    small[*key] = false;
                 }
+                if let Some(value) = value {
+                    small[*value] = false;
+                }
+                small[*ready] = false;
             }
             // The cursor proof covers the final increment as well as the yielded target.
             Statement::For {
@@ -569,11 +577,19 @@ impl Analyzer {
                 return flow;
             }
             Statement::IterNext {
-                key, value, ready, ..
+                key,
+                value,
+                ready,
+                kind,
+                ..
             } => {
-                // An exhausted iterator preserves its outputs, while success
-                // can replace them with any value of the checked storage type.
-                state.0[*key] = Interval::UNKNOWN;
+                // Exhaustion preserves the old output. A successful scalar
+                // pull contributes only the Unicode code-point interval.
+                state.0[*key] = if *kind == crate::ir::IterNextKind::CodePoint {
+                    state.0[*key].join(Interval::bounded(0, 0x10ffff))
+                } else {
+                    Interval::UNKNOWN
+                };
                 if let Some(value) = value {
                     state.0[*value] = Interval::UNKNOWN;
                 }
@@ -2049,6 +2065,7 @@ def parameter(unknown: int) -> int:
                 Statement::Assign(1, Expr::integer(1)),
                 Statement::Assign(2, Expr::integer(2)),
                 Statement::IterNext {
+                    kind: crate::ir::IterNextKind::Generic,
                     iterator: 0,
                     key: 1,
                     value: items.then_some(2),

@@ -211,6 +211,7 @@ impl Rewrite<'_> {
                     key,
                     value,
                     ready,
+                    ..
                 } if [Some(*iterator), Some(*key), *value, Some(*ready)]
                     .into_iter()
                     .flatten()

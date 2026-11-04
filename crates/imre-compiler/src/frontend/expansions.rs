@@ -1028,6 +1028,7 @@ impl Checker<'_> {
         let value_expr = self.coerce(self.local(value), destination.1, node)?;
         let body = vec![
             Statement::IterNext {
+                kind: crate::ir::IterNextKind::Generic,
                 iterator,
                 key,
                 value: Some(value),

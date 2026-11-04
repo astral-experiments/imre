@@ -194,6 +194,7 @@ fn inspect(
                 key,
                 value,
                 ready,
+                ..
             } => {
                 // Runtime iteration transfers whole values, including boxed
                 // tuple payloads whose components are not known statically.

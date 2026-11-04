@@ -1,6 +1,7 @@
 mod analysis;
 mod borrows;
 mod callables;
+mod character_locals;
 mod classes;
 mod contracts;
 mod digit_sums;
@@ -636,6 +637,8 @@ fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);
     verify_after(module, "tuple scalarization")?;
+    character_locals::specialize(module);
+    verify_after(module, "character local specialization")?;
     digit_sums::specialize(module);
     verify_after(module, "digit reduction fusion")?;
     split_fields::specialize(module);
