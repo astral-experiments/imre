@@ -106,11 +106,12 @@ Stock passed both originals. The ordinary and boxed native runs reported the ups
 
 ### `typing`
 
-Pinned CPython passed the lazy-import test. Public Imre at O0 and O3 took its upstream CPython-only skip.
+Pinned CPython passed both originals. Public Imre at O0 and O3 took their upstream CPython-only skips. Both occurrences remain in the denominator. [Public run revision](https://github.com/astral-experiments/imre/commit/25716c72a7b511ceaca8430d71ae8b46d5f827bc)
 
 | Original test | Occurrence | Reason for omission | Public behavior checked |
 | --- | --- | --- | --- |
 | [`test.test_typing.InternalsTests.test_lazy_import`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_typing.py#L6405-L6413) | 1 | The upstream CPython-only test checks whether importing typing also imports warnings, inspect, re, contextlib and annotationlib. The timing of those imports is a CPython startup optimization. Imre uses its own module loader. | The unchanged generic pickle parent and all 12 subtests passed on stock and public O0/O3. The generic type-erasure parent also passed at all three settings. |
+| [`test.test_typing.OverloadTests.test_overload_on_compiled_functions`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_typing.py#L6450-L6463) | 1 | The test replaces the private `typing._overload_registry` and uses `sum` and `print` as compiled functions. Upstream added `@cpython_only` because PyPy implements these builtins in Python. Public overload registration and lookup remain in scope. [Upstream reason](https://github.com/python/cpython/issues/98713) | On stock and public O0/O3, `get_overloads` returned the two stubs registered for a Python function by identity in definition order. Applying `overload` to bare `sum` and `print` left their lookups empty. After explicit registration of a Python wrapper decorated with `functools.wraps(sum)`, lookups on the wrapper and on `sum` both returned that wrapper. `clear_overloads()` emptied both lookups. [Public control revision](https://github.com/astral-experiments/imre/commit/9143ebdadd63de6f2e85d13db0cc52c259166368) |
 
 ### `weakref`
 

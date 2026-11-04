@@ -143,10 +143,10 @@ It passed **15,161**, skipped 1,023, and reported 7 errors.
 | `tempfile` | 110 | 118 | 2 | All three runs registered the same 118 original parents. CPython passed 112 and skipped six. Public Imre passed 110 and skipped eight at both levels. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 91 | 228 | 1 | The whole suite reported 92 paired successes. Four signal tests and two shutdown tests with successful native child assertions bring the verified total to 91. A seventh apparent gain accepted an unrelated child compiler failure and stays uncredited. |
-| `typing` | 710 | 712 | 1 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. |
+| `typing` | 710 | 712 | 2 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. Both upstream skips have [individual omission decisions](docs/stdlib-omissions.md#typing). |
 | `unittest` | 611 | 1,090 | 0 | Both native levels passed 20 of 24 focused `MockTest` originals. Fourteen newly counted tests cover forwarding calls to wrapped objects and precedence among side effects, return values, and the wrapped callable. Four autospec cases errored. [Public change](https://github.com/astral-experiments/imre/pull/5347). |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,727** | **13,327** | **34** | **3 complete suites match stock on `main`** |
+| **Total** | **9,727** | **13,327** | **35** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
