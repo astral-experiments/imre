@@ -2089,7 +2089,7 @@ impl Emitter<'_, '_> {
         for slot in cursors {
             let start = invariant.contains(&slot).then(|| {
                 let start = self.entry_alloca("ptr");
-                self.line(format!("store ptr null, ptr {start}"));
+                writeln!(self.entry_allocas, "  store ptr null, ptr {start}").unwrap();
                 start
             });
             let next = self.entry_alloca("ptr");

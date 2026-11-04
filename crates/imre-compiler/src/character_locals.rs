@@ -235,6 +235,21 @@ mod tests {
     }
 
     #[test]
+    fn allocates_the_saved_cursor_start_before_initializing_it() {
+        let source = "def scan(text: str) -> int:\n    total = 0\n    for i in range(2):\n        for ch in text:\n            total += ord(ch)\n    return total\nprint(scan('é'))\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        let prefix = "store ptr null, ptr ";
+        let mut initializers = llvm
+            .match_indices("store ptr null, ptr %scratch")
+            .peekable();
+        assert!(initializers.peek().is_some());
+        for (position, _) in initializers {
+            let slot = llvm[position + prefix.len()..].lines().next().unwrap();
+            assert!(llvm[..position].contains(&format!("{slot} = alloca ptr")));
+        }
+    }
+
+    #[test]
     fn byte_iteration_borrows_only_a_direct_utf8_encode() {
         for (setup, iterable, fused) in [
             ("", "text.encode()", true),
