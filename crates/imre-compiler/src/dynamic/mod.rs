@@ -127,6 +127,13 @@ impl Imports {
                     | "pathlib._local"
                     | "pathlib.types"
                     | "platform"
+                    | "pyexpat"
+                    | "pyexpat.errors"
+                    | "pyexpat.model"
+                    | "xml.parsers"
+                    | "xml.parsers.expat"
+                    | "xml.parsers.expat.errors"
+                    | "xml.parsers.expat.model"
                     | "keyword"
                     | "site"
                     | "importlib.abc"
@@ -351,7 +358,7 @@ impl<'a> Visitor<'a> for Imports {
             self.add(0, "importlib");
             if matches!(
                 name.value.to_str().split('.').next(),
-                Some("xml" | "zoneinfo")
+                Some("pyexpat" | "xml" | "zoneinfo")
             ) {
                 self.add(0, name.value.to_str());
             }
@@ -635,6 +642,8 @@ pub(crate) fn compile(
             "pathlib",
             "sys",
             "platform",
+            "pyexpat",
+            "xml.parsers",
             "keyword",
             "site",
             "importlib",
@@ -847,6 +856,9 @@ pub(crate) fn compile(
                 && !seen.contains("urllib.robotparser")
             {
                 imports.add(0, "urllib.robotparser");
+            }
+            if computed_import && !seen.contains("xml.parsers.expat") {
+                imports.names.push((0, "xml.parsers.expat".to_owned()));
             }
             // Register the mock provider for imports from source-loaded modules.
             if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {

@@ -1027,6 +1027,7 @@ pub(super) enum Value {
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
+    ExpatParser(std::rc::Rc<super::stdlib::pyexpat::NativeParser>),
     Random(std::rc::Rc<std::cell::RefCell<crate::objects::Generator>>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     #[cfg(unix)]
@@ -2120,6 +2121,7 @@ impl Value {
             | Self::Struct { .. }
             | Self::Hash(_)
             | Self::MetadataArchive(_)
+            | Self::ExpatParser(_)
             | Self::Random(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)

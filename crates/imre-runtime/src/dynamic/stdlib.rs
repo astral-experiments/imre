@@ -60,6 +60,7 @@ pub(super) mod posix_spawn;
 mod posixpath;
 #[cfg(target_os = "linux")]
 mod process_arguments;
+pub(super) mod pyexpat;
 pub(super) mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
@@ -761,6 +762,19 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_linecache", "source_lines")
         | ("_imre_unittest", "format_exception")
+        | (
+            "_imre_pyexpat",
+            "version_info"
+            | "create"
+            | "parse"
+            | "flush_buffer"
+            | "position"
+            | "error_code"
+            | "error_string"
+            | "in_callback"
+            | "get_reparse_deferral"
+            | "set_reparse_deferral",
+        )
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
@@ -1776,6 +1790,9 @@ pub(super) fn call(
         && os::xattr::FUNCTIONS.contains(&op)
     {
         return os::xattr::call(ctx, op, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imre_pyexpat.") {
+        return pyexpat::call(ctx, method, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
