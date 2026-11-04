@@ -1217,6 +1217,8 @@ pub(crate) enum Builtin {
     StringIter,
     /// Iterates Python line boundaries on a rooted immutable string.
     SplitLinesIter,
+    /// Iterates every field of a forward split by a literal ASCII separator.
+    SplitByteIter(u8),
     MatchingSplitIter(u8),
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,

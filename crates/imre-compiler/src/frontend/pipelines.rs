@@ -7,8 +7,8 @@ use crate::ir::TextOperation;
 
 mod groupby;
 
-/// A nonempty needle without the one-byte delimiter cannot cross a field boundary.
-fn split_filter_source<'a>(source: &'a Iteration, needle: &str) -> Option<(&'a Expr, u8)> {
+/// Recognize a forward split with a literal one-byte separator and no limit.
+fn byte_split_source(source: &Iteration) -> Option<(&Expr, u8)> {
     let Iteration::Container {
         iterable,
         items: false,
@@ -32,10 +32,7 @@ fn split_filter_source<'a>(source: &'a Iteration, needle: &str) -> Option<(&'a E
     let [byte] = *separator.as_bytes() else {
         return None;
     };
-    (!needle.is_empty()
-        && !needle.as_bytes().contains(&byte)
-        && matches!(&limit.kind, ExprKind::Int(n) if n == "-1"))
-    .then_some((text, byte))
+    matches!(&limit.kind, ExprKind::Int(n) if n == "-1").then_some((text, byte))
 }
 
 /// `evaluate` evaluates an iterable expression; `acquire` obtains its iterator.
@@ -651,7 +648,9 @@ impl Checker<'_> {
                 });
                 let source = self.expansion_input(&call.arguments.args[0], element)?;
                 if let Some(needle) = split_needle
-                    && let Some((text, separator)) = split_filter_source(&source, needle)
+                    && let Some((text, separator)) = byte_split_source(&source)
+                    && !needle.is_empty()
+                    && !needle.as_bytes().contains(&separator)
                 {
                     let start = if let Some(expr) = call.arguments.args.get(1) {
                         self.expr_expected(expr, Type::Int)?
@@ -667,7 +666,7 @@ impl Checker<'_> {
                     };
                     return Ok(Some(Iteration::Prepared(self.matching_fields(cursor))));
                 }
-                let source = self.fuse_splitlines(source);
+                let source = self.fuse_split(source);
                 let mut input = self.prepare_iteration(source, call, false)?;
                 self.hint_empty_iteration(&input, element);
                 let start = if let Some(start) = call.arguments.args.get(1) {
@@ -946,8 +945,10 @@ impl Checker<'_> {
 
     /// Capture the immutable receiver once, before evaluating an enumerate start.
     /// The fresh split list is unobservable at these direct iteration sites.
-    pub(super) fn fuse_splitlines(&mut self, input: Iteration) -> Iteration {
-        let Iteration::Container {
+    pub(super) fn fuse_split(&mut self, input: Iteration) -> Iteration {
+        let (builtin, args) = if let Some((text, byte)) = byte_split_source(&input) {
+            (Builtin::SplitByteIter(byte), vec![text.clone()])
+        } else if let Iteration::Container {
             iterable:
                 Expr {
                     kind: ExprKind::Builtin(Builtin::SplitLines, args),
@@ -956,12 +957,14 @@ impl Checker<'_> {
             items: false,
             start: None,
         } = input
-        else {
+        {
+            (Builtin::SplitLinesIter, args)
+        } else {
             return input;
         };
         let cursor = Expr {
             ty: Type::Iterator,
-            kind: ExprKind::Builtin(Builtin::SplitLinesIter, args),
+            kind: ExprKind::Builtin(builtin, args),
         };
         Iteration::Prepared(self.prepare_cursor(cursor, Type::Str))
     }

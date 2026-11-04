@@ -223,6 +223,7 @@ enum Storage {
     Repeat(Repeat<OwnedWord>),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
+    SplitFields(SplitFields),
     MatchingFields(matching_fields::MatchingFields),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
@@ -1482,6 +1483,52 @@ impl LineOffsets {
 struct LineIterator {
     owner: StrOwner,
     offsets: LineOffsets,
+}
+
+struct SplitFields {
+    source: StrOwner,
+    separator: u8,
+    start: usize,
+}
+
+impl SplitFields {
+    fn next(&mut self) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
+        let start = self.start;
+        let Some(remaining) = self.source.as_bytes().get(start..) else {
+            return Ok(None);
+        };
+        let end = memchr::memchr(self.separator, remaining)
+            .map_or(self.source.len(), |offset| start + offset);
+        let field = owned_line(&self.source, start..end)?;
+        // A separator at the end leaves one final empty field to yield.
+        self.start = end + 1;
+        // SAFETY: the field transfers its owned string reference to the caller.
+        let word = unsafe {
+            OwnedWord::from_owned(StrOwner::into_raw(field) as usize, words::WordKind::new(3))
+        };
+        Ok(Some((word, None)))
+    }
+}
+
+/// Creates a cursor for an immediately consumed `text.split(sep)`.
+///
+/// # Safety
+/// The caller roots the string for this call and passes an ASCII separator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_split_byte_iter(
+    value: *const Str,
+    separator: u8,
+) -> *const Object {
+    // SAFETY: the caller roots the immutable source while the cursor acquires it.
+    let source = unsafe { StrOwner::acquire_word(value as usize) };
+    let fields = SplitFields {
+        source,
+        separator,
+        start: 0,
+    };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::SplitFields(fields),
+    ))))
 }
 
 fn owned_line(source: &StrOwner, range: std::ops::Range<usize>) -> Result<StrOwner, Error> {

@@ -7487,6 +7487,14 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::StringIter => self.call("imre_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::SplitByteIter(separator) => Value {
+                ty: Type::Iterator,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_str_split_byte_iter(ptr {}, i8 {separator})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::MatchingSplitIter(separator) => {
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_str_matching_split_iter(ptr {}, ptr {}, i64 {}, i8 {separator})",
@@ -9925,6 +9933,7 @@ declare i32 @imre_str_isalpha(ptr)
 declare i32 @imre_str_isdigit(ptr)
 declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
+declare ptr @imre_str_split_byte_iter(ptr, i8)
 declare ptr @imre_str_matching_split_iter(ptr, ptr, i64, i8)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
