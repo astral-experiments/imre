@@ -2840,6 +2840,19 @@ def report(text):
             extra={"IMREFLAGS": "--opt-level 0"},
             native_timeout=300,
         )
+        if sys.version_info >= (3, 14):
+            compare(
+                "-B", "-c",
+                "from uuid import uuid1\n"
+                "from uuid import uuid6\n"
+                "from uuid import uuid7\n"
+                "from uuid import uuid8\n"
+                "print(uuid1(1, 2).version)\n"
+                "print(uuid6(1, 2).version)\n"
+                "print(uuid7().version)\n"
+                "print(uuid8(1, 2, 3).version)\n",
+                native_timeout=300,
+            )
         (helpers / "uuid").mkdir()
         uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")

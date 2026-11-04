@@ -2807,9 +2807,13 @@ impl SourceModule {
     fn export(&self, name: &str) -> Option<Binding> {
         if self.is_bundled("uuid") {
             let export = match name {
+                "uuid1" => Some("uuid.uuid1"),
                 "uuid3" => Some("uuid.uuid3"),
                 "uuid4" => Some("uuid.uuid4"),
                 "uuid5" => Some("uuid.uuid5"),
+                "uuid6" => Some("uuid.uuid6"),
+                "uuid7" => Some("uuid.uuid7"),
+                "uuid8" => Some("uuid.uuid8"),
                 "NAMESPACE_DNS" => Some("uuid.NAMESPACE_DNS"),
                 "NAMESPACE_URL" => Some("uuid.NAMESPACE_URL"),
                 "NAMESPACE_OID" => Some("uuid.NAMESPACE_OID"),
