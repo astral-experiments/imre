@@ -1299,6 +1299,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_binascii_encode"
                 | "imre_base32_encode"
                 | "imre_base32_decode"
+                | "imre_base32_decode_text"
                 | "imre_base85_encode"
                 | "imre_binascii_unhexlify"
                 | "imre_codec_lookup"

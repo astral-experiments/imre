@@ -14,3 +14,22 @@ for invalid in (b"A", b"========", b"0=======", b"A=AAAAAA", b"AA====0=", b"aaaa
         print(b32decode(invalid))
     except Error as exc:
         print(str(exc))
+
+print(b32decode("my======", casefold=True))
+print(b32hexdecode("CO======"))
+
+
+def invalid_text() -> str:
+    print("text")
+    return "π"
+
+
+def folding() -> bool:
+    print("fold")
+    return True
+
+
+try:
+    print(b32hexdecode(casefold=folding(), s=invalid_text()))
+except ValueError as exc:
+    print(str(exc))

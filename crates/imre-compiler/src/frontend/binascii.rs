@@ -16,6 +16,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         name: &'static str,
         params: &[calls::Parameter],
+        accepts_text: bool,
     ) -> Result<(calls::ArgumentScope, Vec<Expr>), String> {
         let short = name.strip_prefix("base64.").unwrap();
         if !self
@@ -30,10 +31,13 @@ impl Checker<'_> {
                 checker.evaluated_argument(node)
             })
             .map_err(|_| self.scoped_builtin_error(name, call))?;
-        if params
-            .iter()
-            .zip(&args.order)
-            .any(|(param, &i)| args.values[i].ty != param.ty)
+        let input = args.values[args.order[0]].ty;
+        let text = accepts_text && matches!(input, Type::Str | Type::StrLiteral(_));
+        if (input != Type::Bytes && !text)
+            || params[1..]
+                .iter()
+                .zip(&args.order[1..])
+                .any(|(param, &i)| args.values[i].ty != param.ty)
         {
             return Err(self.scoped_builtin_error(name, call));
         }
@@ -66,7 +70,7 @@ impl Checker<'_> {
         if name == "base64.b32decode" {
             params.push(kind.parameter("map01", Type::None, Some(Expr::none())));
         }
-        let (scope, args) = self.exact_base_codec_args(call, name, &params)?;
+        let (scope, args) = self.exact_base_codec_args(call, name, &params, decode)?;
         let mut values = vec![args[0].clone(), Expr::boolean(hex)];
         let op = if decode {
             values.push(args[1].clone());
@@ -106,7 +110,7 @@ impl Checker<'_> {
                 Some(Expr::boolean(false)),
             ));
         }
-        let (scope, args) = self.exact_base_codec_args(call, name, &params)?;
+        let (scope, args) = self.exact_base_codec_args(call, name, &params, false)?;
         let option = |i: usize| args.get(i).cloned().unwrap_or_else(|| Expr::boolean(false));
         let alphabet: &[u8; 85] = match short {
             "a85encode" => br##"!"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstu"##,

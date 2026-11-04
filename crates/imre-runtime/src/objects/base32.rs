@@ -2,7 +2,7 @@
 use super::Bytes;
 use super::bytes::allocate;
 use super::exceptions::{Error, Kind, Result, finish};
-use crate::BytesOwner;
+use crate::{BytesOwner, Str};
 
 pub(crate) const ALPHABETS: [[u8; 32]; 2] = [
     *b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
@@ -125,4 +125,19 @@ pub unsafe extern "C" fn imre_base32_decode(
 ) -> *const Bytes {
     // SAFETY: the caller keeps the bytes owner rooted.
     result(decode(unsafe { &*data }, hex, casefold))
+}
+
+/// Decode an exact string after validating that its borrowed storage is ASCII.
+///
+/// # Safety
+/// The caller roots the string owner throughout validation and decoding.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_base32_decode_text(
+    data: *const Str,
+    hex: bool,
+    casefold: bool,
+) -> *const Bytes {
+    // SAFETY: the caller keeps the string owner rooted.
+    let data = super::binascii::ascii_bytes(unsafe { &*data });
+    result(data.and_then(|data| decode(data, hex, casefold)))
 }
