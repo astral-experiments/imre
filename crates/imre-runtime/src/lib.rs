@@ -244,7 +244,7 @@ impl<T> StorageCell<T> {
 /// An opaque, nonmoving list allocation. Only a proven readonly loop borrows its buffer.
 pub struct List(
     StorageCell<Vec<Int>>,
-    // Capacity charged to this list in the thread's range-hint budget.
+    // Capacity charged to this list in the thread's speculative buffer budget.
     Cell<usize>,
 );
 
@@ -354,18 +354,24 @@ fn take_list_buffer(requested: usize) -> Vec<Int> {
     if requested == 0 || requested > MAX_REUSED_LIST_CAPACITY {
         return Vec::new();
     }
+    take_cached_list_buffer(|buffers| {
+        buffers
+            .iter()
+            .enumerate()
+            .filter(|(_, buffer)| (requested..=requested * 2).contains(&buffer.capacity()))
+            .min_by_key(|(_, buffer)| buffer.capacity())
+            .map(|(index, _)| index)
+    })
+}
+
+/// Removes a selected empty buffer and leaves the other in the newest slot.
+fn take_cached_list_buffer(select: impl FnOnce(&[Vec<Int>; 2]) -> Option<usize>) -> Vec<Int> {
     LIST_BUFFERS
         .try_with(|buffers| {
             let Ok(mut buffers) = buffers.try_borrow_mut() else {
                 return Vec::new();
             };
-            let candidate = buffers
-                .iter()
-                .enumerate()
-                .filter(|(_, buffer)| (requested..=requested * 2).contains(&buffer.capacity()))
-                .min_by_key(|(_, buffer)| buffer.capacity())
-                .map(|(index, _)| index);
-            let Some(index) = candidate else {
+            let Some(index) = select(&buffers) else {
                 return Vec::new();
             };
             let buffer = std::mem::take(&mut buffers[index]);
@@ -1941,10 +1947,40 @@ pub unsafe extern "C" fn imre_list_copy_index(
     )
 }
 
+/// Reuse the most recently emptied list buffer for a first append. Charge
+/// oversized capacity to the same live-slot budget as a loop reservation.
+fn take_initial_list_buffer(hint: &Cell<usize>) -> Vec<Int> {
+    RANGE_HINT_SLOTS
+        .try_with(|used| {
+            let other = used.get() - hint.get();
+            let available = MAX_LIVE_RANGE_HINT_SLOTS - other;
+            // A normal first growth can already take a four- to eight-slot buffer.
+            let buffer = take_cached_list_buffer(|buffers| {
+                buffers.iter().position(|buffer| {
+                    let slots = buffer.capacity();
+                    slots >= 4 && (slots <= 8 || slots <= available)
+                })
+            });
+            let charge = if buffer.capacity() > 8 {
+                buffer.capacity()
+            } else {
+                0
+            };
+            used.set(other + charge);
+            hint.set(charge);
+            buffer
+        })
+        .unwrap_or_default()
+}
+
 /// Grow a full integer list into a cached allocation when one fits its next capacity.
 #[inline(never)]
-fn grow_int_list(list: &mut Vec<Int>) -> bool {
-    let mut buffer = take_list_buffer(list.len().saturating_mul(2).max(4));
+fn grow_int_list(list: &mut Vec<Int>, hint: &Cell<usize>) -> bool {
+    let mut buffer = if list.is_empty() {
+        take_initial_list_buffer(hint)
+    } else {
+        take_list_buffer(list.len().saturating_mul(2).max(4))
+    };
     if buffer.capacity() == 0 {
         return list.try_reserve(1).is_ok();
     }
@@ -1954,8 +1990,8 @@ fn grow_int_list(list: &mut Vec<Int>) -> bool {
     true
 }
 
-fn try_append_int(list: &mut Vec<Int>, value: &Int) -> bool {
-    if list.len() == list.capacity() && !grow_int_list(list) {
+fn try_append_int(list: &mut Vec<Int>, value: &Int, hint: &Cell<usize>) -> bool {
+    if list.len() == list.capacity() && !grow_int_list(list, hint) {
         objects::exceptions::sequence_allocation_failed();
         return false;
     }
@@ -1971,9 +2007,10 @@ pub unsafe extern "C" fn imre_list_append(list: *const List, value: usize) -> i3
     // reenter the runtime, and no storage reference escapes the closure.
     unsafe {
         let value = Int::borrow(value);
-        (&*list)
+        let owner = &*list;
+        owner
             .0
-            .with_mut(|list| i32::from(try_append_int(list, &value)))
+            .with_mut(|list| i32::from(try_append_int(list, &value, &owner.1)))
     }
 }
 
@@ -1994,10 +2031,14 @@ pub unsafe extern "C" fn imre_list_append_pair(
     unsafe {
         let first = Int::borrow(first);
         let second = Int::borrow(second);
-        (&*list).0.with_mut(|list| {
+        let owner = &*list;
+        owner.0.with_mut(|list| {
             if list.capacity() - list.len() < 2 {
                 // The first source append can fit even if growing for the second fails.
-                return i32::from(try_append_int(list, &first) && try_append_int(list, &second));
+                return i32::from(
+                    try_append_int(list, &first, &owner.1)
+                        && try_append_int(list, &second, &owner.1),
+                );
             }
             let length = list.len();
             // The capacity check proves that both slots fit. Cloning exact
@@ -2761,7 +2802,11 @@ mod tests {
         let allocation = spare.as_ptr();
         recycle_list_buffer(&mut spare);
 
-        assert!(try_append_int(&mut values, &Int::small(4).unwrap()));
+        assert!(try_append_int(
+            &mut values,
+            &Int::small(4).unwrap(),
+            &Cell::new(0)
+        ));
         assert_eq!(values.as_ptr(), allocation);
         assert_eq!(weak.strong_count(), 1);
         assert_eq!(values[0].big().as_ref(), &BigInt::from(1_u128 << 100));
@@ -2777,6 +2822,39 @@ mod tests {
         assert_eq!(displaced.as_ptr(), original);
         drop(values);
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn first_appends_share_the_live_buffer_budget_with_range_hints() {
+        let cached = || {
+            let mut buffer = Vec::with_capacity(MAX_REUSED_LIST_CAPACITY);
+            recycle_list_buffer(&mut buffer);
+        };
+        let first = imre_list_new();
+        let second = imre_list_new();
+        let third = imre_list_new();
+        let zero = Int::small(0).unwrap();
+        let stop = Int::small(MAX_SMALL).unwrap();
+        let one = Int::small(1).unwrap();
+        // SAFETY: each list stays rooted through its reservation, append and capacity check.
+        unsafe {
+            imre_list_reserve_range(first, zero.0, stop.0, one.0, 1);
+            cached();
+            assert_eq!(imre_list_append(second, one.0), 1);
+            assert_eq!((&*second).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
+            assert_eq!(RANGE_HINT_SLOTS.with(Cell::get), MAX_LIVE_RANGE_HINT_SLOTS);
+            cached();
+            assert_eq!(imre_list_append(third, one.0), 1);
+            assert!((&*third).0.with(Vec::capacity) <= 8);
+            imre_list_release(first);
+            let fourth = imre_list_new();
+            assert_eq!(imre_list_append(fourth, one.0), 1);
+            assert_eq!((&*fourth).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
+            imre_list_release(fourth);
+            imre_list_release(second);
+            imre_list_release(third);
+        }
+        assert_eq!(RANGE_HINT_SLOTS.with(Cell::get), 0);
     }
 
     #[test]
