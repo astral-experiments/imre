@@ -1,4 +1,4 @@
-//! Skip an ASCII case conversion when a string set excludes its byte length.
+//! Skip exact string transformations when a set excludes the resulting key.
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Module, Statement, TextOperation, Type};
 use crate::types::Types;
 
@@ -22,14 +22,133 @@ fn case_input(value: &mut Expr) -> Option<&mut Expr> {
     }
 }
 
-/// Builds the length guard for an already evaluated string.
-fn possible(set: &Expr, text: usize) -> Expr {
+/// Summarize literal key prefixes. An empty key can match after truncating any
+/// input, so it disables prefix rejection.
+fn literal_prefix_mask(values: &[Expr]) -> Option<ir::SetCasePrefix> {
+    let mut masks = [u64::MAX; 2];
+    let mut hashes = Some(0_u64);
+    for value in values {
+        let ExprKind::Str(key) = &value.kind else {
+            return None;
+        };
+        let first = *key.as_bytes().first()?;
+        hashes = hashes.and_then(|mask| {
+            imre_ast::strings::ascii_case_prefix_bit(key.as_bytes()).map(|bit| mask | bit)
+        });
+        if first.is_ascii() {
+            for byte in [first.to_ascii_uppercase(), first.to_ascii_lowercase()] {
+                masks[usize::from(byte / 64)] &= !(1_u64 << (byte % 64));
+            }
+        }
+    }
+    // Use three bytes only when at least three quarters of the hash buckets reject.
+    Some(match hashes {
+        Some(mask) if (1..=16).contains(&mask.count_ones()) => {
+            ir::SetCasePrefix::ThreeByteHashes(mask)
+        }
+        _ => ir::SetCasePrefix::ExcludedBytes(masks),
+    })
+}
+
+/// A single literal initializer describes the set for its lifetime only if every
+/// read is the receiver of membership. Assignments, calls and aliases disqualify it.
+fn constant_set_masks(module: &Module) -> Vec<Option<ir::SetCasePrefix>> {
+    #[derive(Clone, Default)]
+    struct Uses {
+        writes: usize,
+        reads: usize,
+        membership: usize,
+        masks: Option<ir::SetCasePrefix>,
+    }
+    let mut globals = vec![Uses::default(); module.globals.len()];
+    for function in module.functions.iter().chain([&module.entry]) {
+        ir::walk_expressions(&function.body, &mut |expr| {
+            let ExprKind::Builtin(operation, args) = &expr.kind else {
+                return;
+            };
+            match (operation, args.as_slice()) {
+                (Builtin::GlobalSet(slot), [value]) => {
+                    let uses = &mut globals[*slot];
+                    uses.writes += 1;
+                    if let ExprKind::Set {
+                        element: Type::Str,
+                        values,
+                    } = &value.kind
+                    {
+                        uses.masks = literal_prefix_mask(values);
+                    }
+                }
+                (Builtin::GlobalGet(slot), []) => globals[*slot].reads += 1,
+                (Builtin::SetContains, [_, set]) => {
+                    if let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = set.kind {
+                        globals[slot].membership += 1;
+                    }
+                }
+                _ => {}
+            }
+        });
+    }
+    globals
+        .into_iter()
+        .map(|uses| {
+            (uses.writes == 1 && uses.reads == uses.membership)
+                .then_some(uses.masks)
+                .flatten()
+        })
+        .collect()
+}
+
+/// Find the local whose prefix this expression returns. Literal arguments keep the
+/// skipped operations free of callbacks and their separators valid on every path.
+fn prefix_local(value: &Expr) -> Option<usize> {
+    let ExprKind::Builtin(builtin, args) = &value.kind else {
+        return None;
+    };
+    let source = match (builtin, args.as_slice()) {
+        (Builtin::RStrip, [source]) => source,
+        (Builtin::Text(TextOperation::Strip(2)), [source, chars])
+            if matches!(&chars.kind, ExprKind::Absent(value) if matches!(value.kind, ExprKind::None))
+                || matches!(&chars.kind, ExprKind::Present(value) if matches!(value.kind, ExprKind::Str(_))) =>
+        {
+            source
+        }
+        (Builtin::ListGet, [split, index]) => {
+            let (false, [source, separator, _]) = split.selected_split_args(index)? else {
+                return None;
+            };
+            let ExprKind::Present(separator) = &separator.kind else {
+                return None;
+            };
+            if !matches!(&separator.kind, ExprKind::Str(text) if !text.is_empty()) {
+                return None;
+            }
+            source
+        }
+        _ => return None,
+    };
+    match source.kind {
+        ExprKind::Local(slot) => Some(slot),
+        _ => prefix_local(source),
+    }
+}
+
+/// Tests the original string before computing a prefix when the lookup set is constant.
+fn prefix_check(set: &Expr, source: &Expr, masks: &[Option<ir::SetCasePrefix>]) -> Option<Expr> {
+    let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = set.kind else {
+        return None;
+    };
+    Some(possible(
+        Builtin::SetCasePrefixPossible(masks[slot]?),
+        set,
+        prefix_local(source)?,
+    ))
+}
+
+/// Builds a guard for the stable set and an already available string.
+fn possible(probe: Builtin, set: &Expr, text: usize) -> Expr {
     Expr {
         ty: Type::Bool,
-        kind: ExprKind::Builtin(
-            Builtin::SetCaseLengthPossible,
-            vec![set.clone(), Expr::local(text, Type::Str)],
-        ),
+        kind: ExprKind::Builtin(probe, vec![set.clone(), Expr::local(text, Type::Str)]),
     }
 }
 
@@ -50,7 +169,7 @@ fn independent(value: &Expr, target: usize) -> bool {
 
 /// A normalizer may return the converted spelling on a hit. On a definite
 /// miss, its final return bypasses the assignment without exposing the local.
-fn guard_return(function: &mut Function, types: &Types) {
+fn guard_return(function: &mut Function, types: &Types, masks: &[Option<ir::SetCasePrefix>]) {
     let [
         ..,
         assignment,
@@ -80,28 +199,53 @@ fn guard_return(function: &mut Function, types: &Types) {
     let temp = function.locals.len();
     function.locals.push(Type::Str);
     let source = std::mem::replace(input, Expr::local(temp, Type::Str));
-    let skip = Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Not(Box::new(possible(set, temp))),
+    let miss_unless = |check| {
+        let skip = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Not(Box::new(check)),
+        };
+        Statement::If(skip, vec![Statement::Return(miss.clone())], vec![])
     };
-    let original = std::mem::replace(assignment, Statement::Clear(temp));
+    let mut body = Vec::new();
+    if let Some(check) = prefix_check(set, &source, masks) {
+        body.push(miss_unless(check));
+    }
+    body.push(Statement::Assign(temp, source));
+    body.push(miss_unless(possible(
+        Builtin::SetCaseLengthPossible,
+        set,
+        temp,
+    )));
+    body.push(std::mem::replace(assignment, Statement::Clear(temp)));
     *assignment = Statement::Scope {
-        body: vec![
-            Statement::Assign(temp, source),
-            Statement::If(skip, vec![Statement::Return(miss.clone())], vec![]),
-            original,
-        ],
+        body,
         clear: vec![temp],
     };
+}
+
+/// Guard a boolean membership expression with a definite-miss test.
+fn when_possible(check: Expr, value: Expr) -> Expr {
+    Expr {
+        ty: Type::Bool,
+        kind: ExprKind::Conditional(
+            Box::new(check),
+            Box::new(value),
+            Box::new(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(false),
+            }),
+        ),
+    }
 }
 
 /// Guard inline membership and normalize-and-return functions. A private slot
 /// evaluates the source exactly once, even when obtaining it has side effects.
 pub(crate) fn specialize(module: &mut Module) {
+    let masks = constant_set_masks(module);
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
         let original_locals = function.locals.len();
         let types = &module.types;
-        guard_return(function, types);
+        guard_return(function, types, &masks);
         ir::walk_expressions_mut(&mut function.body, &mut |expr| {
             let ExprKind::Builtin(Builtin::SetContains, args) = &mut expr.kind else {
                 return;
@@ -120,26 +264,20 @@ pub(crate) fn specialize(module: &mut Module) {
             let temp = function.locals.len();
             function.locals.push(Type::Str);
             let source = std::mem::replace(input, Expr::local(temp, Type::Str));
-            let check = possible(set, temp);
+            let prefix = prefix_check(set, &source, &masks);
+            let check = possible(Builtin::SetCaseLengthPossible, set, temp);
             let ordinary = std::mem::replace(expr, Expr::none());
-            let absent = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(false),
-            };
-            *expr = Expr {
+            let guarded = Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Assign(temp, source)],
-                    value: Box::new(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Conditional(
-                            Box::new(check),
-                            Box::new(ordinary),
-                            Box::new(absent),
-                        ),
-                    }),
+                    value: Box::new(when_possible(check, ordinary)),
                     clear: vec![temp],
                 },
+            };
+            *expr = match prefix {
+                Some(check) => when_possible(check, guarded),
+                None => guarded,
             };
         });
     }
@@ -150,22 +288,44 @@ mod tests {
     use super::*;
 
     /// Counts guards in the lowered program, including the early return on a definite miss.
-    fn guards(source: &str) -> usize {
+    fn guards(source: &str) -> (usize, usize) {
         let graph = crate::modules::SourceGraph::single(source).unwrap();
         let mut module = crate::frontend::lower(&graph).unwrap();
         specialize(&mut module);
-        let mut count = 0;
+        let mut count = (0, 0);
         for function in module.functions.iter().chain([&module.entry]) {
-            ir::walk_expressions(&function.body, &mut |value| {
-                if matches!(
-                    value.kind,
-                    ExprKind::Builtin(Builtin::SetCaseLengthPossible, _)
-                ) {
-                    count += 1;
-                }
+            ir::walk_expressions(&function.body, &mut |value| match value.kind {
+                ExprKind::Builtin(Builtin::SetCaseLengthPossible, _) => count.0 += 1,
+                ExprKind::Builtin(Builtin::SetCasePrefixPossible(_), _) => count.1 += 1,
+                _ => {}
             });
         }
         count
+    }
+
+    #[test]
+    fn three_byte_prefixes_require_three_ascii_bytes_in_every_key() {
+        let prefixes = |keys: &[&str]| {
+            let values: Vec<_> = keys
+                .iter()
+                .map(|key| Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str((*key).to_owned()),
+                })
+                .collect();
+            literal_prefix_mask(&values)
+        };
+        let abc = imre_ast::strings::ascii_case_prefix_bit(b"ABC").unwrap();
+        assert!(
+            matches!(prefixes(&["Abc", "ABCD"]), Some(ir::SetCasePrefix::ThreeByteHashes(mask)) if mask == abc)
+        );
+        for keys in [["abc", "ab"], ["abc", "ßss"]] {
+            assert!(matches!(
+                prefixes(&keys),
+                Some(ir::SetCasePrefix::ExcludedBytes(_))
+            ));
+        }
+        assert!(prefixes(&["abc", ""]).is_none());
     }
 
     #[test]
@@ -174,13 +334,13 @@ mod tests {
             guards(
                 "def check(s: str, names: set[str]) -> bool:\n    return s.lower() in names\nprint(check('A', {'a'}))\n"
             ),
-            1
+            (1, 0)
         );
         assert_eq!(
             guards(
                 "def find(s: str, names: set[str]) -> str | None:\n    key = s.upper()\n    if key in names:\n        return key\n    return None\nfind('a', {'A'})\n"
             ),
-            1
+            (1, 0)
         );
     }
 
@@ -190,13 +350,50 @@ mod tests {
             guards(
                 "def find(s: str, names: set[str]) -> str:\n    key = s.upper()\n    if key in names:\n        return s\n    return key\nprint(find('a', {'A'}))\n"
             ),
-            0
+            (0, 0)
         );
         assert_eq!(
             guards(
                 "def names() -> set[str]:\n    return {'x'}\ndef check(s: str) -> bool:\n    return s.upper() in names()\nprint(check('x'))\n"
             ),
-            0
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn probes_only_infallible_prefix_operations() {
+        for (key, prefix) in [
+            ("s.rstrip().upper()", 1),
+            ("s.split('.', 1)[0].rstrip(' ').lower()", 1),
+            ("s.lstrip().upper()", 0),
+            ("s.split('', 1)[0].lower()", 0),
+            ("s.split(sep, 1)[0].upper()", 0),
+            ("s.rsplit('.', 1)[-1].lower()", 0),
+        ] {
+            let source = format!(
+                "NAMES = {{'ABC'}}\ndef check(s: str, sep: str) -> bool:\n    return {key} in NAMES\nprint(check('a', '.'))\n"
+            );
+            assert_eq!(guards(&source), (1, prefix), "{key}");
+        }
+    }
+
+    #[test]
+    fn preserves_mutable_or_empty_keys() {
+        for setup in [
+            "NAMES.add('xyz')",
+            "alias = NAMES\nalias.add('xyz')",
+            "NAMES.add('')",
+        ] {
+            let source = format!(
+                "NAMES = {{'ABC'}}\ndef check(s: str) -> bool:\n    return s.rstrip().upper() in NAMES\n{setup}\nprint(check('xyz'))\n"
+            );
+            assert_eq!(guards(&source), (1, 0), "{setup}");
+        }
+        assert_eq!(
+            guards(
+                "NAMES = {'', 'ABC'}\ndef check(s: str) -> bool:\n    return s.rstrip().upper() in NAMES\nprint(check(' '))\n"
+            ),
+            (1, 0)
         );
     }
 }

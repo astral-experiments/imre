@@ -395,6 +395,132 @@ class Lazy(Base):
     assert instance.method(None, None, None) == (instance, private)
 
 
+def conditional_class_annotations():
+    seen = []
+    ns = {"seen": seen}
+    exec("""def record(value):
+    seen.append(value)
+    return value
+
+def factory(flag):
+    class Fields:
+        first: int
+        def active():
+            nonlocal __conditional_annotations__
+            return __conditional_annotations__
+        def identity():
+            return __class__, __conditional_annotations__
+        if flag:
+            value: record(Alias)
+        else:
+            value: record(Missing)
+        for i in range(2):
+            repeated: record(bytes)
+        last: int
+        Alias = float
+    return Fields
+""", ns)
+    cls = ns["factory"](True)
+    provider = cls.__annotate__
+    assert seen == [] and "__conditional_annotations__" not in vars(cls)
+    assert provider.__code__.co_freevars == ("__classdict__", "__conditional_annotations__")
+    assert cls.active() is provider.__closure__[1].cell_contents
+    assert cls.active() == {0, 2}
+    assert cls.identity.__code__.co_freevars == ("__class__", "__conditional_annotations__")
+    assert cls.identity.__closure__[0].cell_contents is cls
+    assert cls.identity.__closure__[1] is provider.__closure__[1]
+    assert cls.identity() == (cls, cls.active())
+    cls.Alias = bool
+    assert list(cls.__annotations__.items()) == [
+        ("first", int), ("value", bool), ("repeated", bytes), ("last", int),
+    ]
+    assert seen == [bool, bytes]
+    other = ns["factory"](False)
+    assert other.active() == {1, 2} and cls.active() == {0, 2}
+    try:
+        other.__annotations__
+    except NameError as exc:
+        assert exc.name == "Missing"
+    else:
+        raise AssertionError("active unresolved annotation was skipped")
+
+    exec("""class Shadow:
+    __conditional_annotations__ = "class binding"
+    if len:
+        x: __conditional_annotations__
+        x: record(__conditional_annotations__)
+""", ns)
+    assert ns["Shadow"].__annotations__ == {"x": "class binding"}
+    assert seen == [bool, bytes, "class binding"]
+    ns["__conditional_annotations__"] = "global binding"
+    exec("""class Outside:
+    global __conditional_annotations__
+    if len:
+        x: __conditional_annotations__
+""", ns)
+    assert ns["Outside"].__annotations__ == {"x": "global binding"}
+
+    shadow = ns["Shadow"]
+    del shadow.__conditional_annotations__
+    assert shadow.__annotate__(1) == {"x": "global binding"}
+    del ns["__conditional_annotations__"]
+    try:
+        shadow.__annotate__(1)
+    except NameError as exc:
+        assert exc.name == "__conditional_annotations__"
+    else:
+        raise AssertionError("a deleted class binding exposed the compiler's cell")
+    exec("""def inside():
+    __conditional_annotations__ = "outer lexical binding"
+    class Lexical:
+        if len:
+            x: __conditional_annotations__
+    return Lexical
+
+class WithParameter:
+    def read[__conditional_annotations__](value: __conditional_annotations__):
+        return __conditional_annotations__
+    def owner[__class__](value: __class__):
+        return __class__, __conditional_annotations__
+""", ns)
+    assert ns["inside"]().__annotations__ == {"x": {0}}
+    read = ns["WithParameter"].read
+    parameter, = read.__type_params__
+    assert read(None) is parameter and read.__annotations__["value"] is parameter
+    owner = ns["WithParameter"].owner
+    parameter, = owner.__type_params__
+    assert owner(None) == (parameter, set()) and owner.__annotations__["value"] is parameter
+
+    exec("""class Target: pass
+class Outer:
+    items = [0]
+    try:
+        inside: int
+    finally:
+        Target.value: Missing = 3
+        items[0]: Missing = 4
+        (plain): Missing = 5
+        class Inner:
+            if len:
+                nested: str
+        def local():
+            local_only: Missing
+""", ns)
+    outer = ns["Outer"]
+    assert (ns["Target"].value, outer.items, outer.plain) == (3, [4], 5)
+    assert outer.__annotations__ == {"inside": int}
+    assert outer.Inner.__annotations__ == {"nested": str}
+    exec("""from __future__ import annotations
+class Postponed:
+    try:
+        pass
+    finally:
+        if len:
+            x: Missing
+""", ns)
+    assert ns["Postponed"].__annotations__ == {"x": "Missing"}
+
+
 def module_annotations():
     events = []
     ns = {"events": events, "alias": int}
@@ -1192,6 +1318,7 @@ def current():
     source_annotations()
     source_annotated_targets()
     module_annotations()
+    conditional_class_annotations()
     source_genexpr()
     source_listcomp()
     source_setcomp()

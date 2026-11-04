@@ -2,6 +2,8 @@
 
 mod annotations;
 
+use annotations::CONDITIONAL;
+
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
@@ -45,8 +47,11 @@ pub(super) struct Program {
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
-    // Declarations collected across module suites while lowering.
-    module_annotations: Vec<(String, ast::Expr)>,
+    // Declarations in source lowering order, including nested suites.
+    deferred_annotations: Vec<(String, ast::Expr)>,
+    // Indices of the class declarations guarded by the private annotation cell.
+    conditional_fields: Vec<usize>,
+    class_binds_conditional_name: bool,
     expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
     eager_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
 }
@@ -156,7 +161,7 @@ enum Instruction {
         scope: annotations::AnnotationScope,
     },
     ModuleAnnotations(Option<Rc<Program>>),
-    MarkModuleAnnotation(usize),
+    MarkAnnotation(usize),
     StringAnnotation(String, ast::Expr),
     ClassAnnotator(Rc<Program>),
     ClassStart,
@@ -1417,7 +1422,7 @@ impl Program {
                     }
                 }
                 Instruction::ModuleAnnotations(None)
-                | Instruction::MarkModuleAnnotation(_)
+                | Instruction::MarkAnnotation(_)
                 | Instruction::ClassStart
                 | Instruction::ClassEnd
                 | Instruction::CheckAnnotationFormat => {}
@@ -1568,8 +1573,18 @@ impl Program {
         // An annotation's class-local name falls back to globals when the class
         // dictionary lacks it. Functions nested inside the annotation skip the class.
         if let Some(class) = annotation_class {
+            self.class_binds_conditional_name = !self.conditional_fields.is_empty()
+                && class.contains(CONDITIONAL)
+                && !self.directives.contains_key(CONDITIONAL);
             self.reads
                 .retain(|name| name == "__classdict__" || !class.contains(name));
+        }
+        if self.method_class_cell.is_none()
+            && self.class_cell
+            && self.reads.contains("super")
+            && self.reads.contains(CONDITIONAL)
+        {
+            self.reads.insert("__class__".into());
         }
         // Even a nonlocal that is only assigned or deleted needs an enclosing cell.
         self.reads.extend(
@@ -1591,6 +1606,10 @@ impl Program {
                 !self.locals.contains(name)
                     && !matches!(self.directives.get(name), Some((ScopeDirective::Global, _)))
             });
+        }
+        // Implicit guard reads still use the cell when the expression names an explicit global.
+        if !self.conditional_fields.is_empty() {
+            self.reads.insert(CONDITIONAL.into());
         }
         Ok((self.string_roots, &self.reads))
     }
@@ -1726,7 +1745,11 @@ impl Program {
             {
                 None
             } else {
-                enclosing(name)
+                // A method can bind the class's conditional annotation cell without an outer binding.
+                enclosing(name).or_else(|| {
+                    (self.class_attributes.is_some() && name == CONDITIONAL)
+                        .then_some(EnclosingBinding::Local)
+                })
             }
         };
         for (_, op) in &mut self.instructions {
@@ -1846,7 +1869,9 @@ impl Program {
             private_names: None,
             template_expressions: Rc::default(),
             instructions: Vec::new(),
-            module_annotations: Vec::new(),
+            deferred_annotations: Vec::new(),
+            conditional_fields: Vec::new(),
+            class_binds_conditional_name: false,
             expression_functions: HashMap::new(),
             eager_comprehension_targets: HashMap::new(),
         }
@@ -2085,7 +2110,6 @@ impl Program {
                 self.doc = Some(doc.range());
             }
         }
-        let mut fields = Vec::new();
         let class = self.class_attributes.is_some();
         self.postponed_annotations = class
             && self.string_annotations()
@@ -2100,16 +2124,22 @@ impl Program {
             self.instructions
                 .push((self.first_line, Instruction::ModuleAnnotations(None)));
         }
-        self.lower_with_fields(body, lines, function, None, class.then_some(&mut fields))?;
-        if !self.module_annotations.is_empty() {
-            let entries = std::mem::take(&mut self.module_annotations);
-            let provider = self.annotation_provider(entries, None, self.first_line);
-            self.instructions[0].1 = Instruction::ModuleAnnotations(Some(provider));
-        }
-        if !fields.is_empty() {
-            let provider = self.annotation_provider(fields, Some(&self.qualname), self.first_line);
-            self.instructions
-                .push((self.first_line, Instruction::ClassAnnotator(provider)));
+        self.lower_block(body, lines, function, None, class)?;
+        if !self.deferred_annotations.is_empty() {
+            let entries = std::mem::take(&mut self.deferred_annotations);
+            let fields = std::mem::take(&mut self.conditional_fields);
+            let provider = self.annotation_provider(
+                entries,
+                class.then_some(&self.qualname),
+                self.first_line,
+                fields,
+            );
+            if class {
+                self.instructions
+                    .push((self.first_line, Instruction::ClassAnnotator(provider)));
+            } else {
+                self.instructions[0].1 = Instruction::ModuleAnnotations(Some(provider));
+            }
         }
         Ok(())
     }
@@ -2121,16 +2151,16 @@ impl Program {
         function: bool,
         active: Option<&mut LoopJumps>,
     ) -> Result<()> {
-        self.lower_with_fields(body, lines, function, active, None)
+        self.lower_block(body, lines, function, active, false)
     }
 
-    fn lower_with_fields(
+    fn lower_block(
         &mut self,
         body: ast::Suite,
         lines: &[usize],
         function: bool,
         active: Option<&mut LoopJumps>,
-        fields: Option<&mut Vec<(String, ast::Expr)>>,
+        class_top_level: bool,
     ) -> Result<()> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             use ast::visitor::Visitor;
@@ -2140,7 +2170,7 @@ impl Program {
                     named.visit_stmt(stmt);
                 }
             }
-            self.lower_suite(body, lines, function, active, fields)?;
+            self.lower_suite(body, lines, function, active, class_top_level)?;
             named.declare(self)
         })
     }
@@ -2151,7 +2181,7 @@ impl Program {
         lines: &[usize],
         function: bool,
         mut active: Option<&mut LoopJumps>,
-        mut fields: Option<&mut Vec<(String, ast::Expr)>>,
+        class_top_level: bool,
     ) -> Result<()> {
         use ast::Stmt;
         for mut stmt in body {
@@ -2247,15 +2277,18 @@ impl Program {
                             name,
                             annotations::string_literal(&s.annotation),
                         )
-                    } else if self.class_attributes.is_none() {
-                        let index = self.module_annotations.len();
-                        self.module_annotations.push((name, *s.annotation));
-                        Instruction::MarkModuleAnnotation(index)
-                    } else if let Some(entries) = &mut fields {
-                        entries.push((name, *s.annotation));
-                        continue;
                     } else {
-                        return Err(unsupported("conditional class annotation"));
+                        let index = self.deferred_annotations.len();
+                        self.deferred_annotations.push((name, *s.annotation));
+                        if class_top_level {
+                            continue;
+                        }
+                        if self.class_attributes.is_some() {
+                            self.conditional_fields.push(index);
+                            Instruction::MarkAnnotation(self.conditional_fields.len() - 1)
+                        } else {
+                            Instruction::MarkAnnotation(index)
+                        }
                     }
                 }
                 Stmt::Delete(s) => {
@@ -2638,6 +2671,7 @@ impl Program {
                     // On fallthrough, leave the protected body before running the else suite.
                     self.instructions.push((line, Instruction::StartFinally));
                     let handler = self.instructions.len();
+                    let before_handlers = self.conditional_fields.len();
                     let mut handled = Vec::new();
                     let count = s.handlers.len();
                     for (i, ast::ExceptHandler::ExceptHandler(h)) in
@@ -2697,7 +2731,16 @@ impl Program {
                     self.instructions.push((line, Instruction::EndFinally));
                     let end = self.instructions.len();
                     self.instructions[entry].1 = Instruction::EnterExcept { handler, end };
+                    let before_else = self.conditional_fields.len();
                     self.lower(s.orelse, lines, function, active.as_deref_mut())?;
+                    // CPython collects the else declarations before those in the handlers.
+                    if before_handlers != before_else
+                        && before_else != self.conditional_fields.len()
+                    {
+                        return Err(unsupported(
+                            "conditional class annotations in both except and else",
+                        ));
+                    }
                     let done = self.instructions.len();
                     for i in handled {
                         self.instructions[i].1 = Instruction::Jump(done);
@@ -2718,7 +2761,12 @@ impl Program {
                     self.lower(protected, lines, function, active.as_deref_mut())?;
                     self.instructions.push((line, Instruction::StartFinally));
                     let handler = self.instructions.len();
+                    let before_finally = self.conditional_fields.len();
                     self.lower(finalbody, lines, function, active.as_deref_mut())?;
+                    // CPython duplicates finally annotations for different unwind paths.
+                    if before_finally != self.conditional_fields.len() {
+                        return Err(unsupported("conditional class annotation in finally"));
+                    }
                     self.instructions.push((line, Instruction::EndFinally));
                     let end = self.instructions.len();
                     self.instructions[enter].1 = Instruction::EnterFinally { handler, end };
@@ -5203,9 +5251,20 @@ impl Context {
             Instruction::ModuleAnnotations(provider) => {
                 self.start_module_annotations(code, owner, scope, provider.as_ref())?;
             }
-            Instruction::MarkModuleAnnotation(index) => {
+            Instruction::MarkAnnotation(index) => {
+                let active = if code.class_attributes.is_some() {
+                    let cell = self.source_conditional_cell(scope)?;
+                    match self.heap.get(cell) {
+                        Value::Cell(Some(active)) => *active,
+                        _ => {
+                            return Err(self.missing_binding(scope, scope, CONDITIONAL));
+                        }
+                    }
+                } else {
+                    self.module_annotation_name(scope, CONDITIONAL)?
+                };
                 let index = self.int(*index as i64);
-                self.mark_module_annotation(scope, index)?;
+                self.mark_annotation(active, index)?;
             }
             Instruction::ClassAnnotator(provider) => {
                 let annotate = self.source_annotator(provider, owner, scope, scope)?;
@@ -5377,11 +5436,49 @@ impl Context {
                     let class_cell = self.scope_data(defining_scope).class_cell;
                     defining_scope =
                         self.source_parameter_scope(child, defining_scope, params, false)?;
+                    // The nearest __class__ binding also supplies zero-argument super().
+                    let class_cell = if params
+                        .iter()
+                        .any(|param| param.name().as_str() == "__class__")
+                    {
+                        Some(self.capture_free_cell(defining_scope, "__class__"))
+                    } else {
+                        class_cell
+                    };
                     let Value::Scope(frame) = self.heap.get_mut(defining_scope) else {
                         unreachable!()
                     };
                     frame.class_cell = class_cell;
                     type_params = self.lookup(defining_scope, ".type_params")?;
+                }
+                // A method that names the compiler's private cell shares it with the
+                // class annotator, even if the prepared namespace has a homonymous entry.
+                if self.scope_data(scope).class_body.is_some()
+                    && self.source_captures_conditional(scope, defining_scope, child)
+                {
+                    let class_cell = self.scope_data(defining_scope).class_cell;
+                    let parent = if defining_scope == scope {
+                        self.scope_data(scope)
+                            .parent
+                            .expect("class definition scope")
+                    } else {
+                        defining_scope
+                    };
+                    let cell = self.source_conditional_cell(scope)?;
+                    let mut names = vec![CONDITIONAL.into()];
+                    let mut cells = vec![cell];
+                    if child.method_class_cell.is_none()
+                        && child.class_cell
+                        && let Some(class_cell) = class_cell
+                    {
+                        names.push("__class__".into());
+                        cells.push(class_cell);
+                    }
+                    defining_scope = self.closure_environment(parent, names, &cells);
+                    let Value::Scope(frame) = self.heap.get_mut(defining_scope) else {
+                        unreachable!()
+                    };
+                    frame.class_cell = class_cell;
                 }
                 if let Some(captures_class) = child.method_class_cell {
                     sig["method_class_cell"] = captures_class.into();
@@ -5402,12 +5499,19 @@ impl Context {
         } else {
             let parameters = self.text(sig.to_string());
             let freevars = if let Some(captures_class) = child.method_class_cell {
+                let enclosing = if defining_scope == scope {
+                    self.scope_data(scope).parent
+                } else {
+                    Some(defining_scope)
+                };
                 self.method_freevars(
-                    scope,
+                    enclosing,
                     child.reads.iter().map(String::as_str),
                     captures_class,
                 )
-            } else if type_params != NONE {
+            } else if type_params != NONE
+                || (defining_scope != scope && self.scope_data(scope).class_body.is_some())
+            {
                 self.enclosing_freevars(defining_scope, child.reads.iter().map(String::as_str))
             } else if (code.name != "<module>" || self.scope_data(scope).comprehension.is_some())
                 && !matches!(
@@ -6027,6 +6131,14 @@ impl Context {
                     && code.locals.contains(name)
                 {
                     return self.lookup_class_local(scope, name);
+                }
+                // An explicitly class-local annotation name falls back to globals. The
+                // separate private cell is still used to guard which expressions run.
+                if name == CONDITIONAL
+                    && code.class_binds_conditional_name
+                    && self.scope_data(scope).exec_locals.is_some()
+                {
+                    return self.module_annotation_name(scope, name);
                 }
                 self.check_source_local(code, enclosing, name)?;
                 self.lookup(scope, name)

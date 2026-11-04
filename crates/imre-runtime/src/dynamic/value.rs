@@ -877,6 +877,8 @@ pub(super) struct ClassNamespace {
     pub layout_descriptors_cleared: bool,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
+    /// Private closure cell shared by a runtime-source class and its annotation provider.
+    pub conditional_cell: Option<Id>,
     /// The field dictionary (NONE if unbound) and executed offsets while the class body runs.
     pub annotation_scratch: Option<(Id, HashSet<u32>)>,
     /// Class annotation attributes are served by the installed provider.
@@ -1076,7 +1078,7 @@ pub(super) enum Value {
     Hmac(Hmac),
     Struct {
         format: String,
-        layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
+        layout: Option<std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>>,
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     ExpatParser(std::rc::Rc<super::stdlib::pyexpat::NativeParser>),
@@ -1100,7 +1102,7 @@ pub(super) enum Value {
         buffer: Option<Id>,
         exporter: Option<Id>,
         offset: usize,
-        remaining: usize,
+        length: usize,
     },
     MemoryIterator {
         view: Option<Id>,
@@ -1525,6 +1527,7 @@ impl Value {
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
             Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
+            Self::Struct { .. } => "struct.Struct",
             Self::StructUnpackIterator { .. } => STRUCT_UNPACK_ITERATOR,
             Self::MemoryIterator { .. } => "memory_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -1868,6 +1871,7 @@ impl Value {
                     visit.extend(class.supplied_bases);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_dict_cell);
+                    visit.extend(class.conditional_cell);
                     if let Some((fields, _)) = &class.annotation_scratch {
                         visit.push(*fields);
                     }

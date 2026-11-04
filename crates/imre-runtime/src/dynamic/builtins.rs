@@ -289,6 +289,15 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
         )
 }
 
+pub(super) const STRUCT_METHODS: &[&str] = &[
+    "__init__",
+    "pack",
+    "pack_into",
+    "unpack",
+    "unpack_from",
+    "iter_unpack",
+];
+
 pub(super) const UNPACK_ITERATOR_METHODS: &[&str] = &["__iter__", "__next__", "__length_hint__"];
 
 /// Native iterator classes implement both iterator slots in the runtime.
@@ -674,14 +683,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::StructUnpackIterator { .. } if UNPACK_ITERATOR_METHODS.contains(&attr) => {
             value::STRUCT_UNPACK_ITERATOR
         }
-        Value::Struct { .. }
-            if matches!(
-                attr,
-                "pack" | "pack_into" | "unpack" | "unpack_from" | "iter_unpack"
-            ) =>
-        {
-            "struct.Struct"
-        }
+        Value::Struct { .. } if STRUCT_METHODS.contains(&attr) => "struct.Struct",
         Value::ZlibDecompressor { .. }
             if matches!(attr, "decompress" | "flush")
                 || value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&attr) =>

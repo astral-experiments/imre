@@ -40,6 +40,11 @@ fn format_error(ctx: &Context, message: impl Into<String>) -> Error {
 }
 
 pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let value = initialized(ctx, args, kwargs)?;
+    Ok(ctx.alloc(value))
+}
+
+fn initialized(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Value> {
     let count = args.len() + kwargs.len();
     if count > 1 {
         return Err(Error::new(
@@ -62,24 +67,25 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
             )
         })?;
     let (format, layout) = parse(ctx, format)?;
-    Ok(ctx.alloc(Value::Struct {
+    Ok(Value::Struct {
         format: format.to_owned(),
-        layout: Rc::new(layout),
-    }))
+        layout: Some(Rc::new(layout)),
+    })
 }
 
 /// Read the underlying format spelling and validate the layout before inspecting the buffer.
-pub(super) fn parse(ctx: &Context, format: Id) -> Result<(&str, StructFormat)> {
-    let format = match ctx.heap.get(ctx.scalar_value(format)) {
-        Value::Str(text) => {
-            if !text.is_ascii() {
-                Codec::Ascii.encode(text, None, || {
-                    crate::StrOwner::try_new(crate::Str::from(text.as_str()))
-                        .map_err(|_| crate::Error::memory_error())
-                })?;
-            }
-            text.as_str()
+pub(super) fn parse(ctx: &mut Context, format: Id) -> Result<(&str, StructFormat)> {
+    let scalar = ctx.scalar_value(format);
+    let scalar = match ctx.heap.get(scalar) {
+        Value::Str(text) if text.is_ascii() => scalar,
+        Value::Str(_) | Value::SurrogateStr(_) => {
+            let bytes = ctx.encode_legacy_codepoints(format, Codec::Ascii, false)?;
+            ctx.heap.bytes_from_data(bytes)
         }
+        _ => scalar,
+    };
+    let format = match ctx.heap.get(scalar) {
+        Value::Str(text) => text.as_str(),
         Value::Bytes(data) => {
             std::str::from_utf8(data).map_err(|_| format_error(ctx, "bad char in struct format"))?
         }
@@ -158,11 +164,35 @@ pub(super) fn module_iter_unpack(
     iter_unpack(ctx, record, *buffer)
 }
 
-fn iter_unpack(ctx: &mut Context, record: Id, source: Id) -> Result<Id> {
-    let Value::Struct { layout, .. } = ctx.heap.get(record) else {
-        unreachable!("parsed Struct")
+/// A live iterator reads the current layout, including after a successful reinitialization.
+fn iterator_layout(ctx: &Context, record: Id) -> &StructFormat {
+    let Value::Struct {
+        layout: Some(layout),
+        ..
+    } = ctx.heap.get(ctx.scalar_value(record))
+    else {
+        unreachable!("iterator holds an initialized Struct")
     };
-    let size = layout.size;
+    layout
+}
+
+pub(super) fn iterator_hint(ctx: &Context, id: Id) -> usize {
+    let Value::StructUnpackIterator {
+        record: Some(record),
+        offset,
+        length,
+        ..
+    } = *ctx.heap.get(id)
+    else {
+        return 0;
+    };
+    (length - offset)
+        .checked_div(iterator_layout(ctx, record).size)
+        .unwrap_or(0)
+}
+
+fn iter_unpack(ctx: &mut Context, record: Id, source: Id) -> Result<Id> {
+    let size = iterator_layout(ctx, record).size;
     if size == 0 {
         return Err(format_error(
             ctx,
@@ -192,7 +222,7 @@ fn iter_unpack(ctx: &mut Context, record: Id, source: Id) -> Result<Id> {
         buffer: Some(buffer),
         exporter,
         offset: 0,
-        remaining: length / size,
+        length,
     });
     if exporter.is_some() {
         ctx.heap.register_finalizer(id);
@@ -205,33 +235,33 @@ pub(in super::super) fn advance_iterator(ctx: &mut Context, id: Id) -> Result<Op
         record: Some(record),
         buffer: Some(buffer),
         offset,
-        remaining,
+        length,
         ..
     } = *ctx.heap.get(id)
     else {
         return Ok(None);
     };
-    if remaining == 0 {
+    if offset >= length {
         release_iterator(ctx, id);
         return Ok(None);
     }
-    let Value::Struct { layout, .. } = ctx.heap.get(record) else {
-        unreachable!("iterator holds a Struct")
-    };
+    let layout = iterator_layout(ctx, record);
+    if layout.size == 0 {
+        return Err(format_error(
+            ctx,
+            "cannot iteratively unpack with a struct of length 0",
+        ));
+    }
     let bytes = ctx.native_buffer_bytes(buffer)?;
     let end = offset + layout.size;
     let bytes = bytes
         .get(offset..end)
         .ok_or_else(|| Error::new("BufferError", "exported buffer changed size"))?;
     let fields = layout.unpack(bytes);
-    let Value::StructUnpackIterator {
-        offset, remaining, ..
-    } = ctx.heap.get_mut(id)
-    else {
+    let Value::StructUnpackIterator { offset, .. } = ctx.heap.get_mut(id) else {
         unreachable!()
     };
     *offset = end;
-    *remaining -= 1;
     let fields = fields.map_err(|e| format_error(ctx, e))?;
     Ok(Some(unpacked_tuple(ctx, fields)))
 }
@@ -241,7 +271,6 @@ pub(in super::super) fn release_iterator(ctx: &mut Context, id: Id) {
         record,
         buffer,
         exporter,
-        remaining,
         ..
     } = ctx.heap.get_mut(id)
     else {
@@ -249,7 +278,6 @@ pub(in super::super) fn release_iterator(ctx: &mut Context, id: Id) {
     };
     // Detach before invoking a Python release hook, which may call next() again.
     let (record, buffer, exporter) = (record.take(), buffer.take(), exporter.take());
-    *remaining = 0;
     if let Some(record) = record {
         ctx.heap.weak_edge_removed(record);
     }
@@ -321,7 +349,8 @@ pub(super) fn method(
             format!("unbound method Struct.{name}() needs an argument"),
         ));
     };
-    let Value::Struct { layout, .. } = ctx.heap.get(receiver) else {
+    let storage = ctx.scalar_value(receiver);
+    let Value::Struct { format, layout } = ctx.heap.get(storage) else {
         return Err(Error::new(
             "TypeError",
             format!(
@@ -330,6 +359,21 @@ pub(super) fn method(
             ),
         ));
     };
+    if name == "__init__" {
+        // Install the new format and layout together only after parsing succeeds.
+        let value = initialized(ctx, args, kwargs)?;
+        *ctx.heap.get_mut(storage) = value;
+        return Ok(NONE);
+    }
+    if name == "size" {
+        return Ok(ctx.int(layout.as_ref().map_or(-1, |layout| layout.size as i64)));
+    }
+    let layout = layout
+        .as_ref()
+        .ok_or_else(|| Error::new("RuntimeError", "Struct object is not initialized"))?;
+    if name == "format" {
+        return Ok(ctx.text(format.to_owned()));
+    }
     if name == "iter_unpack" {
         let buffer = one_positional_arg("Struct.iter_unpack", args, kwargs)?;
         return iter_unpack(ctx, receiver, buffer);

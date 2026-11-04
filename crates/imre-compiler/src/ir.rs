@@ -916,6 +916,13 @@ pub(crate) enum PairTableOp {
     ViewField(usize, usize),
 }
 
+/// Prefixes that rule out every case-converted key in a literal string set.
+#[derive(Clone, Copy)]
+pub(crate) enum SetCasePrefix {
+    ExcludedBytes([u64; 2]),
+    ThreeByteHashes(u64),
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     ByteArrayNew,
@@ -1642,6 +1649,7 @@ pub(crate) enum Builtin {
     /// Arguments are the element then set, matching membership evaluation order.
     SetContains,
     SetCaseLengthPossible,
+    SetCasePrefixPossible(SetCasePrefix),
     SetAdd,
     SetDiscard,
     SetIter,

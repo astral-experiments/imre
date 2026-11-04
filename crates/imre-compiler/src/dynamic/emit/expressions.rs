@@ -19,13 +19,13 @@ impl Function<'_, '_> {
         let line = self.source.line(position);
         let previous = self.expression_line;
         if previous == line {
-            return self.expr_inner(expr);
+            return self.expr_inner(expr, None);
         }
         self.expression_line = line;
         self.line(&format!(
             "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
         ));
-        let value = self.expr_inner(expr);
+        let value = self.expr_inner(expr, None);
         self.expression_line = previous;
         if !self.terminated {
             self.line(&format!(
@@ -35,7 +35,37 @@ impl Function<'_, '_> {
         value
     }
 
-    fn expr_inner(&mut self, expr: &ast::Expr) -> String {
+    /// Select one field from a single-line partition call so both operations retain
+    /// their expression line. Other receivers still dispatch through their methods.
+    fn partition_index(&self, subscript: &ast::ExprSubscript) -> Option<u32> {
+        let ast::Expr::Call(call) = &*subscript.value else {
+            return None;
+        };
+        if self.source.line(subscript.start()) != self.source.line(subscript.end()) {
+            return None;
+        }
+        let field = imre_ast::direct_method(
+            call,
+            &self.source.method_imports,
+            Some(&self.source.private_names),
+        )?;
+        if !matches!(field.attr.as_str(), "partition" | "rpartition")
+            || !call.arguments.keywords.is_empty()
+            || !matches!(call.arguments.args.as_ref(), [arg] if !matches!(arg, ast::Expr::Starred(_)))
+        {
+            return None;
+        }
+        let ast::Expr::NumberLiteral(literal) = &*subscript.slice else {
+            return None;
+        };
+        let ast::Number::Int(index) = &literal.value else {
+            return None;
+        };
+        let index = u32::try_from(index.as_i64()?).ok()?;
+        (index < 3).then_some(index)
+    }
+
+    fn expr_inner(&mut self, expr: &ast::Expr, partition: Option<(u32, String)>) -> String {
         match expr {
             ast::Expr::NoneLiteral(_) => "0".into(),
             ast::Expr::EllipsisLiteral(_) => "3".into(),
@@ -55,6 +85,12 @@ impl Function<'_, '_> {
                 self.attr(&base, v.attr.as_str())
             }
             ast::Expr::Subscript(v) => {
+                if let Some(index) = self.partition_index(v) {
+                    let span = self.expression_span(expr, &v.value, b'[');
+                    let position =
+                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
+                    return self.expr_inner(&v.value, Some((index, position)));
+                }
                 let object = self.expr(&v.value);
                 let key = self.expr(&v.slice);
                 let span = self.expression_span(expr, &v.value, b'[');
@@ -140,7 +176,11 @@ impl Function<'_, '_> {
                         .args
                         .iter()
                         .any(|value| matches!(value, ast::Expr::Starred(_)));
-                let packed = (!direct).then(|| self.op("list", &[]));
+                let single_spread = match v.arguments.args.as_ref() {
+                    [ast::Expr::Starred(star)] => Some(star),
+                    _ => None,
+                };
+                let packed = (!direct && single_spread.is_none()).then(|| self.op("list", &[]));
                 let mut bound_receiver = None;
                 let callable = if let Some(field) = imre_ast::direct_method(
                     v,
@@ -166,7 +206,12 @@ impl Function<'_, '_> {
                 } else {
                     self.expr(&v.func)
                 };
-                let operands = if let Some(args) = packed {
+                let operands = if let Some(star) = single_spread {
+                    let source = self.expr(&star.value);
+                    let kwargs = self.keyword_arguments(&v.arguments, &callable);
+                    let args = self.op("spread_arguments", &[&source]);
+                    CallArguments::Packed { args, kwargs }
+                } else if let Some(args) = packed {
                     let kwargs = self.arguments(&args, &v.arguments, &callable);
                     CallArguments::Packed { args, kwargs }
                 } else {
@@ -176,10 +221,19 @@ impl Function<'_, '_> {
                         .chain(v.arguments.args.iter().map(|arg| self.expr(arg)))
                         .collect();
                     let (array, count) = self.handle_array(&values);
-                    CallArguments::Positional {
-                        array,
-                        count,
-                        receiver_slot: bound_receiver.is_some(),
+                    if let Some((index, get_position)) = partition {
+                        debug_assert!(bound_receiver.is_some() && count == 2);
+                        CallArguments::PartitionField {
+                            array,
+                            index,
+                            get_position,
+                        }
+                    } else {
+                        CallArguments::Positional {
+                            array,
+                            count,
+                            receiver_slot: bound_receiver.is_some(),
+                        }
                     }
                 };
                 let span = self.expression_span(expr, &v.func, b'(');
@@ -354,6 +408,24 @@ impl Function<'_, '_> {
     /// A failed intermediate comparison returns its object in a value context and false in a branch.
     fn compare_expr(&mut self, comparison: &ast::ExprCompare, context: BooleanContext) -> String {
         let mut left = self.expr(&comparison.operands[0]);
+        if let [op @ (ast::CmpOp::In | ast::CmpOp::NotIn)] = comparison.ops.as_ref()
+            && let ast::Expr::Tuple(tuple) = &comparison.operands[1]
+            && tuple.elts.len() <= 8
+            && tuple.elts.iter().all(imre_ast::literal_tuple_element)
+        {
+            // Keep the entry-block scratch array bounded even for very large tuple displays.
+            let values: Vec<_> = tuple.elts.iter().map(|item| self.expr(item)).collect();
+            let (array, count) = self.handle_array(&values);
+            let negate = u32::from(*op == ast::CmpOp::NotIn);
+            let value = self.checked(&format!(
+                "call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {left}, ptr {array}, i64 {count}, i32 {negate})"
+            ));
+            return if context == BooleanContext::Condition {
+                self.truth(&value)
+            } else {
+                value
+            };
+        }
         let done = self.name("b");
         let mut incoming = Vec::new();
         for (i, (op, operand)) in comparison
@@ -418,11 +490,6 @@ impl Function<'_, '_> {
         syntax: &ast::Arguments,
         callable: &str,
     ) -> String {
-        let kwargs = if syntax.keywords.is_empty() {
-            "0".into()
-        } else {
-            self.op("dict", &[])
-        };
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
             if let ast::Expr::Starred(s) = arg {
@@ -433,6 +500,16 @@ impl Function<'_, '_> {
                 self.op("append", &[args, &value]);
             }
         }
+        self.keyword_arguments(syntax, callable)
+    }
+
+    /// Evaluate keyword expressions and merge mappings in source order.
+    fn keyword_arguments(&mut self, syntax: &ast::Arguments, callable: &str) -> String {
+        let kwargs = if syntax.keywords.is_empty() {
+            "0".into()
+        } else {
+            self.op("dict", &[])
+        };
         let mut keywords = syntax.keywords.iter().peekable();
         let mut unpacked = false;
         while let Some(key) = keywords.peek() {

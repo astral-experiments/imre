@@ -132,7 +132,9 @@ impl BuiltinDescriptor {
                 Some(("tuple_iterator", attr, &["__iter__", "__next__"][..]))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
-            Some(("struct.Struct", attr)) => Some(("struct.Struct", attr, &["iter_unpack"][..])),
+            Some(("struct.Struct", attr)) => {
+                Some(("struct.Struct", attr, builtins::STRUCT_METHODS))
+            }
             Some((value::STRUCT_UNPACK_ITERATOR, attr)) => Some((
                 value::STRUCT_UNPACK_ITERATOR,
                 attr,
@@ -499,7 +501,10 @@ impl BuiltinDescriptor {
             "memoryview" => matches!(ctx.heap.get(receiver), Value::MemoryView { .. }),
             "array.array" => matches!(ctx.heap.get(receiver), Value::Array(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
-            "struct.Struct" => matches!(ctx.heap.get(receiver), Value::Struct { .. }),
+            "struct.Struct" => matches!(
+                ctx.heap.get(ctx.scalar_value(receiver)),
+                Value::Struct { .. }
+            ),
             "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
             "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => {
                 ctx.builtin_type_name(receiver) == Some(self.owner)

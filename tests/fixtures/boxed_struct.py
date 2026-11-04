@@ -179,6 +179,34 @@ def current():
         except struct.error as error:
             print(str(error))
 
+    class WireField(struct.Struct):
+        def __init__(self, fmt):
+            super().__init__(fmt)
+
+        @property
+        def size(self):
+            return super().size - 1
+
+    field = WireField(">H")
+    assert field.size == 1
+    pack_field = field.pack
+    payload = bytearray(b"\x00\x01abcd")
+    rows = field.iter_unpack(payload)
+    assert next(rows) == (1,)
+    field.__init__("B")
+    assert rows.__length_hint__() == 4
+    assert list(rows) == [(97,), (98,), (99,), (100,)]
+    payload.append(0)
+
+    for bad, exc in (("$", struct.error), (chr(0xdc00), UnicodeEncodeError)):
+        try:
+            field.__init__(bad)
+        except exc:
+            pass
+        else:
+            raise AssertionError("invalid format accepted")
+        assert field.format == "B" and pack_field(7) == b"\x07"
+
     # End of central directory record with a fixed byte string and repeated integers.
     fmt = b"<4s4H2LH"
     values = (b"PK\x05\x06", 0, 0, 1, 1, 55, 99, 0)

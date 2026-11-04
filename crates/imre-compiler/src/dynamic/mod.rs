@@ -792,11 +792,20 @@ pub(crate) fn compile<const SPLIT: bool>(
     roots.retain(|root| seen_roots.insert(root.clone()));
     let bundled_root = "<imre stdlib>";
     let mut inputs = SourceInputs::default();
-    let mut archive = if options.path_entry && !entry.is_dir() {
-        Some(crate::zip_entry::ZipSources::open(&entry, &mut inputs)?)
-    } else {
-        None
-    };
+    let mut archives = HashMap::new();
+    for path in options
+        .extension_paths
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| options.python_archive_indices.contains(index))
+        .map(|(_, path)| cwd.join(path))
+        .chain((options.path_entry && !entry.is_dir()).then(|| entry.clone()))
+    {
+        archives.insert(
+            path.clone(),
+            crate::zip_entry::ZipSources::open(&path, &mut inputs)?,
+        );
+    }
     let mut sources = vec![(
         "__main__".to_owned(),
         if in_memory {
@@ -1048,20 +1057,28 @@ pub(crate) fn compile<const SPLIT: bool>(
                     if implicit_sites.contains(root) && before_site.contains(&prefix) {
                         continue;
                     }
-                    if module_entry.is_some()
-                        && let Some((parent, _)) = prefix.rsplit_once('.')
+                    if let Some((parent, _)) = prefix.rsplit_once('.')
                         && let Some((selected, package)) = entry_sources.get(parent)
+                        && (module_entry.is_some()
+                            || archives.contains_key(selected)
+                            || archives.contains_key(root))
                         && (!package || selected != root)
                     {
                         continue;
                     }
-                    if let Some(archive) = &mut archive
-                        && initial.first() == Some(root)
-                    {
-                        if let Some((member, source, package)) = archive.module(&prefix) {
+                    if let Some(archive) = archives.get_mut(root) {
+                        // A regular source already won. Ordinary files still register later
+                        // directory alternatives for programs that change sys.path at runtime.
+                        if entry_sources.contains_key(&prefix) {
+                            continue;
+                        }
+                        if let Some(package) = archive.package(&prefix) {
                             installed = None;
-                            if let Ok(imports) =
-                                imports_for_module(&member, source.trim_start_matches('\u{feff}'))
+                            if let Some((member, source, _)) = archive.module(&prefix)
+                                && let Ok(imports) = imports_for_module(
+                                    &member,
+                                    source.trim_start_matches('\u{feff}'),
+                                )
                             {
                                 work.push_back((prefix.clone(), package, imports));
                             }

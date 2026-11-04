@@ -353,6 +353,16 @@ impl Context {
                 Ok(c)
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
+            "spread_arguments" => {
+                // An exact tuple already holds the evaluated positional arguments.
+                // Snapshot other iterables before entering the callee.
+                if matches!(self.heap.get(a), Value::Tuple(_)) {
+                    Ok(a)
+                } else {
+                    let items = self.items(a)?;
+                    Ok(self.alloc(Value::List(items)))
+                }
+            }
             "set" => Ok(self.alloc(Value::Set {
                 entries: Default::default(),
                 frozen: false,
@@ -379,8 +389,23 @@ impl Context {
                 Ok(a)
             }
             "extend" => {
-                for item in self.items(b)? {
-                    self.op("append", a, item, NONE)?;
+                let items = self.items(b)?;
+                if let Value::List(list) = self.heap.get_mut(a) {
+                    // Fill the available space before growing so __sizeof__ and
+                    // partial progress on allocation failure match repeated append.
+                    let mut remaining = items.as_slice();
+                    while !remaining.is_empty() {
+                        list.try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", ""))?;
+                        let count = remaining.len().min(list.capacity() - list.len());
+                        let (chunk, rest) = remaining.split_at(count);
+                        list.extend_from_slice(chunk);
+                        remaining = rest;
+                    }
+                } else {
+                    for item in items {
+                        self.op("append", a, item, NONE)?;
+                    }
                 }
                 Ok(a)
             }
@@ -1285,6 +1310,31 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
     finish(ctx, result)
 }
 
+/// Test a handle against the evaluated elements of a literal tuple.
+///
+/// # Safety
+/// The generated caller roots the operands and provides a readable array of
+/// `count` handles for the duration of the comparison.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_contains_literal_tuple(
+    ctx: *mut Context,
+    item: Id,
+    values: *const Id,
+    count: usize,
+    negate: u32,
+) -> Id {
+    // SAFETY: the caller owns this context and retains the array through rich comparisons.
+    let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let mut candidates = values.iter().copied();
+    let result = ctx
+        .contains_next(item, |_| Ok(candidates.next()))
+        .map(|found| flag(found ^ (negate != 0)));
+    finish(ctx, result)
+}
+
 /// Invoke a prepared method. The leading operand is either the unbound method's
 /// receiver or None when lookup returned a bound callable.
 ///
@@ -1307,6 +1357,65 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_method_at(
     unsafe {
         imre_dyn_positional_call_at(ctx, callable, args.as_ptr(), args.len(), mark, span, scope)
     }
+}
+
+/// Return a single field from an exact string partition, or index the result of a
+/// custom method using the ordinary subscription protocol.
+///
+/// # Safety
+/// The active caller roots both prepared operands and supplies null or static positions.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_partition_field_at(
+    context: *mut Context,
+    callable: Id,
+    operands: *const [Id; 2],
+    index: u32,
+    get_span: *const [u32; 4],
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
+    // SAFETY: the generated call supplies a receiver slot and exactly one argument.
+    let (ctx, [receiver, separator]) = unsafe { (&mut *context, *operands) };
+    if let Value::Native(symbol) = ctx.heap.get(callable)
+        && matches!(symbol.as_str(), "str.partition" | "str.rpartition")
+        && matches!(ctx.heap.get(receiver), Value::Str(_))
+        && matches!(ctx.heap.get(separator), Value::Str(_))
+    {
+        let reverse = symbol == "str.rpartition";
+        // SAFETY: the call position is null or static.
+        return scoped_call(ctx, unsafe { span.as_ref() }, |ctx| {
+            let fields = crate::objects::partition_text(
+                ctx.str_value(receiver)?,
+                ctx.str_value(separator)?,
+                reverse,
+            )?;
+            let selected = match (fields, index) {
+                (Some((left, _)), 0) => ctx.text(left.to_owned()),
+                (Some(_), 1) => separator,
+                (Some((_, right)), 2) => ctx.text(right.to_owned()),
+                (None, 0) if !reverse => receiver,
+                (None, 2) if reverse => receiver,
+                (None, 0..=2) => ctx.text(""),
+                _ => unreachable!("compiler emits indices in 0..=2"),
+            };
+            ctx.finish_call_operands(mark, selected);
+            ctx.check_call_return(selected)
+        });
+    }
+    // SAFETY: the receiver slot, argument and call position follow the prepared method ABI.
+    let result = unsafe {
+        imre_dyn_positional_method_at(context, callable, operands.cast(), 2, mark, span, scope)
+    };
+    // SAFETY: the call has returned, so its borrow of this context has ended.
+    let ctx = unsafe { &mut *context };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let key = ctx.int(i64::from(index));
+    let result = ctx.get_item(result, key);
+    // SAFETY: the subscript position is null or static.
+    finish_at(ctx, result, unsafe { get_span.as_ref() })
 }
 
 /// Invoke a call whose positional operands remain rooted in the caller's frame.
@@ -1458,13 +1567,12 @@ impl Context {
     /// A method captures __class__ from its class and other names from the enclosing function.
     pub(super) fn method_freevars<'a>(
         &self,
-        scope: Id,
+        enclosing: Option<Id>,
         reads: impl Iterator<Item = &'a str>,
         captures_class: bool,
     ) -> Option<Vec<String>> {
-        let enclosing = self.scope_data(scope).parent?;
         let mut freevars =
-            self.enclosing_freevars(enclosing, reads.filter(|&name| name != "__class__"))?;
+            self.enclosing_freevars(enclosing?, reads.filter(|&name| name != "__class__"))?;
         if captures_class {
             freevars.push("__class__".to_owned());
             freevars.sort();
@@ -1562,7 +1670,7 @@ impl Context {
         let freevars = if metadata["scope_complete"] != true {
             None
         } else if let Some(captures_class) = metadata["method_class_cell"].as_bool() {
-            self.method_freevars(scope, reads, captures_class)
+            self.method_freevars(self.scope_data(scope).parent, reads, captures_class)
         } else if metadata["class_cell"] == true {
             None
         } else {

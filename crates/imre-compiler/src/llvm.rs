@@ -2181,6 +2181,9 @@ impl Emitter<'_, '_> {
             }
         });
         for slot in cursors {
+            // Private cursors keep their UTF-8 position in the two native pointers.
+            // The local only needs to own the source string through the final pull.
+            self.locals[slot] = Type::Str;
             let start = invariant.contains(&slot).then(|| {
                 let start = self.entry_alloca("ptr");
                 writeln!(self.entry_allocas, "  store ptr null, ptr {start}").unwrap();
@@ -2554,21 +2557,24 @@ impl Emitter<'_, '_> {
             self.start(&initialize);
             (cache, ready)
         });
-        let iterator = self.expr(expression);
+        let ExprKind::Builtin(Builtin::StringIter, args) = &expression.kind else {
+            unreachable!("private forward cursor initialization")
+        };
+        let source = self.expr(&args[0]);
         let start = self.instruction(format!(
-            "call ptr @imre_str_iter_bounds(ptr {}, ptr {end})",
-            iterator.operand
+            "call ptr @imre_str_bounds(ptr {}, ptr {end})",
+            source.operand
         ));
         if let Some((cache, ready)) = restart {
             self.line(format!("store ptr {start}, ptr {cache}"));
-            self.release(&iterator);
+            self.release(&source);
             self.jump(&ready);
             self.start(&ready);
             let first = self.instruction(format!("load ptr, ptr {cache}"));
             self.line(format!("store ptr {first}, ptr {next}"));
         } else {
             self.line(format!("store ptr {start}, ptr {next}"));
-            self.store(slot, &iterator);
+            self.store(slot, &source);
         }
     }
 
@@ -3602,24 +3608,27 @@ impl Emitter<'_, '_> {
             }
             if let Some(integer) = integer_string_argument(expression) {
                 let integer = self.operand(integer);
-                let buffer = self.entry_alloca("[20 x i8]");
-                let value = Value {
-                    ty: Type::Str,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_int_str_part(i64 {}, ptr {buffer}, ptr {part})",
-                        integer.value.operand
-                    )),
-                    small_integer: false,
-                };
-                // Null denotes inline bytes or an error. Root earlier parts before checking.
-                let value = self.owned(value);
-                owners.push(Operand {
-                    value,
-                    ownership: Ownership::Owned,
-                });
+                let buffer = self.entry_alloca("[40 x i8]");
+                let owner = self.instruction(format!(
+                    "call ptr @imre_int_str_part_into(i64 {}, ptr {buffer}, ptr {part})",
+                    integer.value.operand
+                ));
                 self.release_operand(&integer);
                 if !integer.value.small_integer {
-                    self.check_error();
+                    // Borrowed digits use null. The boxed conversion reports an error
+                    // with address one, which can never be an aligned string owner.
+                    let failed =
+                        self.instruction(format!("icmp eq ptr {owner}, inttoptr (i64 1 to ptr)"));
+                    self.check_failed(&failed);
+                    let value = self.owned(Value {
+                        ty: Type::Str,
+                        operand: owner,
+                        small_integer: false,
+                    });
+                    owners.push(Operand {
+                        value,
+                        ownership: Ownership::Owned,
+                    });
                 }
                 continue;
             }
@@ -8568,6 +8577,26 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::SetCasePrefixPossible(prefix) => {
+                let text = &args[1].value.operand;
+                let rejected = self.instruction(match prefix {
+                    ir::SetCasePrefix::ExcludedBytes([lower, upper]) => format!(
+                        "call i32 @imre_str_affix_ascii(ptr {text}, i64 {lower}, i64 {upper}, i32 0)"
+                    ),
+                    ir::SetCasePrefix::ThreeByteHashes(mask) => format!(
+                        "call i32 @imre_str_excludes_ascii_prefix3(ptr {text}, i64 {mask})"
+                    ),
+                });
+                let possible = self.instruction(format!("icmp eq i32 {rejected}, 0"));
+                // A module initializer can call a function before the set is bound.
+                let unbound =
+                    self.instruction(format!("icmp eq ptr {}, null", args[0].value.operand));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("or i1 {unbound}, {possible}")),
+                    small_integer: false,
+                }
+            }
             Builtin::SetCaseLengthPossible => {
                 let possible = self.instruction(format!(
                     "call i32 @imre_set_case_length_possible(ptr {}, ptr {})",
@@ -9075,10 +9104,19 @@ impl Emitter<'_, '_> {
         ready: usize,
         kind: ir::IterNextKind,
     ) {
-        debug_assert!(matches!(
-            self.locals[iterator],
-            Type::Iterator | Type::Cursor(_)
-        ));
+        let forward = self.forward_cursors.get(&iterator).cloned();
+        debug_assert!(match self.locals[iterator] {
+            Type::Str =>
+                forward.is_some()
+                    && matches!(
+                        kind,
+                        ir::IterNextKind::String
+                            | ir::IterNextKind::CodePoint
+                            | ir::IterNextKind::Utf8Byte
+                    ),
+            Type::Iterator | Type::Cursor(_) => forward.is_none(),
+            _ => false,
+        });
         debug_assert_eq!(self.locals[ready], Type::Bool);
         debug_assert_ne!(iterator, key);
         debug_assert_ne!(iterator, ready);
@@ -9088,7 +9126,6 @@ impl Emitter<'_, '_> {
             debug_assert_ne!(key, value);
             debug_assert_ne!(ready, value);
         }
-        let forward = self.forward_cursors.get(&iterator).cloned();
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
             ir::IterNextKind::SplitField => {
@@ -10576,7 +10613,7 @@ declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)
 declare i64 @imre_str_iter_next_owned(ptr)
 declare i64 @imre_str_iter_next_codepoint(ptr)
-declare ptr @imre_str_iter_bounds(ptr, ptr)
+declare ptr @imre_str_bounds(ptr, ptr)
 declare i64 @imre_utf8_next_non_ascii(ptr, ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
 declare i64 @imre_split_field_next(ptr)
@@ -10588,7 +10625,7 @@ declare ptr @imre_str_concat_parts_owned(ptr, ptr, i64)
 declare ptr @imre_str_append_utf8_owned(ptr, ptr, i64)
 declare ptr @imre_str_append_literal_owned(ptr, ptr, ptr, i64)
 declare i32 @imre_str_get_part(ptr, i64, ptr, ptr)
-declare ptr @imre_int_str_part(i64, ptr, ptr)
+declare ptr @imre_int_str_part_into(i64, ptr, ptr)
 declare ptr @imre_str_split_whitespace(ptr)
 declare i64 @imre_str_split_int_field(ptr, i32)
 declare void @imre_str_prepare_int_fields(ptr, ptr, i32) nounwind
@@ -10606,6 +10643,7 @@ declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
 declare i32 @imre_str_affix_ascii(ptr, i64, i64, i32)
+declare i32 @imre_str_excludes_ascii_prefix3(ptr, i64)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
 declare ptr @imre_str_translate(ptr, ptr)

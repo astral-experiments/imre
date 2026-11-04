@@ -81,10 +81,7 @@ impl Output {
 
     /// Encode the entire input before changing the file or its text buffer.
     /// An untranslated, buffered UTF-8 file can accept the fragments as one pending write.
-    pub(super) fn try_write_parts<'a>(
-        &mut self,
-        parts: impl Iterator<Item = &'a [u8]> + Clone,
-    ) -> bool {
+    pub(super) fn try_write_parts<'a>(&mut self, parts: impl Iterator<Item = &'a [u8]>) -> bool {
         self.encoder.is_none()
             && !self.line_buffering
             && self

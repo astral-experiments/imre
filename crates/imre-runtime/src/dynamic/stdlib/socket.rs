@@ -222,7 +222,13 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
     }
 }
 
-fn buffered_socket_writer(ctx: &mut Context, raw: Id, size: Id) -> Result<Id> {
+fn buffered_socket_file(
+    ctx: &mut Context,
+    raw: Id,
+    size: Id,
+    raw_mode: &str,
+    binary: bool,
+) -> Result<Id> {
     let zero = ctx.int(0);
     let size = if size == NONE { ctx.int(-1) } else { size };
     let negative = ctx.binary("<", size, zero)?;
@@ -234,10 +240,21 @@ fn buffered_socket_writer(ctx: &mut Context, raw: Id, size: Id) -> Result<Id> {
     };
     let unbuffered = ctx.binary("==", size, zero)?;
     if ctx.truth(unbuffered)? {
+        if !binary {
+            return Err(Error::new(
+                "ValueError",
+                "unbuffered streams must be binary",
+            ));
+        }
         return Ok(raw);
     }
-    let writer = ctx.lookup_attr(io, "BufferedWriter")?;
-    ctx.call(writer, vec![raw, size], Vec::new())
+    let (class, args) = match raw_mode {
+        "rw" => ("BufferedRWPair", vec![raw, raw, size]),
+        "w" => ("BufferedWriter", vec![raw, size]),
+        _ => ("BufferedReader", vec![raw, size]),
+    };
+    let class = ctx.lookup_attr(io, class)?;
+    ctx.call(class, args, Vec::new())
 }
 
 fn integer(ctx: &Context, id: Id) -> Result<i32> {
@@ -1349,91 +1366,54 @@ pub(super) fn call(
         let write = text.contains('w');
         let read = text.contains('r') || !write;
         let buffering = option(args, 1, kwargs, "buffering")?.unwrap_or(NONE);
-        let raw_file = |ctx: &mut Context| -> Result<Id> {
-            let module = ctx.module("socket")?;
-            let Value::Module { scope, .. } = *ctx.heap.get(module) else {
-                return Err(Error::new("TypeError", "socket must be a module"));
-            };
-            let factory = ctx.lookup(scope, "SocketIO")?;
-            let raw_mode = ctx.text(if write && read {
-                "rw"
-            } else if write {
-                "w"
-            } else {
-                "r"
-            });
-            let raw = ctx.call(factory, vec![*receiver, raw_mode], Vec::new())?;
-            native::retain_socketio(&s);
-            Ok(raw)
-        };
         let roots = ctx.heap.temporary_mark();
-        let release_on_error = |ctx: &mut Context, error: &Error| {
-            // A replacement factory can retain the raw stream before raising.
+        let make_stream = |ctx: &mut Context| -> Result<Id> {
+            let default_size = buffering == NONE
+                || matches!(ctx.heap.get(buffering), Value::Int(n) if n.cmp(&crate::Int::from(0)).is_lt());
+            let buffer = if !write && default_size {
+                // Keep the native socket buffer for the default read-only stream.
+                let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
+                ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?)
+            } else {
+                let module = ctx.module("socket")?;
+                let Value::Module { scope, .. } = *ctx.heap.get(module) else {
+                    return Err(Error::new("TypeError", "socket must be a module"));
+                };
+                let factory = ctx.lookup(scope, "SocketIO")?;
+                let raw_mode = if read && write {
+                    "rw"
+                } else if write {
+                    "w"
+                } else {
+                    "r"
+                };
+                let mode_arg = ctx.text(raw_mode);
+                let raw = ctx.call(factory, vec![*receiver, mode_arg], Vec::new())?;
+                native::retain_socketio(&s);
+                buffered_socket_file(ctx, raw, buffering, raw_mode, binary)?
+            };
+            if binary {
+                return Ok(buffer);
+            }
+            let io = ctx.module("io")?;
+            let encoding = option(&[], 0, kwargs, "encoding")?.unwrap_or(NONE);
+            let text_encoding = ctx.lookup_attr(io, "text_encoding")?;
+            let encoding = ctx.call(text_encoding, vec![encoding], Vec::new())?;
+            let errors = option(&[], 0, kwargs, "errors")?.unwrap_or(NONE);
+            let newline = option(&[], 0, kwargs, "newline")?.unwrap_or(NONE);
+            let wrapper = ctx.lookup_attr(io, "TextIOWrapper")?;
+            let text = ctx.call(wrapper, vec![buffer, encoding, errors, newline], Vec::new())?;
+            ctx.set_attr(text, "mode", mode)?;
+            Ok(text)
+        };
+        return make_stream(ctx).inspect_err(|error| {
+            // A replacement factory can retain a stream before raising.
             ctx.heap.release_temporaries_since(roots);
             for root in error.roots() {
                 ctx.heap.keep(root);
             }
             ctx.collect_unreachable();
-        };
-        if binary && write && !read {
-            let raw = raw_file(ctx)?;
-            return buffered_socket_writer(ctx, raw, buffering)
-                .inspect_err(|error| release_on_error(ctx, error));
-        }
-        let size = match buffering {
-            NONE => -1,
-            _ if binary && !write => ctx.as_integer(buffering)?,
-            _ => i64::from(integer(ctx, buffering)?),
-        };
-        if binary && !write && size > 0 {
-            let raw = raw_file(ctx)?;
-            return ctx
-                .module("io")
-                .and_then(|io| ctx.lookup_attr(io, "BufferedReader"))
-                .and_then(|reader| ctx.call(reader, vec![raw, buffering], Vec::new()))
-                .inspect_err(|error| release_on_error(ctx, error));
-        }
-        if size == 0 {
-            let raw = raw_file(ctx)?;
-            if !binary {
-                // The live factory may have retained the raw stream outside this call.
-                ctx.heap.release_temporaries_since(roots);
-                ctx.collect_unreachable();
-                return Err(Error::new(
-                    "ValueError",
-                    "unbuffered streams must be binary",
-                ));
-            }
-            return Ok(raw);
-        }
-        if write || size > 0 {
-            return Err(Error::new(
-                "NotImplementedError",
-                "socket.makefile supports raw binary streams, buffered binary readers and writers, and default text readers",
-            ));
-        }
-        let wrapper = if binary {
-            None
-        } else {
-            let io = ctx.module("io")?;
-            Some(ctx.lookup_attr(io, "TextIOWrapper")?)
-        };
-        let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
-        let buffer = ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?);
-        let Some(cls) = wrapper else {
-            return Ok(buffer);
-        };
-        let encoding = option(&[], 0, kwargs, "encoding")?.unwrap_or(NONE);
-        let errors = option(&[], 0, kwargs, "errors")?.unwrap_or(NONE);
-        let newline = option(&[], 0, kwargs, "newline")?.unwrap_or(NONE);
-        let args = vec![buffer, encoding, errors, newline];
-        return ctx
-            .call(cls, args, Vec::new())
-            .and_then(|text| {
-                ctx.set_attr(text, "mode", mode)?;
-                Ok(text)
-            })
-            .inspect_err(|error| release_on_error(ctx, error));
+        });
     }
     let max = match method {
         "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,

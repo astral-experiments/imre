@@ -241,6 +241,14 @@ REJECTED = {
             "typed('wrong')\n"
         ),
     }, "expected int, got str"),
+    "email_message_from_bytes_preserves_typed_call": ({
+        "main.py": (
+            "from email import message_from_bytes\n"
+            "def typed(n: int) -> int: return n\n"
+            "message_from_bytes(b'body')\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "randbytes_call_preserves_typed_call": ({
         "main.py": (
             "from random import randbytes\n"
@@ -973,7 +981,14 @@ ACCEPTED = {
         "after.py": "print('after')\n",
     },
     "wildcard_native_namespaces": {
-        "main.py": "import paths\nimport prepare\nimport codes\nimport computed\n",
+        "main.py": "import paths\nimport prepare\nimport codes\nimport computed\nimport collection_abcs\n",
+        "collection_abcs.py": (
+            "from collections.abc import *\nimport collections.abc as _abc\n"
+            "_names = [n for n in globals() if not n.startswith('_')]\n"
+            "assert _names == _abc.__all__\n"
+            "for _name in _names:\n    assert globals()[_name] is getattr(_abc, _name)\n"
+            "print(_names)\n"
+        ),
         "paths.py": (
             "import genericpath as _path\nfrom genericpath import *\n"
             "assert [n for n in globals() if not n.startswith('_')] == _path.__all__\n"
@@ -1193,12 +1208,22 @@ ACCEPTED = {
     },
     "email_address_parsers": {
         "main.py": (
+            "import email\n"
+            "from email import message_from_bytes\n"
             "from email._header_value_parser import get_addr_spec, get_angle_addr as angle\n"
+            "from email import message_from_binary_file\n"
+            "from io import BytesIO\n"
             "import email._header_value_parser as parser\n"
             "assert angle is parser.get_angle_addr\n"
+            "assert email.message_from_bytes is message_from_bytes\n"
+            "print(email.message_from_bytes(b'Subject: hello\\r\\n\\r\\nbody')['Subject'])\n"
+            "print(message_from_bytes(b'\\r\\nraw\\xff').get_payload(decode=True))\n"
             "for parse, value in ((get_addr_spec, 'user@example.org SIZE=32'), (angle, '<>')):\n"
             "    address, rest = parse(value)\n"
             "    print(address.addr_spec, rest)\n"
+            "with BytesIO(b'Subject: hi\\r\\n folded\\r\\n\\r\\nraw\\xff') as fp:\n"
+            "    msg = message_from_binary_file(fp)\n"
+            "    print(msg['Subject'], msg.get_payload(decode=True), fp.read())\n"
         ),
     },
     "zip_source_spec": {
@@ -1862,6 +1887,7 @@ def main() -> None:
             (mock_setup, "def helper() -> object:\n    return patch.object(Owner, 'value', 1)\n"),
             ("from math import atan2\n", "def helper() -> float:\n    return atan2(1.0, -1.0)\n"),
             ("from math import exp\n", "def helper() -> float:\n    return exp(1.0)\n"),
+            ("from math import fsum\n", "def helper() -> float:\n    return fsum([1.0, 2.0])\n"),
             ("from math import isfinite\n", "def helper() -> bool:\n    return isfinite(1.0)\n"),
             ("from math import sin\n", "def helper() -> float:\n    return sin(1.0)\n"),
             ("from math import sqrt\n", "def helper() -> float:\n    return sqrt(4.0)\n"),

@@ -470,9 +470,9 @@ impl Binary {
         }
     }
 
-    /// Complete the orbit starting at the only set bit, or restore its original state.
+    /// Fill an orbit from its only set bit, clearing the unvisited tail before publication.
     #[inline(never)]
-    fn fill_complete_orbit(
+    fn fill_scattered_orbit(
         &mut self,
         at: usize,
         step: usize,
@@ -481,14 +481,43 @@ impl Binary {
     ) -> Option<(usize, usize)> {
         let spacing = num_integer::gcd(n, step);
         let period = n / spacing;
-        if count < period - 1 || spacing >= step.min(n - step) || !self.contains(at) {
+        let mut omitted = (period - 1).saturating_sub(count);
+        // Compare individual scattered stores with a bitmap-word fill followed by
+        // clearing the complementary tail. Keep the existing sparse-tail bound
+        // when the residue class itself takes one or more words per visit.
+        let fill_words = n.div_ceil(BLOCK).min(period);
+        let tail_budget = (count / BLOCK).max(count.saturating_sub(fill_words) / 2);
+        if omitted > tail_budget || spacing >= step.min(n - step) || !self.contains(at) {
             return None;
         }
 
         // Exactly one residue class is reachable. Visit the other members in
         // address order while the runtime owns the bitmap exclusively.
         let (done, last) = self.set_modular(at, spacing, n, period - 1, true);
-        if done < period - 1 || crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+        // The unvisited tail ends immediately before the original row in source order.
+        let mut hole = at;
+        while done == period - 1
+            && omitted != 0
+            && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            let batch = omitted.min(1024);
+            for _ in 0..batch {
+                hole = if hole >= step {
+                    hole - step
+                } else {
+                    n - (step - hole)
+                };
+                // Every omitted position is distinct and was set by the complete fill.
+                let (block, bit) = position(hole);
+                self.bits[block] &= !bit;
+            }
+            self.changed -= batch;
+            omitted -= batch;
+        }
+        if done < period - 1
+            || omitted != 0
+            || crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+        {
             // Reordered stores cannot expose a source-order prefix. Clear only
             // the words the canonical walk reached, including its single wrap.
             let (first_word, original) = position(at);
@@ -518,7 +547,7 @@ impl Binary {
     ) -> (usize, usize) {
         if set
             && self.changed == 1
-            && let Some(progress) = self.fill_complete_orbit(at, step, n, count)
+            && let Some(progress) = self.fill_scattered_orbit(at, step, n, count)
         {
             return progress;
         }
@@ -896,7 +925,17 @@ mod page_tests {
             (1056, 67, 99),
         ] {
             let period = n / num_integer::gcd(n, step);
-            for count in [period - 2, period - 1, period, 3 * period + 3] {
+            for count in [
+                period / 2,
+                3 * period / 4,
+                7 * period / 8,
+                period - period / 32,
+                period - period / 64,
+                period - 2,
+                period - 1,
+                period,
+                3 * period + 3,
+            ] {
                 let mut binary = Binary::empty(&[7], n.div_ceil(BLOCK)).unwrap();
                 assert!(binary.insert(at));
                 let mut expected = vec![false; n];

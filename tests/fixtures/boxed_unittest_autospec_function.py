@@ -1,5 +1,5 @@
 from unittest import TestCase
-from unittest.mock import DEFAULT, call, create_autospec
+from unittest.mock import DEFAULT, Mock, call, create_autospec
 
 
 receipts = []
@@ -35,3 +35,17 @@ assert receipts == ["A17", "D20"]
 assert send.mock_calls == [call(order=n) for n in ("A17", "B18", "C19", "D20")]
 assert send.mock.call_args_list is send.call_args_list
 send.mock.assert_called_with(order="D20")
+
+orders = Mock(name="orders")
+orders.send = send
+assert orders.send is send
+checkout(orders.send)
+assert orders.mock_calls == [call.send(order="A17")]
+
+audit = Mock(name="audit")
+audit.attach_mock(send, "deliver")
+assert audit.deliver is send
+checkout(audit.deliver)
+assert audit.method_calls == [call.deliver(order="A17")]
+assert orders.mock_calls == [call.send(order="A17")]
+assert "name='audit.deliver'" in repr(send.mock)

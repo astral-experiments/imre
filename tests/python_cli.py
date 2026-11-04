@@ -1939,6 +1939,22 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         (later / "__init__.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
 
+        # All three entry points must search the same module suppliers in order.
+        mailapp = root / "mailapp.py"
+        mail_command = "import quopri\nprint(quopri.encodestring(b'A=B'))\n"
+        mail_module = mail_command + "print(__spec__.origin)\n"
+        mailapp.write_text(mail_command)
+        codec = "def encodestring(data: bytes) -> bytes:\n    return %r + data\n"
+        with zipfile.ZipFile(archive, "a") as app:
+            app.writestr("quopri.py", codec % b"archive:")
+            app.writestr("mailcli.py", mail_module)
+        (later.parent / "quopri.py").write_text(codec % b"directory:")
+        (later.parent / "mailcli.py").write_text(mail_module)
+        for roots in ((archive, later.parent), (later.parent, archive)):
+            for args in ((mailapp,), ("-c", mail_command), ("-m", "mailcli")):
+                compare("-B", *args, extra={"PYTHONPATH": os.pathsep.join(map(str, roots))},
+                        native_timeout=300)
+
         helper = root / "request_support.py"
         helper.write_text("from importlib.machinery import ModuleSpec\nspec = ModuleSpec('sample', None)\n")
         request_script = root / "request_entry.py"
@@ -3710,6 +3726,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_rounding.py",
             "boxed_math_acosh.py",
             "boxed_math_fma.py",
+            "boxed_math_fsum.py",
             "boxed_math_gcd.py",
             "boxed_math_isclose.py",
             "boxed_float_arithmetic.py",
@@ -3963,7 +3980,10 @@ for name in ("md4", "ripemd160"):
             "boxed_set_symmetric_difference_update.py",
             "boxed_set_difference.py",
             "boxed_set_intersection.py",
+            "boxed_starred_call_order.py",
+            "boxed_tuple_membership.py",
             "boxed_set_intersection_lifetime.py",
+            "boxed_partition_field.py",
             "boxed_set_pop.py",
             "boxed_set_clear.py",
             "boxed_set_remove.py",
