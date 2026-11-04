@@ -1,7 +1,9 @@
 def current():
+    import errno
     import io
     import socket
     from http.client import HTTPConnection, HTTPMessage, parse_headers
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
     class RecordingMessage(HTTPMessage):
         def set_raw(self, name, value):
@@ -45,3 +47,30 @@ def current():
         pass
     else:
         raise AssertionError("connected to a closed port")
+
+    class IPv6HTTPServer(HTTPServer):
+        address_family = socket.AF_INET6
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response_only(204)
+            self.end_headers()
+
+    try:
+        server = IPv6HTTPServer(("::1", 0), Handler)
+    except OSError as exc:
+        if exc.errno in (errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT, errno.EADDRNOTAVAIL):
+            return
+        raise
+    with server:
+        host, port, _, _ = server.socket.getsockname()
+        assert server.server_name == socket.getfqdn(host)
+        assert server.server_port == port > 0
+        conn = HTTPConnection(host, port, timeout=5)
+        try:
+            conn.request("GET", "/")
+            server.handle_request()
+            with conn.getresponse() as response:
+                assert response.status == 204
+        finally:
+            conn.close()
