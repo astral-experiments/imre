@@ -1,20 +1,20 @@
 from _hashlib import HASH as _Hash, HASHXOF as _Xof, pbkdf2_hmac as pbkdf2_hmac, scrypt as scrypt
 from _typeshed import ReadableBuffer as _Buffer
-from typing import BinaryIO as _BinaryIO, Callable as _Callable, Literal as _Literal, TypedDict as _TypedDict, Unpack as _Unpack, overload as _overload
+from typing import BinaryIO as _BinaryIO, Callable as _Callable, Literal as _Literal, SupportsIndex as _SupportsIndex, TypedDict as _TypedDict, Unpack as _Unpack, overload as _overload
 def file_digest(fileobj: _BinaryIO | None, digest: str | _Callable[[], _Hash], /, *, _bufsize: object = ...) -> _Hash: ...
 algorithms_available: set[str]
 algorithms_guaranteed: set[str]
 class _Blake2Options(_TypedDict, total=False):
-    digest_size: int
+    digest_size: _SupportsIndex
     key: _Buffer
     salt: _Buffer
     person: _Buffer
-    fanout: int
-    depth: int
-    leaf_size: int
-    node_offset: int
-    node_depth: int
-    inner_size: int
+    fanout: _SupportsIndex
+    depth: _SupportsIndex
+    leaf_size: _SupportsIndex
+    node_offset: _SupportsIndex
+    node_depth: _SupportsIndex
+    inner_size: _SupportsIndex
     last_node: bool
     usedforsecurity: bool
     string: _Buffer
