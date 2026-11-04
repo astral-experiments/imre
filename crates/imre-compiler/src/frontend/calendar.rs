@@ -140,6 +140,36 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
 }
 
 impl Checker<'_> {
+    pub(super) fn month_grid_call(
+        &mut self,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (op, names, returns): (_, &[&str], _) = match name {
+            "calendar.monthcalendar" => (
+                Op::MonthGrid,
+                &["year", "month"],
+                self.types.list(self.types.list(Type::Int)),
+            ),
+            "calendar.setfirstweekday" => (Op::SetFirstWeekday, &["firstweekday"], Type::None),
+            _ => (Op::FirstWeekday, &[], Type::Int),
+        };
+        let params = names
+            .iter()
+            .map(|name| parameter(name, Type::Int, None))
+            .collect::<Vec<_>>();
+        let args = self
+            .arguments_with(call, &params, None, |checker, _, source| {
+                let value = checker.expr(source)?;
+                if value.ty != Type::Int {
+                    return Err(checker.object_runtime_export(name, source));
+                }
+                Ok(value)
+            })
+            .map_err(|_| self.object_runtime_export(name, call))?;
+        Ok(self.ordered_builtin(Builtin::Calendar(op), returns, args))
+    }
+
     pub(super) fn calendar_class_attribute(
         &self,
         a: &ast::ExprAttribute,

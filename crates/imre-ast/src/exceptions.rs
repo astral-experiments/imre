@@ -136,6 +136,8 @@ exception_kinds! {
         PackageNotFoundError = 71 => "PackageNotFoundError",
         HError = 72 => "socket.herror",
         LzmaError = 94 => "LZMAError",
+        IllegalMonthError = 96 => "IllegalMonthError",
+        IllegalWeekdayError = 97 => "IllegalWeekdayError",
     }
 }
 
@@ -201,11 +203,17 @@ impl Kind {
                     | Self::OverflowError
             ),
             Self::LookupError => {
-                matches!(self, Self::LookupError | Self::IndexError | Self::KeyError)
+                matches!(
+                    self,
+                    Self::LookupError | Self::IndexError | Self::KeyError | Self::IllegalMonthError
+                )
             }
+            Self::IndexError => matches!(self, Self::IndexError | Self::IllegalMonthError),
             Self::ValueError => matches!(
                 self,
                 Self::ValueError
+                    | Self::IllegalMonthError
+                    | Self::IllegalWeekdayError
                     | Self::JsonDecodeError
                     | Self::TomlDecodeError
                     | Self::BinasciiError

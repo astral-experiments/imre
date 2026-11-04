@@ -79,6 +79,9 @@ impl Emitter<'_, '_> {
             Op::ZoneName => self.call("imre_calendar_zonename", returns, &[get(0)]),
             _ => {
                 let name = match op {
+                    Op::MonthGrid => "imre_calendar_month_grid",
+                    Op::FirstWeekday => "imre_calendar_firstweekday",
+                    Op::SetFirstWeekday => "imre_calendar_setfirstweekday",
                     Op::Date => "imre_calendar_date",
                     Op::DateTime => "imre_calendar_datetime",
                     Op::Combine => "imre_calendar_combine",

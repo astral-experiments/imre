@@ -103,7 +103,9 @@ impl Builtin {
             Self::Calendar(op) => Contract::new(
                 matches!(
                     op,
-                    crate::ir::CalendarOp::Date
+                    crate::ir::CalendarOp::MonthGrid
+                        | crate::ir::CalendarOp::SetFirstWeekday
+                        | crate::ir::CalendarOp::Date
                         | crate::ir::CalendarOp::DateTime
                         | crate::ir::CalendarOp::Combine
                         | crate::ir::CalendarOp::Replace { .. }
@@ -1225,6 +1227,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_new"
                 | "imre_log_clock_new"
                 | "imre_calendar_datetime"
+                | "imre_calendar_month_grid"
+                | "imre_calendar_setfirstweekday"
                 | "imre_calendar_date"
                 | "imre_calendar_combine"
                 | "imre_calendar_replace"

@@ -9783,6 +9783,11 @@ impl<'a> Checker<'a> {
                 return Err(self.object_runtime_export("functools.cached_property", call));
             }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("calendar.monthcalendar"
+                | "calendar.firstweekday"
+                | "calendar.setfirstweekday"),
+            ))) => return self.month_grid_call(name, call),
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("base64.b32encode"
                 | "base64.b32hexencode"
                 | "base64.b32decode"

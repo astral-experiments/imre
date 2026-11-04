@@ -652,6 +652,7 @@ pub(crate) enum IntrinsicModule {
     Locale,
     LocaleNative,
     Functools,
+    Calendar,
     Fnmatch,
     Time,
     Warnings,
@@ -1200,6 +1201,7 @@ impl IntrinsicModule {
             "_locale" => Some(Self::LocaleNative),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "calendar" => Some(Self::Calendar),
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
@@ -1315,6 +1317,20 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Calendar {
+            return Some(match name {
+                "monthcalendar" => {
+                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.monthcalendar"))
+                }
+                "firstweekday" => {
+                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.firstweekday"))
+                }
+                "setfirstweekday" => {
+                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.setfirstweekday"))
+                }
+                _ => Binding::ConditionalValue,
+            });
+        }
         // The bundled ntpath binds platform-dependent names during module initialization.
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
@@ -4954,7 +4970,8 @@ impl<'a> Loader<'a> {
             self.reject_stdlib_shadow(name)?;
             self.needs_object_imports |= matches!(
                 module,
-                IntrinsicModule::Ast
+                IntrinsicModule::Calendar
+                    | IntrinsicModule::Ast
                     | IntrinsicModule::NtPath
                     | IntrinsicModule::Blake2
                     | IntrinsicModule::OperatorNative
