@@ -62,20 +62,26 @@ fn bytes(output: &mut String, name: &str, value: &str) {
 
 /// Names and field flags are shared constants. Record allocation size, field
 /// offsets, and ownership operations do not depend on generated value behavior.
-pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut String) -> String {
+pub(super) fn semantics(
+    module: &Module,
+    ty: Type,
+    fields: &[Type],
+    name: &str,
+    output: &mut String,
+) -> String {
     let named = module.types.tuple_metadata(ty);
+    // These field owners can be dropped without scheduling child records.
+    let scalar_fields = fields.iter().all(|ty| {
+        matches!(
+            ty,
+            Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes
+        )
+    });
     let (kind, flags, class_name, qualified_name, fields) = match ty {
         Type::Class(class) => {
             let Some(metadata) = module.class_metadata.get(class) else {
                 return "null".to_owned();
             };
-            // These field owners may be dropped directly without scheduling child records.
-            let scalar_fields = module.class_fields[class].iter().all(|ty| {
-                matches!(
-                    ty,
-                    Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes
-                )
-            });
             let flags = u32::from(metadata.dataclass_eq)
                 | (u32::from(metadata.dataclass_repr) << 1)
                 | (u32::from(metadata.toml_hash) << 2)
@@ -173,7 +179,9 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             // Private frames can also have tuple-shaped storage. Only a Python tuple
             // display gets the same exact-type flag as a runtime-built tuple.
             let exact = module.types.is_plain_or_declared_tuple(ty);
-            (1, 3 | (u32::from(exact) << 5), "", "", "null".to_owned())
+            let leaf = exact && scalar_fields;
+            let flags = 3 | (u32::from(exact) << 5) | (u32::from(leaf) << 6);
+            (1, flags, "", "", "null".to_owned())
         }
         _ => unreachable!("only public record layouts have value behavior"),
     };

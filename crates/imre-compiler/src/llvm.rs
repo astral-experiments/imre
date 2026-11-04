@@ -9884,7 +9884,7 @@ fn record_layouts(module: &Module, output: &mut Output) {
             "@kinds_{name} = private unnamed_addr constant [{kind_count} x i32] [{kinds}]"
         )
         .unwrap();
-        let semantics = records::semantics(module, ty, &name, output.entry_buffer());
+        let semantics = records::semantics(module, ty, &fields, &name, output.entry_buffer());
         writeln!(
             output.global(
                 output.entry,

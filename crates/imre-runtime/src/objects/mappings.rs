@@ -828,6 +828,27 @@ impl AsciiIntCache {
         }
     }
 
+    /// Copy tagged ASCII lookups into a disjoint output span, returning whether
+    /// every key was present. Take the table pointer once for the whole loop.
+    ///
+    /// # Safety
+    /// Every input byte is ASCII and every present table value is a small integer.
+    #[inline(never)]
+    unsafe fn copy_small_ascii(
+        &self,
+        text: &[u8],
+        output: &mut [std::mem::MaybeUninit<Int>],
+    ) -> bool {
+        let mut present = 1;
+        for (&character, slot) in text.iter().zip(output) {
+            // SAFETY: the caller proved that character indexes the ASCII table.
+            let word = unsafe { *self.values.get_unchecked(usize::from(character)) };
+            present &= word;
+            slot.write(Int(word | 1));
+        }
+        present != 0
+    }
+
     /// Maintains the small-value proof across insertion, replacement, and deletion.
     fn set(&mut self, character: u8, word: usize) {
         let old = std::mem::replace(&mut self.values[usize::from(character)], word);
@@ -2486,7 +2507,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                     Err(Error::string_key(key))
                 }
             };
-            let ascii = mapping.ascii_int.as_ref().unwrap();
+            let ascii = mapping.ascii_int.as_deref().unwrap();
             let ascii_small = ascii.heap_values == 0 && text.is_ascii();
             let length = if ascii_small {
                 text.len()
@@ -2498,19 +2519,11 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 .try_reserve_exact(length)
                 .map_err(|_| Error::allocation())?;
             if ascii_small {
-                // Every present small integer is odd. Accumulate its tag while
-                // copying, and turn missing entries into tagged integer zeros.
-                let mut present = 1;
-                for (slot, &character) in values.spare_capacity_mut()[..length]
-                    .iter_mut()
-                    .zip(text.as_bytes())
-                {
-                    // SAFETY: every byte in this immutable text is ASCII.
-                    let word = *ascii.values.get_unchecked(usize::from(character));
-                    present &= word;
-                    slot.write(Int(word | 1));
-                }
-                if present == 0 && mapping.missing != Missing::Zero {
+                // SAFETY: this path proved that all characters are ASCII and all
+                // present values are small integers. The result has enough spare slots.
+                let complete = ascii
+                    .copy_small_ascii(text.as_bytes(), &mut values.spare_capacity_mut()[..length]);
+                if !complete && mapping.missing != Missing::Zero {
                     let character = text
                         .bytes()
                         .find(|&byte| ascii.values[usize::from(byte)] == 0)
