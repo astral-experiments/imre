@@ -812,7 +812,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "calcsize" | "pack" | "pack_into" | "unpack" | "unpack_from")
-        | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
+        | ("base64", "b16encode" | "urlsafe_b64encode" | "urlsafe_b64decode")
         | (
             "random",
             "seed" | "getrandbits" | "random" | "choice" | "choices" | "shuffle" | "randint"
@@ -1784,6 +1784,10 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("math.") {
         return math::call(ctx, operation, args, kwargs);
+    }
+    if name == "base64.b16encode" {
+        let [data] = required_arguments("b16encode", ["s"], args, kwargs)?;
+        return binascii::b16encode(ctx, data);
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);

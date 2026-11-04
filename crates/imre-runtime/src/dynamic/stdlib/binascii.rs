@@ -103,6 +103,21 @@ pub(super) fn encode85(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
+/// Encode a contiguous buffer as uppercase hex, as in binascii.hexlify(s).upper().
+pub(super) fn b16encode(ctx: &mut Context, data: Id) -> Result<Id> {
+    let hex = if let Some(method) = ctx.python_buffer_method(data, true)? {
+        // binascii.hexlify requests PyBUF_SIMPLE from Python buffer exporters.
+        ctx.with_contiguous_python_buffer(data, method, 0, |ctx, view| {
+            Ok(crate::objects::hash_hex(ctx.view_bytes(view)?)?)
+        })?
+    } else {
+        crate::objects::hash_hex(input(ctx, data, false)?)?
+    };
+    let mut encoded = hex.into_string().into_bytes();
+    encoded.make_ascii_uppercase();
+    Ok(ctx.alloc(Value::Bytes(encoded)))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,

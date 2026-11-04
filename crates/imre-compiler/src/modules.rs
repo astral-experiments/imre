@@ -2230,6 +2230,7 @@ impl IntrinsicModule {
             (Self::Base64, "encodebytes") => Intrinsic::ScopedObjectExport("base64.encodebytes"),
             (Self::Base64, "b64encode") => Intrinsic::Base64Encode,
             (Self::Base64, "b64decode") => Intrinsic::Base64Decode,
+            (Self::Base64, "b16encode") => Intrinsic::ScopedObjectExport("base64.b16encode"),
             (Self::Base64, "b16decode") => Intrinsic::ScopedObjectExport("base64.b16decode"),
             (Self::Base64, "b32encode") => Intrinsic::ScopedObjectExport("base64.b32encode"),
             (Self::Base64, "b32decode") => Intrinsic::ScopedObjectExport("base64.b32decode"),
