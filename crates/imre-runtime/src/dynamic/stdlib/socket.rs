@@ -1199,12 +1199,20 @@ pub(super) fn call(
             return buffered_socket_writer(ctx, raw, buffering)
                 .inspect_err(|error| release_on_error(ctx, error));
         }
-        let buffering = if buffering == NONE {
-            -1
-        } else {
-            integer(ctx, buffering)?
+        let size = match buffering {
+            NONE => -1,
+            _ if binary && !write => ctx.as_integer(buffering)?,
+            _ => i64::from(integer(ctx, buffering)?),
         };
-        if buffering == 0 {
+        if binary && !write && size > 0 {
+            let raw = raw_file(ctx)?;
+            return ctx
+                .module("io")
+                .and_then(|io| ctx.lookup_attr(io, "BufferedReader"))
+                .and_then(|reader| ctx.call(reader, vec![raw, buffering], Vec::new()))
+                .inspect_err(|error| release_on_error(ctx, error));
+        }
+        if size == 0 {
             let raw = raw_file(ctx)?;
             if !binary {
                 // The live factory may have retained the raw stream outside this call.
@@ -1217,10 +1225,10 @@ pub(super) fn call(
             }
             return Ok(raw);
         }
-        if write || buffering > 0 {
+        if write || size > 0 {
             return Err(Error::new(
                 "NotImplementedError",
-                "socket.makefile supports raw binary streams, buffered binary writers and default buffered readers",
+                "socket.makefile supports raw binary streams, buffered binary readers and writers, and default text readers",
             ));
         }
         let wrapper = if binary {
