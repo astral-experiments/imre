@@ -265,7 +265,9 @@ impl Verifier<'_> {
                 kind,
             } => {
                 let item_type = match kind {
-                    crate::ir::IterNextKind::String => Some(Type::Str),
+                    crate::ir::IterNextKind::String | crate::ir::IterNextKind::SplitField => {
+                        Some(Type::Str)
+                    }
                     crate::ir::IterNextKind::CodePoint | crate::ir::IterNextKind::Utf8Byte => {
                         Some(Type::Int)
                     }

@@ -1029,6 +1029,12 @@ impl Checker<'_> {
     }
 
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
+        let kind = match cursor.kind {
+            ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _) => {
+                crate::ir::IterNextKind::SplitField
+            }
+            _ => crate::ir::IterNextKind::Generic,
+        };
         let iterator = self.hidden(cursor.ty);
         let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);
@@ -1038,7 +1044,7 @@ impl Checker<'_> {
             next: vec![
                 Statement::Clear(value),
                 Statement::IterNext {
-                    kind: crate::ir::IterNextKind::Generic,
+                    kind,
                     iterator,
                     key: value,
                     value: None,

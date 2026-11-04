@@ -232,7 +232,6 @@ enum Storage {
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     SplitFields(SplitFields),
-    SortedSplitFields(Box<SortedSplitFields>),
     MatchingFields(matching_fields::MatchingFields),
     BytesIterator(bytes::BytesIterator),
     ByteArray(Vec<u8>),
@@ -295,6 +294,7 @@ enum Storage {
     },
     JsonDecoder(crate::ObjectOwner),
     PairTable(allocator_api2::boxed::Box<pair_tables::Table>),
+    SortedSplitFields(Box<SortedSplitFields>),
 }
 
 /// Borrows a rooted object for one nonreentrant operation.

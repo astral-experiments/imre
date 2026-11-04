@@ -3214,6 +3214,30 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
     }
 }
 
+/// Transfers the next owned string field. Zero indicates exhaustion or a pending error.
+///
+/// # Safety
+/// The caller roots a single-byte split cursor and releases each returned field.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_split_field_next(value: *const Object) -> usize {
+    // SAFETY: the caller roots this cursor. Advancing one field cannot re-enter it.
+    let next = unsafe {
+        object(value).0.with_mut(|storage| match storage {
+            Storage::SplitFields(fields) => fields.next(),
+            Storage::SortedSplitFields(fields) => fields.next(),
+            _ => unreachable!("expected a split field iterator"),
+        })
+    };
+    match next {
+        Ok(Some((field, _))) => field.into_word(),
+        Ok(None) => 0,
+        Err(error) => {
+            error.raise();
+            0
+        }
+    }
+}
+
 /// # Safety
 /// Root the cursor; output words are aligned, independent, outside runtime storage,
 /// and contain no unconsumed owner. Only success writes them; keys/set/string mode

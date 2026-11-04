@@ -237,6 +237,7 @@ mod tests {
             3
         );
         assert_eq!(code.matches("call ptr @imre_str_split(").count(), 4);
+        assert!(code.matches("call i64 @imre_split_field_next(").count() >= 3);
     }
 
     #[test]
