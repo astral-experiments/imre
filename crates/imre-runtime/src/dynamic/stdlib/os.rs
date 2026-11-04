@@ -252,9 +252,15 @@ pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     let mut warn = false;
     let result = at_fork::around(ctx, |ctx| {
         // A before-handler can add child handlers or mutate the argument list.
-        if ctx.fork_hooks[Phase::Child as usize].is_empty()
-            && let Some(result) = spawn_plain::try_spawn(ctx, path, argv, exec)
-        {
+        let child_hooks = &ctx.fork_hooks[Phase::Child as usize];
+        let plain_child = match child_hooks.as_slice() {
+            [] => true,
+            [hook] if Some(*hook) == ctx.random_fork_hook => {
+                super::random::instance::can_skip_reseed_before_exec(ctx, *hook)
+            }
+            _ => false,
+        };
+        if plain_child && let Some(result) = spawn_plain::try_spawn(ctx, path, argv, exec) {
             warn = spawn_plain::multiple_threads(ctx);
             return result;
         }

@@ -21,6 +21,22 @@ pub(crate) struct Generator {
 }
 
 impl Generator {
+    pub(crate) const STATE_WORDS: usize = N;
+
+    pub(crate) fn state(&self) -> ([u32; N], usize) {
+        (self.state, self.index)
+    }
+
+    pub(crate) fn from_state(state: [u32; N], index: i64) -> Result<Self> {
+        if !(0..=N as i64).contains(&index) {
+            return Err(Error::new(Kind::ValueError, "invalid state"));
+        }
+        Ok(Self {
+            state,
+            index: index as usize,
+        })
+    }
+
     /// A newly allocated Random has zeroed state until its initializer seeds it.
     pub(crate) fn unseeded() -> Self {
         Self {
@@ -196,6 +212,10 @@ fn shared() -> MutexGuard<'static, Generator> {
         .get_or_init(|| Mutex::new(Generator::from_entropy()))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
+}
+
+pub(crate) fn shared_random_state() -> ([u32; N], usize) {
+    shared().state()
 }
 
 pub(crate) fn seed_shared(generator: Generator) {

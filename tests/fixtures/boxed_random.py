@@ -1,5 +1,5 @@
 import random
-from random import choice, choices, randbytes, randint, random as draw, shuffle
+from random import choice, choices, gauss, getstate, randbytes, randint, random as draw, setstate, shuffle
 
 
 def current():
@@ -192,3 +192,63 @@ def current():
     j = events[1][1]
     assert 0 <= j <= 2
     assert events == ["len", ("get", j), ("get", 2), ("set", 2, 2), ("set", j, 3)]
+
+    assert gauss is random.gauss
+    assert gauss.__self__ is random._inst is draw.__self__
+    random._inst.gauss_next = 4.0
+    assert gauss(1.0, -2.0) == -7.0
+    assert random._inst.gauss_next is None
+    random.seed(seed)
+    local = random.Random(seed)
+    first_draw = gauss()
+    assert local.gauss() == first_draw
+    scaled = gauss(sigma=-2.0, mu=1.0)
+    assert scaled == 1.0 + local.gauss() * -2.0
+    print(first_draw, scaled)
+
+    # The second Gaussian uses the cached partner without consuming another draw.
+    uniform = random.Random(seed)
+    uniform.random()
+    uniform.random()
+    assert random.random() == local.random() == uniform.random()
+    local.seed(seed)
+    assert local.gauss(3.0, 0.0) == 3.0
+    local.seed(seed)
+    assert local.gauss() == first_draw
+
+    # Random.gauss resolves its math functions in the random module's namespace.
+    cosine = random._cos
+    try:
+        random._cos = lambda angle: 0.0
+        local.seed(seed)
+        assert local.gauss() == 0.0
+    finally:
+        random._cos = cosine
+
+    assert getstate.__self__ is setstate.__self__ is gauss.__self__
+    for api in (random, local):
+        api.seed(seed)
+        api.gauss()
+        version, words, cached = api.getstate()
+        assert version == 3 and len(words) == 625 and type(cached) is float
+        assert api.gauss() == cached and api.getstate()[1] == words
+        expected = api.random(), api.getrandbits(39)
+
+        # Version 2 stores signed MT words; restoration also reinstates the Gaussian.
+        signed = [word - (1 << 32) for word in words]
+        api.setstate((2, signed, cached))
+        assert api.getstate() == (3, words, cached)
+        assert api.gauss() == cached
+        assert (api.random(), api.getrandbits(39)) == expected
+
+        # The cache assignment precedes core validation. A bad offset leaves every word intact.
+        api.setstate((3, words, cached))
+        events.clear()
+        try:
+            api.setstate((3, (0,) * 624 + (Index(625),), seq))
+        except ValueError as error:
+            assert str(error) == "invalid state"
+        else:
+            raise AssertionError("invalid MT offset accepted")
+        assert events == [("index", 625)]
+        assert api.getstate() == (3, words, seq)
