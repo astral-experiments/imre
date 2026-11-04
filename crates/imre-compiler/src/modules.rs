@@ -318,6 +318,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
         "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
+        "quopri" => Some(("quopri.py", include_str!("../stdlib/quopri.py"))),
         "base64" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some((
@@ -5267,7 +5268,7 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
-            "_pyio" if self.allow_imports && self.has_project_source(name) => None,
+            "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
             // Fixed-layout Decimal values use the scalar methods. Rich comparisons use the
             // complete provider on the boxed route, where Python dispatches equality and hashing.
             "decimal" => Some((
@@ -5351,10 +5352,10 @@ impl<'a> Loader<'a> {
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
-            // token initializes its public tables from the live module globals.
+            // token initializes its tables and quopri selects a codec from live module globals.
             self.needs_object_imports |= matches!(
                 name,
-                "token" | "http.client" | "fractions" | "xml" | "zoneinfo"
+                "token" | "http.client" | "fractions" | "quopri" | "xml" | "zoneinfo"
             );
             let pkgutil_source;
             let source = if name == "pkgutil" {
@@ -5407,6 +5408,7 @@ impl<'a> Loader<'a> {
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
+            && !(first == "quopri" && self.has_project_source(first))
             && (IntrinsicModule::named(first).is_some()
                 || imre_ast::providers::provider(first).is_some()
                 || !self
