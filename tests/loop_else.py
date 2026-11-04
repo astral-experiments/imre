@@ -10,6 +10,9 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "loop_else"
 
 REJECTED = {
+    "constant_while_break": "def bad(stop: bool) -> int:\n    while True:\n        if stop:\n            break\n        return 1\n",
+    "constant_while_finally_break": "def bad(stop: bool) -> int:\n    while 1:\n        try:\n            return 1\n        finally:\n            if stop:\n                break\n",
+    "zero_while_fallthrough": "def bad() -> int:\n    while 0:\n        return 1\n",
     "for_break_leaves_unbound": "def bad(values: list[int]) -> int:\n    for value in values:\n        if value == 1:\n            break\n    else:\n        result = 2\n    return result\n",
     "while_break_leaves_unbound": "def bad(flag: bool) -> int:\n    while flag:\n        break\n    else:\n        result = 2\n    return result\n",
     "for_else_target_unbound": "for value in range(0):\n    pass\nelse:\n    print(value)\n",

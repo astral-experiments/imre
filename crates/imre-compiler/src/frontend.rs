@@ -4177,7 +4177,7 @@ impl<'a> Checker<'a> {
             let breaks = self.loop_breaks.pop().unwrap();
             self.assigned = before;
             self.narrowed = facts;
-            let (mut orelse, falls) = self.loop_else(orelse, breaks)?;
+            let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
             let cursor = self.hidden(Type::Int);
             let stop = self.hidden(Type::Int);
             let step = self.hidden(Type::Int);
@@ -4458,7 +4458,7 @@ impl<'a> Checker<'a> {
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned = before;
         self.narrowed = facts;
-        let (mut orelse, falls) = self.loop_else(orelse, breaks)?;
+        let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
         cleanup.extend(counter);
         if !orelse.is_empty() {
             // CPython drops the exhausted iterator before entering else. A
@@ -4508,9 +4508,13 @@ impl<'a> Checker<'a> {
         &mut self,
         orelse: &[ast::Stmt],
         mut breaks: Option<LocalState>,
+        can_exhaust: bool,
     ) -> Result<(Vec<Statement>, bool), String> {
+        let reachable = self.reachable;
+        self.reachable &= can_exhaust;
         let (orelse, falls) = self.block(orelse)?;
-        if falls {
+        self.reachable = reachable;
+        if can_exhaust && falls {
             self.merge_exit(&mut breaks);
         }
         let falls = breaks.is_some();
@@ -5133,7 +5137,15 @@ impl<'a> Checker<'a> {
                 self.assigned = before;
                 self.narrowed = facts;
                 self.apply_facts(&loop_.test, false);
-                let (orelse, falls) = self.loop_else(&loop_.orelse, breaks)?;
+                let can_exhaust = match &*loop_.test {
+                    ast::Expr::BooleanLiteral(literal) => !literal.value,
+                    ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
+                        value: ast::Number::Int(value),
+                        ..
+                    }) => value.as_i64() == Some(0),
+                    _ => true,
+                };
+                let (orelse, falls) = self.loop_else(&loop_.orelse, breaks, can_exhaust)?;
                 return Ok((vec![Statement::While(test, body, orelse)], falls));
             }
             ast::Stmt::For(loop_) if !loop_.is_async => {
