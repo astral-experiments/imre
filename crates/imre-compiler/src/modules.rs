@@ -75,60 +75,31 @@ fn stat_mode_source() -> Option<&'static str> {
     }
 }
 
-/// Pinned CPython 3.14.5 XML packages and the modules used by ElementTree.
-pub(crate) fn etree_source(name: &str) -> Option<(&'static str, &'static str)> {
-    macro_rules! source {
-        ($path:literal) => {
-            Some(($path, include_str!(concat!("../stdlib/", $path))))
-        };
-    }
-    match name {
-        "xml" => source!("xml/__init__.py"),
-        "xml.etree" => source!("xml/etree/__init__.py"),
-        "xml.etree.ElementPath" => source!("xml/etree/ElementPath.py"),
-        "xml.etree.ElementTree" => source!("xml/etree/ElementTree.py"),
-        _ => None,
-    }
+/// Register a bundled Python file under its path in the standard library.
+macro_rules! bundled_source {
+    ($path:literal) => {
+        Some((
+            $path,
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib/", $path)),
+        ))
+    };
 }
+pub(crate) use bundled_source;
 
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
-        "unittest.main" => Some((
-            "unittest/main.py",
-            include_str!("../stdlib/unittest/main.py"),
-        )),
-        "unittest.result" => Some((
-            "unittest/result.py",
-            include_str!("../stdlib/unittest/result.py"),
-        )),
-        "unittest.runner" => Some((
-            "unittest/runner.py",
-            include_str!("../stdlib/unittest/runner.py"),
-        )),
-        "unittest.suite" => Some((
-            "unittest/suite.py",
-            include_str!("../stdlib/unittest/suite.py"),
-        )),
-        "unittest.signals" => Some((
-            "unittest/signals.py",
-            include_str!("../stdlib/unittest/signals.py"),
-        )),
+        "unittest.main" => bundled_source!("unittest/main.py"),
+        "unittest.result" => bundled_source!("unittest/result.py"),
+        "unittest.runner" => bundled_source!("unittest/runner.py"),
+        "unittest.suite" => bundled_source!("unittest/suite.py"),
+        "unittest.signals" => bundled_source!("unittest/signals.py"),
         // CPython 3.14.5 Lib/unittest/_log.py. See stdlib/docstrings/LICENSE.
-        "unittest._log" => Some((
-            "unittest/_log.py",
-            include_str!("../stdlib/unittest/_log.py"),
-        )),
+        "unittest._log" => bundled_source!("unittest/_log.py"),
         // CPython 3.14.5 Lib/unittest/util.py. See stdlib/docstrings/LICENSE.
-        "unittest.util" => Some((
-            "unittest/util.py",
-            include_str!("../stdlib/unittest/util.py"),
-        )),
+        "unittest.util" => bundled_source!("unittest/util.py"),
         // CPython 3.14.5 Lib/unittest/async_case.py. See licenses/CPython.txt.
-        "unittest.async_case" => Some((
-            "unittest/async_case.py",
-            include_str!("../stdlib/unittest/async_case.py"),
-        )),
+        "unittest.async_case" => bundled_source!("unittest/async_case.py"),
         "unittest.case" => Some((
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
@@ -142,40 +113,25 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             ),
         )),
         // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
-        "_colorize" => Some(("_colorize.py", include_str!("../stdlib/_colorize.py"))),
+        "_colorize" => bundled_source!("_colorize.py"),
         // CPython 3.14.5 Lib/_pyio.py. See licenses/CPython.txt.
-        "_pyio" => Some(("_pyio.py", include_str!("../stdlib/_pyio.py"))),
+        "_pyio" => bundled_source!("_pyio.py"),
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
-        "_strptime" => Some(("_strptime.py", include_str!("../stdlib/_strptime.py"))),
-        "calendar" => Some(("calendar.py", include_str!("../stdlib/calendar.py"))),
+        "_strptime" => bundled_source!("_strptime.py"),
+        "calendar" => bundled_source!("calendar.py"),
         // CPython 3.14.5 Lib/zoneinfo. See licenses/CPython.txt.
-        "zoneinfo" => Some((
-            "zoneinfo/__init__.py",
-            include_str!("../stdlib/zoneinfo/__init__.py"),
-        )),
-        "zoneinfo._common" => Some((
-            "zoneinfo/_common.py",
-            include_str!("../stdlib/zoneinfo/_common.py"),
-        )),
-        "zoneinfo._tzpath" => Some((
-            "zoneinfo/_tzpath.py",
-            include_str!("../stdlib/zoneinfo/_tzpath.py"),
-        )),
-        "zoneinfo._zoneinfo" => Some((
-            "zoneinfo/_zoneinfo.py",
-            include_str!("../stdlib/zoneinfo/_zoneinfo.py"),
-        )),
+        "zoneinfo" => bundled_source!("zoneinfo/__init__.py"),
+        "zoneinfo._common" => bundled_source!("zoneinfo/_common.py"),
+        "zoneinfo._tzpath" => bundled_source!("zoneinfo/_tzpath.py"),
+        "zoneinfo._zoneinfo" => bundled_source!("zoneinfo/_zoneinfo.py"),
         // CPython 3.14.5 Lib/fractions.py and its numeric ABCs. See licenses/CPython.txt.
-        "fractions" => Some(("fractions.py", include_str!("../stdlib/fractions.py"))),
-        "numbers" => Some(("numbers.py", include_str!("../stdlib/numbers.py"))),
-        "_compat_pickle" => Some((
-            "_compat_pickle.py",
-            include_str!("../stdlib/_compat_pickle.py"),
-        )),
-        "_tokenize" => Some(("_tokenize.py", include_str!("../stdlib/_tokenize.py"))),
-        "__future__" => Some(("__future__.py", include_str!("../stdlib/__future__.py"))),
-        "__hello__" => Some(("__hello__.py", include_str!("../stdlib/__hello__.py"))),
-        "ast" => Some(("ast.py", include_str!("../stdlib/ast.py"))),
+        "fractions" => bundled_source!("fractions.py"),
+        "numbers" => bundled_source!("numbers.py"),
+        "_compat_pickle" => bundled_source!("_compat_pickle.py"),
+        "_tokenize" => bundled_source!("_tokenize.py"),
+        "__future__" => bundled_source!("__future__.py"),
+        "__hello__" => bundled_source!("__hello__.py"),
+        "ast" => bundled_source!("ast.py"),
         "stat" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             let modes = stat_mode_source()?;
@@ -214,7 +170,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/importlib/metadata_entrypoints.py"),
             ),
         )),
-        "queue" => Some(("queue.py", include_str!("../stdlib/queue.py"))),
+        "queue" => bundled_source!("queue.py"),
         "csv" => Some((
             "csv.py",
             concat!(
@@ -233,14 +189,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "copy.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/copy/upstream/Lib/copy.py"),
         )),
-        "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
-        "dis" => Some(("dis.py", include_str!("../stdlib/dis.py"))),
-        "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
-        "_opcode_metadata" => Some((
-            "_opcode_metadata.py",
-            include_str!("../stdlib/_opcode_metadata.py"),
-        )),
-        "tracemalloc" => Some(("tracemalloc.py", include_str!("../stdlib/tracemalloc.py"))),
+        "copyreg" => bundled_source!("copyreg.py"),
+        "dis" => bundled_source!("dis.py"),
+        "opcode" => bundled_source!("opcode.py"),
+        "_opcode_metadata" => bundled_source!("_opcode_metadata.py"),
+        "tracemalloc" => bundled_source!("tracemalloc.py"),
         "warnings" => Some((
             "warnings.py",
             include_str!(
@@ -259,26 +212,17 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                     .replace("            raise message", "            try:\n                raise message\n            finally:\n                del message")
             })))
         }
-        "re" => Some(("re/__init__.py", include_str!("../stdlib/re/__init__.py"))),
-        "re._constants" => Some((
-            "re/_constants.py",
-            include_str!("../stdlib/re/_constants.py"),
-        )),
-        "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
+        "re" => bundled_source!("re/__init__.py"),
+        "re._constants" => bundled_source!("re/_constants.py"),
+        "decimal" => bundled_source!("decimal.py"),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
-        "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
-        "pyexpat" => Some(("pyexpat.py", include_str!("../stdlib/pyexpat.py"))),
-        "xml" => Some(("xml/__init__.py", include_str!("../stdlib/xml/__init__.py"))),
-        "xml.parsers" => Some((
-            "xml/parsers/__init__.py",
-            include_str!("../stdlib/xml/parsers/__init__.py"),
-        )),
-        "xml.parsers.expat" => Some((
-            "xml/parsers/expat.py",
-            include_str!("../stdlib/xml/parsers/expat.py"),
-        )),
+        "py_compile" => bundled_source!("py_compile.py"),
+        "pyexpat" => bundled_source!("pyexpat.py"),
+        "xml" => bundled_source!("xml/__init__.py"),
+        "xml.parsers" => bundled_source!("xml/parsers/__init__.py"),
+        "xml.parsers.expat" => bundled_source!("xml/parsers/expat.py"),
         // CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
-        "pprint" => Some(("pprint.py", include_str!("../stdlib/pprint.py"))),
+        "pprint" => bundled_source!("pprint.py"),
         "difflib" => Some((
             "difflib.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/difflib/upstream/Lib/difflib.py"),
@@ -287,13 +231,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "heapq.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/heapq/upstream/Lib/heapq.py"),
         )),
-        "importlib" => Some((
-            "importlib/__init__.py",
-            include_str!("../stdlib/importlib/__init__.py"),
-        )),
-        "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
-        "genericpath" => Some(("genericpath.py", include_str!("../stdlib/genericpath.py"))),
-        "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
+        "importlib" => bundled_source!("importlib/__init__.py"),
+        "os" => bundled_source!("os.py"),
+        "genericpath" => bundled_source!("genericpath.py"),
+        "posixpath" => bundled_source!("posixpath.py"),
         "pkgutil" => Some((
             "pkgutil.py",
             concat!(
@@ -302,10 +243,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/pkgutil/iter_modules.py"),
             ),
         )),
-        "_collections_abc" => Some((
-            "_collections_abc.py",
-            include_str!("../stdlib/_collections_abc.py"),
-        )),
+        "_collections_abc" => bundled_source!("_collections_abc.py"),
         "unittest.mock" => Some((
             "unittest/mock.py",
             concat!(
@@ -315,10 +253,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             ),
         )),
         // CPython 3.14.5 Lib/weakref.py and Lib/_weakrefset.py.
-        "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
-        "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
-        "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
-        "quopri" => Some(("quopri.py", include_str!("../stdlib/quopri.py"))),
+        "weakref" => bundled_source!("weakref.py"),
+        "_weakrefset" => bundled_source!("_weakrefset.py"),
+        "abc" => bundled_source!("abc.py"),
+        "quopri" => bundled_source!("quopri.py"),
         "base64" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some((
@@ -353,12 +291,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             ))
         }
         // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
-        "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
-        "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
-        "encodings" => Some((
-            "encodings/__init__.py",
-            include_str!("../stdlib/encodings/__init__.py"),
-        )),
+        "code" => bundled_source!("code.py"),
+        "codecs" => bundled_source!("codecs.py"),
+        "encodings" => bundled_source!("encodings/__init__.py"),
         "encodings.aliases" => Some((
             "encodings/aliases.py",
             include_str!(
@@ -401,14 +336,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/cp424.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
-        "encodings.idna" => Some((
-            "encodings/idna.py",
-            include_str!("../stdlib/encodings/idna.py"),
-        )),
-        "encodings.shift_jis" => Some((
-            "encodings/shift_jis.py",
-            include_str!("../stdlib/encodings/shift_jis.py"),
-        )),
+        "encodings.idna" => bundled_source!("encodings/idna.py"),
+        "encodings.shift_jis" => bundled_source!("encodings/shift_jis.py"),
         "encodings.cp437" => Some((
             "encodings/cp437.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
@@ -421,12 +350,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/koi8_u.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
-        "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
+        "codeop" => bundled_source!("codeop.py"),
         "keyword" => Some((
             "keyword.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/keyword/upstream/Lib/keyword.py"),
         )),
-        "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
+        "token" => bundled_source!("token.py"),
         "tokenize" => Some((
             "tokenize.py",
             include_str!(
@@ -460,7 +389,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             })))
         }
         // CPython 3.14.5 Lib/configparser.py.
-        "configparser" => Some(("configparser.py", include_str!("../stdlib/configparser.py"))),
+        "configparser" => bundled_source!("configparser.py"),
         "contextlib" => Some((
             "contextlib.py",
             concat!(
@@ -502,10 +431,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
-        "inspect" => Some(("inspect.py", include_str!("../stdlib/inspect.py"))),
-        "itertools" => Some(("itertools.py", include_str!("../stdlib/itertools.py"))),
-        "signal" if cfg!(unix) => Some(("signal.py", include_str!("../stdlib/signal.py"))),
-        "typing" => Some(("typing.py", include_str!("../stdlib/typing.py"))),
+        "inspect" => bundled_source!("inspect.py"),
+        "itertools" => bundled_source!("itertools.py"),
+        "signal" if cfg!(unix) => bundled_source!("signal.py"),
+        "typing" => bundled_source!("typing.py"),
         "logging" => Some((
             "logging/__init__.py",
             concat!(
@@ -523,10 +452,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             ),
         )),
         // CPython 3.14.5 Lib/logging/config.py.
-        "logging.config" => Some((
-            "logging/config.py",
-            include_str!("../stdlib/logging/config.py"),
-        )),
+        "logging.config" => bundled_source!("logging/config.py"),
         // CPython 3.14.5 Lib/logging/handlers.py.
         "logging.handlers" => Some((
             "logging/handlers.py",
@@ -541,7 +467,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             ),
         )),
         // CPython 3.14.5 Lib/ftplib.py. See stdlib/docstrings/LICENSE.
-        "ftplib" if cfg!(unix) => Some(("ftplib.py", include_str!("../stdlib/ftplib.py"))),
+        "ftplib" if cfg!(unix) => bundled_source!("ftplib.py"),
         "mimetypes" if cfg!(unix) => Some((
             "mimetypes.py",
             include_str!(
@@ -559,23 +485,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "string/__init__.py",
             include_str!("../stdlib/string/cpython.py"),
         )),
-        "string.templatelib" => Some((
-            "string/templatelib.py",
-            include_str!("../stdlib/string/templatelib.py"),
-        )),
-        "email" => Some((
-            "email/__init__.py",
-            include_str!("../stdlib/email/__init__.py"),
-        )),
-        "email.parser" => Some(("email/parser.py", include_str!("../stdlib/email/parser.py"))),
-        "email.feedparser" => Some((
-            "email/feedparser.py",
-            include_str!("../stdlib/email/feedparser.py"),
-        )),
-        "email._policybase" => Some((
-            "email/_policybase.py",
-            include_str!("../stdlib/email/_policybase.py"),
-        )),
+        "string.templatelib" => bundled_source!("string/templatelib.py"),
+        "email" => bundled_source!("email/__init__.py"),
+        "email.parser" => bundled_source!("email/parser.py"),
+        "email.feedparser" => bundled_source!("email/feedparser.py"),
+        "email._policybase" => bundled_source!("email/_policybase.py"),
         "email.message" => Some((
             "email/message.py",
             concat!(
@@ -584,10 +498,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/email/boxed_message.py"),
             ),
         )),
-        "http" => Some((
-            "http/__init__.py",
-            include_str!("../stdlib/http/__init__.py"),
-        )),
+        "http" => bundled_source!("http/__init__.py"),
         "http.client" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some((
@@ -619,20 +530,21 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/cookiejar.py"
             ),
         )),
-        "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
-        "locale" => Some(("locale.py", include_str!("../stdlib/locale.py"))),
-        "_imre_gettext_locale" => Some((
-            "_imre_gettext_locale.py",
-            include_str!("../stdlib/_imre_gettext_locale.py"),
-        )),
+        "http.server" => bundled_source!("http/server.py"),
+        "locale" => bundled_source!("locale.py"),
+        "_imre_gettext_locale" => bundled_source!("_imre_gettext_locale.py"),
         // CPython 3.14.5 Lib/colorsys.py. See licenses/CPython.txt.
-        "colorsys" => Some(("colorsys.py", include_str!("../stdlib/colorsys.py"))),
-        "getopt" => Some(("getopt.py", include_str!("../stdlib/getopt.py"))),
+        "colorsys" => bundled_source!("colorsys.py"),
+        "getopt" => bundled_source!("getopt.py"),
         // CPython 3.14.5 Lib/optparse.py. See licenses/Optik.txt and licenses/CPython.txt.
-        "optparse" => Some(("optparse.py", include_str!("../stdlib/optparse.py"))),
-        "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
-        "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
-        _ => etree_source(name),
+        "optparse" => bundled_source!("optparse.py"),
+        "gettext" => bundled_source!("gettext.py"),
+        "uuid" => bundled_source!("uuid.py"),
+        "xml" => bundled_source!("xml/__init__.py"),
+        "xml.etree" => bundled_source!("xml/etree/__init__.py"),
+        "xml.etree.ElementPath" => bundled_source!("xml/etree/ElementPath.py"),
+        "xml.etree.ElementTree" => bundled_source!("xml/etree/ElementTree.py"),
+        _ => None,
     }
 }
 
@@ -5337,7 +5249,7 @@ impl<'a> Loader<'a> {
             // The Python evaluator resolves ElementTree's optional C accelerator and the
             // globals that ElementPath initializes from its tokenizer.
             "xml.etree.ElementTree" | "xml.etree.ElementPath" => {
-                etree_source(name).map(|(filename, _)| (filename, ""))
+                bundled_runtime_source(name).map(|(filename, _)| (filename, ""))
             }
             // ZoneInfo exports belong to the boxed provider. Loading the package's children
             // while scanning this typed namespace would recursively enter its initializer.
