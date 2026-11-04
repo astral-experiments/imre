@@ -2591,6 +2591,8 @@ pub(super) struct Heap {
     weak: HashMap<Id, Vec<Id>>,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
+    // Detached workers compare against the original stderr without keeping it alive.
+    pub(super) default_stderr: Option<Id>,
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
@@ -2805,6 +2807,7 @@ impl Heap {
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             borrowed_hooks: Vec::new(),
+            default_stderr: None,
             has_weak_values: false,
             collect_next_statement: false,
             file_writers: Vec::new(),
@@ -4877,6 +4880,9 @@ impl Heap {
         {
             self.discarded_shutdown_write = Some(true);
         }
+        self.default_stderr = self
+            .default_stderr
+            .filter(|&id| self.traces[id as usize].get() != UNMARKED);
         for id in &mut self.borrowed_hooks {
             if self.traces[*id as usize].get() == UNMARKED {
                 *id = NONE;

@@ -3735,7 +3735,7 @@ impl Context {
                     self.bind(scope, original, stream);
                     if stderr && self.threads.system_module.is_none() {
                         self.threads.system_module = Some(module);
-                        self.threads.default_stderr = Some(stream);
+                        self.heap.default_stderr = Some(stream);
                     }
                 }
                 let stdin = stdlib::io::standard_input(self)?;

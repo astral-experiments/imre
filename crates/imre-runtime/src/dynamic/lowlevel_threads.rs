@@ -31,7 +31,6 @@ pub(super) struct Workers {
     pub(super) acquire_bound: Option<std::sync::mpsc::Sender<()>>,
     // Thread errors use the original sys module when its registry entry changes.
     pub(super) system_module: Option<Id>,
-    pub(super) default_stderr: Option<Id>,
     pub(super) default_unraisable_hook: Option<Id>,
     pub(super) asyncgen_hooks: [Id; 2],
     pub(super) coroutine_origin_depth: u32,
@@ -55,7 +54,6 @@ impl Workers {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.system_module
             .into_iter()
-            .chain(self.default_stderr)
             .chain(self.default_unraisable_hook)
             .chain(self.asyncgen_hooks)
             .chain(
@@ -202,9 +200,9 @@ pub(super) fn call(
         // Once exposed, the live dict can be changed through an arbitrary alias.
         && (ctx.scope_data(*scope).namespace.is_some()
             || ctx.scope_name(*scope, "unraisablehook").is_some_and(|hook| Some(hook) != ctx.threads.default_unraisable_hook)
-            || ctx.scope_name(*scope, "stderr") != ctx.threads.default_stderr
-            || ctx.threads.default_stderr.is_some_and(|stderr| {
-                matches!(ctx.heap.get(stderr), Value::TextFile(file) if file.closed())
+            || ctx.heap.default_stderr.is_none_or(|stderr| {
+                ctx.scope_name(*scope, "stderr") != Some(stderr)
+                    || matches!(ctx.heap.get(stderr), Value::TextFile(file) if file.closed())
             }))
     {
         return Err(Error::new(

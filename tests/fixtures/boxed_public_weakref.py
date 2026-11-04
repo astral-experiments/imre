@@ -33,6 +33,7 @@ def current():
     generic_alias_weakref()
     coroutine_weak_value()
     reference_repr()
+    standard_stream_weak_values()
 
 
 def equal_weak_value_keys(first, other):
@@ -166,3 +167,20 @@ def reference_repr():
     del obj
     collect()
     assert str(wr).endswith("; dead>")
+
+
+def standard_stream_weak_values():
+    import sys
+    from gc import collect
+
+    stream = sys.stderr
+    sinks = WeakValueDictionary()
+    sinks["log"] = stream
+    callbacks = []
+    original = ref(stream, callbacks.append)
+    sinks["log"] = sys.stdout
+    sys.stderr = sys.__stderr__ = sys.stdout
+    del stream
+    collect()
+    assert original() is None and callbacks == [original]
+    assert sinks["log"] is sys.stdout
