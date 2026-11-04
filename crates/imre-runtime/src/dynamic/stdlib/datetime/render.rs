@@ -127,8 +127,13 @@ pub(super) fn date_isoformat(
     Ok(ctx.text(format!("{year:04}-{month:02}-{day:02}")))
 }
 
-/// Append a validated calendar field, including its leading zeroes.
+/// ISO fields are zero-padded to a minimum width, including fields restored from pickle.
 fn push_digits<const WIDTH: usize>(out: &mut String, mut value: i64) {
+    if !(0..10_i64.pow(WIDTH as u32)).contains(&value) {
+        use std::fmt::Write;
+        write!(out, "{value:0WIDTH$}").unwrap();
+        return;
+    }
     let mut bytes = [b'0'; WIDTH];
     for digit in bytes.iter_mut().rev() {
         *digit += (value % 10) as u8;
@@ -243,14 +248,19 @@ pub(super) fn isoformat(
         _ => return Err(Error::new("ValueError", "Unknown timespec value")),
     };
     let mut text = String::with_capacity(32);
-    let scalar_separator = char::from_u32(separator);
+    let mut surrogate_at = None;
     if kind != "time" {
         push_digits::<4>(&mut text, y);
         text.push('-');
         push_digits::<2>(&mut text, m);
         text.push('-');
         push_digits::<2>(&mut text, d);
-        text.push(scalar_separator.unwrap_or('T'));
+        if let Some(ch) = char::from_u32(separator) {
+            text.push(ch);
+        } else {
+            surrogate_at = Some(text.len());
+            text.push('T');
+        }
     }
     push_digits::<2>(&mut text, h);
     for &part in &[min, s][..components - 1] {
@@ -270,10 +280,9 @@ pub(super) fn isoformat(
     };
     let arg = if kind == "time" { NONE } else { receiver };
     text.push_str(&offset_text(ctx, tzinfo, arg, true)?);
-    if scalar_separator.is_none() {
-        // A lone surrogate occupies the single separator position after YYYY-MM-DD.
+    if let Some(index) = surrogate_at {
         let mut points: Vec<_> = text.bytes().map(u32::from).collect();
-        points[10] = separator;
+        points[index] = separator;
         return Ok(ctx.text_codepoints(points));
     }
     Ok(ctx.text(text))

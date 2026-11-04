@@ -937,6 +937,7 @@ def test_calendar_reduction():
     assert (obj.year, obj.month, obj.day, obj.hour, obj.microsecond) == (12601, 3, 53, 45, 2961973)
     assert type(obj) is Moment and obj.__reduce_ex__(4) == (Moment, (invalid,))
     assert obj.isoformat() == "12601-03-53T45:48:51.2961973"
+    assert obj.isoformat(chr(0xD800)) == "12601-03-53" + chr(0xD800) + "45:48:51.2961973"
     assert repr(obj) == "Moment(12601, 3, 53, 45, 48, 51, 2961973)"
     folded = Moment(invalid[:2] + b"\x83" + invalid[3:], UTC)
     assert folded.fold == 1 and folded.__reduce__() == (Moment, (invalid, UTC))
