@@ -31,6 +31,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "crc32" {
+        return checksum(ctx, "binascii", name, args, kwargs);
+    }
     if matches!(name, "a2b_hex" | "unhexlify") {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -90,9 +93,10 @@ pub(super) fn call(
     Ok(ctx.alloc(Value::Bytes(result)))
 }
 
-/// Convert the exported buffer before the seed, as required by the zlib checksum functions.
+/// Hold the input buffer while converting the optional checksum seed.
 pub(super) fn checksum(
     ctx: &mut Context,
+    module: &str,
     method: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -100,19 +104,12 @@ pub(super) fn checksum(
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("zlib.{method}() takes no keyword arguments"),
+            format!("{module}.{method}() takes no keyword arguments"),
         ));
     }
     let (data, seed) = match args {
-        [data] => (
-            *data,
-            crate::Int::from_usize(usize::from(method == "adler32")),
-        ),
-        [data, seed] => {
-            ctx.bytes_like(*data)?;
-            let seed = ctx.with_buffer_export(*data, |ctx| ctx.index_integer(*seed))?;
-            (*data, seed)
-        }
+        [data] => (*data, None),
+        [data, seed] => (*data, Some(*seed)),
         [] => {
             return Err(Error::new(
                 "TypeError",
@@ -126,11 +123,25 @@ pub(super) fn checksum(
             ));
         }
     };
-    let bytes = ctx.bytes_like(data)?;
-    let checksum = if method == "crc32" {
-        crate::objects::crc32(bytes, &seed)
-    } else {
-        crate::objects::adler32(bytes, &seed)
+    let compute = |ctx: &mut Context, view| {
+        let seed = match seed {
+            Some(seed) => ctx.index_integer(seed)?,
+            None => crate::Int::from_usize(usize::from(method == "adler32")),
+        };
+        let bytes = ctx.native_buffer_bytes(view)?;
+        Ok(if method == "crc32" {
+            crate::objects::crc32(bytes, &seed)
+        } else {
+            crate::objects::adler32(bytes, &seed)
+        })
     };
+    let checksum = if module == "binascii"
+        && let Some(method) = ctx.python_buffer_method(data, true)?
+    {
+        ctx.with_contiguous_python_buffer(data, method, 0, compute)
+    } else {
+        ctx.native_buffer_bytes(data)?;
+        ctx.with_buffer_export(data, |ctx| compute(ctx, data))
+    }?;
     Ok(ctx.int(i64::from(checksum)))
 }

@@ -137,6 +137,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
+        "binascii" if function == "crc32" => Some((module, function)),
         "zlib" if function == "compressobj" => Some((module, function)),
         "lzma" if function == "decompress" => Some((module, function)),
         "zlib"
@@ -2722,6 +2723,12 @@ impl Context {
                         if let Some(original) = self.threads.system_module {
                             return Ok(original);
                         }
+                    }
+                    "__text_signature__" if symbol == "binascii.crc32" => {
+                        return Ok(self.text("($module, data, crc=0, /)"));
+                    }
+                    "__doc__" if symbol == "binascii.crc32" => {
+                        return Ok(self.text("Compute CRC-32 incrementally."));
                     }
                     "__text_signature__" if symbol == "sys.set_coroutine_origin_tracking_depth" => {
                         return Ok(self.text("($module, /, depth)"));
