@@ -90,8 +90,7 @@ impl Context {
             self.put_item(locals, key, value)?;
             self.heap.release_temporaries_since(mark);
             if replaced && self.heap.has_unbound_finalizer(NONE) {
-                self.collect_unreachable();
-                self.heap.release_unbound_finalizers();
+                self.finish_binding_release();
             }
         }
         Ok(NONE)
