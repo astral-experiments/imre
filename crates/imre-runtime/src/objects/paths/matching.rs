@@ -57,6 +57,11 @@ fn literal(text: &str, sensitive: bool) -> Hir {
 fn component(pattern: &str, sensitive: bool, sep: char) -> Hir {
     match Pattern::component(pattern) {
         Pattern::Literal(text) => literal(&text, sensitive),
+        Pattern::Affixes { text, stars } => Hir::concat(vec![
+            literal(&text[..stars.start], sensitive),
+            repeat(Hir::dot(Dot::AnyCharExcept(sep)), 0, None),
+            literal(&text[stars.end..], sensitive),
+        ]),
         Pattern::Wildcard(tokens) => Hir::concat(
             tokens
                 .into_iter()
