@@ -3,6 +3,15 @@ from collections.abc import MutableSequence
 
 
 def current():
+    source = array('I', [1, 2, 3])
+    view = memoryview(source)
+    copy = source[:]
+    view[0] = 9
+    copy[1] = 8
+    assert source.tolist() == [9, 2, 3]
+    assert copy.tolist() == [1, 8, 3]
+    view.release()
+
     for code, items in [('i', [-2147483648,0,2147483647]), ('f', [0.1,1.1,-0.0]), ('d',[0.1,1e300]),('w','😀ab')]:
         a = array(code, items)
         assert type(a) is array and isinstance(a, MutableSequence)

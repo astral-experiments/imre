@@ -3468,7 +3468,7 @@ impl Context {
             }
             Value::Bytes(data) => Value::Bytes(sliced_values(data, positions, count)?),
             Value::ByteArray(data) => Value::ByteArray(sliced_values(data, positions, count)?),
-            Value::Array(array) => Value::Array(array.sliced(positions, count)?),
+            Value::Array(array) => Value::Array(array.sliced(start, step, count)?),
             Value::List(items) => Value::List(sliced_values(items, positions, count)?),
             Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                 Value::Tuple(sliced_values(items, positions, count)?)
