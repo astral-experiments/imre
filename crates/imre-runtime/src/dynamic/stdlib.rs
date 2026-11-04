@@ -993,6 +993,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("_warnings.") {
         return warnings_accel::call(ctx, method, args, kwargs);
     }
+    if name == "_locale.localeconv" {
+        return locale::localeconv(ctx, args, kwargs);
+    }
     if name == "_locale.setlocale" {
         return locale::setlocale(ctx, args, kwargs);
     }

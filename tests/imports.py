@@ -15,6 +15,14 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "imports"
 HELPER = "def f(value: int) -> int:\n    return value + 1\n"
 IMPORT = "from helper import f\nprint(f(2))\n"
 
+# The wrong call is never executed. Checked builds must diagnose it in either source order.
+LOCALE_CALL = "def typed(n: int) -> int: return n\ndef unused() -> int: return typed({argument})\n"
+LOCALE_CHAR_MAX = "from _locale import CHAR_MAX\n" + LOCALE_CALL + "print(CHAR_MAX)\n"
+LOCALE_FORMAT = (
+    LOCALE_CALL
+    + "from _locale import CHAR_MAX\nfrom locale import format_string\n"
+    + "print(format_string('%d', CHAR_MAX))\n"
+)
 
 REJECTED = {
     "unused_float_info_preserves_typed_call": ({
@@ -187,6 +195,12 @@ REJECTED = {
             "print(urlopen('data:,hello').read())\n"
             "print(typed('wrong'))\n"
         ),
+    }, "expected int, got str"),
+    "locale_char_max_keeps_unused_function_checked": ({
+        "main.py": LOCALE_CHAR_MAX.format(argument="'wrong'"),
+    }, "expected int, got str"),
+    "locale_formatting_keeps_earlier_function_checked": ({
+        "main.py": LOCALE_FORMAT.format(argument="'wrong'"),
     }, "expected int, got str"),
     "unused_randbytes_preserves_typed_call": ({
         "main.py": (
@@ -622,6 +636,8 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "locale_typed_char_max": {"main.py": LOCALE_CHAR_MAX.format(argument="1")},
+    "locale_formats_typed_char_max": {"main.py": LOCALE_FORMAT.format(argument="1")},
     "generator_local_argument_binding": {
         "helper.py": (
             "def values():\n"
