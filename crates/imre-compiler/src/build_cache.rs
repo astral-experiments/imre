@@ -526,6 +526,7 @@ impl Cache {
                 options.python_startup(),
                 options.runtime_imports,
                 &options.extension_paths,
+                &options.python_archive_indices,
                 &options.system_site,
                 options.sitecustomize,
                 &options.stdlib_fallback,

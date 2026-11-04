@@ -91,15 +91,28 @@ impl BuildOptions {
         if !flags.ignore_environment
             && let Some(paths) = env::var_os("PYTHONPATH").filter(|value| !value.is_empty())
         {
+            let search_archives = match &invocation {
+                Invocation::Command(_) | Invocation::Module { .. } => true,
+                Invocation::Script { path, .. } => {
+                    path.is_file() && !imre_compiler::is_zip_path(path)
+                }
+            };
             for path in env::split_paths(&paths) {
                 let path = if path.as_os_str().is_empty() {
                     PathBuf::from(".")
                 } else {
                     path
                 };
-                if path.is_dir() {
-                    options.compile.extension_paths.push(path);
+                if !path.is_dir() {
+                    if !search_archives || !imre_compiler::is_zip_path(&path) {
+                        continue;
+                    }
+                    options
+                        .compile
+                        .python_archive_indices
+                        .push(options.compile.extension_paths.len());
                 }
+                options.compile.extension_paths.push(path);
             }
         }
         if options.module_root.is_some() {
