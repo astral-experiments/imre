@@ -100,11 +100,16 @@ impl Context {
         Some((source.path.clone(), SourceBody::Compiled(source.code)))
     }
 
+    fn sealed_native(&self, name: &str) -> bool {
+        self.is_frozen(name)
+            || (stdlib::is_module(name) && !imre_ast::providers::is_native_fallback(name))
+    }
+
     /// Look up a module owned by this loader, including native modules without a Python body.
     fn native_registration(&self, name: &str, bundled: bool) -> Result<Option<&SourceModule>> {
-        let sealed = self.is_frozen(name) || stdlib::is_module(name);
+        let sealed = self.sealed_native(name);
         let registration = self.bundled_registration(name);
-        if sealed == bundled || (!sealed && registration.is_none()) {
+        if sealed == bundled || (!sealed && registration.is_none() && !stdlib::is_module(name)) {
             return Err(Self::missing_module(name));
         }
         Ok(registration)
@@ -149,7 +154,7 @@ impl Context {
     }
 
     pub(super) fn native_spec_info(&mut self, name: &str, path: Id, bundled: bool) -> Result<Id> {
-        let sealed = stdlib::is_module(name) || self.is_frozen(name);
+        let sealed = self.sealed_native(name);
         if sealed == bundled {
             return Ok(NONE);
         }

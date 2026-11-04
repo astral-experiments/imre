@@ -116,6 +116,10 @@ fn main() {
         // h_errno may be a macro rather than an exported variable.
         c.push_str("#include <netdb.h>\nint imre_socket_host_errno(void) { return h_errno; }\n");
     }
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        // Darwin exposes this action modifier through its termios header.
+        c.push_str("#include <termios.h>\nint imre_platform_tcsasoft(void) { return TCSASOFT; }\n");
+    }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
         println!("cargo:rerun-if-changed=native/confstr-names.txt");
         println!("cargo:rerun-if-changed=native/sysconf-names.txt");

@@ -665,6 +665,7 @@ pub(crate) enum IntrinsicModule {
     Shutil,
     Grp,
     Pwd,
+    Termios,
     Resource,
     Fcntl,
     Random,
@@ -1216,6 +1217,7 @@ impl IntrinsicModule {
             "fcntl" if cfg!(target_os = "linux") => Some(Self::Fcntl),
             "grp" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Grp),
             "pwd" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Pwd),
+            "termios" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Termios),
             "resource" if cfg!(target_os = "linux") => Some(Self::Resource),
             "random" => Some(Self::Random),
             "secrets" => Some(Self::Secrets),
@@ -5049,6 +5051,12 @@ impl<'a> Loader<'a> {
         name: &str,
         imports: Option<&[ast::Alias]>,
     ) -> Result<Option<IntrinsicModule>, String> {
+        if self.allow_imports
+            && imre_ast::providers::is_native_fallback(name)
+            && self.has_project_source(name)
+        {
+            return Ok(None);
+        }
         let module = IntrinsicModule::named(name).filter(|module| {
             self.reachable_only || !matches!(module, IntrinsicModule::Declaration(_))
         });
@@ -5458,7 +5466,8 @@ impl<'a> Loader<'a> {
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
-            && !(first == "quopri" && self.has_project_source(first))
+            && !((first == "quopri" || imre_ast::providers::is_native_fallback(first))
+                && self.has_project_source(first))
             && (IntrinsicModule::named(first).is_some()
                 || imre_ast::providers::provider(first).is_some()
                 || !self
