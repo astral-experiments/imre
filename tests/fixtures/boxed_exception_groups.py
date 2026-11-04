@@ -6,6 +6,14 @@ class Batch(ExceptionGroup):
         return Batch(self.message, exceptions)
 
 
+class InvalidNotes:
+    def __getitem__(self, index):
+        return ("import failed",)[index]
+
+    def __len__(self):
+        raise invalid_length
+
+
 first = ValueError("bad header")
 second = ValueError("bad record")
 missing = KeyError("missing file")
@@ -42,3 +50,13 @@ except Batch as remainder:
     assert remainder.exceptions[0].exceptions == (missing,)
 else:
     raise AssertionError("suppress discarded the unmatched error")
+
+invalid_length = ValueError("invalid notes length")
+batch.__notes__ = InvalidNotes()
+for partition in (batch.subgroup, batch.split):
+    try:
+        partition(ValueError)
+    except ValueError as exc:
+        assert exc is invalid_length
+    else:
+        raise AssertionError("discarded the exception from __len__")

@@ -180,8 +180,8 @@ fn derive_subset(ctx: &mut Context, original: Id, children: Vec<Id>) -> Result<I
     if let Some(notes) = ctx.optional_attr(original, "__notes__")?
         && ctx.is_sequence(notes)
     {
-        let list = ctx.builtin("list");
-        let copied = ctx.call(list, vec![notes], vec![])?;
+        let copied = ctx.alloc(Value::List(Vec::new()));
+        super::builtins::list_extend(ctx, copied, notes)?;
         ctx.set_attr(result, "__notes__", copied)?;
     }
     Ok(result)
