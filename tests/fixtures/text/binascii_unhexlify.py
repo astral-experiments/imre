@@ -24,3 +24,16 @@ try:
     unhexlify()
 except TypeError as exc:
     print(str(exc))
+
+
+for pairs in (15, 16, 17, 31, 32, 33):
+    assert unhexlify(b"aB" * pairs) == b"\xab" * pairs
+for index in (0, 1, 30, 31, 32, 33, 62, 63, 64, 65):
+    for digit in (b"/", b":", b"@", b"G", b"`", b"g", b"\xff"):
+        data = b"0" * index + digit + b"a" * (65 - index)
+        try:
+            unhexlify(data)
+        except Error as exc:
+            assert str(exc) == "Non-hexadecimal digit found"
+        else:
+            raise AssertionError("accepted an invalid hex digit")
