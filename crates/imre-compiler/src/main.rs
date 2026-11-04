@@ -309,14 +309,6 @@ fn run() -> Result<ExitCode, String> {
         options.bundled_provider_archive =
             bundled_native.and_then(|toolchain| toolchain.provider_archive(&optimization));
     }
-    #[cfg(unix)]
-    if let Some((_, executable)) = options.python_startup()
-        && !Path::new(executable)
-            .with_file_name("imre-stdlib.zip")
-            .is_file()
-    {
-        options.stdlib_fallback = Some(build_cache::stdlib_archive_path()?);
-    }
     let run_image = |directory, boxed_imports| {
         #[cfg(unix)]
         if boxed_imports && let Some(path) = &options.stdlib_fallback {

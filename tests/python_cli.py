@@ -194,6 +194,39 @@ def check_installed_site(imre, root, run):
     init.write_text("def value(): return 23\n")
     result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
+    check_symlinked_venv(launcher, site, root.resolve(), run)
+
+
+def check_symlinked_venv(launcher, base_site, root, run):
+    base = launcher.parent.parent
+    venv = root / "symlink-venv"
+    link = venv / "bin" / "venv-python"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(launcher)
+    local_site = venv / base_site.relative_to(base)
+    local_site.mkdir(parents=True)
+    decoy = root / "decoy-bin"
+    decoy.mkdir()
+    (decoy / link.name).write_text("not executable\n")
+    env = {"PATH": os.pathsep.join([str(decoy), str(link.parent), os.environ["PATH"]])}
+    code = (
+        "import importlib.util, site, sys\n"
+        "print(sys.executable == sys.argv[1], sys._base_executable == sys.argv[2], "
+        "sys.prefix == sys.exec_prefix == sys.argv[3], sys.base_prefix == sys.base_exec_prefix == sys.argv[4])\n"
+        "print(site.getsitepackages() == sys.argv[5:], site.ENABLE_USER_SITE, "
+        "importlib.util.find_spec('installed_example') is not None)\n"
+    )
+    for enabled, flag in [(True, "-sB"), (False, "-B")]:
+        (venv / "pyvenv.cfg").write_text(
+            f"home = {launcher.parent}\ninclude-system-site-packages = {str(enabled).lower()}\n"
+        )
+        expected_sites = [local_site, base_site] if enabled else [local_site]
+        result = run(link.name, flag, "-c", code, link, launcher, venv, base, *expected_sites,
+                     extra=env, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"True True True True\nTrue False " + str(enabled).encode() + b"\n", b"",
+        ), result
+
 
 
 def check_sysconfig_build(imre, root, run):

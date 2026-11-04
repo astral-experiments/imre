@@ -133,6 +133,7 @@ pub(crate) struct Context {
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
+    interpreter_layout: Result<imre_ast::layout::InterpreterLayout>,
     helper_executable: String,
     argv: Id,
     sys_path: Id,
@@ -3364,7 +3365,10 @@ impl Context {
                 };
                 self.bind(scope, "_finder_external", finder);
                 // The Python launcher (or standalone program) owns its installed sources.
-                let archive = self.executable.with_file_name("imre-stdlib.zip");
+                let archive = self.interpreter_layout.as_ref().map_or_else(
+                    |_| self.executable.with_file_name("imre-stdlib.zip"),
+                    |layout| layout.stdlib_archive.clone(),
+                );
                 let archive = if archive.is_absolute() {
                     archive.to_str().map_or(NONE, |path| self.text(path))
                 } else {

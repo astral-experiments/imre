@@ -285,8 +285,8 @@ fn tuple_text(ctx: &mut Context, values: &[&str]) -> Id {
     ctx.alloc(Value::Tuple(values))
 }
 
-fn language_version(ctx: &Context) -> Result<(u8, u8)> {
-    let (major, minor) = ctx.config["python_version"]
+fn language_version(config: &serde_json::Value) -> Result<(u8, u8)> {
+    let (major, minor) = config["python_version"]
         .as_str()
         .and_then(|v| v.split_once('.'))
         .ok_or_else(|| Error::new("RuntimeError", "missing Imre language version"))?;
@@ -297,8 +297,15 @@ fn language_version(ctx: &Context) -> Result<(u8, u8)> {
     Ok((parse(major)?, parse(minor)?))
 }
 
+pub(super) fn interpreter_layout(
+    config: &serde_json::Value,
+    executable: &Path,
+) -> Result<system::InterpreterLayout> {
+    system::InterpreterLayout::new(executable, language_version(config)?).map_err(os_error)
+}
+
 fn layout(ctx: &Context) -> Result<system::InterpreterLayout> {
-    system::InterpreterLayout::new(&ctx.executable, language_version(ctx)?).map_err(os_error)
+    ctx.interpreter_layout.clone()
 }
 
 /// Initialize the cached site attributes before the Python-level directory helpers run.
@@ -312,7 +319,7 @@ pub(super) fn initialize_site(ctx: &mut Context, scope: Id) -> Result<()> {
     if ctx.config["no_site"] != true {
         let allowed = system::InterpreterLayout::user_site_enabled(
             ctx.config["no_user_site"] == true,
-            layout.venv_system_site(),
+            layout.venv_system_site,
         );
         enabled = match allowed {
             Some(true) => TRUE,
@@ -341,7 +348,7 @@ pub(super) fn package_path(ctx: &Context, name: &str) -> Result<PathBuf> {
 }
 
 fn full_version(ctx: &Context) -> Result<String> {
-    let (major, minor) = language_version(ctx)?;
+    let (major, minor) = language_version(&ctx.config)?;
     Ok(format!("{major}.{minor}.0"))
 }
 
@@ -692,8 +699,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "a2b_qp" | "b2a_qp" | "crc32",
         ) => ctx.builtin(&format!("binascii.{name}")),
         ("sys", "path") => ctx.sys_path,
-        ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
-            path_text(ctx, &layout(ctx)?.prefix)?
+        ("sys", "base_prefix" | "base_exec_prefix") => path_text(ctx, &layout(ctx)?.base_prefix)?,
+        ("sys", "prefix" | "exec_prefix") => path_text(ctx, &layout(ctx)?.prefix)?,
+        ("sys", "_base_executable") if ctx.config["executable"].is_string() => {
+            path_text(ctx, &layout(ctx)?.base_executable)?
         }
         ("sys", "executable" | "_base_executable") => ctx.text(ctx.helper_executable.clone()),
         ("sys", "maxsize") => ctx.int(isize::MAX as i64),
@@ -3134,8 +3143,11 @@ pub(super) fn call(
             path_text(ctx, &path)?
         }
         "site.getsitepackages" => {
-            let site = ctx.text(layout(ctx)?.path("posix_prefix", "purelib", true).unwrap());
-            ctx.alloc(Value::List(vec![site]))
+            let sites = layout(ctx)?
+                .site_packages(ctx.config["no_site"] != true)
+                .map(|p| path_text(ctx, &p))
+                .collect::<Result<Vec<_>>>()?;
+            ctx.alloc(Value::List(sites))
         }
         "os.confstr" => {
             let value = system::confstr(ctx.str_value(argument(args, 0)?)?).map_err(|err| {

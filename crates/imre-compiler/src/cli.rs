@@ -143,11 +143,7 @@ impl BuildOptions {
             (version.major, version.minor),
         )
         .map_err(|e| e.to_string())?;
-        let system_site = layout
-            .path("posix_prefix", "purelib", true)
-            .map(PathBuf::from)
-            .filter(|p| p.is_dir());
-        let venv = layout.venv_system_site();
+        let venv = layout.venv_system_site;
         let user_site = if !flags.no_site
             && imre_ast::layout::InterpreterLayout::user_site_enabled(flags.no_user_site, venv)
                 == Some(true)
@@ -171,11 +167,14 @@ impl BuildOptions {
                 })
             })
         });
-        let site_dirs: Vec<_> = if venv.is_some() {
-            system_site.into_iter().chain(user_site.clone()).collect()
-        } else {
-            user_site.clone().into_iter().chain(system_site).collect()
-        };
+        let mut prefix_sites = layout.site_packages(!flags.no_site);
+        let mut site_dirs = Vec::new();
+        if venv.is_some() {
+            site_dirs.extend(prefix_sites.next());
+        }
+        site_dirs.extend(user_site.clone());
+        site_dirs.extend(prefix_sites);
+        site_dirs.retain(|path| path.is_dir());
         // site runs before Python prepends the script directory or command cwd.
         options.compile.sitecustomize = process_pth
             || (!flags.no_site
@@ -188,6 +187,10 @@ impl BuildOptions {
                         root.join("sitecustomize.py").is_file()
                             || root.join("sitecustomize").is_dir()
                     }));
+        #[cfg(unix)]
+        if !layout.stdlib_archive.is_file() {
+            options.compile.stdlib_fallback = Some(super::build_cache::stdlib_archive_path()?);
+        }
         options.compile.user_site_pth = user_site.filter(|_| process_pth);
         options.compile.site_dirs = site_dirs;
         Ok(options)

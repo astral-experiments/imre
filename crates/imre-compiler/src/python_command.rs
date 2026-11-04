@@ -278,18 +278,30 @@ fn venv_launcher(executable: &std::path::Path) -> Option<PathBuf> {
     } else {
         env::split_paths(&env::var_os("PATH")?)
             .map(|dir| dir.join(&arg))
-            .find(|path| path.is_file())?
+            .find(|path| executable_file(path))?
     };
     let path = std::path::absolute(path).ok()?;
-    let bin = path.parent()?;
     if path != executable
-        && (bin.join("pyvenv.cfg").is_file() || bin.parent()?.join("pyvenv.cfg").is_file())
+        && imre_ast::layout::InterpreterLayout::venv_config(&path).is_some()
         && path.canonicalize().ok()?.as_path() == executable
     {
         Some(path)
     } else {
         None
     }
+}
+
+/// Match PATH lookup for an executable, including a non-executable earlier namesake.
+fn executable_file(path: &std::path::Path) -> bool {
+    path.metadata().is_ok_and(|metadata| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        metadata.is_file()
+    })
 }
 
 /// CPython parses -X operands as wide characters, unlike its byte environment.

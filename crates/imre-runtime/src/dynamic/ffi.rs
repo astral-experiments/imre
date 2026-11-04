@@ -766,8 +766,10 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
+    let interpreter_layout = stdlib::interpreter_layout(&config, &executable);
     let mut ctx = Context {
         heap,
+        interpreter_layout,
         threads: Default::default(),
         workers: Default::default(),
         socket_default_timeout: Default::default(),
