@@ -804,6 +804,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "error_code"
             | "error_string"
             | "in_callback"
+            | "set_namespace_prefixes"
             | "get_reparse_deferral"
             | "set_reparse_deferral",
         )

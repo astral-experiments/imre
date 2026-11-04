@@ -100,6 +100,7 @@ functions! {
     unknown_encoding = c"XML_SetUnknownEncodingHandler": fn(Raw, Option<UnknownEncoding>, Raw);
     user_data = c"XML_SetUserData": fn(Raw, Raw);
     elements = c"XML_SetElementHandler": fn(Raw, Option<Start>, Option<OneName>);
+    set_ns_triplet = c"XML_SetReturnNSTriplet": fn(Raw, c_int);
     namespaces = c"XML_SetNamespaceDeclHandler": fn(Raw, Option<TwoNames>, Option<OneName>);
     text = c"XML_SetCharacterDataHandler": fn(Raw, Option<Text>);
     comment = c"XML_SetCommentHandler": fn(Raw, Option<OneName>);
@@ -315,6 +316,11 @@ impl Parser {
     pub(super) fn set_utf8(&self) -> bool {
         // SAFETY: Expat owns its copy of this terminated encoding name.
         unsafe { (self.api.set_encoding)(self.ptr.as_ptr(), c"UTF-8".as_ptr()) != 0 }
+    }
+
+    pub(super) fn set_namespace_prefixes(&self, enabled: bool) {
+        // SAFETY: the parser is live and Expat does not retain any pointers.
+        unsafe { (self.api.set_ns_triplet)(self.ptr.as_ptr(), enabled.into()) }
     }
 
     pub(super) fn supports_reparse_deferral(&self) -> bool {
