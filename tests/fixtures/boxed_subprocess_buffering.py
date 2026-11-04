@@ -155,6 +155,29 @@ def current():
         data[:] = b"after!"
         assert child.communicate(timeout=5) == (b"after!", None)
 
+    # A rebound output is drained and closed. The child's original pipe stays readable.
+    for name, expected, saved in (("stdout", (b"redirected", b"err"), b"out"),
+                                  ("stderr", (b"out", b"redirected"), b"err")):
+        with subprocess.Popen(["/bin/sh", "-c", "printf out; printf err >&2"],
+                              stdout=pipe, stderr=pipe) as child:
+            read_fd, write_fd = os.pipe()
+            with getattr(child, name) as original, os.fdopen(read_fd, "rb") as reader:
+                with os.fdopen(write_fd, "wb") as writer:
+                    writer.write(b"redirected")
+                setattr(child, name, reader)
+                assert child.communicate(timeout=5) == expected
+                assert reader.closed and original.read() == saved
+
+    with subprocess.Popen(["/bin/true"], stdin=pipe, stdout=pipe, text=True) as child:
+        with child.stdout, open(os.devnull, encoding="utf-8") as reader:
+            child.stdout = reader
+            try:
+                child.communicate(b"", timeout=5)
+            except AttributeError:
+                assert child.stdin.closed
+            else:
+                raise AssertionError("rebound text pipe accepted bytes input")
+
     # communicate sends input to the replacement and leaves the original open.
     with subprocess.Popen(["/bin/true"], stdin=pipe, stdout=pipe) as child:
         original = child.stdin

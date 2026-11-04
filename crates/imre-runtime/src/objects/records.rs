@@ -700,6 +700,41 @@ unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
     }
 }
 
+/// Drop one independently owned scalar class in place. Weak callbacks and nested
+/// owners use the ordinary worklist, which preserves their destruction order.
+unsafe fn release_scalar_class(payload: *const usize) -> bool {
+    // SAFETY: the sequence transfers a live owner with this header.
+    let header = unsafe { &*payload.cast::<Header>().sub(1) };
+    let descriptor = header.descriptor();
+    if !descriptor
+        .class_semantics()
+        .is_some_and(|s| s.flags & (1 << 6) != 0)
+    {
+        return false;
+    }
+    let count = header.references.get();
+    if count > 1 {
+        header.references.set(count - 1);
+        return true;
+    }
+    if count != 1 || header.has_weak_anchor() {
+        return false;
+    }
+    header.references.set(0);
+    // SAFETY: scalar fields cannot queue children or run callbacks. A shared
+    // batch owns the inline payload, while a standalone record owns its layout.
+    unsafe {
+        if let Some(block) = header.block() {
+            release_fields::<true>(payload, descriptor, 0..descriptor.length);
+            Shared::decrement_strong_count(block);
+        } else {
+            release_fields::<false>(payload, descriptor, 0..descriptor.length);
+            free_standalone(payload, descriptor);
+        }
+    }
+    true
+}
+
 /// Leaves room for a continuation when the remaining owners do not fit.
 fn release_batch_len(remaining: usize, room: usize) -> usize {
     let available = if remaining <= room {
@@ -712,6 +747,20 @@ fn release_batch_len(remaining: usize, room: usize) -> usize {
 
 /// Transfers a bounded tail of sequence owners in their original pop order.
 fn release_sequence_batch(kind: WordKind, mut values: Vec<usize>, pending: &ReleaseQueue) {
+    if matches!(kind.base(), 6 | 14) {
+        // List destruction proceeds from the last element to the first.
+        // Stop before any owner whose children must precede its siblings.
+        while let Some(&word) = values.last() {
+            // SAFETY: a nonzero word owns a record until the matching pop.
+            if word != 0 && !unsafe { release_scalar_class(word as *const usize) } {
+                break;
+            }
+            values.pop();
+        }
+        if values.is_empty() {
+            return;
+        }
+    }
     if matches!(kind.base(), 5 | 6 | 14) {
         let mut queue = pending.borrow_mut();
         let count = release_batch_len(values.len(), queue.capacity() - queue.len());
@@ -757,6 +806,12 @@ unsafe fn release_standalone_fields(
             return;
         }
     }
+    // SAFETY: the final field has transferred its owner.
+    unsafe { free_standalone(payload, descriptor) };
+}
+
+/// Deallocate a standalone record after its last field has transferred ownership.
+unsafe fn free_standalone(payload: *const usize, descriptor: &RecordDescriptor) {
     // SAFETY: every field has transferred its owner and the constructor used this layout.
     unsafe {
         let size = size_of::<Header>() + descriptor.allocated_words() * size_of::<usize>();
@@ -902,18 +957,40 @@ mod tests {
             semantics: std::ptr::null(),
         };
         let text = StrOwner::new(Str::from("shared field"));
-        let mut words = Vec::new();
-        for _ in 0..8 {
-            // SAFETY: the record takes one string owner and its descriptor outlives the queue.
-            let record = unsafe {
-                let record = imre_record_new(&descriptor);
+        let semantics = RecordSemantics {
+            kind: 0,
+            flags: 1 << 6,
+            name: std::ptr::null(),
+            name_len: 0,
+            qualified_name: std::ptr::null(),
+            qualified_name_len: 0,
+            fields: std::ptr::null(),
+        };
+        let scalar = RecordDescriptor {
+            semantics: &semantics,
+            ..descriptor
+        };
+        let new_record = |shape: &RecordDescriptor| {
+            // SAFETY: each record takes one string owner and both layouts outlive the queue.
+            unsafe {
+                let record = imre_record_new(shape);
                 record.write(StrOwner::into_raw(text.clone()) as usize);
                 record
-            };
-            words.push(record as usize);
+            }
+        };
+        let mut words = Vec::new();
+        for _ in 0..7 {
+            words.push(new_record(&descriptor) as usize);
         }
-        let (last, previous) = (words[7], words[6]);
-        words.insert(7, 0);
+        let observed = new_record(&scalar);
+        // SAFETY: the record remains rooted until its queued owner is released.
+        let observer = unsafe { weak::imre_weak_proxy_new(observed, false) };
+        let (last, previous) = (observed as usize, words[6]);
+        words.extend([0, last]);
+        let shared = new_record(&scalar);
+        // SAFETY: keep one independent owner after the sequence releases its tail.
+        unsafe { imre_record_retain(shared) };
+        words.extend([shared as usize, new_record(&scalar) as usize]);
         let kind = WordKind::new(6 | crate::objects::words::NULLABLE);
         let queue = ReleaseQueue::default();
         release_sequence_batch(kind, words, &queue);
@@ -924,6 +1001,12 @@ mod tests {
         ));
         for entry in entries {
             release(entry);
+        }
+        assert_eq!(StrOwner::strong_count(&text), 2);
+        // SAFETY: the retained record and the weak proxy each have one remaining owner.
+        unsafe {
+            imre_record_release(shared);
+            imre_object_release(observer);
         }
         assert_eq!(StrOwner::strong_count(&text), 1);
     }

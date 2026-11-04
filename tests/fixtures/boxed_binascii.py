@@ -24,6 +24,18 @@ class DropIndex:
 
 
 def current():
+    from binascii import a2b_qp
+
+    print(a2b_qp("tag_name=5F=FF", header=True))
+    print(a2b_qp(memoryview(b".=00==z=\rdiscard\n!")[1:-1]))
+    raw = bytearray(b"=41")
+    try:
+        a2b_qp(raw, header=Resize(raw))
+    except BufferError as error:
+        print(str(error))
+    raw.append(33)
+    print(a2b_qp(raw))
+
     for decode in (binascii.a2b_hex, binascii.unhexlify):
         print(repr(decode), decode.__name__, decode.__qualname__, decode.__module__,
               decode.__text_signature__, decode.__self__ is binascii)
@@ -37,6 +49,18 @@ def current():
     data = memoryview(bytearray(b".123456789."))[1:-1]
     print(crc32 is binascii.crc32, crc32(data), crc32(data[4:], crc32(data[:4])))
     print(crc32(b"", -(1 << 80) - 1))
+
+    from binascii import b2a_qp
+
+    print(b2a_qp(b"Lines: \xff \r\n.\r\n"), b2a_qp(b"first last_", header=True))
+    print(b2a_qp(data=b"x" * 74 + b"\xff", istext=False))
+    raw = bytearray(b"A\x00")
+    try:
+        b2a_qp(raw, quotetabs=Resize(raw))
+    except BufferError as error:
+        print(str(error))
+    raw.append(33)
+    print(b2a_qp(raw))
 
     print(type(a2b_base64) is type(len), a2b_base64 is binascii.a2b_base64)
     print(Error.__module__, Error.__name__, Error.__bases__ == (ValueError,))

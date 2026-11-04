@@ -2652,6 +2652,15 @@ pub(crate) fn contains_loop(body: &[Statement]) -> bool {
     found
 }
 
+/// Visits an operand and its nested expressions, including eager scope bodies.
+pub(crate) fn walk_operand_expressions<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
+    walk_expression(value, &mut |node| {
+        if let Node::Expression(expression) = node {
+            visit(expression);
+        }
+    });
+}
+
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
 pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {

@@ -16,7 +16,10 @@ pub(crate) mod base32;
 mod base85;
 pub(crate) use base85::encode as base85_encode;
 mod binascii;
-pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, crc32, unhexlify};
+pub(crate) use binascii::{
+    adler32, binascii_decode, binascii_encode, crc32, decode_quoted_printable,
+    encode_quoted_printable, unhexlify,
+};
 pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
@@ -56,7 +59,9 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::{State as HashState, hex_text as hash_hex, hex_with_separator};
+pub(crate) use hashlib::{
+    State as HashState, hex_text as hash_hex, hex_with_separator, uppercase_hex_bytes,
+};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;

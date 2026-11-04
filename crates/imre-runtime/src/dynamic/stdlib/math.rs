@@ -7,6 +7,55 @@ use num_traits::{One, ToPrimitive, Zero};
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
+/// Compute the bounded candidates and the exact distance comparison for Fraction.
+pub(super) fn fraction_limit_candidates(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let &[n, d, limit] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "_limit_candidates requires three integers",
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_limit_candidates takes no keyword arguments",
+        ));
+    }
+    let integer = |id| match ctx.heap.get(id) {
+        Value::Int(value) => Some(value.big().into_owned()),
+        _ => None,
+    };
+    let (Some(mut n), Some(mut d), Some(limit)) = (integer(n), integer(d), integer(limit)) else {
+        return Ok(super::NONE);
+    };
+    if limit < BigInt::one() || d <= limit {
+        return Ok(super::NONE);
+    }
+    let (mut p0, mut q0) = (BigInt::zero(), BigInt::one());
+    let (mut p1, mut q1) = (BigInt::one(), BigInt::zero());
+    while !d.is_zero() {
+        let (a, remainder) = n.div_mod_floor(&d);
+        let q2 = &q0 + &a * &q1;
+        if q2 > limit {
+            let k = (limit - &q0) / &q1;
+            let (p2, q2) = (p0 + &k * &p1, q0 + k * &q1);
+            let distance = (d * &q2) << 1;
+            let values =
+                [p1, q1, p2, q2, distance].map(|n| ctx.alloc(Value::Int(crate::Int::new(n))));
+            return Ok(ctx.alloc(Value::Tuple(values.into())));
+        }
+        let p2 = p0 + a * &p1;
+        (p0, q0, p1, q1) = (p1, q1, p2, q2);
+        (n, d) = (d, remainder);
+    }
+    // A mutated, non-reduced Fraction can exhaust the divisions before the bound.
+    Ok(super::NONE)
+}
+
 /// Dispatch the boxed math functions.
 pub(super) fn call(
     ctx: &mut Context,

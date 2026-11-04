@@ -446,6 +446,7 @@ fn emit_program(
         fixed_int_lists: Vec::new(),
         line_slots: Vec::new(),
         affine_literal_lengths: Vec::new(),
+        cached_string_lengths: BTreeSet::new(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
         guarded_integer_lists: Vec::new(),
@@ -702,6 +703,7 @@ struct Emitter<'a, 'module> {
     fixed_int_lists: Vec<bool>,
     line_slots: Vec<bool>,
     affine_literal_lengths: Vec<(usize, i32)>,
+    cached_string_lengths: BTreeSet<usize>,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
     guarded_integer_lists: Vec<(usize, String, String)>,
@@ -1675,6 +1677,62 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Finds immutable string parameters whose length is requested inside a loop.
+    fn loop_string_lengths(function: &ir::Function, writes: &[u8]) -> BTreeSet<usize> {
+        fn in_loops(body: &[Statement], inspect: &mut impl FnMut(&Expr)) {
+            for statement in body {
+                match statement {
+                    Statement::While(test, body, orelse) => {
+                        ir::walk_operand_expressions(test, inspect);
+                        ir::walk_expressions(body, inspect);
+                        in_loops(orelse, inspect);
+                    }
+                    Statement::For { body, orelse, .. } => {
+                        ir::walk_expressions(body, inspect);
+                        in_loops(orelse, inspect);
+                    }
+                    _ => statement.suites(|suite| in_loops(suite, inspect)),
+                }
+            }
+        }
+        let mut parameters = BTreeSet::new();
+        in_loops(&function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::Len, args) = &expr.kind
+                && let ExprKind::Local(slot) = args[0].kind
+                && args[0].ty == Type::Str
+                && writes[slot] == 0
+                && function.params.contains(&slot)
+            {
+                parameters.insert(slot);
+            }
+        });
+        parameters
+    }
+
+    /// Memoizes immediate lengths on first use. A heap integer remains owned by
+    /// the ordinary call edge and is transferred to the result without caching.
+    fn cached_string_length(&mut self, slot: usize, text: &Value) -> Value {
+        let cached = self.instruction(format!("load i64, ptr %str_count{slot}"));
+        let hit = self.instruction(format!("icmp ne i64 {cached}, 0"));
+        let from = self.current.clone();
+        let (miss, done) = (self.label(), self.label());
+        self.branch(&hit, &done, &miss);
+        self.start(&miss);
+        let length = self.call("imre_str_len", Type::Int, &[text]);
+        self.forget(&length);
+        let word = length.operand;
+        let immediate = self.instruction(format!("trunc i64 {word} to i1"));
+        let entry = self.instruction(format!("select i1 {immediate}, i64 {word}, i64 0"));
+        self.line(format!("store i64 {entry}, ptr %str_count{slot}"));
+        let miss_exit = self.current.clone();
+        self.jump(&done);
+        self.start(&done);
+        let word = self.instruction(format!(
+            "phi i64 [{cached}, %{from}], [{word}, %{miss_exit}]"
+        ));
+        self.unpack_word(word, Type::Int)
+    }
+
     /// Identity-only definitions do not exclude Clear/Move resets. A current
     /// pointer guard preserves the original length read on every unequal value,
     /// including a cleared alias; no hidden-slot liveness assumption is needed.
@@ -2070,6 +2128,7 @@ impl Emitter<'_, '_> {
             writes[slot] = writes[slot].saturating_add(1);
         });
         self.affine_literal_lengths = affine::literal_lengths(function, &writes);
+        self.cached_string_lengths = Self::loop_string_lengths(function, &writes);
         self.borrowed_params = vec![false; self.locals.len()];
         for &slot in &function.params {
             self.borrowed_params[slot] =
@@ -2110,6 +2169,12 @@ impl Emitter<'_, '_> {
             function.returns.llvm()
         };
         self.start("entry");
+        for &slot in &function.params {
+            if self.cached_string_lengths.contains(&slot) {
+                self.line(format!("%str_count{slot} = alloca i64"));
+                self.line(format!("store i64 0, ptr %str_count{slot}"));
+            }
+        }
         let fault_frame = if let Some(Statement::Expr(Expr {
             kind: ExprKind::Builtin(Builtin::FaultFrame { file, name, line }, _),
             ..
@@ -7485,6 +7550,10 @@ impl Emitter<'_, '_> {
             }
             Builtin::Len => {
                 if let ExprKind::Local(slot) = expressions[0].kind
+                    && self.cached_string_lengths.contains(&slot)
+                {
+                    self.cached_string_length(slot, &args[0].value)
+                } else if let ExprKind::Local(slot) = expressions[0].kind
                     && let Some(length) = self.snapshot_length(slot, &args[0].value)
                 {
                     length
@@ -12273,6 +12342,21 @@ def transform(values: list[int], count: int) -> int:
         assert!(fast.contains("icmp ult i64"));
         assert!(fast.contains("getelementptr inbounds i64"));
         assert!(fast.contains("call i64 @imre_list_borrow_index("));
+    }
+
+    #[test]
+    fn string_lengths_in_loop_conditions_and_bodies_cache_only_unwritten_parameters() {
+        let source = "def score(a: str, b: str) -> int:\n    total = 0\n    i = 0\n    while i < len(a):\n        total += len(b)\n        i += 1\n    return total\n";
+        let slots = |source: &str| {
+            compile(source, &CompileOptions::default())
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("%str_count") && line.contains(" = alloca i64"))
+                .count()
+        };
+        assert_eq!(slots(source), 2);
+        let rebound = source.replace("        i += 1", "        b = a + b\n        i += 1");
+        assert_eq!(slots(&rebound), 1);
     }
 
     #[test]
