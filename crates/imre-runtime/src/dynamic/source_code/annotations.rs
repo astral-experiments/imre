@@ -89,6 +89,48 @@ pub(super) enum AnnotationScope {
 }
 
 impl Program {
+    pub(super) fn discard_annotation_operand(
+        &mut self,
+        operand: ast::Expr,
+        line: u32,
+        function: bool,
+    ) -> Result<()> {
+        if let Some(expr) = self.lower_suspension(operand, line, function)? {
+            self.instructions.push((line, Instruction::Discard(expr)));
+        }
+        Ok(())
+    }
+
+    // A bare subscript annotation evaluates the keys and bounds in order,
+    // without constructing a slice or fetching the final item.
+    pub(super) fn discard_annotation_slice(
+        &mut self,
+        slice: ast::Expr,
+        line: u32,
+        function: bool,
+    ) -> Result<()> {
+        match slice {
+            ast::Expr::Slice(slice) => {
+                for bound in [slice.lower, slice.upper, slice.step].into_iter().flatten() {
+                    self.discard_annotation_operand(*bound, line, function)?;
+                }
+            }
+            ast::Expr::Tuple(items) => {
+                for item in items.elts {
+                    self.discard_annotation_slice(item, line, function)?;
+                }
+            }
+            ast::Expr::Starred(_) => {
+                return Err(Error::new(
+                    "SyntaxError",
+                    "can't use starred expression here",
+                ));
+            }
+            expr => self.discard_annotation_operand(expr, line, function)?,
+        }
+        Ok(())
+    }
+
     pub(super) fn annotation_program(
         &self,
         function: &mut ast::StmtFunctionDef,
