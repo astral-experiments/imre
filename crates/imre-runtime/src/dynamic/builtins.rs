@@ -755,7 +755,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Struct { .. } if matches!(attr, "pack" | "unpack" | "unpack_from") => {
             "struct.Struct"
         }
-        Value::ZlibDecompressor { .. } if matches!(attr, "decompress" | "flush") => {
+        Value::ZlibDecompressor { .. }
+            if matches!(attr, "decompress" | "flush" | "copy" | "__copy__") =>
+        {
             super::value::ZLIB_DECOMPRESS_TYPE
         }
         Value::Hash(state)

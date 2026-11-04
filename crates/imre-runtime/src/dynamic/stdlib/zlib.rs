@@ -138,25 +138,37 @@ pub(in crate::dynamic) fn decompressor(
             unused_data: Vec::new(),
             unconsumed_tail: Vec::new(),
         };
-        let state = crate::Shared::try_new(std::cell::RefCell::new(state))
-            .map_err(|_| crate::Error::allocation())?;
-        return Ok(ctx.alloc(Value::ZlibDecompressor { state, dictionary }));
+        return state.allocate(ctx, dictionary);
     }
 
     let Some((&receiver, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            "expected a zlib decompression object",
+            format!("unbound method Decompress.{name}() needs an argument"),
         ));
     };
     let Value::ZlibDecompressor { state, dictionary } = ctx.heap.get(receiver) else {
         return Err(Error::new(
             "TypeError",
-            "expected a zlib decompression object",
+            format!(
+                "descriptor '{name}' for 'zlib.Decompress' objects doesn't apply to a '{}' object",
+                ctx.builtin_type_name(receiver)
+                    .unwrap_or_else(|| ctx.type_name(receiver))
+            ),
         ));
     };
     let (state, dictionary) = (state.clone(), *dictionary);
     let bytes = match name {
+        "copy" | "__copy__" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{name}() takes no arguments"),
+                ));
+            }
+            let copy = state.borrow_mut().snapshot()?;
+            return copy.allocate(ctx, dictionary);
+        }
         "eof" => return Ok(builtins::boolean(state.borrow().eof)),
         "unused_data" => copy_bytes(&state.borrow().unused_data)?,
         "unconsumed_tail" => copy_bytes(&state.borrow().unconsumed_tail)?,
@@ -200,6 +212,54 @@ pub(in crate::dynamic) fn decompressor(
 }
 
 impl Decompressor {
+    fn allocate(self, ctx: &mut Context, dictionary: Option<Id>) -> Result<Id> {
+        let state = crate::Shared::try_new(std::cell::RefCell::new(self))
+            .map_err(|_| crate::Error::allocation())?;
+        Ok(ctx.alloc(Value::ZlibDecompressor { state, dictionary }))
+    }
+
+    fn snapshot(&mut self) -> Result<Self> {
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| Error::new("ValueError", "Inconsistent stream state"))?;
+        let mut dest = MaybeUninit::uninit();
+        // inflate::copy requires a non-null output pointer even with zero available bytes.
+        let mut scratch = 0;
+        stream.raw.next_out = &raw mut scratch;
+        // SAFETY: the source owns an initialized inflater, and dest is separate storage.
+        let status = unsafe {
+            inflate::copy(
+                &mut dest,
+                inflate::InflateStream::from_stream_ref(&stream.raw).unwrap(),
+            )
+        };
+        stream.raw.next_out = std::ptr::null_mut();
+        match status {
+            ReturnCode::Ok => {}
+            ReturnCode::MemError => {
+                return Err(Error::new(
+                    "MemoryError",
+                    "Can't allocate memory for decompression object",
+                ));
+            }
+            _ => return Err(Error::new("ValueError", "Inconsistent stream state")),
+        }
+        // SAFETY: a successful copy owns an independent state and window. zlib-rs
+        // guarantees InflateStream has the layout of z_stream.
+        let mut raw = unsafe { dest.as_ptr().cast::<z_stream>().read() };
+        raw.next_out = std::ptr::null_mut();
+        Ok(Self {
+            stream: Some(Stream {
+                codec: stream.codec,
+                raw,
+            }),
+            eof: self.eof,
+            unused_data: copy_bytes(&self.unused_data)?,
+            unconsumed_tail: copy_bytes(&self.unconsumed_tail)?,
+        })
+    }
+
     /// With no new input, flush drains the tail retained by the previous call.
     fn decode<'a>(
         &mut self,
