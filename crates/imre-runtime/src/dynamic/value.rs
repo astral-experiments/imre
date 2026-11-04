@@ -4429,7 +4429,11 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        self.collect_if_due(globals)
+        if self.take_sweep_request() {
+            self.collect(globals)
+        } else {
+            None
+        }
     }
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
@@ -4469,16 +4473,9 @@ impl Heap {
         self.collect_next_statement || self.watermark_due() || self.gc_schedule.requested()
     }
 
-    /// Reclaim expression temporaries at the heap watermark even with cyclic GC disabled.
-    pub(super) fn collect_if_due(
-        &mut self,
-        globals: impl Iterator<Item = Id>,
-    ) -> Option<WeakCallbacks> {
-        if std::mem::take(&mut self.collect_next_statement) || self.watermark_due() {
-            self.collect(globals)
-        } else {
-            None
-        }
+    /// Consume a pending heap sweep before assembling its root iterators.
+    pub(super) fn take_sweep_request(&mut self) -> bool {
+        std::mem::take(&mut self.collect_next_statement) || self.watermark_due()
     }
 
     /// Collect early when a streaming consumer cannot reserve its next heap slot.
@@ -5118,14 +5115,16 @@ mod tests {
         let live = heap.alloc(Value::Bytes(buffer));
         assert!(heap.collection_requested());
         heap.frames.last_mut().unwrap().live.clear();
-        heap.collect_if_due([live].into_iter());
+        assert!(heap.take_sweep_request());
+        heap.collect([live].into_iter());
         assert_eq!(heap.byte_buffer_allowance, capacity);
 
         let mut buffer = Vec::with_capacity(capacity);
         buffer.extend_from_slice(b"dead");
         let dead = heap.bytes_from_data(buffer);
         heap.frames.last_mut().unwrap().live.clear();
-        heap.collect_if_due([live].into_iter());
+        assert!(heap.take_sweep_request());
+        heap.collect([live].into_iter());
         assert!(heap.slots[dead as usize].value.is_none());
         assert!(matches!(heap.get(live), Value::Bytes(bytes) if bytes == b"live"));
         assert_eq!(heap.byte_buffer_allowance, capacity);

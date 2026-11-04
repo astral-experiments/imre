@@ -1849,9 +1849,11 @@ impl Context {
                 Ok(false) => {}
             }
         }
-        let (heap, roots) = self.heap_and_roots();
-        if let Some(callbacks) = heap.collect_if_due(roots) {
-            self.run_weak_callbacks(callbacks);
+        if self.heap.take_sweep_request() {
+            let (heap, roots) = self.heap_and_roots();
+            if let Some(callbacks) = heap.collect(roots) {
+                self.run_weak_callbacks(callbacks);
+            }
         }
     }
 
