@@ -50,6 +50,7 @@ mod json;
 mod lzma;
 mod marshal;
 mod math;
+pub(super) use math::fraction_hash;
 mod metadata;
 pub(super) mod monitoring;
 pub(super) mod opcode;
@@ -2030,8 +2031,17 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
-    if name == "_imre_fractions._hash_ints" {
-        return math::fraction_hash(ctx, args, kwargs);
+    if name == "_imre_fractions._hash_function" {
+        if let &[function] = args
+            && kwargs.is_empty()
+            && matches!(ctx.heap.get(function), Value::Function { .. })
+        {
+            return Ok(ctx.alloc(Value::FractionHash(function)));
+        }
+        return Err(Error::new(
+            "TypeError",
+            "_hash_function requires a function",
+        ));
     }
     if name == "_imre_fractions._limit_candidates" {
         return math::fraction_limit_candidates(ctx, args, kwargs);

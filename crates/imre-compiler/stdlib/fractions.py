@@ -54,8 +54,8 @@ def _hash_algorithm(numerator, denominator):
     result = hash_ if numerator >= 0 else -hash_
     return -2 if result == -1 else result
 
-# Keep the defining function and its live globals for non-integer protocols.
-_hash_algorithm = functools.partial(__import__('_imre_fractions')._hash_ints, _hash_algorithm)
+# Keep Python protocol dispatch for overridden operations and non-integral fields.
+_hash_algorithm = __import__('_imre_fractions')._hash_function(_hash_algorithm)
 
 
 _RATIONAL_FORMAT = re.compile(r"""

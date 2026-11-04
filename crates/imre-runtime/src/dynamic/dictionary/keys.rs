@@ -572,8 +572,12 @@ impl Context {
             if matches!(self.heap.get(slot), Value::Native(name) if name == "object.__hash__") {
                 return Ok(ControlFlow::Break(Self::identity_hash(key)));
             }
-            let method = self.bind_attribute(slot, key, class)?;
-            let returned = self.call(method, vec![], vec![])?;
+            let returned = if matches!(self.heap.get(slot), Value::Function { .. }) {
+                self.call(slot, vec![key], vec![])?
+            } else {
+                let method = self.bind_attribute(slot, key, class)?;
+                self.call(method, vec![], vec![])?
+            };
             let hash = match self.heap.get(self.scalar_value(returned)) {
                 Value::Int(n) => n.to_i64().unwrap_or_else(|| integer_hash(n)),
                 Value::Bool(b) => i64::from(*b),

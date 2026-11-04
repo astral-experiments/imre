@@ -30,3 +30,8 @@ for value in (Fraction(1, 2), Fraction(0)):
     print(isinstance(value, Rational))
 print(isinstance(0.5, Rational))
 print(isinstance(False, Rational))
+
+prime = 2**61 - 1
+for numerator, denominator in ((0, 1), (-1, 1), (11, -7), (9, prime),
+                               (-9, prime), (2**313 + 17, 2**201 - 7)):
+    print(hash(Fraction(numerator, denominator)))

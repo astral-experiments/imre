@@ -8,12 +8,14 @@ use smallvec::SmallVec;
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
-/// The partial carries the original Python function, including its defining scope.
-pub(super) fn fraction_hash(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let Some((&fallback, arguments)) = args.split_first() else {
-        return Err(Error::new("TypeError", "_hash_ints requires a function"));
-    };
-    if let &[n, d] = arguments
+/// Retain the original function's argument binding and live arithmetic hooks.
+pub(in crate::dynamic) fn fraction_hash(
+    ctx: &mut Context,
+    fallback: Id,
+    args: Vec<Id>,
+    kwargs: Vec<(String, Id)>,
+) -> Result<Id> {
+    if let &[n, d] = args.as_slice()
         && kwargs.is_empty()
         && let Value::Function { scope, .. } = *ctx.heap.get(fallback)
         && let Some(p) = ctx.scope_name(scope, "_PyHASH_MODULUS")
@@ -30,7 +32,7 @@ pub(super) fn fraction_hash(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
     }
     // Subclass operations, replaced builtins and a noninvertible denominator
     // must use the module's live Python operations and infinity constant.
-    ctx.call(fallback, arguments.to_vec(), kwargs.to_vec())
+    ctx.call(fallback, args, kwargs)
 }
 
 /// Compute the bounded candidates and the exact distance comparison for Fraction.

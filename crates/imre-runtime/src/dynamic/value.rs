@@ -638,6 +638,7 @@ impl Context {
             Value::ParamSpec(_) => "ParamSpec",
             Value::ParamSpecMarker(kind, _) => kind.class().rsplit_once('.').unwrap().1,
             Value::ConstEvaluator(_) => "constevaluator",
+            Value::FractionHash(_) => "builtin_function_or_method",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -1229,6 +1230,7 @@ pub(super) enum Value {
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
     ConstEvaluator(Id),
+    FractionHash(Id),
     TypeAlias {
         name: Id,
         parameters: Id,
@@ -1994,7 +1996,9 @@ impl Value {
                 ..
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
-            Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
+            Self::ParamSpecMarker(_, origin)
+            | Self::ConstEvaluator(origin)
+            | Self::FractionHash(origin) => visit.push(*origin),
             Self::TypeAlias {
                 name,
                 parameters,

@@ -3401,7 +3401,7 @@ impl Context {
                 }
             }
             "_imre_fractions" => {
-                for name in ["_limit_candidates", "_hash_ints"] {
+                for name in ["_limit_candidates", "_hash_function"] {
                     let value = self.builtin(&format!("_imre_fractions.{name}"));
                     self.bind(scope, name, value);
                 }
