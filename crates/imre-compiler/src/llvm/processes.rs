@@ -131,6 +131,7 @@ impl Emitter<'_, '_> {
                 }
             }
             ProcessOperation::Coroutine { function, result } => {
+                self.async_frames.insert(function, args[0].value.ty);
                 let kind = representation_kind(result, &self.module.types);
                 let thunk = self.output.used(
                     self.output.function_owner(function),
@@ -147,6 +148,7 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::ContextNew { function } => {
+                self.async_frames.insert(function, args[0].value.ty);
                 let thunk = self.output.used(
                     self.output.function_owner(function),
                     self.output.async_name(function),
@@ -218,6 +220,8 @@ impl Emitter<'_, '_> {
                 let Type::Callable(signature) = signature else {
                     unreachable!()
                 };
+                self.async_invoke_frames
+                    .insert(signature, (args[0].value.ty, result));
                 let kind = representation_kind(result, &self.module.types);
                 let thunk = self
                     .output

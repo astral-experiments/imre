@@ -2,39 +2,17 @@
 //! captured tuple using the target's native ownership convention.
 
 use super::*;
-use crate::ir::ProcessOperation;
 
-pub(super) fn adapters(
-    module: &Module,
-    sanitize: bool,
-    resource_types: &HashSet<Type>,
-    units: &mut Output,
-) {
-    let mut direct = BTreeMap::new();
-    let mut indirect = BTreeMap::new();
-    for f in module.functions.iter().chain([&module.entry]) {
-        crate::ir::walk_expressions(&f.body, &mut |expr| {
-            let ExprKind::Builtin(Builtin::Process(op), args) = &expr.kind else {
-                return;
-            };
-            match op {
-                ProcessOperation::Coroutine { function, .. }
-                | ProcessOperation::ContextNew { function } => {
-                    direct.insert(*function, args[0].ty);
-                }
-                ProcessOperation::IndirectCoroutine {
-                    signature: Type::Callable(signature),
-                    result,
-                } => {
-                    indirect.insert(*signature, (args[0].ty, *result));
-                }
-                _ => {}
-            }
-        });
-    }
-    let attrs = if sanitize { " sanitize_address" } else { "" };
-    for (id, frame) in direct {
-        let function = &module.functions[id];
+pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
+    let units = &mut *emitter.output;
+    let resource_types = &emitter.resource_types;
+    let attrs = if emitter.sanitize {
+        " sanitize_address"
+    } else {
+        ""
+    };
+    for (&id, &frame) in &emitter.async_frames {
+        let function = &emitter.module.functions[id];
         let target = units.function_name(id);
         let thunk = units.async_name(id);
         let output = units.function(units.function_owner(id), &thunk, "i64", "ptr %frame", attrs);
@@ -49,7 +27,7 @@ pub(super) fn adapters(
             .collect();
         invoke(output, format!("@{target}"), args, function.returns);
     }
-    for (id, (frame, result)) in indirect {
+    for (&id, &(frame, result)) in &emitter.async_invoke_frames {
         let output = units.function(
             units.entry,
             &format!("async_invoke_{id}"),
@@ -60,7 +38,7 @@ pub(super) fn adapters(
         let callable = load_arg(output, frame, 0, Type::Callable(id), true);
         writeln!(output, "  %target = load ptr, {callable}").unwrap();
         let mut args = vec![callable];
-        let (params, _) = module.types.signature(Type::Callable(id)).unwrap();
+        let (params, _) = emitter.module.types.signature(Type::Callable(id)).unwrap();
         args.extend(params.iter().enumerate().map(|(index, &ty)| {
             load_arg(output, frame, index + 1, ty, resource_types.contains(&ty))
         }));
