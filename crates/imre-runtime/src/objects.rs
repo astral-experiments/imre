@@ -915,11 +915,20 @@ pub unsafe extern "C" fn imre_str_get_part(
     buffer: *mut u8,
     part: *mut StringPart,
 ) -> u32 {
-    // SAFETY: both immutable inputs remain rooted throughout Unicode indexing.
-    let (value, at) = unsafe { (&*value, Int::borrow(at)) };
-    let character = match sequences::string_character(value, &at) {
-        Ok(character) => character,
-        Err(error) => return error.returning(0),
+    // SAFETY: the caller roots the immutable string and canonical integer.
+    let value = unsafe { &*value };
+    let character = if at == 1
+        && let Some(&first) = value.as_bytes().first()
+        && first.is_ascii()
+    {
+        char::from(first)
+    } else {
+        // SAFETY: the caller roots the index throughout Unicode indexing.
+        let at = unsafe { Int::borrow(at) };
+        match sequences::string_character(value, &at) {
+            Ok(character) => character,
+            Err(error) => return error.returning(0),
+        }
     };
     // SAFETY: the caller provides four disjoint writable bytes, enough for every
     // Unicode scalar. No output is touched before all recoverable checks succeed.
@@ -1356,11 +1365,26 @@ pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const 
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value)) };
     let mut result = Words::new(3);
-    for part in value
-        .split(python_whitespace)
-        .filter(|part| !part.is_empty())
-    {
-        text::push_part(&mut result, &value, part);
+    if value.is_ascii() {
+        // Python also treats the four ASCII information separators as whitespace.
+        for part in value
+            .as_bytes()
+            .split(|byte| matches!(byte, b'\t'..=b'\r' | 0x1c..=b' '))
+        {
+            if !part.is_empty() {
+                // SAFETY: every byte of the source is ASCII.
+                text::push_part(&mut result, &value, unsafe {
+                    std::str::from_utf8_unchecked(part)
+                });
+            }
+        }
+    } else {
+        for part in value
+            .split(python_whitespace)
+            .filter(|part| !part.is_empty())
+        {
+            text::push_part(&mut result, &value, part);
+        }
     }
     crate::ObjectOwner::into_raw(result.into_object())
 }

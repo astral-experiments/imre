@@ -69,6 +69,42 @@ pub unsafe extern "C" fn imre_byte_output_reserve_range(
     }
 }
 
+impl ByteOutput {
+    /// Publish a fixed-width append into slots the caller already reserved.
+    fn append_reserved<const N: usize>(&mut self, words: [usize; N]) {
+        let len = self.bytes.len();
+        let invalid_bits = words.into_iter().fold(0, |bits, word| bits | (word ^ 1));
+        self.invalid |= invalid_bits & !0x1fe != 0;
+        for (slot, word) in self.bytes.spare_capacity_mut()[..N].iter_mut().zip(words) {
+            slot.write((word >> 1) as u8);
+        }
+        // SAFETY: the slice above bounds-checks and initializes all N spare slots.
+        unsafe { self.bytes.set_len(len + N) };
+    }
+
+    /// Grow a full buffer, preserving any prefix that fits if the allocation fails.
+    #[cold]
+    #[inline(never)]
+    fn grow_and_append<const N: usize>(&mut self, words: [usize; N]) -> i32 {
+        let count = N.min(super::MAX_LIST_LEN - self.bytes.len());
+        let writable = if self.bytes.try_reserve(count).is_ok() {
+            count
+        } else {
+            count.min(self.bytes.capacity() - self.bytes.len())
+        };
+        if writable == N {
+            self.append_reserved(words);
+            return 1;
+        }
+        for word in words.into_iter().take(writable) {
+            self.invalid |= word & !0x1fe != 1;
+            self.bytes.push((word >> 1) as u8);
+        }
+        super::exceptions::sequence_allocation_failed();
+        0
+    }
+}
+
 /// # Safety
 /// Root the private output and its canonical integer arguments for this call.
 unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N]) -> i32 {
@@ -78,30 +114,12 @@ unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N])
             let Storage::ByteOutput(output) = storage else {
                 unreachable!()
             };
-            let count = N.min(super::MAX_LIST_LEN - output.bytes.len());
-            let writable = if output.bytes.try_reserve(count).is_ok() {
-                count
-            } else {
-                // A fused pair can still commit its first Python append in a spare slot.
-                count.min(output.bytes.capacity() - output.bytes.len())
-            };
-            // Canonical bytes have tag 1 and no bits above bit 8. Publish a
-            // complete fixed-width append in one copy. Defer conversion errors
-            // until bytes() so a later producer exception can still win.
-            if writable == N {
-                let invalid_bits = words.into_iter().fold(0, |bits, word| bits | (word ^ 1));
-                output.invalid |= invalid_bits & !0x1fe != 0;
-                output
-                    .bytes
-                    .extend_from_slice(&words.map(|word| (word >> 1) as u8));
-                return 1;
+            let len = output.bytes.len();
+            if output.bytes.capacity() - len < N || len > super::MAX_LIST_LEN - N {
+                return output.grow_and_append(words);
             }
-            for word in words.into_iter().take(writable) {
-                output.invalid |= word & !0x1fe != 1;
-                output.bytes.push((word >> 1) as u8);
-            }
-            super::exceptions::sequence_allocation_failed();
-            0
+            output.append_reserved(words);
+            1
         })
     }
 }
