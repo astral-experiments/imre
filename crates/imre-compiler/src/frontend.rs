@@ -9676,6 +9676,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
+            ))) => return self.base85_encode(call, name),
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }

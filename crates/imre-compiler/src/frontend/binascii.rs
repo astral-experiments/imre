@@ -10,6 +10,85 @@ fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
 }
 
 impl Checker<'_> {
+    /// Lower exact bytes and boolean options. Formatting and custom protocols use the bundled wrapper.
+    pub(super) fn base85_encode(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &'static str,
+    ) -> Result<Expr, String> {
+        let short = name.strip_prefix("base64.").unwrap();
+        if !self
+            .graph
+            .session
+            .is_stdlib_function(self.module, &call.func, "base64", short)
+        {
+            return Err(self.scoped_builtin_error(name, call));
+        }
+        let positional = ParameterKind::PositionalOrKeyword;
+        let ascii = short == "a85encode";
+        let mut params = vec![positional.parameter(
+            if short == "z85encode" { "s" } else { "b" },
+            Type::Bytes,
+            None,
+        )];
+        if short != "z85encode" {
+            let kind = if ascii {
+                ParameterKind::KeywordOnly
+            } else {
+                positional
+            };
+            params.push(kind.parameter("pad", Type::Bool, Some(Expr::boolean(false))));
+        }
+        if ascii {
+            params.push(ParameterKind::KeywordOnly.parameter(
+                "foldspaces",
+                Type::Bool,
+                Some(Expr::boolean(false)),
+            ));
+        }
+        let args = self
+            .arguments_with(call, &params, None, |checker, _, node| {
+                checker.evaluated_argument(node)
+            })
+            .map_err(|_| self.scoped_builtin_error(name, call))?;
+        if args.values[args.order[0]].ty != Type::Bytes
+            || args.order[1..]
+                .iter()
+                .any(|&i| args.values[i].ty != Type::Bool)
+        {
+            return Err(self.scoped_builtin_error(name, call));
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let values: Vec<_> = args
+            .values
+            .into_iter()
+            .map(|value| scope.hold(self, value))
+            .collect();
+        let input = values[args.order[0]].clone();
+        let option = |i| {
+            args.order
+                .get(i)
+                .map_or_else(|| Expr::boolean(false), |&at: &usize| values[at].clone())
+        };
+        // This call formerly selected the checked object provider. Keep it available
+        // if a later operation in the same program needs boxed values.
+        self.graph.needs_object_runtime.set(true);
+        self.graph.require_fallback_calls();
+        let alphabet: &[u8; 85] = match short {
+            "a85encode" => br##"!"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstu"##,
+            "b85encode" => b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~",
+            "z85encode" => b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#",
+            _ => unreachable!(),
+        };
+        Ok(scope.finish(bytes_op(
+            Builtin::Base85Encode {
+                alphabet,
+                foldnuls: ascii,
+            },
+            vec![input, option(1), option(2)],
+        )))
+    }
+
     /// Resolve the bytes buffer before invoking the seed's integer index protocol.
     pub(super) fn adler32(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let one = Expr::integer(1);
