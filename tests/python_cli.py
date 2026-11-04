@@ -120,6 +120,7 @@ def check_installed_site(imre, root, run):
         "decimal = importlib.import_module(sys.argv[1]); "
         "second = importlib.util.module_from_spec(decimal.__spec__); "
         "decimal.__loader__.exec_module(second); "
+        "assert (decimal.Decimal('1') == '1') is False and (second.Decimal('1') != '1') is True; "
         "print(decimal.Decimal(10), second.Decimal(11), Fraction.from_decimal(10))"
     )
     for installed in (False, True):
@@ -2798,6 +2799,15 @@ def report(text):
         comparisons = Path(__file__).with_name("fixtures") / "text" / "decimal_comparison.py"
         (helpers / "decimal_comparison.py").write_bytes(comparisons.read_bytes())
         compare("-IB", "-c", decimal_import + "import decimal_comparison")
+        (helpers / "decimal_reflected.py").write_text(
+            "from decimal import Decimal\n"
+            "class Peer:\n"
+            "    def __eq__(self, other): return 'reflected equality'\n"
+            "    def __gt__(self, other): return 'reflected ordering'\n"
+            "value = Decimal('1')\n"
+            "print(value == Peer(), value < Peer())\n"
+        )
+        compare("-IB", "-c", decimal_import + "import decimal_reflected")
         for expression in ("Decimal('1.00') < Decimal(1)", "Decimal('1.00') == 1"):
             (helpers / "decimal_boundary.py").write_text(
                 f"from decimal import Decimal\nprint({expression})\n"

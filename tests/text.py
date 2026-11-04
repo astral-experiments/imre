@@ -15,6 +15,13 @@ STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
     "decimal_ordering": 'from decimal import Decimal\nprint(Decimal("1.00") < Decimal(1))',
     "decimal_mixed_equality": 'from decimal import Decimal\nprint(Decimal("1.00") == 1)',
+    "decimal_fallback_invalid_call": (
+        "from decimal import Decimal\n"
+        "def compare(): return Decimal('1') == '1'\n"
+        "def needs_int(value: int): pass\n"
+        "def invalid(): needs_int('invalid')\n"
+        "print(compare())"
+    ),
     "formatter_unknown_export": "from _string import no_such_export",
     "formatter_unknown_neighbor": "import _string, missing_formatter_neighbor",
     "formatter_nested_argument": 'from _string import formatter_parser\ndef number(item: int) -> int:\n    return item\nformatter_parser(number("bad"))',

@@ -921,10 +921,9 @@ impl Checker<'_> {
                 })
         {
             // A discarded call still supplies the streams inspected in its exception handler.
-            self.graph
-                .check_fallback_calls
-                .set(crate::analysis::FallbackCalls::FunctionBodies);
-            return Err(self.object_builtin_error("subprocess pipe encoding", call));
+            return Err(
+                self.object_builtin_error_with_checked_calls("subprocess pipe encoding", call)
+            );
         }
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
