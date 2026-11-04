@@ -32,6 +32,8 @@ def main():
     assert ctx.check_hostname and ctx.verify_mode == ssl.CERT_REQUIRED
     ctx.load_verify_locations(cafile=cafile)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw:
+        if mode == ["https"]:
+            raw.settimeout(1.0)
         raw.connect((host, int(port)))
         try:
             peer = ctx.wrap_socket(raw, server_hostname=hostname)
@@ -59,6 +61,21 @@ def main():
             assert data == b"local tls\n"
             assert peer.recv(0) == b""
             assert peer.send(b"") == 0
+            if mode == ["https"]:
+                # The echo server waits for our next request.
+                with peer.makefile("rb") as idle:
+                    try:
+                        idle.read(1)
+                    except TimeoutError:
+                        pass
+                    else:
+                        raise AssertionError("silent TLS peer did not time out")
+                    try:
+                        idle.read(1)
+                    except OSError as exc:
+                        assert str(exc) == "cannot read from timed out object"
+                    else:
+                        raise AssertionError("timed-out TLS reader accepted another read")
             binding = peer.get_channel_binding()
             assert isinstance(binding, bytes) and binding
             assert peer.get_channel_binding(cb_type="tls-unique") == binding

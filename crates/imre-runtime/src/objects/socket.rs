@@ -216,7 +216,7 @@ pub(crate) fn fd(s: &Object) -> RawFd {
     state(s, |s| s.fd)
 }
 
-/// Move a blocking stream to its TLS owner and report whether a handshake can begin.
+/// Move a stream to its TLS owner and report whether a handshake can begin.
 #[cfg(unix)]
 pub(crate) fn take_tls_stream(socket: &Object, server: bool) -> Result<(crate::ObjectOwner, bool)> {
     if kind(socket) != libc::SOCK_STREAM {
@@ -242,10 +242,17 @@ pub(crate) fn take_tls_stream(socket: &Object, server: bool) -> Result<(crate::O
         }
         // SAFETY: this query only reads the flags of the socket-owned descriptor.
         let flags = checked(unsafe { libc::fcntl(s.fd, libc::F_GETFL) }).map_err(errno_error)?;
-        if s.timeout_ns >= 0 || flags & libc::O_NONBLOCK != 0 {
+        // A finite timeout uses a nonblocking fd so OpenSSL can yield to poll.
+        let nonblocking = flags & libc::O_NONBLOCK != 0;
+        let supported = match s.timeout_ns {
+            -1 => !nonblocking,
+            0 => false,
+            _ => connected && nonblocking,
+        };
+        if !supported {
             return Err(Error::new(
                 Kind::NotImplementedError,
-                "TLS requires a blocking socket without a timeout",
+                "TLS requires a blocking socket or a connected socket with a positive timeout",
             ));
         }
         let transport = Socket {
@@ -292,18 +299,18 @@ fn retry<T>(until: Option<Deadline>, mut call: impl FnMut() -> io::Result<T>) ->
 
 /// Return a single deadline for an entire socket operation, including retries and sendall.
 #[derive(Clone, Copy)]
-struct Deadline {
+pub(crate) struct Deadline {
     start: Instant,
     duration: Duration,
 }
 
 impl Deadline {
-    fn remaining(self) -> Duration {
+    pub(crate) fn remaining(self) -> Duration {
         self.duration.saturating_sub(self.start.elapsed())
     }
 }
 
-fn deadline(socket: &Object) -> Option<Deadline> {
+pub(crate) fn deadline(socket: &Object) -> Option<Deadline> {
     get_timeout(socket)
         .filter(|d| !d.is_zero())
         .map(|duration| Deadline {
@@ -317,7 +324,7 @@ fn timed_out() -> io::Error {
 }
 
 /// Wait without extending the deadline on a signal, spurious readiness or a long poll interval.
-fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()> {
+pub(crate) fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()> {
     retry(until, || poll_interruptible(fd, events, until))
 }
 
@@ -342,12 +349,6 @@ fn poll_interruptible(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Re
             return Err(timed_out());
         }
     }
-}
-
-/// Wait for the direction requested by a blocking TLS operation, retrying interrupted polls.
-#[cfg(unix)]
-pub(crate) fn wait_blocking(fd: RawFd, events: i16) -> io::Result<()> {
-    poll_socket(fd, events, None)
 }
 
 /// Issue a nonblocking syscall and retry on readiness only when a timeout was requested.
