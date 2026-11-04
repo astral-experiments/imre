@@ -1992,6 +1992,44 @@ fn justify_string(
     ctx.heap.fresh_string(result)
 }
 
+/// Partition immutable bytes, preserving the separator's exported object on a hit.
+fn partition_bytes(ctx: &mut Context, receiver: Id, separator: Id) -> Result<Id> {
+    let locate = |ctx: &Context, buffer| {
+        let needle = ctx.native_buffer_bytes(buffer)?;
+        if needle.is_empty() {
+            return Err(Error::new("ValueError", "empty separator"));
+        }
+        Ok(memchr::memmem::find(ctx.bytes_like(receiver)?, needle)
+            .map(|start| start..start + needle.len()))
+    };
+    let method = ctx.python_buffer_method(separator, true)?;
+    let range = if let Some(method) = method {
+        ctx.with_contiguous_python_buffer(separator, method, 0, |ctx, view| locate(ctx, view))?
+    } else {
+        locate(ctx, separator)?
+    };
+    let fields = if let Some(range) = range {
+        let source = ctx.bytes_like(receiver)?;
+        let before = super::super::copy_ids(&source[..range.start])?;
+        let after = super::super::copy_ids(&source[range.end..])?;
+        // Py_buffer.obj for a Python exporter is its wrapper, emptied on release.
+        let middle = if method.is_some() {
+            ctx.alloc(Value::BufferWrapper)
+        } else {
+            separator
+        };
+        vec![
+            ctx.heap.bytes_from_data(before),
+            middle,
+            ctx.heap.bytes_from_data(after),
+        ]
+    } else {
+        let empty = ctx.heap.bytes_from_data(Vec::new());
+        vec![receiver, empty, empty]
+    };
+    Ok(ctx.alloc(Value::Tuple(fields)))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -2412,6 +2450,18 @@ pub(super) fn method(
             start += end + boundary;
         }
         return Ok(ctx.alloc(Value::List(fields)));
+    }
+    if owner == "bytes" && name == "partition" {
+        if !kwargs.is_empty() {
+            return Err(type_error("bytes.partition() takes no keyword arguments"));
+        }
+        let &[separator] = args else {
+            return Err(type_error(format!(
+                "bytes.partition() takes exactly one argument ({} given)",
+                args.len()
+            )));
+        };
+        return partition_bytes(ctx, original_receiver, separator);
     }
     if matches!(owner, "bytes" | "bytearray") && matches!(name, "split" | "rsplit") {
         let [sep, max] = super::bind_method_arguments(name, args, kwargs, ["sep", "maxsplit"], 2)?;
