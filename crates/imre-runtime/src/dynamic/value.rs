@@ -58,6 +58,9 @@ pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 pub(super) const EMPTY_TUPLE: Id = 5;
 
+/// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
+pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
+
 pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
 pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
@@ -4119,7 +4122,7 @@ impl Heap {
         if remaining == 0 {
             return Ok(None);
         }
-        if remaining <= 3 && self.frame_keeps_stream_finalizers(stdin, &[]) {
+        if remaining <= MAX_FRAME_FINALIZERS && self.frame_keeps_stream_finalizers(stdin, &[]) {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
