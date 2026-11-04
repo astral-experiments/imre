@@ -202,12 +202,27 @@ mod tests {
             .iter_mut()
             .find(|f| f.params.len() == 1)
             .unwrap();
-        let private = crate::ir::private_scalar_cursors(function);
+        let private = crate::ir::private_string_cursors(function);
         assert_eq!(private.len(), 1);
         function
             .body
             .insert(0, Statement::Expr(Expr::local(private[0], Type::Iterator)));
-        assert!(crate::ir::private_scalar_cursors(function).is_empty());
+        assert!(crate::ir::private_string_cursors(function).is_empty());
+    }
+
+    #[test]
+    fn byte_iteration_borrows_only_a_direct_utf8_encode() {
+        for (setup, iterable, fused) in [
+            ("", "text.encode()", true),
+            ("    data = text.encode()\n    print(data)\n", "data", false),
+        ] {
+            let source = format!(
+                "def scan(text: str) -> int:\n{setup}    total = 0\n    for byte in {iterable}:\n        total += byte\n    return total\n"
+            );
+            let llvm = compile(&source, &CompileOptions::default()).unwrap();
+            assert_eq!(llvm.contains("call ptr @imre_str_encode("), !fused);
+            assert_eq!(llvm.contains("call i64 @next_utf8_value("), fused);
+        }
     }
 
     #[test]
@@ -224,7 +239,7 @@ mod tests {
             );
             let llvm = compile(&source, &CompileOptions::default()).unwrap();
             assert_eq!(
-                llvm.contains("call i64 @next_utf8_scalar("),
+                llvm.contains("call i64 @next_utf8_value("),
                 scalar,
                 "{source}"
             );

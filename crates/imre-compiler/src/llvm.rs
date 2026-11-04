@@ -2077,7 +2077,7 @@ impl Emitter<'_, '_> {
         }
         self.line_slots = line_views::select(function);
         self.forward_cursors.clear();
-        for slot in ir::private_scalar_cursors(function) {
+        for slot in ir::private_string_cursors(function) {
             let next = self.entry_alloca("ptr");
             let end = self.entry_alloca("ptr");
             self.forward_cursors.insert(slot, (next, end));
@@ -8714,20 +8714,21 @@ impl Emitter<'_, '_> {
                 ));
                 (self.instruction(format!("icmp ne i32 {byte}, 0")), None)
             }
-            ir::IterNextKind::String | ir::IterNextKind::CodePoint => {
+            ir::IterNextKind::String | ir::IterNextKind::CodePoint | ir::IterNextKind::Utf8Byte => {
                 debug_assert!(value.is_none());
-                let next = if kind == ir::IterNextKind::String {
-                    "imre_str_iter_next_owned"
-                } else {
-                    "imre_str_iter_next_codepoint"
-                };
                 let word = if let Some((next_byte, end)) = forward {
-                    debug_assert!(kind == ir::IterNextKind::CodePoint);
+                    debug_assert!(kind != ir::IterNextKind::String);
+                    let raw = kind == ir::IterNextKind::Utf8Byte;
                     let end = self.instruction(format!("load ptr, ptr {end}"));
                     self.instruction(format!(
-                        "call i64 @next_utf8_scalar(ptr {next_byte}, ptr {end})"
+                        "call i64 @next_utf8_value(ptr {next_byte}, ptr {end}, i1 {raw})"
                     ))
                 } else {
+                    let next = match kind {
+                        ir::IterNextKind::String => "imre_str_iter_next_owned",
+                        ir::IterNextKind::CodePoint => "imre_str_iter_next_codepoint",
+                        _ => unreachable!("encoded-byte loops own a private forward cursor"),
+                    };
                     self.instruction(format!("call i64 @{next}(ptr {})", iterator.operand))
                 };
                 (

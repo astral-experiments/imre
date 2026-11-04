@@ -4280,11 +4280,20 @@ impl<'a> Checker<'a> {
                     "iteration requires a concrete list, dictionary, set, string, bytes, or range",
                 )
             })?;
+        // A private forward cursor can borrow the UTF-8 bytes of an exact string.
+        let (iterable, encoded_bytes) = match iterable {
+            Expr {
+                kind: ExprKind::Builtin(Builtin::Encode, mut args),
+                ..
+            } => (args.pop().expect("encode receiver"), true),
+            iterable => (iterable, false),
+        };
         let captured = self.hidden(iterable.ty);
         let cursor = if mapping.is_none()
             && set_element.is_none()
             && self.types.deque_element(iterable.ty).is_none()
             && !string
+            && !encoded_bytes
         {
             Some(self.hidden(Type::Int))
         } else {
@@ -4344,7 +4353,7 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: Type::Iterator,
                     kind: ExprKind::Builtin(
-                        if string {
+                        if string || encoded_bytes {
                             Builtin::StringIter
                         } else if self.types.deque_element(self.locals[captured]).is_some() {
                             Builtin::DequeIter { reverse: false }
@@ -4362,7 +4371,9 @@ impl<'a> Checker<'a> {
             let value = items.then(|| self.hidden(value_type));
             let ready = self.hidden(Type::Bool);
             body.push(Statement::IterNext {
-                kind: if string {
+                kind: if encoded_bytes {
+                    ir::IterNextKind::Utf8Byte
+                } else if string {
                     ir::IterNextKind::String
                 } else {
                     ir::IterNextKind::Generic

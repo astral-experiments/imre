@@ -266,7 +266,9 @@ impl Verifier<'_> {
             } => {
                 let item_type = match kind {
                     crate::ir::IterNextKind::String => Some(Type::Str),
-                    crate::ir::IterNextKind::CodePoint => Some(Type::Int),
+                    crate::ir::IterNextKind::CodePoint | crate::ir::IterNextKind::Utf8Byte => {
+                        Some(Type::Int)
+                    }
                     crate::ir::IterNextKind::Generic => None,
                 };
                 if let Some(ty) = item_type {
