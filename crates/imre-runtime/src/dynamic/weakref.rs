@@ -277,6 +277,7 @@ impl Context {
             | Value::Array(_)
             | Value::MemoryView { .. }
             | Value::File(_)
+            | Value::TextFile(_)
             | Value::Partial { .. }
             | Value::Cached { .. }
             | Value::HandlerLock(_)
