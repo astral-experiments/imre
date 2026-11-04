@@ -4346,7 +4346,7 @@ impl Emitter<'_, '_> {
                 ..value
             };
         }
-        if let Some(value) = self.rsplit_last(builtin, expressions) {
+        if let Some(value) = self.selected_split(builtin, expressions) {
             return value;
         }
         // Truth consumes immediately and cannot rebind the slot. Transfer the
@@ -8257,6 +8257,17 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::FilterCharacterSet(below) => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_filter_character_set(ptr {}, ptr {}, i32 {below})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::StringListFilter(strip) => {
                 let second =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
@@ -9906,6 +9917,7 @@ declare ptr @imre_str_split_whitespace(ptr)
 declare i64 @imre_str_split_int_field(ptr, i32)
 declare void @imre_str_prepare_int_fields(ptr, ptr, i32) nounwind
 declare ptr @imre_str_split(ptr, ptr, i64, i32)
+declare ptr @imre_str_split_first(ptr, ptr)
 declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
@@ -9942,6 +9954,7 @@ declare ptr @imre_str_split_byte_iter(ptr, i8)
 declare ptr @imre_str_matching_split_iter(ptr, ptr, i64, i8)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
+declare ptr @imre_filter_character_set(ptr, ptr, i32)
 declare ptr @imre_str_list_filter(ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_str_list_sorted_suffix(ptr, i32)
 declare i32 @imre_str_list_nonempty(ptr)

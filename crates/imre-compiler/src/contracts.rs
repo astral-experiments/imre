@@ -69,7 +69,7 @@ impl Builtin {
                 }
             }
             Self::SplitIntSource(_) => Contract::new(false, PreservesLists),
-            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
+            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),

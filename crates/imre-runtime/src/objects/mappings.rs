@@ -891,6 +891,7 @@ pub(super) struct Mapping {
 pub(super) struct Set {
     tables: Tables<()>,
     frozen: bool,
+    ascii_characters: Option<allocator_api2::boxed::Box<[bool; 128]>>,
 }
 
 impl Mapping {
@@ -1354,6 +1355,32 @@ impl Mapping {
 }
 
 impl Set {
+    fn new(tables: Tables<()>, frozen: bool) -> Self {
+        Self {
+            tables,
+            frozen,
+            ascii_characters: None,
+        }
+    }
+
+    /// Build a small string set's ASCII lookup on its first character scan.
+    fn character_keys(&mut self) -> (&Table<StrOwner, ()>, Option<&[bool; 128]>) {
+        let Tables::Str(keys) = &self.tables else {
+            unreachable!("string set expected")
+        };
+        if self.ascii_characters.is_none() && keys.entries.len() <= 32 {
+            let mut members = [false; 128];
+            for entry in keys.entries.iter().flatten() {
+                if let [byte] = entry.key.as_bytes() {
+                    members[usize::from(*byte)] = true;
+                }
+            }
+            // An allocation failure can use the ordinary string table for every key.
+            self.ascii_characters = allocator_api2::boxed::Box::try_new(members).ok();
+        }
+        (keys, self.ascii_characters.as_deref())
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         self.tables.len() == 0
     }
@@ -1365,10 +1392,11 @@ impl Set {
                 format!("'frozenset' object has no attribute '{method}'"),
             ));
         }
+        self.ascii_characters = None;
         Ok(&mut self.tables)
     }
 
-    /// Transfer exact string keys into a new, immutable set.
+    /// Transfer exact string keys into a fresh set.
     fn string_set(
         keys: impl Iterator<Item = Result<OwnedWord, Error>>,
         frozen: bool,
@@ -1377,7 +1405,7 @@ impl Set {
         for key in keys {
             tables.insert(key?, ())?;
         }
-        let set = TableOwner::try_new(Self { tables, frozen })?;
+        let set = TableOwner::try_new(Self::new(tables, frozen))?;
         crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Set(set))))
             .map_err(|_| Error::allocation())
     }
@@ -1402,10 +1430,7 @@ impl Set {
     pub(super) fn copy_keys(&self) -> Result<Self, Error> {
         let mut tables = Tables::new(self.tables.key_kind());
         self.tables.copy_keys(&mut tables)?;
-        Ok(Self {
-            tables,
-            frozen: self.frozen,
-        })
+        Ok(Self::new(tables, self.frozen))
     }
 
     /// Borrow these integer keys while the caller copies a child descriptor set.
@@ -2754,10 +2779,7 @@ unsafe fn new_iterator(value: *const Object, kind: IteratorKind) -> *const Objec
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-        Storage::Set(TableOwner::new(Set {
-            tables: Tables::new(kind),
-            frozen: false,
-        })),
+        Storage::Set(TableOwner::new(Set::new(Tables::new(kind), false))),
     ))))
 }
 
@@ -2898,10 +2920,7 @@ pub unsafe extern "C" fn imre_key_union(
         }
     }
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-        Storage::Set(TableOwner::new(Set {
-            tables: result,
-            frozen: false,
-        })),
+        Storage::Set(TableOwner::new(Set::new(result, false))),
     ))))
 }
 /// Builds an intersection directly from two key views or sets. The output owns
@@ -2977,6 +2996,43 @@ pub unsafe extern "C" fn imre_set_len(value: *const Object) -> usize {
     // SAFETY: only the copied length escapes storage.
     Int::from_usize(unsafe { object(value).0.with(|s| s.set().tables.len()) }).into_raw()
 }
+/// Collect matching Unicode characters in encounter order, acquiring only selected keys.
+///
+/// # Safety
+/// Both inputs are rooted native owners. The set contains exact strings. A null
+/// result signals an allocation failure and leaves an exception pending.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_filter_character_set(
+    text: *const Str,
+    allowed: *const Object,
+    below: u32,
+) -> *const Object {
+    // SAFETY: both inputs stay rooted. Updating the private lookup and comparing
+    // exact strings cannot reenter the set.
+    let result = unsafe {
+        let text = &*text;
+        object(allowed).0.with_mut(|storage| {
+            let (keys, ascii) = storage.set_mut().character_keys();
+            let selected = text.chars().filter_map(|c| {
+                let mut buffer = [0; 4];
+                let key = c.encode_utf8(&mut buffer);
+                let present = u32::from(c) < below
+                    || match ascii {
+                        Some(members) if c.is_ascii() => members[c as usize],
+                        _ => keys.position(HASHER.hash_one(&*key), &*key).is_some(),
+                    };
+                present.then(|| {
+                    super::text::try_owned_string(key).map(|key| {
+                        OwnedWord::from_owned(StrOwner::into_raw(key) as usize, WordKind::new(3))
+                    })
+                })
+            });
+            Set::string_set(selected, false)
+        })
+    };
+    crate::finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
+}
+
 /// # Safety
 /// Root both the set and its exact-kind scalar key.
 #[unsafe(no_mangle)]
