@@ -649,16 +649,7 @@ fn release(owner: Release) {
                         pending.borrow_mut().push(Release::Table(table, next));
                     }
                 }
-                Release::Sequence(kind, mut values) => {
-                    if let Some(word) = values.pop() {
-                        // SAFETY: the sequence transferred this independently owned word.
-                        unsafe { kind.release(word) };
-                    }
-                    if !values.is_empty() {
-                        // Visit the child before resuming the remaining words.
-                        pending.borrow_mut().push(Release::Sequence(kind, values));
-                    }
-                }
+                Release::Sequence(kind, values) => release_sequence_batch(kind, values, &pending),
             }
             let mut pending = pending.borrow_mut();
             // Children were enqueued in field or container order. Finish this
@@ -709,6 +700,41 @@ unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
     }
 }
 
+/// Leaves room for a continuation when the remaining owners do not fit.
+fn release_batch_len(remaining: usize, room: usize) -> usize {
+    let available = if remaining <= room {
+        room
+    } else {
+        room.saturating_sub(1)
+    };
+    remaining.min(available.clamp(1, 32))
+}
+
+/// Transfers a bounded tail of sequence owners in their original pop order.
+fn release_sequence_batch(kind: WordKind, mut values: Vec<usize>, pending: &ReleaseQueue) {
+    if matches!(kind.base(), 5 | 6 | 14) {
+        let mut queue = pending.borrow_mut();
+        let count = release_batch_len(values.len(), queue.capacity() - queue.len());
+        let start = values.len() - count;
+        for word in values.drain(start..).rev().filter(|&word| word != 0) {
+            let owner = if kind.base() == 5 {
+                // SAFETY: each nonnull word transfers one object owner into the queue.
+                Release::Object(unsafe { crate::ObjectOwner::from_raw(word as *const Object) })
+            } else {
+                Release::Record(word as *const usize)
+            };
+            queue.push(owner);
+        }
+    } else if let Some(word) = values.pop() {
+        // Other kinds can drop a child immediately. Finish it before the next word.
+        // SAFETY: the sequence transferred this independently owned word.
+        unsafe { kind.release(word) };
+    }
+    if !values.is_empty() {
+        pending.borrow_mut().push(Release::Sequence(kind, values));
+    }
+}
+
 unsafe fn release_standalone_fields(
     payload: *const usize,
     mut next: usize,
@@ -722,13 +748,7 @@ unsafe fn release_standalone_fields(
         (queue.len(), queue.capacity() - queue.len())
     };
     while next < descriptor.length {
-        // Leave room for the continuation when this batch cannot finish the record.
-        let batch = if descriptor.length - next <= room {
-            room
-        } else {
-            room.saturating_sub(1)
-        };
-        let end = (next + batch.clamp(1, 32)).min(descriptor.length);
+        let end = next + release_batch_len(descriptor.length - next, room);
         // SAFETY: this frame owns the untouched fields starting at next.
         unsafe { release_fields::<false>(payload, descriptor, next..end) };
         next = end;
@@ -871,6 +891,58 @@ mod tests {
             layout(1),
             (false, 10 + super::super::os::stat_result::EXTRA_WORDS)
         );
+    }
+
+    #[test]
+    fn sequence_batches_preserve_reverse_order_across_null_words() {
+        let kinds = [3];
+        let descriptor = RecordDescriptor {
+            length: 1,
+            kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        let text = StrOwner::new(Str::from("shared field"));
+        let mut words = Vec::new();
+        for _ in 0..8 {
+            // SAFETY: the record takes one string owner and its descriptor outlives the queue.
+            let record = unsafe {
+                let record = imre_record_new(&descriptor);
+                record.write(StrOwner::into_raw(text.clone()) as usize);
+                record
+            };
+            words.push(record as usize);
+        }
+        let (last, previous) = (words[7], words[6]);
+        words.insert(7, 0);
+        let kind = WordKind::new(6 | crate::objects::words::NULLABLE);
+        let queue = ReleaseQueue::default();
+        release_sequence_batch(kind, words, &queue);
+        let entries = queue.into_inner();
+        assert!(matches!(entries.as_slice(),
+            [Release::Record(a), Release::Record(b), Release::Sequence(k, rest)]
+                if *a as usize == last && *b as usize == previous && *k == kind && rest.len() == 6
+        ));
+        for entry in entries {
+            release(entry);
+        }
+        assert_eq!(StrOwner::strong_count(&text), 1);
+    }
+
+    #[test]
+    fn sequence_batches_transfer_shared_object_owners() {
+        let object = crate::objects::Words::new(5).into_object();
+        let kind = WordKind::new(5 | crate::objects::words::NULLABLE);
+        let words = (0..100)
+            .map(|i| {
+                if i % 3 == 0 {
+                    0
+                } else {
+                    crate::ObjectOwner::into_raw(object.clone()) as usize
+                }
+            })
+            .collect();
+        release_sequence_words(kind, words);
+        assert_eq!(crate::ObjectOwner::strong_count(&object), 1);
     }
 
     #[test]
