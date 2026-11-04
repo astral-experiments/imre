@@ -8,6 +8,7 @@ mod digit_sums;
 mod dynamic;
 mod effects;
 use imre_regex as fixed_regex;
+mod case_membership;
 mod frontend;
 mod guarded_text;
 mod ir;
@@ -685,6 +686,8 @@ fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "digit reduction fusion")?;
     split_fields::specialize(module);
     verify_after(module, "integer split fields")?;
+    case_membership::specialize(module);
+    verify_after(module, "case-converted string set membership")?;
     list_bounds::specialize(module);
     verify_after(module, "list bounds specialization")?;
     list_specialization::specialize(module);
