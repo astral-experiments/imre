@@ -3,6 +3,7 @@ import io
 import gc
 import os
 import pickle
+from typing import get_overloads
 
 
 def check_state():
@@ -100,6 +101,13 @@ def current():
 
     class Stream(io.BytesIO):
         pass
+
+    read = Stream(b"abc").read
+    assert read.__module__ is None
+    assert read.__name__ == "read" and read.__qualname__ == Stream.__qualname__ + ".read"
+    assert get_overloads(read) == [] and read(2) == b"ab"
+    assert not hasattr(io.BytesIO.read, "__module__")
+    assert not hasattr(read.__self__.__init__, "__module__")
 
     class Lines(io.BytesIO):
         def __iter__(self):
