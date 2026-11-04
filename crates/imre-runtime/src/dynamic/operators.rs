@@ -3767,10 +3767,8 @@ impl Context {
         let result = if inplace && !frozen {
             left
         } else {
-            self.alloc(Value::Set {
-                entries: entries.try_clone()?,
-                frozen: *frozen,
-            })
+            self.heap
+                .alloc_materialized_set(entries.try_clone()?, *frozen)
         };
         if left != right {
             builtins::update_set(self, result, right)?;
@@ -4082,6 +4080,7 @@ impl Context {
             }
             Ok(())
         })?;
+        self.heap.account_set_result(result);
         if mutate {
             self.replace_set_entries(left, result);
             return Ok(left);
