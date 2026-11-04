@@ -3790,7 +3790,8 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if class == value::ZLIB_DECOMPRESS_TYPE && matches!(name, "copy" | "__copy__") =>
+                if class == value::ZLIB_DECOMPRESS_TYPE
+                    && value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&name) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }

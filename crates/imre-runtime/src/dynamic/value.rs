@@ -57,6 +57,7 @@ pub(super) const NOT_IMPLEMENTED: Id = 4;
 pub(super) const EMPTY_TUPLE: Id = 5;
 
 pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
+pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
