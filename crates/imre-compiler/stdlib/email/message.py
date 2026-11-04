@@ -11,9 +11,14 @@ def _valid_field_name(name: str) -> bool:
 
 class Message:
     _headers: list[tuple[str, str]]
+    _charset: object
 
     def __init__(self) -> None:
         self._headers = []
+        self._charset = None
+
+    def get_charset(self) -> object:
+        return self._charset
 
     def set_raw(self, name: str, value: str) -> None:
         self._headers.append((name, value))

@@ -224,6 +224,11 @@ class Message:
             return bpayload
         return payload
 
+    def get_charset(self):
+        """Return the Charset instance associated with the message's payload.
+        """
+        return self._charset
+
     def get_content_type(self):
         """Return the message's content type.
 
