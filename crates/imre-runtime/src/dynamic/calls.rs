@@ -3047,7 +3047,12 @@ impl Context {
                             self.text("Return True if the process returning status was stopped.")
                         );
                     }
-                    "__text_signature__" if symbol == "posix.WIFSTOPPED" => {
+                    "__doc__" if symbol == "posix.WSTOPSIG" => {
+                        return Ok(self.text("Return the signal that stopped the process that provided the status value."));
+                    }
+                    "__text_signature__"
+                        if matches!(symbol.as_str(), "posix.WIFSTOPPED" | "posix.WSTOPSIG") =>
+                    {
                         return Ok(self.text("($module, /, status)"));
                     }
                     "__doc__" if symbol == "posix.execv" => {

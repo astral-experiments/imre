@@ -3899,6 +3899,15 @@ else:
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_text.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            script = root / "stopped_status.py"
+            consumer = "def stop_signal(): return os.WSTOPSIG(4991)\n"
+            invalid = "def needs_int(value: int): pass\ndef invalid(): needs_int('wrong')\n"
+            for definitions in (consumer + invalid, invalid + consumer):
+                script.write_text("import os\n" + definitions + "print(stop_signal())\n")
+                result = run(imre, "-B", script)
+                assert result.returncode > 0 and not result.stdout, result
+                assert b"invalid-argument-type" in result.stderr or b"expected int, got str" in result.stderr, result
+
             script = root / "subprocess_text.py"
             command = r"printf '\200'; printf '\223err\224' >&2; exit 7"
             script.write_text(

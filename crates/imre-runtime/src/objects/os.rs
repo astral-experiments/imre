@@ -170,7 +170,7 @@ macro_rules! descriptor_constants {
 }
 descriptor_constants! { descriptor_constant -> i32;
     imre_os_f_ok = F_OK, imre_os_r_ok = R_OK, imre_os_w_ok = W_OK, imre_os_x_ok = X_OK,
-    imre_os_wnohang = WNOHANG,
+    imre_os_wnohang = WNOHANG, imre_os_wuntraced = WUNTRACED,
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,

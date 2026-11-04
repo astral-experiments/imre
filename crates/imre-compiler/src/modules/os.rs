@@ -186,6 +186,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
         "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
+        "WSTOPSIG" if cfg!(unix) => Intrinsic::CheckedObjectExport("posix.WSTOPSIG"),
         "execv" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.execv"),
         "execve" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.execve"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
@@ -198,6 +199,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             Intrinsic::ObjectRuntimeExport("posix.waitstatus_to_exitcode")
         }
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
+        "WUNTRACED" if cfg!(unix) => Intrinsic::DescriptorConstant("wuntraced"),
         "getgrouplist" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.getgrouplist")
         }

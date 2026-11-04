@@ -215,7 +215,7 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
 }
 
 pub(super) fn is_process_function(name: &str) -> bool {
-    cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED")
+    cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED" | "WSTOPSIG")
 }
 
 /// Audit after signature validation and before any Python fork handlers run.
@@ -1338,7 +1338,7 @@ pub(super) fn descriptor(
         unsafe { libc::_exit(status) }
     }
     #[cfg(unix)]
-    if matches!(name, "WIFSTOPPED" | "waitstatus_to_exitcode") {
+    if matches!(name, "WIFSTOPPED" | "WSTOPSIG" | "waitstatus_to_exitcode") {
         let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
         else {
             unreachable!("status is required")
@@ -1346,6 +1346,9 @@ pub(super) fn descriptor(
         let status = c_int(ctx, status)?;
         if name == "WIFSTOPPED" {
             return Ok(builtins::boolean(libc::WIFSTOPPED(status)));
+        }
+        if name == "WSTOPSIG" {
+            return Ok(ctx.int(i64::from(libc::WSTOPSIG(status))));
         }
         let code = if libc::WIFEXITED(status) {
             libc::WEXITSTATUS(status)
