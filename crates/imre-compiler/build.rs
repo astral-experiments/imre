@@ -13,14 +13,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compression_method(CompressionMethod::Stored)
         .last_modified_time(DateTime::default())
         .unix_permissions(0o644);
-    for name in [
-        "_pydatetime.py",
-        "tarfile.py",
-        "xml/__init__.py",
-        "xml/etree/__init__.py",
-        "xml/etree/ElementPath.py",
-        "xml/etree/ElementTree.py",
-    ] {
+    println!("cargo:rerun-if-changed=stdlib/installed-sources.txt");
+    for name in include_str!("stdlib/installed-sources.txt").lines() {
         let path = Path::new("stdlib").join(name);
         println!("cargo:rerun-if-changed={}", path.display());
         archive.start_file(name, options)?;
