@@ -161,7 +161,16 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
 }
 
-fn excess_positional_error(
+/// Format a Python call's unexpected keyword and any spelling suggestion.
+pub(super) fn unexpected_keyword_error(name: &str, key: &str, params: &[&str]) -> Error {
+    let mut message = format!("{name}() got an unexpected keyword argument '{key}'");
+    if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, params) {
+        message.push_str(&format!(". Did you mean '{hint}'?"));
+    }
+    Error::new("TypeError", message)
+}
+
+pub(super) fn excess_positional_error(
     name: &str,
     allowed: usize,
     defaults: usize,
@@ -7631,14 +7640,7 @@ impl Context {
                             .chain(&kwonly)
                             .map(String::as_str)
                             .collect();
-                        let mut message =
-                            format!("{name}() got an unexpected keyword argument '{n}'");
-                        if let Some(hint) =
-                            crate::objects::exceptions::keyword_suggestion(&n, &candidates)
-                        {
-                            message.push_str(&format!(". Did you mean '{hint}'?"));
-                        }
-                        return Err(Error::new("TypeError", message));
+                        return Err(unexpected_keyword_error(&name, &n, &candidates));
                     }
                 }
                 if let Some(n) = sig["kwargs"].as_str() {

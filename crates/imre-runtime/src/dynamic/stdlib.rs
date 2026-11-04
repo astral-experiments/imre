@@ -191,44 +191,67 @@ fn string_argument_message(
     crate::objects::Codec::Utf8 { signature: false }.decode(&message, None)
 }
 
-/// Bind the one positional-or-keyword parameter of a Python function.
-pub(super) fn single_argument(
+/// Bind a native implementation of a Python function. Keyword errors take
+/// precedence over excess positional arguments, even when both apply.
+fn python_arguments<'a, const N: usize>(
     name: &str,
-    param: &str,
-    args: &[Id],
+    params: [&str; N],
+    positional: usize,
+    defaults: usize,
+    args: impl IntoIterator<Item = &'a Id>,
     kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let mut value = args.first().copied();
-    for (key, arg) in kwargs {
-        if key != param {
-            let mut message = format!("{name}() got an unexpected keyword argument '{key}'");
-            if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &[param]) {
-                message.push_str(&format!(". Did you mean '{hint}'?"));
-            }
-            return Err(Error::new("TypeError", message));
-        }
-        if value.replace(*arg).is_some() {
+) -> Result<[Option<Id>; N]> {
+    let mut args = args.into_iter().copied();
+    let mut values = [None; N];
+    for (slot, value) in values[..positional].iter_mut().zip(&mut args) {
+        *slot = Some(value);
+    }
+    for (key, value) in kwargs {
+        let Some(index) = params.iter().position(|&param| param == key) else {
+            return Err(super::calls::unexpected_keyword_error(name, key, &params));
+        };
+        if values[index].replace(*value).is_some() {
             return Err(Error::new(
                 "TypeError",
-                format!("{name}() got multiple values for argument '{param}'"),
+                format!("{name}() got multiple values for argument '{key}'"),
             ));
         }
     }
-    if args.len() > 1 {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "{name}() takes 1 positional argument but {} were given",
-                args.len()
-            ),
+    let extra = args.count();
+    if extra != 0 {
+        let keywords = values[positional..].iter().flatten().count();
+        return Err(super::calls::excess_positional_error(
+            name,
+            positional,
+            defaults,
+            positional + extra,
+            keywords,
         ));
     }
-    value.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!("{name}() missing 1 required positional argument: '{param}'"),
-        )
-    })
+    let required = positional - defaults;
+    if values[..required].contains(&None) {
+        let missing: Vec<_> = params[..required]
+            .iter()
+            .zip(values)
+            .filter_map(|(&param, value)| value.is_none().then_some(param))
+            .collect();
+        return Err(super::calls::missing_arguments_error(
+            name,
+            "positional",
+            &missing,
+        ));
+    }
+    Ok(values)
+}
+
+/// Bind a Python function whose parameters are all required and positional-or-keyword.
+fn required_arguments<'a, const N: usize>(
+    name: &str,
+    params: [&str; N],
+    args: impl IntoIterator<Item = &'a Id>,
+    kwargs: &[(String, Id)],
+) -> Result<[Id; N]> {
+    Ok(python_arguments(name, params, N, 0, args, kwargs)?.map(Option::unwrap))
 }
 
 fn option(args: &[Id], index: usize, kwargs: &[(String, Id)], name: &str) -> Result<Option<Id>> {
@@ -1175,15 +1198,15 @@ pub(super) fn call(
         return traceback::format_result(ctx, *kind, *value, *tb, *locals);
     }
     if name == "traceback._frame_locals" {
-        let frame = single_argument("_frame_locals", "frame", args, kwargs)?;
+        let [frame] = required_arguments("_frame_locals", ["frame"], args, kwargs)?;
         return traceback::frame_locals(ctx, frame);
     }
     if name == "traceback._tb_position" {
-        let tb = single_argument("_tb_position", "tb", args, kwargs)?;
+        let [tb] = required_arguments("_tb_position", ["tb"], args, kwargs)?;
         return Ok(traceback::tb_position(ctx, tb));
     }
     if name == "traceback.clear_frames" {
-        let tb = single_argument("clear_frames", "tb", args, kwargs)?;
+        let [tb] = required_arguments("clear_frames", ["tb"], args, kwargs)?;
         return traceback::clear_frames(ctx, tb);
     }
     if let Some(method) = name.strip_prefix("collections.defaultdict.")
@@ -2072,7 +2095,7 @@ pub(super) fn call(
     }
     if name == "types._coroutine_flags" {
         use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
-        let code = single_argument("_coroutine_flags", "code", args, kwargs)?;
+        let [code] = required_arguments("_coroutine_flags", ["code"], args, kwargs)?;
         if let Value::Code(code) = ctx.heap.get(code) {
             // Source functions track execution kind and the iterable-coroutine
             // bit even when their full public co_flags value is unavailable.
@@ -2585,7 +2608,7 @@ pub(super) fn call(
         let generation = if args.is_empty() && kwargs.is_empty() {
             2
         } else {
-            let value = single_argument("collect", "generation", args, kwargs)?;
+            let [value] = required_arguments("collect", ["generation"], args, kwargs)?;
             let generation = ctx
                 .index_integer(value)?
                 .to_i64()
@@ -2889,7 +2912,7 @@ pub(super) fn call(
         }
         "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
         _ if urlsafe => {
-            let id = single_argument(name.trim_start_matches("base64."), "s", args, kwargs)?;
+            let [id] = required_arguments(name.trim_start_matches("base64."), ["s"], args, kwargs)?;
             let decode = name == "base64.urlsafe_b64decode";
             let (id, urlsafe) = if decode
                 && matches!(ctx.heap.get(id), Value::Instance { .. })
