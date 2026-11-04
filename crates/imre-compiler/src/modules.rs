@@ -370,6 +370,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/cp437.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
+        "encodings.iso8859_15" => Some((
+            "encodings/iso8859_15.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
         "encodings.koi8_u" => Some((
             "encodings/koi8_u.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),

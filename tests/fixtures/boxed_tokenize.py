@@ -21,3 +21,10 @@ def current():
         assert str(error) == "unknown encoding: no-such-encoding"
     else:
         raise AssertionError("invalid encoding cookie was accepted")
+
+    cookie = b"# coding: iso-8859-15\n"
+    source = BytesIO(cookie + b"\xa4\n")
+    encoding, consumed = tokenize.detect_encoding(source.readline)
+    assert (encoding, consumed) == ("iso-8859-15", [cookie])
+    assert source.readline().decode(encoding) == "€\n"
+    assert "€".encode(encoding) == b"\xa4"
