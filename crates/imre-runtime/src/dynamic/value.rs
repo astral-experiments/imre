@@ -877,6 +877,8 @@ pub(super) struct ClassNamespace {
     pub layout_descriptors_cleared: bool,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
+    /// Private closure cell shared by a runtime-source class and its annotation provider.
+    pub conditional_cell: Option<Id>,
     /// The field dictionary (NONE if unbound) and executed offsets while the class body runs.
     pub annotation_scratch: Option<(Id, HashSet<u32>)>,
     /// Class annotation attributes are served by the installed provider.
@@ -1868,6 +1870,7 @@ impl Value {
                     visit.extend(class.supplied_bases);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_dict_cell);
+                    visit.extend(class.conditional_cell);
                     if let Some((fields, _)) = &class.annotation_scratch {
                         visit.push(*fields);
                     }

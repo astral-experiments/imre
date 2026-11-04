@@ -1450,13 +1450,12 @@ impl Context {
     /// A method captures __class__ from its class and other names from the enclosing function.
     pub(super) fn method_freevars<'a>(
         &self,
-        scope: Id,
+        enclosing: Option<Id>,
         reads: impl Iterator<Item = &'a str>,
         captures_class: bool,
     ) -> Option<Vec<String>> {
-        let enclosing = self.scope_data(scope).parent?;
         let mut freevars =
-            self.enclosing_freevars(enclosing, reads.filter(|&name| name != "__class__"))?;
+            self.enclosing_freevars(enclosing?, reads.filter(|&name| name != "__class__"))?;
         if captures_class {
             freevars.push("__class__".to_owned());
             freevars.sort();
@@ -1554,7 +1553,7 @@ impl Context {
         let freevars = if metadata["scope_complete"] != true {
             None
         } else if let Some(captures_class) = metadata["method_class_cell"].as_bool() {
-            self.method_freevars(scope, reads, captures_class)
+            self.method_freevars(self.scope_data(scope).parent, reads, captures_class)
         } else if metadata["class_cell"] == true {
             None
         } else {
