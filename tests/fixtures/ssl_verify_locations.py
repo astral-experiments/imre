@@ -47,3 +47,19 @@ class LoadAuthority:
 
 
 assert partial.get_ca_certs(LoadAuthority()) == [ca_der]
+
+factory = ssl._create_unverified_context
+assert ssl._create_stdlib_context is factory
+unverified = factory()
+assert unverified.protocol == ssl.PROTOCOL_TLS_CLIENT
+assert not unverified.check_hostname and unverified.verify_mode == ssl.CERT_NONE
+verified = factory(cert_reqs=ssl.CERT_REQUIRED, check_hostname=True, cafile=cafile)
+assert verified.check_hostname and verified.verify_mode == ssl.CERT_REQUIRED
+assert verified.get_ca_certs(binary_form=True) == [ca_der]
+assert factory(purpose=ssl.Purpose.CLIENT_AUTH).protocol == ssl.PROTOCOL_TLS_SERVER
+try:
+    factory(cert_reqs=ssl.CERT_NONE, check_hostname=True)
+except ValueError:
+    pass
+else:
+    raise AssertionError("accepted CERT_NONE with hostname checking")
