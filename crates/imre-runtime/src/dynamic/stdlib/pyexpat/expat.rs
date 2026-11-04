@@ -10,6 +10,27 @@ type Start = unsafe extern "C" fn(Raw, Name, *const Name);
 type OneName = unsafe extern "C" fn(Raw, Name);
 type TwoNames = unsafe extern "C" fn(Raw, Name, Name);
 type Text = unsafe extern "C" fn(Raw, Name, c_int);
+type UnknownEncoding = unsafe extern "C" fn(Raw, Name, *mut Encoding) -> c_int;
+
+/// The XML_Encoding layout from expat.h. A single-byte map has no owned data.
+#[repr(C)]
+pub(super) struct Encoding {
+    map: [c_int; 256],
+    data: Raw,
+    convert: Option<unsafe extern "C" fn(Raw, Name) -> c_int>,
+    release: Option<unsafe extern "C" fn(Raw)>,
+}
+
+impl Encoding {
+    pub(super) fn single_byte(points: &[u32; 256]) -> Self {
+        Self {
+            map: points.map(|c| if c == 0xfffd { -1 } else { c as c_int }),
+            data: ptr::null_mut(),
+            convert: None,
+            release: None,
+        }
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Handlers {
@@ -76,6 +97,7 @@ functions! {
     parse = c"XML_Parse": fn(Raw, Name, c_int, c_int) -> c_int;
     stop = c"XML_StopParser": fn(Raw, u8) -> c_int;
     set_encoding = c"XML_SetEncoding": fn(Raw, Name) -> c_int;
+    unknown_encoding = c"XML_SetUnknownEncodingHandler": fn(Raw, Option<UnknownEncoding>, Raw);
     user_data = c"XML_SetUserData": fn(Raw, Raw);
     elements = c"XML_SetElementHandler": fn(Raw, Option<Start>, Option<OneName>);
     namespaces = c"XML_SetNamespaceDeclHandler": fn(Raw, Option<TwoNames>, Option<OneName>);
@@ -232,6 +254,7 @@ impl Parser {
         final_chunk: bool,
         user: Raw,
         handlers: &Handlers,
+        unknown_encoding: UnknownEncoding,
     ) -> Result<(), ParseError> {
         if self.parsing.replace(true) {
             return Err(ParseError {
@@ -245,6 +268,7 @@ impl Parser {
         // remains valid until XML_Parse returns and is cleared afterwards.
         let status = unsafe {
             (self.api.user_data)(p, user);
+            (self.api.unknown_encoding)(p, Some(unknown_encoding), user);
             self.set_handlers(handlers);
             // Bound each C int length, matching CPython's feed chunk size. Even
             // an empty final call goes through XML_Parse to validate end-of-input.
@@ -264,6 +288,7 @@ impl Parser {
                 }
                 input = &input[n..];
             };
+            (self.api.unknown_encoding)(p, None, ptr::null_mut());
             (self.api.user_data)(p, ptr::null_mut());
             status
         };
