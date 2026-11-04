@@ -216,11 +216,18 @@ def run(args, level, root, fixture_root):
         if default_fixture or module == "testmock.testpatch":
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
             compiler = lang
+            assertions = "imre"
             if module == "testmock.testpatch":
                 compiler = patch_compiler
+                if method == "test_dotted_but_module_not_loaded":
+                    # The original exercises the decorated call without an explicit assertion.
+                    operation = "unittest.mock.patch resolves a dotted target after removing its modules"
+                    assertions = "none"
                 (directory / "__init__.py").touch()
                 (directory / "test").symlink_to(fixture_root / "test", target_is_directory=True)
-            native_defaults[case_id, 1] = NativeDefaultMethod(compiler, directory, path, blob, ("imre", operation))
+            native_defaults[case_id, 1] = NativeDefaultMethod(
+                compiler, directory, path, blob, ("imre", operation), assertions=assertions
+            )
             if module == "test_loader" and method in LOADER_BLOCKERS:
                 diagnostic = f"Compiling <case>/case.py (-O{level})\n<case>/case.py:{LOADER_BLOCKERS[method]}"
                 expected_loader_blocks[case_id, 1] = diagnostic, {
