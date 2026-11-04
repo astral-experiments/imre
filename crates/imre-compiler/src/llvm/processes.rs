@@ -38,10 +38,7 @@ impl Emitter<'_, '_> {
         }
         let (params, result) = self.module.types.signature(copy.value.ty).unwrap();
         let target = self.instruction(format!("load ptr, ptr {}", copy.value.operand));
-        let slot = self.instruction(format!(
-            "getelementptr %callable, ptr {}, i32 0, i32 1",
-            copy.value.operand
-        ));
+        let slot = self.callable_context_slot(&copy.value);
         let context = self.instruction(format!("load ptr, ptr {}", slot));
         let tagged = u32::from(matches!(params[0], Type::Union(_)))
             | (u32::from(matches!(params[1], Type::Union(_))) << 1);
@@ -810,10 +807,7 @@ impl Emitter<'_, '_> {
                     let (_, ret) = self.module.types.signature(ignore.value.ty).unwrap();
                     let target =
                         self.instruction(format!("load ptr, ptr {}", ignore.value.operand));
-                    let slot = self.instruction(format!(
-                        "getelementptr %callable, ptr {}, i32 0, i32 1",
-                        ignore.value.operand
-                    ));
+                    let slot = self.callable_context_slot(&ignore.value);
                     let context = self.instruction(format!("load ptr, ptr {slot}"));
                     (
                         target,

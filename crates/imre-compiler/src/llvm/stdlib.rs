@@ -20,10 +20,7 @@ impl Emitter<'_, '_> {
                 // Resource parameters take an owner, as in transfer_call_operands.
                 let abi = abi | (u32::from(self.resource_types.contains(&element)) << 8);
                 let target = self.instruction(format!("load ptr, ptr {}", callable.operand));
-                let context = self.instruction(format!(
-                    "getelementptr %callable, ptr {}, i32 0, i32 1",
-                    callable.operand
-                ));
+                let context = self.callable_context_slot(callable);
                 let context = self.instruction(format!("load ptr, ptr {context}"));
                 let reverse = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 self.checked_line(format!("call void @imre_sort_by_comparator(ptr {}, i32 {}, ptr {target}, ptr {context}, i32 {abi}, i32 {}, i32 {reverse})",
