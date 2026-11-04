@@ -602,12 +602,15 @@ impl Input {
             word.wrapping_sub(0x0101_0101_0101_0101) & !word & 0x8080_8080_8080_8080
         }
         let (chunks, _) = window.as_chunks::<8>();
-        let end = chunks.iter().enumerate().find_map(|(i, chunk)| {
+        for (i, chunk) in chunks.iter().enumerate() {
             let matches = newline(chunk);
-            (matches != 0).then(|| 8 * i + (matches.trailing_zeros() / 8) as usize + 1)
-        })?;
-        self.text.pos += end;
-        Some((end, window))
+            if matches != 0 {
+                let end = i * 8 + matches.trailing_zeros() as usize / 8 + 1;
+                self.text.pos += end;
+                return Some((end, window));
+            }
+        }
+        None
     }
 
     pub(super) fn text_line(&mut self) -> Result<Str> {
