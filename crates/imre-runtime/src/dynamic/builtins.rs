@@ -686,9 +686,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             iter.class_name()
         }
         Value::Iterator {
-            kind: "list_iterator",
+            kind: kind @ ("list_iterator" | "tuple_iterator"),
             ..
-        } if matches!(attr, "__iter__" | "__next__") => "list_iterator",
+        } if matches!(attr, "__iter__" | "__next__") => kind,
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
@@ -832,7 +832,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Tuple(_) | Value::NamedTuple { .. }
             if matches!(
                 attr,
-                "__getitem__" | "__getnewargs__" | "__len__" | "count" | "index"
+                "__getitem__" | "__getnewargs__" | "__iter__" | "__len__" | "count" | "index"
             ) =>
         {
             "tuple"
@@ -2212,7 +2212,7 @@ pub(super) fn call(
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "list_iterator" | "map" | "filter" | "enumerate" => {
+            "list_iterator" | "tuple_iterator" | "map" | "filter" | "enumerate" => {
                 ctx.iterator_method(owner, method, args, kwargs)
             }
             "property" => super::property::method(ctx, method, args, kwargs),

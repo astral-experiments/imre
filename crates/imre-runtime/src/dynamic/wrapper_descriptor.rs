@@ -128,6 +128,9 @@ impl BuiltinDescriptor {
             Some(("list_iterator", attr)) => {
                 Some(("list_iterator", attr, &["__iter__", "__next__"][..]))
             }
+            Some(("tuple_iterator", attr)) => {
+                Some(("tuple_iterator", attr, &["__iter__", "__next__"][..]))
+            }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
             Some(("memory_iterator", attr)) => {
                 Some(("memory_iterator", attr, &["__iter__", "__next__"][..]))
@@ -332,6 +335,7 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
             "tuple.__getnewargs__" => ("tuple", "__getnewargs__"),
+            "tuple.__iter__" => ("tuple", "__iter__"),
             "tuple.__len__" => ("tuple", "__len__"),
             "array.array.__getitem__" => ("array.array", "__getitem__"),
             "array.array.__setitem__" => ("array.array", "__setitem__"),
@@ -435,6 +439,7 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "list_iterator"
+            | "tuple_iterator"
             | "memory_iterator"
             | "generator"
             | "async_generator"

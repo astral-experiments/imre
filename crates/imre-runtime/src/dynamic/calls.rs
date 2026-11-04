@@ -4600,8 +4600,10 @@ impl Context {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "list_iterator" | "enumerate")
-                    && matches!(name, "__iter__" | "__next__") =>
+                if matches!(
+                    class.as_str(),
+                    "list_iterator" | "tuple_iterator" | "enumerate"
+                ) && matches!(name, "__iter__" | "__next__") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
@@ -7137,6 +7139,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "list_iterator"
+                                | "tuple_iterator"
                                 | "map"
                                 | "filter"
                                 | "mappingproxy"
