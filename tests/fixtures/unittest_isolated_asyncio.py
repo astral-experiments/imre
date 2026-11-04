@@ -38,6 +38,27 @@ class Case(IsolatedAsyncioTestCase):
         self.assertEqual(state.get(), "async setup")
         self.loop = asyncio.get_running_loop()
         await asyncio.sleep(0)
+
+        from unittest.mock import AsyncMock, call
+
+        order = []
+
+        async def double(value):
+            order.append(value)
+            return 2 * value
+
+        mock = AsyncMock(side_effect=double)
+        first = mock(1)
+        second = mock(2)
+        self.assertEqual(mock.call_args_list, [call(1), call(2)])
+        mock.assert_not_awaited()
+        self.assertEqual(order, [])
+        second_result = await second
+        first_result = await first
+        self.assertEqual((second_result, first_result), (4, 2))
+        self.assertEqual(order, [2, 1])
+        self.assertEqual(mock.await_args_list, [call(2), call(1)])
+
         state.set("test")
 
     async def asyncTearDown(self):

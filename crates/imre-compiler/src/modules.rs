@@ -2740,6 +2740,7 @@ pub(crate) fn boxed_mock_export(name: &str) -> bool {
             | "DEFAULT"
             | "ANY"
             | "MagicMock"
+            | "AsyncMock"
             | "CallableMixin"
             | "NonCallableMock"
             | "NonCallableMagicMock"
