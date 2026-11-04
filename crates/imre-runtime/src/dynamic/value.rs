@@ -2668,7 +2668,8 @@ pub(super) struct Heap {
     pub(super) gc_settings: Arc<GcSettings>,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
-    weak_roots: weak_roots::WeakRoots,
+    weak_roots: weak_roots::RootPaths,
+    finalizer_roots: weak_roots::RootPaths,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
     // Detached workers compare against the original stderr without keeping it alive.
@@ -2895,7 +2896,8 @@ impl Heap {
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
-            weak_roots: weak_roots::WeakRoots::default(),
+            weak_roots: Default::default(),
+            finalizer_roots: Default::default(),
             borrowed_hooks: Vec::new(),
             default_stderr: None,
             has_weak_values: false,
@@ -4241,7 +4243,8 @@ impl Heap {
     }
 
     pub(super) fn acyclic_finalizer(
-        &self,
+        &mut self,
+        globals: [Id; 2],
         roots: impl Iterator<Item = Id>,
         stdin: Option<&[Id; 3]>,
     ) -> Result<Option<Id>> {
@@ -4285,6 +4288,13 @@ impl Heap {
                     .clone()
                     .all(|id| matches!(self.get(id), Value::Generator { .. })))
             && owners.all(|id| self.frame_keeps_instance_owner(id))
+        {
+            return Ok(None);
+        }
+        if remaining > 1
+            && (self.cached_finalizers_kept(globals, stdin, false)
+                || (self.learn_finalizer_paths(globals, stdin)
+                    && self.cached_finalizers_kept(globals, stdin, false)))
         {
             return Ok(None);
         }
@@ -4402,7 +4412,7 @@ impl Heap {
 
     /// Both the weak reference and its target must keep a strong path from a surviving root.
     pub(super) fn weak_values_kept_by(&self, modules: Id, reference: Id) -> bool {
-        if self.weak_roots.keeps_all(self, [modules, reference]) {
+        if self.cached_weak_roots([modules, reference]) {
             return true;
         }
         if self.weak.len() != 1 {
@@ -5494,7 +5504,10 @@ mod tests {
 
         // Only one distinct pending owner is proven by this chain.
         let chain = [input, buffer, input];
-        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
+        let mut check = |roots| {
+            heap.acyclic_finalizer([NONE; 2], roots, Some(&chain))
+                .unwrap()
+        };
         assert_eq!(check(vec![input].into_iter()), Some(dead));
         assert_eq!(check(vec![input, dead].into_iter()), None);
         assert_eq!(check(vec![input].into_iter()), Some(dead));

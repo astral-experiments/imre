@@ -1,16 +1,29 @@
 use super::{Heap, Id, Value};
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use std::collections::HashSet;
 
-const MAX_ENDPOINTS: usize = 16;
-const MAX_DEPTH: usize = 12;
+// Retain the small weak-only search when no finalizer paths have been learned.
+const MAX_WEAK_ENDPOINTS: usize = 16;
 const MAX_NODES: usize = 8192;
 const MAX_EDGES: usize = 65536;
+const SEARCH_BACKOFF: u8 = 63;
+
+#[derive(Clone, Copy)]
+enum Root {
+    Global(usize),
+    Frame(usize),
+}
+
+#[derive(Clone, Copy)]
+enum Origin {
+    Root(Root),
+    Edge { parent: usize, slot: usize },
+}
 
 #[derive(Default)]
-pub(super) struct WeakRoots {
-    roots: [Id; 2],
-    endpoints: Vec<Id>,
+pub(super) struct RootPaths {
+    anchors: Vec<(Root, Id)>,
+    nodes: HashSet<Id>,
     edges: Vec<(Id, usize, Id)>,
     retry: u8,
 }
@@ -81,109 +94,281 @@ impl<'a> Links<'a> {
     }
 }
 
-impl WeakRoots {
-    /// Recheck parents before children so a removed link also protects against reused heap slots.
-    pub(super) fn keeps_all(&self, heap: &Heap, roots: [Id; 2]) -> bool {
-        self.roots == roots
-            && !self.endpoints.is_empty()
-            && heap.weak.len() <= MAX_ENDPOINTS
-            && heap.weak.iter().all(|(target, refs)| {
-                self.endpoints.contains(target)
-                    && refs.len() <= MAX_ENDPOINTS
-                    && refs.iter().all(|id| self.endpoints.contains(id))
+impl RootPaths {
+    /// Check roots before edges, and parents before children, so a stale slot is never dereferenced.
+    fn valid(&self, heap: &Heap, globals: [Id; 2]) -> bool {
+        !self.nodes.is_empty()
+            && self.anchors.iter().all(|&(origin, root)| match origin {
+                Root::Frame(index) => heap
+                    .frames
+                    .get(index)
+                    .is_some_and(|frame| frame.scope == root),
+                Root::Global(index) => globals[index] == root,
             })
             && self.edges.iter().all(|&(parent, slot, child)| {
                 Links::from(heap.get(parent)).get(slot) == Some(child)
             })
     }
 
-    fn discover(heap: &Heap, roots: [Id; 2]) -> Option<Self> {
-        let mut endpoints = Vec::new();
-        endpoints.try_reserve_exact(MAX_ENDPOINTS).ok()?;
-        for (&target, refs) in &heap.weak {
-            if refs.len() >= MAX_ENDPOINTS - endpoints.len() {
-                return None;
-            }
-            endpoints.push(target);
-            endpoints.extend_from_slice(refs);
+    fn discover(
+        heap: &Heap,
+        globals: [Id; 2],
+        endpoints: impl Iterator<Item = Id>,
+        from_frames: bool,
+    ) -> Option<Self> {
+        let mut edges_left = MAX_EDGES;
+        let mut nodes_left = heap.slots.len().min(MAX_NODES);
+        let mut wanted = HashSet::new();
+        for id in endpoints {
+            edges_left = edges_left.checked_sub(1)?;
+            wanted.try_reserve(1).ok()?;
+            wanted.insert(id);
         }
-        let limit = heap.slots.len().min(MAX_NODES);
-        let mut parents = HashMap::new();
-        let mut queue = Vec::new();
-        parents.try_reserve(limit).ok()?;
-        queue.try_reserve_exact(limit).ok()?;
-        for root in roots {
-            if parents.insert(root, (root, 0)).is_none() {
-                queue.push(root);
+        let mut paths = Self::default();
+        if from_frames && !wanted.is_empty() {
+            let roots = heap
+                .frames
+                .iter()
+                .enumerate()
+                .rev()
+                .map(|(i, frame)| (frame.scope, Root::Frame(i)));
+            paths.search(
+                heap,
+                roots,
+                &mut wanted,
+                &mut nodes_left,
+                &mut edges_left,
+                false,
+            )?;
+        }
+        if !wanted.is_empty() && nodes_left != 0 && edges_left != 0 {
+            let roots = globals
+                .into_iter()
+                .enumerate()
+                .map(|(i, id)| (id, Root::Global(i)));
+            paths.search(
+                heap,
+                roots,
+                &mut wanted,
+                &mut nodes_left,
+                &mut edges_left,
+                true,
+            )?;
+        }
+        Some(paths)
+    }
+
+    /// The insertion-ordered tree is also the BFS queue. Propagate required endpoints to
+    /// their ancestors in one reverse pass, then emit the surviving edges parent-first.
+    fn search(
+        &mut self,
+        heap: &Heap,
+        roots: impl Iterator<Item = (Id, Root)>,
+        wanted: &mut HashSet<Id>,
+        nodes_left: &mut usize,
+        edges_left: &mut usize,
+        follow_modules: bool,
+    ) -> Option<()> {
+        let mut tree = IndexMap::<Id, (Origin, bool)>::new();
+        for (root, origin) in roots {
+            if *edges_left == 0 || *nodes_left == 0 {
+                break;
+            }
+            *edges_left -= 1;
+            if !tree.contains_key(&root) {
+                *nodes_left -= 1;
+                tree.try_reserve(1).ok()?;
+                tree.insert(root, (Origin::Root(origin), wanted.remove(&root)));
             }
         }
         let mut front = 0;
-        let mut budget = MAX_EDGES;
-        while !endpoints.iter().all(|id| parents.contains_key(id)) {
-            let parent = *queue.get(front)?;
+        // An unrepresented owner can consume the search budget. Keep the paths already
+        // found; the caller must still account for every current owner before skipping a trace.
+        'search: while !wanted.is_empty()
+            && front < tree.len()
+            && *edges_left != 0
+            && *nodes_left != 0
+        {
+            let (&parent, _) = tree.get_index(front)?;
+            let index = front;
             front += 1;
-            let links = Links::from(heap.get(parent));
-            budget = budget.checked_sub(links.len())?;
-            for slot in 0..links.len() {
-                if let Some(child) = links.get(slot)
-                    && (!heap.scalar_leaves[child as usize] || endpoints.contains(&child))
-                    && let std::collections::hash_map::Entry::Vacant(entry) = parents.entry(child)
-                {
-                    if queue.len() >= limit {
-                        return None;
-                    }
-                    entry.insert((parent, slot));
-                    queue.push(child);
+            let value = heap.get(parent);
+            if !follow_modules && matches!(value, Value::Module { .. }) {
+                continue;
+            }
+            let links = Links::from(value);
+            for slot in 0..links.len().min(*edges_left) {
+                *edges_left -= 1;
+                let Some(child) = links.get(slot) else {
+                    continue;
+                };
+                if tree.contains_key(&child) {
+                    continue;
+                }
+                if *nodes_left == 0 {
+                    break 'search;
+                }
+                let found = wanted.remove(&child);
+                if !found && heap.scalar_leaves[child as usize] {
+                    continue;
+                }
+                *nodes_left -= 1;
+                tree.try_reserve(1).ok()?;
+                tree.insert(
+                    child,
+                    (
+                        Origin::Edge {
+                            parent: index,
+                            slot,
+                        },
+                        found,
+                    ),
+                );
+                if wanted.is_empty() {
+                    break;
                 }
             }
         }
+        for index in (0..tree.len()).rev() {
+            if let (_, &(Origin::Edge { parent, .. }, true)) = tree.get_index(index)? {
+                let (_, (_, needed)) = tree.get_index_mut(parent)?;
+                *needed = true;
+            }
+        }
+        for (&id, &(origin, keep)) in &tree {
+            if !keep || self.nodes.contains(&id) {
+                continue;
+            }
+            self.nodes.try_reserve(1).ok()?;
+            self.nodes.insert(id);
+            match origin {
+                Origin::Edge { parent, slot } => {
+                    let (&parent, _) = tree.get_index(parent)?;
+                    self.edges.try_reserve(1).ok()?;
+                    self.edges.push((parent, slot, id));
+                }
+                Origin::Root(root) => {
+                    self.anchors.try_reserve(1).ok()?;
+                    self.anchors.push((root, id));
+                }
+            }
+        }
+        Some(())
+    }
 
-        let mut edges = Vec::new();
-        edges.try_reserve_exact(endpoints.len() * MAX_DEPTH).ok()?;
-        for &endpoint in &endpoints {
-            let mut child = endpoint;
-            let mut path = smallvec::SmallVec::<[_; MAX_DEPTH]>::new();
-            while !roots.contains(&child) {
-                if path.len() == MAX_DEPTH {
-                    return None;
-                }
-                let &(parent, slot) = parents.get(&child)?;
-                path.push((parent, slot, child));
-                child = parent;
-            }
-            for edge in path.into_iter().rev() {
-                if !edges.contains(&edge) {
-                    edges.push(edge);
-                }
-            }
+    fn search_due(&mut self) -> bool {
+        if self.retry > 0 {
+            self.retry -= 1;
+            return false;
         }
-        Some(Self {
-            roots,
-            endpoints,
-            edges,
-            retry: 0,
-        })
+        self.retry = SEARCH_BACKOFF;
+        true
     }
 }
 
 impl Heap {
-    /// Learn bounded ownership paths after a prompt collection, when weak callbacks have settled.
+    pub(super) fn cached_weak_roots(&self, globals: [Id; 2]) -> bool {
+        self.weak_roots.valid(self, globals)
+            && self.weak.iter().all(|(target, refs)| {
+                self.weak_roots.nodes.contains(target)
+                    && refs.iter().all(|id| self.weak_roots.nodes.contains(id))
+            })
+    }
+
     pub(in crate::dynamic) fn learn_weak_roots(&mut self, modules: Id, reference: Id) {
-        if self.weak.is_empty()
-            || self.weak.len() > MAX_ENDPOINTS
-            || self.weak_values_kept_by(modules, reference)
+        let globals = [modules, reference];
+        if self.weak.is_empty() || self.weak_values_kept_by(modules, reference) {
+            return;
+        }
+        let from_frames = self.finalizer_roots.valid(self, globals);
+        let endpoints = self
+            .weak
+            .iter()
+            .flat_map(|(target, refs)| std::iter::once(*target).chain(refs.iter().copied()));
+        if !from_frames
+            && endpoints.clone().take(MAX_WEAK_ENDPOINTS + 1).count() > MAX_WEAK_ENDPOINTS
         {
             return;
         }
-        if self.weak_roots.retry > 0 {
-            self.weak_roots.retry -= 1;
-            return;
+        if self.weak_roots.search_due()
+            && let Some(paths) = RootPaths::discover(self, globals, endpoints, from_frames)
+        {
+            self.weak_roots = RootPaths {
+                retry: SEARCH_BACKOFF,
+                ..paths
+            };
         }
-        self.weak_roots = WeakRoots::discover(self, [modules, reference]).unwrap_or_default();
-        // Limit unsuccessful or repeatedly invalidated searches to one per 64 prompt collections.
-        self.weak_roots.retry = 63;
+    }
+
+    pub(in crate::dynamic) fn learn_finalizer_paths(
+        &mut self,
+        globals: [Id; 2],
+        stdin: Option<&[Id; 3]>,
+    ) -> bool {
+        if !self.finalizer_roots.search_due() {
+            return false;
+        }
+        let endpoints = self
+            .ordinary_finalizers
+            .iter()
+            .chain(&self.file_writers)
+            .copied()
+            .filter(|id| {
+                !stdin.is_some_and(|input| input.contains(id))
+                    && !self.operand_keeps_finalizer(*id, true)
+            });
+        let Some(paths) = RootPaths::discover(self, globals, endpoints, true) else {
+            return false;
+        };
+        self.finalizer_roots = RootPaths {
+            retry: SEARCH_BACKOFF,
+            ..paths
+        };
+        self.learn_weak_roots(globals[0], globals[1]);
+        !self.finalizer_roots.nodes.is_empty()
+    }
+
+    fn operand_keeps_finalizer(&self, owner: Id, before_discard: bool) -> bool {
+        self.frames
+            .iter()
+            .rev()
+            .skip(usize::from(before_discard))
+            .take(24)
+            .any(|frame| {
+                frame
+                    .live
+                    .iter()
+                    .take(8)
+                    .any(|root| self.short_path_keeps_owner(*root, owner))
+            })
+    }
+
+    /// Scopes and globals survive dropping the current frame's temporaries. During the
+    /// acyclic-finalizer check the current frame's published operands are also roots.
+    pub(in crate::dynamic) fn cached_finalizers_kept(
+        &self,
+        globals: [Id; 2],
+        stdin: Option<&[Id; 3]>,
+        before_discard: bool,
+    ) -> bool {
+        if !self.finalizer_roots.valid(self, globals) {
+            return false;
+        }
+        let kept = |owner: &Id| {
+            self.finalizer_roots.nodes.contains(owner)
+                || stdin.is_some_and(|input| input.contains(owner))
+                || self.operand_keeps_finalizer(*owner, before_discard)
+                || self.bound_in_active_frame(*owner)
+        };
+        self.ordinary_finalizers.iter().all(&kept)
+            && (!before_discard
+                || (self.file_writers.iter().all(kept)
+                    && (!self.has_weak_values || self.weak_values_kept_by(globals[0], globals[1]))))
     }
 }
+
+#[cfg(test)]
+mod cohort_tests;
 
 #[cfg(test)]
 mod tests {
