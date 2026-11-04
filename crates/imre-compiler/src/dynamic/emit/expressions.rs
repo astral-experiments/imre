@@ -139,8 +139,7 @@ impl Function<'_, '_> {
                     Some(&self.source.private_names),
                 ) {
                     let receiver = self.expr(&field.value);
-                    let name = self.code_name(field.attr.as_str());
-                    self.op("method", &[&receiver, &name])
+                    self.named_op("method", &receiver, field.attr.as_str(), "0")
                 } else {
                     self.expr(&v.func)
                 };
@@ -409,8 +408,12 @@ impl Function<'_, '_> {
                 };
                 while let Some(key) = keywords.next_if(|key| key.arg.is_some()) {
                     let value = self.expr(&key.value);
-                    let name = self.code_name(key.arg.as_ref().unwrap().as_str());
-                    self.op("keyword", &[&group, &name, &value]);
+                    self.named_op(
+                        "keyword",
+                        &group,
+                        key.arg.as_ref().unwrap().as_str(),
+                        &value,
+                    );
                 }
                 if unpacked {
                     self.op("keywords", &[&kwargs, &group, callable]);

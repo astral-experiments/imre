@@ -34,6 +34,21 @@ declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
+// Keep repeated code-name loads and their error edge out of each caller.
+const NAMED_OP: &str = "\
+define internal i64 @imre_boxed_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value) noinline {
+entry:
+  %key = call i64 @imre_dyn_lit(ptr %ctx, i32 6, ptr %name, i64 %len)
+  %failed = call i1 @imre_dyn_failed(ptr %ctx)
+  br i1 %failed, label %error, label %apply
+error:
+  ret i64 0
+apply:
+  %result = tail call i64 @imre_dyn_op_at(ptr %ctx, ptr %op, i64 %receiver, i64 %key, i64 %value, ptr null)
+  ret i64 %result
+}
+";
+
 /// All module source has already been resolved. Import execution remains conditional.
 pub(crate) fn emit(
     modules: &[(String, PathBuf, String)],
@@ -314,6 +329,7 @@ enum StringConstant {
 struct Output {
     keep_docstrings: bool,
     declared_statement_line: bool,
+    emitted_named_op: bool,
     string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -651,6 +667,21 @@ impl Function<'_, '_> {
         self.lit(0, n.to_string().as_bytes())
     }
 
+    /// Load a code name and use it as the second operand of a boxed operation.
+    fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
+        if !self.output.emitted_named_op {
+            self.output.functions.push_str(NAMED_OP);
+            self.output.emitted_named_op = true;
+        }
+        self.output.interned_identifiers.insert(name.to_owned());
+        let opcode = self.output.data(op.as_bytes());
+        let data = self.output.data(name.as_bytes());
+        self.checked(&format!(
+            "call i64 @imre_boxed_named_op(ptr %ctx, ptr {opcode}, i64 {receiver}, ptr {data}, i64 {}, i64 {value})",
+            name.len()
+        ))
+    }
+
     fn lookup(&mut self, name: &str) -> String {
         let op = match &self.class_locals {
             Some(class) if self.annotation_lookup && class.globals.contains(name) => {
@@ -663,18 +694,15 @@ impl Function<'_, '_> {
             Some(class) if class.locals.contains(name) => "lookup_class_local",
             _ => "lookup",
         };
-        let name = self.code_name(name);
-        self.op(op, &[&self.scope.clone(), &name])
+        self.named_op(op, &self.scope.clone(), name, "0")
     }
 
     fn bind(&mut self, name: &str, value: &str) {
-        let name = self.code_name(name);
-        self.op("assign", &[&self.scope.clone(), &name, value]);
+        self.named_op("assign", &self.scope.clone(), name, value);
     }
 
     fn attr(&mut self, object: &str, name: &str) -> String {
-        let name = self.code_name(name);
-        self.op("attr", &[object, &name])
+        self.named_op("attr", object, name, "0")
     }
 
     fn truth(&mut self, value: &str) -> String {
