@@ -187,6 +187,7 @@ pub(crate) enum CalendarType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CalendarOp {
     MonthGrid,
+    InstanceMonthGrid,
     FirstWeekday,
     SetFirstWeekday,
     Date,

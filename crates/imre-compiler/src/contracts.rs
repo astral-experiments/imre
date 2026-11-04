@@ -104,6 +104,7 @@ impl Builtin {
                 matches!(
                     op,
                     crate::ir::CalendarOp::MonthGrid
+                        | crate::ir::CalendarOp::InstanceMonthGrid
                         | crate::ir::CalendarOp::SetFirstWeekday
                         | crate::ir::CalendarOp::Date
                         | crate::ir::CalendarOp::DateTime
@@ -1227,6 +1228,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_new"
                 | "imre_log_clock_new"
                 | "imre_calendar_datetime"
+                | "imre_calendar_instance_grid"
                 | "imre_calendar_month_grid"
                 | "imre_calendar_setfirstweekday"
                 | "imre_calendar_date"

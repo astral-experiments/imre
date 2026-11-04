@@ -39,7 +39,18 @@ pub unsafe extern "C" fn imre_calendar_setfirstweekday(value: usize) -> u8 {
     0
 }
 
-fn month_grid(year: &Int, month: &Int) -> exceptions::Result<*const Object> {
+/// Map arbitrary-size signed Python integers onto a positive Gregorian or weekday cycle.
+fn cycle_index(value: &Int, period: i32) -> i32 {
+    if let Some(value) = value.to_i64() {
+        return value.rem_euclid(i64::from(period)) as i32;
+    }
+    (value.big().as_ref() % period)
+        .to_i32()
+        .unwrap()
+        .rem_euclid(period)
+}
+
+fn month_grid(year: &Int, month: &Int, firstweekday: i32) -> exceptions::Result<*const Object> {
     let Some(month @ 1..=12) = month.to_i64() else {
         return Err(argument_error(
             exceptions::Kind::IllegalMonthError,
@@ -49,19 +60,10 @@ fn month_grid(year: &Int, month: &Int) -> exceptions::Result<*const Object> {
     };
     // Each Gregorian cycle has 146097 days, a whole number of weeks. Reduce
     // even unbounded Python years before entering the ordinary date arithmetic.
-    let cycle_year = year.to_i64().map_or_else(
-        || {
-            (year.big().as_ref() % 400_i32)
-                .to_i32()
-                .unwrap()
-                .rem_euclid(400)
-        },
-        |year| year.rem_euclid(400) as i32,
-    );
-    let year = 2000 + cycle_year;
+    let year = 2000 + cycle_index(year, 400);
     let month = month as i32;
     let first = ((ordinal(year, month, 1) - 1) % 7) as i32;
-    let offset = (first - i32::from(FIRST_WEEKDAY.load(Ordering::Relaxed))).rem_euclid(7);
+    let offset = (first - firstweekday).rem_euclid(7);
     let days = month_days(year, month);
     let mut rows = Words::new(4);
     rows.values
@@ -89,5 +91,34 @@ fn month_grid(year: &Int, month: &Int) -> exceptions::Result<*const Object> {
 pub unsafe extern "C" fn imre_calendar_month_grid(year: usize, month: usize) -> *const Object {
     // SAFETY: both inputs remain owned by the caller until the result is returned.
     let (year, month) = unsafe { (Int::borrow(year), Int::borrow(month)) };
-    finish(month_grid(&year, &month), std::ptr::null())
+    finish(
+        month_grid(
+            &year,
+            &month,
+            i32::from(FIRST_WEEKDAY.load(Ordering::Relaxed)),
+        ),
+        std::ptr::null(),
+    )
+}
+
+/// # Safety
+/// The checked caller roots all three exact integer arguments.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_instance_grid(
+    year: usize,
+    month: usize,
+    firstweekday: usize,
+) -> *const Object {
+    // SAFETY: all inputs remain owned by the caller until the result is returned.
+    let (year, month, firstweekday) = unsafe {
+        (
+            Int::borrow(year),
+            Int::borrow(month),
+            Int::borrow(firstweekday),
+        )
+    };
+    finish(
+        month_grid(&year, &month, cycle_index(&firstweekday, 7)),
+        std::ptr::null(),
+    )
 }
