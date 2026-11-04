@@ -405,6 +405,8 @@ fn emit_program(
         uses_sequence_layout: false,
         tuple_literals: BTreeMap::new(),
         static_functions: BTreeSet::new(),
+        async_frames: BTreeMap::new(),
+        async_invoke_frames: BTreeMap::new(),
         function_link_types,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
@@ -568,7 +570,7 @@ fn emit_program(
         !emitter.function_link_types.is_empty(),
         emitter.output,
     );
-    asyncio::adapters(module, sanitize, &emitter.resource_types, emitter.output);
+    asyncio::adapters(&mut emitter);
     emitter.output.common().push_str(&integer_helpers());
     emitter
         .output
@@ -645,6 +647,8 @@ struct Emitter<'a, 'module> {
     uses_sequence_layout: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
+    async_frames: BTreeMap<usize, Type>,
+    async_invoke_frames: BTreeMap<usize, (Type, Type)>,
     function_link_types: HashSet<Type>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
