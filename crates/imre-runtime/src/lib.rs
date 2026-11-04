@@ -40,6 +40,7 @@ mod format_grammar;
 mod shared;
 #[cfg(unix)]
 mod signals;
+mod string_cursor;
 mod string_owner;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
@@ -1154,7 +1155,7 @@ pub unsafe extern "C" fn imre_print_str(value: *const Str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_len(value: *const Str) -> usize {
     // SAFETY: the caller roots this immutable string for the duration of the call.
-    Int::from_usize(unsafe { &*value }.chars().count()).into_raw()
+    Int::from_usize(string_cursor::length(unsafe { &*value })).into_raw()
 }
 
 /// Tests emptiness without counting Unicode code points.
