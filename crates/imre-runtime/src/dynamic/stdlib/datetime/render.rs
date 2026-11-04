@@ -223,27 +223,36 @@ pub(super) fn isoformat(
         let [y, m, d, h, min, s, us, _] = value.fields().map(|n| n as i64);
         (y, m, d, h, min, s, us)
     };
-    let clock = match spec {
-        "hours" => format!("{h:02}"),
-        "minutes" => format!("{h:02}:{min:02}"),
-        "seconds" => format!("{h:02}:{min:02}:{s:02}"),
-        "milliseconds" => format!("{h:02}:{min:02}:{s:02}.{:03}", us / 1000),
-        "auto" if us == 0 => format!("{h:02}:{min:02}:{s:02}"),
-        "microseconds" | "auto" => format!("{h:02}:{min:02}:{s:02}.{us:06}"),
+    use std::fmt::Write;
+
+    let mut text = String::with_capacity(32);
+    let scalar_separator = char::from_u32(separator);
+    if kind != "time" {
+        write!(text, "{y:04}-{m:02}-{d:02}").unwrap();
+        text.push(scalar_separator.unwrap_or('T'));
+    }
+    match spec {
+        "hours" => write!(text, "{h:02}"),
+        "minutes" => write!(text, "{h:02}:{min:02}"),
+        "seconds" => write!(text, "{h:02}:{min:02}:{s:02}"),
+        "milliseconds" => write!(text, "{h:02}:{min:02}:{s:02}.{:03}", us / 1000),
+        "auto" if us == 0 => write!(text, "{h:02}:{min:02}:{s:02}"),
+        "microseconds" | "auto" => write!(text, "{h:02}:{min:02}:{s:02}.{us:06}"),
         _ => return Err(Error::new("ValueError", "Unknown timespec value")),
-    };
+    }
+    .unwrap();
     let Value::Calendar { tzinfo, .. } = *ctx.heap.get(ctx.scalar_value(receiver)) else {
         unreachable!()
     };
     let arg = if kind == "time" { NONE } else { receiver };
-    let offset = offset_text(ctx, tzinfo, arg, true)?;
-    let mut points = Vec::new();
-    if kind != "time" {
-        points.extend(format!("{y:04}-{m:02}-{d:02}").bytes().map(u32::from));
-        points.push(separator);
+    text.push_str(&offset_text(ctx, tzinfo, arg, true)?);
+    if scalar_separator.is_none() {
+        // A lone surrogate occupies the single separator position after YYYY-MM-DD.
+        let mut points: Vec<_> = text.bytes().map(u32::from).collect();
+        points[10] = separator;
+        return Ok(ctx.text_codepoints(points));
     }
-    points.extend(clock.bytes().chain(offset.bytes()).map(u32::from));
-    Ok(ctx.text_codepoints(points))
+    Ok(ctx.text(text))
 }
 
 // Exact calendar values have no Python instance slots for the generic container renderer to call.
