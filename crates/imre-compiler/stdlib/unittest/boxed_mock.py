@@ -200,7 +200,7 @@ class NonCallableMock(_FixedMock):
         return object.__new__(type(cls.__name__, (cls,), {}))
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
-                 _new_parent=None, _new_name="", **attrs):
+                 parent=None, _new_parent=None, _new_name="", **attrs):
         methods = spec_set if spec_set is not None else spec
         if _is_instance_mock(methods):
             raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
@@ -222,16 +222,20 @@ class NonCallableMock(_FixedMock):
         object.__setattr__(self, "_mock_methods", methods)
         object.__setattr__(self, "_mock_strict", spec_set is not None)
         super().__init__(name=name)
+        self._mock_parent = parent
+        self._mock_children = {}
+        if _new_parent is None:
+            _new_parent = parent
         if _new_parent is not None:
-            suffix = _new_name if _new_name == "()" else "." + _new_name
-            _new_parent._attach(self._node, suffix)
+            self._node._owner = _new_parent
+            self._node._suffix = _new_name if _new_name == "()" else "." + _new_name
         self.mock_calls = _CallList()
         self.method_calls = _CallList()
         self.side_effect = side_effect
         if return_value is not _unset_return:
             self.return_value = return_value
         if attrs:
-            for key in ("wraps", "parent", "unsafe"):
+            for key in ("wraps", "unsafe"):
                 if key in attrs:
                     raise TypeError(f"Mock.__init__() got an unexpected keyword argument '{key}'")
             self.configure_mock(**attrs)
@@ -255,7 +259,7 @@ class NonCallableMock(_FixedMock):
         if _is_instance_mock(mock):
             node = mock._node
             node._mock_name = ""
-            node._magic = False
+            mock._mock_parent = None
             if hasattr(node, "_owner"):
                 del node._owner
         else:
@@ -282,9 +286,8 @@ class NonCallableMock(_FixedMock):
             name = suffix[1:]
             if not magic:
                 value._node._mock_name = name
-            if not hasattr(self._node, "_assigned_children"):
-                self._node._assigned_children = {}
-            self._node._assigned_children[name] = value
+                value._mock_parent = self
+            self._mock_children[name] = value
         return True
 
     def _mock_path(self):
@@ -300,11 +303,8 @@ class NonCallableMock(_FixedMock):
             if self._mock_methods is not None and name not in self._mock_methods:
                 raise AttributeError(f"Mock object has no attribute {name!r}")
             if _is_instance_mock(value):
-                if self._adopt(value, "." + name, magic=True):
-                    value._node._magic = True
-                if not hasattr(self._node, "_assigned_children"):
-                    self._node._assigned_children = {}
-                self._node._assigned_children[name] = value
+                self._adopt(value, "." + name, magic=True)
+                self._mock_children[name] = value
                 member = stored = value
             else:
                 def member(instance, /, *args, **kwargs):
@@ -317,7 +317,8 @@ class NonCallableMock(_FixedMock):
         if name in ("called", "call_count", "call_args", "call_args_list"):
             setattr(self._node, name, value)
             return
-        if name not in ("_node", "_nodes", "_mock_sealed", "return_value", "side_effect", "mock_calls", "method_calls"):
+        if name not in ("_node", "_nodes", "_mock_sealed", "_mock_parent", "_mock_children",
+                        "return_value", "side_effect", "mock_calls", "method_calls"):
             if self._mock_strict and name not in self._mock_methods and name not in self.__dict__:
                 raise AttributeError(f"Mock object has no attribute {name!r}")
             if name == "__class__":
@@ -335,8 +336,7 @@ class NonCallableMock(_FixedMock):
     def __delattr__(self, name):
         if name in _mock_magics and name in type(self).__dict__:
             delattr(type(self), name)
-            self._node._children.pop(name, None)
-            getattr(self._node, "_assigned_children", {}).pop(name, None)
+            self._mock_children.pop(name, None)
             if name in self.__dict__:
                 object.__delattr__(self, name)
             return
@@ -349,14 +349,13 @@ class NonCallableMock(_FixedMock):
             factory = MagicMock if issubclass(factory, NonCallableMagicMock) else Mock
         return factory(**kwargs)
 
-    def _at(self, index):
-        node = self._nodes[index]
-        if not hasattr(node, "_proxy"):
-            proxy = self._get_child_mock()
-            proxy._node = node
-            proxy._nodes = self._nodes
-            node._proxy = proxy
-        return node._proxy
+    def _get_child(self, name, *, magic=False):
+        child = self._mock_children.get(name)
+        if child is None:
+            kwargs = {} if magic else {"parent": self}
+            child = self._get_child_mock(name=name, _new_parent=self, _new_name=name, **kwargs)
+            self._mock_children[name] = child
+        return child
 
     def __getattr__(self, name):
         if name in ("called", "call_count", "call_args", "call_args_list", "_mock_name"):
@@ -378,7 +377,7 @@ class NonCallableMock(_FixedMock):
             if self._mock_sealed:
                 seal(child)
             return child
-        if self._mock_sealed and name not in self._node._children:
+        if self._mock_sealed and name not in self._mock_children:
             if methods is None:
                 _check_child_name(name)
             raise AttributeError(self._mock_path() + "." + name)
@@ -408,7 +407,9 @@ class NonCallableMock(_FixedMock):
         node = self._nodes[index]
         if hasattr(node, "_configured_return"):
             return node._configured_return
-        return self._at(index)
+        value = self._get_child_mock(_new_parent=self, _new_name="()")
+        self.return_value = value
+        return value
 
     @return_value.setter
     def return_value(self, value):
@@ -440,9 +441,7 @@ class NonCallableMock(_FixedMock):
                 result = current.return_value
                 if _is_instance_mock(result):
                     pending.append((result, False, False))
-            children = {name: current._at(index) for name, index in node._children.items()}
-            children.update(getattr(node, "_assigned_children", {}))
-            for child in children.values():
+            for child in current._mock_children.values():
                 pending.append((child, clear_return, clear_effect))
 
     def _calls_repr(self):
@@ -461,12 +460,9 @@ class NonCallableMock(_FixedMock):
         if name:
             sig = None
             for part in name.replace("()", "").split("."):
-                node = mock._node
-                child = getattr(node, "_assigned_children", {}).get(part)
+                child = mock._mock_children.get(part)
                 if child is None:
-                    if part not in node._children:
-                        break
-                    child = mock._at(node._children[part])
+                    break
                 mock = child
                 sig = getattr(mock._node, "_spec_signature", None)
         if sig is None:
@@ -552,10 +548,9 @@ class _MagicSlot:
         self.parent = parent
 
     def __get__(self, instance, owner):
-        if self.parent._mock_sealed and self.name not in self.parent._node._children:
+        if self.parent._mock_sealed and self.name not in self.parent._mock_children:
             raise AttributeError(self.parent._mock_path() + "." + self.name)
-        child = self.parent._get_child(self.name)
-        child._node._magic = True
+        child = self.parent._get_child(self.name, magic=True)
         setattr(self.parent, self.name, child)
         if self.name == "__exit__":
             child.return_value = False
@@ -587,7 +582,9 @@ class CallableMixin:
         current = node
         path = ""
         separator = ""
-        method_suffix = ""
+        # An explicit parent records the method name separately from the mock_calls path.
+        method_name = node._mock_name
+        record_methods = self._mock_parent is not None
         while hasattr(current, "_owner"):
             suffix = current._suffix
             name = suffix.removeprefix(".")
@@ -597,12 +594,11 @@ class CallableMixin:
                 path = name + separator + path
                 separator = "" if name == "()" else "."
             parent = current._owner
-            if suffix == "()" or getattr(current, "_magic", False):
-                method_suffix = None
-            if method_suffix is not None:
-                # Only real return-value edges stop method_calls propagation.
-                method_suffix = suffix + method_suffix
-                parent.method_calls.append(_Call((method_suffix[1:], args, kwargs)))
+            if record_methods:
+                parent.method_calls.append(_Call((method_name, args, kwargs)))
+                record_methods = parent._mock_parent is not None
+                if record_methods:
+                    method_name = parent._mock_name + "." + method_name
             parent.mock_calls.append(_Call((path, args, kwargs)))
             current = parent._node
 
@@ -748,7 +744,7 @@ def seal(mock):
             continue
         seen.add(id(current))
         current._mock_sealed = True
-        names = set(current._node._children)
+        names = set(current._mock_children)
         names.update(current.__dict__)
         if current._node._result != -1:
             names.add("return_value")

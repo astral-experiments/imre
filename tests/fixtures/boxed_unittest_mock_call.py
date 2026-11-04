@@ -5,6 +5,19 @@ assert mock.call is call
 assert call._format("payload") == ("_format", ("payload",), {})
 assert repr(call.fetch()._format("payload")) == "call.fetch()._format('payload')"
 
+parent = Mock()
+child = Mock(name="worker", parent=parent, spec=["send"])
+children = child._mock_children
+child(1)
+child.send(2)
+assert parent.mock_calls == [call(1), call.send(2)]
+assert parent.method_calls == [call.worker(1), call.worker.send(2)]
+assert "worker" not in parent._mock_children
+child.reset_mock()
+assert child._mock_parent is parent
+assert child._mock_children is children and children["send"] is child.send
+assert parent.mock_calls == [call(1), call.send(2)]
+
 client = Mock()
 client.fetch(1).read(size=2)
 client.fetch(3)
