@@ -80,8 +80,8 @@ pub(in crate::dynamic) enum BioFailure {
     UnexpectedEof,
     ProtocolIsShutdown,
     ShutdownInInit,
-    RecordError {
-        reason: &'static str,
+    ProtocolError {
+        reason: Option<&'static str>,
         message: String,
     },
     Tls(Failure),
@@ -117,22 +117,20 @@ impl Api {
                 // OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_*).
                 const SHUTDOWN_IN_INIT: std::ffi::c_ulong = (20 << 23) | 407;
                 const PROTOCOL_IS_SHUTDOWN: std::ffi::c_ulong = (20 << 23) | 207;
-                const RECORD_LAYER_FAILURE: std::ffi::c_ulong = (20 << 23) | 313;
-                const DECRYPTION_FAILED_OR_BAD_RECORD_MAC: std::ffi::c_ulong = (20 << 23) | 281;
-                const SSLV3_ALERT_BAD_RECORD_MAC: std::ffi::c_ulong = (20 << 23) | 1020;
                 // SAFETY: this thread's last error belongs to the failed SSL operation.
                 let code = unsafe { (self.ERR_peek_last_error)() };
-                let reason = match code {
+                match code {
                     super::UNEXPECTED_EOF => return BioFailure::UnexpectedEof,
                     PROTOCOL_IS_SHUTDOWN => return BioFailure::ProtocolIsShutdown,
                     SHUTDOWN_IN_INIT => return BioFailure::ShutdownInInit,
-                    RECORD_LAYER_FAILURE => "RECORD_LAYER_FAILURE",
-                    DECRYPTION_FAILED_OR_BAD_RECORD_MAC => "DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
-                    SSLV3_ALERT_BAD_RECORD_MAC => "SSLV3_ALERT_BAD_RECORD_MAC",
-                    _ => return BioFailure::Tls(self.error(operation)),
-                };
-                BioFailure::RecordError {
-                    reason,
+                    _ => (),
+                }
+                // Only ERR_LIB_SSL (20) indexes the SSL reason table.
+                if code >> 23 != 20 {
+                    return BioFailure::Tls(self.error(operation));
+                }
+                BioFailure::ProtocolError {
+                    reason: super::reasons::reason_name((code & 0x7f_ffff) as u32),
                     message: self
                         .reason_text(code)
                         .map_or_else(|| operation.to_owned(), |s| s.into_owned()),

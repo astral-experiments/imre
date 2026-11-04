@@ -126,3 +126,23 @@ else:
     raise AssertionError("missing bad-record alert")
 cin.write(record)
 assert client.read() == b"one session"
+
+# Incompatible versions produce a local error on the server and an alert on the client.
+server_ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+client_ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+cin, cout = ssl.MemoryBIO(), ssl.MemoryBIO()
+sin, sout = ssl.MemoryBIO(), ssl.MemoryBIO()
+client = client_ctx.wrap_bio(cin, cout, server_hostname="localhost")
+server = server_ctx.wrap_bio(sin, sout, server_side=True)
+want_read(client.do_handshake)
+sin.write(cout.read())
+for endpoint, reason in ((server, "UNSUPPORTED_PROTOCOL"), (client, "TLSV1_ALERT_PROTOCOL_VERSION")):
+    try:
+        endpoint.do_handshake()
+    except ssl.SSLError as error:
+        assert (type(error), error.errno, error.library, error.reason) == (
+            ssl.SSLError, ssl.SSL_ERROR_SSL, "SSL", reason)
+    else:
+        raise AssertionError("incompatible protocol versions completed a handshake")
+    if endpoint is server:
+        cin.write(sout.read())

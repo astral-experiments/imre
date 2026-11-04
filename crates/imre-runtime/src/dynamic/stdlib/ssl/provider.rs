@@ -9,6 +9,7 @@ pub(in crate::dynamic) mod bio;
 pub(super) mod certificate;
 pub(super) mod ciphers;
 pub(in crate::dynamic) mod objects;
+mod reasons;
 mod trust;
 pub(super) use trust::CaData;
 pub(in crate::dynamic) mod versions;
@@ -1031,7 +1032,7 @@ impl Session {
         socket: crate::ObjectOwner,
         host: Option<&str>,
         server: bool,
-    ) -> Result<Self, Failure> {
+    ) -> Result<Self, bio::BioFailure> {
         let api = ctx.api;
         api.clear();
         // SAFETY: SSL_new takes its own reference to this live context.
@@ -1049,7 +1050,7 @@ impl Session {
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
         if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
-            return Err(api.error("SSL_set_fd"));
+            return Err(api.error("SSL_set_fd").into());
         }
         let handshake = session.blocking_io(
             if server {
@@ -1057,7 +1058,7 @@ impl Session {
             } else {
                 Operation::Connect
             },
-            |api, _, label| api.error(label),
+            Api::ssl_failure_kind,
         );
         api.verify_peer(handle.as_ptr(), !server && handshake.is_ok())?;
         handshake?;
