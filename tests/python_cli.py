@@ -186,6 +186,24 @@ def check_sysconfig_build(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (0, b"build markers passed\n", b""), result
 
 
+def check_explicit_site_directory(imre, root, run):
+    site_dir = root / "extra-site"
+    plugins = site_dir / "plugins"
+    plugins.mkdir(parents=True)
+    (plugins / "activated_plugin.py").write_text("value = 41\n")
+    (site_dir / "plugins.pth").write_text("plugins\nimport sys; sys.pth_increment = 1\n")
+    source = (
+        "import importlib, sys\n"
+        "site = importlib.import_module(sys.argv[1])\n"
+        "known = set()\n"
+        "assert site.addsitedir(sys.argv[2], known_paths=known) is known\n"
+        "import activated_plugin\n"
+        "print(activated_plugin.value + sys.pth_increment)\n"
+    )
+    result = run(imre, "-B", "-c", source, "site", str(site_dir), timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"42\n", b""), result
+
+
 def check_io_compaction_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "refuse_io_compaction.c"
     wrapper = root / "refuse_io_compaction.o"
@@ -1411,6 +1429,7 @@ def main():
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
+            check_explicit_site_directory(imre, root, run)
         if sys.platform.startswith("linux"):
             check_os_abort(imre, run)
             check_os_execvpe(imre, root, run)

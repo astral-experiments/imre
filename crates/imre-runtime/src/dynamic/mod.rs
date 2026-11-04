@@ -3725,6 +3725,14 @@ impl Context {
                     self.bind(scope, name, function);
                 }
             }
+            "site" => {
+                let text = self.text(include_str!("stdlib/site.py"));
+                let filename = self.text("<imre stdlib>/site.py");
+                let mode = self.text("exec");
+                let code = self.compile_source(text, filename, mode, false)?;
+                let globals = self.module_globals(scope)?;
+                self.exec_source(code, globals, None, None)?;
+            }
             "_locale" => stdlib::locale::install(self, module, scope)?,
             "_warnings" => stdlib::warnings_accel::install(self, module, scope)?,
             "_tracemalloc" => stdlib::tracemalloc::install(self, module, scope),
