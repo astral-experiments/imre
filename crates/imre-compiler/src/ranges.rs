@@ -97,8 +97,28 @@ impl RangeFacts<'_> {
         for &parameter in &function.params {
             small[parameter] = false;
         }
+        self.small_replacements(&function.body, small)
+    }
+
+    /// Finds integer slots that stay small after checking their incoming owners.
+    pub(crate) fn checked_small_slots(
+        &self,
+        body: &[Statement],
+        locals: &[Type],
+        existing: &[bool],
+    ) -> Vec<usize> {
+        let mut small = existing.to_vec();
+        crate::ir::walk_writes(body, |slot, _| small[slot] |= locals[slot] == Type::Int);
+        self.small_replacements(body, small)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(slot, proven)| (proven && !existing[slot]).then_some(slot))
+            .collect()
+    }
+
+    fn small_replacements(&self, body: &[Statement], mut small: Vec<bool>) -> Vec<bool> {
         let mut moves = Vec::new();
-        crate::ir::walk_statements(&function.body, &mut |statement| match statement {
+        crate::ir::walk_statements(body, &mut |statement| match statement {
             Statement::Assign(slot, value) => small[*slot] &= self.integer(value).is_some(),
             Statement::Move(target, source) => moves.push((*source, *target)),
             Statement::IterNext {
@@ -152,11 +172,7 @@ impl RangeFacts<'_> {
 /// Computes facts after ownership-preserving IR rewrites have finished. Loop
 /// bodies are recorded only after their entry invariant reaches a fixed point.
 pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
-    let mut analyzer = Analyzer {
-        intervals: HashMap::new(),
-        cursors: HashMap::new(),
-        cleared: Vec::new(),
-    };
+    let mut analyzer = Analyzer::default();
     for function in module.functions.iter().chain([&module.entry]) {
         analyzer.function(function);
     }
@@ -165,6 +181,13 @@ pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
         cursors: analyzer.cursors,
         module: PhantomData,
     }
+}
+
+/// A rewrite can query these bounds until it moves or replaces the original expressions.
+pub(crate) fn integer_bounds(function: &Function) -> IntegerFacts {
+    let mut analyzer = Analyzer::default();
+    analyzer.function(function);
+    IntegerFacts(analyzer.intervals)
 }
 
 /// An absent endpoint denotes infinity. Checked i128 arithmetic discards bounds
@@ -458,6 +481,7 @@ impl Flow {
     }
 }
 
+#[derive(Default)]
 struct Analyzer {
     intervals: HashMap<*const Expr, Interval>,
     cursors: HashMap<*const Statement, Interval>,
@@ -931,7 +955,19 @@ impl Analyzer {
                     Builtin::ListGetI32 => {
                         Interval::bounded(i128::from(i32::MIN), i128::from(i32::MAX))
                     }
-                    Builtin::ListGetBounded { min, max }
+                    Builtin::IntExtremum { minimum } => values
+                        .into_iter()
+                        .reduce(|x, y| {
+                            let select =
+                                |(a, b): (i128, i128)| if *minimum { a.min(b) } else { a.max(b) };
+                            Interval {
+                                min: x.min.zip(y.min).map(select),
+                                max: x.max.zip(y.max).map(select),
+                            }
+                        })
+                        .unwrap_or(Interval::UNKNOWN),
+                    Builtin::GetBoundedInAppendWindow { min, max, .. }
+                    | Builtin::ListGetBounded { min, max }
                     | Builtin::ListGetBoundedInBounds { min, max }
                     | Builtin::IntBounded { min, max } => {
                         Interval::bounded(i128::from(*min), i128::from(*max))

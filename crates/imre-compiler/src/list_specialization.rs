@@ -2,6 +2,9 @@
 //! scanning for bounded integers. Without a range, each fast read checks its
 //! own tagged word. Runtime identity guards exclude aliases of append targets.
 
+mod window_ranges;
+pub(crate) use window_ranges::is_window_range_guard;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, contains_loop};
@@ -17,6 +20,7 @@ pub(crate) fn specialize(module: &mut Module) {
         crate::ir::rewrite_statements(&mut function.body, &mut |statement| {
             rewrite_loop(statement, &mut function.locals, &private_cursors);
         });
+        window_ranges::specialize(function);
     }
 }
 
@@ -590,6 +594,13 @@ mod tests {
         crate::tuples::scalarize(&mut module);
         specialize(&mut module);
         module
+    }
+
+    #[test]
+    fn certifies_closed_tail_ranges_after_a_scalar_cursor_scan() {
+        let source = include_str!("../../../tests/fixtures/iterables/buffered_integer_ranges.py");
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(llvm.contains("; inductive list tail -2147483648..=2147483648"));
     }
 
     #[test]

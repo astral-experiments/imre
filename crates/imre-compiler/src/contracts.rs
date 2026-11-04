@@ -632,6 +632,7 @@ impl Builtin {
             | Self::BeginListAppends(_)
             | Self::FinishListAppends(_)
             | Self::GetInAppendWindow(_)
+            | Self::GetBoundedInAppendWindow { .. }
             | Self::JoinBufferAppend
             | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
@@ -788,6 +789,7 @@ impl Builtin {
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
+            | Self::CursorScanBudget(_)
             | Self::ListPresent
             | Self::DequeClear
             | Self::DequeReverse
@@ -887,10 +889,14 @@ impl Builtin {
                 ) && matches!(args[4].kind, ExprKind::Int(_))
                     && index(&args[4])
             }
+            Self::CursorScanBudget(_) => signature(&[], Type::Int),
             Self::ListPresent => signature(&[Type::ListInt], Type::Bool),
             Self::BeginListAppends(_) | Self::FinishListAppends(_) => signature(&[], Type::None),
             Self::AppendInWindow(_) => signature(&[Type::ListInt, Type::Int], Type::None),
             Self::GetInAppendWindow(_) => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::GetBoundedInAppendWindow { min, max, .. } => {
+                signature(&[Type::ListInt, Type::Int], Type::Int) && bounds(*min, *max)
+            }
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
