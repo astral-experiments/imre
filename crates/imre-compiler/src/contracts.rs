@@ -561,6 +561,7 @@ impl Builtin {
             | Self::ExceptionSuppressContext
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
+            | Self::BoundedCursorValue { .. }
             | Self::IntBounded { .. }
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
@@ -789,6 +790,7 @@ impl Builtin {
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
+            | Self::IntFitsI32
             | Self::CursorScanBudget(_)
             | Self::ListPresent
             | Self::DequeClear
@@ -871,7 +873,7 @@ impl Builtin {
                     && matches!(source.kind, ExprKind::Local(_))
                     && cursor.ty == Type::Int && index(cursor))
             }
-            Self::IntBounded { min, max } => {
+            Self::BoundedCursorValue { min, max } | Self::IntBounded { min, max } => {
                 signature(&[Type::Int], Type::Int)
                     && bounds(*min, *max)
                     && matches!(args[0].kind, ExprKind::Local(_))
@@ -890,6 +892,7 @@ impl Builtin {
                 ) && matches!(args[4].kind, ExprKind::Int(_))
                     && index(&args[4])
             }
+            Self::IntFitsI32 => signature(&[Type::Int], Type::Bool),
             Self::CursorScanBudget(_) => signature(&[], Type::Int),
             Self::ListPresent => signature(&[Type::ListInt], Type::Bool),
             Self::BeginListAppends(_) | Self::FinishListAppends(_) => signature(&[], Type::None),

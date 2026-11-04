@@ -1247,6 +1247,11 @@ pub(crate) enum Builtin {
     ListDistinct,
     /// Checks that a list local owns storage before borrowing its buffer.
     CursorScanBudget(usize),
+    IntFitsI32,
+    BoundedCursorValue {
+        min: i64,
+        max: i64,
+    },
     ListPresent,
     StringGet,
     StringIter,
