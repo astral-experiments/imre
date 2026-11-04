@@ -1637,6 +1637,7 @@ pub(crate) enum Builtin {
     DictIter(bool),
     /// Arguments are the element then set, matching membership evaluation order.
     SetContains,
+    SetCaseLengthPossible,
     SetAdd,
     SetDiscard,
     SetIter,

@@ -3114,6 +3114,27 @@ unsafe fn filter_character_set(
     crate::finish(result, std::ptr::null())
 }
 
+/// Rejects an ASCII case conversion when the set has no key of that byte length.
+///
+/// # Safety
+/// The caller roots the native set and immutable string for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_set_case_length_possible(
+    value: *const Object,
+    text: *const Str,
+) -> u32 {
+    // SAFETY: both borrowed operands remain live throughout the metadata read.
+    unsafe {
+        let text = &*text;
+        u32::from(object(value).0.with(|storage| {
+            let set = storage.set();
+            !matches!(set.tables, Tables::Str(_))
+                || set.string_lengths & Set::length_bit(text.len()) != 0
+                || !text.is_ascii()
+        }))
+    }
+}
+
 /// # Safety
 /// Root both the set and its exact-kind scalar key.
 #[unsafe(no_mangle)]
