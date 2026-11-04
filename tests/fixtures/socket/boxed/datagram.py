@@ -1,6 +1,9 @@
 """Exchange UDP datagrams and preserve socket type after close."""
 import errno
 import socket
+from _socket import MSG_PEEK as raw_peek, MSG_TRUNC as raw_trunc
+from socket import MSG_PEEK, MSG_TRUNC, MsgFlag
+
 
 
 def check(family, host):
@@ -23,7 +26,10 @@ def check(family, host):
 
         assert sender.sendto(payload, (host.encode("ascii"), Port())) == 4
         payload.append(0)
+        assert receiver.recvfrom(2, socket.MSG_PEEK) == (b"fi", source)
+        assert receiver.recvfrom(16, MSG_PEEK) == (b"first", source)
         assert receiver.recvfrom(2) == (b"fi", source)
+        assert receiver.recvfrom(16, MSG_PEEK) == (b"", source)
         assert receiver.recvfrom(16) == (b"", source)
         # A zero-size recvfrom consumes a datagram and still returns the sender.
         assert receiver.recvfrom(0) == (b"", source)
@@ -74,6 +80,10 @@ def check(family, host):
     else:
         raise AssertionError("closed datagram socket sent data")
 
+
+assert type(raw_peek) is type(raw_trunc) is int
+assert MSG_PEEK is MsgFlag.MSG_PEEK and MSG_TRUNC is MsgFlag.MSG_TRUNC
+assert int(MSG_PEEK | MSG_TRUNC) == raw_peek | raw_trunc
 
 check(socket.AF_INET, "127.0.0.1")
 try:

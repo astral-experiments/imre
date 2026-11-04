@@ -1181,6 +1181,7 @@ impl Intrinsic {
         }
     }
 
+    pub(crate) const SOCKET_MSG_PEEK: Self = Self::ScopedObjectExport("socket.MSG_PEEK");
     pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
@@ -2007,6 +2008,15 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
+            (Self::Socket, "MsgFlag") => Intrinsic::ScopedObjectExport("socket.MsgFlag"),
+            (Self::Socket, "MSG_PEEK") => Intrinsic::SOCKET_MSG_PEEK,
+            (Self::SocketNative, "MSG_PEEK") => Intrinsic::ScopedObjectExport("_socket.MSG_PEEK"),
+            (
+                Self::Socket | Self::SocketNative,
+                "MSG_OOB" | "MSG_DONTROUTE" | "MSG_DONTWAIT" | "MSG_EOR" | "MSG_TRUNC"
+                | "MSG_CTRUNC" | "MSG_WAITALL" | "MSG_NOSIGNAL" | "MSG_CMSG_CLOEXEC"
+                | "MSG_ERRQUEUE" | "MSG_CONFIRM" | "MSG_MORE" | "MSG_FASTOPEN" | "MSG_EOF",
+            ) => Intrinsic::ScopedObjectExport("socket message flags"),
             #[cfg(unix)]
             (Self::Socket | Self::SocketNative, "SO_ERROR") => {
                 Intrinsic::IntConstant(i64::from(libc::SO_ERROR))
@@ -2200,7 +2210,6 @@ impl IntrinsicModule {
                 "SO_SNDBUF" => "so_sndbuf",
                 "SO_RCVBUF" => "so_rcvbuf",
                 "SO_LINGER" => "so_linger",
-                "MSG_PEEK" => "msg_peek",
                 "SHUT_RD" => "shut_rd",
                 "SHUT_WR" => "shut_wr",
                 "SHUT_RDWR" => "shut_rdwr",
