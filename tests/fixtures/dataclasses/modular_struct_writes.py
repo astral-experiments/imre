@@ -26,6 +26,7 @@ def main() -> None:
     write(rows, alternate, 0, 3081, 127, 23, 8192)
     write(rows, base, 3, 1903, 17, 9, 8187)
     write(rows, alternate, 5, 16389, 128, 11, 8192)
+    write(rows, base, 3, 9361, 512, 71, 7680)
     write(rows, Row(5.0, False), 8, 71, 0, 713, 8192)
     write(rows, base, 42, 11, 3, 0, 8192)
     total = 0.0

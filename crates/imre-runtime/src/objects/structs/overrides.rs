@@ -336,11 +336,17 @@ impl Sparse {
             let block = &page.blocks[next];
             let bits = block.mask >> (at % BLOCK);
             if bits & 1 != 0 {
+                let count = bits.trailing_ones() as usize;
+                let width = default.len();
+                let start = block.offset(bit, width);
+                let words = &block.words[start..start + count * width];
+                // Equal neighboring payloads can share the first row of this borrowed span.
+                let repeated = count > 1 && words[..words.len() - width] == words[width..];
                 return super::ReadSpan {
                     start: at,
-                    len: bits.trailing_ones() as usize,
-                    index_mask: usize::MAX,
-                    data: block.words[block.offset(bit, default.len())..].as_ptr(),
+                    len: count,
+                    index_mask: if repeated { 0 } else { usize::MAX },
+                    data: words.as_ptr(),
                 };
             }
             if bits != 0 {
@@ -411,7 +417,7 @@ impl Binary {
     /// Each poll leaves both the population count and the source index recoverable.
     pub(super) fn set_modular(
         &mut self,
-        mut at: usize,
+        at: usize,
         step: usize,
         n: usize,
         count: usize,
@@ -431,9 +437,43 @@ impl Binary {
             }
             self.bits.resize(words, 0);
         }
-        if step == 1 || (step != 0 && step == n - 1) {
-            return self.set_contiguous(at, step == 1, n, count, set);
+        let distance = step.min(n - step);
+        let writes = match distance {
+            0 => count.min(1),
+            1 => count.min(n),
+            // Distinct positions span at most one turn in the shorter direction.
+            _ if count.saturating_mul(distance) <= n => count,
+            _ => count.min(n / num_integer::gcd(n, step)),
+        };
+        let (done, last) = if distance == 1 {
+            self.set_contiguous(at, step == 1, n, writes, set)
+        } else if distance == BLOCK && n.is_multiple_of(BLOCK) {
+            self.set_word_stride(at, step == BLOCK, n, writes, set)
+        } else {
+            self.set_scattered(at, step, n, writes, set)
+        };
+        if done == writes
+            && done < count
+            && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            // The remaining stores revisit identical values. Only the final index changes.
+            let last = (at as u128 + count as u128 * step as u128) % n as u128;
+            (count, last as usize)
+        } else {
+            (done, last)
         }
+    }
+
+    /// Apply scattered writes in index order and report the prefix completed before a signal.
+    fn set_scattered(
+        &mut self,
+        mut at: usize,
+        step: usize,
+        n: usize,
+        count: usize,
+        set: bool,
+    ) -> (usize, usize) {
+        let mut added = 0;
         let mut done = 0;
         while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
             let chunk = (count - done).min(1024);
@@ -445,7 +485,7 @@ impl Binary {
                 let (block, bit) = position(at);
                 if set {
                     let word = &mut self.bits[block];
-                    self.changed += usize::from(*word & bit == 0);
+                    added += usize::from(*word & bit == 0);
                     *word |= bit;
                 } else {
                     self.remove(at);
@@ -453,6 +493,7 @@ impl Binary {
             }
             done += chunk;
         }
+        self.changed += added;
         (done, at)
     }
 
@@ -490,6 +531,17 @@ impl Binary {
         let mut changed = 0;
         while at < end {
             let offset = at % BLOCK;
+            if offset == 0 && end - at >= BLOCK {
+                let last = end / BLOCK;
+                let target = if set { u64::MAX } else { 0 };
+                for word in &mut self.bits[at / BLOCK..last] {
+                    let flips = *word ^ target;
+                    changed += flips.count_ones() as usize;
+                    *word ^= flips;
+                }
+                at = last * BLOCK;
+                continue;
+            }
             let width = (end - at).min(BLOCK - offset);
             let mask = (u64::MAX >> (BLOCK - width)) << offset;
             let word = &mut self.bits[at / BLOCK];
@@ -503,6 +555,48 @@ impl Binary {
         } else {
             self.changed -= changed;
         }
+    }
+
+    /// A one-word stride on a word-aligned ring keeps the bit within each word fixed.
+    fn set_word_stride(
+        &mut self,
+        at: usize,
+        forward: bool,
+        n: usize,
+        count: usize,
+        set: bool,
+    ) -> (usize, usize) {
+        let (mut word, bit) = position(at);
+        let words = n / BLOCK;
+        let target = if set { bit } else { 0 };
+        let mut changed = 0;
+        let mut done = 0;
+        while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+            let chunk = (count - done).min(1024);
+            let range = if forward {
+                let first = if word + 1 == words { 0 } else { word + 1 };
+                first..first + chunk.min(words - first)
+            } else {
+                let end = if word == 0 { words } else { word };
+                end - chunk.min(end)..end
+            };
+            done += range.len();
+            word = if forward { range.end - 1 } else { range.start };
+            let end = range.end.min(self.bits.len());
+            if let Some(slice) = self.bits.get_mut(range.start..end) {
+                for slot in slice {
+                    let flip = (*slot ^ target) & bit;
+                    changed += usize::from(flip != 0);
+                    *slot ^= flip;
+                }
+            }
+        }
+        if set {
+            self.changed += changed;
+        } else {
+            self.changed -= changed;
+        }
+        (done, word * BLOCK + at % BLOCK)
     }
 
     fn remove(&mut self, at: usize) {
@@ -735,18 +829,21 @@ mod page_tests {
             assert_eq!(span.start, at);
             assert!((1..=len - at).contains(&span.len));
             let end = at + span.len;
-            if span.index_mask == 0 {
-                assert_eq!(span.data, default.as_ptr());
+            if span.data == default.as_ptr() {
+                assert_eq!(span.index_mask, 0);
                 assert!(expected.range(at..end).next().is_none());
             } else {
-                assert_eq!(span.index_mask, usize::MAX);
-                // SAFETY: The edited span points into one block's Vec<usize>, with two
-                // initialized words per row. The shared borrow of rows keeps the block
-                // alive and its contiguous payload unchanged for the traversal.
-                let words = unsafe { std::slice::from_raw_parts(span.data, span.len * 2) };
-                let (payloads, _) = words.as_chunks::<2>();
-                for (index, payload) in (at..end).zip(payloads) {
-                    assert_eq!(payload, &expected[&index]);
+                assert!(span.index_mask == 0 || span.index_mask == usize::MAX);
+                for i in at..end {
+                    // SAFETY: the span borrows one edited payload or a contiguous
+                    // run of edits. Each row has two initialized words.
+                    let payload = unsafe {
+                        std::slice::from_raw_parts(
+                            span.data.add(((i - at) & span.index_mask) * 2),
+                            2,
+                        )
+                    };
+                    assert_eq!(payload, &expected[&i]);
                 }
             }
             at = end;
@@ -762,9 +859,28 @@ mod page_tests {
     }
 
     #[test]
-    fn contiguous_writes_match_scalar_stores_across_wraps() {
+    fn equal_sparse_neighbors_share_a_read_span() {
+        let mut sparse = Sparse::default();
+        let default = [0, 0];
+        for at in 60..64 {
+            assert!(sparse.put(at, &[1, 2]).is_ok());
+        }
+        let run = sparse.span(60, 128, &default);
+        assert_eq!((run.len, run.index_mask), (4, 0));
+        assert!(sparse.put(62, &[1, 3]).is_ok());
+        let run = sparse.span(60, 128, &default);
+        assert_eq!((run.len, run.index_mask), (4, usize::MAX));
+    }
+
+    #[test]
+    fn contiguous_row_and_word_writes_match_scalar_stores_across_wraps() {
         let n: usize = 193;
-        for step in [1, n - 1] {
+        for (n, step) in [
+            (n, 1),
+            (n, n - 1),
+            (4 * BLOCK, BLOCK),
+            (4 * BLOCK, 3 * BLOCK),
+        ] {
             let mut rows = Binary::empty(&[7], n.div_ceil(BLOCK)).unwrap();
             let mut expected = vec![false; n];
             for at in (0..n).step_by(3) {
