@@ -176,7 +176,11 @@ impl Function<'_, '_> {
                         .args
                         .iter()
                         .any(|value| matches!(value, ast::Expr::Starred(_)));
-                let packed = (!direct).then(|| self.op("list", &[]));
+                let single_spread = match v.arguments.args.as_ref() {
+                    [ast::Expr::Starred(star)] => Some(star),
+                    _ => None,
+                };
+                let packed = (!direct && single_spread.is_none()).then(|| self.op("list", &[]));
                 let mut bound_receiver = None;
                 let callable = if let Some(field) = imre_ast::direct_method(
                     v,
@@ -202,7 +206,12 @@ impl Function<'_, '_> {
                 } else {
                     self.expr(&v.func)
                 };
-                let operands = if let Some(args) = packed {
+                let operands = if let Some(star) = single_spread {
+                    let source = self.expr(&star.value);
+                    let kwargs = self.keyword_arguments(&v.arguments, &callable);
+                    let args = self.op("spread_arguments", &[&source]);
+                    CallArguments::Packed { args, kwargs }
+                } else if let Some(args) = packed {
                     let kwargs = self.arguments(&args, &v.arguments, &callable);
                     CallArguments::Packed { args, kwargs }
                 } else {
@@ -481,11 +490,6 @@ impl Function<'_, '_> {
         syntax: &ast::Arguments,
         callable: &str,
     ) -> String {
-        let kwargs = if syntax.keywords.is_empty() {
-            "0".into()
-        } else {
-            self.op("dict", &[])
-        };
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
             if let ast::Expr::Starred(s) = arg {
@@ -496,6 +500,16 @@ impl Function<'_, '_> {
                 self.op("append", &[args, &value]);
             }
         }
+        self.keyword_arguments(syntax, callable)
+    }
+
+    /// Evaluate keyword expressions and merge mappings in source order.
+    fn keyword_arguments(&mut self, syntax: &ast::Arguments, callable: &str) -> String {
+        let kwargs = if syntax.keywords.is_empty() {
+            "0".into()
+        } else {
+            self.op("dict", &[])
+        };
         let mut keywords = syntax.keywords.iter().peekable();
         let mut unpacked = false;
         while let Some(key) = keywords.peek() {
