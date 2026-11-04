@@ -146,7 +146,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "binascii" if matches!(function, "b2a_qp" | "crc32") => Some((module, function)),
+        "binascii" if matches!(function, "a2b_qp" | "b2a_qp" | "crc32") => Some((module, function)),
         "zlib" if function == "compressobj" => Some((module, function)),
         "lzma" if function == "decompress" => Some((module, function)),
         "zlib"
@@ -2781,6 +2781,12 @@ impl Context {
                             "space at end of lines is.  When istext is not set, \\r and \\n (CR/LF)\n",
                             "are both encoded.  When quotetabs is set, space and tabs are encoded."
                         )));
+                    }
+                    "__text_signature__" if symbol == "binascii.a2b_qp" => {
+                        return Ok(self.text("($module, /, data, header=False)"));
+                    }
+                    "__doc__" if symbol == "binascii.a2b_qp" => {
+                        return Ok(self.text("Decode a string of qp-encoded data."));
                     }
                     "__text_signature__" if symbol == "sys.set_coroutine_origin_tracking_depth" => {
                         return Ok(self.text("($module, /, depth)"));

@@ -1,4 +1,4 @@
-//! Base64 and checksums over rooted immutable inputs.
+//! Binary-to-text codecs and checksums over byte slices.
 
 use base64::Engine;
 use base64::engine::general_purpose::{GeneralPurpose, STANDARD, URL_SAFE};
@@ -201,6 +201,41 @@ fn decode_groups<const STRICT: bool>(data: &[u8], digits: &[u8; 256]) -> Result<
         decoded.extend_from_slice(&unpack_digits(group)[..used.saturating_sub(1)]);
     }
     Ok(decoded)
+}
+
+/// Decode quoted-printable bytes, including the permissive escapes accepted by binascii.
+pub(crate) fn decode_quoted_printable(mut input: &[u8], header: bool) -> Result<Bytes> {
+    use super::text::hexadecimal;
+
+    let mut output = allocate(input.len())?;
+    loop {
+        match input {
+            [] | [b'='] => break,
+            [b'=', b'\n', tail @ ..] => input = tail,
+            // A soft break starting with CR consumes the rest of the line, even without LF.
+            [b'=', b'\r', tail @ ..] => {
+                let Some(end) = tail.iter().position(|&byte| byte == b'\n') else {
+                    break;
+                };
+                input = &tail[end + 1..];
+            }
+            [b'=', b'=', tail @ ..] => {
+                output.push(b'=');
+                input = tail;
+            }
+            [b'=', high, low, tail @ ..]
+                if let (Some(high), Some(low)) = (hexadecimal(*high), hexadecimal(*low)) =>
+            {
+                output.push(high << 4 | low);
+                input = tail;
+            }
+            [byte, tail @ ..] => {
+                output.push(if header && *byte == b'_' { b' ' } else { *byte });
+                input = tail;
+            }
+        }
+    }
+    Ok(output)
 }
 
 /// Encode bytes using binascii's 76-column quoted-printable line rules.
