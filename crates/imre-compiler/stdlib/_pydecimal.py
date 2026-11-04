@@ -50,6 +50,7 @@ __all__ = [
     'HAVE_CONTEXTVAR'
 ]
 
+_public_boxed = globals().get('_imre_public_decimal', False)
 __xname__ = __name__    # sys.modules lookup (--without-threads)
 __name__ = 'decimal'    # For pickling
 __version__ = '1.70'    # Highest version of the spec this complies with
@@ -953,24 +954,33 @@ class Decimal(object):
         # agrees with the hash of a numerically equal integer, float
         # or Fraction, we follow the rules for numeric hashes outlined
         # in the documentation.  (See library docs, 'Built-in Types').
-        if self._is_special:
-            if self.is_snan():
+        if _public_boxed:
+            # The public numeric hash reads the stored value even on subclasses.
+            exp = Decimal._exp.__get__(self)
+            sign = Decimal._sign.__get__(self)
+            if exp == 'N':
                 raise TypeError('Cannot hash a signaling NaN value')
-            elif self.is_nan():
+            if exp == 'n':
                 return object.__hash__(self)
-            else:
-                if self._sign:
-                    return -_PyHASH_INF
-                else:
-                    return _PyHASH_INF
-
-        if self._exp >= 0:
-            exp_hash = pow(10, self._exp, _PyHASH_MODULUS)
+            if exp == 'F':
+                return -_PyHASH_INF if sign else _PyHASH_INF
+            digits = Decimal._int.__get__(self)
         else:
-            exp_hash = pow(_PyHASH_10INV, -self._exp, _PyHASH_MODULUS)
-        coefficient = _coefficient_as_int(self._int, _PyHASH_MODULUS)
+            if self._is_special:
+                if self.is_snan():
+                    raise TypeError('Cannot hash a signaling NaN value')
+                elif self.is_nan():
+                    return object.__hash__(self)
+                return -_PyHASH_INF if self._sign else _PyHASH_INF
+            exp, sign, digits = self._exp, self._sign, self._int
+
+        if exp >= 0:
+            exp_hash = pow(10, exp, _PyHASH_MODULUS)
+        else:
+            exp_hash = pow(_PyHASH_10INV, -exp, _PyHASH_MODULUS)
+        coefficient = _coefficient_as_int(digits, _PyHASH_MODULUS)
         hash_ = coefficient * exp_hash % _PyHASH_MODULUS
-        ans = -hash_ if self._sign else hash_
+        ans = -hash_ if sign else hash_
         return -2 if ans == -1 else ans
 
     def as_tuple(self):
@@ -6073,6 +6083,9 @@ def _convert_for_comparison(self, other, equality_op=False):
     if isinstance(other, Decimal):
         return self, other
 
+    if _public_boxed and isinstance(other, int):
+        return self, Decimal(other)
+
     # Comparison with a Rational instance (also includes integers):
     # self op n/d <=> self*d op n (for n and d integers, d positive).
     # A NaN or infinity can be left unchanged without affecting the
@@ -6148,19 +6161,20 @@ ExtendedContext = Context(
 # lookahead expression '(?=\d|\.\d)' checks this.
 
 import re
-_parser = re.compile(r"""        # A numeric string consists of:
+# Public Decimal folds marker letters in ASCII; digit groups remain Unicode.
+_marker_alphabet = 'a' if _public_boxed else 'u'
+_parser = re.compile(rf"""        # A numeric string consists of:
 #    \s*
     (?P<sign>[-+])?              # an optional sign, followed by either...
     (
         (?=\d|\.\d)              # ...a number (with at least one digit)
         (?P<int>\d*)             # having a (possibly empty) integer part
         (\.(?P<frac>\d*))?       # followed by an optional fractional part
-        (E(?P<exp>[-+]?\d+))?    # followed by an optional exponent, or...
+        ((?{_marker_alphabet}:E)(?P<exp>[-+]?\d+))?    # followed by an optional exponent, or...
     |
-        Inf(inity)?              # ...an infinity, or...
+        (?{_marker_alphabet}:Inf(inity)?)   # ...an infinity, or...
     |
-        (?P<signal>s)?           # ...an (optionally signaling)
-        NaN                      # NaN
+        (?{_marker_alphabet}:(?P<signal>s)?NaN)   # ...an optionally signaling NaN
         (?P<diag>\d*)            # with (possibly empty) diagnostic info.
     )
 #    \s*

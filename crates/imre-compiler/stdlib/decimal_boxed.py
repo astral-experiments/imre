@@ -103,7 +103,28 @@ try:
     from _decimal import __version__  # noqa: F401
     from _decimal import __libmpdec_version__  # noqa: F401
 except ImportError:
-    import _pydecimal
-    import sys
-    _pydecimal.__doc__ = __doc__
-    sys.modules[__name__] = _pydecimal
+    import sys as _sys
+
+    if "_decimal" in _sys.modules and _sys.modules["_decimal"] is None:
+        # import_fresh_module can explicitly request the pure-Python implementation.
+        import _pydecimal
+        _pydecimal.__doc__ = __doc__
+        _sys.modules[__name__] = _pydecimal
+    else:
+        def _load_public_decimal():
+            from importlib.util import find_spec, module_from_spec
+
+            # Run the shared implementation with its own Decimal, context and globals.
+            # The loader needs the private spec name to locate the bundled source.
+            spec = find_spec("_pydecimal")
+            if spec is None:
+                raise ModuleNotFoundError("No module named '_pydecimal'", name="_pydecimal")
+            provider = module_from_spec(spec)
+            provider._imre_public_decimal = True
+            spec.loader.exec_module(provider)
+            names = provider.__all__ + ["__all__", "__version__", "__libmpdec_version__"]
+            globals().update({name: getattr(provider, name) for name in names})
+
+        _load_public_decimal()
+        del _load_public_decimal
+    del _sys
