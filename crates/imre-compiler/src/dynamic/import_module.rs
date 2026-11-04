@@ -162,7 +162,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     .replace("    Parameter = cls._parameter_cls", "    import ast\n    Parameter = cls._parameter_cls");
                     // BlockFinder and getblock share tokenize. Delay its import until the
                     // first scan so importing inspect alone does not initialize the tokenizer.
-                    let source_blocks = section("class EndOfBlock(", "def getsource(object):")
+                    let source_blocks = section("class EndOfBlock(", "def walktree(")
                         .replace(
                             "        self.indent = 0",
                             "        global tokenize\n        if 'tokenize' not in globals():\n            import tokenize\n        self.indent = 0",
