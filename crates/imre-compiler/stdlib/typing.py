@@ -2843,7 +2843,8 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         return value
     args = getattr(value, '__args__', ())
     values = args
-    if type(value) is GenericAlias:
+    is_generic_alias = isinstance(value, GenericAlias)
+    if is_generic_alias:
         # Strings inside builtin aliases are type arguments, even in class annotations.
         module = getattr(parent_ref, '__forward_module__', None)
         ref_owner = getattr(parent_ref, '__owner__', None)
@@ -2858,13 +2859,13 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):
                 return resolved[0]
-    if type(value) is GenericAlias and value.__unpacked__:
+    if is_generic_alias and value.__unpacked__:
         return Unpack[GenericAlias(origin, resolved)]
     if resolved == args:
         return value
     if origin is _typing.Union:
         return _typing.Union[resolved]
-    if type(value) is GenericAlias:
+    if is_generic_alias:
         return GenericAlias(origin, resolved)
     if type(value) is _typing._GenericAlias:
         name = getattr(value, '_name', None)

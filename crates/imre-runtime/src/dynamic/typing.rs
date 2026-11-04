@@ -2779,7 +2779,7 @@ pub(super) fn call(
         }),
         ("get_args", [v]) => Ok(match ctx.heap.get(*v) {
             Value::GenericAlias(a)
-                if matches!(a.kind, AliasKind::Callable | AliasKind::AbcCallable) =>
+                if ctx.classes.get("collections.abc.Callable") == Some(&a.origin) =>
             {
                 let Value::Tuple(args) = ctx.heap.get(a.args) else {
                     unreachable!()
