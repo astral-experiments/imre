@@ -2887,17 +2887,18 @@ def report(text):
         )
 
         invoice = Path(__file__).resolve().with_name("fixtures") / "decimal_invoice.py"
-        compare("-IB", invoice, native_args=("run", invoice, "--quiet"))
+        # Cold optimized builds include the CPython decimal implementation.
+        compare("-IB", invoice, native_args=("run", invoice, "--quiet"), native_timeout=300)
         compare(
             "-IB", "-c",
             "import importlib, sys\nsys.path.insert(0, sys.argv[1])\nimportlib.import_module(sys.argv[2])",
-            invoice.parent, invoice.stem,
+            invoice.parent, invoice.stem, native_timeout=300,
         )
         compare(
             "-IB", "-c",
             "import importlib, sys\nD = importlib.import_module(sys.argv[1]).Decimal\n"
             "print((D('-4.225') * D('3.5')).quantize(D('0.01')))",
-            "decimal",
+            "decimal", native_timeout=300,
         )
 
         decimal_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
