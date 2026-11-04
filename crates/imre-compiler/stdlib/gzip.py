@@ -14,6 +14,7 @@ READ = "rb"
 WRITE = "wb"
 _Z_SYNC_FLUSH = 2
 _Z_FINISH = 4
+READ_BUFFER_SIZE = 128 * 1024
 _WRITE_BUFFER_SIZE = 4 * io.DEFAULT_BUFFER_SIZE
 
 
@@ -322,5 +323,59 @@ def open(filename, mode="rb", compresslevel=9, encoding=None, errors=None, newli
         raise
 
 
+# Adapted from CPython 3.14.5, Lib/gzip.py. See stdlib/docstrings/LICENSE.
+def main():
+    import sys
+    from argparse import ArgumentParser
+    from contextlib import ExitStack
+
+    parser = ArgumentParser(
+        description="A simple command line interface for the gzip module: "
+                    "act like gzip, but do not delete the input file.",
+        color=True,
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--fast", action="store_true", help="compress faster")
+    group.add_argument("--best", action="store_true", help="compress better")
+    group.add_argument("-d", "--decompress", action="store_true",
+                       help="act like gunzip instead of gzip")
+    parser.add_argument("args", nargs="*", default=["-"], metavar="file")
+    args = parser.parse_args()
+
+    compresslevel = 6
+    if args.fast:
+        compresslevel = 1
+    elif args.best:
+        compresslevel = 9
+
+    for name in args.args:
+        with ExitStack() as files:
+            if args.decompress:
+                if name == "-":
+                    source = files.enter_context(
+                        GzipFile(filename="", mode="rb", fileobj=sys.stdin.buffer)
+                    )
+                    target = sys.stdout.buffer
+                else:
+                    if not name.endswith(".gz"):
+                        sys.exit(f"filename doesn't end in .gz: {name!r}")
+                    source = files.enter_context(open(name, "rb"))
+                    target = files.enter_context(io.open(name[:-3], "wb"))
+            elif name == "-":
+                source = sys.stdin.buffer
+                target = files.enter_context(
+                    GzipFile(filename="", mode="wb", fileobj=sys.stdout.buffer, compresslevel=compresslevel)
+                )
+            else:
+                source = files.enter_context(io.open(name, "rb"))
+                target = files.enter_context(open(name + ".gz", "wb"))
+
+            while True:
+                chunk = source.read(READ_BUFFER_SIZE)
+                if not chunk:
+                    break
+                target.write(chunk)
+
+
 if __name__ == "__main__":
-    raise SystemExit("the gzip command-line interface is not supported")
+    main()
