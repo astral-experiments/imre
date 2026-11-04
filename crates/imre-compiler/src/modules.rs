@@ -3470,7 +3470,7 @@ impl SourceGraph {
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
-            options.system_site.as_deref(),
+            options.implicit_site().map(PathBuf::as_path),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3536,7 +3536,7 @@ impl SourceGraph {
         let mut loader = Loader::new(
             root,
             &options.extension_paths,
-            options.system_site.as_deref(),
+            options.implicit_site().map(PathBuf::as_path),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;

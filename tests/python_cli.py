@@ -79,7 +79,7 @@ def check_command_stdin(imre, run):
 
 def check_installed_site(imre, root, run):
     # A real relocated launcher keeps this test independent of the developer's installation.
-    prefix = root / "prefix"
+    prefix = root.resolve() / "prefix"
     install = prefix / "bin"
     install.mkdir(parents=True)
     launcher = Path(shutil.copy2(imre, install / "imre"))
@@ -137,6 +137,16 @@ def check_installed_site(imre, root, run):
     for args in (("-B", "-c", script.read_text()), ("-IB", script), ("-IB", "-m", package.name)):
         result = run(launcher, *args, timeout=300)
         assert (result.returncode, result.stdout, result.stderr) == (0, b"17\n", b""), result
+    no_site = (
+        "import sys\n"
+        "print(sys.flags.no_site, sys.argv[1] in sys.path, sys.argv[2] in sys.path)\n"
+        "try:\n"
+        "    import installed_example\n"
+        "except ModuleNotFoundError as error:\n"
+        "    print(error.name)\n"
+    )
+    result = run(launcher, "-IS", "-c", no_site, str(site), str(launcher / "<imre stdlib>"), timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"1 False True\ninstalled_example\n", b""), result
     init.write_text("def value(): return 23\n")
     result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
@@ -2381,6 +2391,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         mixed = run(imre, "-uc", mixed_writes)
         assert (mixed.returncode, mixed.stdout, mixed.stderr) == (0, b"ab\xff", b"cd\xfe")
         compare("-IBc" + flags_code)
+        compare("-ISSc", "import sys\nprint(sys.flags.no_site)\nprint(sys.flags.no_user_site)\n")
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(
             "-c",

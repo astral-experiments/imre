@@ -51,6 +51,7 @@ pub(super) fn parse(
     args: &mut impl Iterator<Item = OsString>,
 ) -> Result<Invocation, ParseError> {
     let mut isolated = false;
+    let mut no_site = false;
     let mut ignore_environment = false;
     let mut context_option = None;
     let mut warn_default_encoding = false;
@@ -80,6 +81,7 @@ pub(super) fn parse(
                     ignore_environment = true;
                 }
                 'E' => ignore_environment = true,
+                'S' => no_site = true,
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
                 'u' => unbuffered = true,
@@ -230,6 +232,7 @@ pub(super) fn parse(
         optimize: optimize.max(env_flag("PYTHONOPTIMIZE")),
         safe_path: isolated || env_present("PYTHONSAFEPATH"),
         no_user_site: isolated || env_flag("PYTHONNOUSERSITE") != 0,
+        no_site,
         dont_write_bytecode: dont_write_bytecode || env_flag("PYTHONDONTWRITEBYTECODE") != 0,
         unbuffered: unbuffered || env_flag("PYTHONUNBUFFERED") != 0,
         utf8_mode,
