@@ -168,6 +168,13 @@ def _is_instance_mock(value):
     return issubclass(type(value), NonCallableMock)
 
 
+def _extract_mock(value):
+    # Autospecced functions expose their backing mock via .mock.
+    if isinstance(value, (FunctionType, MethodType)):
+        return getattr(value, "mock", value)
+    return value
+
+
 def _is_exception(value):
     return isinstance(value, BaseException) or isinstance(value, type) and issubclass(value, BaseException)
 
@@ -278,17 +285,18 @@ class NonCallableMock(_FixedMock):
 
     def attach_mock(self, mock, attribute):
         """Reparent a mock so its calls are recorded under the given attribute."""
-        if _is_instance_mock(mock):
-            node = mock._node
+        inner = _extract_mock(mock)
+        if _is_instance_mock(inner):
+            node = inner._node
             node._mock_name = ""
-            mock._mock_parent = None
+            inner._mock_parent = None
             if hasattr(node, "_owner"):
                 del node._owner
         else:
             # Writable objects can also be attached using the standard mock attributes.
-            mock._mock_parent = mock._mock_new_parent = None
-            mock._mock_name = ""
-            mock._mock_new_name = None
+            inner._mock_parent = inner._mock_new_parent = None
+            inner._mock_name = ""
+            inner._mock_new_name = None
         setattr(self, attribute, mock)
 
     def _attach(self, child, suffix):
@@ -296,6 +304,7 @@ class NonCallableMock(_FixedMock):
         child._suffix = suffix
 
     def _adopt(self, value, suffix, *, magic=False):
+        value = _extract_mock(value)
         if not _is_instance_mock(value) or value._node._mock_name or hasattr(value._node, "_owner"):
             return False
         ancestor = self
@@ -319,6 +328,15 @@ class NonCallableMock(_FixedMock):
             suffix = node._suffix + suffix
             node = node._owner._node
         return (node._mock_name or "mock") + suffix
+
+    def __repr__(self):
+        name = self._mock_path()
+        name_part = f" name={name!r}" if name not in ("mock", "mock.") else ""
+        spec_part = ""
+        if self._spec_class is not None:
+            kind = "spec_set" if self._mock_strict else "spec"
+            spec_part = f" {kind}={self._spec_class.__name__!r}"
+        return f"<{type(self).__name__}{name_part}{spec_part} id='{id(self)}'>"
 
     def __setattr__(self, name, value):
         if name in _mock_magics:
