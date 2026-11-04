@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 4, 2026, Imre has a paired pass for **11,393 of 16,202 tests (70.3%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,406 of 16,202 tests (70.4%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -141,9 +141,9 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 710 | 712 | 1 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. |
-| `unittest` | 589 | 1,090 | 0 | Two more original exception tests passed on stock CPython and public Imre at O0 and O3. The independent runs covered TestAsyncCase.test_exception_in_test and Test_TestCase.test_no_exception_leak. |
+| `unittest` | 593 | 1,090 | 0 | Four more originals passed on stock and public Imre at both levels. Two cover mock call matching, one covers attaching a PropertyMock, and one covers a dataclass default in an autospec. All 28 cases in the two mock call classes passed. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,643** | **13,327** | **34** | **3 complete suites match stock on `main`** |
+| **Total** | **9,647** | **13,327** | **34** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -154,14 +154,14 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
-| `base64` | 33 | 41 | 0 | In a full run of all 41 originals, `test.test_base64.LegacyBase64TestCase.test_encodebytes` (occurrence 1) joined the pass set. Stock passed 41. Each native mode passed 33, failed five, errored on two, and skipped one. |
+| `base64` | 38 | 41 | 0 | Both native runs of the full suite passed 38 of 41 originals. The five new passes cover command-line decoding, file and stdin encoding, help, and invalid flags. Two originals errored on b16encode and one skipped. Stock passed all 41. |
 | `configparser` | 326 | 344 | 0 | Stock and both native builds passed the same 19 original multiline parsing tests on public main. All 19 are new to the ledger. |
 | `contextlib` | 148 | 149 | 0 | All 58 async originals and 90 of 91 synchronous originals have paired passes. The module entry point passed nine of the ten `TestSuppress` cases on public Imre. The remaining case exercises exception groups. |
-| `copy` | 73 | 81 | 0 | Shallow and deep copies of list subclasses passed on stock and both public native levels. The full suite ran 81 cases. Stock passed 81 and both native levels passed the same 73. |
+| `copy` | 74 | 81 | 0 | The complete public suite reached 74 of 81. A second Ruff worker reproduced `test.test_copy.TestCopy.test_deepcopy_dict_subclass` (occurrence 1) on stock and public Imre at both optimization levels. |
 | `fractions` | 50 | 50 | 0 | The ordinary fractions module ran all 50 original parents. Every parent passed on pinned stock and on public Imre O0 and O3. |
 | `glob` | 22 | 24 | 0 | On Linux, CPython and both native builds passed 22 of the 24 tests in the complete module, including the open-file stress test. All three skipped the two Windows tests. |
 | `gzip` | 29 | 75 | 0 | The complete 75-parent gzip module passed 29 parents on public Imre at O0 and O3. CPython passed all 75. Twenty-six passes are new to the ledger. |
-| `inspect` | 178 | 362 | 0 | The frame and previous-frame originals both passed on stock CPython and public Imre at O0 and O3. Both are new to the ledger. |
+| `inspect` | 181 | 362 | 0 | All seven bound-method getcallargs tests passed in the original TestGetcallargsMethods class. Three also passed in separate public runs and joined the paired count. They cover invalid calls, positional varargs and keyword varargs. |
 | `math` | 0 | 89 | 0 | Stock registered and ran 89 original parents. At the measured public revision, native module discovery stopped before any original parent passed. |
 | `ssl` | 48 | 195 | 0 | After the ECDH curve change, `test.test_ssl.ContextTests.test_set_ecdh_curve` (occurrence 1) passed on pinned CPython and public Imre at O0 and O3. |
 | `struct` | 8 | 43 | 0 | The complete suite ran the same 43 original tests on all three engines. Stock CPython passed all 43. Public Imre O0 and O3 passed the same eight. |
@@ -173,7 +173,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 204 | 383 | 0 | Three additional originals now pass on the public compiler in both modes. They cover the good password and two forms of CRC failure in deflated ZIP entries. Both stored-entry controls also passed. |
 | `zoneinfo` | 41 | 261 | 0 | All 18 originals in WeirdZoneTest and CWeirdZoneTest passed on CPython and public Imre at O0 and O3 after LZMA decompression landed. The cumulative count includes the 23 previously passing properties. |
-| **Measured total (19 of 19 families)** | **1,750** | **2,875** | **8** |  |
+| **Measured total (19 of 19 families)** | **1,759** | **2,875** | **8** |  |
 
 ## Design
 
