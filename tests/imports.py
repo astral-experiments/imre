@@ -1660,6 +1660,10 @@ def main() -> None:
                 "    elif sys.argv[3] == 'current':\n"
                 "        module.current()\n"
                 "    elif sys.argv[3] == 'write':\n"
+                "        import zlib\n"
+                "        member = module.compress(memoryview(b'payload'), compresslevel=1, mtime=42)\n"
+                "        assert member[4:10] == bytes((42, 0, 0, 0, 4, 255))\n"
+                "        assert zlib.decompress(member, wbits=31) == b'payload'\n"
                 "        with module.open('written.gz', 'wb') as stream:\n"
                 "            print(stream.write(b'payload'))\n"
                 "            assert stream.seekable() and stream.tell() == 7\n"
@@ -1806,6 +1810,20 @@ def main() -> None:
                 assert result.returncode == 1 and diagnostic in result.stderr, (name, result)
             require_success(run(command + ["--runtime-imports"], temporary))
             checks += 3
+
+        caller = "def gzip_caller() -> bytes: return compress(b'payload')\n"
+        typed = "def typed(n: int) -> int: return n\n"
+        unused = "def unused() -> int: return typed('wrong')\n"
+        for name, definitions, error_line in (
+            ("caller_first", caller + typed + unused, 4),
+            ("caller_last", unused + typed + caller, 2),
+        ):
+            case = temporary / f"gzip_compress_{name}"
+            write_files(case, {"main.py": "from gzip import compress\n" + definitions + "print(gzip_caller())\n"})
+            result = run([compiler, "check", str(case / "main.py")], temporary)
+            assert result.returncode != 0 and f"main.py:{error_line}:" in result.stderr, result
+            assert "expected int, got str" in result.stderr or "invalid-argument-type" in result.stderr, result
+            checks += 1
 
         # A TypeError raised while evaluating a return operand can still be caught.
         caught = temporary / "object_return_operand"

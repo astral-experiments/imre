@@ -1939,6 +1939,7 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Gzip, "compress") => Intrinsic::ScopedObjectExport("gzip.compress"),
             (Self::Types, "GenericAlias") => Intrinsic::ScopedObjectExport("types.GenericAlias"),
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,

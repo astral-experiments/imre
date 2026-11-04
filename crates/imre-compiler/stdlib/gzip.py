@@ -217,6 +217,16 @@ class GzipFile(io.BufferedIOBase):
             _imre_gzip.close(reader)
 
 
+def compress(data, compresslevel=9, *, mtime=0):
+    """Compress data into a single gzip member, with a reproducible timestamp by default."""
+    member = zlib.compress(data, level=compresslevel, wbits=31)
+    if mtime is None:
+        mtime = time.time()
+    # Keep zlib's compression flags and use gzip's portable OS byte.
+    header = struct.pack("<4sLBB", member, int(mtime), member[8], 255)
+    return header + member[10:]
+
+
 def open(filename, mode="rb", compresslevel=9, encoding=None, errors=None, newline=None):
     """Open a gzip-compressed path or file object in binary or text mode."""
     if "t" in mode:
