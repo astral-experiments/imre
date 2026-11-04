@@ -20,6 +20,36 @@ def current():
     finally:
         struct.error = error
 
+    class Frequency(str):
+        def __complex__(self):
+            return complex(-0.0, 1.5)
+
+    for code, component in (("F", "f"), ("D", "d")):
+        for prefix in ("@", "=", "<", ">"):
+            sample = struct.Struct(prefix + code)
+            wire = struct.pack(prefix + "2" + component, -0.0, 1.5)
+            assert sample.pack(Frequency("ignored")) == wire
+            assert list(sample.iter_unpack(wire * 2)) == [(-0.0 + 1.5j,)] * 2
+            assert struct.calcsize(prefix + "B0" + code) == struct.calcsize(prefix + "B0" + component)
+            decoded, = sample.unpack_from(b"!" + wire, 1)
+            assert sample.pack(decoded) == wire
+    try:
+        struct.pack("F", "2j")
+    except struct.error as error:
+        assert error.args == ("required argument is not a complex",)
+    else:
+        raise AssertionError("complex field parsed text")
+
+    import sys
+    swapped = ">" if sys.byteorder == "little" else "<"
+    target = bytearray(b"!" * 10)
+    try:
+        struct.pack_into(swapped + "F", target, 1, complex(1.5, 1e100))
+    except OverflowError:
+        assert target == b"!" + struct.pack(swapped + "f", 1.5) + bytes(4) + b"!"
+    else:
+        raise AssertionError("out-of-range imaginary component packed")
+
     words = array("I", [0x12345678])
     assert struct.unpack("@I", words) == (0x12345678,)
     assert struct.Struct("@I").unpack(memoryview(words)) == (0x12345678,)

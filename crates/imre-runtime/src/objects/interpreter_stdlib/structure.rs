@@ -15,6 +15,7 @@ pub(crate) enum UnpackedField {
     Integer(u64),
     Signed(i64),
     Float(f64),
+    Complex(f64, f64),
     Byte(u8),
     Bytes(Vec<u8>),
 }
@@ -85,6 +86,8 @@ impl StructFormat {
                 b'i' | b'I' => (4, align_of::<u32>()),
                 b'f' => (4, align_of::<f32>()),
                 b'd' => (8, align_of::<f64>()),
+                b'F' => (8, align_of::<f32>()),
+                b'D' => (16, align_of::<f64>()),
                 b'q' | b'Q' => (8, align_of::<u64>()),
                 b'x' => (1, 1),
                 b'n' | b'N' | b'P' if result.native => (size_of::<usize>(), align_of::<usize>()),
@@ -132,6 +135,17 @@ impl StructFormat {
                 (field.code, start..start + field.width)
             })
         })
+    }
+
+    fn read_integer(&self, field: &[u8]) -> u64 {
+        let mut word = [0; 8];
+        if self.little_endian {
+            word[..field.len()].copy_from_slice(field);
+            u64::from_le_bytes(word)
+        } else {
+            word[8 - field.len()..].copy_from_slice(field);
+            u64::from_be_bytes(word)
+        }
     }
 
     pub(crate) fn write_integer(&self, target: &mut [u8], value: u64) {
@@ -218,14 +232,22 @@ impl StructFormat {
                 });
                 continue;
             }
-            let mut word = [0u8; 8];
-            let value = if self.little_endian {
-                word[..field.len()].copy_from_slice(field);
-                u64::from_le_bytes(word)
-            } else {
-                word[8 - field.len()..].copy_from_slice(field);
-                u64::from_be_bytes(word)
-            };
+            if matches!(code, b'F' | b'D') {
+                let component = |bytes| {
+                    let word = self.read_integer(bytes);
+                    if code == b'D' {
+                        f64::from_bits(word)
+                    } else if self.little_endian == cfg!(target_endian = "little") {
+                        f64::from(f32::from_bits(word as u32))
+                    } else {
+                        self.unpack_single(word as u32)
+                    }
+                };
+                let (real, imag) = field.split_at(field.len() / 2);
+                result.push(UnpackedField::Complex(component(real), component(imag)));
+                continue;
+            }
+            let value = self.read_integer(field);
             result.push(match code {
                 b'?' => UnpackedField::Bool(value != 0),
                 b'b' | b'h' | b'i' | b'l' | b'q' | b'n' => {

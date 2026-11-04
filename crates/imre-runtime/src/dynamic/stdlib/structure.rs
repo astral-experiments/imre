@@ -1,9 +1,11 @@
 //! Bound methods retain the parsed binary layout and convert arguments in field order.
+use std::ops::Range;
 use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
 use super::super::builtins::{bind_builtin_arguments, boolean, one_positional_arg};
+use super::super::complex::Complex;
 use super::{
     Context, Error, Id, NONE, Result, Value,
     system::{StructFormat, UnpackedField},
@@ -127,6 +129,7 @@ fn unpacked_tuple(ctx: &mut Context, fields: Vec<UnpackedField>) -> Id {
             UnpackedField::Integer(word) => ctx.alloc(Value::Int(crate::Int::new(word.into()))),
             UnpackedField::Signed(number) => ctx.int(number),
             UnpackedField::Float(number) => ctx.alloc(Value::Float(number)),
+            UnpackedField::Complex(real, imag) => ctx.alloc(Value::Complex(Complex { real, imag })),
             UnpackedField::Byte(byte) => ctx.heap.bytes_from_data([byte]),
             UnpackedField::Bytes(bytes) => ctx.heap.bytes_from_data(bytes),
         })
@@ -415,9 +418,10 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
             };
             write_byte_field(code, &mut output, range, Some(bytes));
         } else {
-            let target = &mut output[range];
-            let word = pack_word(ctx, id, code, target.len(), layout.little_endian)?;
-            layout.write_integer(target, word);
+            pack_number(ctx, layout, id, code, range, |_, range, word| {
+                layout.write_integer(&mut output[range], word);
+                Ok(())
+            })?;
         }
     }
     Ok(ctx.alloc(Value::Bytes(output)))
@@ -462,9 +466,8 @@ pub(super) fn pack_into(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -
         // Field conversion callbacks can observe the cleared record and any preceding writes.
         ctx.writable_storage_bytes(storage)?[start..start + layout.size].fill(0);
         for ((code, range), &id) in layout.items().zip(values) {
-            let pos = start + range.start;
+            let field = start + range.start..start + range.end;
             if matches!(code, b's' | b'p') {
-                let field = pos..start + range.end;
                 let source = ctx.scalar_value(id);
                 if source == storage {
                     let Value::ByteArray(bytes) = ctx.heap.get_mut(storage) else {
@@ -485,15 +488,76 @@ pub(super) fn pack_into(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -
                     );
                 }
             } else {
-                let word = pack_word(ctx, id, code, range.len(), layout.little_endian)?;
-                layout.write_integer(
-                    &mut ctx.writable_storage_bytes(storage)?[pos..start + range.end],
-                    word,
-                );
+                pack_number(ctx, layout, id, code, field, |ctx, field, word| {
+                    let buffer = ctx.writable_storage_bytes(storage)?;
+                    layout.write_integer(&mut buffer[field], word);
+                    Ok(())
+                })?;
             }
         }
         Ok(NONE)
     })
+}
+
+/// Convert each number once, writing the real component before narrowing the imaginary one.
+fn pack_number(
+    ctx: &mut Context,
+    layout: &StructFormat,
+    id: Id,
+    code: u8,
+    range: Range<usize>,
+    mut write: impl FnMut(&mut Context, Range<usize>, u64) -> Result<()>,
+) -> Result<()> {
+    if !matches!(code, b'F' | b'D') {
+        let word = pack_word(ctx, id, code, range.len(), layout.little_endian)?;
+        return write(ctx, range, word);
+    }
+    let value = complex_value(ctx, id)
+        .ok_or_else(|| format_error(ctx, "required argument is not a complex"))?;
+    let middle = range.start + range.len() / 2;
+    for (part, component) in [
+        (range.start..middle, value.real),
+        (middle..range.end, value.imag),
+    ] {
+        let word = if code == b'D' {
+            component.to_bits()
+        } else if layout.little_endian == cfg!(target_endian = "little") {
+            // CPython uses a native float cast for same-endian complex fields, even with '='.
+            u64::from((component as f32).to_bits())
+        } else {
+            u64::from(checked_single_bits(ctx, id, component)?)
+        };
+        write(ctx, part, word)?;
+    }
+    Ok(())
+}
+
+/// struct uses the numeric protocol and converts any coercion failure to struct.error.
+fn complex_value(ctx: &mut Context, id: Id) -> Option<Complex> {
+    if let Value::Complex(number) = *ctx.heap.get(ctx.scalar_value(id)) {
+        return Some(number);
+    }
+    let Some(method) = ctx.bound_slot(id, "__complex__").ok()? else {
+        return float_value(ctx, id).ok().map(Complex::from);
+    };
+    let result = ctx.call(method, Vec::new(), Vec::new()).ok()?;
+    let scalar = ctx.scalar_value(result);
+    let Value::Complex(number) = *ctx.heap.get(scalar) else {
+        return None;
+    };
+    if result != scalar {
+        let message = format!(
+            "__complex__ returned non-complex (type {:.200}).  The ability to return an instance of a strict subclass of complex is deprecated, and may be removed in a future version of Python.",
+            ctx.type_name(result)
+        );
+        ctx.emit_builtin_warning(
+            crate::objects::exceptions::Kind::DeprecationWarning,
+            &message,
+            1,
+        )
+        .ok()?;
+    }
+    Some(number)
 }
 
 fn pack_word(
@@ -520,6 +584,10 @@ fn pack_word(
 
 fn single_bits(ctx: &mut Context, id: Id) -> Result<u32> {
     let value = float_value(ctx, id)?;
+    checked_single_bits(ctx, id, value)
+}
+
+fn checked_single_bits(ctx: &Context, id: Id, value: f64) -> Result<u32> {
     if value.is_nan() {
         // Preserve sign and the high 23 significand bits, including the quiet bit.
         // A payload that disappears in binary32 becomes a quiet NaN, never infinity.
