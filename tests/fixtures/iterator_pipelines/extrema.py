@@ -8,7 +8,15 @@ def replace_item(values: list[int]) -> int:
     return 1
 
 
+def spread(a: int, b: int, c: int) -> int:
+    return max(a, b, c) - min(a, b, c)
+
+
 large = 1000000000000000000000000000000
+assert spread(3, 1, 2) == 2
+assert spread(-large, 1, large) == 2 * large
+assert spread(large, large, large) == 0
+
 visits: list[int] = []
 print(min(observe(n, visits) for n in [large, -large, -large]))
 print(len(visits))
