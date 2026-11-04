@@ -72,7 +72,7 @@ class HTTPServer(socketserver.TCPServer):
 
     def server_bind(self) -> None:
         super().server_bind()
-        host, port = self.server_address
+        host, port = self.server_address[:2]
         self.server_name = socket.getfqdn(host)
         self.server_port = port
 
