@@ -115,7 +115,8 @@ fn unpacked_tuple(ctx: &mut Context, fields: Vec<UnpackedField>) -> Id {
             UnpackedField::Integer(word) => ctx.alloc(Value::Int(crate::Int::new(word.into()))),
             UnpackedField::Signed(number) => ctx.int(number),
             UnpackedField::Float(number) => ctx.alloc(Value::Float(number)),
-            UnpackedField::Bytes(bytes) => ctx.alloc(Value::Bytes(bytes)),
+            UnpackedField::Byte(byte) => ctx.heap.bytes_from_data([byte]),
+            UnpackedField::Bytes(bytes) => ctx.heap.bytes_from_data(bytes),
         })
         .collect();
     ctx.alloc(Value::Tuple(items))

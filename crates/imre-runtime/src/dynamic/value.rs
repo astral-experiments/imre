@@ -3148,15 +3148,15 @@ impl Heap {
 
     /// Reuse CPython's empty and one-byte singletons when copying known byte data.
     /// Allocating an uninitialized one-byte result (for example, bytes(1)) is distinct.
-    pub(super) fn bytes_from_data(&mut self, bytes: Vec<u8>) -> Id {
-        if bytes.len() > 1 {
-            return self.alloc_slot(Value::Bytes(bytes));
+    pub(super) fn bytes_from_data(&mut self, bytes: impl AsRef<[u8]> + Into<Vec<u8>>) -> Id {
+        if bytes.as_ref().len() > 1 {
+            return self.alloc_slot(Value::Bytes(bytes.into()));
         }
-        let byte = bytes.first().copied();
+        let byte = bytes.as_ref().first().copied();
         if let Some(&id) = self.short_bytes.get(&byte) {
             return id;
         }
-        let id = self.alloc_slot_with_trace(Value::Bytes(bytes), false);
+        let id = self.alloc_slot_with_trace(Value::Bytes(bytes.into()), false);
         self.short_bytes.insert(byte, id);
         id
     }
