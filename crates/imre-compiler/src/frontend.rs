@@ -7052,7 +7052,19 @@ impl<'a> Checker<'a> {
                         "comprehension local may be uninitialized on this path",
                     ));
                 }
-                let slot = self.names.get(name.id.as_str()).copied().ok_or_else(|| error(self.source, expression, "name is not a local value; globals and first-class functions are unsupported"))?;
+                let Some(&slot) = self.names.get(name.id.as_str()) else {
+                    let name = name.id.as_str();
+                    if imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+                        && self.unshadowed_builtin(expression, name)
+                    {
+                        return Err(self.scoped_builtin_error(name, expression));
+                    }
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "name is not a local value; globals and first-class functions are unsupported",
+                    ));
+                };
                 if !self.assigned.contains(&slot) {
                     if let Some(&flag) = self.bound_flags.get(name.id.as_str()) {
                         self.graph
