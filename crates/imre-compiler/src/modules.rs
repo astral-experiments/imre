@@ -2648,6 +2648,9 @@ impl IntrinsicModule {
             (Self::Email, "message_from_string") => {
                 Intrinsic::ScopedObjectExport("email.message_from_string")
             }
+            (Self::Email, "message_from_binary_file") => {
+                Intrinsic::ScopedObjectExport("email.message_from_binary_file")
+            }
             (Self::EmailFeedParser, "FeedParser") => {
                 Intrinsic::ScopedObjectExport("email.feedparser.FeedParser")
             }
