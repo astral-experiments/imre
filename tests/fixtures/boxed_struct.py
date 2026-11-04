@@ -256,6 +256,23 @@ def current():
     else:
         raise AssertionError("lost index error")
 
+    # The length field of a native cmsghdr has type size_t.
+    header = struct.Struct("@Nii")
+    assert header.unpack(header.pack(Field(20), 1, 1)) == (20, 1, 1)
+    bits = 8 * struct.calcsize("P")
+    assert struct.calcsize("@B0N") == struct.calcsize("@B0n") == struct.calcsize("@B0P")
+    for code, low, high in (("n", -(1 << (bits - 1)), (1 << (bits - 1)) - 1),
+                            ("N", 0, (1 << bits) - 1)):
+        pair = struct.Struct("@2" + code)
+        assert pair.unpack(pair.pack(low, high)) == (low, high)
+        for value in (low - 1, high + 1, OverflowingIndex()):
+            try:
+                struct.pack(code, value)
+            except struct.error as error:
+                assert str(error) == f"'{code}' format requires {low} <= number <= {high}"
+            else:
+                raise AssertionError("native size overflow accepted")
+
     sample = struct.Struct("<h?")
     assert sample.pack(Field(-32768), [1]) == b"\x00\x80\x01"
     value, flag = sample.unpack(b"\xff\x7f\x80")
