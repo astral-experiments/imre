@@ -6,6 +6,7 @@ from _imre_dataclasses import (
     slot_bases as _slot_bases,
     slotted_type as _slotted_type,
 )
+import abc
 import types
 from types import GenericAlias, MemberDescriptorType
 
@@ -509,6 +510,7 @@ def _decorate(cls, params):
         # can have a separate cell from the one shared by generated methods.
         if not repaired_user_cell:
             frozen_owner = cls
+    abc.update_abstractmethods(cls)
     return cls
 
 
