@@ -1,10 +1,12 @@
 import os
 import pkgutil
 from importlib.util import find_spec
-from pkgutil import get_data, iter_modules
+from pkgutil import get_data, iter_modules, resolve_name
 
 
 def current():
+    assert resolve_name(__name__ + ':current') is current
+    assert pkgutil.resolve_name(__name__ + '.current') is current
     root = os.path.dirname(__file__)
     class Directory:
         def __fspath__(self):

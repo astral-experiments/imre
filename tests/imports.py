@@ -359,6 +359,13 @@ REJECTED = {
             "    value: int = 'wrong'\n    print(value)\nrun()\n"
         ),
     }, "expected int, got str"),
+    "pkgutil_resolve_name_preserves_checked_calls": ({
+        "main.py": (
+            "from pkgutil import resolve_name\n"
+            "def take(n: int) -> int:\n    return n\n"
+            "print(resolve_name('builtins:int'), take('wrong'))\n"
+        ),
+    }, "invalid-argument-type"),
     "platform_iot_preserves_checked_calls": ({
         "main.py": (
             "import helper\ndef typed(value: int) -> int:\n    return value + 1\n"
