@@ -257,7 +257,7 @@ fn stream_options(raw: &sys::lzma_options_lzma, encode: bool) -> Result<LzmaOpti
 
 fn parse_chain(ctx: &mut Context, filters: Id) -> Result<Vec<Filter>> {
     ctx.heap.keep(filters);
-    let n = ctx.sequence_len(filters)?;
+    let n = ctx.sequence_protocol_len(filters)?;
     if n > 4 {
         return Err(Error::new(
             "ValueError",
@@ -266,6 +266,18 @@ fn parse_chain(ctx: &mut Context, filters: Id) -> Result<Vec<Filter>> {
     }
     (0..n)
         .map(|i| {
+            // A conversion can change the chain's type slots before the next item.
+            if !ctx.has_sequence_item_slot(filters) {
+                let kind = super::super::diagnostic_type_name(ctx, filters);
+                let message = if ctx.has_mapping_subscription(filters)
+                    || ctx.heap.get(filters).is_weak_proxy()
+                {
+                    format!("{kind} is not a sequence")
+                } else {
+                    format!("'{kind}' object does not support indexing")
+                };
+                return Err(Error::new("TypeError", message));
+            }
             let key = ctx.int(i as i64);
             let mark = ctx.heap.temporary_mark();
             let spec = ctx.get_item(filters, key)?;
