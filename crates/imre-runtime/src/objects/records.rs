@@ -582,12 +582,15 @@ pub unsafe extern "C" fn imre_record_release(payload: *const usize) {
     let count = header.references.get();
     // A function's last external owner can expose a cycle. An active release
     // queue must also keep the order of its outstanding owners.
-    if count > 1
-        && (count > 2 || !wrappers::is_function(header.descriptor()))
-        && PENDING_RELEASES.get().is_null()
-    {
-        header.references.set(count - 1);
-        return;
+    if PENDING_RELEASES.get().is_null() {
+        if count > 1 && (count > 2 || !wrappers::is_function(header.descriptor())) {
+            header.references.set(count - 1);
+            return;
+        }
+        // SAFETY: this final owner has no earlier siblings waiting for release.
+        if count == 1 && unsafe { release_scalar_record(payload) } {
+            return;
+        }
     }
     release(Release::Record(payload));
 }
@@ -700,15 +703,15 @@ unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
     }
 }
 
-/// Drop one independently owned scalar class in place. Weak callbacks and nested
+/// Drop one independently owned scalar record in place. Weak callbacks and nested
 /// owners use the ordinary worklist, which preserves their destruction order.
-unsafe fn release_scalar_class(payload: *const usize) -> bool {
-    // SAFETY: the sequence transfers a live owner with this header.
+unsafe fn release_scalar_record(payload: *const usize) -> bool {
+    // SAFETY: the caller transfers a live owner with this header.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     let descriptor = header.descriptor();
-    if !descriptor
-        .class_semantics()
-        .is_some_and(|s| s.flags & (1 << 6) != 0)
+    // SAFETY: this record roots its immutable layout and semantic metadata.
+    if !unsafe { descriptor.semantics.as_ref() }
+        .is_some_and(|s| s.kind <= 1 && s.flags & (1 << 6) != 0)
     {
         return false;
     }
@@ -752,7 +755,7 @@ fn release_sequence_batch(kind: WordKind, mut values: Vec<usize>, pending: &Rele
         // Stop before any owner whose children must precede its siblings.
         while let Some(&word) = values.last() {
             // SAFETY: a nonzero word owns a record until the matching pop.
-            if word != 0 && !unsafe { release_scalar_class(word as *const usize) } {
+            if word != 0 && !unsafe { release_scalar_record(word as *const usize) } {
                 break;
             }
             values.pop();

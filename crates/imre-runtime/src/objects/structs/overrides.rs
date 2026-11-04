@@ -1,4 +1,5 @@
 //! Store sparse exceptions by occupied block, or one alternate scalar row and a bitmap.
+mod ranked_writes;
 mod spaced_writes;
 mod word_writes;
 
@@ -487,8 +488,11 @@ impl Binary {
         // when the residue class itself takes one or more words per visit.
         let fill_words = n.div_ceil(BLOCK).min(period);
         let tail_budget = (count / BLOCK).max(count.saturating_sub(fill_words) / 2);
-        if omitted > tail_budget || spacing >= step.min(n - step) || !self.contains(at) {
+        if spacing >= step.min(n - step) || !self.contains(at) {
             return None;
+        }
+        if omitted > tail_budget {
+            return self.fill_ranked_prefix(at, step, n, count, spacing);
         }
 
         // Exactly one residue class is reachable. Visit the other members in
@@ -923,6 +927,8 @@ mod page_tests {
             (1024usize, 1019usize, 94usize),
             (1032, 1010, 1014),
             (1056, 67, 99),
+            (8192, 8171, 194),
+            (4096, 4081, 1069),
         ] {
             let period = n / num_integer::gcd(n, step);
             for count in [
