@@ -908,6 +908,72 @@ fn getnameinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
     Ok(ctx.alloc(Value::Tuple(vec![host, service])))
 }
 
+fn receive_size(ctx: &mut Context, value: Id) -> Result<isize> {
+    crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
+fn recvfrom_into(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    const FIELDS: [&str; 3] = ["buffer", "nbytes", "flags"];
+    let required = super::required_args("recvfrom_into", args, kwargs, &FIELDS)?;
+    let buffer = required(0)?;
+    let optional = |index: usize| {
+        args.get(index).copied().or_else(|| {
+            kwargs
+                .iter()
+                .find(|(key, _)| key == FIELDS[index])
+                .map(|(_, value)| *value)
+        })
+    };
+    let (count, peer) = ctx.with_writable_byte_span(
+        buffer,
+        "recvfrom_into() argument 1",
+        |ctx, storage, span| {
+            let nbytes = optional(1)
+                .map(|value| receive_size(ctx, value))
+                .transpose()?
+                .unwrap_or(0);
+            let flags = optional(2)
+                .map(|value| ctx.index_c_int(value))
+                .transpose()?
+                .unwrap_or(0);
+            // PyArg converts its recognized inputs before diagnosing leftover keywords.
+            if !kwargs.is_empty() {
+                super::super::builtins::bind_builtin_arguments(
+                    "recvfrom_into",
+                    args,
+                    kwargs,
+                    FIELDS,
+                    1,
+                )?;
+            }
+            let nbytes = usize::try_from(nbytes)
+                .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom_into"))?;
+            let bytes = &mut ctx.writable_storage_bytes(storage)?[span];
+            let size = if nbytes == 0 { bytes.len() } else { nbytes };
+            let target = bytes.get_mut(..size).ok_or_else(|| {
+                Error::new(
+                    "ValueError",
+                    "nbytes is greater than the length of the buffer",
+                )
+            })?;
+            Ok(native::recv_from_into(socket, target, flags)?)
+        },
+    )?;
+    let count = ctx.int(count as i64);
+    let peer = pack_socket_name(ctx, peer)?;
+    Ok(ctx.alloc(Value::Tuple(vec![count, peer])))
+}
+
 fn getsockopt(
     ctx: &mut Context,
     socket: &crate::objects::Object,
@@ -1143,6 +1209,9 @@ pub(super) fn call(
     if method == "getsockopt" {
         return getsockopt(ctx, &s, args, kwargs);
     }
+    if method == "recvfrom_into" {
+        return recvfrom_into(ctx, &s, args, kwargs);
+    }
     if method == "makefile" {
         check_args(
             method,
@@ -1324,13 +1393,7 @@ pub(super) fn call(
             return Ok(ctx.int(count as i64));
         }
         "recvfrom" => {
-            let n =
-                crate::signed_index(&ctx.index_integer(argument(args, 0)?)?).ok_or_else(|| {
-                    Error::new(
-                        "OverflowError",
-                        "Python int too large to convert to C ssize_t",
-                    )
-                })?;
+            let n = receive_size(ctx, argument(args, 0)?)?;
             let flags = args
                 .get(1)
                 .map(|&id| ctx.index_c_int(id))

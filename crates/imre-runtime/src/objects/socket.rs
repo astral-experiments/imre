@@ -1670,26 +1670,7 @@ pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
 /// Receive one message and preserve the source address, including a missing stream peer.
 pub(crate) fn recv_from(s: &Object, size: usize, flags: i32) -> Result<(Vec<u8>, SocketName)> {
     let mut bytes = zeroed_receive_buffer(size)?;
-    // SAFETY: zero initializes the entire socket-address storage, including padding.
-    let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let raw = fd(s);
-    let (count, len) = socket_call(raw, libc::POLLIN, deadline(s), || {
-        let mut len = size_of_val(&peer) as libc::socklen_t;
-        // SAFETY: bytes and peer remain writable up to their respective capacities.
-        let count = unsafe {
-            libc::recvfrom(
-                raw,
-                bytes.as_mut_ptr().cast(),
-                size,
-                flags,
-                (&raw mut peer).cast(),
-                &mut len,
-            )
-        };
-        let count = usize::try_from(count).map_err(|_| io::Error::last_os_error())?;
-        Ok((count, len))
-    })
-    .map_err(errno_error)?;
+    let (count, peer) = recv_from_into(s, &mut bytes, flags)?;
     // MSG_TRUNC may report the full datagram size even when fewer bytes were copied.
     if count > size {
         bytes
@@ -1700,7 +1681,36 @@ pub(crate) fn recv_from(s: &Object, size: usize, flags: i32) -> Result<(Vec<u8>,
     if count < size / 2 {
         crate::compact_bytes(&mut bytes);
     }
-    Ok((bytes, unpack_socket_name(&peer, len)?))
+    Ok((bytes, peer))
+}
+
+/// Receive a message into the caller's buffer and preserve the kernel's byte count and address.
+pub(crate) fn recv_from_into(
+    s: &Object,
+    buffer: &mut [u8],
+    flags: i32,
+) -> Result<(usize, SocketName)> {
+    // SAFETY: zero initializes the entire socket-address storage, including padding.
+    let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let raw = fd(s);
+    let (count, len) = socket_call(raw, libc::POLLIN, deadline(s), || {
+        let mut len = size_of_val(&peer) as libc::socklen_t;
+        // SAFETY: buffer and peer remain writable up to their respective capacities.
+        let count = unsafe {
+            libc::recvfrom(
+                raw,
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                flags,
+                (&raw mut peer).cast(),
+                &mut len,
+            )
+        };
+        let count = usize::try_from(count).map_err(|_| io::Error::last_os_error())?;
+        Ok((count, len))
+    })
+    .map_err(errno_error)?;
+    Ok((count, unpack_socket_name(&peer, len)?))
 }
 
 pub(crate) fn recv_into(s: &Object, buffer: &mut [u8], flags: i32) -> Result<usize> {
