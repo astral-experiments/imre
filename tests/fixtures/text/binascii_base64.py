@@ -62,3 +62,22 @@ except Exception as exc:
     print((isinstance(exc, Error), isinstance(exc, ValueError),
            isinstance(exc, Incomplete), isinstance(exc, TypeError)))
     print(exc.args)
+
+
+# A partial group can span ignored bytes before decoding resumes in whole groups.
+for split in range(13):
+    encoded = b"YWJjZGVmZ2hp"
+    separated = encoded[:split] + b"\n!" + encoded[split:]
+    assert a2b_base64(separated) == b"abcdefghi"
+    try:
+        a2b_base64(separated, strict_mode=True)
+    except Error as exc:
+        assert str(exc) == "Only base64 data is allowed"
+    else:
+        raise AssertionError("accepted an invalid base64 digit in strict mode")
+for suffix in (b"A", b"=A", b"AA=A", b"AA==A", b"AA==\xff", b"AB=="):
+    for strict in (True, False):
+        try:
+            print(a2b_base64(b"YWJj" * 8 + suffix, strict_mode=strict))
+        except Error as exc:
+            print(str(exc))
