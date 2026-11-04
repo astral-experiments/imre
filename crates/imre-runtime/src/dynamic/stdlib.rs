@@ -430,6 +430,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "find_spec"
             | "native_spec_info"
             | "native_source"
+            | "native_code"
             | "create_native_module"
             | "exec_native_module"
             | "warn_import"
@@ -2146,6 +2147,10 @@ pub(super) fn call(
                     frozen,
                 )?;
                 return Ok(NONE);
+            }
+            ("native_code", [name, bundled], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx.native_code(&name, *bundled == TRUE);
             }
             ("native_source", [name, bundled], []) => {
                 let name = ctx.str_value(*name)?.to_owned();

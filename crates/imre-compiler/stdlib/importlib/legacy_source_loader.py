@@ -7,6 +7,7 @@ from _imre_importlib import (
     create_native_module as _create_native_module,
     exec_native_module as _exec_native_module,
     native_spec_info as _native_spec_info,
+    native_code as _native_code,
     native_source as _native_source,
     warn_import as _warn_import,
 )
@@ -99,6 +100,10 @@ class _NativeImporter:
     @classmethod
     def get_source(cls, fullname):
         return _native_source(fullname, cls is _BundledImporter)
+
+    @classmethod
+    def get_code(cls, fullname):
+        return _native_code(fullname, cls is _BundledImporter)
 
     @staticmethod
     def create_module(spec):
