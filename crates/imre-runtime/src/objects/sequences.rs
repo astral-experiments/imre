@@ -513,7 +513,7 @@ pub unsafe extern "C" fn imre_str_iter_next_codepoint(cursor: *const Object) -> 
 /// Borrows the complete UTF-8 buffer of a freshly constructed forward cursor.
 ///
 /// # Safety
-/// Root the exact forward string iterator until the final read from the view.
+/// Root the exact forward iterator for the call and it or its source string through the final read.
 /// The caller supplies a writable end pointer and tracks its own byte position.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_iter_bounds(
