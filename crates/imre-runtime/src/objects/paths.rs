@@ -435,7 +435,7 @@ enum ResolvePart {
 
 /// A successful lookup proves that every component exists and none is a symlink.
 #[cfg(target_os = "linux")]
-fn resolve_existing(base: &str, path: &str) -> Option<Str> {
+fn resolve_existing(base: &str, path: &StrOwner) -> Option<StrOwner> {
     use rustix::fs::{CWD, Mode, OFlags, ResolveFlags, openat2};
 
     let tail = path.strip_prefix('/').unwrap_or(path);
@@ -444,22 +444,28 @@ fn resolve_existing(base: &str, path: &str) -> Option<Str> {
     if parts.clone().nth(2).is_none() || parts.any(|part| matches!(part, "" | "." | "..")) {
         return None;
     }
+    let exists_without_links = |absolute: &str| {
+        openat2(
+            CWD,
+            absolute,
+            OFlags::PATH | OFlags::CLOEXEC,
+            Mode::empty(),
+            ResolveFlags::NO_SYMLINKS,
+        )
+        .is_ok()
+    };
+    if path.starts_with('/') {
+        // The successful walk proves this exact spelling is already resolved.
+        return exists_without_links(path).then(|| StrOwner::clone(path));
+    }
     let absolute = join(base, tail);
-    let _fd = openat2(
-        CWD,
-        absolute.as_str(),
-        OFlags::PATH | OFlags::CLOEXEC,
-        Mode::empty(),
-        ResolveFlags::NO_SYMLINKS,
-    )
-    .ok()?;
-    Some(absolute)
+    exists_without_links(&absolute).then(|| absolute.into())
 }
 
 /// Resolve links component by component, retaining missing suffixes when not
 /// strict. An explicit stack and link cache handle long acyclic link chains
 /// without recursion or the kernel's per-lookup symlink traversal limit.
-fn resolve(path: &str, strict: bool) -> Result<Str> {
+fn resolve(path: &StrOwner, strict: bool) -> Result<StrOwner> {
     let mut resolved = if path.starts_with('/') {
         Str::from("/")
     } else {
@@ -544,7 +550,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
                 .map(|part| ResolvePart::Component(Str::from(part))),
         );
     }
-    Ok(resolved)
+    Ok(resolved.into())
 }
 
 pub(crate) fn path_utf8(path: OsString) -> Result<Str> {
@@ -855,7 +861,7 @@ pub unsafe extern "C" fn imre_path_resolve(path: *const Object, strict: u32) -> 
     let result = unsafe {
         object(path)
             .0
-            .with(|storage| resolve(storage.path(), strict != 0))
+            .with(|storage| resolve(storage.path_text(), strict != 0))
     };
     finish(result.map(new_path), std::ptr::null())
 }
