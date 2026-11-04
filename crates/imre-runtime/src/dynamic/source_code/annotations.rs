@@ -3,6 +3,8 @@
 use super::*;
 use ast::visitor::{self, Visitor};
 
+pub(super) const CONDITIONAL: &str = "__conditional_annotations__";
+
 /// A nested lambda body or comprehension has its own scope. Defaults and the outer
 /// iterable still execute in the annotation scope.
 #[derive(Default)]
@@ -169,6 +171,7 @@ impl Program {
             entries,
             Some(&body.qualname),
             line,
+            Vec::new(),
         )))
     }
 
@@ -177,6 +180,7 @@ impl Program {
         entries: Vec<(String, ast::Expr)>,
         owner: Option<&str>,
         line: u32,
+        conditional_fields: Vec<usize>,
     ) -> Rc<Program> {
         let mut provider = self.nested_program("__annotate__");
         provider.qualname = owner.map_or_else(
@@ -187,6 +191,7 @@ impl Program {
         provider.method_imports = self.method_imports.clone();
         provider.private_names = self.private_names.clone();
         provider.template_expressions = self.template_expressions.clone();
+        provider.conditional_fields = conditional_fields;
         let scope = if owner.is_none() {
             AnnotationScope::Module
         } else if self.class_attributes.is_some() && !self.string_annotations() {
@@ -253,18 +258,61 @@ impl<'a> CompiledStrings<'a, '_> {
 }
 
 impl Context {
+    /// A method's own type parameter shadows the class's private annotation cell.
+    pub(super) fn source_captures_conditional(
+        &self,
+        scope: Id,
+        defining_scope: Id,
+        program: &Program,
+    ) -> bool {
+        program.reads.contains(CONDITIONAL)
+            && (scope == defining_scope
+                || !self
+                    .scope_data(defining_scope)
+                    .closure
+                    .declared
+                    .contains(CONDITIONAL))
+    }
+
+    /// The class suite records executed sites in a cell, outside its prepared namespace.
+    pub(super) fn source_conditional_cell(&mut self, scope: Id) -> Result<Id> {
+        if let Some(cell) = self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.conditional_cell)
+        {
+            return Ok(cell);
+        }
+        let active = self.op("set", NONE, NONE, NONE)?;
+        let cell = self.alloc(Value::Cell(Some(active)));
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame
+            .class_namespace
+            .get_or_insert_with(Default::default)
+            .conditional_cell = Some(cell);
+        Ok(cell)
+    }
+
     /// Method providers consult their live class dictionary before lexical or global names.
-    fn source_annotation_scope(&mut self, scope: Id, defining_scope: Id, program: &Program) -> Id {
+    fn source_annotation_scope(
+        &mut self,
+        scope: Id,
+        defining_scope: Id,
+        program: &Program,
+    ) -> Result<Id> {
         let parent = self.scope_data(scope);
         if parent.class_body.is_none() || !program.reads.contains("__classdict__") {
-            return defining_scope;
+            return Ok(defining_scope);
         }
         let parent_scope = if defining_scope == scope {
             parent.parent.expect("class definition scope")
         } else {
             defining_scope
         };
-        let class_cell = parent.class_cell;
+        let class_cell = self.scope_data(defining_scope).class_cell;
         let dict_cell = self.class_annotation_dict_cell(scope);
         let mut names = vec!["__classdict__".to_owned()];
         let mut cells = vec![dict_cell];
@@ -274,7 +322,11 @@ impl Context {
             names.push("__class__".to_owned());
             cells.push(cell);
         }
-        self.closure_environment(parent_scope, names, &cells)
+        if self.source_captures_conditional(scope, defining_scope, program) {
+            names.push(CONDITIONAL.into());
+            cells.push(self.source_conditional_cell(scope)?);
+        }
+        Ok(self.closure_environment(parent_scope, names, &cells))
     }
 
     pub(super) fn source_annotator(
@@ -284,7 +336,7 @@ impl Context {
         scope: Id,
         defining_scope: Id,
     ) -> Result<Id> {
-        let scope = self.source_annotation_scope(scope, defining_scope, program);
+        let scope = self.source_annotation_scope(scope, defining_scope, program)?;
         // Annotation code is constant for this definition, even across calls to its factory.
         let code = if let Some((_, id)) = self
             .code_object(function_code)
@@ -315,7 +367,7 @@ impl Context {
         Ok(self.source_function(code, scope, defaults))
     }
 
-    /// Implicit annotation bytecode uses LOAD_NAME even for a declared global.
+    /// Look up a name in the current locals mapping, then in globals and builtins.
     pub(in crate::dynamic) fn module_annotation_name(
         &mut self,
         scope: Id,
@@ -355,7 +407,11 @@ impl Context {
         scope: Id,
         index: Id,
     ) -> Result<()> {
-        let active = self.module_annotation_name(scope, "__conditional_annotations__")?;
+        let active = self.module_annotation_name(scope, CONDITIONAL)?;
+        self.mark_annotation(active, index)
+    }
+
+    pub(super) fn mark_annotation(&mut self, active: Id, index: Id) -> Result<()> {
         let set = self.scalar_value(active);
         if !matches!(self.heap.get(set), Value::Set { frozen: false, .. }) {
             return Err(Error::new("TypeError", "expected a set"));
@@ -371,7 +427,7 @@ impl Context {
     ) -> Result<()> {
         let active = self.op("set", NONE, NONE, NONE)?;
         let locals = self.frame_locals(scope)?;
-        let key = self.heap.code_name("__conditional_annotations__");
+        let key = self.heap.code_name(CONDITIONAL);
         self.put_item(locals, key, active)?;
         if string_annotations {
             match self.load_exec_name(locals, "__annotations__") {
@@ -402,7 +458,8 @@ impl Context {
             return Err(self.exception("NotImplementedError", &[]));
         }
         // The synthetic argument 'format' is invisible to the expressions themselves.
-        let mut environment = self.scope_data(scope).parent.expect("annotation globals");
+        let defining_scope = self.scope_data(scope).parent.expect("annotation globals");
+        let mut environment = defining_scope;
         if annotation_scope == AnnotationScope::Class {
             let dict = self.lookup(environment, "__classdict__")?;
             let globals = self.scope_data(scope).globals.clone();
@@ -416,8 +473,13 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         for (index, (name, expr)) in entries.iter().enumerate() {
-            if annotation_scope == AnnotationScope::Module {
-                let active = self.lookup(environment, "__conditional_annotations__")?;
+            let conditional = match annotation_scope {
+                AnnotationScope::Module => Some(index),
+                AnnotationScope::Class => code.conditional_fields.binary_search(&index).ok(),
+                AnnotationScope::Function => None,
+            };
+            if let Some(index) = conditional {
+                let active = self.lookup(defining_scope, CONDITIONAL)?;
                 let index = self.int(index as i64);
                 if !self.contains(index, active)? {
                     continue;

@@ -327,7 +327,8 @@ impl Context {
                         "RuntimeError",
                         format!(
                             "super(): __class__ is not a type ({})",
-                            self.type_name(*class)
+                            self.builtin_type_name(*class)
+                                .unwrap_or_else(|| self.type_name(*class))
                         ),
                     ));
                 }

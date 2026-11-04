@@ -8503,6 +8503,7 @@ impl Context {
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
+                namespace.conditional_cell = None;
             }
             frame.globals.clear();
             frame.closure.nonlocals.clear();
