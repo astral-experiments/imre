@@ -96,7 +96,7 @@ class _GzipRawReader(io.RawIOBase):
         position = self.tell()
         if offset < position:
             self.fileobj.seek(0)
-            self.decoder = _imre_gzip.decoder()
+            _imre_gzip.raw_rewind(self.decoder)
             position = 0
         while position < offset:
             data = self._read(min(io.DEFAULT_BUFFER_SIZE, offset - position))
@@ -172,6 +172,15 @@ class GzipFile(io.BufferedIOBase):
         self.fileobj = fileobj
         self.myfileobj = fileobj if owned else None
         self._reader = reader
+
+    @property
+    def mtime(self):
+        """Last modification time read from stream, or None."""
+        if self.mode == WRITE:
+            raise AttributeError("mtime is only available in read mode")
+        if self._reader is None:
+            return self._last_mtime
+        return _imre_gzip.raw_mtime(self._reader.raw.decoder)
 
     @property
     def closed(self):
@@ -264,6 +273,7 @@ class GzipFile(io.BufferedIOBase):
             return
         try:
             if reader is not None:
+                self._last_mtime = _imre_gzip.raw_mtime(reader.raw.decoder)
                 self._reader = None
                 reader.close()
             else:

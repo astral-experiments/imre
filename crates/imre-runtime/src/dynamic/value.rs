@@ -903,6 +903,12 @@ pub(super) struct ExecGlobals {
     pub builtins: Id,
 }
 
+/// Metadata stays readable while a Python source callback owns the decoder.
+pub(super) struct BoxedGzipDecoder {
+    pub(super) stream: RefCell<Option<crate::objects::GzipDecoder>>,
+    pub(super) last_mtime: Cell<Option<u32>>,
+}
+
 #[derive(Clone)]
 pub(super) struct BoxedTextFile {
     pub(super) file: crate::objects::TextFile,
@@ -1349,7 +1355,7 @@ pub(super) enum Value {
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(BoxedTextFile),
     GzipReader(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
-    GzipDecoder(crate::Shared<std::cell::RefCell<Option<crate::objects::GzipDecoder>>>),
+    GzipDecoder(crate::Shared<BoxedGzipDecoder>),
     ZlibDecompressor {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
