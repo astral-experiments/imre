@@ -39,7 +39,7 @@ pub unsafe extern "C" fn imre_calendar_setfirstweekday(value: usize) -> u8 {
     0
 }
 
-fn month_grid(year: &Int, month: &Int) -> exceptions::Result<*const Object> {
+fn month_grid(year: &Int, month: &Int, firstweekday: i32) -> exceptions::Result<*const Object> {
     let Some(month @ 1..=12) = month.to_i64() else {
         return Err(argument_error(
             exceptions::Kind::IllegalMonthError,
@@ -61,7 +61,7 @@ fn month_grid(year: &Int, month: &Int) -> exceptions::Result<*const Object> {
     let year = 2000 + cycle_year;
     let month = month as i32;
     let first = ((ordinal(year, month, 1) - 1) % 7) as i32;
-    let offset = (first - i32::from(FIRST_WEEKDAY.load(Ordering::Relaxed))).rem_euclid(7);
+    let offset = (first - firstweekday).rem_euclid(7);
     let days = month_days(year, month);
     let mut rows = Words::new(4);
     rows.values
@@ -89,5 +89,40 @@ fn month_grid(year: &Int, month: &Int) -> exceptions::Result<*const Object> {
 pub unsafe extern "C" fn imre_calendar_month_grid(year: usize, month: usize) -> *const Object {
     // SAFETY: both inputs remain owned by the caller until the result is returned.
     let (year, month) = unsafe { (Int::borrow(year), Int::borrow(month)) };
-    finish(month_grid(&year, &month), std::ptr::null())
+    finish(
+        month_grid(
+            &year,
+            &month,
+            i32::from(FIRST_WEEKDAY.load(Ordering::Relaxed)),
+        ),
+        std::ptr::null(),
+    )
+}
+
+/// # Safety
+/// The checked caller roots all three exact integer arguments.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_instance_grid(
+    year: usize,
+    month: usize,
+    firstweekday: usize,
+) -> *const Object {
+    // SAFETY: all inputs remain owned by the caller until the result is returned.
+    let (year, month, firstweekday) = unsafe {
+        (
+            Int::borrow(year),
+            Int::borrow(month),
+            Int::borrow(firstweekday),
+        )
+    };
+    let firstweekday = firstweekday.to_i64().map_or_else(
+        || {
+            (firstweekday.big().as_ref() % 7_i32)
+                .to_i32()
+                .unwrap()
+                .rem_euclid(7)
+        },
+        |day| day.rem_euclid(7) as i32,
+    );
+    finish(month_grid(&year, &month, firstweekday), std::ptr::null())
 }

@@ -653,6 +653,7 @@ pub(crate) enum IntrinsicModule {
     LocaleNative,
     Functools,
     Calendar,
+    CalendarNative,
     Fnmatch,
     Time,
     Warnings,
@@ -1202,6 +1203,7 @@ impl IntrinsicModule {
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "calendar" => Some(Self::Calendar),
+            "_imre_calendar" => Some(Self::CalendarNative),
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
@@ -1317,8 +1319,14 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::CalendarNative && name == "_monthgrid" {
+            return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                "_imre_calendar._monthgrid",
+            )));
+        }
         if self == Self::Calendar {
             return Some(match name {
+                "Calendar" | "TextCalendar" => return None,
                 "monthcalendar" => {
                     Binding::Intrinsic(Intrinsic::ScopedObjectExport("calendar.monthcalendar"))
                 }
@@ -3861,6 +3869,7 @@ const METADATA_VERSION: &str = "__imre_metadata_version__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
+pub(crate) const CALENDAR_CLASSES: &str = "__imre_calendar_classes__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
 fn textwrap_implementation(name: &str) -> Option<&'static str> {
@@ -3899,6 +3908,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
             IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
+            IntrinsicModule::Calendar if matches!(name, "Calendar" | "TextCalendar") => CALENDAR_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
             _ => return None,
         };
@@ -3909,7 +3919,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
+                    (IntrinsicModule::Calendar | IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::ImportlibMetadata | IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
@@ -5034,6 +5044,16 @@ impl<'a> Loader<'a> {
         // A named import loads only the bundled definitions it can call.
         let bundles = [
             metadata.as_deref().map(|source| (METADATA_VERSION, source)),
+            (module == Some(IntrinsicModule::Calendar)
+                && imports.is_none_or(|names| {
+                    names
+                        .iter()
+                        .any(|a| matches!(a.name.as_str(), "Calendar" | "TextCalendar"))
+                }))
+            .then_some((
+                CALENDAR_CLASSES,
+                include_str!("../stdlib/calendar_grid_typed.py"),
+            )),
             (module == Some(IntrinsicModule::Contextlib)
                 && imports.is_none_or(|names| {
                     names

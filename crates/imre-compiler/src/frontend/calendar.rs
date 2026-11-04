@@ -146,6 +146,11 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let (op, names, returns): (_, &[&str], _) = match name {
+            "_imre_calendar._monthgrid" => (
+                Op::MonthGrid,
+                &["year", "month", "firstweekday"],
+                self.types.list(self.types.list(Type::Int)),
+            ),
             "calendar.monthcalendar" => (
                 Op::MonthGrid,
                 &["year", "month"],
