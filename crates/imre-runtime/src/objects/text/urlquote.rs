@@ -11,37 +11,48 @@ fn check_option(value: &str) -> Result<()> {
 }
 
 fn quoted(input: &[u8], safe: &[u8], plus: bool) -> Result<String> {
-    let mut allowed = [false; 128];
+    const UNRESERVED: [bool; 256] = {
+        let mut allowed = [false; 256];
+        let mut byte = 0;
+        while byte < 128 {
+            let b = byte as u8;
+            allowed[byte] = b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-' | b'~');
+            byte += 1;
+        }
+        allowed
+    };
+
+    let mut allowed = UNRESERVED;
     for &byte in safe.iter().filter(|b| b.is_ascii()) {
         allowed[usize::from(byte)] = true;
     }
-    let safe = |b: u8| {
-        (plus && b == b' ')
-            || b.is_ascii_alphanumeric()
-            || b"_.-~".contains(&b)
-            || (b.is_ascii() && allowed[usize::from(b)])
-    };
-    let extra = input.iter().filter(|&&b| !safe(b)).count();
+    if plus {
+        allowed[usize::from(b' ')] = true;
+    }
+    let extra = input.iter().filter(|&&b| !allowed[usize::from(b)]).count();
     let size = extra
         .checked_mul(2)
         .and_then(|n| n.checked_add(input.len()))
         .ok_or_else(Error::allocation)?;
-    let mut out = String::new();
+    let mut out = Vec::new();
     out.try_reserve_exact(size)
         .map_err(|_| Error::allocation())?;
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    for &b in input {
-        if plus && b == b' ' {
-            out.push('+');
-        } else if safe(b) {
-            out.push(char::from(b));
-        } else {
-            out.push('%');
-            out.push(char::from(HEX[usize::from(b >> 4)]));
-            out.push(char::from(HEX[usize::from(b & 15)]));
+    if extra == 0 && (!plus || !input.contains(&b' ')) {
+        out.extend_from_slice(input);
+    } else {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        for &b in input {
+            if plus && b == b' ' {
+                out.push(b'+');
+            } else if allowed[usize::from(b)] {
+                out.push(b);
+            } else {
+                out.extend_from_slice(&[b'%', HEX[usize::from(b >> 4)], HEX[usize::from(b & 15)]]);
+            }
         }
     }
-    Ok(out)
+    // SAFETY: Only ASCII bytes can be allowed, and '+' and percent escapes are ASCII.
+    Ok(unsafe { String::from_utf8_unchecked(out) })
 }
 
 /// Escape a URL component with an ASCII safe set and the requested text codec.

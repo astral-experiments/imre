@@ -34,6 +34,9 @@ print(quote_from_bytes(b"/% \x00\xff~"))
 print(escape_bytes(safe=b"%\xff", bs=b"/% \xff"))
 print(urlparse.quote_from_bytes(b"", safe=""))
 print(urlparse.quote_from_bytes(b"=+/", safe="=é"))
+print(repr(quote_from_bytes(b"\x00~\x7f\x80\xff", safe=b"\x00\x7f\x80\xff")))
+print(urlparse.quote_plus(b"a b+c", safe=b" +"))
+print(quote_from_bytes(b"/A_~09", safe=b"/"))
 try:
     print(escape_bytes(safe=mark("!"), bs=mark("wrong")))
 except TypeError as error:
