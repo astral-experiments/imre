@@ -191,10 +191,10 @@ class GzipFile(io.BufferedIOBase):
         if self.closed:
             raise ValueError("I/O operation on closed file")
 
-    def _open_reader(self):
+    def _open_reader(self, operation="read"):
         self._check_open()
         if self._reader is None:
-            raise OSError(errno.EBADF, "read() on write-only GzipFile object")
+            raise OSError(errno.EBADF, f"{operation}() on write-only GzipFile object")
         return self._reader
 
     def readable(self):
@@ -215,6 +215,9 @@ class GzipFile(io.BufferedIOBase):
     def read1(self, size=-1):
         reader = self._open_reader()
         return reader.read1(io.DEFAULT_BUFFER_SIZE if size < 0 else size)
+
+    def peek(self, n):
+        return self._open_reader("peek").peek(n)
 
     def readline(self, size=-1):
         return self._open_reader().readline(size)
