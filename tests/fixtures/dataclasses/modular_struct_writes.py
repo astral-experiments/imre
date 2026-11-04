@@ -38,4 +38,25 @@ def main() -> None:
     print(marked)
 
 
+# A near-complete permutation must retain the original payload in every omitted
+# slot. The extra suffix and the noncoprime stride exercise the scalar fallback.
+def covering(n: int, length: int, stop: int, stride: int) -> None:
+    base = Row(0.0, False)
+    alternate = Row(2.0, True)
+    saved = Row(-3.0, False)
+    rows = [base] * length
+    for index in range(0, length, 37):
+        rows[index] = saved
+    alias = rows
+    write(rows, alternate, 3, stop, stride, 11, n)
+    checksum = 0.0
+    for index in range(length):
+        checksum += (index + 1) * alias[index].value
+    print(checksum)
+
+
 main()
+covering(1024, 1024, 1020, 37)
+covering(1024, 1024, 2051, 1023)
+covering(1024, 1031, 1027, 37)
+covering(1024, 1024, 1027, 36)
