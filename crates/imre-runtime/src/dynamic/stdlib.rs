@@ -31,6 +31,7 @@ pub(super) mod grp;
 mod gzip;
 pub(super) mod hashlib;
 mod hmac;
+mod idna;
 mod inspect;
 pub(super) mod itertools;
 pub(super) mod locale;
@@ -408,6 +409,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "utf_32_ex_decode",
         ) => ctx.builtin(&format!("codecs.{name}")),
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
+        ("_codecs", "_imre_idna_label") => ctx.builtin("_codecs._imre_idna_label"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         (
@@ -2486,6 +2488,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("time.") {
         return time::call(ctx, method, args, kwargs);
+    }
+    if name == "_codecs._imre_idna_label" {
+        return idna::label(ctx, args, kwargs);
     }
     if name == "_codecs._imre_codec_functions" {
         return codecs::entry_functions(ctx, args, kwargs);

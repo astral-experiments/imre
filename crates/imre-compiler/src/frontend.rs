@@ -10559,6 +10559,44 @@ impl<'a> Checker<'a> {
             {
                 return self.str_encode(Self::string_value(receiver), call);
             }
+            if receiver.ty == Type::Bytes && attribute.attr.as_str() == "decode" {
+                if call.arguments.keywords.is_empty() {
+                    let builtin = match call.arguments.args.as_ref() {
+                        [] => Some(Builtin::Decode),
+                        [ast::Expr::StringLiteral(s)]
+                            if s.value.to_str().eq_ignore_ascii_case("ascii") =>
+                        {
+                            Some(Builtin::DecodeAscii)
+                        }
+                        [ast::Expr::StringLiteral(s)]
+                            if matches!(s.value.to_str(), "utf-8" | "utf8" | "UTF-8" | "UTF8") =>
+                        {
+                            Some(Builtin::Decode)
+                        }
+                        _ => None,
+                    };
+                    if let Some(builtin) = builtin {
+                        return Ok(Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Builtin(builtin, vec![receiver]),
+                        });
+                    }
+                }
+                if !call.arguments.args.is_empty()
+                    || call
+                        .arguments
+                        .keywords
+                        .iter()
+                        .any(|kw| kw.arg.as_deref() == Some("encoding"))
+                {
+                    let params = [
+                        parameter("encoding", Type::Str, None),
+                        parameter("errors", Type::Str, Some(unpacking::string("strict"))),
+                    ];
+                    self.arguments(call, &params, Some(receiver))?;
+                    return Err(self.scoped_builtin_error("bytes.decode", call));
+                }
+            }
             if receiver.ty == Type::CodecInfo {
                 return self.codec_method(receiver, attribute, call);
             }
@@ -10892,25 +10930,6 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty: Type::Str,
                     kind: ExprKind::Builtin(Builtin::BytesHex, vec![receiver]),
-                });
-            }
-            if receiver.ty == Type::Bytes
-                && attribute.attr.as_str() == "decode"
-                && matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if s.value.to_str().eq_ignore_ascii_case("ascii"))
-            {
-                return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::DecodeAscii, vec![receiver]),
-                });
-            }
-            if receiver.ty == Type::Bytes
-                && attribute.attr.as_str() == "decode"
-                && (call.arguments.args.is_empty()
-                    || matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if matches!(s.value.to_str(), "utf-8" | "utf8" | "UTF-8" | "UTF8")))
-            {
-                return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Decode, vec![receiver]),
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {

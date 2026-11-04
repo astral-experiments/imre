@@ -22,6 +22,11 @@ impl Context {
             Codec::Utf8 { signature: true } => {
                 self.encode_utf8_codepoints(id, true, "surrogateescape")
             }
+            Codec::Idna => {
+                let encoding = self.text("idna");
+                let errors = self.text("surrogateescape");
+                super::encode_text(self, id, Some(encoding), Some(errors))
+            }
             _ => self.encode_legacy_codepoints(id, codec, true),
         }
     }
@@ -82,11 +87,11 @@ impl Context {
         id: Id,
         codec: &str,
         reason: &str,
-        point: u32,
+        point: impl Into<Option<u32>>,
         range: std::ops::Range<usize>,
     ) -> Error {
         let start = range.start;
-        let part = if range.len() == 1 {
+        let part = if let Some(point) = point.into().filter(|_| range.len() == 1) {
             let escape = match point {
                 0..=0xff => format!("\\x{point:02x}"),
                 0x100..=0xffff => format!("\\u{point:04x}"),
