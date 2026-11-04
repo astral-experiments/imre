@@ -1,5 +1,7 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
+use imre_ast::providers::BUILTIN_FUNCTIONS;
+
 use super::Context;
 use super::value::{
     self, DictIterator, ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value,
@@ -76,51 +78,6 @@ pub(super) fn exception_ancestors(
     .map(|base| base.name())
 }
 
-const FUNCTIONS: &[&str] = &[
-    "len",
-    "hash",
-    "reversed",
-    "dir",
-    "sorted",
-    "min",
-    "max",
-    "ord",
-    "chr",
-    "hex",
-    "oct",
-    "divmod",
-    "round",
-    "callable",
-    "id",
-    "abs",
-    "all",
-    "any",
-    "isinstance",
-    "issubclass",
-    "getattr",
-    "globals",
-    "locals",
-    "vars",
-    "setattr",
-    "delattr",
-    "hasattr",
-    "open",
-    "input",
-    "print",
-    "pow",
-    "sum",
-    "__import__",
-    "repr",
-    "ascii",
-    "format",
-    "compile",
-    "exec",
-    "eval",
-    "iter",
-    "next",
-    "anext",
-];
-
 const TYPES: &[&str] = &[
     "bool",
     "bytearray",
@@ -150,7 +107,7 @@ const TYPES: &[&str] = &[
 ];
 
 pub(super) fn names() -> impl Iterator<Item = &'static str> {
-    FUNCTIONS
+    BUILTIN_FUNCTIONS
         .iter()
         .chain(TYPES)
         .chain(imre_ast::exceptions::BOXED_BUILTINS)
@@ -208,7 +165,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
 }
 
 pub(super) fn is_builtin_function(name: &str) -> bool {
-    FUNCTIONS.contains(&name)
+    BUILTIN_FUNCTIONS.contains(&name)
 }
 
 /// CPython compares built-in functions by their implementation and bound module.
