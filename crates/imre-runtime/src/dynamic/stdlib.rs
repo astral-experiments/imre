@@ -411,8 +411,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         (
             "math",
-            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "cos" | "gcd" | "isclose"
-            | "isinf" | "isnan" | "isqrt" | "lcm" | "log",
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "cos" | "fma" | "gcd"
+            | "isclose" | "isinf" | "isnan" | "isqrt" | "lcm" | "log",
         ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
