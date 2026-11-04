@@ -156,6 +156,8 @@ struct Escapes {
     alphabet: Alphabet,
     preserve_categories: bool,
     bracketed_word: bool,
+    // Source-only walks keep Python literals outside the Unicode scalar domain.
+    code_points: bool,
 }
 
 /// Use the caller's regex flags to limit literal guards to sound text modes.
@@ -646,6 +648,7 @@ fn tokenize(
     let mut escapes = Escapes {
         alphabet,
         preserve_categories: grammar == Grammar::LocaleBytes,
+        code_points: visiting,
         bracketed_word: false,
     };
     let mut modes = vec![(0, alphabet)];
@@ -1055,6 +1058,7 @@ fn tokenize(
                     &mut input,
                     &mut output,
                     &mut escapes,
+                    None,
                     None,
                     warnings.as_deref_mut(),
                 )?;
@@ -1544,7 +1548,7 @@ fn guarded_class(
         match next_token(input, verbose)? {
             Some('\\')
                 if escaped(input, &mut excluded, false, escapes, None)?
-                    .scalar()
+                    .point()
                     .is_some() => {}
             Some(c) if !r"\.^$*+?{}[]()|".contains(c) => literal(&mut excluded, c),
             _ => return Err(unsupported.into()),
@@ -1557,7 +1561,7 @@ fn guarded_class(
     }
     output.push('[');
     match next_token(input, verbose)? {
-        Some('[') => parse_class(input, output, escapes, None, None)?,
+        Some('[') => parse_class(input, output, escapes, None, None, None)?,
         Some('\\') if escaped(input, output, false, escapes, None)? == Escape::Class => {}
         _ => return Err(unsupported.into()),
     }
@@ -1580,7 +1584,7 @@ fn atomic_delimited(
     }
     let mut delimiter = String::new();
     match input.next() {
-        Some('[') => parse_class(input, &mut delimiter, escapes, None, None)?,
+        Some('[') => parse_class(input, &mut delimiter, escapes, None, None, None)?,
         Some('\\') => {
             // The delimiter also appears inside a negated class in the lowered scan.
             let word_delimiter = matches!(input.peek(), Some('w' | 'W'));
@@ -1617,15 +1621,15 @@ fn literal(output: &mut String, c: char) {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Escape {
-    Scalar(char),
+    Literal(u32),
     Class,
     Anchor,
 }
 
 impl Escape {
-    fn scalar(self) -> Option<char> {
+    fn point(self) -> Option<u32> {
         match self {
-            Self::Scalar(value) => Some(value),
+            Self::Literal(value) => Some(value),
             _ => None,
         }
     }
@@ -1698,7 +1702,7 @@ fn escaped(
 ) -> Result<Escape, String> {
     let start = input.position - 1;
     if let Some(value) = push_octal_escape(input, output, in_class, visitor.as_deref_mut())? {
-        return Ok(Escape::Scalar(value));
+        return Ok(Escape::Literal(u32::from(value)));
     }
     let c = input.next().ok_or("incomplete regex escape")?;
     let ascii = escapes.alphabet.ascii();
@@ -1816,7 +1820,10 @@ fn escaped(
             if c == 'x' {
                 // The same escape denotes a scalar in text and a single octet in bytes.
                 write!(output, "\\x{result:02x}").unwrap();
-                return Ok(Escape::Scalar(char::from(result as u8)));
+                return Ok(Escape::Literal(result));
+            }
+            if escapes.code_points && (0xd800..=0xdfff).contains(&result) {
+                return Ok(Escape::Literal(result));
             }
             char::from_u32(result).ok_or("regex escape is not a Unicode scalar")?
         }
@@ -1831,7 +1838,7 @@ fn escaped(
         }
     };
     literal(output, value);
-    Ok(Escape::Scalar(value))
+    Ok(Escape::Literal(u32::from(value)))
 }
 
 /// Inspect one class in its original spelling before the backend expands Python categories.
@@ -1840,6 +1847,7 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
     let mut input = Input::new(source.strip_prefix('[')?);
     let mut escapes = Escapes {
         preserve_categories: false,
+        code_points: true,
         alphabet: if bytes {
             Alphabet::Bytes
         } else {
@@ -1853,6 +1861,7 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
         &mut String::new(),
         &mut escapes,
         Some(&mut from_end),
+        None,
         None,
     )
     .err()?;
@@ -1875,11 +1884,46 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
     Some((error, position))
 }
 
+/// One literal class and its optional single-character repetition in a text pattern.
+pub struct LiteralClass<'a> {
+    pub negated: bool,
+    pub ranges: Vec<(u32, u32)>,
+    pub repeat: &'a str,
+}
+
+pub fn literal_class(source: &str) -> Option<LiteralClass<'_>> {
+    let mut input = Input::new(source.strip_prefix('[')?);
+    let negated = input.peek() == Some('^');
+    let mut ranges = Vec::new();
+    let mut escapes = Escapes {
+        alphabet: Alphabet::Unicode,
+        preserve_categories: false,
+        bracketed_word: false,
+        code_points: true,
+    };
+    parse_class(
+        &mut input,
+        &mut String::new(),
+        &mut escapes,
+        None,
+        Some(&mut ranges),
+        None,
+    )
+    .ok()?;
+    let repeat = input.chars.as_str();
+    matches!(repeat, "" | "*" | "+" | "?").then_some(LiteralClass {
+        negated,
+        ranges,
+        repeat,
+    })
+}
+
 fn parse_class(
     input: &mut Input<'_>,
     output: &mut String,
     escapes: &mut Escapes,
     from_end: Option<&mut usize>,
+    mut ranges: Option<&mut Vec<(u32, u32)>>,
     mut warnings: Option<&mut WarningVisitor<'_>>,
 ) -> Result<(), String> {
     output.push('[');
@@ -1938,7 +1982,7 @@ fn parse_class(
         let mut second = None;
         let value = if c == '\\' {
             second = input.peek();
-            escaped(input, output, true, escapes, warnings.as_deref_mut())?.scalar()
+            escaped(input, output, true, escapes, warnings.as_deref_mut())?.point()
         } else {
             if matches!(c, '[' | '-' | '&' | '~' | '|')
                 && let Some(visitor) = warnings.as_mut()
@@ -1946,7 +1990,7 @@ fn parse_class(
                 visitor.literals.push(input.position - 1);
             }
             literal(output, c);
-            Some(c)
+            Some(u32::from(c))
         };
         if let Some((low, left, extra)) = range_start.take() {
             if !matches!((low, value), (Some(low), Some(high)) if low <= high) {
@@ -1964,7 +2008,14 @@ fn parse_class(
                 }
                 return Err(format!("bad character range {range}"));
             }
+            if let Some(ranges) = &mut ranges {
+                ranges.last_mut().expect("left endpoint").1 = value.expect("validated range");
+            }
         } else {
+            if let Some(ranges) = &mut ranges {
+                let point = value.ok_or("expected a literal class member")?;
+                ranges.push((point, point));
+            }
             left_atom = Some((value, c, second));
         }
         first = false;

@@ -48,49 +48,40 @@ fn encode(point: u32) -> char {
 /// Write a nonempty interval of Unicode scalars into an open character class.
 fn push_range(class: &mut String, first: u32, last: u32) {
     if first <= last {
-        class.push(char::from_u32(first).unwrap());
+        write!(class, r"\U{first:08x}").unwrap();
         if first < last {
-            class.push('-');
-            class.push(char::from_u32(last).unwrap());
+            write!(class, r"-\U{last:08x}").unwrap();
         }
     }
 }
 
 /// Project a standalone literal class, including ranges and a simple repeat.
-fn literal_class(points: &[u32]) -> Option<(String, String)> {
-    let (points, repeat) = match points.split_last()? {
-        (0x2a, rest) => (rest, "*"),
-        (0x2b, rest) => (rest, "+"),
-        (0x3f, rest) => (rest, "?"),
-        _ => (points, ""),
-    };
-    let members = points
-        .strip_prefix(&[u32::from('[')])?
-        .strip_suffix(&[u32::from(']')])?;
-    let (negated, mut members) = match members.strip_prefix(&[u32::from('^')]) {
-        Some(rest) => (true, rest),
-        None => (false, members),
-    };
-    // The full parser handles escaped endpoints, literal hyphens and set operators.
-    let endpoint = |p| {
-        !matches!(
-            char::from_u32(p),
-            Some('[' | ']' | '-' | '\\' | '^' | '&' | '|' | '~')
-        )
-    };
-    let prefix = if negated { "[^" } else { "[" };
+pub(super) fn class_patterns(source: &str) -> Option<(String, String)> {
+    if !source.starts_with('[')
+        || (source.is_ascii() && !source.contains(r"\u") && !source.contains(r"\U"))
+    {
+        return None;
+    }
+    let class = imre_regex::literal_class(source)?;
+    if class.ranges.iter().all(|&(_, last)| last < 0x80) {
+        return None;
+    }
+    let prefix = if class.negated { "[^" } else { "[" };
     let mut plain = String::from(prefix);
     let mut encoded = String::from(prefix);
-    while let Some((&first, rest)) = members.split_first() {
-        let (last, tail) = match rest {
-            [0x2d, last, tail @ ..] => (*last, tail),
-            _ => (first, rest),
-        };
-        members = tail;
-        if !endpoint(first) || !endpoint(last) || first > last {
-            return None;
-        }
-
+    // D7FF and E000 are adjacent Unicode scalars. The backend can introduce both
+    // as a spurious gap when negating separate ranges that contain these endpoints.
+    let contains = |point| {
+        class
+            .ranges
+            .iter()
+            .any(|&(low, high)| low <= point && point <= high)
+    };
+    if class.negated && contains(0xd7ff) && contains(0xe000) {
+        push_range(&mut plain, 0xd7ff, 0xe000);
+        push_range(&mut encoded, 0xd7ff, 0xe000);
+    }
+    for (first, last) in class.ranges {
         // A scalar-only subject has no code points in the surrogate interval.
         push_range(&mut plain, first, last.min(0xd7ff));
         push_range(&mut plain, first.max(0xe000), last);
@@ -114,28 +105,43 @@ fn literal_class(points: &[u32]) -> Option<(String, String)> {
         push_range(&mut encoded, first.max(0xf0801), last);
     }
     if plain.len() == prefix.len() {
-        plain = if negated { r"[\s\S]" } else { r"[^\s\S]" }.into();
+        plain = if class.negated { r"[\s\S]" } else { r"[^\s\S]" }.into();
     } else {
         plain.push(']');
     }
     encoded.push(']');
-    plain.push_str(repeat);
-    encoded.push_str(repeat);
+    plain.push_str(class.repeat);
+    encoded.push_str(class.repeat);
     Some((plain, encoded))
 }
 
 /// Compile raw surrogate atoms separately for scalar-only and code-point subjects.
 /// No Unicode scalar can match a surrogate literal, including under IGNORECASE.
 pub(super) fn literal_patterns(points: &[u32]) -> Result<(String, String)> {
-    if let Some(class) = literal_class(points) {
-        return Ok(class);
-    }
     let unsupported = || {
         Error::new(
             "NotImplementedError",
             "unsupported surrogate regular expression",
         )
     };
+    if points.first() == Some(&u32::from('[')) {
+        // Spell literals from a Python code-point string for the same class parser.
+        let mut source = String::new();
+        let mut escaped = false;
+        for &point in points {
+            if let Some(ch) = char::from_u32(point) {
+                source.push(ch);
+                escaped = ch == '\\' && !escaped;
+            } else if escaped {
+                return Err(unsupported());
+            } else {
+                write!(source, r"\u{point:04x}").unwrap();
+            }
+        }
+        if let Some(class) = class_patterns(&source) {
+            return Ok(class);
+        }
+    }
     let mut plain = String::new();
     let mut encoded = String::new();
     let mut in_set = false;
