@@ -1642,6 +1642,7 @@ pub(crate) enum Builtin {
     /// Arguments are the element then set, matching membership evaluation order.
     SetContains,
     SetCaseLengthPossible,
+    SetCasePrefixPossible([u64; 2]),
     SetAdd,
     SetDiscard,
     SetIter,
