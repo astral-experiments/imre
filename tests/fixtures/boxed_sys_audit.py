@@ -78,6 +78,9 @@ def current():
     veto = Veto("stop here")
 
     def reject(event, args):
+        if event == "subprocess.Popen":
+            assert args == ("/bin/true", ["/bin/true"], None, None)
+            raise veto
         if event == "sample.deny":
             raise veto
     def unreachable(event, args):
@@ -91,6 +94,14 @@ def current():
         assert error is veto
     else:
         raise AssertionError("audit swallowed a hook exception")
+
+    import subprocess
+    try:
+        subprocess.run(("/bin/true",), capture_output=True)
+    except Veto as error:
+        assert error is veto
+    else:
+        raise AssertionError("Popen ignored a launch veto")
 
     assert addaudithook(42) is None
     try:

@@ -99,6 +99,19 @@ def current():
     else:
         raise AssertionError("accepted a bytearray for a char field")
 
+    pascal = struct.Struct("!0p4p")
+    target = bytearray(b"______")
+    pascal.pack_into(target, 1, b"ignored", Data(b"abcde"))
+    assert target == b"_\x03abc_"
+    assert pascal.unpack_from(target, 1) == (b"", b"abc")
+    assert struct.unpack("3p", b"\xffab") == (b"ab",)
+    wide = struct.pack("260p", Buffer(b"x" * 259))
+    assert wide == b"\xff" + b"x" * 259
+    assert struct.unpack("260p", wide) == (b"x" * 255,)
+    alias = bytearray(b"abcd")
+    struct.pack_into("4p", alias, 0, alias)
+    assert alias == b"\x03\0\0\0"
+
     for fmt in (Text(">Q"), Data(b">Q")):
         record = struct.Struct(fmt)
         print(record.format, struct.calcsize(fmt))

@@ -316,6 +316,7 @@ fn expanded_sub(
     exposes_match: bool,
     mut expand: impl FnMut(&mut Context, Match) -> Result<Id>,
 ) -> Result<(Id, isize)> {
+    let pattern = pattern.for_subject(ctx, string);
     let subject = SearchSubject::new(ctx, pattern, string, "sub")?;
     let length = subject.bytes(ctx)?.len();
     let window = subject.original(Span::from(0..length));

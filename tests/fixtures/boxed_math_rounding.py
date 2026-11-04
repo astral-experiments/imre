@@ -2,8 +2,9 @@
 
 import math
 from fractions import Fraction
-from math import ceil, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
+from math import atan2, ceil, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
 from math import e, inf, nan, pi, tau
+from math import sin, tan
 
 
 class Hooks:
@@ -105,6 +106,14 @@ def current():
     assert cos(Fraction(1, 2)) == cos(0.5)
     assert cos(FloatOverride(-0.0)) == 1.0 and isnan(cos(float("nan")))
     assert cos(IndexOnly()) == cos(5)
+    assert sin is math.sin and tan is math.tan
+    assert sin(pi / 2) == 1.0
+    assert abs(tan(pi / 4) - 1.0) < 1e-15
+    for trig in (sin, tan):
+        angle = FloatOnly(-0.0)
+        assert copysign(1.0, trig(angle)) == -1.0
+        assert angle.calls == 1
+        assert isnan(trig(nan))
     assert log(Fraction(1, 4), FloatOverride(2)) == -2.0
     assert log(IndexOnly()) == log(5) and log(True) == 0.0
     assert log(10**1000, 10**500) == 2.0
@@ -129,6 +138,8 @@ def current():
         (lambda: sqrt(-1.0), ValueError, "expected a nonnegative input, got -1.0"),
         (lambda: sqrt(-inf), ValueError, "expected a nonnegative input, got -inf"),
         (lambda: cos(float("inf")), ValueError, "expected a finite input, got inf"),
+        (lambda: sin(-inf), ValueError, "expected a finite input, got -inf"),
+        (lambda: tan(inf), ValueError, "expected a finite input, got inf"),
         (lambda: cos(10**1000), OverflowError, "int too large to convert to float"),
         (lambda: cos("1"), TypeError, "must be real number, not str"),
         (lambda: log(-10**1000, 0), ValueError, "expected a positive input"),
@@ -144,6 +155,16 @@ def current():
             assert str(error) == message
         else:
             raise AssertionError(message)
+
+    assert atan2 is math.atan2
+    y = FloatOnly(-1.0)
+    x = FloatOnly(-0.0)
+    assert atan2(y, x) == -pi / 2
+    assert y.calls == x.calls == 1
+    assert atan2(-0.0, -0.0) == -pi
+    assert copysign(1.0, atan2(-0.0, 1.0)) == -1.0
+    assert atan2(inf, -inf) == 3 * pi / 4
+    assert isnan(atan2(nan, 1.0))
 
     assert copysign is math.copysign
     assert copysign(FloatOnly(), IndexOnly()) == 1.25

@@ -2626,11 +2626,11 @@ impl Context {
             self.builtin(&format!("{name}.{method}"));
         }
         match name {
-            "dict" => {
+            "dict" | "list" => {
                 let mut entries = Vec::new();
                 for member in methods.iter().copied().chain(["__sizeof__"]) {
                     let key = self.heap.code_name(member);
-                    entries.push((key, self.builtin(&format!("dict.{member}"))));
+                    entries.push((key, self.builtin(&format!("{name}.{member}"))));
                 }
                 entries.push((self.heap.code_name("__hash__"), NONE));
                 let dictionary = self.dict(entries);
@@ -2655,6 +2655,9 @@ impl Context {
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
         let result = unsafe { entry(self, scope) };
+        if matches!(owner, FrameOwner::Module(_)) && self.pending.is_none() {
+            self.register_decimal_class(code, entry, scope);
+        }
         self.leave_frame(result, self.pending.is_none());
         self.pending.take().map_or(Ok(result), Err)
     }
@@ -4026,14 +4029,6 @@ impl Context {
                 )
             {
                 self.register_thread_run(class, main);
-            }
-            if name == "decimal"
-                && self.config["bundled_root"]
-                    .as_str()
-                    .is_some_and(|root| path == std::path::Path::new(root).join("decimal.py"))
-                && let Some(class) = self.scope_name(scope, "Decimal")
-            {
-                self.classes.insert("decimal.Decimal".into(), class);
             }
             if name == "typing"
                 && self.config["bundled_root"]

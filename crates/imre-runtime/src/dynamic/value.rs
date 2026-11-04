@@ -1,5 +1,7 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
+mod weak_roots;
+
 use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -849,6 +851,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
+    /// The Decimal class created by an execution of the registered bundled provider.
+    pub bundled_decimal: bool,
     /// Qualified name of an iterator type whose instances require private native cursor state.
     pub itertools_layout: Option<&'static str>,
     /// Attribute writes to the type object itself are forbidden, independently of its instance layout.
@@ -2634,6 +2638,7 @@ pub(super) struct Heap {
     pub(super) gc_settings: Arc<GcSettings>,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
+    weak_roots: weak_roots::WeakRoots,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
     // Detached workers compare against the original stderr without keeping it alive.
@@ -2645,6 +2650,8 @@ pub(super) struct Heap {
     file_writers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // Positions are hints. Each check reads the current binding and native stream edges.
+    finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
     // Weak class handles, compacted before the collector recycles their slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
@@ -2855,12 +2862,14 @@ impl Heap {
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
+            weak_roots: weak_roots::WeakRoots::default(),
             borrowed_hooks: Vec::new(),
             default_stderr: None,
             has_weak_values: false,
             collect_next_statement: false,
             file_writers: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            finalizer_bindings: Cell::new([None; 2]),
             classes: Vec::new(),
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
@@ -4107,23 +4116,53 @@ impl Heap {
         })
     }
 
+    /// Check the active bindings at previously successful positions and trace their live stream edges.
+    fn bound_finalizer_chains(&self) -> [Option<[Id; 3]>; 2] {
+        self.finalizer_bindings.get().map(|position| {
+            let (frame, slot) = position?;
+            let Value::Scope(scope) = self.get(self.frames.get(frame)?.scope) else {
+                return None;
+            };
+            let (_, &owner) = scope.names.get_index(slot)?;
+            Some(super::stdlib::io::text_descriptor_chain(self, owner).unwrap_or([owner; 3]))
+        })
+    }
+
+    /// Remember where a surviving local keeps the owner so subsequent checks can validate it directly.
+    fn find_finalizer_binding(&self, owner: Id) -> bool {
+        for (frame_index, frame) in self.frames.iter().enumerate().rev() {
+            let Value::Scope(scope) = self.get(frame.scope) else {
+                continue;
+            };
+            if let Some(slot) = scope.names.values().position(|&bound| bound == owner) {
+                let position = Some((frame_index, slot));
+                let [first, _] = self.finalizer_bindings.get();
+                if first != position {
+                    self.finalizer_bindings.set([position, first]);
+                }
+                return true;
+            }
+            if let Some(namespace) = scope.namespace
+                && matches!(self.get(namespace), Value::Dict(entries)
+                    if entries.iter().any(|&(_, bound)| bound == owner))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Check each registration against the surviving frame bindings and native stream edges.
     fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
-        let frame_keeps = |owner| {
-            self.bound_in_active_frame(owner)
-                || self.frames.iter().any(|frame| {
-                    // Materialized scopes can retain additional native local names.
-                    matches!(self.get(frame.scope), Value::Scope(scope)
-                        if scope.namespace.is_some()
-                            && scope.names.values().any(|&bound| bound == owner))
-                })
-        };
+        let chains = self.bound_finalizer_chains();
         self.ordinary_finalizers.iter().chain(writers).all(|owner| {
             stdin.is_some_and(|input| input.contains(owner))
-                || frame_keeps(*owner)
+                || chains.iter().flatten().any(|chain| chain.contains(owner))
+                || self.find_finalizer_binding(*owner)
                 || self.ordinary_finalizers.iter().any(|&stream| {
-                    super::stdlib::io::text_descriptor_chain(self, stream)
-                        .is_some_and(|chain| chain.contains(owner) && frame_keeps(stream))
+                    super::stdlib::io::text_descriptor_chain(self, stream).is_some_and(|chain| {
+                        chain.contains(owner) && self.find_finalizer_binding(stream)
+                    })
                 })
         })
     }
@@ -4283,9 +4322,11 @@ impl Heap {
             || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
     }
 
-    /// A single interpreter-owned weak reference and its registered module both survive.
-    /// A user-owned reference can itself disappear even while its target stays alive.
-    pub(super) fn weak_module_kept_by(&self, modules: Id, reference: Id) -> bool {
+    /// Both the weak reference and its target must keep a strong path from a surviving root.
+    pub(super) fn weak_values_kept_by(&self, modules: Id, reference: Id) -> bool {
+        if self.weak_roots.keeps_all(self, [modules, reference]) {
+            return true;
+        }
         if self.weak.len() != 1 {
             return self.weak.is_empty();
         }
@@ -5227,6 +5268,22 @@ mod tests {
             unreachable!()
         };
         bindings.names.shift_remove("writer");
+        bindings.names.insert("replacement".into(), owner);
+        assert!(
+            !ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+        );
+
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names.insert("renamed".into(), writer);
+        assert!(
+            ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+        );
+        let replacement = ctx.scope("replacement", None);
+        ctx.heap.frames.last_mut().unwrap().scope = replacement;
         assert!(
             !ctx.heap
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])

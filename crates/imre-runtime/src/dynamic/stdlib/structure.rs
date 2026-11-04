@@ -207,6 +207,36 @@ pub(super) fn method(
     pack(ctx, &layout, args)
 }
 
+fn byte_field_error(ctx: &Context, code: u8) -> Error {
+    format_error(
+        ctx,
+        format!("argument for '{}' must be a bytes object", char::from(code)),
+    )
+}
+
+/// Write a byte string into a cleared field. A missing source denotes the destination itself.
+fn write_byte_field(
+    code: u8,
+    buffer: &mut [u8],
+    field: std::ops::Range<usize>,
+    source: Option<&[u8]>,
+) {
+    let has_length = code == b'p' && !field.is_empty();
+    let start = field.start + usize::from(has_length);
+    let capacity = field.end - start;
+    let copied = if let Some(bytes) = source {
+        let count = capacity.min(bytes.len());
+        buffer[start..start + count].copy_from_slice(&bytes[..count]);
+        count
+    } else {
+        buffer.copy_within(..capacity, start);
+        capacity
+    };
+    if has_length {
+        buffer[field.start] = copied.min(usize::from(u8::MAX)) as u8;
+    }
+}
+
 pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Result<Id> {
     let count = layout.item_count;
     if args.len() != count {
@@ -220,16 +250,15 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
     }
     let mut output = super::super::builtins::zeroed_bytes(layout.size as i64)?;
     for ((code, range), &id) in layout.items().zip(args) {
-        let target = &mut output[range];
-        if code == b's' {
+        if matches!(code, b's' | b'p') {
             let (Value::Bytes(bytes) | Value::ByteArray(bytes)) =
                 ctx.heap.get(ctx.scalar_value(id))
             else {
-                return Err(format_error(ctx, "argument for 's' must be a bytes object"));
+                return Err(byte_field_error(ctx, code));
             };
-            let length = target.len().min(bytes.len());
-            target[..length].copy_from_slice(&bytes[..length]);
+            write_byte_field(code, &mut output, range, Some(bytes));
         } else {
+            let target = &mut output[range];
             let word = pack_word(ctx, id, code, target.len(), layout.little_endian)?;
             layout.write_integer(target, word);
         }
@@ -277,23 +306,26 @@ pub(super) fn pack_into(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -
         ctx.writable_storage_bytes(storage)?[start..start + layout.size].fill(0);
         for ((code, range), &id) in layout.items().zip(values) {
             let pos = start + range.start;
-            if code == b's' {
+            if matches!(code, b's' | b'p') {
+                let field = pos..start + range.end;
                 let source = ctx.scalar_value(id);
                 if source == storage {
                     let Value::ByteArray(bytes) = ctx.heap.get_mut(storage) else {
-                        return Err(format_error(ctx, "argument for 's' must be a bytes object"));
+                        return Err(byte_field_error(ctx, code));
                     };
-                    let count = range.len().min(bytes.len());
-                    bytes.copy_within(..count, pos);
+                    write_byte_field(code, bytes, field, None);
                 } else {
                     let Some((Value::Bytes(bytes) | Value::ByteArray(bytes), target)) =
                         ctx.heap.source_and_target(source, storage)
                     else {
-                        return Err(format_error(ctx, "argument for 's' must be a bytes object"));
+                        return Err(byte_field_error(ctx, code));
                     };
-                    let count = range.len().min(bytes.len());
-                    Context::mutable_storage_bytes(target)?[pos..pos + count]
-                        .copy_from_slice(&bytes[..count]);
+                    write_byte_field(
+                        code,
+                        Context::mutable_storage_bytes(target)?,
+                        field,
+                        Some(bytes),
+                    );
                 }
             } else {
                 let word = pack_word(ctx, id, code, range.len(), layout.little_endian)?;

@@ -124,6 +124,7 @@ impl Checker<'_> {
             "context_aware_warnings" => flags.context_aware_warnings,
             "dont_write_bytecode" => flags.dont_write_bytecode,
             "no_user_site" => flags.no_user_site,
+            "no_site" => flags.no_site,
             "warn_default_encoding" => flags.warn_default_encoding,
             _ => return Err(error(self.source, attr, "unsupported sys.flags field")),
         };

@@ -1859,7 +1859,7 @@ impl Context {
         self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
             && !self.heap.full_collection_active()
             && (!self.heap.has_weak_values
-                || self.heap.weak_module_kept_by(
+                || self.heap.weak_values_kept_by(
                     self.modules,
                     self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
                 ))
@@ -1888,6 +1888,12 @@ impl Context {
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);
         }
+        let reference = self
+            .builtins
+            .get(super::stdlib::datetime::isocalendar::MODULE_REF)
+            .copied()
+            .unwrap_or(NONE);
+        self.heap.learn_weak_roots(self.modules, reference);
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.

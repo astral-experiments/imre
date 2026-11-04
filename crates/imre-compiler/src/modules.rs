@@ -2344,13 +2344,16 @@ impl IntrinsicModule {
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
+            (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
             (Self::Math, "fma") => Intrinsic::ScopedObjectExport("math.fma"),
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
             (Self::Math, "prod") => Intrinsic::MathProd,
+            (Self::Math, "sin") => Intrinsic::ScopedObjectExport("math.sin"),
             (Self::Math, "sqrt") => Intrinsic::ScopedObjectExport("math.sqrt"),
+            (Self::Math, "tan") => Intrinsic::ScopedObjectExport("math.tan"),
             (Self::Math, "pi") => Intrinsic::ScopedObjectExport("math.pi"),
             (Self::Math, "e") => Intrinsic::ScopedObjectExport("math.e"),
             (Self::Math, "tau") => Intrinsic::ScopedObjectExport("math.tau"),
@@ -3469,7 +3472,7 @@ impl SourceGraph {
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
-            options.system_site.as_deref(),
+            options.implicit_site().map(PathBuf::as_path),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3535,7 +3538,7 @@ impl SourceGraph {
         let mut loader = Loader::new(
             root,
             &options.extension_paths,
-            options.system_site.as_deref(),
+            options.implicit_site().map(PathBuf::as_path),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;

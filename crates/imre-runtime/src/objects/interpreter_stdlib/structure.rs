@@ -63,9 +63,13 @@ impl StructFormat {
                 continue;
             }
             let repeat_count = repeat.take().unwrap_or(1);
-            let count = if c == b's' { 1 } else { repeat_count };
+            let count = if matches!(c, b's' | b'p') {
+                1
+            } else {
+                repeat_count
+            };
             let (width, alignment) = match c {
-                b's' => (repeat_count, 1),
+                b's' | b'p' => (repeat_count, 1),
                 b'L' if result.native => (
                     size_of::<std::ffi::c_ulong>(),
                     align_of::<std::ffi::c_ulong>(),
@@ -119,7 +123,7 @@ impl StructFormat {
         Ok(result)
     }
 
-    /// Yield one argument and byte range per value, including a single empty range for 0s.
+    /// Yield one argument and byte range per value, including a single empty range for 0s or 0p.
     pub(crate) fn items(&self) -> impl Iterator<Item = (u8, std::ops::Range<usize>)> + '_ {
         self.fields.iter().flat_map(|field| {
             (0..field.count).map(move |index| {
@@ -202,8 +206,12 @@ impl StructFormat {
         let mut result = Vec::new();
         for (code, range) in self.items() {
             let field = &buffer[range];
-            if matches!(code, b'c' | b's') {
-                result.push(UnpackedField::Bytes(field.to_vec()));
+            if matches!(code, b'c' | b's' | b'p') {
+                let data = match (code, field) {
+                    (b'p', [length, data @ ..]) => &data[..usize::from(*length).min(data.len())],
+                    _ => field,
+                };
+                result.push(UnpackedField::Bytes(data.to_vec()));
                 continue;
             }
             let mut word = [0u8; 8];
