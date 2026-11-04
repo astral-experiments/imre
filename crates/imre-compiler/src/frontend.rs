@@ -5998,6 +5998,22 @@ impl<'a> Checker<'a> {
             self.branch_layouts(body, &clauses[index..])?;
             let condition = self.condition(test)?;
             let known = self.instance_condition(&condition);
+            if self.graph.reachable_only()
+                && let Some(taken) = known
+                && let [other] = clauses.as_slice()
+                && other.test.is_none()
+                && let Some(names) = literal_binding_names(body)
+                && literal_binding_names(&other.body) == Some(names)
+            {
+                // Both suites declare exactly these locals. The dead constants
+                // cannot constrain the slots initialized by the reachable suite.
+                self.apply_facts(test, taken);
+                let selected = if taken { body } else { &other.body };
+                let (mut statements, falls) = self.block(selected)?;
+                // A type test can still evaluate a call or raise on its operand.
+                statements.insert(0, Statement::Expr(condition));
+                return Ok((statements, falls));
+            }
             let before = self.local_state();
             self.apply_facts(test, true);
             let guard_depth = self.regex_guards.len();
@@ -12089,8 +12105,48 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// Returns the names initialized by a suite of literal assignments. Each RHS
+/// is independent of local bindings in either arm, including assignment order.
+fn literal_binding_names(suite: &[ast::Stmt]) -> Option<std::collections::HashSet<&str>> {
+    suite
+        .iter()
+        .map(|stmt| {
+            let ast::Stmt::Assign(assign) = stmt else {
+                return None;
+            };
+            let [ast::Expr::Name(name)] = assign.targets.as_slice() else {
+                return None;
+            };
+            assign.value.is_literal_expr().then_some(name.id.as_str())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reachable_literal_bindings_follow_the_known_instance_branch() {
+        use crate::modules::SourceGraph;
+        let source = r#"
+def choose(value: str) -> str:
+    if isinstance(value, bytes):
+        sep = b"/"
+        prefix = b""
+    else:
+        prefix = ""
+        sep = "/"
+    return prefix + sep
+print(choose("x"))
+"#;
+        let graph = SourceGraph::single_with_mode(source, true).unwrap();
+        assert!(super::lower(&graph).is_ok());
+        let graph = SourceGraph::single_with_mode(source, false).unwrap();
+        let error = super::lower(&graph)
+            .err()
+            .expect("whole-module checking inspects both suites");
+        assert!(error.contains("expected bytes, got str"), "{error}");
+    }
+
     #[test]
     fn long_call_chains_can_be_checked_with_or_without_a_cycle() {
         use std::collections::HashSet;
