@@ -62,7 +62,8 @@ pub(super) const EMPTY_TUPLE: Id = 5;
 const SMALL_INT_MIN: i64 = -5;
 const SMALL_INT_MAX: i64 = 256;
 const FIRST_SMALL_INT: Id = EMPTY_TUPLE + 1;
-const LAST_SMALL_INT: Id = FIRST_SMALL_INT + (SMALL_INT_MAX - SMALL_INT_MIN) as Id;
+const FIRST_DYNAMIC_SLOT: usize =
+    FIRST_SMALL_INT as usize + (SMALL_INT_MAX - SMALL_INT_MIN + 1) as usize;
 
 /// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
 pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
@@ -2860,7 +2861,7 @@ impl Heap {
             (SMALL_INT_MIN..=SMALL_INT_MAX).map(|n| Slot::new(Value::Int(crate::Int::from(n)))),
         );
         let mut heap = Self {
-            traces: vec![Cell::new(UNMARKED); slots.len()],
+            traces: vec![Cell::new(END); slots.len()],
             scalar_leaves: slots
                 .iter()
                 .map(|slot| slot.value.as_ref().is_some_and(Value::scalar_leaf))
@@ -2898,7 +2899,7 @@ impl Heap {
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
         };
-        for id in 0..heap.slots.len() {
+        for id in 0..FIRST_SMALL_INT as usize {
             heap.gc_order.push(id, &heap.slots);
         }
         heap
@@ -3939,7 +3940,6 @@ impl Heap {
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_string_constants.values().copied());
         pending.extend(self.short_bytes.values().copied());
-        pending.extend(NONE..=LAST_SMALL_INT);
         pending.extend(
             self.interned
                 .values()
@@ -3959,12 +3959,17 @@ impl Heap {
         }
     }
 
+    /// The singleton and small-integer prefix is permanently marked and has no children.
+    fn clear_marks(&self) {
+        for trace in &self.traces[FIRST_DYNAMIC_SLOT..] {
+            trace.set(UNMARKED);
+        }
+    }
+
     fn reachable(&self, id: Id, roots: impl Iterator<Item = Id>) -> bool {
         self.mark(roots);
         let reachable = self.traces[id as usize].get() != UNMARKED;
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         reachable
     }
 
@@ -4013,9 +4018,7 @@ impl Heap {
             .zip(&self.traces)
             .filter(|(slot, trace)| trace.get() != UNMARKED && exports(slot))
             .count();
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         self.slots[storage as usize].may_have_buffer_views = live != 0;
         Ok(live)
     }
@@ -4499,9 +4502,7 @@ impl Heap {
         let small = self.small_unreachable();
         let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
         let Ok(mut cycles) = CycleSet::new(size) else {
-            for trace in &self.traces {
-                trace.set(UNMARKED);
-            }
+            self.clear_marks();
             self.collect_next_statement = true;
             return None;
         };
@@ -4585,9 +4586,7 @@ impl Heap {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, Some(child));
         let last = self.traces[child as usize].get() == UNMARKED;
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         Ok(last)
     }
 
@@ -4843,9 +4842,7 @@ impl Heap {
         } else {
             Vec::new()
         };
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         Ok(callbacks)
     }
 
@@ -5044,7 +5041,7 @@ impl Heap {
             .retain_live(|id| self.traces[id as usize].get() != UNMARKED);
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
-        for id in 0..self.slots.len() {
+        for id in FIRST_DYNAMIC_SLOT..self.slots.len() {
             let slot = &self.slots[id];
             if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
                 self.gc_order.remove(id, &self.slots);
