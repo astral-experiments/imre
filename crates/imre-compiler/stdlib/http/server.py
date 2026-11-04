@@ -407,16 +407,12 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
     def log_request(self, code: str | int | HTTPStatus = "-", size: str | int | HTTPStatus = "-") -> None:
         self.log_message('"%s" %s %s', self.requestline, _log_text(code), _log_text(size))
 
-    def log_error(self, format: str, *args: object) -> None:
+    def log_error(self, format, *args: object) -> None:
         self.log_message(format, *args)
 
-    def log_message(self, format: str, *args: object) -> None:
+    def log_message(self, format, *args: object) -> None:
         message = format % args
-        safe = ""
-        for ch in message:
-            n = ord(ch)
-            if n in self._control_char_table:
-                safe += self._control_char_table[n]
-            else:
-                safe += ch
-        sys.stderr.write(self.address_string() + " - - [" + self.log_date_time_string() + "] " + safe + "\n")
+        sys.stderr.write("%s - - [%s] %s\n" % (
+            self.address_string(), self.log_date_time_string(),
+            message.translate(self._control_char_table),
+        ))
