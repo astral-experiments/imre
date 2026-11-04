@@ -353,6 +353,16 @@ impl Context {
                 Ok(c)
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
+            "spread_arguments" => {
+                // An exact tuple already holds the evaluated positional arguments.
+                // Snapshot other iterables before entering the callee.
+                if matches!(self.heap.get(a), Value::Tuple(_)) {
+                    Ok(a)
+                } else {
+                    let items = self.items(a)?;
+                    Ok(self.alloc(Value::List(items)))
+                }
+            }
             "set" => Ok(self.alloc(Value::Set {
                 entries: Default::default(),
                 frozen: false,
