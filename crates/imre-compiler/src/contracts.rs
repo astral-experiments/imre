@@ -514,6 +514,7 @@ impl Builtin {
             | Self::CacheInsert(_)
             | Self::EmptyPartial
             | Self::ListGetI32
+            | Self::ListGetStable
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
@@ -779,6 +780,7 @@ impl Builtin {
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
+            | Self::ListPresent
             | Self::DequeClear
             | Self::DequeReverse
             | Self::SetIter
@@ -842,7 +844,9 @@ impl Builtin {
                     && matches!(args, [buffer] if types.element(buffer.ty) == Some(Type::Str))
             }
             Self::TryDigitSums(_) => signature(&[Type::Str], Type::Int),
-            Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::ListGetI32 | Self::ListGetStable => {
+                signature(&[Type::ListInt, Type::Int], Type::Int)
+            }
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
                     && bounds(*min, *max)
@@ -875,6 +879,7 @@ impl Builtin {
                 ) && matches!(args[4].kind, ExprKind::Int(_))
                     && index(&args[4])
             }
+            Self::ListPresent => signature(&[Type::ListInt], Type::Bool),
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),

@@ -1,15 +1,12 @@
-//! Checked loop versions for bounded integer elements in stable input lists.
-//!
-//! An entry guard scans each input once. Fast-loop reads retain their ordinary
-//! index checks, but carry an i32 value proof into integer interval analysis.
-//! Inputs cannot be rebound or mutated in the loop. Appends to other lists are
-//! permitted only after a runtime identity check excludes aliases of every input.
+//! Checked loop versions for stable input lists. A captured range can justify
+//! scanning for bounded integers. Without a range, each fast read checks its
+//! own tagged word. Runtime identity guards exclude aliases of append targets.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, contains_loop};
 
-/// Versions leaf range and canonical list loops after tuple scalarization.
+/// Versions leaf loops after tuple scalarization.
 /// Unknown calls and mutations retain the original arbitrary-precision path.
 pub(crate) fn specialize(module: &mut Module) {
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
@@ -26,21 +23,20 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
     let (arguments, body, orelse, while_source) = match statement {
         Statement::For {
             args, body, orelse, ..
-        } => (range_arguments(args), body, orelse, None),
-        Statement::While(test, body, orelse) => {
-            let Some((args, source)) = while_arguments(test) else {
+        } => {
+            let Some(args) = range_arguments(args) else {
                 return;
             };
-            (Some(args), body, orelse, Some(source))
+            (Some(args), body, orelse, None)
         }
+        Statement::While(test, body, orelse) => match while_arguments(test) {
+            Some((args, source)) => (Some(args), body, orelse, Some(source)),
+            None if matches!(test.kind, ExprKind::Bool(true)) => (None, body, orelse, None),
+            None => return,
+        },
         _ => return,
     };
-    // The guard also rejects scans whose cost cannot be amortized by the
-    // captured range. Only cheap, nonfallible operands may be read twice.
-    let Some([start, mut stop, step]) = arguments else {
-        return;
-    };
-    if contains_loop(orelse) {
+    if contains_loop(body) || contains_loop(orelse) {
         return;
     }
     let mut written = vec![false; locals.len()];
@@ -60,67 +56,88 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
     };
     let mut plan = Plan {
         locals,
-        inputs: BTreeSet::new(),
+        scan_inputs: arguments.is_some(),
+        inputs: BTreeMap::new(),
         outputs: BTreeSet::new(),
-        reads: 0,
         appends: 0,
         nontrivial_arithmetic: false,
     };
-    if !plan.block(body, &mut aliases)
-        || (plan.reads < 2
-            && !(while_source.is_some() && plan.reads == 1 && plan.nontrivial_arithmetic))
-        || while_source.is_some_and(|source| !plan.inputs.contains(&source))
+    if !plan.block(body, &mut aliases) {
+        return;
+    }
+    if !plan.scan_inputs {
+        plan.inputs.retain(|slot, _| !plan.outputs.contains(slot));
+    } else if plan.inputs.keys().any(|slot| plan.outputs.contains(slot)) {
+        return;
+    }
+    let reads = plan.inputs.values().sum::<usize>();
+    if (reads < 2 && !(while_source.is_some() && reads == 1 && plan.nontrivial_arithmetic))
+        || while_source.is_some_and(|source| !plan.inputs.contains_key(&source))
     {
         return;
     }
-    if plan.inputs.iter().any(|slot| plan.outputs.contains(slot)) {
-        return;
+    if !plan.scan_inputs {
+        // Only this loop body was checked. Its else suite may run arbitrary code.
+        crate::ir::walk_expressions_mut(body, &mut |value| {
+            if let ExprKind::Builtin(operation @ Builtin::ListGet, args) = &mut value.kind
+                && let ExprKind::Local(slot) = args[0].kind
+                && plan.inputs.contains_key(&slot)
+                && args[1].ty == Type::Int
+            {
+                *operation = Builtin::ListGetStable;
+            }
+        });
     }
     let mut guards = Vec::new();
-    for &input in &plan.inputs {
+    for &input in plan.inputs.keys() {
         for &output in &plan.outputs {
             guards.push(builtin(
                 Builtin::ListDistinct,
                 vec![list_local(input), list_local(output)],
             ));
         }
-        guards.push(builtin(
-            Builtin::ListAllI32,
-            vec![list_local(input), start.clone(), stop.clone(), step.clone()],
-        ));
+        guards.push(match &arguments {
+            Some([start, stop, step]) => builtin(
+                Builtin::ListAllI32,
+                vec![list_local(input), start.clone(), stop.clone(), step.clone()],
+            ),
+            None => builtin(Builtin::ListPresent, vec![list_local(input)]),
+        });
     }
     let Plan {
         outputs, appends, ..
     } = plan;
     let mut fast_body = Vec::new();
-    // Every append target passed ListDistinct against the condition's source.
-    // Only this arm can reuse its length across the loop backedge.
-    if !outputs.is_empty()
-        && let Statement::While(test, _, _) = &mut fast
-        && let ExprKind::Compare(operands, _) = &mut test.kind
-    {
-        let slot = locals.len();
-        locals.push(Type::Int);
-        fast_body.push(Statement::Assign(slot, stop));
-        stop = Expr::local(slot, Type::Int);
-        operands[1] = stop.clone();
-    }
-    if outputs.len() == 1 {
-        // Hints beyond the runtime's slot budget cannot reserve more space.
-        let appends = appends.min(32_768) as i64;
-        fast_body.push(Statement::Expr(Expr {
-            ty: Type::None,
-            kind: ExprKind::Builtin(
-                Builtin::ListReserveRange,
-                vec![
-                    list_local(*outputs.first().unwrap()),
-                    start,
-                    stop,
-                    step,
-                    Expr::integer(appends),
-                ],
-            ),
-        }));
+    if let Some([start, mut stop, step]) = arguments {
+        // Every append target passed ListDistinct against the condition's source.
+        // Only this arm can reuse its length across the loop backedge.
+        if !outputs.is_empty()
+            && let Statement::While(test, _, _) = &mut fast
+            && let ExprKind::Compare(operands, _) = &mut test.kind
+        {
+            let slot = locals.len();
+            locals.push(Type::Int);
+            fast_body.push(Statement::Assign(slot, stop));
+            stop = Expr::local(slot, Type::Int);
+            operands[1] = stop.clone();
+        }
+        if outputs.len() == 1 {
+            // Hints beyond the runtime's slot budget cannot reserve more space.
+            let appends = appends.min(32_768) as i64;
+            fast_body.push(Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::ListReserveRange,
+                    vec![
+                        list_local(*outputs.first().unwrap()),
+                        start,
+                        stop,
+                        step,
+                        Expr::integer(appends),
+                    ],
+                ),
+            }));
+        }
     }
     fast_body.push(fast);
     let fallback = std::mem::replace(statement, Statement::Break);
@@ -136,9 +153,10 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
 
 struct Plan<'a> {
     locals: &'a [Type],
-    inputs: BTreeSet<usize>,
+    scan_inputs: bool,
+    /// Number of eligible reads associated with each rooted source slot.
+    inputs: BTreeMap<usize, usize>,
     outputs: BTreeSet<usize>,
-    reads: usize,
     /// Upper bound for one iteration; mutually exclusive arms take the maximum.
     appends: usize,
     /// A single list read justifies a scan only when it enables useful arithmetic.
@@ -205,6 +223,11 @@ impl Plan<'_> {
                     }
                 }
                 Statement::Break | Statement::Continue | Statement::Exhaust => {}
+                // An exact string cursor cannot call Python or resize a list.
+                Statement::IterNext {
+                    kind: crate::ir::IterNextKind::CodePoint,
+                    ..
+                } if !self.scan_inputs => {}
                 Statement::SetItem(..)
                 | Statement::AugmentItem(..)
                 | Statement::SetField(..)
@@ -232,9 +255,15 @@ impl Plan<'_> {
                         let Some(root) = receiver else {
                             return false;
                         };
-                        self.inputs.insert(root);
-                        self.reads += 1;
-                        *operation = Builtin::ListGetI32;
+                        if self.scan_inputs {
+                            *operation = Builtin::ListGetI32;
+                        } else if args[1].ty == Type::Int {
+                            // A loop-local alias denotes this same rooted input.
+                            args[0] = list_local(root);
+                        } else {
+                            return true;
+                        }
+                        *self.inputs.entry(root).or_default() += 1;
                     }
                     Builtin::Append if args[0].ty == Type::ListInt => {
                         let Some(root) = receiver else {
@@ -467,6 +496,7 @@ mod tests {
     fn optimized(source: &str) -> Module {
         let mut module =
             crate::frontend::lower(&crate::modules::SourceGraph::single(source).unwrap()).unwrap();
+        crate::character_locals::specialize(&mut module);
         crate::tuples::scalarize(&mut module);
         specialize(&mut module);
         module
@@ -486,6 +516,33 @@ mod tests {
             });
         }
         result
+    }
+
+    #[test]
+    fn only_stable_inputs_borrow_words_in_the_loop_body() {
+        let module = optimized(
+            r#"
+def fill(source: list[int], output: list[int], text: str) -> None:
+    for ch in text:
+        alias = source
+        output.append(alias[0] + source[1] + output[-1] + ord(ch))
+    else:
+        source.append(42)
+        print(source[0])
+fill([1, 2], [0], "abc")
+"#,
+        );
+        let mut present = 0;
+        let mut reads = 0;
+        for function in &module.functions {
+            walk_expressions(&function.body, &mut |expr| match &expr.kind {
+                ExprKind::Builtin(Builtin::ListPresent, _) => present += 1,
+                ExprKind::Builtin(Builtin::ListGetStable, _) => reads += 1,
+                _ => {}
+            });
+        }
+        assert_eq!((present, reads), (1, 2));
+        assert_eq!(counts(&module), (0, 1, 0));
     }
 
     #[test]

@@ -1209,6 +1209,8 @@ pub(crate) enum Builtin {
     StructCyclePrefix,
     /// The guarded loop proves all elements fit i32 and cannot be replaced.
     ListGetI32,
+    /// Reads a checked index from the stable buffer in a guarded loop body.
+    ListGetStable,
     /// Every call site and intervening operation preserve these exact element
     /// bounds. The access still checks its index and returns a tagged-small Int.
     ListGetBounded {
@@ -1230,6 +1232,8 @@ pub(crate) enum Builtin {
     },
     /// Internal identity guard between a read source and a mutated list.
     ListDistinct,
+    /// Checks that a list local owns storage before borrowing its buffer.
+    ListPresent,
     StringGet,
     StringIter,
     /// Iterates Python line boundaries on a rooted immutable string.

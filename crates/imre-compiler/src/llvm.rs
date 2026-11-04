@@ -1260,7 +1260,7 @@ impl Emitter<'_, '_> {
             return;
         };
         for guard in guards {
-            if let ExprKind::Builtin(Builtin::ListAllI32, args) = &guard.kind
+            if let ExprKind::Builtin(Builtin::ListAllI32 | Builtin::ListPresent, args) = &guard.kind
                 && let ExprKind::Local(slot) = args[0].kind
             {
                 let receiver = self.borrow_slot(slot);
@@ -1275,6 +1275,19 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Looks up the length and buffer captured by the innermost guard for this source.
+    fn guarded_list_buffer(&self, source: &Expr) -> Option<(String, String)> {
+        let ExprKind::Local(slot) = source.kind else {
+            return None;
+        };
+        let (_, length, data) = self
+            .guarded_integer_lists
+            .iter()
+            .rev()
+            .find(|(root, _, _)| *root == slot)?;
+        Some((length.clone(), data.clone()))
+    }
+
     /// Inline the bounds check and borrowed word load in the guarded version.
     /// The ordinary checked access supplies the exception on the cold edge.
     fn guarded_integer_word(
@@ -1283,15 +1296,7 @@ impl Emitter<'_, '_> {
         receiver: &Value,
         index: &Value,
     ) -> Option<String> {
-        let ExprKind::Local(slot) = source.kind else {
-            return None;
-        };
-        let (_, length, data) = self
-            .guarded_integer_lists
-            .iter()
-            .rev()
-            .find(|(root, _, _)| *root == slot)?
-            .clone();
+        let (length, data) = self.guarded_list_buffer(source)?;
         let at = self.index_word(index, true);
         let valid = self.instruction(format!("icmp ult i64 {at}, {length}"));
         let (fast, slow, end) = (self.label(), self.label(), self.label());
@@ -1311,6 +1316,48 @@ impl Emitter<'_, '_> {
         Some(self.instruction(format!(
             "phi i64 [{word}, %{fast}], [{ordinary}, %{slow_exit}]"
         )))
+    }
+
+    /// Returns an owned integer from a stable buffer. Tagged elements can be
+    /// copied directly. The ordinary subscript owns heap values and handles
+    /// negative, oversized, and out-of-bounds indices.
+    fn guarded_owned_integer(
+        &mut self,
+        source: &Expr,
+        receiver: &Value,
+        index: &Value,
+    ) -> Option<Value> {
+        let (length, data) = self.guarded_list_buffer(source)?;
+        let at = self.instruction(format!("ashr i64 {}, 1", index.operand));
+        let in_bounds = self.instruction(format!("icmp ult i64 {at}, {length}"));
+        let valid = if index.small_integer {
+            in_bounds
+        } else {
+            let tag = self.instruction(format!("and i64 {}, 1", index.operand));
+            let small = self.instruction(format!("icmp ne i64 {tag}, 0"));
+            self.instruction(format!("and i1 {small}, {in_bounds}"))
+        };
+        let (fast, slow, end) = (self.label(), self.label(), self.label());
+        self.branch(&valid, &fast, &slow);
+        self.start(&fast);
+        let word = self.load_list_word(&data, &at);
+        let tag = self.instruction(format!("and i64 {word}, 1"));
+        let immediate = self.instruction(format!("icmp ne i64 {tag}, 0"));
+        self.branch(&immediate, &end, &slow);
+        self.start(&slow);
+        let ordinary = self
+            .runtime_call(&LIST_GET, [receiver, index])
+            .into_value(self);
+        // The join takes ownership of the value acquired on this edge.
+        self.forget(&ordinary);
+        let slow_exit = self.current.clone();
+        self.jump(&end);
+        self.start(&end);
+        let result = self.instruction(format!(
+            "phi i64 [{word}, %{fast}], [{}, %{slow_exit}]",
+            ordinary.operand
+        ));
+        Some(self.unpack_word(result, Type::Int))
     }
 
     fn load_list_word(&mut self, data: &str, index: &str) -> String {
@@ -7221,6 +7268,16 @@ impl Emitter<'_, '_> {
                 };
                 self.fixed_int_get(slot, &args[1].value)
             }
+            Builtin::ListGetStable => self
+                .guarded_owned_integer(&expressions[0], &args[0].value, &args[1].value)
+                .unwrap_or_else(|| {
+                    self.get_item(
+                        &args[0].value,
+                        &args[1].value,
+                        returns,
+                        self.nonnegative_index(&expressions[1]),
+                    )
+                }),
             Builtin::ListGet => self.get_item(
                 &args[0].value,
                 &args[1].value,
@@ -7359,6 +7416,11 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ListPresent => Value {
+                ty: Type::Bool,
+                operand: self.instruction(format!("icmp ne ptr {}, null", args[0].value.operand)),
+                small_integer: false,
+            },
             Builtin::ListDistinct => Value {
                 ty: Type::Bool,
                 operand: self.instruction(format!(
