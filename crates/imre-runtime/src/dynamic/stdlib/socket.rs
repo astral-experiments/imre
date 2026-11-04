@@ -64,6 +64,19 @@ const RESOLVER_NAMES: &[&str] = &[
     "if_indextoname",
 ];
 
+const IMPORTED_FUNCTIONS: &[&str] = &[
+    "getdefaulttimeout",
+    "htonl",
+    "htons",
+    "ntohl",
+    "ntohs",
+    "setdefaulttimeout",
+    "inet_aton",
+    "inet_pton",
+    "inet_ntoa",
+    "inet_ntop",
+];
+
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
 pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
     for &(name, value) in CONSTANTS.iter().chain(IMPORTED_CONSTANTS) {
@@ -74,14 +87,7 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.builtin(&format!("socket.{name}"));
         ctx.bind(scope, name, value);
     }
-    for name in [
-        "getdefaulttimeout",
-        "setdefaulttimeout",
-        "inet_aton",
-        "inet_pton",
-        "inet_ntoa",
-        "inet_ntop",
-    ] {
+    for &name in IMPORTED_FUNCTIONS {
         let function = ctx.builtin(&format!("_socket.{name}"));
         ctx.bind(scope, name, function);
     }
@@ -110,15 +116,8 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
         .iter()
         .map(|&(name, _)| name)
         .chain(RESOLVER_NAMES.iter().copied())
-        .chain([
-            "timeout",
-            "getdefaulttimeout",
-            "setdefaulttimeout",
-            "inet_aton",
-            "inet_pton",
-            "inet_ntoa",
-            "inet_ntop",
-        ])
+        .chain(["timeout"])
+        .chain(IMPORTED_FUNCTIONS.iter().copied())
     {
         match ctx.lookup_attr(low, name) {
             Ok(value) => ctx.bind(scope, name, value),
@@ -650,6 +649,35 @@ fn text_argument(
         _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
     };
     text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+/// Convert an unsigned Python index between host and network byte order.
+pub(super) fn convert_byte_order(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    use num_traits::{Signed, ToPrimitive};
+    let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+    let value = ctx.index_integer(arg)?;
+    let value = value.big();
+    if value.is_negative() {
+        return Err(Error::new("ValueError", "Cannot convert negative int"));
+    }
+    // Reversing the host/network conversion uses the same permutation in either direction.
+    let (converted, width) = if matches!(name, "_socket.htons" | "_socket.ntohs") {
+        (value.to_u16().map(|n| i64::from(n.to_be())), 16)
+    } else {
+        (value.to_u32().map(|n| i64::from(n.to_be())), 32)
+    };
+    let converted = converted.ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            format!("Python int too large for C uint{width}_t"),
+        )
+    })?;
+    Ok(ctx.int(converted))
 }
 
 /// Convert the host's IPv4 numbers-and-dots notation to four network-order bytes.
