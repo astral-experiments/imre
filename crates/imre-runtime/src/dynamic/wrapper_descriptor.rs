@@ -211,6 +211,7 @@ impl BuiltinDescriptor {
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
             }
+            Some(("socket.socket", attr)) => Some(("socket.socket", attr, &["connect_ex"][..])),
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
         };

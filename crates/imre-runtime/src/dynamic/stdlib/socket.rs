@@ -1256,6 +1256,25 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected a socket"));
     };
     let s = handle.clone();
+    if matches!(method, "connect" | "connect_ex") {
+        let peer = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+        let addr = address(ctx, native::family(&s), peer, method)?;
+        super::audit::event(ctx, "socket.connect", &[*receiver, peer])?;
+        let result = native::connect(&s, &addr, || ctx.dispatch_signals())?;
+        if method == "connect" {
+            result.map_err(crate::objects::errno_error)?;
+            return Ok(NONE);
+        }
+        let status = match result {
+            Ok(()) => 0,
+            Err(error) => match error.raw_os_error() {
+                Some(errno) => errno,
+                None if error.kind() == std::io::ErrorKind::TimedOut => libc::EWOULDBLOCK,
+                None => return Err(crate::objects::errno_error(error).into()),
+            },
+        };
+        return Ok(ctx.int(i64::from(status)));
+    }
     if method == "getsockopt" {
         return getsockopt(ctx, &s, args, kwargs);
     }
@@ -1374,7 +1393,7 @@ pub(super) fn call(
             .inspect_err(|error| release_on_error(ctx, error));
     }
     let max = match method {
-        "bind" | "connect" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
+        "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
         "recv" | "recvfrom" | "send" | "sendall" => 2,
         "setsockopt" | "__exit__" | "recv_into" | "sendto" => 3,
         _ => 0,
@@ -1394,10 +1413,6 @@ pub(super) fn call(
             return Ok(if enabled { super::TRUE } else { super::FALSE });
         }
         "bind" => native::bind(
-            &s,
-            &address(ctx, native::family(&s), argument(args, 0)?, method)?,
-        )?,
-        "connect" => native::connect_address(
             &s,
             &address(ctx, native::family(&s), argument(args, 0)?, method)?,
         )?,
