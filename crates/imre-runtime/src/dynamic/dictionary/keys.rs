@@ -415,17 +415,15 @@ impl Context {
             return error;
         }
         let name = if let Value::Instance { class, .. } = *self.heap.get(key)
-            && let Value::Class { scope, .. } = *self.heap.get(class)
+            && matches!(self.heap.get(class), Value::Class { .. })
         {
-            let module = &self.scope_data(scope).module;
-            let name = self
-                .own_class_attr(class, "__qualname__")
+            let name = self.class_qualname(class);
+            match self
+                .own_class_attr(class, "__module__")
                 .and_then(|id| self.str_value(id).ok())
-                .unwrap_or_else(|| self.type_name(key));
-            if matches!(module.as_str(), "builtins" | "__main__") {
-                name.to_owned()
-            } else {
-                format!("{module}.{name}")
+            {
+                None | Some("builtins" | "__main__") => name.to_owned(),
+                Some(module) => format!("{module}.{name}"),
             }
         } else {
             self.type_name(key).to_owned()
