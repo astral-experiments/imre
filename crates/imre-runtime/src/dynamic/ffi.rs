@@ -379,8 +379,23 @@ impl Context {
                 Ok(a)
             }
             "extend" => {
-                for item in self.items(b)? {
-                    self.op("append", a, item, NONE)?;
+                let items = self.items(b)?;
+                if let Value::List(list) = self.heap.get_mut(a) {
+                    // Fill the available space before growing so __sizeof__ and
+                    // partial progress on allocation failure match repeated append.
+                    let mut remaining = items.as_slice();
+                    while !remaining.is_empty() {
+                        list.try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", ""))?;
+                        let count = remaining.len().min(list.capacity() - list.len());
+                        let (chunk, rest) = remaining.split_at(count);
+                        list.extend_from_slice(chunk);
+                        remaining = rest;
+                    }
+                } else {
+                    for item in items {
+                        self.op("append", a, item, NONE)?;
+                    }
                 }
                 Ok(a)
             }
