@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 138 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 140 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -86,6 +86,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
 | `pwd` | Yes | No API example recorded. | — | — | — |
 | `py_compile` | Yes | No API example recorded. | — | — | — |
+| `pyexpat` | Yes | No API example recorded. | — | — | — |
 | `queue` | Yes | No API example recorded. | — | — | — |
 | `random` | Yes | Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences. [Evidence](../benchmarks/cpython_stdlib/full/shutil/random.md) | — | — | — |
 | `re` | Yes | Fixed regular expressions, captures and replacement escapes in `sub`. [`escape`](../tests/fixtures/boxed_re_escape.py) quotes literal text and byte strings for use in patterns. [Evidence](../benchmarks/cpython_stdlib/README.md) | — | — | — |
@@ -123,6 +124,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `uuid` | Yes | Construct a `UUID` from hexadecimal text or a 128-bit integer and read its canonical spelling, `hex` and `int`. [Evidence](../tests/fixtures/text/uuid_conversion.py) | — | — | — |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
 | `weakref` | Yes | Callback-free proxy for source-defined records, including cached identity, attribute and call forwarding, and ReferenceError after the referent is released. [Evidence](../tests/fixtures/classes/weak_proxy.py) | — | — | — |
+| `xml` | Yes | No API example recorded. | — | — | — |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
 | `zipimport` | Yes | Read stored and deflated resources with `zipimporter.get_data()`. Importing Python modules from ZIP paths is unsupported. [Evidence](../tests/fixtures/files/zipimport_resources.py) | — | — | — |
 | `zlib` | Yes | `adler32` computes an unsigned checksum of bytes with an optional integer seed. Compressed-input failures preserve the `error` exception. [Evidence](../tests/fixtures/bytes/zlib_adler32.py) | — | — | — |
@@ -177,7 +179,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `pyclbr` |
 | `pydoc` |
 | `pydoc_data` |
-| `pyexpat` |
 | `quopri` |
 | `readline` |
 | `reprlib` |
@@ -205,7 +206,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `webbrowser` |
 | `winreg` |
 | `wsgiref` |
-| `xml` |
 | `xmlrpc` |
 | `zipapp` |
 
