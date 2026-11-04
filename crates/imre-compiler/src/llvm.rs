@@ -22,6 +22,7 @@ mod asyncio;
 mod byte_outputs;
 mod calendar;
 mod callables;
+mod character_filters;
 mod conditionals;
 mod contextvars;
 mod int_buffers;
@@ -8875,13 +8876,15 @@ impl Emitter<'_, '_> {
                 let keys = &args[1].value.operand;
                 let call = format!("call ptr @{symbol}(ptr {text}, ptr {keys}, i32 {below})");
                 let operand = if optional && let Some(table) = filter.ascii_table() {
+                    let matcher =
+                        character_filters::vector_matcher(self.output, &table, self.strings.len());
                     let table = self.byte_array(table);
                     self.output.local_helper(
                         "text_has_table_byte",
                         include_str!("llvm/text_has_table_byte.ll"),
                     );
                     let hit = self.instruction(format!(
-                        "call i1 @text_has_table_byte(ptr {text}, ptr @{table})"
+                        "call i1 @text_has_table_byte(ptr {text}, ptr @{table}, ptr {matcher})"
                     ));
                     let unbound = self.instruction(format!("icmp eq ptr {keys}, null"));
                     let collect = self.instruction(format!("or i1 {hit}, {unbound}"));

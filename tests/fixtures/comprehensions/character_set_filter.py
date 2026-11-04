@@ -77,3 +77,9 @@ first = materialized("🙂")
 first.add("fresh")
 print(sorted(first))
 print(sorted(materialized("🙂")))
+
+# Put a match at every position around the short and full-width boundaries.
+for size in (0, 1, 7, 8, 9, 15, 16, 17, 23, 31, 32, 33, 48):
+    assert ascii_count("b" * size) == 0
+    for position in range(size):
+        assert ascii_count("b" * position + "#" + "b" * (size - position - 1)) == 1
