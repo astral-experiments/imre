@@ -315,6 +315,11 @@ impl Checker<'_> {
                 }
                 error(self.source, literal, &message)
             })?;
+        // CPython can use the outer ASCII alphabet when scanning for a match
+        // that starts with a scoped Unicode character class.
+        if ascii && spelling.contains("(?u:") {
+            return Err(self.scoped_builtin_error("re.compile", literal));
+        }
         self.globals
             .regex_literals
             .borrow_mut()
