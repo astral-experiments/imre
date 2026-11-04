@@ -63,6 +63,16 @@ except socket.gaierror:
 except OSError as exc:
     assert type(exc) is socket.herror and exc.errno == 1
 
+assert socket.getprotobyname is _socket.getprotobyname
+assert socket.getprotobyname.__module__ == "_socket"
+assert socket.getprotobyname("udp") == socket.IPPROTO_UDP
+try:
+    socket.getprotobyname("imre-unknown-protocol")
+except OSError as exc:
+    assert exc.args == ("protocol not found",)
+else:
+    raise AssertionError("an unknown protocol name was accepted")
+
 assert getservbyname is _socket.getservbyname
 assert raw_getservbyport is socket.getservbyport
 try:

@@ -69,23 +69,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "_socket"
-            if matches!(
-                function,
-                "getdefaulttimeout"
-                    | "setdefaulttimeout"
-                    | "htonl"
-                    | "htons"
-                    | "ntohl"
-                    | "ntohs"
-                    | "inet_aton"
-                    | "inet_pton"
-                    | "inet_ntoa"
-                    | "inet_ntop"
-            ) =>
-        {
-            Some((module, function))
-        }
+        "_socket" if stdlib::SOCKET_FUNCTIONS.contains(&function) => Some((module, function)),
         "_typing" if function == "_idfunc" => Some((module, function)),
         "encodings" if function == "search_function" => Some((module, function)),
         "posix"
@@ -2926,11 +2910,17 @@ impl Context {
                     "__doc__" if symbol == "_socket.inet_aton" => {
                         return Ok(self.text("Convert an IP address in string format (123.45.67.89) to the 32-bit packed binary format used in low-level network functions."));
                     }
+                    "__doc__" if symbol == "_socket.getprotobyname" => {
+                        return Ok(self.text("getprotobyname(name) -> integer\n\nReturn the protocol number for the named protocol.  (Rarely used.)"));
+                    }
                     "__doc__" if symbol == "_socket.inet_pton" => {
                         return Ok(self.text("inet_pton(af, ip) -> packed IP address string\n\nConvert an IP address from string format to a packed string suitable\nfor use with low-level network functions."));
                     }
                     "__text_signature__"
-                        if matches!(symbol.as_str(), "_socket.inet_pton" | "_socket.inet_ntop") =>
+                        if matches!(
+                            symbol.as_str(),
+                            "_socket.getprotobyname" | "_socket.inet_pton" | "_socket.inet_ntop"
+                        ) =>
                     {
                         return Ok(NONE);
                     }
