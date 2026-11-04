@@ -589,17 +589,18 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
                    match_args=True, kw_only=False, slots=False, weakref_slot=False,
                    module=None, decorator=dataclass):
     """Create a class from field declarations and apply the requested decorator."""
+    import annotationlib
     from keyword import iskeyword
     import sys
 
     annotations = {}
     defaults = {}
-    implicit = False
+    untyped = []
     for item in fields:
         if isinstance(item, str):
             name = item
             annotation = None
-            implicit = True
+            untyped.append(name)
         elif len(item) == 2:
             name, annotation = item
         elif len(item) == 3:
@@ -616,9 +617,6 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
             raise TypeError(f'Field name duplicated: {name!r}')
         annotations[name] = annotation
 
-    if implicit:
-        raise NotImplementedError('implicit Any fields require deferred typing.Any resolution')
-
     def fill_namespace(ns):
         if namespace is not None:
             ns.update(namespace)
@@ -626,19 +624,37 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
 
     cls = types.new_class(cls_name, bases, {}, fill_namespace)
 
+    # The decorator requests forward references and may try VALUE first.
+    # Keep that lookup from importing typing while the class is being built.
+    value_blocked = True
+
     def annotate(format):
-        # The field types are already values. Rendering strings requires annotationlib.
-        if format == 4:
-            raise NotImplementedError(format)
-        return annotations.copy()
+        result = annotations.copy()
+        for name in untyped:
+            if format == annotationlib.Format.STRING:
+                result[name] = 'typing.Any'
+            elif format == annotationlib.Format.FORWARDREF:
+                typing = sys.modules.get('typing')
+                result[name] = (typing.Any if typing is not None else
+                                annotationlib.ForwardRef('Any', module='typing'))
+            elif format == annotationlib.Format.VALUE and not value_blocked:
+                from typing import Any
+                result[name] = Any
+            else:
+                raise NotImplementedError
+        if format == annotationlib.Format.STRING:
+            return annotationlib.annotations_to_string(result)
+        return result
 
     cls.__annotate__ = annotate
     if module is None:
         module = sys._getframemodulename(1) or '__main__'
     cls.__module__ = module
-    return decorator(cls, init=init, repr=repr, eq=eq, order=order,
-                     unsafe_hash=unsafe_hash, frozen=frozen, match_args=match_args,
-                     kw_only=kw_only, slots=slots, weakref_slot=weakref_slot)
+    cls = decorator(cls, init=init, repr=repr, eq=eq, order=order,
+                    unsafe_hash=unsafe_hash, frozen=frozen, match_args=match_args,
+                    kw_only=kw_only, slots=slots, weakref_slot=weakref_slot)
+    value_blocked = False
+    return cls
 
 
 def _convert(obj, factory, named):

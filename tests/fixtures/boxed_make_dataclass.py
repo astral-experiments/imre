@@ -6,6 +6,7 @@ def create():
 
 
 def current():
+    implicit_annotations()
     annotation_cache()
     factory_bases()
     namespace = {"label": "compiled", "value": 9}
@@ -24,6 +25,22 @@ def current():
     fresh.clear()
     assert made.__annotate__(3) == {"value": int}
     print("factory class and callback passed")
+
+
+def implicit_annotations():
+    import sys
+    from annotationlib import Format, ForwardRef
+
+    assert 'typing' not in sys.modules
+    cls = make_dataclass('Record', ['value', ('nullable', None)])
+    ref = ForwardRef('Any', module='typing')
+    assert [f.type for f in fields(cls)] == [ref, None]
+    assert cls.__annotate__(Format.FORWARDREF) == {'value': ref, 'nullable': None}
+    assert cls.__annotate__(Format.STRING) == {'value': 'typing.Any', 'nullable': 'None'}
+    assert 'typing' not in sys.modules
+    value = cls.__annotations__['value']
+    assert value is sys.modules['typing'].Any
+    assert cls.__annotate__(Format.FORWARDREF)['value'] is value
 
 
 def annotation_cache():
