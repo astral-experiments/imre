@@ -553,13 +553,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                     const UPSTREAM: &str = include_str!(
                         "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/client.py"
                     );
-                    let transport = UPSTREAM
-                        .replace("import email.parser\n", "")
-                        // Match the same invalid newline bytes without regex lookahead.
-                        .replace(
-                            r"\n(?![ \t])|\r(?![ \t\n])",
-                            r"\n[^ \t]|\r[^ \t\n]|[\n\r]\Z",
-                        );
+                    // Match the same invalid newline bytes without regex lookahead.
+                    let transport = UPSTREAM.replace(
+                        r"\n(?![ \t])|\r(?![ \t\n])",
+                        r"\n[^ \t]|\r[^ \t\n]|[\n\r]\Z",
+                    );
                     concat!(
                         include_str!("../stdlib/http/client.py"),
                         "\n_parse_http_fields = HTTPMessage._parse\n",
