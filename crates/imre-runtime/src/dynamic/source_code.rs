@@ -4166,11 +4166,11 @@ impl Context {
         // Closing an exact range iterator or repeat cannot call Python. A
         // suspended outer try/finally still needs its own finalizer below.
         let delegate_needs_close = matches!(&result, Ok(Step::Yield(_, ip))
-            if matches!(&self.code_object(code).body, Body::Source(program)
-                if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate))))
-            && active.last().is_none_or(|&iter| {
-                !matches!(self.heap.get(iter), Value::RangeIterator(_) | Value::Repeat(_))
-            }));
+        if matches!(&self.code_object(code).body, Body::Source(program)
+            if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate))))
+        && active.last().is_none_or(|&iter| {
+            !matches!(self.heap.get(iter), Value::RangeIterator(_) | Value::Repeat(_))
+        }));
         let Value::Generator {
             running,
             offset,
