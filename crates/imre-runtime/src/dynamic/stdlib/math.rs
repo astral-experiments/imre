@@ -8,35 +8,29 @@ use smallvec::SmallVec;
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
-/// Use the fixed-width numeric hash only when the Python operations are the builtins.
+/// The partial carries the original Python function, including its defining scope.
 pub(super) fn fraction_hash(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let &[n, d, modulus, pow, hash, abs] = args else {
-        return Err(Error::new("TypeError", "_hash_ints requires six arguments"));
+    let Some((&fallback, arguments)) = args.split_first() else {
+        return Err(Error::new("TypeError", "_hash_ints requires a function"));
     };
-    if !kwargs.is_empty() {
-        return Err(Error::new(
-            "TypeError",
-            "_hash_ints takes no keyword arguments",
-        ));
-    }
-    let (Value::Int(n), Value::Int(d), Value::Int(p)) =
-        (ctx.heap.get(n), ctx.heap.get(d), ctx.heap.get(modulus))
-    else {
-        return Ok(super::NONE);
-    };
-    if p.as_small() != Some(crate::python_hash::MODULUS)
-        || ![(pow, "pow"), (hash, "hash"), (abs, "abs")]
-            .into_iter()
-            .all(|(id, name)| matches!(ctx.heap.get(id), Value::Native(current) if current == name))
+    if let &[n, d] = arguments
+        && kwargs.is_empty()
+        && let Value::Function { scope, .. } = *ctx.heap.get(fallback)
+        && let Some(p) = ctx.scope_name(scope, "_PyHASH_MODULUS")
+        && matches!(ctx.heap.get(p), Value::Int(p) if p.as_small() == Some(crate::python_hash::MODULUS))
+        && ["pow", "hash", "abs"].into_iter().all(|name| {
+            ctx.lookup(scope, name).is_ok_and(
+                |id| matches!(ctx.heap.get(id), Value::Native(current) if current == name),
+            )
+        })
+        && let (Value::Int(n), Value::Int(d)) = (ctx.heap.get(n), ctx.heap.get(d))
+        && let Some(hash) = crate::python_hash::fraction_hash(n, d)
     {
-        return Ok(super::NONE);
+        return Ok(ctx.int(hash));
     }
-    // A noninvertible denominator reads the module's live _PyHASH_INF.
-    if crate::python_hash::integer_hash(d) == 0 {
-        return Ok(super::NONE);
-    }
-    let value = crate::python_hash::fraction_hash(n, d);
-    Ok(ctx.int(value))
+    // Subclass operations, replaced builtins and a noninvertible denominator
+    // must use the module's live Python operations and infinity constant.
+    ctx.call(fallback, arguments.to_vec(), kwargs.to_vec())
 }
 
 /// Compute the bounded candidates and the exact distance comparison for Fraction.

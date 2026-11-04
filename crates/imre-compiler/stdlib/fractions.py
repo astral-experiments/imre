@@ -11,7 +11,6 @@ import re
 import sys
 
 _limit_candidates = __import__('_imre_fractions')._limit_candidates
-_hash_ints = __import__('_imre_fractions')._hash_ints
 
 __all__ = ['Fraction']
 
@@ -30,9 +29,6 @@ def _hash_algorithm(numerator, denominator):
     # follow the rules for numeric hashes outlined in the
     # documentation.  (See library docs, 'Built-in Types').
 
-    native = _hash_ints(numerator, denominator, _PyHASH_MODULUS, pow, hash, abs)
-    if native is not None:
-        return native
     try:
         dinv = pow(denominator, -1, _PyHASH_MODULUS)
     except ValueError:
@@ -57,6 +53,10 @@ def _hash_algorithm(numerator, denominator):
         hash_ = hash(hash(abs(numerator)) * dinv)
     result = hash_ if numerator >= 0 else -hash_
     return -2 if result == -1 else result
+
+# Keep the defining function and its live globals for non-integer protocols.
+_hash_algorithm = functools.partial(__import__('_imre_fractions')._hash_ints, _hash_algorithm)
+
 
 _RATIONAL_FORMAT = re.compile(r"""
     \A\s*                                  # optional whitespace at the start,
