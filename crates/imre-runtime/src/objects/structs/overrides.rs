@@ -482,8 +482,12 @@ impl Binary {
         let spacing = num_integer::gcd(n, step);
         let period = n / spacing;
         let mut omitted = (period - 1).saturating_sub(count);
-        // Clear a sparse tail only when it costs at most one extra scalar store per 64 visits.
-        if omitted > count / BLOCK || spacing >= step.min(n - step) || !self.contains(at) {
+        // Compare individual scattered stores with a bitmap-word fill followed by
+        // clearing the complementary tail. Keep the existing sparse-tail bound
+        // when the residue class itself takes one or more words per visit.
+        let fill_words = n.div_ceil(BLOCK).min(period);
+        let tail_budget = (count / BLOCK).max(count.saturating_sub(fill_words) / 2);
+        if omitted > tail_budget || spacing >= step.min(n - step) || !self.contains(at) {
             return None;
         }
 
@@ -503,8 +507,11 @@ impl Binary {
                 } else {
                     n - (step - hole)
                 };
-                self.remove(hole);
+                // Every omitted position is distinct and was set by the complete fill.
+                let (block, bit) = position(hole);
+                self.bits[block] &= !bit;
             }
+            self.changed -= batch;
             omitted -= batch;
         }
         if done < period - 1
@@ -919,6 +926,9 @@ mod page_tests {
         ] {
             let period = n / num_integer::gcd(n, step);
             for count in [
+                period / 2,
+                3 * period / 4,
+                7 * period / 8,
                 period - period / 32,
                 period - period / 64,
                 period - 2,
