@@ -457,6 +457,18 @@ def _coefficient_digits(text):
     return text.lstrip('0') or '0'
 
 
+def _coefficient_as_int(digits, modulus=None):
+    # A Decimal coefficient can exceed the limit for int(string). For hashing,
+    # reduce each block so no intermediate grows with the coefficient length.
+    first = len(digits) % 18 or 18
+    value = int(digits[:first])
+    for start in range(first, len(digits), 18):
+        value = value * 10**18 + int(digits[start:start + 18])
+        if modulus is not None:
+            value %= modulus
+    return value
+
+
 def _unsigned_coefficient(integer):
     try:
         return str(integer)
@@ -738,7 +750,7 @@ class Decimal(object):
             return 1
         return 0
 
-    def _check_nans(self, other=None, context=None):
+    def _check_nans(self, other=None, context=None, *, equality_op=False):
         """Returns whether the number is not actually one.
 
         if self, other are sNaN, signal
@@ -758,12 +770,10 @@ class Decimal(object):
             if context is None:
                 context = getcontext()
 
-            if self_is_nan == 2:
-                return context._raise_error(InvalidOperation, 'sNaN',
-                                        self)
-            if other_is_nan == 2:
-                return context._raise_error(InvalidOperation, 'sNaN',
-                                        other)
+            if self_is_nan == 2 or other_is_nan == 2:
+                explanation = [InvalidOperation] if equality_op else 'sNaN'
+                operand = self if self_is_nan == 2 else other
+                return context._raise_error(InvalidOperation, explanation, operand)
             if self_is_nan:
                 return self._fix_nan(context)
 
@@ -878,7 +888,7 @@ class Decimal(object):
         self, other = _convert_for_comparison(self, other, equality_op=True)
         if other is NotImplemented:
             return other
-        if self._check_nans(other, context):
+        if self._check_nans(other, context, equality_op=True):
             return False
         return self._cmp(other) == 0
 
@@ -945,7 +955,7 @@ class Decimal(object):
         # in the documentation.  (See library docs, 'Built-in Types').
         if self._is_special:
             if self.is_snan():
-                raise TypeError('Cannot hash a signaling NaN value.')
+                raise TypeError('Cannot hash a signaling NaN value')
             elif self.is_nan():
                 return object.__hash__(self)
             else:
@@ -958,8 +968,9 @@ class Decimal(object):
             exp_hash = pow(10, self._exp, _PyHASH_MODULUS)
         else:
             exp_hash = pow(_PyHASH_10INV, -self._exp, _PyHASH_MODULUS)
-        hash_ = int(self._int) * exp_hash % _PyHASH_MODULUS
-        ans = hash_ if self >= 0 else -hash_
+        coefficient = _coefficient_as_int(self._int, _PyHASH_MODULUS)
+        hash_ = coefficient * exp_hash % _PyHASH_MODULUS
+        ans = -hash_ if self._sign else hash_
         return -2 if ans == -1 else ans
 
     def as_tuple(self):
@@ -994,7 +1005,7 @@ class Decimal(object):
 
         # Find n, d in lowest terms such that abs(self) == n / d;
         # we'll deal with the sign later.
-        n = int(self._int)
+        n = _coefficient_as_int(self._int)
         if self._exp >= 0:
             # self is an integer.
             n, d = n * 10**self._exp, 1
