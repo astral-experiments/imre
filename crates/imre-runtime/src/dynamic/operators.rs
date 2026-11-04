@@ -3416,8 +3416,17 @@ impl Context {
             }
         })?;
         self.heap.keep(iterator);
+        self.contains_next(item, |ctx| ctx.next_item(iterator))
+    }
+
+    /// Compare candidates in order and release rich-comparison temporaries between calls.
+    pub(super) fn contains_next(
+        &mut self,
+        item: Id,
+        mut next: impl FnMut(&mut Self) -> Result<Option<Id>>,
+    ) -> Result<bool> {
         let mark = self.heap.temporary_mark();
-        while let Some(value) = self.next_item(iterator)? {
+        while let Some(value) = next(self)? {
             if value == item {
                 return Ok(true);
             }

@@ -3893,6 +3893,7 @@ for name in ("md4", "ripemd160"):
             "boxed_set_symmetric_difference_update.py",
             "boxed_set_difference.py",
             "boxed_set_intersection.py",
+            "boxed_tuple_membership.py",
             "boxed_set_intersection_lifetime.py",
             "boxed_set_pop.py",
             "boxed_set_clear.py",
