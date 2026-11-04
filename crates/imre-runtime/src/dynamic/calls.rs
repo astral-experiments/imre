@@ -4355,22 +4355,19 @@ impl Context {
                 return Ok(self.text("defaultdict"));
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "collections.defaultdict" | "super")
-                    && let Some(member) = self.own_class_attr(obj, name) =>
+                if matches!(
+                    class.as_str(),
+                    "collections.defaultdict" | "super" | "struct.Struct"
+                ) && let Some(member) = self.own_class_attr(obj, name) =>
             {
                 return Ok(member);
             }
-            Value::Native(ref class) if class == "struct.Struct" && name == "iter_unpack" => {
-                return Ok(self.builtin("struct.Struct.iter_unpack"));
+            Value::Struct { .. } => {
+                let class = self.builtin("struct.Struct");
+                if let Some(member) = self.own_class_attr(class, name) {
+                    return self.bind_attribute(member, obj, class);
+                }
             }
-            Value::Struct {
-                ref format,
-                ref layout,
-            } => match name {
-                "format" => return Ok(self.text(format.clone())),
-                "size" => return Ok(self.int(layout.size as i64)),
-                _ => {}
-            },
             Value::ZlibDecompressor { .. }
                 if matches!(name, "eof" | "unused_data" | "unconsumed_tail") =>
             {
@@ -6757,20 +6754,20 @@ impl Context {
         Ok(self.instance(class, None))
     }
 
-    /// Allocate empty list storage without consuming arguments reserved for the initializer.
-    fn new_list(&mut self, args: &[Id]) -> Result<Id> {
+    /// Allocate native storage while leaving constructor arguments to the initializer.
+    fn new_mutable_scalar(&mut self, kind: &str, args: &[Id], empty: Value) -> Result<Id> {
         let Some(&class) = args.first() else {
             return Err(Error::new(
                 "TypeError",
-                "list.__new__(): not enough arguments",
+                format!("{kind}.__new__(): not enough arguments"),
             ));
         };
-        let list = self.builtin("list");
-        if !self.direct_subclass(class, list) {
-            return Err(self.invalid_new_subtype("list", class));
+        let base = self.builtin(kind);
+        if !self.direct_subclass(class, base) {
+            return Err(self.invalid_new_subtype(kind, class));
         }
-        let storage = self.alloc(Value::List(Vec::new()));
-        if class == list {
+        let storage = self.alloc(empty);
+        if class == base {
             return Ok(storage);
         }
         let instance = self.instance(class, None);
@@ -7143,7 +7140,17 @@ impl Context {
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
-            Value::Native(name) if name == "list.__new__" => self.new_list(&args),
+            Value::Native(name) if name == "list.__new__" => {
+                self.new_mutable_scalar("list", &args, Value::List(Vec::new()))
+            }
+            Value::Native(name) if name == "struct.Struct.__new__" => self.new_mutable_scalar(
+                "struct.Struct",
+                &args,
+                Value::Struct {
+                    format: String::new(),
+                    layout: None,
+                },
+            ),
             Value::Native(name) if name == "_thread._local.__new__" => {
                 super::thread_local::allocate(self, &args, &kwargs)
             }

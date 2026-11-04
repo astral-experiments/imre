@@ -32,7 +32,7 @@ impl Context {
     }
 
     /// Encode code points with a legacy codec under strict or surrogateescape handling.
-    pub(super) fn encode_legacy_codepoints(
+    pub(in crate::dynamic::stdlib) fn encode_legacy_codepoints(
         &mut self,
         id: Id,
         codec: Codec,

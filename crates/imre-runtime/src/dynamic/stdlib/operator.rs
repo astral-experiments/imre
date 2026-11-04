@@ -310,9 +310,10 @@ impl Context {
                 .map_err(|_| size_overflow())?;
             return Ok(self.int(length));
         }
-        if let Value::DequeIterator { remaining, .. }
-        | Value::StructUnpackIterator { remaining, .. } = *self.heap.get(value)
-        {
+        if matches!(self.heap.get(value), Value::StructUnpackIterator { .. }) {
+            return Ok(self.int(super::structure::iterator_hint(self, value) as i64));
+        }
+        if let Value::DequeIterator { remaining, .. } = *self.heap.get(value) {
             return Ok(self.int(remaining as i64));
         }
         if let Value::RangeIterator(iter) = self.heap.get(value) {
