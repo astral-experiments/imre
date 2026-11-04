@@ -353,6 +353,8 @@ impl Exception {
             Kind::JsonDecodeError => "json.decoder.JSONDecodeError",
             Kind::CancelledError => "asyncio.exceptions.CancelledError",
             Kind::BadZipFile => "zipfile.BadZipFile",
+            Kind::IllegalMonthError => "calendar.IllegalMonthError",
+            Kind::IllegalWeekdayError => "calendar.IllegalWeekdayError",
             Kind::PackageNotFoundError => "importlib.metadata.PackageNotFoundError",
             Kind::UnsupportedOperation => "io.UnsupportedOperation",
             kind => kind.name(),
