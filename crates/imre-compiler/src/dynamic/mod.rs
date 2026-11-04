@@ -850,12 +850,17 @@ pub(crate) fn compile<const SPLIT: bool>(
             if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
                 imports.names.push((0, "http.server".to_owned()));
             }
-            // Computed imports can select a urllib child without naming it in source.
-            if (uses_exec || uses_import_builtin || seen.contains("importlib"))
-                && seen.contains("urllib")
-                && !seen.contains("urllib.robotparser")
-            {
-                imports.add(0, "urllib.robotparser");
+            // Late imports can select children of a bundled package without naming them in source.
+            if uses_exec || uses_import_builtin || seen.contains("importlib") {
+                for (parent, child) in [
+                    ("email", "email._header_value_parser"),
+                    ("logging", "logging.config"),
+                    ("urllib", "urllib.robotparser"),
+                ] {
+                    if seen.contains(parent) && !seen.contains(child) {
+                        imports.add(0, child);
+                    }
+                }
             }
             if computed_import && !seen.contains("xml.parsers.expat") {
                 imports.names.push((0, "xml.parsers.expat".to_owned()));

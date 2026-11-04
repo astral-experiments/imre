@@ -3089,6 +3089,26 @@ def report(text):
         compare("-IB", thread_hook_exports, native_args=("run", thread_hook_exports, "--quiet"), native_timeout=300)
         plugin.write_bytes((fixtures / "boxed_threading_except_hook.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.current()", native_timeout=300)
+        compare(
+            "-B", "-c",
+            "import importlib, sys\n"
+            "handlers = importlib.import_module(sys.argv[1])\n"
+            "logging = sys.modules['logging']\n"
+            "assert handlers is logging.handlers\n"
+            "handler = handlers.BufferingHandler(2)\n"
+            "handler.handle(logging.makeLogRecord({'msg': 'late handler'}))\n"
+            "print(handler.buffer[0].getMessage())\n"
+            "handler.close()\n",
+            "logging.handlers", native_timeout=300,
+        )
+        compare(
+            "-B", "-c",
+            "import importlib, sys\n"
+            "parser = importlib.import_module(sys.argv[1])\n"
+            "address, options = parser.get_angle_addr('<ops@example.org> SIZE=19')\n"
+            "print(address.addr_spec, options)\n",
+            "email._header_value_parser", native_timeout=300,
+        )
         # A from-import elsewhere in the same program would already select the boxed runtime.
         queue_lookup = root / "queue_lookup.py"
         for statement, name in (("import logging.handlers", "logging.handlers"),
