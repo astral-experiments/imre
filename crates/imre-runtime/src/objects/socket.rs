@@ -492,25 +492,38 @@ pub(crate) fn detach(socket: &Object) -> RawFd {
     })
 }
 
+/// Return the syscall type, stored socket kind, and initial blocking mode.
+fn creation_type(ty: i32) -> (i32, i32, bool) {
+    #[cfg(target_os = "linux")]
+    {
+        (
+            ty | libc::SOCK_CLOEXEC,
+            ty & !(libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK),
+            ty & libc::SOCK_NONBLOCK == 0,
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        (ty, ty, true)
+    }
+}
+
 pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwner> {
     // socket.socket uses -1 to request the default for each field.
     let family = if family == -1 { libc::AF_INET } else { family };
-    let ty = if ty == -1 { libc::SOCK_STREAM } else { ty };
+    let (flags, kind, blocking) = creation_type(if ty == -1 { libc::SOCK_STREAM } else { ty });
     let proto = if proto == -1 { 0 } else { proto };
     if !matches!(family, libc::AF_INET | libc::AF_INET6 | libc::AF_UNIX)
-        || !matches!(ty, libc::SOCK_STREAM | libc::SOCK_DGRAM)
+        || !matches!(kind, libc::SOCK_STREAM | libc::SOCK_DGRAM)
     {
         return Err(Error::new(
             Kind::NotImplementedError,
             "only Internet and Unix stream and datagram sockets are supported",
         ));
     }
-    let kind = ty;
-    #[cfg(target_os = "linux")]
-    let ty = ty | libc::SOCK_CLOEXEC;
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
-    let raw = checked(unsafe { libc::socket(family, ty, proto) }).map_err(errno_error)?;
-    handle(raw, true, family, kind, proto)
+    let raw = checked(unsafe { libc::socket(family, flags, proto) }).map_err(errno_error)?;
+    handle(raw, blocking, family, kind, proto)
 }
 
 pub(crate) fn socketpair(
@@ -518,14 +531,7 @@ pub(crate) fn socketpair(
     kind: i32,
     proto: i32,
 ) -> Result<(crate::ObjectOwner, crate::ObjectOwner)> {
-    #[cfg(target_os = "linux")]
-    let (flags, blocking, kind) = (
-        kind | libc::SOCK_CLOEXEC,
-        kind & libc::SOCK_NONBLOCK == 0,
-        kind & !(libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK),
-    );
-    #[cfg(not(target_os = "linux"))]
-    let (flags, blocking) = (kind, true);
+    let (flags, kind, blocking) = creation_type(kind);
 
     let mut pair = [-1; 2];
     // SAFETY: on success socketpair initializes both entries and transfers both descriptors.

@@ -1963,6 +1963,24 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
+            #[cfg(unix)]
+            (Self::Socket | Self::SocketNative, "SO_ERROR") => {
+                Intrinsic::IntConstant(i64::from(libc::SO_ERROR))
+            }
+            #[cfg(target_os = "linux")]
+            (Self::Socket, "SOCK_NONBLOCK") => {
+                Intrinsic::ScopedObjectExport("socket.SOCK_NONBLOCK")
+            }
+            #[cfg(target_os = "linux")]
+            (Self::SocketNative, "SOCK_NONBLOCK") => {
+                Intrinsic::IntConstant(i64::from(libc::SOCK_NONBLOCK))
+            }
+            #[cfg(target_os = "linux")]
+            (Self::Socket, "SOCK_CLOEXEC") => Intrinsic::ScopedObjectExport("socket.SOCK_CLOEXEC"),
+            #[cfg(target_os = "linux")]
+            (Self::SocketNative, "SOCK_CLOEXEC") => {
+                Intrinsic::IntConstant(i64::from(libc::SOCK_CLOEXEC))
+            }
             (Self::Socket, "timeout") => Intrinsic::ScopedObjectExport("socket.timeout"),
             (Self::SocketNative, "timeout") => Intrinsic::ScopedObjectExport("_socket.timeout"),
             (Self::SocketNative, "getdefaulttimeout") => {
@@ -4876,8 +4894,16 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::ImportlibBootstrapExternal
                     | IntrinsicModule::ImportlibResourcesAbc
             ) || module == IntrinsicModule::SocketNative
-                && imports
-                    .is_none_or(|names| names.iter().any(|alias| alias.name.as_str() != "timeout"));
+                && imports.is_none_or(|names| {
+                    names.iter().any(|alias| {
+                        let name = alias.name.as_str();
+                        name != "timeout"
+                            && !matches!(
+                                module.symbol(name),
+                                Some(Binding::Intrinsic(Intrinsic::IntConstant(_)))
+                            )
+                    })
+                });
         }
         if module == Some(IntrinsicModule::Dataclasses)
             && imports.is_none_or(|names| {
