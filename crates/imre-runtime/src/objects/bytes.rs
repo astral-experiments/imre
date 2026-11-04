@@ -216,7 +216,9 @@ impl ByteOutput {
     fn append_reserved<const N: usize>(&mut self, words: [usize; N]) {
         let len = self.bytes.len();
         let invalid_bits = words.into_iter().fold(0, |bits, word| bits | (word ^ 1));
-        self.invalid |= invalid_bits & !0x1fe != 0;
+        if invalid_bits & !0x1fe != 0 {
+            self.invalid = true;
+        }
         for (slot, word) in self.bytes.spare_capacity_mut()[..N].iter_mut().zip(words) {
             slot.write((word >> 1) as u8);
         }
