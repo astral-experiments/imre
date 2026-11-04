@@ -195,10 +195,15 @@ pub(super) fn construct(
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
                 bind(name, args, kwargs, ["source", "encoding", "errors"])?;
-            if let ("bytes", Some(source), None, None) = (name, value, encoding_id, errors)
-                && let Some(result) = call_bytes_method(ctx, source)?
-            {
-                return Ok(result);
+            if let ("bytes", Some(source), None, None) = (name, value, encoding_id, errors) {
+                if let Some(result) = call_bytes_method(ctx, source)? {
+                    return Ok(result);
+                }
+                if ctx.string_storage(source).is_none()
+                    && let Some(bytes) = bytes_count(ctx, source)?
+                {
+                    return Ok(ctx.alloc(Value::Bytes(bytes)));
+                }
             }
             let bytes = match value.map(|id| ctx.heap.get(id)) {
                 Some(_) if value.is_some_and(|id| ctx.string_storage(id).is_some()) => {
@@ -224,7 +229,7 @@ pub(super) fn construct(
                 }
                 _ => {
                     let source = value.unwrap();
-                    let bytes = bytes_from_iterable(ctx, source)?;
+                    let bytes = bytes_from_source(ctx, source, name == "bytes")?;
                     // An exact tuple or buffer fills newly allocated bytes. The iterable
                     // writer instead finishes from known byte data and can return a singleton.
                     if name == "bytes"
@@ -512,6 +517,37 @@ pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
+    bytes_from_source(ctx, obj, false)
+}
+
+/// The count form allocates distinct single-byte results, unlike the iterable writer.
+fn bytes_count(ctx: &mut Context, source: Id) -> Result<Option<Vec<u8>>> {
+    // bytes(x) tries the index slot before buffers and iterators. A TypeError
+    // from that slot falls through to PyBytes_FromObject.
+    let ty = ctx.builtin("TypeError");
+    match ctx.index_result(source) {
+        Ok(Some((_, number))) => {
+            let size = number.to_i64().ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        ctx.type_name(source)
+                    ),
+                )
+            })?;
+            zeroed_bytes(size).map(Some)
+        }
+        Ok(None) => Ok(None),
+        Err(error) if ctx.raised_error_matches(&error, ty) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn bytes_from_source(ctx: &mut Context, obj: Id, bytes_constructor: bool) -> Result<Vec<u8>> {
+    if bytes_constructor && let Value::Array(array) = ctx.heap.get(ctx.scalar_value(obj)) {
+        return super::super::copy_ids(array.as_bytes());
+    }
     if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
         return ctx.memoryview_bytes(obj);
     }
@@ -521,7 +557,18 @@ pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Resul
     ) {
         return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
-    let iter = ctx.iterator(obj)?;
+    // PyBytes_FromObject replaces TypeError only while acquiring the iterator.
+    let iter = ctx.iterator(obj).map_err(|error| {
+        let ty = ctx.builtin("TypeError");
+        if bytes_constructor && ctx.raised_error_matches(&error, ty) {
+            type_error(format!(
+                "cannot convert '{:.200}' object to bytes",
+                ctx.type_name(obj)
+            ))
+        } else {
+            error
+        }
+    })?;
     ctx.heap.keep(iter);
     let mark = ctx.heap.temporary_mark();
     let mut bytes = Vec::new();

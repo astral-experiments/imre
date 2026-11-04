@@ -1,4 +1,5 @@
 //! Native text codecs shared by the registry and text files.
+pub(crate) mod idna;
 pub(crate) mod shift_jis;
 pub(super) mod writer;
 
@@ -42,7 +43,7 @@ static KOI8_U: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(8, "koi8_u"))
 static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"));
 static ISO8859_15: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(10, "iso8859_15"));
 
-const CODEC_NAMES: [&str; 11] = [
+const CODEC_NAMES: [&str; 12] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -54,6 +55,7 @@ const CODEC_NAMES: [&str; 11] = [
     "koi8-u",
     "cp1252",
     "iso8859-15",
+    "idna",
 ];
 
 thread_local! {
@@ -499,6 +501,7 @@ pub(crate) enum Codec {
     Ascii,
     CodePage(&'static CodePage),
     ShiftJis,
+    Idna,
 }
 
 impl Codec {
@@ -510,6 +513,7 @@ impl Codec {
             Self::Utf8 { signature: true } => 3,
             Self::CodePage(page) => page.index,
             Self::ShiftJis => 7,
+            Self::Idna => 11,
         }
     }
 
@@ -543,6 +547,7 @@ impl Codec {
             "shift_jis" | "shiftjis" | "s_jis" | "sjis" | "csshiftjis" | "x_mac_japanese" => {
                 Ok(Self::ShiftJis)
             }
+            "idna" => Ok(Self::Idna),
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
             "cp1252" | "1252" | "windows_1252" => Ok(Self::CodePage(&CP1252)),
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
@@ -590,6 +595,11 @@ impl Codec {
 
     /// Decode a POSIX filename with the startup codec and Python's surrogateescape policy.
     pub(crate) fn decode_filesystem(self, data: &[u8]) -> Result<Vec<u32>> {
+        if matches!(self, Self::Idna) {
+            return self
+                .decode(data, Some("surrogateescape"))
+                .map(|s| s.chars().map(u32::from).collect());
+        }
         let mut points = Vec::new();
         points
             .try_reserve_exact(data.len())
@@ -607,7 +617,7 @@ impl Codec {
                 Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
                 Self::Latin1 => Some(char::from(byte)),
                 Self::CodePage(page) => page.decode.decode(byte),
-                Self::Utf8 { .. } | Self::ShiftJis => unreachable!(),
+                Self::Utf8 { .. } | Self::ShiftJis | Self::Idna => unreachable!(),
             };
             points.push(match ch {
                 Some(ch) => u32::from(ch),
@@ -663,6 +673,7 @@ impl Codec {
                 }
                 Ok(text)
             }
+            Self::Idna => idna::decode(data, errors),
             Self::ShiftJis => {
                 shift_jis::decode_chunk(&mut text, data, errors, true)?;
                 Ok(text)
@@ -698,7 +709,9 @@ impl Codec {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
             Self::CodePage(page) => page.encode.get(&ch).copied(),
-            Self::Utf8 { .. } | Self::ShiftJis => unreachable!("expected a single-byte encoding"),
+            Self::Utf8 { .. } | Self::ShiftJis | Self::Idna => {
+                unreachable!("expected a single-byte encoding")
+            }
         }
     }
 
@@ -724,6 +737,7 @@ impl Codec {
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
             Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
             Self::ShiftJis => ("shift_jis", "illegal multibyte sequence"),
+            Self::Idna => unreachable!("IDNA encodes whole labels"),
             Self::Utf8 { .. } => unreachable!("UTF-8 encodes every Unicode scalar"),
         }
     }
@@ -735,6 +749,7 @@ impl Codec {
         error_input: impl FnOnce() -> Result<StrOwner>,
     ) -> Result<Cow<'a, [u8]>> {
         let (codec, reason) = match self {
+            Self::Idna => return idna::encode(text, errors, error_input).map(Cow::Owned),
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {
                 let mut out = Vec::new();

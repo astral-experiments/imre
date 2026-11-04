@@ -372,6 +372,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/cp424.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
+        "encodings.idna" => Some((
+            "encodings/idna.py",
+            include_str!("../stdlib/encodings/idna.py"),
+        )),
         "encodings.shift_jis" => Some((
             "encodings/shift_jis.py",
             include_str!("../stdlib/encodings/shift_jis.py"),

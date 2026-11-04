@@ -29,6 +29,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::CodecsNative => exports!(
             "_codecs",
             "_imre_codec_functions",
+            "_imre_idna_label",
             "_imre_native_search",
             "encode",
             "escape_decode",
@@ -147,6 +148,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::Codecs => exports!(
             "codecs",
             "BufferedIncrementalDecoder",
+            "BufferedIncrementalEncoder",
             "Codec",
             "CodecInfo",
             "IncrementalDecoder",
@@ -157,6 +159,8 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "getincrementaldecoder",
             "getincrementalencoder",
             "getreader",
+            "iterdecode",
+            "iterencode",
             "utf_16_ex_decode",
             "utf_32_ex_decode",
             "utf_16_encode",

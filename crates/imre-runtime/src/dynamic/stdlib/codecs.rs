@@ -385,13 +385,10 @@ pub(super) fn native_search(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
             FixedUnicode::Utf16(_) => "encodings.utf_16",
             _ => "encodings.utf_32",
         };
-        let provider = ctx.module(module)?;
-        let package = ctx.module("encodings")?;
-        let entry = ctx.lookup_attr(package, "_wide_entry")?;
-        return ctx.call(entry, vec![arg, provider], Vec::new());
+        return module_entry(ctx, arg, module);
     }
     match CodecInfo::lookup(&key).map_err(Error::from) {
-        Ok(entry) => box_native_entry(ctx, entry),
+        Ok(entry) => box_native_entry(ctx, entry, arg),
         Err(error) if error.kind == "LookupError" => Ok(NONE),
         Err(error) => Err(error),
     }
@@ -530,7 +527,15 @@ fn native_functions(ctx: &mut Context, codec: Codec) -> Result<(Id, Id)> {
     Ok(functions)
 }
 
-fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
+/// Look up a Python codec module's entry using the default provider's original spelling.
+fn module_entry(ctx: &mut Context, spelling: Id, module: &str) -> Result<Id> {
+    let provider = ctx.module(module)?;
+    let package = ctx.module("encodings")?;
+    let entry = ctx.lookup_attr(package, "_module_entry")?;
+    ctx.call(entry, vec![spelling, provider], Vec::new())
+}
+
+fn box_native_entry(ctx: &mut Context, entry: CodecInfo, spelling: Id) -> Result<Id> {
     let key = entry.as_ptr();
     if let Some((_, id)) = ctx.codec_entries.entries.get(&key) {
         return Ok(*id);
@@ -543,6 +548,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         Codec::Utf8 { signature: true } => "utf_8_sig",
         Codec::CodePage(page) => page.module_name,
         Codec::ShiftJis => codec.name(),
+        Codec::Idna => return module_entry(ctx, spelling, "encodings.idna"),
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     // Keep the pending constructor arguments across Python-visible module lookups.
@@ -624,6 +630,9 @@ pub(in crate::dynamic) fn encode_text(
         .transpose()?
         .unwrap_or("strict");
     let encoder = StrEncoder::lookup(encoding, errors)?;
+    if matches!(encoder, StrEncoder::Registered(Codec::Idna)) {
+        crate::objects::idna::check_errors(Some(errors))?;
+    }
     let errors = if let StrEncoder::Registered(codec) = encoder {
         match encode_error::registered(ctx, codec, errors) {
             Some(encode_error::Handler::Python(callback)) => {
@@ -654,6 +663,16 @@ pub(in crate::dynamic) fn encode_text(
         StrEncoder::Wide { format, signature } => {
             let order = if signature { 0 } else { format.byte_order() };
             encode_fixed(ctx, id, format, &errors, order)
+        }
+        StrEncoder::Registered(Codec::Idna) => {
+            let points = ctx.string_codepoints(id)?;
+            match crate::objects::idna::encode_points(&points) {
+                Ok(bytes) => Ok(bytes),
+                Err((range, reason)) => {
+                    let point = points.get(range.start).copied();
+                    Err(ctx.string_encoding_error(id, "idna", &reason, point, range))
+                }
+            }
         }
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
@@ -1206,7 +1225,7 @@ pub(in crate::dynamic) fn entry_encode(
         Codec::Ascii => "ascii_encode",
         Codec::Utf8 { .. } => "utf_8_encode",
         Codec::CodePage(_) => "charmap_encode",
-        Codec::ShiftJis => "encode",
+        Codec::ShiftJis | Codec::Idna => "encode",
     };
     let (input, errors) = if matches!(codec, Codec::Utf8 { signature: true } | Codec::CodePage(_)) {
         let wrapper = if matches!(codec, Codec::CodePage(_)) {
@@ -1215,7 +1234,7 @@ pub(in crate::dynamic) fn entry_encode(
             "encode"
         };
         python_codec_args(wrapper, matches!(codec, Codec::CodePage(_)), args, kwargs)?
-    } else if matches!(codec, Codec::ShiftJis) {
+    } else if matches!(codec, Codec::ShiftJis | Codec::Idna) {
         python_codec_args("encode", false, args, kwargs)?
     } else {
         positional_codec_args(function, args, kwargs)?
@@ -1246,7 +1265,7 @@ pub(in crate::dynamic) fn decode(
         Codec::Ascii => "ascii_decode",
         Codec::Utf8 { .. } => "utf_8_decode",
         Codec::CodePage(_) => "charmap_decode",
-        Codec::ShiftJis => "decode",
+        Codec::ShiftJis | Codec::Idna => "decode",
     };
     if matches!(codec, Codec::ShiftJis) {
         // The module's incremental decoder passes final as a third argument.
