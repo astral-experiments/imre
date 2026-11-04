@@ -1,4 +1,5 @@
 _pydatetime.py
+_pydecimal.py
 tarfile.py
 xml/__init__.py
 xml/etree/__init__.py

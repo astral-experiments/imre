@@ -2920,8 +2920,7 @@ def report(text):
             (helpers / "decimal_boundary.py").write_text(
                 f"from decimal import Decimal\nprint({expression})\n"
             )
-            unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_boundary")
-            assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+            compare("-IB", "-c", decimal_import + "import decimal_boundary")
 
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
@@ -3590,6 +3589,7 @@ for name in ("md4", "ripemd160"):
             "boxed_inspect_isabstract.py",
             "boxed_numeric_repr.py",
             "boxed_decimal_hash.py",
+            "boxed_decimal_arithmetic.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
             "boxed_positional_string_methods.py",

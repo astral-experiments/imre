@@ -48,6 +48,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             })))
         }
         "reprlib" => bundled_source!("reprlib.py"),
+        // The scalar Decimal stays available for checked serializers.
+        "decimal" => Some(("decimal.py", include_str!("../../stdlib/decimal_boxed.py"))),
         "datetime" => Some((
             "datetime.py",
             include_str!(
