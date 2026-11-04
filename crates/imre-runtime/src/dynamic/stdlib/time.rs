@@ -4,6 +4,32 @@ use crate::dynamic::builtins::bind;
 use crate::objects::Calendar;
 use crate::objects::time::{ClockParts, LocalTime, wall_time, wall_time_ns};
 
+pub(in crate::dynamic) fn is_function(name: &str) -> bool {
+    matches!(
+        name,
+        "get_clock_info"
+            | "time"
+            | "time_ns"
+            | "monotonic"
+            | "monotonic_ns"
+            | "perf_counter"
+            | "perf_counter_ns"
+            | "sleep"
+            | "gmtime"
+            | "localtime"
+            | "mktime"
+            | "strftime"
+            | "ctime"
+            | "tzset"
+    ) || text_signature(name).is_some()
+}
+
+/// Only the two clock_gettime functions publish an Argument Clinic signature.
+pub(in crate::dynamic) fn text_signature(name: &str) -> Option<&'static str> {
+    (cfg!(target_os = "linux") && matches!(name, "clock_gettime" | "clock_gettime_ns"))
+        .then_some("($module, clk_id, /)")
+}
+
 /// Install the snapshot of local standard and daylight time exported by time.
 pub(in crate::dynamic) fn install_timezone(ctx: &mut Context, scope: Id) -> Result<()> {
     let [(standard, std_name), (summer, dst_name)] = crate::objects::time::timezone_samples()?;

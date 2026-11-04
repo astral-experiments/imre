@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from inspect import signature
+from time import ctime
+from types import MethodType
 from unittest import TestCase
 from unittest.mock import InvalidSpecError, NonCallableMagicMock, call, create_autospec, seal
 
@@ -148,5 +150,15 @@ request.sink.write("body")
 request.sink.write.assert_called_once_with(value="body")
 with check.assertRaises(AttributeError):
     request.sink.extra = 1
+
+bound = MethodType(ctime, 0)
+opaque = create_autospec(bound)
+opaque(1, 2)
+opaque.assert_called_once_with(1, 2)
+
+sealed = create_autospec(bound)
+seal(sealed)
+with check.assertRaises(AttributeError):
+    sealed()
 
 print("autospec checked")
