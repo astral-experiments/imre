@@ -1262,6 +1262,8 @@ pub(crate) enum Builtin {
     BinasciiDecode,
     BinasciiEncode,
     BinasciiUnhexlify,
+    Base32Encode,
+    Base32Decode,
     Base85Encode {
         alphabet: &'static [u8; 85],
         foldnuls: bool,

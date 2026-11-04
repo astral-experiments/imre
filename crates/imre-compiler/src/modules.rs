@@ -311,7 +311,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                         "import binascii\nimport struct\n",
                         // The runtime supplies the URL-safe codecs.
                         section("bytes_types =", "_urlsafe_encode_translation ="),
-                        section("# Base32 encoding/decoding", "# RFC 3548, Base 16"),
+                        section("# Base32 encoding/decoding", "_b32tab2 ="),
+                        include_str!("../stdlib/base32.py"),
+                        section("def b32encode(s):", "# RFC 3548, Base 16"),
                         section("def b16decode(", "# Ascii85 encoding/decoding"),
                         include_str!("../stdlib/base85_encode.py"),
                         section("def a85decode(", "# The following code is originally taken"),
