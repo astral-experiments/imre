@@ -1500,6 +1500,7 @@ pub(crate) enum Builtin {
     HashStr,
     HashBytes,
     HashRecord,
+    FractionHash(usize, usize),
     /// A dictionary with a read-only JSON receiver and a literal string key.
     JsonGet {
         key: String,

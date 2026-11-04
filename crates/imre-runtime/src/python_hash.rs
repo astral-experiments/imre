@@ -3,7 +3,11 @@
 use std::hash::Hasher;
 use std::sync::OnceLock;
 
+use num_integer::Integer;
+use num_traits::ToPrimitive;
 use siphasher::sip::SipHasher13;
+
+use crate::Int;
 
 pub(crate) const ALGORITHM: &str = "siphash13";
 pub(crate) const HASH_BITS: u32 = u64::BITS;
@@ -58,6 +62,51 @@ pub(crate) fn randomized() -> bool {
 
 fn normalized(hash: u64) -> i64 {
     if hash == u64::MAX { -2 } else { hash as i64 }
+}
+
+/// Signed residue before CPython remaps the reserved hash -1.
+pub(crate) fn integer_hash(value: &Int) -> i64 {
+    value.to_i64().map_or_else(
+        || {
+            (value.big().as_ref() % MODULUS)
+                .to_i64()
+                .expect("bounded remainder")
+        },
+        |n| n % MODULUS,
+    )
+}
+
+/// Hash a rational directly in the prime field used for Python numeric hashes.
+pub(crate) fn fraction_hash(numerator: &Int, denominator: &Int) -> i64 {
+    let n = integer_hash(numerator);
+    let d = integer_hash(denominator).rem_euclid(MODULUS);
+    if d == 0 {
+        let negative = numerator.as_small().map_or_else(
+            || numerator.big().sign() == num_bigint::Sign::Minus,
+            |n| n < 0,
+        );
+        return if negative { -INF } else { INF };
+    }
+    let hash = if d == 1 {
+        n
+    } else {
+        // A nonzero residue has an inverse since MODULUS is prime. The product
+        // of two 61-bit residues fits in i128, even for unbounded inputs.
+        let inverse = d.extended_gcd(&MODULUS).x.rem_euclid(MODULUS);
+        (i128::from(n) * i128::from(inverse) % i128::from(MODULUS)) as i64
+    };
+    normalized(hash as u64)
+}
+
+/// # Safety
+/// Both arguments are borrowed, live tagged integer handles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_fraction_hash(numerator: usize, denominator: usize) -> usize {
+    let n = unsafe { Int::borrow(numerator) };
+    let d = unsafe { Int::borrow(denominator) };
+    Int::small(fraction_hash(&n, &d))
+        .expect("hash fits a tagged integer")
+        .into_raw()
 }
 
 pub(crate) fn bytes(data: &[u8]) -> i64 {

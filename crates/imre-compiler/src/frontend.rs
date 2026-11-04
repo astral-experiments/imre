@@ -11440,6 +11440,11 @@ impl<'a> Checker<'a> {
                 }
                 Type::Str | Type::StrLiteral(_) => Builtin::HashStr,
                 Type::Bytes => Builtin::HashBytes,
+                Type::Class(id) if self.fraction_class(id) => {
+                    let fields = &self.classes.declarations.definitions[id].fields;
+                    let index = |name| fields.iter().position(|field| field.name == name).unwrap();
+                    Builtin::FractionHash(index("_numerator"), index("_denominator"))
+                }
                 Type::Class(id)
                     if self.classes.declarations.definitions[id].toml_hash
                         || self.classes.declarations.definitions[id]

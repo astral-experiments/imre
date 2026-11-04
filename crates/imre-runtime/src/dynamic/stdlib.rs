@@ -2030,6 +2030,9 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
+    if name == "_imre_fractions._hash_ints" {
+        return math::fraction_hash(ctx, args, kwargs);
+    }
     if name == "_imre_fractions._limit_candidates" {
         return math::fraction_limit_candidates(ctx, args, kwargs);
     }

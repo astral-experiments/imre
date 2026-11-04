@@ -5663,6 +5663,13 @@ impl Emitter<'_, '_> {
             }
             Builtin::HashStr => self.call("imre_string_hash", returns, &[&args[0].value]),
             Builtin::HashBytes => self.call("imre_bytes_hash", returns, &[&args[0].value]),
+            Builtin::FractionHash(numerator, denominator) => {
+                let [n, d] = [numerator, denominator].map(|index| {
+                    let pointer = self.field_pointer(&args[0].value, *index);
+                    self.field_value(&pointer, Type::Int)
+                });
+                self.call("imre_fraction_hash", Type::Int, &[&n, &d])
+            }
             Builtin::HashRecord => Value {
                 ty: Type::Int,
                 operand: self.checked_instruction(format!(
@@ -9984,6 +9991,7 @@ declare i64 @imre_string_hash(ptr)
 declare i64 @imre_bytes_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
+declare i64 @imre_fraction_hash(i64, i64)
 declare ptr @imre_subprocess_shell_output(ptr, i32, i64, i64, ptr)
 declare ptr @imre_popen_config(ptr)
 declare i64 @imre_call_config(ptr, i32, i64, i1 zeroext)

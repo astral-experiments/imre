@@ -2,7 +2,6 @@
 
 use std::ops::ControlFlow;
 
-use num_traits::ToPrimitive;
 use smallvec::SmallVec;
 
 use super::Entries;
@@ -11,7 +10,7 @@ use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 
 const EMPTY: usize = usize::MAX;
 const DUMMY: usize = usize::MAX - 1;
-use crate::python_hash::{IMAG, INF, MODULUS};
+use crate::python_hash::{IMAG, INF, MODULUS, integer_hash};
 
 /// A pending operation in the left-to-right hash of a boxed key.
 enum HashFrame {
@@ -268,17 +267,6 @@ impl Entries {
 // Python reserves -1 as the error return from a hash slot.
 fn normalized(hash: i64) -> i64 {
     if hash == -1 { -2 } else { hash }
-}
-
-fn integer_hash(value: &crate::Int) -> i64 {
-    value.to_i64().map_or_else(
-        || {
-            (value.big().as_ref() % MODULUS)
-                .to_i64()
-                .expect("bounded remainder")
-        },
-        |n| n % MODULUS,
-    )
 }
 
 fn float_hash(value: f64, identity: Id) -> i64 {

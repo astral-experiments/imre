@@ -3401,8 +3401,10 @@ impl Context {
                 }
             }
             "_imre_fractions" => {
-                let value = self.builtin("_imre_fractions._limit_candidates");
-                self.bind(scope, "_limit_candidates", value);
+                for name in ["_limit_candidates", "_hash_ints"] {
+                    let value = self.builtin(&format!("_imre_fractions.{name}"));
+                    self.bind(scope, name, value);
+                }
             }
             "_imre_itertools" => {
                 for attr in [

@@ -503,6 +503,7 @@ impl Builtin {
             | Self::JsonEncoderEncode(_)
             | Self::JsonErrorField(_)
             | Self::HashRecord
+            | Self::FractionHash(_, _)
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
