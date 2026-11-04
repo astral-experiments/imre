@@ -421,8 +421,18 @@ def copy_names(values: set[int]) -> set[str]:
 
 copy_names({1})
 """,
-    "set_pop_method": "values = {1}\nvalues.pop()\n",
-    "set_remove_method": "values = {1}\nvalues.remove(1)\n",
+    "set_pop_wrong_return": """\
+def take(values: set[int]) -> str:
+    return values.pop()
+
+take({1})
+""",
+    "set_remove_wrong_return": """\
+def take(values: set[int]) -> int:
+    return values.remove(1)
+
+take({1})
+""",
     "set_union_mismatched_keys": 'values = {1} | {"two"}\n',
     "dict_keys_union_mismatched": 'values = {"one": 1}.keys() | {2: "two"}.keys()\n',
     "defaultdict_requires_factory": "from collections import defaultdict\na: defaultdict[str, list[int]] = defaultdict()\n",
