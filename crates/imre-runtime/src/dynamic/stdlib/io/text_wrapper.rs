@@ -401,8 +401,12 @@ impl Wrapper {
         invoke(ctx, buffer, name, args)
     }
 
+    pub(in crate::dynamic) fn buffer_id(&self) -> Option<Id> {
+        self.buffer.get()
+    }
+
     pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
-        visit.extend(self.buffer.get());
+        visit.extend(self.buffer_id());
         visit.extend([
             self.encoding.get(),
             self.errors.get(),
