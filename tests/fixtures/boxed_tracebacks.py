@@ -394,3 +394,11 @@ ref = attach_payload(error)
 assert ref() is not None
 error.__cause__ = None
 assert ref() is None
+
+
+from traceback import format_tb
+
+last_frame, = format_tb(saved, limit=-1)
+assert "in total" in last_frame
+assert "return data['values']" in last_frame
+assert format_tb(saved, limit=0) == []

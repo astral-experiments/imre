@@ -1784,6 +1784,7 @@ impl IntrinsicModule {
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Traceback, "print_exc") => Intrinsic::TracebackPrintExc,
+            (Self::Traceback, "format_tb") => Intrinsic::ScopedObjectExport("traceback.format_tb"),
             (Self::Traceback, "format_exc") => {
                 Intrinsic::TracebackFormatter("traceback.format_exc")
             }
