@@ -133,6 +133,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/fractions.py and its numeric ABCs. See licenses/CPython.txt.
         "fractions" => bundled_source!("fractions.py"),
         "numbers" => bundled_source!("numbers.py"),
+        "statistics" => bundled_source!("statistics.py"),
         "_compat_pickle" => bundled_source!("_compat_pickle.py"),
         "_tokenize" => bundled_source!("_tokenize.py"),
         "__future__" => bundled_source!("__future__.py"),
