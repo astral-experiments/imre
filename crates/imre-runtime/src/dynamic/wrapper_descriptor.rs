@@ -300,6 +300,7 @@ impl BuiltinDescriptor {
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
             "str.isidentifier" => ("str", "isidentifier"),
+            "str.isprintable" => ("str", "isprintable"),
             "str.lower" => ("str", "lower"),
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
@@ -390,6 +391,7 @@ impl BuiltinDescriptor {
                     | "isdigit"
                     | "isidentifier"
                     | "islower"
+                    | "isprintable"
                     | "istitle"
                     | "center"
                     | "ljust"
@@ -818,6 +820,9 @@ impl BuiltinDescriptor {
                     ("isidentifier", "__doc__") => {
                         "Return True if the string is a valid Python identifier, False otherwise.\n\nCall keyword.iskeyword(s) to test whether string s is a reserved identifier,\nsuch as \"def\" or \"class\"."
                     }
+                    ("isprintable", "__doc__") => {
+                        "Return True if all characters in the string are printable, False otherwise.\n\nA character is printable if repr() may use it in its output."
+                    }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
@@ -864,7 +869,7 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "lower" | "title"
+                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "isprintable" | "istitle" | "lower" | "title"
                         | "swapcase",
                         _,
                     ) => "($self, /)",
