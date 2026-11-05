@@ -5,7 +5,9 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
+use std::sync::Mutex;
+use std::thread;
 
 use imre_compiler::{CodegenUnit, SourceInputs};
 use serde::{Deserialize, Serialize};
@@ -283,7 +285,7 @@ pub fn compile_objects(
         fs::create_dir_all(&dir).ok()?;
         Some((dir, c.object_recipe))
     });
-    let ir_path = stage.join("module.ll");
+    let mut pending = Vec::new();
     let mut objects = Vec::with_capacity(units.len());
     for (i, unit) in units.iter().enumerate() {
         let filename = format!("unit-{i}.o");
@@ -301,6 +303,74 @@ pub fn compile_objects(
             }
         });
         let hit = entry.as_ref().is_some_and(|e| e.restore(&staged).is_some());
+        if !hit {
+            pending.push((i, entry));
+        }
+        objects.push(staged);
+    }
+
+    let compile = |i: usize, entry: Option<ObjectEntry>| -> Result<Output, String> {
+        // The input basename can appear in the object. Give each compiler its own module.ll.
+        let dir = tempfile::tempdir_in(stage).map_err(|e| e.to_string())?;
+        let unit = &units[i];
+        fs::write(dir.path().join("module.ll"), &unit.llvm_ir).map_err(|e| e.to_string())?;
+        let filename = format!("unit-{i}.o");
+        let output = toolchain
+            .driver()
+            .current_dir(dir.path())
+            .arg(format!("-O{}", opt.to_string_lossy()))
+            .args([
+                "-Wno-override-module",
+                "-c",
+                "-x",
+                "ir",
+                "module.ll",
+                "-o",
+                &filename,
+            ])
+            .output()
+            .map_err(|e| format!("Could not compile {}: {e}", unit.name))?;
+        if output.status.success() {
+            fs::rename(dir.path().join(filename), &objects[i]).map_err(|e| e.to_string())?;
+            if let Some(entry) = entry {
+                let _ = entry.publish(&objects[i]);
+            }
+        }
+        Ok(output)
+    };
+
+    let mut completed = BTreeMap::new();
+    if !pending.is_empty() {
+        let workers = thread::available_parallelism()
+            .map_or(1, usize::from)
+            .min(4)
+            .min(pending.len());
+        // Start the largest uncached modules first to avoid a long final compile.
+        pending.sort_by_key(|(i, _)| units[*i].llvm_ir.len());
+        let pending = Mutex::new(pending);
+        let results = Mutex::new(&mut completed);
+        let worker = || loop {
+            let job = pending.lock().unwrap().pop();
+            let Some((i, entry)) = job else { break };
+            let result = compile(i, entry);
+            if !result.as_ref().is_ok_and(|output| output.status.success()) {
+                // Earlier diagnostics precede this failure, even if a later worker finished first.
+                pending.lock().unwrap().retain(|(n, _)| *n < i);
+            }
+            results.lock().unwrap().insert(i, result);
+        };
+        thread::scope(|scope| {
+            for _ in 1..workers {
+                if thread::Builder::new().spawn_scoped(scope, worker).is_err() {
+                    break;
+                }
+            }
+            worker();
+        });
+    }
+    for (i, unit) in units.iter().enumerate() {
+        let result = completed.remove(&i);
+        let hit = result.is_none();
         progress(&unit.name, hit);
         if cache.is_some() && trace_enabled() {
             eprintln!(
@@ -309,34 +379,21 @@ pub fn compile_objects(
                 unit.name
             );
         }
-        if !hit {
-            fs::write(&ir_path, &unit.llvm_ir).map_err(|e| e.to_string())?;
-            let status = toolchain
-                .driver()
-                .current_dir(stage)
-                .arg(format!("-O{}", opt.to_string_lossy()))
-                .args([
-                    "-Wno-override-module",
-                    "-c",
-                    "-x",
-                    "ir",
-                    "module.ll",
-                    "-o",
-                    &filename,
-                ])
-                .status()
-                .map_err(|e| format!("Could not compile {}: {e}", unit.name))?;
-            if !status.success() {
+        if let Some(result) = result {
+            let output = result?;
+            io::stdout()
+                .write_all(&output.stdout)
+                .map_err(|e| e.to_string())?;
+            io::stderr()
+                .write_all(&output.stderr)
+                .map_err(|e| e.to_string())?;
+            if !output.status.success() {
                 return Err(format!(
-                    "LLVM compilation of {} failed: {status}",
-                    unit.name
+                    "LLVM compilation of {} failed: {}",
+                    unit.name, output.status
                 ));
             }
-            if let Some(entry) = entry {
-                let _ = entry.publish(&staged);
-            }
         }
-        objects.push(staged);
     }
     Ok(objects)
 }
