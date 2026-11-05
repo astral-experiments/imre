@@ -12,12 +12,8 @@ impl Binary {
         count: usize,
         spacing: usize,
     ) -> Option<(usize, usize)> {
-        let words = n / BLOCK;
-        if !n.is_multiple_of(BLOCK)
-            || !BLOCK.is_multiple_of(spacing)
-            || count < 1024
-            || count / 8 < words
-        {
+        let words = n.div_ceil(BLOCK);
+        if !BLOCK.is_multiple_of(spacing) || count < 1024 || count / 8 < words {
             return None;
         }
         let period = n / spacing;
@@ -79,6 +75,12 @@ impl Binary {
             let (block, seed) = position(at);
             self.bits[block] = seed;
             return Some((0, at));
+        }
+        // Ranks wrap at the modulus. Bits past it in the last physical word
+        // would duplicate the first rows, which are outside this word.
+        let tail = n % BLOCK;
+        if tail != 0 {
+            self.bits[words - 1] &= (1u64 << tail) - 1;
         }
         self.changed = visits;
         let last = (at as u128 + count as u128 * step as u128) % n as u128;
