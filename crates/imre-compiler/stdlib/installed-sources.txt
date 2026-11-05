@@ -2,6 +2,7 @@ _pydatetime.py
 _pydecimal.py
 getpass.py
 graphlib.py
+statistics.py
 tarfile.py
 timeit.py
 xml/__init__.py
