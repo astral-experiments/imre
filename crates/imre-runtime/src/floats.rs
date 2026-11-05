@@ -133,6 +133,25 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
     }
 }
 
+/// Compute the principal arc cosine with Python's domain error for real inputs.
+pub(crate) fn acos(value: f64) -> Result<f64> {
+    if value.abs() > 1.0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!(
+                "expected a number in range from -1 up to 1, got {}",
+                render(value)
+            ),
+        ));
+    }
+    Ok(value.acos())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_acos(value: f64) -> f64 {
+    finish(acos(value), 0.0)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_int(value: f64) -> usize {
     finish(float_to_integer(value).map(|n| Int::new(n).into_raw()), 1)

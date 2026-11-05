@@ -243,6 +243,10 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
     }
+    if operation == "acos" {
+        let result = crate::floats::acos(as_double(ctx, value)?)?;
+        return Ok(ctx.alloc(Value::Float(result)));
+    }
     if operation == "acosh" {
         let x = as_double(ctx, value)?;
         let result = x.acosh();

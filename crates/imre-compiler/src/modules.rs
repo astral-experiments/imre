@@ -865,6 +865,7 @@ pub(crate) enum Intrinsic {
     NullContext,
     IntConstant(i64),
     WallTime,
+    MathAcos,
     TimeSleep,
     WarningFilter {
         simple: bool,
@@ -2357,6 +2358,7 @@ impl IntrinsicModule {
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Gc, "is_tracked") => Intrinsic::ScopedObjectExport("gc.is_tracked"),
+            (Self::Math, "acos") => Intrinsic::MathAcos,
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
             (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
