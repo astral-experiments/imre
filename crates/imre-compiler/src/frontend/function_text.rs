@@ -59,7 +59,9 @@ impl Checker<'_> {
 
 /// Return the normalized value of a namespace's leading string literal.
 pub(crate) fn docstring(body: &[ast::Stmt]) -> Option<String> {
-    Some(clean_doc(docstring_literal(body)?.value.to_str()))
+    Some(imre_ast::strings::clean_doc(
+        docstring_literal(body)?.value.to_str(),
+    ))
 }
 
 pub(crate) fn docstring_literal(body: &[ast::Stmt]) -> Option<&ast::ExprStringLiteral> {
@@ -70,42 +72,4 @@ pub(crate) fn docstring_literal(body: &[ast::Stmt]) -> Option<&ast::ExprStringLi
         return None;
     };
     Some(text)
-}
-
-/// CPython expands tabs at eight-character stops, then removes the common
-/// margin after the first line. Blank lines and the final newline survive.
-fn clean_doc(doc: &str) -> String {
-    let mut expanded = String::with_capacity(doc.len());
-    let mut column = 0;
-    for c in doc.chars() {
-        if c == '\t' {
-            let width = 8 - column % 8;
-            expanded.extend(std::iter::repeat_n(' ', width));
-            column += width;
-        } else {
-            expanded.push(c);
-            column = if matches!(c, '\r' | '\n') {
-                0
-            } else {
-                column + 1
-            };
-        }
-    }
-    let mut lines = expanded.split('\n');
-    let first = lines.next().unwrap_or_default().trim_start_matches(' ');
-    let margin = lines
-        .clone()
-        .filter_map(|line| {
-            let content = line.trim_start_matches(' ');
-            (!content.is_empty()).then_some(line.len() - content.len())
-        })
-        .min()
-        .unwrap_or(0);
-    let mut cleaned = first.to_owned();
-    for line in lines {
-        cleaned.push('\n');
-        let indent = line.len() - line.trim_start_matches(' ').len();
-        cleaned.push_str(&line[margin.min(indent)..]);
-    }
-    cleaned
 }
