@@ -5,6 +5,7 @@ import io
 import os
 import struct
 import time
+import weakref
 import zlib
 import _imre_gzip
 from _imre_gzip import BadGzipFile
@@ -13,7 +14,6 @@ from _imre_gzip import BadGzipFile
 READ = "rb"
 WRITE = "wb"
 _Z_SYNC_FLUSH = 2
-_Z_FINISH = 4
 READ_BUFFER_SIZE = 128 * 1024
 _WRITE_BUFFER_SIZE = 4 * io.DEFAULT_BUFFER_SIZE
 
@@ -35,9 +35,8 @@ def _write_header(fileobj, name, level, mtime):
 
 
 class _WriteBuffer(io.RawIOBase):
-    def __init__(self, fileobj, level):
-        self.fileobj = fileobj
-        self.encoder = _imre_gzip.writer(level)
+    def __init__(self, gzip_file):
+        self.gzip_file = weakref.ref(gzip_file)
         self.crc = 0
         self.size = 0
 
@@ -45,15 +44,15 @@ class _WriteBuffer(io.RawIOBase):
         return True
 
     def write(self, data):
+        gzip_file = self.gzip_file()
+        if gzip_file is None:
+            raise RuntimeError("lost gzip_file")
         length = memoryview(data).nbytes
         if length:
-            self.fileobj.write(_imre_gzip.compress(self.encoder, data))
+            gzip_file.fileobj.write(gzip_file.compress.compress(data))
             self.crc = zlib.crc32(data, self.crc)
             self.size += length
         return length
-
-    def flush_compressor(self, mode):
-        self.fileobj.write(_imre_gzip.flush_writer(self.encoder, mode))
 
 
 class _GzipRawReader(io.RawIOBase):
@@ -142,8 +141,8 @@ class GzipFile(io.BufferedIOBase):
             if owned:
                 fileobj = io.open(name, mode[0] + "b")
             try:
-                raw = _WriteBuffer(fileobj, compresslevel)
-                buffer = io.BufferedWriter(raw, _WRITE_BUFFER_SIZE)
+                compressor = _imre_gzip.writer(compresslevel)
+                buffer = io.BufferedWriter(_WriteBuffer(self), _WRITE_BUFFER_SIZE)
                 if not self.closed:
                     self.close()
                 _write_header(fileobj, name, compresslevel, mtime)
@@ -151,11 +150,12 @@ class GzipFile(io.BufferedIOBase):
                 if owned:
                     fileobj.close()
                 raise
+            self._writer = buffer
             self.mode = WRITE
+            self.compress = compressor
             self.name = name
             self.fileobj = fileobj
             self.myfileobj = fileobj if owned else None
-            self._writer = buffer
             return
         owned = fileobj is None
         if owned:
@@ -168,6 +168,7 @@ class GzipFile(io.BufferedIOBase):
             if owned:
                 fileobj.close()
             raise
+        self._writer = None
         self.mode = READ
         self.name = name
         self.fileobj = fileobj
@@ -185,7 +186,7 @@ class GzipFile(io.BufferedIOBase):
 
     @property
     def closed(self):
-        return self._reader is None and self._writer is None
+        return self.fileobj is None
 
     def _check_open(self):
         if self.closed:
@@ -263,7 +264,7 @@ class GzipFile(io.BufferedIOBase):
         self._check_open()
         if self._writer is not None:
             self._writer.flush()
-            self._writer.raw.flush_compressor(zlib_mode)
+            self.fileobj.write(self.compress.flush(zlib_mode))
             self.fileobj.flush()
 
     def __enter__(self):
@@ -271,9 +272,10 @@ class GzipFile(io.BufferedIOBase):
         return self
 
     def close(self):
+        fileobj = self.fileobj
         reader = self._reader
         writer = self._writer
-        if reader is None and writer is None:
+        if fileobj is None or (reader is None and writer is None):
             return
         try:
             if reader is not None:
@@ -281,11 +283,10 @@ class GzipFile(io.BufferedIOBase):
                 self._reader = None
                 reader.close()
             else:
-                self._writer = None
                 raw = writer.raw
-                writer.close()
-                raw.flush_compressor(_Z_FINISH)
-                self.fileobj.write(struct.pack("<II", raw.crc, raw.size & 0xffffffff))
+                writer.flush()
+                fileobj.write(self.compress.flush())
+                fileobj.write(struct.pack("<II", raw.crc, raw.size & 0xffffffff))
         finally:
             self.fileobj = None
             if self.myfileobj is not None:
