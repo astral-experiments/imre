@@ -38,13 +38,13 @@ pub(super) fn split(
             "expected compiled regular expression",
         ));
     };
+    let pattern = Rc::clone(pattern);
     if limit == 0
         && (pattern.flags == 0 || !pattern.bytes && pattern.flags == super::UNICODE)
         && let Some(fields) = super::plain_collection(ctx, pattern.source, string, true)
     {
         return Ok(fields);
     }
-    let pattern = Rc::clone(pattern);
     let (pattern, subject) = SearchSubject::for_pattern(ctx, &pattern, string, "split")?;
     let text = subject.bytes(ctx)?;
     let length = text.len();
