@@ -26,7 +26,6 @@ pub(super) struct CodeObject {
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
-    pub coroutine: bool,
     /// CPython flags for boxed Python function definitions.
     pub flags: u32,
     /// Runtime source retains execution flags even when its complete co_flags is unknown.
@@ -34,6 +33,12 @@ pub(super) struct CodeObject {
     pub nested: Vec<(usize, Id)>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
+}
+
+impl CodeObject {
+    pub(super) fn is_coroutine(&self) -> bool {
+        self.flags & imre_ast::code_flags::COROUTINE != 0
+    }
 }
 
 #[derive(Clone)]

@@ -476,16 +476,6 @@ impl Context {
                 };
                 self.class(b, c, keywords, op == "parameterized_class")
             }
-            "coroutine_function" => {
-                let Value::Function { code, .. } = *self.heap.get(a) else {
-                    return Err(Error::new("SystemError", "invalid coroutine definition"));
-                };
-                let Value::Code(code) = self.heap.get_mut(code) else {
-                    unreachable!("function code")
-                };
-                code.coroutine = true;
-                Ok(a)
-            }
             "mark_module_annotation" => {
                 self.mark_module_annotation(a, b)?;
                 Ok(NONE)
@@ -1833,7 +1823,6 @@ impl Context {
             filename,
             first_line: location.line,
             module_definition,
-            coroutine: false,
             flags: flags.unwrap_or_default(),
             flags_complete: flags.is_some(),
             nested: Vec::new(),
