@@ -132,6 +132,16 @@ pub(super) fn call(
         };
         return Ok(ctx.alloc(Value::Float(result)));
     }
+    if operation == "hypot" {
+        let mut coordinates = SmallVec::<[f64; 16]>::new();
+        coordinates
+            .try_reserve_exact(args.len())
+            .map_err(|_| Error::new("MemoryError", "math.hypot coordinates"))?;
+        for &arg in args {
+            coordinates.push(as_double(ctx, arg)?.abs());
+        }
+        return Ok(ctx.alloc(Value::Float(vector_norm(&coordinates))));
+    }
     if operation == "fma" {
         let &[x, y, z] = args else {
             return Err(Error::new(
@@ -317,6 +327,46 @@ pub(super) fn call(
     ))))
 }
 
+/// Compute the Euclidean norm of absolute coordinates using CPython's compensated
+/// sum of squares and its correction for rounding the square root.
+fn vector_norm(coordinates: &[f64]) -> f64 {
+    let max = coordinates.iter().copied().fold(0.0, f64::max);
+    if max.is_infinite() {
+        return max;
+    }
+    if coordinates.iter().any(|x| x.is_nan()) {
+        return f64::NAN;
+    }
+    if coordinates.len() <= 1 || max == 0.0 {
+        return max;
+    }
+
+    let mut exponent = 0;
+    // SAFETY: frexp writes one exponent to the supplied C int.
+    unsafe { c_frexp(max, &mut exponent) };
+    // Scaling each coordinate with ldexp also works when a subnormal maximum
+    // would require a scale factor too large to represent as a double.
+    let mut sum = 1.0;
+    let mut product_errors = 0.0;
+    let mut sum_errors = 0.0;
+    let mut add_product = |x: f64, y: f64| {
+        let product = x * y;
+        product_errors += x.mul_add(y, -product);
+        let next = sum + product;
+        sum_errors += (sum - next) + product;
+        sum = next;
+        (sum - 1.0) + (product_errors + sum_errors)
+    };
+    let mut squared_norm = 0.0;
+    for &x in coordinates {
+        let scaled = ldexp(x, -exponent);
+        squared_norm = add_product(scaled, scaled);
+    }
+    let h = squared_norm.sqrt();
+    let residual = add_product(-h, h);
+    ldexp(h + residual / (2.0 * h), exponent)
+}
+
 fn isclose(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [Some(a), Some(b), rel_tol, abs_tol] =
         builtins::bind_two_positional("isclose", args, kwargs, ["a", "b", "rel_tol", "abs_tol"])?
@@ -487,9 +537,6 @@ pub(super) fn as_double(ctx: &mut Context, value: Id) -> Result<f64> {
 
 /// Scale by a power of two with a single rounding, including for subnormal results.
 fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
-    unsafe extern "C" {
-        safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
-    }
     let exponent = ctx
         .as_int(exponent)
         .map_err(|_| Error::new("TypeError", "Expected an int as second argument to ldexp."))?;
@@ -512,6 +559,7 @@ fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
 }
 
 unsafe extern "C" {
+    safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
     #[link_name = "frexp"]
     fn c_frexp(x: f64, exponent: *mut std::ffi::c_int) -> f64;
 }
