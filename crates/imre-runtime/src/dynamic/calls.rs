@@ -2183,6 +2183,11 @@ impl Context {
                 Value::BufferedRandom(..) | Value::File(_)
             )
         {
+            if let Some(value) =
+                self.dictionary_field(self.heap.get(obj).native_file_dict(), name)?
+            {
+                return Ok(value);
+            }
             // A direct call reports the defining IOBase descriptor in argument errors.
             let callable = self.builtin("_IOBase.writelines");
             return Ok(self.alloc(Value::Method {
@@ -2274,14 +2279,20 @@ impl Context {
             let class = self.exact_type(obj)?;
             return self.bind_attribute(descriptor, obj, class);
         }
-        if matches!(
-            self.heap.get(obj),
-            Value::File(_) | Value::BufferedRandom(..)
-        ) || (matches!(name, "__repr__" | "truncate")
-            && matches!(self.heap.get(obj), Value::TextFile(_)))
-        {
+        if self.heap.get(obj).native_io_class_name().is_some() {
             let class = self.exact_type(obj)?;
-            if let Some(member) = self.class_attr(class, name)
+            let member = self.class_attr(class, name);
+            if name != "__class__"
+                && !member.is_some_and(|member| self.readable_data_descriptor(member))
+                && let Some(value) =
+                    self.dictionary_field(self.heap.get(obj).native_file_dict(), name)?
+            {
+                return Ok(value);
+            }
+            // Standard text streams implement most properties directly on their native handle.
+            if (!matches!(self.heap.get(obj), Value::TextFile(_))
+                || matches!(name, "__dict__" | "__repr__" | "truncate"))
+                && let Some(member) = member
                 && matches!(
                     self.heap.get(member),
                     Value::IoMethod { .. } | Value::GetSetDescriptor { .. }
@@ -3754,14 +3765,17 @@ impl Context {
                     | "_ssl.MemoryBIO"
                     | stdlib::hashlib::md5::CLASS
                     | stdlib::datetime::isocalendar::CLASS
-            ) || HashState::is_provider_class(owner)
+            ) || matches!(self.heap.get(get), Value::IoMethod { .. })
+                || HashState::is_provider_class(owner)
                 || Self::dict_view_owner(owner).is_some()
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
             {
                 match name {
                     "__objclass__" => {
-                        if let Value::HeapTypeMethod { owner, .. } = *self.heap.get(get) {
+                        if let Value::HeapTypeMethod { owner, .. } | Value::IoMethod { owner, .. } =
+                            *self.heap.get(get)
+                        {
                             return Ok(owner);
                         }
                         return Ok(self.builtin(owner));
@@ -3770,7 +3784,18 @@ impl Context {
                     "__doc__" if Self::dict_view_owner(owner).is_some() => {
                         return Ok(self.text("dictionary that this view refers to"));
                     }
-                    "__doc__" if owner == stdlib::datetime::isocalendar::CLASS => return Ok(NONE),
+                    "__doc__"
+                        if owner == stdlib::datetime::isocalendar::CLASS
+                            || matches!(
+                                self.heap.get(get),
+                                Value::IoMethod {
+                                    name: "__dict__",
+                                    ..
+                                }
+                            ) =>
+                    {
+                        return Ok(NONE);
+                    }
                     "__doc__" if owner == super::deque::CLASS => {
                         return Ok(self.text("maximum size of a deque or None if unbounded"));
                     }
@@ -3800,6 +3825,7 @@ impl Context {
                                     | stdlib::hashlib::md5::CLASS
                                     | stdlib::datetime::isocalendar::CLASS
                             )
+                            || matches!(self.heap.get(get), Value::IoMethod { .. })
                             || HashState::is_provider_class(owner)
                             || Self::dict_view_owner(owner).is_some() =>
                     {
@@ -4264,7 +4290,6 @@ impl Context {
             {
                 return self.lookup_attr(buffer, "name");
             }
-            Value::TextFile(_) if name == "mode" => return Ok(self.text("w")),
             Value::TextFile(ref file)
                 if name == "encoding"
                     && let Some(encoding) = file.encoding() =>
@@ -5251,7 +5276,7 @@ impl Context {
             return self.update_base_local_attribute(obj, name, None);
         }
         let exception_member = self.exception_member(obj, name);
-        let member = self.writable_attribute_member(obj, name);
+        let member = self.writable_attribute_member(obj, name)?;
         if member.is_none()
             && self.exposes_defaultdict_factory(obj, name)
             && self.replace_defaultdict_factory(obj, NONE)
@@ -5365,6 +5390,10 @@ impl Context {
         }
         self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
+            ref file if file.native_io_class_name().is_some() => {
+                let dictionary = self.native_file_dictionary(obj);
+                self.update_dictionary_field(obj, dictionary, name, None)
+            }
             Value::Partial { dictionary, .. } => {
                 if matches!(name, "func" | "args" | "keywords") {
                     return Err(Error::new("AttributeError", "readonly attribute"));
@@ -5598,20 +5627,20 @@ impl Context {
         })
     }
 
-    fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+    fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
         if matches!(self.heap.get(obj), Value::LzmaDecompressor(_)) {
             let class = self.builtin(value::LZMA_DECOMPRESS_TYPE);
-            return self.own_class_attr(class, name);
+            return Ok(self.own_class_attr(class, name));
         }
-        if name == "_finalizing" && matches!(self.heap.get(obj), Value::TextFile(_)) {
-            let owner = self.builtin("_io.TextIOWrapper");
-            return self.own_class_attr(owner, name);
+        if self.heap.get(obj).native_io_class_name().is_some() {
+            let class = self.exact_type(obj)?;
+            return Ok(self.class_attr(class, name));
         }
         if name == "cr_origin" && matches!(self.heap.get(obj), Value::Coroutine { .. }) {
-            return Some(self.readonly_member("coroutine", "cr_origin"));
+            return Ok(Some(self.readonly_member("coroutine", "cr_origin")));
         }
         if name == "mapping" && matches!(self.heap.get(obj), Value::DictView { .. }) {
-            return self.dict_view_mapping_member(obj);
+            return Ok(self.dict_view_mapping_member(obj));
         }
         if matches!(name, "numerator" | "denominator" | "real" | "imag")
             && matches!(
@@ -5619,7 +5648,7 @@ impl Context {
                 Value::Int(_) | Value::Bool(_) | Value::Float(_)
             )
         {
-            return self.builtin_numeric_member(obj, name);
+            return Ok(self.builtin_numeric_member(obj, name));
         }
         if let Value::NamedTuple {
             class: Some(owner), ..
@@ -5633,7 +5662,7 @@ impl Context {
                 None
             };
             if member.is_some() {
-                return member;
+                return Ok(member);
             }
         }
         if matches!(
@@ -5644,19 +5673,21 @@ impl Context {
             }
         ) && let Some(member) = stdlib::flags::member(self, name)
         {
-            return Some(member);
+            return Ok(Some(member));
         }
         if matches!(self.heap.get(obj), Value::TypeVar(_)) {
             let owner = self.builtin("typing.TypeVar");
-            return self.own_class_attr(owner, name);
+            return Ok(self.own_class_attr(owner, name));
         }
-        let member = self.slot(obj, name)?;
+        let Some(member) = self.slot(obj, name) else {
+            return Ok(None);
+        };
         if let Value::Instance { class, .. } = *self.heap.get(obj)
             && self.instance_layout(class, name).active_slot
         {
-            return None;
+            return Ok(None);
         }
-        Some(member)
+        Ok(Some(member))
     }
 
     /// An inline Python slot can shadow object's class descriptor.
@@ -5723,7 +5754,7 @@ impl Context {
                 let proxy = self.class_dictionary(scope);
                 Some(self.mapping_proxy_target(proxy))
             }
-            _ => None,
+            ref value => value.native_file_dict(),
         };
         Ok(dictionary
             .filter(|&dictionary| {
@@ -6315,7 +6346,7 @@ impl Context {
             return self.set_function_attr(obj, name, value);
         }
         let exception_member = self.exception_member(obj, name);
-        let member = self.writable_attribute_member(obj, name);
+        let member = self.writable_attribute_member(obj, name)?;
         if let Some(descriptor) = member.or(exception_member)
             && self.data_descriptor(descriptor)
         {
@@ -6478,6 +6509,10 @@ impl Context {
             return self.assign_instance_class(obj, Some(value));
         }
         self.check_instance_field(obj, name)?;
+        if self.heap.get(obj).native_io_class_name().is_some() && name != "__class__" {
+            let dictionary = self.native_file_dictionary(obj);
+            return self.update_dictionary_field(obj, dictionary, name, Some(value));
+        }
         if let Value::Partial { dictionary, .. } = *self.heap.get(obj)
             && name != "__class__"
         {

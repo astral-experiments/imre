@@ -1750,10 +1750,10 @@ def main():
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
-        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py"):
-            exit_stack = Path(__file__).with_name("fixtures") / fixture
-            expected = run(sys.executable, "-B", exit_stack)
-            actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "io_dict_descriptor.py"):
+            script = Path(__file__).with_name("fixtures") / fixture
+            expected = run(sys.executable, "-B", script)
+            actual = run(imre, "run", script, "--runtime-imports", "--quiet")
             assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
             assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 

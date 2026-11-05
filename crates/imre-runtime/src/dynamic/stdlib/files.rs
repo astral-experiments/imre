@@ -83,7 +83,7 @@ impl BinaryFile {
     /// A refused handle allocation drops its reader and releases any retained socket.
     pub(in crate::dynamic) fn into_value(self) -> Result<Value> {
         crate::shared::Shared::try_new(self)
-            .map(Value::File)
+            .map(|file| Value::File(super::super::value::BoxedFile::new(file)))
             .map_err(|_| Error::new("MemoryError", ""))
     }
 
