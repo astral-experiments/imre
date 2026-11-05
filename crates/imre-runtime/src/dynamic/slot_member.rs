@@ -319,15 +319,6 @@ impl Context {
                 self.module_value("typing", "_TypedDictMeta"),
                 false,
             )?;
-            if bases
-                .iter()
-                .any(|&base| self.direct_subclass(base, type_class))
-            {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "type() with specialized metaclasses is unsupported",
-                ));
-            }
             if let Some(winner) = winner
                 && explicit_meta != Some(winner)
                 && self.class_attr(winner, "__new__").is_some()
