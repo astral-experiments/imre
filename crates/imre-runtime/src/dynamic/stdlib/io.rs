@@ -106,6 +106,8 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
         return unbuffered_standard(ctx, fd, if stderr { "<stderr>" } else { "<stdout>" });
     }
     let file = crate::objects::TextFile::standard(stderr);
+    let encoding = ctx.text(crate::sys::standard_field(fd as u32, false).as_str());
+    let errors = ctx.text(crate::sys::standard_field(fd as u32, true).as_str());
     let path = ctx.text(if stderr { "<stderr>" } else { "<stdout>" });
     let buffer = ctx.alloc(
         super::BinaryFile::Standard {
@@ -120,6 +122,8 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
     Ok(
         ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
             file,
+            encoding,
+            errors,
             dictionary,
             buffer: Some(buffer),
             finalizing: false,
