@@ -137,6 +137,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "ipaddress" => bundled_source!("ipaddress.py"),
         "numbers" => bundled_source!("numbers.py"),
         "statistics" => bundled_source!("statistics.py"),
+        // CPython 3.14.5 Lib/wave.py. See licenses/CPython.txt.
+        "wave" => bundled_source!("wave.py"),
         "_compat_pickle" => bundled_source!("_compat_pickle.py"),
         "_tokenize" => bundled_source!("_tokenize.py"),
         "__future__" => bundled_source!("__future__.py"),
@@ -5374,6 +5376,7 @@ impl<'a> Loader<'a> {
                 name,
                 "token"
                     | "html"
+                    | "wave"
                     | "http.client"
                     | "fractions"
                     | "quopri"
