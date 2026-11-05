@@ -4238,7 +4238,9 @@ impl Heap {
         let chains = self.bound_finalizer_chains();
         self.ordinary_finalizers.iter().chain(writers).all(|owner| {
             stdin.is_some_and(|input| input.contains(owner))
-                || chains.iter().flatten().any(|chain| chain.contains(owner))
+                || chains.iter().flatten().any(|chain| {
+                    chain.contains(owner) || self.short_path_keeps_owner(chain[0], *owner)
+                })
                 || self.find_finalizer_binding(*owner)
                 || self.ordinary_finalizers.iter().any(|&stream| {
                     super::stdlib::io::text_descriptor_chain(self, stream).is_some_and(|chain| {
@@ -5375,6 +5377,43 @@ mod tests {
         assert!(!heap.discard_operands(mark, NONE, modules));
         *heap.get_mut(modules) = Value::Dict(Default::default());
         assert!(heap.discard_operands(mark, NONE, modules));
+    }
+
+    #[test]
+    fn a_bound_owners_field_must_still_retain_the_finalizer() {
+        use super::super::{ffi, stdlib};
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let scope = ctx.scope("__main__", None);
+        ctx.heap.frames.last_mut().unwrap().scope = scope;
+        let class = ctx.builtin("object");
+        let root = ctx.instance(class, None);
+        let owner = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.register_finalizer(root);
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names.insert("root".into(), root);
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
+            unreachable!()
+        };
+        fields.insert("resource".into(), owner);
+
+        let input = stdlib::io::rooted_input_chain(&ctx);
+        assert!(ctx.heap.frame_keeps_stream_finalizers(input.as_ref(), &[]));
+        assert!(
+            ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+        );
+
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
+            unreachable!()
+        };
+        fields.insert("resource".into(), NONE);
+        assert!(
+            !ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+        );
     }
 
     #[test]
