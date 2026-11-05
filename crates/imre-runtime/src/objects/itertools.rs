@@ -404,8 +404,9 @@ impl IntegerAccumulate {
 /// The caller roots a cursor whose successful pulls transfer exact integer words.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_collect_int_cursor(cursor: *const Object) -> *const crate::List {
-    // SAFETY: only exact integer-list addition runs under the storage borrow.
+    // SAFETY: the caller roots this cursor for the full call.
     let cursor = unsafe { object(cursor) };
+    // SAFETY: only exact integer-list addition runs under the storage borrow.
     let bulk = unsafe {
         cursor.0.with_mut(|s| match s {
             Storage::IntegerAccumulate(scan) => Some(scan.collect_remaining()),

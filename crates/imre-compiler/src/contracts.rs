@@ -75,6 +75,7 @@ impl Builtin {
             }
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
             Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
+            Self::CollectIntCursor => Contract::new(true, Unknown),
             Self::ListExtendBuffer | Self::ListExtendSnapshot | Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::MarkCoroutine(_) => Contract::new(false, Unknown),
@@ -925,6 +926,8 @@ impl Builtin {
                         .or_else(|| types.var_tuple_element(source.ty)) == Some(element)
                         && args.get(1).is_none_or(|seed| seed.ty == element))
             }
+            Self::CollectIntCursor => matches!(args, [source]
+                if types.cursor_element(source.ty) == Some(Type::Int) && result == Type::ListInt),
             Self::ListAccumulate => {
                 signature(&[Type::ListInt], Type::ListInt)
                     || signature(&[Type::ListInt, Type::Int], Type::ListInt)
