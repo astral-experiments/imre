@@ -341,6 +341,21 @@ _condition_map = {ConversionSyntax:InvalidOperation,
 _rounding_modes = (ROUND_DOWN, ROUND_HALF_UP, ROUND_HALF_EVEN, ROUND_CEILING,
                    ROUND_FLOOR, ROUND_UP, ROUND_HALF_DOWN, ROUND_05UP)
 
+def _checked_rounding(rounding, context):
+    # The public methods validate both optional arguments before touching any flags.
+    if context is not None and not issubclass(type(context), Context):
+        raise TypeError("optional argument must be a context")
+    if rounding is None:
+        return None
+    if issubclass(type(rounding), str):
+        rounding = str.__str__(rounding)
+        if rounding in _rounding_modes:
+            return rounding
+    raise TypeError("valid values for rounding are:\n"
+                    "  [ROUND_CEILING, ROUND_FLOOR, ROUND_UP, ROUND_DOWN,\n"
+                    "   ROUND_HALF_UP, ROUND_HALF_DOWN, ROUND_HALF_EVEN,\n"
+                    "   ROUND_05UP]")
+
 ##### Context Functions ##################################################
 
 # The getcontext() and setcontext() function manage access to a thread-local
@@ -2572,6 +2587,8 @@ class Decimal(object):
 
         Similar to self._rescale(exp._exp) but with error checking.
         """
+        if _public_boxed:
+            rounding = _checked_rounding(rounding, context)
         exp = _convert_other(exp, raiseit=True)
 
         if context is None:
@@ -2710,6 +2727,8 @@ class Decimal(object):
         See also: to_integral_value, which does exactly the same as
         this method except that it doesn't raise Inexact or Rounded.
         """
+        if _public_boxed:
+            rounding = _checked_rounding(rounding, context)
         if self._is_special:
             ans = self._check_nans(context=context)
             if ans:
@@ -2731,6 +2750,8 @@ class Decimal(object):
 
     def to_integral_value(self, rounding=None, context=None):
         """Rounds to the nearest integer, without raising inexact, rounded."""
+        if _public_boxed:
+            rounding = _checked_rounding(rounding, context)
         if context is None:
             context = getcontext()
         if rounding is None:

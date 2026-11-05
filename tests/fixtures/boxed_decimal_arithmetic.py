@@ -42,4 +42,24 @@ def current():
         assert decimal.getcontext() is ctx
         assert Decimal(1) / Decimal(3) == Decimal("0.333")
 
+    cents = Decimal("0.01")
+    foreign = _pydecimal.Context()
+    try:
+        Decimal("19.985").quantize(cents, context=foreign)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("quantize accepted a foreign context")
+    assert not any(foreign.flags.values())
+
+    for post in (lambda: left.quantize(cents, "HALF-EVEN"),
+                 lambda: Decimal(17).to_integral_exact("HALF-EVEN"),
+                 lambda: Decimal(17).to_integral_value("HALF-EVEN")):
+        try:
+            post()
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted an invalid rounding mode on an exact amount")
+
     print("boxed decimal arithmetic and contexts")
