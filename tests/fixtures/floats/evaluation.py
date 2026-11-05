@@ -1,4 +1,4 @@
-from math import log2
+from math import acos, log2
 
 
 def integer(label: str, value: int) -> int:
@@ -78,3 +78,10 @@ for value in (-0.0, -2.5, float("-inf")):
         print(log2(value))
     except ValueError as error:
         print(str(error))
+
+print(acos(floating("arc cosine receiver", -0.5)))
+print(acos(True))
+try:
+    acos(2)
+except ValueError as error:
+    print(str(error))

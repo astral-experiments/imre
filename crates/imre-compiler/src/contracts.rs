@@ -539,7 +539,7 @@ impl Builtin {
             | Self::StringIntList
             | Self::EnumLookup(_)
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
-            Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
+            Self::FloatAcos | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
             | Self::DictIsOrdered
@@ -918,7 +918,7 @@ impl Builtin {
             }
             Self::IntBitLength => signature(&[Type::Int], Type::Int),
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
-            Self::FloatLog2 => signature(&[Type::Float], Type::Float),
+            Self::FloatAcos | Self::FloatLog2 => signature(&[Type::Float], Type::Float),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
@@ -1460,6 +1460,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_parse"
                 | "imre_int_parse_hex"
                 | "imre_int_float"
+                | "imre_float_acos"
                 | "imre_float_int"
                 | "imre_float_parse"
                 | "imre_bytes_float"

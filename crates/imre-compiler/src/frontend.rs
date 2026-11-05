@@ -10178,6 +10178,28 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Mktime)) => return self.mktime(call),
             Some(Binding::Intrinsic(Intrinsic::StructTime)) => return self.struct_time_new(call),
+            Some(Binding::Intrinsic(Intrinsic::MathAcos)) => {
+                self.reject_builtin_keywords(call)?;
+                let [arg] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "math.acos takes one number"));
+                };
+                let value = self.expr(arg)?;
+                if !matches!(value.ty, Type::Float | Type::Int | Type::Bool) {
+                    return Err(error(
+                        self.source,
+                        arg,
+                        "math.acos requires an integer or float",
+                    ));
+                }
+                let number = Expr {
+                    ty: Type::Float,
+                    kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                };
+                return Ok(Expr {
+                    ty: Type::Float,
+                    kind: ExprKind::Builtin(Builtin::FloatAcos, vec![number]),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
                 self.reject_builtin_keywords(call)?;
                 let [arg] = call.arguments.args.as_ref() else {
