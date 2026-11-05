@@ -26,7 +26,8 @@ def byte_runs(data: bytes) -> None:
 def byte_identity(data: bytes) -> None:
     first = findall(rb"[^;]+", data)
     again = findall(rb"[^;]+", data)
-    print(first[0] is first[1], first[0] is again[0])
+    print(first[0] is first[1])
+    print(first[0] is again[0])
 
 
 for value in ["", "xx", ",;,", " alpha__beta,,x", "éx,y🐍z;", "x\x00y"]:
