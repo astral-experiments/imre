@@ -2572,10 +2572,18 @@ impl SlotShape {
         matches!(self, Self::ScalarLeaf | Self::AsciiStr)
     }
 
+    fn text(value: &str) -> Self {
+        if value.is_ascii() {
+            Self::AsciiStr
+        } else {
+            Self::ScalarLeaf
+        }
+    }
+
     /// Record whether a newly occupied slot holds an exact scalar without strong children.
     fn occupied(value: &Value) -> Self {
-        if matches!(value, Value::Str(text) if text.is_ascii()) {
-            Self::AsciiStr
+        if let Value::Str(text) = value {
+            Self::text(text)
         } else if value.scalar_leaf() {
             Self::ScalarLeaf
         } else {
@@ -3219,11 +3227,16 @@ impl Heap {
         permanent::small_integer_id(value)
     }
 
-    pub fn alloc(&mut self, value: Value) -> Id {
-        if let Value::Str(text) = &value
-            && let Some(owner) = crate::objects::short_string(text)
-        {
+    pub(super) fn owned_text(&mut self, text: crate::Str) -> Id {
+        if let Some(owner) = crate::objects::short_string(&text) {
             return self.intern_literal(owner, true);
+        }
+        self.fill_slot(SlotShape::text(&text), false, true, || Value::Str(text))
+    }
+
+    pub fn alloc(&mut self, value: Value) -> Id {
+        if let Value::Str(text) = value {
+            return self.owned_text(text);
         }
         if let Value::Int(integer) = &value
             && let Some(id) = integer.as_small().and_then(Self::cached_integer)
@@ -3344,15 +3357,25 @@ impl Heap {
     }
 
     fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
-        let trace = trace && self.allocation_traces.is_tracing();
         let has_gc_header = value.has_gc_header(self);
         let shape = SlotShape::occupied(&value);
+        self.fill_slot(shape, has_gc_header, trace, || value)
+    }
+
+    fn fill_slot(
+        &mut self,
+        shape: SlotShape,
+        has_gc_header: bool,
+        trace: bool,
+        value: impl FnOnce() -> Value,
+    ) -> Id {
+        let trace = trace && self.allocation_traces.is_tracing();
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
             self.slot_shapes[index] = shape;
-            self.slots[index].value = Some(value);
+            self.slots[index].value = Some(value());
             self.slots[index].may_have_buffer_views = false;
             self.slots[index].generation = 0;
             index
@@ -3366,7 +3389,7 @@ impl Heap {
             }
             self.slot_shapes.push(shape);
             self.traces.push(Cell::new(UNMARKED));
-            self.slots.push(Slot::new(value));
+            self.slots.push(Slot::new(value()));
             self.slots.len() - 1
         };
         self.gc_order.push(index, &self.slots);
@@ -5414,16 +5437,16 @@ mod tests {
     fn ascii_offsets_require_an_unchanged_string() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
-        let text = heap.alloc(Value::Str("cat".repeat(200)));
+        let text = heap.alloc(Value::Str("cat".repeat(200).into()));
         assert!(heap.is_ascii_str(text));
         heap.release_temporaries_since(mark);
         heap.collect(std::iter::empty());
-        let next = heap.alloc(Value::Str("猫".repeat(200)));
+        let next = heap.alloc(Value::Str("猫".repeat(200).into()));
         assert_eq!(next, text);
         assert!(!heap.is_ascii_str(next));
-        let writable = heap.alloc(Value::Str("dog".repeat(200)));
+        let writable = heap.alloc(Value::Str("dog".repeat(200).into()));
         assert!(heap.is_ascii_str(writable));
-        *heap.get_mut(writable) = Value::Str("café".repeat(200));
+        *heap.get_mut(writable) = Value::Str("café".repeat(200).into());
         assert!(!heap.is_ascii_str(writable));
     }
 

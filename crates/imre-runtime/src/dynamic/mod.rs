@@ -246,7 +246,7 @@ impl Context {
         id
     }
     fn text(&mut self, value: impl Into<crate::Str>) -> Id {
-        self.alloc(Value::Str(value.into()))
+        self.heap.owned_text(value.into())
     }
     /// Use the ordinary UTF-8 layout whenever all Python code points are scalars.
     fn text_codepoints(&mut self, points: Vec<u32>) -> Id {
