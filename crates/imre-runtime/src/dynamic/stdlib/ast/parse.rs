@@ -762,6 +762,21 @@ impl Parser<'_> {
         Ok(())
     }
 
+    /// Decode a string with the original code points preserved for surrogate escapes.
+    fn string_value(&mut self, v: &ast::ExprStringLiteral) -> Result<Id> {
+        let text = v.value.to_str();
+        let points = crate::dynamic::source_code::original_points(
+            text,
+            self.replacements
+                .range(v.start()..v.end())
+                .flat_map(|(_, points)| points.iter().copied()),
+        )?;
+        Ok(match points {
+            Some(points) => self.ctx.text_codepoints(points),
+            None => self.ctx.text(text),
+        })
+    }
+
     fn expr(&mut self, e: ast::Expr) -> Result<Id> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.expr_inner(e))
     }
@@ -812,20 +827,7 @@ impl Parser<'_> {
             Expr::TString(mut v) if !self.literal => {
                 ("TemplateStr", vec![self.template_values(&mut v)?])
             }
-            Expr::StringLiteral(v) => {
-                let text = v.value.to_str();
-                let points = crate::dynamic::source_code::original_points(
-                    text,
-                    self.replacements
-                        .range(v.start()..v.end())
-                        .flat_map(|(_, points)| points.iter().copied()),
-                )?;
-                let value = match points {
-                    Some(points) => self.ctx.text_codepoints(points),
-                    None => self.ctx.text(text),
-                };
-                ("Constant", vec![value, NONE])
-            }
+            Expr::StringLiteral(v) => ("Constant", vec![self.string_value(&v)?, NONE]),
             Expr::BytesLiteral(v) => (
                 "Constant",
                 vec![
@@ -1050,7 +1052,12 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     parse_source(ctx, source, &filename, &mode, false)
 }
 
-pub(super) fn parse_source(
+/// Evaluate literal source after applying the same syntax checks as parsing an expression.
+pub(super) fn literal_source(ctx: &mut Context, source: &str) -> Result<Id> {
+    parse_source(ctx, source, "<unknown>", "eval", true)
+}
+
+fn parse_source(
     ctx: &mut Context,
     source: &str,
     filename: &str,
@@ -1120,8 +1127,20 @@ pub(super) fn parse_source(
                 }
             })?;
             parser.prepare_strings(source, expr.tokens(), expr.syntax())?;
-            let body = parser.expr(*expr.into_syntax().body)?;
-            Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
+            let expr = *expr.into_syntax().body;
+            if literal
+                && let ast::Expr::StringLiteral(text) = &expr
+                && super::literal::plain_string_fields(parser.ctx)
+            {
+                return parser.string_value(text);
+            }
+            let body = parser.expr(expr)?;
+            let expression = parsed_instance(parser.ctx, "Expression", &[body], None);
+            if literal {
+                super::literal::from_node(parser.ctx, expression)
+            } else {
+                Ok(expression)
+            }
         }
         _ => Err(Error::new(
             "ValueError",

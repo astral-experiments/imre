@@ -318,9 +318,21 @@ fn convert(ctx: &mut Context, node: Id, depth: usize) -> Result<Id> {
     signed_number(ctx, node)
 }
 
+/// A fresh Expression and Constant may be elided only when field access and finalization are ordinary.
+pub(super) fn plain_string_fields(ctx: &Context) -> bool {
+    [("ast.Expression", "body"), ("ast.Constant", "value")].into_iter().all(|(name, field)| {
+        let class = ctx.builtins[name];
+        ctx.class_attr(class, field).is_none()
+            && ctx.class_attr(class, "__del__").is_none()
+            && ctx.class_attr(class, "__getattribute__").is_none_or(|hook| {
+                matches!(ctx.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__")
+            })
+    })
+}
+
 pub(super) fn evaluate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [node] = builtins::bind("literal_eval", args, kwargs, ["node_or_string"])?;
-    let mut node = node.ok_or_else(|| {
+    let node = node.ok_or_else(|| {
         Error::new(
             "TypeError",
             "literal_eval() missing 1 required positional argument: 'node_or_string'",
@@ -328,8 +340,13 @@ pub(super) fn evaluate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
     })?;
     if let Value::Str(s) = ctx.heap.get(node) {
         let source = s.trim_start_matches([' ', '\t']).to_owned();
-        node = parse::parse_source(ctx, &source, "<unknown>", "eval", true)?;
+        return parse::literal_source(ctx, &source);
     }
+    from_node(ctx, node)
+}
+
+/// Unwrap a Python Expression and convert its body through normal attribute lookup.
+pub(super) fn from_node(ctx: &mut Context, mut node: Id) -> Result<Id> {
     if is(ctx, node, "ast.Expression") {
         node = ctx.lookup_attr(node, "body")?;
     }
