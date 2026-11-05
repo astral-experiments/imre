@@ -1181,6 +1181,14 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 }
 
 fn load_linked_literal(ctx: &mut Context, kind: i32, data: &[u8]) -> Id {
+    // Small decimal integers already occupy permanent slots and need no temporary root.
+    if kind == 0
+        && let Ok(text) = std::str::from_utf8(data)
+        && let Ok(value) = text.parse::<i64>()
+        && let Some(id) = Heap::cached_integer(value)
+    {
+        return id;
+    }
     // Each literal roots its value and the returned handle; metadata roots every name.
     let roots = if kind == 5 {
         data.iter()
@@ -2304,6 +2312,26 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn linked_small_integer_literals_use_permanent_slots() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the argument and configuration pointers outlive context initialization.
+        let mut ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+        ctx.heap
+            .enter(NONE, NONE, value::FrameOwner::Function(NONE));
+        let mark = ctx.heap.temporary_mark();
+        for (text, expected) in [("-5", -5), ("0", 0), ("256", 256)] {
+            let id = load_linked_literal(&mut ctx, 0, text.as_bytes());
+            assert!(matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(expected)));
+            assert_eq!(ctx.heap.temporary_mark(), mark);
+        }
+        for (text, expected) in [("-6", -6), ("257", 257), ("0xff", 255), ("1_0", 10)] {
+            let id = load_linked_literal(&mut ctx, 0, text.as_bytes());
+            assert!(matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(expected)));
+        }
+    }
 
     #[test]
     fn dictionary_view_intersection_collects_discarded_values() {
