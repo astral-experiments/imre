@@ -293,19 +293,16 @@ fn run() -> Result<ExitCode, String> {
     let bundled_native = bundled
         .as_ref()
         .filter(|_| target.as_deref().is_none_or(native_linux_gnu_target));
-    let native = if clang.is_none()
-        && target.is_none()
-        && lto_linker.is_none()
-        && llvm_path.is_none()
-        && !options.address_sanitizer
-        && link.args.is_empty()
-    {
+    let native_objects =
+        target.is_none() && lto_linker.is_none() && llvm_path.is_none() && link.args.is_empty();
+    let native = if native_objects && clang.is_none() && !options.address_sanitizer {
         build_cache::native_toolchain(&runtime, bundled_native)
     } else {
         None
     };
-    let split = native.is_some() && !whole_program;
-    if split {
+    let split =
+        !whole_program && (native.is_some() || (native_objects && options.address_sanitizer));
+    if split && !options.address_sanitizer {
         options.bundled_provider_archive =
             bundled_native.and_then(|toolchain| toolchain.provider_archive(&optimization));
     }
@@ -441,6 +438,10 @@ fn run() -> Result<ExitCode, String> {
     let staged_output = stage.as_ref().map(|s| s.path().join("program"));
     let mut temporary = None;
     let mut scratch = None;
+    let clang_driver = || match &bundled {
+        Some(tools) => tools.driver(),
+        None => Command::new(clang.as_deref().unwrap_or(OsStr::new("clang-18"))),
+    };
     let native_inputs = match code {
         Code::Whole(ir) => {
             let mut file = tempfile::Builder::new()
@@ -466,10 +467,13 @@ fn run() -> Result<ExitCode, String> {
                 .expect("unit compilation has a staging directory");
             let objects = build_cache::compile_objects(
                 &units,
-                native
-                    .as_ref()
-                    .expect("native toolchain for module objects"),
+                || {
+                    native
+                        .as_ref()
+                        .map_or_else(&clang_driver, |tools| tools.driver())
+                },
                 &optimization,
+                options.address_sanitizer,
                 dir.path(),
                 cache
                     .as_ref()
@@ -480,10 +484,7 @@ fn run() -> Result<ExitCode, String> {
             objects
         }
     };
-    let mut linker = match &bundled {
-        Some(tools) => tools.driver(),
-        None => Command::new(clang.as_deref().unwrap_or(OsStr::new("clang-18"))),
-    };
+    let mut linker = clang_driver();
     if let Some(tools) = bundled_native {
         tools.native_link_paths(&mut linker);
     }
