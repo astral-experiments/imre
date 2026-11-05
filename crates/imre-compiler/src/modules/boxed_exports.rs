@@ -458,7 +458,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         ),
         M::Locale => exports!("locale", "getlocale", "getpreferredencoding", "setlocale"),
         M::Math => exports!("math", "copysign", "cos", "isinf", "isnan", "isqrt", "log"),
-        M::Numbers => exports!("numbers", "Complex", "Integral", "Rational", "Real"),
+        M::Numbers => exports!("numbers", "Complex", "Integral", "Real"),
         M::Pickle => exports!("pickle", "UnpicklingError", "_loads", "dumps", "loads"),
         M::PosixPath => exports!("posixpath", "expanduser", "ismount", "split"),
         #[cfg(any(target_os = "linux", target_os = "macos"))]
