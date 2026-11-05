@@ -2750,6 +2750,7 @@ impl Context {
             ],
             "complex" => complex::METHODS,
             "bytes" => {
+                self.builtin("bytes.__new__");
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
             }

@@ -4227,7 +4227,7 @@ impl Context {
             Value::Native(ref class)
                 if matches!(
                     class.as_str(),
-                    "int" | "float" | "function" | "cell" | "type"
+                    "int" | "float" | "bytes" | "function" | "cell" | "type"
                 ) && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
@@ -5061,6 +5061,7 @@ impl Context {
                 }
                 Value::List(_) => return Ok(self.builtin("list.__new__")),
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::Bytes(_) => return Ok(self.builtin("bytes.__new__")),
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::Cell(_) => return Ok(self.builtin("cell.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
