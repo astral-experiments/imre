@@ -227,7 +227,7 @@ fn portable_mask(flags: &[u8; 32]) -> u32 {
 
 /// Up to three inclusive ranges, stored as lower bounds and widths. Repeat
 /// the first range in unused lanes so all three comparisons are independent.
-fn small_ranges(members: &[u8; 256]) -> Option<[(u8, u8); 3]> {
+pub fn small_ranges(members: &[u8; 256]) -> Option<[(u8, u8); 3]> {
     let mut ranges = [(0, 0); 3];
     let mut count = 0;
     let mut start = 0;

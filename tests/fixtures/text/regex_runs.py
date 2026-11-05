@@ -42,6 +42,13 @@ def byte_identity(data: bytes) -> None:
     print(first[0] is again[0])
 
 
+def block_runs(subject: str) -> None:
+    print(len(findall(r"[a-g]+", subject)))
+    print(len(split(r"[a-g]+", subject)))
+    print(len(findall(r"[aceg]+", subject)))
+    print(len(findall(r"g+", subject)))
+
+
 for value in ["", "xx", ",;,", " alpha__beta,,x", "a:74 z:2", "éx,y🐍z;", "x\x00y"]:
     scan(value)
 
@@ -62,3 +69,7 @@ for data in [b"", b"\x00\xff", b"a_9 b\xff\xff\x80\x00z", b"\x1c\r\n"]:
 byte_identity(b"x;x")
 byte_identity(b"ab;ab")
 byte_identity(b"\xff;\xff")
+
+
+for length in [15, 16, 31, 32, 47, 48]:
+    block_runs("a" * length + "é!" + "g" * 33)
