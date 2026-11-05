@@ -7456,6 +7456,22 @@ impl Emitter<'_, '_> {
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
+            Builtin::FloatIsInteger => {
+                let value = &args[0].value.operand;
+                let truncated =
+                    self.instruction(format!("call double @llvm.trunc.f64(double {value})"));
+                let whole = self.instruction(format!("fcmp oeq double {value}, {truncated}"));
+                // Infinities also compare equal to their truncation.
+                let magnitude =
+                    self.instruction(format!("call double @llvm.fabs.f64(double {value})"));
+                let finite =
+                    self.instruction(format!("fcmp olt double {magnitude}, 0x7FF0000000000000"));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("and i1 {finite}, {whole}")),
+                    small_integer: false,
+                }
+            }
             Builtin::IntSignAsFloat => {
                 let order = self.instruction(format!(
                     "call i32 @compare_int(i64 {}, i64 {})",
