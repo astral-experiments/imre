@@ -1,4 +1,5 @@
 use super::{Heap, Id, SlotShape, Value};
+use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
 use std::collections::HashSet;
 
@@ -40,7 +41,7 @@ struct Links<'a> {
 enum Members<'a> {
     None,
     Sequence(&'a [Id]),
-    Names(&'a IndexMap<String, Id>),
+    Names(&'a IndexMap<String, Id>, Option<Id>),
     Keys(&'a [(Id, Id)]),
     Values(&'a [(Id, Id)]),
     Entries(&'a [(Id, Id)]),
@@ -52,7 +53,7 @@ impl<'a> Links<'a> {
             Value::Module { scope, .. } => ([Some(*scope), None], Members::None),
             Value::Scope(scope) => (
                 [scope.namespace, scope.exec_globals.map(|g| g.dict)],
-                Members::Names(&scope.names),
+                Members::Names(&scope.names, None),
             ),
             Value::Dict(entries) if dict_keys => ([None; 2], Members::Entries(entries)),
             Value::Dict(entries) => ([None; 2], Members::Values(entries)),
@@ -62,8 +63,18 @@ impl<'a> Links<'a> {
                 fields,
                 namespace,
                 dictionary,
+                memory_stream,
                 ..
-            } => ([*namespace, *dictionary], Members::Names(fields)),
+            } => {
+                let buffer = match memory_stream {
+                    Some(MemoryStream::Wrapper(wrapper)) => wrapper.buffer_id(),
+                    _ => None,
+                };
+                ([*namespace, *dictionary], Members::Names(fields, buffer))
+            }
+            Value::File(file) if let BinaryFile::Descriptor(fd) = file.as_ref() => {
+                ([Some(fd.raw), None], Members::None)
+            }
             Value::Function {
                 defaults,
                 kwdefaults,
@@ -79,7 +90,7 @@ impl<'a> Links<'a> {
             + match self.members {
                 Members::None => 0,
                 Members::Sequence(items) => items.len(),
-                Members::Names(names) => names.len(),
+                Members::Names(names, buffer) => names.len() + usize::from(buffer.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
                 Members::Entries(entries) => entries.len() * 2,
             }
@@ -99,7 +110,8 @@ impl<'a> Links<'a> {
         match self.members {
             Members::None => None,
             Members::Sequence(items) => items.get(index).copied(),
-            Members::Names(names) => names.get_index(index).map(|(_, id)| *id),
+            Members::Names(names, buffer) if index == names.len() => buffer,
+            Members::Names(names, _) => names.get_index(index).map(|(_, id)| *id),
             Members::Keys(entries) => entries.get(index).map(|(key, _)| *key),
             Members::Values(entries) => entries.get(index).map(|(_, value)| *value),
             Members::Entries(entries) => {
