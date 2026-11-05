@@ -297,10 +297,21 @@ fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
             let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
             Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
         }
-        Value::DirEntry(_) | Value::ClassMethod { .. } | Value::StaticMethod { .. } => {
+        Value::DirEntry(_)
+        | Value::ClassMethod { .. }
+        | Value::StaticMethod { .. }
+        | Value::LzmaCompressor(_)
+        | Value::LzmaDecompressor(_) => {
+            let name = ctx.type_name(obj);
+            // The legacy copyreg reducer uses __name__; newer protocols use the native tp_name.
+            let name = if protocol < 2 {
+                name.rsplit('.').next().unwrap_or(name)
+            } else {
+                name
+            };
             Err(Error::new(
                 "TypeError",
-                format!("cannot pickle '{}' object", ctx.type_name(obj)),
+                format!("cannot pickle '{name}' object"),
             ))
         }
         _ => default_instance_reduce(ctx, obj, protocol),
