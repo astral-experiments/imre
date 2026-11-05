@@ -4575,14 +4575,14 @@ impl Context {
             }
             Value::Native(ref class)
                 if name == "__base__"
-                    && class == defaultdict::CLASS
-                    && let Some(base) = Self::native_base(class) =>
+                    && matches!(class.as_str(), defaultdict::CLASS | "NoneType") =>
             {
-                return Ok(self.builtin(base));
+                return Ok(self.builtin(Self::native_base(class).unwrap_or("object")));
             }
             Value::Native(ref class)
                 if matches!(name, "__bases__" | "__mro__")
-                    && (builtins::is_exported_type(class) || class == defaultdict::CLASS) =>
+                    && (builtins::is_exported_type(class)
+                        || matches!(class.as_str(), defaultdict::CLASS | "NoneType")) =>
             {
                 return Ok(self.builtin_hierarchy_tuple(obj, name));
             }

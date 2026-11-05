@@ -146,6 +146,9 @@ def check_mro():
     from os import terminal_size
     from types import ModuleType
     assert bool.mro() == type.mro(bool) == [bool, int, object]
+    none_type = type(None)
+    assert none_type.__base__ is object and none_type.__bases__ == (object,)
+    assert none_type.__mro__ == (none_type, object)
     assert terminal_size.mro() == [terminal_size, tuple, object]
     assert type.mro(defaultdict) == [defaultdict, dict, object]
     assert defaultdict.__base__ is dict and defaultdict.__bases__ == (dict,)
