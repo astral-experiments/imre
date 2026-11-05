@@ -100,6 +100,23 @@ pub fn plain_run(pattern: &[u8]) -> Option<[u8; 256]> {
     Some(members)
 }
 
+/// Find the next maximal byte run without revisiting an accepted byte.
+pub fn next_byte_run(
+    bytes: &[u8],
+    members: &[u8; 256],
+    offset: usize,
+) -> Option<std::ops::Range<usize>> {
+    let skip = bytes[offset..]
+        .iter()
+        .position(|&b| members[usize::from(b)] != 0)?;
+    let start = offset + skip;
+    let mut end = start + 1;
+    while end < bytes.len() && members[usize::from(bytes[end])] != 0 {
+        end += 1;
+    }
+    Some(start..end)
+}
+
 /// Stream the boundaries of one byte class. A full block contributes one bit
 /// for every change between accepted and rejected bytes.
 pub struct ByteRuns<'a> {
@@ -129,24 +146,31 @@ impl<'a> ByteRuns<'a> {
 
     /// Visit successive maximal runs. The caller can reborrow its subject
     /// between fields when allocating the result can move the owning slot.
+    #[inline]
     pub fn next(&mut self, bytes: &[u8]) -> Option<std::ops::Range<usize>> {
-        if let Some(ranges) = self.ranges {
-            let start = self.boundary(bytes, &ranges)?;
-            return Some(start..self.boundary(bytes, &ranges).unwrap_or(bytes.len()));
+        if self.ranges.is_none() {
+            let run = next_byte_run(bytes, self.members, self.offset)?;
+            self.offset = run.end;
+            return Some(run);
         }
-        let skip = bytes[self.offset..]
-            .iter()
-            .position(|&b| self.members[usize::from(b)] != 0)?;
-        let start = self.offset + skip;
-        let mut end = start + 1;
-        while end < bytes.len() && self.members[usize::from(bytes[end])] != 0 {
-            end += 1;
-        }
-        self.offset = end;
-        Some(start..end)
+        let start = self.boundary(bytes)?;
+        Some(start..self.boundary(bytes).unwrap_or(bytes.len()))
     }
 
-    fn boundary(&mut self, bytes: &[u8], ranges: &[(u8, u8); 3]) -> Option<usize> {
+    #[inline]
+    fn boundary(&mut self, bytes: &[u8]) -> Option<usize> {
+        if self.changes == 0 {
+            self.fill(bytes)?;
+        }
+        let bit = self.changes.trailing_zeros();
+        self.changes &= self.changes - 1;
+        Some(self.offset - 32 + bit as usize)
+    }
+
+    // Keep the live block and its range tests out of the per-field path.
+    #[inline(never)]
+    fn fill(&mut self, bytes: &[u8]) -> Option<()> {
+        let ranges = self.ranges.as_ref()?;
         while self.changes == 0 {
             let remaining = bytes.get(self.offset..).filter(|tail| !tail.is_empty())?;
             let mask = if let Some(block) = remaining.first_chunk::<32>() {
@@ -160,31 +184,42 @@ impl<'a> ByteRuns<'a> {
             self.previous = mask >> 31;
             self.offset += 32;
         }
-        let bit = self.changes.trailing_zeros();
-        self.changes &= self.changes - 1;
-        Some(self.offset - 32 + bit as usize)
+        Some(())
     }
 }
 
 fn block_mask(block: &[u8; 32], ranges: &[(u8, u8); 3]) -> u32 {
     let mut flags = [0; 32];
     for (flag, &byte) in flags.iter_mut().zip(block) {
-        *flag = u8::from(
+        *flag = 0u8.wrapping_sub(u8::from(
             (byte.wrapping_sub(ranges[0].0) <= ranges[0].1)
                 | (byte.wrapping_sub(ranges[1].0) <= ranges[1].1)
                 | (byte.wrapping_sub(ranges[2].0) <= ranges[2].1),
-        );
+        ));
     }
-    if flags == [1; 32] {
-        return u32::MAX;
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::x86_64::{_mm_loadu_si128, _mm_movemask_epi8};
+        // SAFETY: SSE2 is available on x86-64 and both loads fit in flags.
+        unsafe {
+            let lo = _mm_loadu_si128(flags.as_ptr().cast());
+            let hi = _mm_loadu_si128(flags.as_ptr().add(16).cast());
+            _mm_movemask_epi8(lo) as u32 | ((_mm_movemask_epi8(hi) as u32) << 16)
+        }
     }
-    if flags == [0; 32] {
-        return 0;
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        portable_mask(&flags)
     }
-    // Gather each byte's low bit into the high byte of the product.
+}
+
+#[cfg(any(test, not(target_arch = "x86_64")))]
+fn portable_mask(flags: &[u8; 32]) -> u32 {
+    // Gather the low bit of each byte into the high byte of the product.
     let mut mask = 0;
     for (i, group) in flags.as_chunks::<8>().0.iter().enumerate() {
-        let packed = u64::from_le_bytes(*group).wrapping_mul(0x0102_0408_1020_4080) >> 56;
+        let low = u64::from_le_bytes(*group) & 0x0101_0101_0101_0101;
+        let packed = low.wrapping_mul(0x0102_0408_1020_4080) >> 56;
         mask |= (packed as u32) << (i * 8);
     }
     mask
@@ -2377,6 +2412,18 @@ fn parse_class(
 mod tests {
     use super::translate;
     use regex::Regex;
+
+    #[test]
+    fn packed_match_bits_preserve_lane_order() {
+        let ranges = [(b'a', 0); 3];
+        for low in 0..=u16::MAX {
+            let mask = u32::from(low) | (u32::from(!low) << 16);
+            let block = std::array::from_fn(|i| if mask & (1 << i) != 0 { b'a' } else { b'!' });
+            let flags = block.map(|b| if b == b'a' { u8::MAX } else { 0 });
+            assert_eq!(super::block_mask(&block, &ranges), mask);
+            assert_eq!(super::portable_mask(&flags), mask);
+        }
+    }
 
     #[test]
     fn byte_class_blocks_preserve_boundaries() {
