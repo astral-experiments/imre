@@ -16,3 +16,15 @@ fields = split(r",+", text)
 print(fields[0] is text)
 fields.append("new")
 print(split(r",+", text))
+
+
+def unicode_runs(text: str) -> None:
+    print(findall(r"(\w+)", text))
+    print(findall(r"(é+)", text))
+    print(findall(r"[^,]+", text))
+    print(split(r"\d+", text))
+    print(split(r"[\x7f-\u0080\U0010ffff]+", text))
+
+
+for value in ["", "éé,ß_字👋", "\x7f\u0080x\U0010ffff", "x1٢३y", "\x1c hé!"]:
+    unicode_runs(value)

@@ -5314,11 +5314,19 @@ impl Emitter<'_, '_> {
             }
             Builtin::RegexRuns { members, split } => {
                 let name = self.byte_array(members.clone());
-                let operand = self.checked_instruction(format!(
-                    "call ptr @imre_regex_collect_runs(ptr {}, ptr @{name}, i32 {})",
-                    args[0].value.operand,
-                    u32::from(*split)
-                ));
+                let text = &args[0].value.operand;
+                let split = u32::from(*split);
+                let call = if members.len() == 256 {
+                    format!(
+                        "call ptr @imre_regex_collect_runs(ptr {text}, ptr @{name}, i32 {split})"
+                    )
+                } else {
+                    format!(
+                        "call ptr @imre_regex_collect_unicode_runs(ptr {text}, ptr @{name}, i64 {}, i32 {split})",
+                        members.len()
+                    )
+                };
+                let operand = self.checked_instruction(call);
                 Value {
                     ty: returns,
                     operand,
@@ -10973,6 +10981,7 @@ declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_search_text(ptr, ptr, i1, i1)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_collect_runs(ptr, ptr, i32)
+declare ptr @imre_regex_collect_unicode_runs(ptr, ptr, i64, i32)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
 declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)

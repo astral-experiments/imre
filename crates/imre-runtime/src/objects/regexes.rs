@@ -372,49 +372,100 @@ pub unsafe extern "C" fn imre_regex_literal(data: *const u8, len: usize) -> *con
     handle(Storage::RegexPattern(Box::new(pattern)))
 }
 
-/// Collect the runs or gaps of a greedy ASCII class in a single forward scan.
+/// Materialize each match or the fields between matches in a fresh string list.
+fn collect_runs(
+    source: &StrOwner,
+    split: bool,
+    runs: impl Iterator<Item = std::ops::Range<usize>>,
+) -> *const Object {
+    let mut parts = super::Words::new(3);
+    let mut cursor = 0;
+    for span in runs {
+        let field = if split {
+            cursor..span.start
+        } else {
+            span.clone()
+        };
+        super::text::push_part(&mut parts, source, &source[field]);
+        cursor = span.end;
+    }
+    if split {
+        super::text::push_part(&mut parts, source, &source[cursor..]);
+    }
+    crate::ObjectOwner::into_raw(parts.into_object())
+}
+
+/// Collect a greedy class whose membership is uniform for all non-ASCII scalars.
 ///
 /// # Safety
-/// The caller roots the subject and supplies a 256-byte membership table with
-/// zeros for all non-ASCII bytes. The returned list owns every string it contains.
+/// The caller roots the subject and supplies a 256-byte membership table
+/// with the same value for every non-ASCII byte.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_regex_collect_runs(
     value: *const Str,
     members: *const [u8; 256],
     split: u32,
 ) -> *const Object {
-    // SAFETY: the caller retains the input owner and the compiler emits static table data.
-    let source = std::mem::ManuallyDrop::new(unsafe { StrOwner::from_raw(value) });
-    // SAFETY: the compiler emitted all 256 entries of this immutable table.
-    let members = unsafe { &*members };
+    // SAFETY: the caller owns the subject and the compiler emits all 256 entries.
+    let (source, members) = unsafe {
+        (
+            std::mem::ManuallyDrop::new(StrOwner::from_raw(value)),
+            &*members,
+        )
+    };
     let bytes = source.as_bytes();
-    let mut parts = super::Words::new(3);
-    let mut cursor = 0;
     let mut end = 0;
-    while end < bytes.len() {
-        let Some(skip) = bytes[end..]
+    let runs = std::iter::from_fn(|| {
+        let skip = bytes[end..]
             .iter()
-            .position(|&b| members[usize::from(b)] != 0)
-        else {
-            break;
-        };
+            .position(|&b| members[usize::from(b)] != 0)?;
         let start = end + skip;
         end = start + 1;
         while end < bytes.len() && members[usize::from(bytes[end])] != 0 {
             end += 1;
         }
-        let range = if split != 0 {
-            cursor..start
+        Some(start..end)
+    });
+    collect_runs(&source, split != 0, runs)
+}
+
+/// Collect a greedy Unicode class using sorted membership change points.
+///
+/// # Safety
+/// The caller roots the subject and supplies the complete immutable program
+/// from imre_regex::run_class, including its first 256 byte entries.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_unicode_runs(
+    value: *const Str,
+    class: *const u8,
+    len: usize,
+    split: u32,
+) -> *const Object {
+    // SAFETY: the caller owns the subject and the compiler supplies the program length.
+    let (source, class) = unsafe {
+        (
+            std::mem::ManuallyDrop::new(StrOwner::from_raw(value)),
+            std::slice::from_raw_parts(class, len),
+        )
+    };
+    let (members, ranges) = class.split_at(256);
+    let (bounds, _) = ranges.as_chunks::<4>();
+    let member = |ch: char| {
+        if ch.is_ascii() {
+            members[ch as usize] != 0
         } else {
-            start..end
-        };
-        super::text::push_part(&mut parts, &source, &source[range]);
-        cursor = end;
-    }
-    if split != 0 {
-        super::text::push_part(&mut parts, &source, &source[cursor..]);
-    }
-    crate::ObjectOwner::into_raw(parts.into_object())
+            bounds.partition_point(|bound| u32::from_le_bytes(*bound) <= ch as u32) % 2 == 1
+        }
+    };
+    let mut chars = source.char_indices();
+    let runs = std::iter::from_fn(|| {
+        let (start, _) = chars.find(|&(_, ch)| member(ch))?;
+        let end = chars
+            .find(|&(_, ch)| !member(ch))
+            .map_or(source.len(), |(i, _)| i);
+        Some(start..end)
+    });
+    collect_runs(&source, split != 0, runs)
 }
 
 /// Return the original Python spelling even when the native engine expanded an escape.
