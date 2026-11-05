@@ -45,6 +45,20 @@ def current():
 
     extension_stream()
 
+    import pickle
+    for cls in (LZMACompressor, LZMADecompressor):
+        assert cls.__reduce__ is object.__reduce__
+        assert cls.__reduce_ex__ is object.__reduce_ex__
+        stream = cls()
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            name = cls.__name__ if protocol < 2 else "_lzma." + cls.__name__
+            try:
+                pickle.dumps(stream, protocol)
+            except TypeError as error:
+                assert str(error) == f"cannot pickle '{name}' object"
+            else:
+                raise AssertionError("pickled a live LZMA stream")
+
 
 def mutable_filter_options():
     lookups = []

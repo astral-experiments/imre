@@ -284,13 +284,16 @@ impl Context {
             && let Value::Native(kind) = self.heap.get(class)
             && matches!(
                 kind.as_str(),
-                stdlib::datetime::TZINFO | "datetime.timezone"
+                stdlib::datetime::TZINFO
+                    | "datetime.timezone"
+                    | value::LZMA_COMPRESS_TYPE
+                    | value::LZMA_DECOMPRESS_TYPE
             )
         {
-            let parent = if kind == stdlib::datetime::TZINFO {
-                "object"
-            } else {
+            let parent = if kind == "datetime.timezone" {
                 stdlib::datetime::TZINFO
+            } else {
+                "object"
             };
             return self
                 .builtins
@@ -2228,7 +2231,7 @@ impl Context {
                 value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
             )
         {
-            if let Some(member) = self.own_class_attr(obj, name) {
+            if let Some(member) = self.class_attr(obj, name) {
                 return Ok(member);
             }
             match name {
@@ -2245,7 +2248,7 @@ impl Context {
             Value::LzmaCompressor(_) | Value::LzmaDecompressor(_)
         ) {
             let class = self.exact_type(obj)?;
-            if let Some(member) = self.own_class_attr(class, name) {
+            if let Some(member) = self.class_attr(class, name) {
                 return self.bind_attribute(member, obj, class);
             }
         }
