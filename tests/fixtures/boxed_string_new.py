@@ -32,6 +32,20 @@ def current():
     assert str.__mod__(Word("%(key)s"), {"key": "value"}) == "value"
     assert str.__rmod__(Word("result"), "<%s>") == "<result>"
     assert Word("result").__rmod__(3) is NotImplemented
+
+    class FormatValue:
+        def __str__(self):
+            return "value"
+
+        def __rmod__(self, other):
+            return "reflected"
+
+    class ReflectedText(str):
+        def __rmod__(self, other):
+            return "reflected"
+
+    assert "<%s>" % FormatValue() == "<value>"
+    assert "<%s>" % ReflectedText("value") == "reflected"
     class Text(str):
         pass
     class Data(bytes):
