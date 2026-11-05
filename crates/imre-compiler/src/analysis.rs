@@ -1998,12 +1998,12 @@ mod diagnostic_mode_tests {
         let whole = TextRange::new(0.into(), 40.into());
         assert!(
             session
-                .errors(Some(&[vec![whole]]), &[], FileChecks::Full, None)
+                .errors(Some(&[vec![whole]]), &[], FileChecks::Full, None, None)
                 .is_ok()
         );
         assert_eq!(
             session
-                .errors(None, &[], FileChecks::Full, None)
+                .errors(None, &[], FileChecks::Full, None, None)
                 .unwrap_err(),
             message
         );
