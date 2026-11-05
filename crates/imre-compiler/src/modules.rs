@@ -1846,6 +1846,9 @@ impl IntrinsicModule {
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
             (Self::Sys, "float_info") => Intrinsic::ScopedObjectExport("sys.float_info"),
+            (Self::Sys, "float_repr_style") => {
+                Intrinsic::ScopedObjectExport("sys.float_repr_style")
+            }
             (Self::Sys, "implementation") => Intrinsic::SysImplementation,
             (Self::Sys, "pycache_prefix") => Intrinsic::SysPycachePrefix,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,

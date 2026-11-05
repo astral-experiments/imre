@@ -4035,6 +4035,9 @@ impl Context {
                 self.bind(scope, "byteorder", byteorder);
                 let float_info = stdlib::fixed_structseq::float_info(self);
                 self.bind(scope, "float_info", float_info);
+                // floats::render uses shortest round-tripping digits with Python's decimal spelling.
+                let float_repr_style = self.text("short");
+                self.bind(scope, "float_repr_style", float_repr_style);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
                 for name in [
