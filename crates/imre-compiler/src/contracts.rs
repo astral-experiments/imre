@@ -537,6 +537,7 @@ impl Builtin {
             | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
+            | Self::ListAccumulate
             | Self::EnumLookup(_)
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::FloatAcos | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
@@ -912,6 +913,10 @@ impl Builtin {
             }
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
+            Self::ListAccumulate => {
+                signature(&[Type::ListInt], Type::ListInt)
+                    || signature(&[Type::ListInt, Type::Int], Type::ListInt)
+            }
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)

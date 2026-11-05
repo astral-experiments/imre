@@ -1311,6 +1311,8 @@ pub(crate) enum Builtin {
     /// Eagerly converts immutable string code points into an integer list,
     /// preserving `list(map(int, text))` errors without character objects.
     StringIntList,
+    /// Materialize exact integer prefixes, optionally starting with an initial value.
+    ListAccumulate,
     /// Two nonnegative 31-bit digit subtotals in one immediate, or -1 for fallback.
     TryDigitSums([[u8; 10]; 2]),
     Bytes,
