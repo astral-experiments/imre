@@ -2684,6 +2684,7 @@ pub(super) struct Heap {
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
+    check_finalizers_next_statement: bool,
     // Weak handles to buffered output files returned by open().
     file_writers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
@@ -2908,6 +2909,7 @@ impl Heap {
             default_stderr: None,
             has_weak_values: false,
             collect_next_statement: false,
+            check_finalizers_next_statement: false,
             file_writers: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
@@ -4438,7 +4440,7 @@ impl Heap {
 
     /// Recheck unbound writers after control flow discards temporary roots.
     pub fn release_unbound_finalizers(&mut self) {
-        self.collect_next_statement |= self.has_unbound_finalizer(NONE);
+        self.check_finalizers_next_statement |= self.has_unbound_finalizer(NONE);
     }
 
     /// Keep the operands needed by later targets after a source assignment releases its old value.
@@ -4472,7 +4474,8 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        if self.take_sweep_request() {
+        let finalizers = self.take_finalizer_check();
+        if self.take_sweep_request() || finalizers {
             self.collect(globals)
         } else {
             None
@@ -4513,7 +4516,15 @@ impl Heap {
 
     /// A discarded owner or the allocation threshold has requested a sweep.
     pub(super) fn collection_requested(&self) -> bool {
-        self.collect_next_statement || self.watermark_due() || self.gc_schedule.requested()
+        self.collect_next_statement
+            || self.check_finalizers_next_statement
+            || self.watermark_due()
+            || self.gc_schedule.requested()
+    }
+
+    /// A potentially unbound finalizer needs its roots checked after publishing the next statement.
+    pub(super) fn take_finalizer_check(&mut self) -> bool {
+        std::mem::take(&mut self.check_finalizers_next_statement)
     }
 
     /// Consume a pending heap sweep before assembling its root iterators.
@@ -5157,6 +5168,25 @@ mod tests {
             assert!(matches!(heap.get(id), Value::Int(value) if value.as_small() == Some(n)));
             assert_eq!(heap.alloc(Value::Int(crate::Int::from(n))), id);
         }
+    }
+
+    #[test]
+    fn checking_a_finalizer_preserves_a_byte_buffer_sweep() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        heap.release_temporaries_since(mark);
+        heap.release_unbound_finalizers();
+        assert!(heap.take_finalizer_check());
+        assert!(!heap.take_sweep_request());
+
+        heap.release_unbound_finalizers();
+        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        buffer.extend_from_slice(b"allocated");
+        heap.alloc(Value::Bytes(buffer));
+        assert!(heap.take_finalizer_check());
+        assert!(heap.take_sweep_request());
     }
 
     #[test]
