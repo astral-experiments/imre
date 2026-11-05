@@ -135,6 +135,32 @@ pub(super) fn call(
         };
         return Ok(ctx.alloc(Value::Float(result)));
     }
+    if operation == "dist" {
+        let &[p, q] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("dist expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let p = point_coordinates(ctx, p)?;
+        let q = point_coordinates(ctx, q)?;
+        if p.len() != q.len() {
+            return Err(Error::new(
+                "ValueError",
+                "both points must have the same number of dimensions",
+            ));
+        }
+        let mut differences = SmallVec::<[f64; 16]>::new();
+        differences
+            .try_reserve_exact(p.len())
+            .map_err(|_| Error::new("MemoryError", "math.dist coordinates"))?;
+        for (px, qx) in p.into_iter().zip(q) {
+            let px = as_double(ctx, px)?;
+            let qx = as_double(ctx, qx)?;
+            differences.push((px - qx).abs());
+        }
+        return Ok(ctx.alloc(Value::Float(vector_norm(&differences))));
+    }
     if operation == "hypot" {
         let mut coordinates = SmallVec::<[f64; 16]>::new();
         coordinates
@@ -328,6 +354,16 @@ pub(super) fn call(
     Ok(ctx.alloc(Value::Int(crate::Int::new(
         crate::floats::float_to_integer(rounded)?,
     ))))
+}
+
+/// Read tuple storage directly, including for tuple subclasses. Other points
+/// must be fully consumed and kept alive before any coordinate is converted.
+fn point_coordinates(ctx: &mut Context, point: Id) -> Result<Vec<Id>> {
+    if let Some(items) = ctx.tuple_items(point)? {
+        return Ok(items);
+    }
+    let snapshot = ctx.collect_iterable(point, true)?;
+    Ok(ctx.tuple_items(snapshot)?.expect("collected a tuple"))
 }
 
 /// Compute the Euclidean norm of absolute coordinates using CPython's compensated

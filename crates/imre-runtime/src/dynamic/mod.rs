@@ -1641,15 +1641,17 @@ impl Context {
         self.collect_garbage();
     }
 
-    /// Keep yielded values in a traced sequence while discarding each step's other temporaries.
-    fn collect_generator(&mut self, generator: Id, tuple: bool) -> Result<Id> {
+    /// Keep the completed snapshot or exception, releasing iterator temporaries
+    /// before the caller can invoke another Python callback.
+    fn collect_iterable(&mut self, source: Id, tuple: bool) -> Result<Id> {
         let mark = self.heap.temporary_mark();
-        self.heap.reserve_temporaries(2)?;
-        self.heap.keep(generator);
-        let buffer = self.alloc(Value::List(Vec::new()));
-        let step = self.heap.temporary_mark();
-        let result: Result<()> = (|| {
-            while let Some(item) = self.next_item(generator)? {
+        let result: Result<Id> = (|| {
+            self.heap.reserve_temporaries(2)?;
+            let iterator = self.iterator(source)?;
+            self.heap.keep(iterator);
+            let buffer = self.alloc(Value::List(Vec::new()));
+            let step = self.heap.temporary_mark();
+            while let Some(item) = self.next_item(iterator)? {
                 let Value::List(items) = self.heap.get_mut(buffer) else {
                     unreachable!()
                 };
@@ -1659,24 +1661,25 @@ impl Context {
                 items.push(item);
                 self.comprehension_step(step);
             }
-            Ok(())
-        })();
-        self.heap.release_temporaries_since(mark);
-        if let Err(error) = result {
-            for root in error.roots() {
-                self.heap.keep(root);
+            if tuple {
+                let Value::List(items) = self.heap.get_mut(buffer) else {
+                    unreachable!()
+                };
+                let items = std::mem::take(items);
+                return Ok(self.alloc(Value::Tuple(items)));
             }
-            return Err(error);
+            Ok(buffer)
+        })();
+        match &result {
+            Ok(snapshot) => self.heap.keep_call_result(mark, *snapshot),
+            Err(error) => {
+                self.heap.release_temporaries_since(mark);
+                for root in error.roots() {
+                    self.heap.keep(root);
+                }
+            }
         }
-        if tuple {
-            let Value::List(items) = self.heap.get_mut(buffer) else {
-                unreachable!()
-            };
-            let items = std::mem::take(items);
-            return Ok(self.alloc(Value::Tuple(items)));
-        }
-        self.heap.keep(buffer);
-        Ok(buffer)
+        result
     }
 
     /// Check the Python sequence protocol without consuming iterators.
@@ -1707,7 +1710,7 @@ impl Context {
             return Ok(vec![typing::unpack_parameter(self, id)?]);
         }
         if matches!(self.heap.get(id), Value::Generator { .. }) {
-            let buffer = self.collect_generator(id, false)?;
+            let buffer = self.collect_iterable(id, false)?;
             let Value::List(items) = self.heap.get_mut(buffer) else {
                 unreachable!()
             };

@@ -457,8 +457,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         (
             "math",
-            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "atan2" | "cos" | "exp"
-            | "fma" | "frexp" | "fsum" | "gcd" | "hypot" | "isclose" | "isfinite" | "isinf"
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "atan2" | "cos" | "dist"
+            | "exp" | "fma" | "frexp" | "fsum" | "gcd" | "hypot" | "isclose" | "isfinite" | "isinf"
             | "isnan" | "isqrt" | "lcm" | "ldexp" | "log" | "log2" | "prod" | "sin" | "sqrt"
             | "tan",
         ) => ctx.builtin(&format!("math.{name}")),
