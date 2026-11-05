@@ -14,6 +14,7 @@ pub(in crate::dynamic) fn is_function(name: &str) -> bool {
             | "monotonic_ns"
             | "perf_counter"
             | "perf_counter_ns"
+            | "process_time"
             | "sleep"
             | "gmtime"
             | "localtime"
@@ -194,6 +195,7 @@ pub(super) fn call(
         "monotonic_ns" => "time.monotonic_ns",
         "perf_counter" => "time.perf_counter",
         "perf_counter_ns" => "time.perf_counter_ns",
+        "process_time" => "time.process_time",
         "mktime" => "time.mktime",
         "tzset" => "time.tzset",
         _ => name,
@@ -332,6 +334,9 @@ pub(super) fn call(
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
             Ok(ctx.alloc(Value::Float(stamp.as_secs_f64())))
         }
+        "process_time" if args.is_empty() => {
+            Ok(ctx.alloc(Value::Float(crate::objects::time::process_time()?)))
+        }
         "tzset" if args.is_empty() => {
             let module = ctx.module("time")?;
             let Value::Module { scope, .. } = *ctx.heap.get(module) else {
@@ -346,7 +351,7 @@ pub(super) fn call(
             Ok(NONE)
         }
         "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter" | "perf_counter_ns"
-        | "tzset" => Err(Error::new(
+        | "process_time" | "tzset" => Err(Error::new(
             "TypeError",
             format!("{function}() takes no arguments ({} given)", args.len()),
         )),
