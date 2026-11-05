@@ -4858,17 +4858,24 @@ impl Context {
                 ),
             ));
         }
-        if op == "**"
+        if matches!(op, "+" | "**")
             && [left, right]
                 .into_iter()
                 .any(|id| !matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
         {
+            let operator = match (op, inplace) {
+                ("+", true) => "+=",
+                ("+", false) => "+",
+                _ => "** or pow()",
+            };
+            let left = stdlib::diagnostic_type_name(self, a);
+            let right = stdlib::diagnostic_type_name(self, b);
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "unsupported operand type(s) for ** or pow(): '{}' and '{}'",
-                    self.type_name(a),
-                    self.type_name(b)
+                    "unsupported operand type(s) for {operator}: '{}' and '{}'",
+                    &left[..left.floor_char_boundary(100)],
+                    &right[..right.floor_char_boundary(100)]
                 ),
             ));
         }
