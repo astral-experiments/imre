@@ -71,11 +71,18 @@ impl<'a> Links<'a> {
                 memory_stream,
                 ..
             } => {
-                let buffer = match memory_stream {
+                let stream = match memory_stream {
+                    Some(MemoryStream::BufferedFile(file)) => Some(*file),
+                    Some(MemoryStream::Reader(reader)) => reader.raw.get(),
+                    Some(MemoryStream::BufferedBytes(writer)) => writer.raw.get(),
+                    Some(
+                        MemoryStream::UninitializedReader(raw)
+                        | MemoryStream::UninitializedWriter(raw),
+                    ) => *raw,
                     Some(MemoryStream::Wrapper(wrapper)) => wrapper.buffer_id(),
                     _ => None,
                 };
-                ([*namespace, *dictionary], Members::Names(fields, buffer))
+                ([*namespace, *dictionary], Members::Names(fields, stream))
             }
             Value::File(file) if let BinaryFile::Descriptor(fd) = file.as_ref() => {
                 ([Some(fd.raw), None], Members::None)
