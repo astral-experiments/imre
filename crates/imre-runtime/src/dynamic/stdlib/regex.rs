@@ -1306,7 +1306,7 @@ fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) ->
         (Value::Bytes(pattern), Value::Bytes(b)) => (imre_regex::plain_run(pattern)?, b.len()),
         _ => return None,
     };
-    let runs = imre_regex::ByteRuns::new(&members, len);
+    let mut runs = imre_regex::ByteRuns::new(&members, len);
     let mark = ctx.heap.temporary_mark();
     let mut fields = Vec::new();
     let mut cursor = 0;
@@ -1316,7 +1316,7 @@ fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) ->
             Value::Bytes(b) => b,
             _ => unreachable!(),
         };
-        let next = runs.next(data, cursor);
+        let next = runs.next(data);
         let span = match &next {
             Some(run) if split => cursor..run.start,
             Some(run) => run.clone(),

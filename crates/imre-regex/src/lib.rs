@@ -100,10 +100,14 @@ pub fn plain_run(pattern: &[u8]) -> Option<[u8; 256]> {
     Some(members)
 }
 
-/// Scan the same byte class across all fields of one subject.
+/// Stream the boundaries of one byte class. A full block contributes one bit
+/// for every change between accepted and rejected bytes.
 pub struct ByteRuns<'a> {
     members: &'a [u8; 256],
     ranges: Option<[(u8, u8); 3]>,
+    offset: usize,
+    changes: u32,
+    previous: u32,
 }
 
 impl<'a> ByteRuns<'a> {
@@ -114,53 +118,76 @@ impl<'a> ByteRuns<'a> {
         } else {
             None
         };
-        Self { members, ranges }
+        Self {
+            members,
+            ranges,
+            offset: 0,
+            changes: 0,
+            previous: 0,
+        }
     }
 
-    /// Find the first maximal run starting at or after the byte offset.
-    pub fn next(&self, bytes: &[u8], offset: usize) -> Option<std::ops::Range<usize>> {
-        let remaining = &bytes[offset..];
-        let skip = self.prefix::<false>(remaining);
-        if skip == remaining.len() {
-            return None;
+    /// Visit successive maximal runs. The caller can reborrow its subject
+    /// between fields when allocating the result can move the owning slot.
+    pub fn next(&mut self, bytes: &[u8]) -> Option<std::ops::Range<usize>> {
+        if let Some(ranges) = self.ranges {
+            let start = self.boundary(bytes, &ranges)?;
+            return Some(start..self.boundary(bytes, &ranges).unwrap_or(bytes.len()));
         }
-        let start = offset + skip;
-        let end = start + 1 + self.prefix::<true>(&bytes[start + 1..]);
+        let skip = bytes[self.offset..]
+            .iter()
+            .position(|&b| self.members[usize::from(b)] != 0)?;
+        let start = self.offset + skip;
+        let mut end = start + 1;
+        while end < bytes.len() && self.members[usize::from(bytes[end])] != 0 {
+            end += 1;
+        }
+        self.offset = end;
         Some(start..end)
     }
 
-    fn prefix<const INSIDE: bool>(&self, bytes: &[u8]) -> usize {
-        let scalar = |slice: &[u8]| {
-            slice
-                .iter()
-                .position(|&b| (self.members[usize::from(b)] != 0) != INSIDE)
-                .unwrap_or(slice.len())
-        };
-        let Some(ranges) = &self.ranges else {
-            return scalar(bytes);
-        };
-        let (head, rest) = bytes.split_at(bytes.len().min(8));
-        let count = scalar(head);
-        if count < head.len() {
-            return count;
+    fn boundary(&mut self, bytes: &[u8], ranges: &[(u8, u8); 3]) -> Option<usize> {
+        while self.changes == 0 {
+            let remaining = bytes.get(self.offset..).filter(|tail| !tail.is_empty())?;
+            let mask = if let Some(block) = remaining.first_chunk::<32>() {
+                block_mask(block, ranges)
+            } else {
+                remaining.iter().enumerate().fold(0, |mask, (i, &byte)| {
+                    mask | (u32::from(self.members[usize::from(byte)] != 0) << i)
+                })
+            };
+            self.changes = mask ^ ((mask << 1) | self.previous);
+            self.previous = mask >> 31;
+            self.offset += 32;
         }
-        let mut offset = count;
-        for block in rest.as_chunks::<32>().0 {
-            // Each unsigned subtraction tests one inclusive range across all lanes.
-            let mut uniform = true;
-            for &byte in block {
-                let member = (byte.wrapping_sub(ranges[0].0) <= ranges[0].1)
-                    | (byte.wrapping_sub(ranges[1].0) <= ranges[1].1)
-                    | (byte.wrapping_sub(ranges[2].0) <= ranges[2].1);
-                uniform &= member == INSIDE;
-            }
-            if !uniform {
-                break;
-            }
-            offset += 32;
-        }
-        offset + scalar(&bytes[offset..])
+        let bit = self.changes.trailing_zeros();
+        self.changes &= self.changes - 1;
+        Some(self.offset - 32 + bit as usize)
     }
+}
+
+fn block_mask(block: &[u8; 32], ranges: &[(u8, u8); 3]) -> u32 {
+    let mut flags = [0; 32];
+    for (flag, &byte) in flags.iter_mut().zip(block) {
+        *flag = u8::from(
+            (byte.wrapping_sub(ranges[0].0) <= ranges[0].1)
+                | (byte.wrapping_sub(ranges[1].0) <= ranges[1].1)
+                | (byte.wrapping_sub(ranges[2].0) <= ranges[2].1),
+        );
+    }
+    if flags == [1; 32] {
+        return u32::MAX;
+    }
+    if flags == [0; 32] {
+        return 0;
+    }
+    // Gather each byte's low bit into the high byte of the product.
+    let mut mask = 0;
+    for (i, group) in flags.as_chunks::<8>().0.iter().enumerate() {
+        let packed = u64::from_le_bytes(*group).wrapping_mul(0x0102_0408_1020_4080) >> 56;
+        mask |= (packed as u32) << (i * 8);
+    }
+    mask
 }
 
 /// Up to three inclusive ranges, stored as lower bounds and widths. Repeat
@@ -2375,20 +2402,23 @@ mod tests {
                     bytes.extend(pool.iter().copied().cycle().take(len));
                 }
             }
-            let runs = ByteRuns::new(&members, bytes.len());
             for offset in 0..=bytes.len() {
-                let expected = bytes[offset..]
+                let tail = &bytes[offset..];
+                let mut runs = ByteRuns::new(&members, tail.len());
+                let mut cursor = 0;
+                while let Some(skip) = tail[cursor..]
                     .iter()
                     .position(|&b| members[usize::from(b)] != 0)
-                    .map(|skip| {
-                        let start = offset + skip;
-                        let len = bytes[start..]
-                            .iter()
-                            .take_while(|&&b| members[usize::from(b)] != 0)
-                            .count();
-                        start..start + len
-                    });
-                assert_eq!(runs.next(&bytes, offset), expected);
+                {
+                    let start = cursor + skip;
+                    let len = tail[start..]
+                        .iter()
+                        .take_while(|&&b| members[usize::from(b)] != 0)
+                        .count();
+                    cursor = start + len;
+                    assert_eq!(runs.next(tail), Some(start..cursor));
+                }
+                assert_eq!(runs.next(tail), None);
             }
         }
     }
