@@ -240,12 +240,14 @@ class NonCallableMock(_FixedMock):
         return object.__new__(type(cls.__name__, bases, {}))
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
-                 wraps=None, parent=None, _new_parent=None, _new_name="", unsafe=False, **attrs):
-        self._mock_add_spec(spec_set if spec_set is not None else spec, spec_set is not None)
+                 wraps=None, parent=None, _new_parent=None, _new_name="", _eat_self=None, unsafe=False, **attrs):
+        super().__init__(name=name)
+        if _eat_self is None:
+            _eat_self = parent is not None
+        self._mock_add_spec(spec_set if spec_set is not None else spec, spec_set is not None, _eat_self)
         self._mock_set_magics()
         object.__setattr__(self, "_mock_wraps", wraps)
         object.__setattr__(self, "_mock_unsafe", unsafe)
-        super().__init__(name=name)
         self._mock_parent = parent
         self._mock_children = {}
         if _new_parent is None:
@@ -261,18 +263,21 @@ class NonCallableMock(_FixedMock):
         if attrs:
             self.configure_mock(**attrs)
 
-    def _mock_add_spec(self, spec, strict):
+    def _mock_add_spec(self, spec, strict, eat_self=False):
         methods = spec
         if _is_instance_mock(methods):
             raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
         spec_class = None
-        if issubclass(type(methods), type):
-            spec_class = methods
-            methods = dir(methods)
-        elif methods is not None and type(methods) not in (list, tuple):
-            spec_class = type(methods)
-            methods = dir(methods)
+        sig = None
+        if methods is not None and type(methods) not in (list, tuple):
+            spec_class = methods if issubclass(type(methods), type) else type(methods)
+            if isinstance(spec, (FunctionType, MethodType)):
+                # Evaluating annotations may change which attributes the spec exposes.
+                sig = _spec_signature(spec, eat_self=eat_self)
+            methods = dir(spec)
         asyncs = _spec_async_methods(spec, methods) if spec_class is not None else ()
+        # Install the new spec only after all user-controlled inspection has succeeded.
+        self._node._spec_signature = sig
         object.__setattr__(self, "_spec_asyncs", asyncs)
         object.__setattr__(self, "_spec_class", spec_class)
         object.__setattr__(self, "_mock_methods", methods)
@@ -888,11 +893,15 @@ def _autospec_target(spec, name, value):
     return value
 
 
-def _autospec_signature(target):
+def _spec_signature(target, *, eat_self=False):
+    from annotationlib import Format
+    from functools import partial
     from inspect import signature
 
+    if eat_self:
+        target = partial(target, None)
     try:
-        return signature(target)
+        return signature(target, annotation_format=Format.FORWARDREF)
     except ValueError:
         # Some builtin callables do not expose a signature.
         return None
@@ -965,10 +974,8 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None, *, eat_sel
     if target is not _unset_return:
         # Calls supply the receiver. Assertions on an explicit instance spec
         # use the raw signature, while a factory's return mock eats self too.
-        if eat_self:
-            target = partial(target, None)
-        sig = _autospec_signature(target)
-        call_sig = _autospec_signature(partial(target, None)) if is_class and as_instance and not eat_self else sig
+        sig = _spec_signature(target, eat_self=eat_self)
+        call_sig = _spec_signature(target, eat_self=True) if is_class and as_instance and not eat_self else sig
         mock._node._spec_signature = sig
         if call_sig is not None:
             mock._node._call_signature = call_sig

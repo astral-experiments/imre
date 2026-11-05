@@ -3669,7 +3669,12 @@ for name in ("md4", "ripemd160"):
             "from ast import BinOp, ClassDef\nimport ast\n"
             "assert BinOp is ast.BinOp and ClassDef is ast.ClassDef\n",
         )
-        for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
+        for name in (
+            "boxed_unittest_mock_any.py",
+            "boxed_unittest_mock_side_effect.py",
+            "boxed_unittest_mock_call.py",
+            "boxed_unittest_mock_spec_binding.py",
+        ):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
