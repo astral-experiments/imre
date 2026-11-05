@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 148 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 149 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -131,6 +131,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `urllib` | Yes | `urllib.parse.urlsplit` exposes named result fields. `quote` and `unquote` accept codec options, and `quote_from_bytes` escapes octets. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [2 / 178](../benchmarks/cpython_stdlib/full/urllib/) | 4 | 5 |
 | `uuid` | Yes | Construct a `UUID` from hexadecimal text or a 128-bit integer and read its canonical spelling, `hex` and `int`. [Evidence](../tests/fixtures/text/uuid_conversion.py) | — | — | — |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
+| `wave` | Yes | Read and write stereo PCM frames in a WAV stream, query parameters, and rewind. [Evidence](../tests/fixtures/boxed_wave.py) | — | — | — |
 | `weakref` | Yes | Callback-free proxy for source-defined records, including cached identity, attribute and call forwarding, and ReferenceError after the referent is released. [Evidence](../tests/fixtures/classes/weak_proxy.py) | — | — | — |
 | `xml` | Yes | No API example recorded. | — | — | — |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
@@ -202,7 +203,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `trace` |
 | `tty` |
 | `venv` |
-| `wave` |
 | `webbrowser` |
 | `winreg` |
 | `wsgiref` |
