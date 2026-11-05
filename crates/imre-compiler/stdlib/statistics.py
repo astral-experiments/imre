@@ -31,6 +31,23 @@ def mean(data):
     If ``data`` is empty, StatisticsError will be raised.
 
     """
+    if type(data) is list or type(data) is tuple:
+        partials = {}
+        count = 0
+        for value in data:
+            if type(value) is not float or not math.isfinite(value):
+                break
+            n, d = value.as_integer_ratio()
+            partials[d] = partials.get(d, 0) + n
+            count += 1
+        else:
+            if count:
+                # Binary float denominators are powers of two. Combine their
+                # partial sums exactly and round only the final mean.
+                denominator = max(partials)
+                numerator = sum(n * (denominator // d) for d, n in partials.items())
+                return float(Fraction(numerator, denominator * count))
+
     T, total, n = _sum(data)
     if n < 1:
         raise StatisticsError('mean requires at least one data point')
