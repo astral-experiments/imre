@@ -123,7 +123,7 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(result))));
     }
-    if matches!(operation, "atan2" | "copysign" | "ldexp") {
+    if matches!(operation, "atan2" | "copysign" | "ldexp" | "pow") {
         let &[first, second] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -134,6 +134,7 @@ pub(super) fn call(
         let result = match operation {
             "atan2" => first.atan2(as_double(ctx, second)?),
             "copysign" => first.copysign(as_double(ctx, second)?),
+            "pow" => real_power(first, as_double(ctx, second)?)?,
             _ => scale_by_power_of_two(ctx, first, second)?,
         };
         return Ok(ctx.alloc(Value::Float(result)));
@@ -728,6 +729,20 @@ fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
         }
     }
     Ok(ctx.alloc(Value::Float(hi)))
+}
+
+/// Raise two real numbers to a floating-point power with Python's domain and range errors.
+fn real_power(base: f64, exponent: f64) -> Result<f64> {
+    let result = base.powf(exponent);
+    if base.is_finite() && exponent.is_finite() {
+        if result.is_nan() || (base == 0.0 && exponent < 0.0) {
+            return Err(Error::new("ValueError", "math domain error"));
+        }
+        if result.is_infinite() {
+            return Err(Error::new("OverflowError", "math range error"));
+        }
+    }
+    Ok(result)
 }
 
 /// Read a float subclass's stored double before trying the numeric conversion protocol.

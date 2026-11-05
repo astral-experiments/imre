@@ -2256,6 +2256,7 @@ impl IntrinsicModule {
             (Self::Math, "log2") => Intrinsic::ScopedObjectExport("math.log2"),
             (Self::Math, "ldexp") => Intrinsic::ScopedObjectExport("math.ldexp"),
             (Self::Math, "nextafter") => Intrinsic::ScopedObjectExport("math.nextafter"),
+            (Self::Math, "pow") => Intrinsic::ScopedObjectExport("math.pow"),
             (Self::Math, "prod") => Intrinsic::ScopedObjectExport("math.prod"),
             (Self::Math, "sin") => Intrinsic::ScopedObjectExport("math.sin"),
             (Self::Math, "sinh") => Intrinsic::ScopedObjectExport("math.sinh"),
