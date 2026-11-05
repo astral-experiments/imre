@@ -783,7 +783,11 @@ pub(super) fn builtin_format(
             let slice = ctx.alloc(Value::Slice([NONE, stop, NONE]));
             text = ctx.get_item(storage, slice)?;
         }
-        let padded = justify_string(ctx, text, width, fill, alignment)?;
+        let padded = if width == 0 {
+            text
+        } else {
+            justify_string(ctx, text, width, fill, alignment)?
+        };
         // An unchanged nonempty string subclass keeps its identity.
         return Ok(if padded == storage && ctx.truth(storage)? {
             value
