@@ -9,6 +9,13 @@ def saved_day(text: str) -> int:
     read = datetime.fromisoformat
     return read(text).day
 
+def retain(stamp: datetime, text: str) -> list[datetime]:
+    stamps: list[datetime] = []
+    stamps.append(stamp)
+    stamps.append(datetime.fromisoformat(text))
+    stamps.append(stamps[0])
+    return stamps
+
 for text in ["0001-01-01", "2000-02-29T12:34:56.123456+03:00",
              "2020-W53", "2020W537", "2020-W53-7🌙24:00Z", "20250101T235959-00:00:30.000005"]:
     stamp = parse(text)
@@ -29,3 +36,7 @@ try:
     saved_day("bad")
 except ValueError as error:
     print(str(error))
+
+original = parse("2000-02-29T12:00Z")
+print([item.isoformat() for item in retain(original, "2020-W53-7")])
+print(original.isoformat())

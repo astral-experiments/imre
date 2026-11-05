@@ -8776,7 +8776,7 @@ impl Emitter<'_, '_> {
                     && matches!(args[0].value.ty, Type::List(_))
                     && matches!(
                         args[1].value.ty,
-                        Type::Tuple(_) | Type::List(_) | Type::ListInt
+                        Type::Tuple(_) | Type::List(_) | Type::ListInt | Type::Calendar(_)
                     )
                 {
                     let item = &args[1].value;

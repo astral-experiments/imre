@@ -587,12 +587,12 @@ pub unsafe extern "C" fn imre_seq_set_index(
     finish(old.map(drop), ());
 }
 
-/// Append one list or tuple owner without taking a redundant reference. On
-/// failure, the caller still owns the word for ordinary exception cleanup.
+/// Transfer a word-backed list element on success. On failure, the caller
+/// retains the owner for ordinary exception cleanup.
 ///
 /// # Safety
-/// The receiver is a list of exact tuples or lists. The caller transfers a
-/// rooted element of that kind on success. Neither operation can reenter Python.
+/// The receiver must use ordinary word storage. The rooted element must match
+/// its kind and preserve acyclicity. Neither operation can reenter Python.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_seq_append_owned(
     value: *const Object,
