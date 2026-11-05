@@ -888,6 +888,17 @@ fn percent_value_in<'a>(
                 return Err(Error::new(Kind::ValueError, "float formatting failed"));
             }
             bytes.pop();
+            if matches!(c, 'g' | 'G')
+                && flags.contains('#')
+                && let Some(exp) = bytes.iter().position(|b| matches!(b, b'e' | b'E'))
+            {
+                // libc can drop trailing zeros when rounding carries into scientific notation.
+                // The exponent and sign do not count toward the requested significant digits.
+                let digits = bytes[..exp].iter().filter(|b| b.is_ascii_digit()).count();
+                let zeros = precision.saturating_sub(digits);
+                bytes.try_reserve(zeros).map_err(|_| Error::allocation())?;
+                bytes.splice(exp..exp, std::iter::repeat_n(b'0', zeros));
+            }
             let text = String::from_utf8_lossy(&bytes);
             if flags.contains('0') && !flags.contains('-') && width > text.len() {
                 let sign = usize::from(text.starts_with(['+', '-', ' ']));
