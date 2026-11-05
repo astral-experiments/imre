@@ -132,6 +132,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "zoneinfo._zoneinfo" => bundled_source!("zoneinfo/_zoneinfo.py"),
         // CPython 3.14.5 Lib/fractions.py and its numeric ABCs. See licenses/CPython.txt.
         "fractions" => bundled_source!("fractions.py"),
+        "ipaddress" => bundled_source!("ipaddress.py"),
         "numbers" => bundled_source!("numbers.py"),
         "statistics" => bundled_source!("statistics.py"),
         "_compat_pickle" => bundled_source!("_compat_pickle.py"),
