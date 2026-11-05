@@ -928,6 +928,8 @@ mod page_tests {
             (1032, 1010, 1014),
             (1056, 67, 99),
             (8192, 8171, 194),
+            (8194, 8171, 194),
+            (8191, 8183, 67),
             (4096, 4081, 1069),
         ] {
             let period = n / num_integer::gcd(n, step);
@@ -944,7 +946,7 @@ mod page_tests {
             ] {
                 let mut binary = Binary::empty(&[7], n.div_ceil(BLOCK)).unwrap();
                 assert!(binary.insert(at));
-                let mut expected = vec![false; n];
+                let mut expected = vec![false; binary.bits.len() * BLOCK];
                 let mut last = at;
                 expected[at] = true;
                 for _ in 0..count {
