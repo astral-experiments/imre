@@ -268,25 +268,37 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(result)));
     }
-    let trig: Option<fn(f64) -> f64> = match operation {
+    let unary: Option<fn(f64) -> f64> = match operation {
+        "asinh" => Some(f64::asinh),
+        // The platform libm retains precision for inputs just above -1.
+        "atanh" => Some(|x| atanh(x)),
         "cos" => Some(f64::cos),
+        "cosh" => Some(f64::cosh),
+        "exp" => Some(f64::exp),
         "sin" => Some(f64::sin),
+        "sinh" => Some(f64::sinh),
         "tan" => Some(f64::tan),
+        "tanh" => Some(f64::tanh),
         _ => None,
     };
-    if let Some(trig) = trig {
+    if let Some(unary) = unary {
         let x = as_double(ctx, value)?;
-        if x.is_infinite() {
+        if x.is_infinite() && matches!(operation, "cos" | "sin" | "tan") {
             return Err(Error::new(
                 "ValueError",
                 format!("expected a finite input, got {}", crate::floats::render(x)),
             ));
         }
-        return Ok(ctx.alloc(Value::Float(trig(x))));
-    }
-    if operation == "exp" {
-        let x = as_double(ctx, value)?;
-        let result = x.exp();
+        if operation == "atanh" && x.abs() >= 1.0 {
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "expected a number between -1 and 1, got {}",
+                    crate::floats::render(x)
+                ),
+            ));
+        }
+        let result = unary(x);
         if x.is_finite() && result.is_infinite() {
             return Err(Error::new("OverflowError", "math range error"));
         }
@@ -776,6 +788,7 @@ fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
 }
 
 unsafe extern "C" {
+    safe fn atanh(x: f64) -> f64;
     safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
     #[link_name = "nextafter"]
     safe fn c_nextafter(x: f64, y: f64) -> f64;

@@ -3347,8 +3347,10 @@ impl Context {
             self.bind(scope, "__builtins__", builtins);
         } else if name == "math" {
             // Re-executing the native loader preserves this module's attribute edits.
-            let nextafter = self.builtin("math.nextafter");
-            self.bind(scope, "nextafter", nextafter);
+            for name in ["asinh", "atanh", "cosh", "nextafter", "sinh", "tanh"] {
+                let function = self.builtin(&format!("math.{name}"));
+                self.bind(scope, name, function);
+            }
         }
         let origin = source.and_then(|(path, _)| {
             if locations.contains(path) {
