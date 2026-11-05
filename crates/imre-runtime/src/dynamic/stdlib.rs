@@ -2989,13 +2989,13 @@ pub(super) fn call(
     );
     let (max_args, keywords): (usize, &[&str]) = match name {
         "functools.cmp_to_key" => {
-            let comparator = functools::key_argument("cmp_to_key", "mycmp", args, kwargs)?;
+            let comparator = functools::key_argument("cmp_to_key", "mycmp", &args[1..], kwargs)?;
             return Ok(ctx.alloc(Value::KeyWrapper {
                 comparator,
                 object: None,
             }));
         }
-        "functools.reduce" => return functools::reduce(ctx, args, kwargs),
+        "functools.reduce" => return functools::reduce(ctx, &args[1..], kwargs),
         "functools._cache_wrapper" => (3, &[]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
