@@ -1,4 +1,5 @@
 import math
+import struct
 from math import fsum
 
 
@@ -11,6 +12,11 @@ def current():
     assert fsum([]) == 0.0
     assert fsum([math.inf, 1.0]) == math.inf
     assert math.isnan(fsum([math.nan, math.inf]))
+
+    # Keep NaN sign, payload, and signaling status observable across runtimes.
+    payloads = struct.unpack(">dd", bytes.fromhex("7ff8000000004321fff0000000000001"))
+    for values in ([payloads[1]], payloads, tuple(reversed(payloads))):
+        print(struct.pack(">d", fsum(values)).hex())
 
     interrupted = map(float, (math.inf, -math.inf, "stop"))
     for values, kind, message in (
