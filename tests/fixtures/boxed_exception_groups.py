@@ -14,6 +14,30 @@ class InvalidNotes:
         raise invalid_length
 
 
+def current():
+    class ReportedException(BaseException):
+        @property
+        def __class__(self):
+            if self.args:
+                raise self.args[0]
+            return Exception
+
+    # Match leaves by actual type, but choose the derived group type using isinstance.
+    leaf = ReportedException()
+    group = BaseExceptionGroup("mixed", [leaf, KeyboardInterrupt()])
+    part = group.subgroup(ReportedException)
+    assert type(part) is ExceptionGroup and part.exceptions[0] is leaf
+    assert group.subgroup(Exception) is None
+
+    invalid_class = LookupError("invalid reported class")
+    try:
+        BaseExceptionGroup("mixed", [KeyboardInterrupt(), ReportedException(invalid_class)])
+    except LookupError as exc:
+        assert exc is invalid_class
+    else:
+        raise AssertionError("discarded the exception from __class__")
+
+
 first = ValueError("bad header")
 second = ValueError("bad record")
 missing = KeyError("missing file")
@@ -60,3 +84,6 @@ for partition in (batch.subgroup, batch.split):
         assert exc is invalid_length
     else:
         raise AssertionError("discarded the exception from __len__")
+
+if __name__ == "__main__":
+    current()

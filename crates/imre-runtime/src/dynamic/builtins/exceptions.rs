@@ -89,7 +89,7 @@ pub(super) fn allocate_group(ctx: &mut Context, mut class: Id, args: &[Id]) -> R
     };
     let members = super::collections::construct(ctx, "tuple", &[source], &[])?;
     let exception = ctx.builtin("Exception");
-    let Value::Tuple(children) = ctx.heap.get(members) else {
+    let Some(children) = ctx.tuple_items(members)? else {
         unreachable!()
     };
     if children.is_empty() {
@@ -99,14 +99,14 @@ pub(super) fn allocate_group(ctx: &mut Context, mut class: Id, args: &[Id]) -> R
         ));
     }
     let mut only_exceptions = true;
-    for (index, &child) in children.iter().enumerate() {
-        let Value::Raised(error) = ctx.heap.get(child) else {
+    for (index, child) in children.into_iter().enumerate() {
+        if !matches!(ctx.heap.get(child), Value::Raised(_)) {
             return Err(Error::new(
                 "ValueError",
                 format!("Item {index} of second argument (exceptions) is not an exception"),
             ));
-        };
-        only_exceptions &= ctx.raised_error_matches(error, exception);
+        }
+        only_exceptions &= ctx.python_instance_check(child, exception)?;
     }
 
     if class == ctx.builtin("BaseExceptionGroup") && only_exceptions {
