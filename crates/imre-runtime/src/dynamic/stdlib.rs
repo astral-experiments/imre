@@ -53,6 +53,8 @@ pub(super) mod lzma;
 mod marshal;
 mod math;
 pub(super) use math::fraction_hash;
+#[cfg(target_os = "linux")]
+pub(super) mod epoll;
 mod metadata;
 pub(super) mod monitoring;
 pub(super) mod opcode;
@@ -678,8 +680,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
             ctx.int(i64::from(flag))
         }
-        ("selectors", "EVENT_READ") => ctx.int(1),
-        ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
         ("sys", "warnoptions") => {
             let options: Vec<String> = serde_json::from_value(ctx.config["warnoptions"].clone())
@@ -2569,6 +2569,14 @@ pub(super) fn call(
         if let Some(op) = operator::Operation::named(name) {
             return op.call(ctx, name, args, kwargs);
         }
+    }
+    #[cfg(target_os = "linux")]
+    if name == "select.epoll" {
+        return epoll::create(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(method) = name.strip_prefix("select.epoll.") {
+        return epoll::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("select.") {
         return select::call(ctx, method, args, kwargs);

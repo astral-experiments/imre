@@ -50,6 +50,8 @@ mod deque;
 mod digit_sums;
 pub(crate) use deque::Ring as DequeRing;
 mod difflib;
+#[cfg(target_os = "linux")]
+pub(crate) mod epoll;
 mod errno;
 pub(crate) mod exceptions;
 mod files;

@@ -25,6 +25,10 @@ pub(in crate::dynamic) struct Selector {
 
 /// Install the selector constructors and the concrete key class in one module scope.
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()> {
+    for (name, mask) in [("EVENT_READ", READ), ("EVENT_WRITE", WRITE)] {
+        let value = ctx.int(mask);
+        ctx.bind(scope, name, value);
+    }
     let selector = ctx.builtin("selectors.PollSelector");
     let select = ctx.builtin("selectors.SelectSelector");
     ctx.bind(scope, "SelectSelector", select);
@@ -45,7 +49,15 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
     let base = super::super::mapping_abc::class(ctx, "Mapping")?;
     let class = ctx.allocate_class("_SelectorMapping".into(), fields, vec![base])?;
     ctx.bind(scope, "_SelectorMapping", class);
-    let source = ctx.text(include_str!("selectors_base.py"));
+    #[cfg(target_os = "linux")]
+    let source = concat!(
+        include_str!("selectors_base.py"),
+        "\n",
+        include_str!("selectors_epoll.py")
+    );
+    #[cfg(not(target_os = "linux"))]
+    let source = include_str!("selectors_base.py");
+    let source = ctx.text(source);
     let filename = ctx.text("<imre stdlib>/selectors.py");
     let mode = ctx.text("exec");
     let code = ctx.compile_source(source, filename, mode, false)?;
@@ -304,15 +316,6 @@ fn close(ctx: &mut Context, handle: &RefCell<Selector>) -> Result<Id> {
     Ok(NONE)
 }
 
-fn mapping_owner(ctx: &mut Context, mapping: Id) -> Result<Rc<RefCell<Selector>>> {
-    let owner = ctx.lookup_attr(mapping, "_selector")?;
-    if let Value::Selector(handle) = ctx.heap.get(owner) {
-        Ok(handle.clone())
-    } else {
-        Err(Error::new("TypeError", "expected selector"))
-    }
-}
-
 fn mapping(
     ctx: &mut Context,
     method: &str,
@@ -327,15 +330,18 @@ fn mapping(
         ctx.set_attr(receiver, "_selector", selector)?;
         return Ok(NONE);
     }
-    let handle = mapping_owner(ctx, receiver)?;
+    let owner = ctx.lookup_attr(receiver, "_selector")?;
     match method {
         "__len__" | "__iter__" => {
             builtins::bind(method, args, kwargs, [])?;
-            let keys = handle.borrow().keys;
+            let keys = match ctx.heap.get(owner) {
+                Value::Selector(handle) => handle.borrow().keys,
+                _ => ctx.lookup_attr(owner, "_fd_to_key")?,
+            };
             if method == "__iter__" {
                 ctx.iterator(keys)
             } else {
-                Ok(ctx.int(ctx.dict_entries(keys).unwrap().len() as i64))
+                builtins::call(ctx, "len", &[keys], &[])
             }
         }
         "get" | "__getitem__" => {
@@ -347,13 +353,37 @@ fn mapping(
                 (obj, None)
             };
             let obj = obj.ok_or_else(|| Error::new("TypeError", "missing file object"))?;
-            let fd = reg_fd(ctx, &handle, obj)?;
-            // fileno() can replace the mapping's owner.
-            let keys = mapping_owner(ctx, receiver)?.borrow().keys;
-            registration(ctx, keys, fd)?
-                .map(|entry| entry.key)
-                .or(default)
-                .map_or_else(|| missing(ctx, obj), Ok)
+            let fd = match ctx.heap.get(owner) {
+                Value::Selector(handle) => {
+                    let handle = Rc::clone(handle);
+                    reg_fd(ctx, &handle, obj)?
+                }
+                _ => {
+                    let lookup = ctx.lookup_attr(owner, "_fileobj_lookup")?;
+                    ctx.call(lookup, vec![obj], Vec::new())?
+                }
+            };
+            // fileno() can replace the mapping's owner, even with a different selector type.
+            ctx.heap.reserve_temporaries(1)?;
+            ctx.heap.keep(fd);
+            let owner = ctx.lookup_attr(receiver, "_selector")?;
+            if let Value::Selector(handle) = ctx.heap.get(owner) {
+                let keys = handle.borrow().keys;
+                return registration(ctx, keys, fd)?
+                    .map(|entry| entry.key)
+                    .or(default)
+                    .map_or_else(|| missing(ctx, obj), Ok);
+            }
+            let keys = ctx.lookup_attr(owner, "_fd_to_key")?;
+            let get = ctx.lookup_attr(keys, "get")?;
+            let mut args = vec![fd];
+            args.extend(default);
+            let key = ctx.call(get, args, Vec::new())?;
+            if key == NONE && default.is_none() {
+                missing(ctx, obj)
+            } else {
+                Ok(key)
+            }
         }
         _ => unreachable!(),
     }

@@ -4378,6 +4378,10 @@ else:
         if sys.platform == "linux":
             plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", str(fixtures / "epoll_descriptors.py"))
+            plugin.write_bytes((fixtures / "boxed_epoll_capability.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current(False)")
+            compare("-IB", "-c", imports + "arithmetic.current(True)")
             execve = str(fixtures / "boxed_os_execve.py")
             compare("-IB", execve, "exports", "os")
             for mode in ("path", "fd"):

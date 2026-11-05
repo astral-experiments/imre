@@ -704,6 +704,7 @@ dependencies = [
 name = "imre-ast"
 version = "0.1.5"
 dependencies = [
+ "cc",
  "libc",
  "ruff_python_ast",
  "ruff_python_codegen",
