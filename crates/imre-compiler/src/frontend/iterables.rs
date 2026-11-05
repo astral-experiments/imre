@@ -32,6 +32,36 @@ impl Checker<'_> {
             let input = self.iteration_value(value, false, source)?;
             return self.collect_list(input, false, element, call);
         }
+        if let ast::Expr::Call(scan) = source
+            && self.is_accumulate(scan)
+        {
+            let args = self.accumulate_args(scan)?;
+            if let Some(expected) = element {
+                self.expect(expected, args.element, source)
+                    .map_err(|_| self.scoped_builtin_error("itertools.accumulate", scan))?;
+            }
+            if args.source.ty == Type::ListInt && args.function.ty == Type::None {
+                let mut operands = vec![args.source];
+                operands.extend(args.initial);
+                return Ok(args.scope.finish(Expr {
+                    ty: Type::ListInt,
+                    kind: ExprKind::Builtin(Builtin::ListAccumulate, operands),
+                }));
+            }
+            let input = self.prepare_accumulate(scan, args)?;
+            return self.collect_list(Iteration::Prepared(input), false, element, call);
+        }
+        if element.is_none_or(|ty| ty == Type::Int)
+            && let ast::Expr::Name(name) = source
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && self.types.cursor_element(self.locals[slot]) == Some(Type::Int)
+        {
+            let cursor = self.expr(source)?;
+            return Ok(Expr {
+                ty: Type::ListInt,
+                kind: ExprKind::Builtin(Builtin::CollectIntCursor, vec![cursor]),
+            });
+        }
         if let Some(diff) = self.materialize_ndiff(source)? {
             if let Some(element) = element {
                 self.expect(element, Type::Str, source)?;

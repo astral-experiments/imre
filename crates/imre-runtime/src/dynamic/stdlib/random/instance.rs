@@ -41,7 +41,14 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     attach_state(ctx, singleton, RandomState::Shared);
     ctx.set_attr(singleton, "gauss_next", NONE)?;
     ctx.bind(scope, "_inst", singleton);
-    for name in ["seed", "random", "getrandbits", "randbytes", "expovariate"] {
+    for name in [
+        "seed",
+        "random",
+        "getrandbits",
+        "randbytes",
+        "sample",
+        "expovariate",
+    ] {
         let bound = ctx.lookup_attr(singleton, name)?;
         ctx.bind(scope, name, bound);
     }

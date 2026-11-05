@@ -2,7 +2,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::boolean::{Context as BooleanContext, Flow, Target};
-use super::{Body, CallArguments, DefinitionName, Function};
+use super::{Body, CallArguments, DefinitionName, Function, permanent};
 
 enum Element<'a> {
     Value(&'a ast::Expr),
@@ -67,11 +67,19 @@ impl Function<'_, '_> {
 
     fn expr_inner(&mut self, expr: &ast::Expr, partition: Option<(u32, String)>) -> String {
         match expr {
-            ast::Expr::NoneLiteral(_) => "0".into(),
-            ast::Expr::EllipsisLiteral(_) => "3".into(),
-            ast::Expr::BooleanLiteral(v) => if v.value { "2" } else { "1" }.into(),
+            ast::Expr::NoneLiteral(_) => permanent::NONE.to_string(),
+            ast::Expr::EllipsisLiteral(_) => permanent::ELLIPSIS.to_string(),
+            ast::Expr::BooleanLiteral(v) => (if v.value {
+                permanent::TRUE
+            } else {
+                permanent::FALSE
+            })
+            .to_string(),
             ast::Expr::NumberLiteral(v) => match &v.value {
-                ast::Number::Int(n) => self.integer(n),
+                ast::Number::Int(n) => match n.as_i64() {
+                    Some(value) => self.integer(value),
+                    None => self.lit(0, n.to_string().as_bytes()),
+                },
                 ast::Number::Float(value) => self.lit(3, &value.to_le_bytes()),
                 ast::Number::Complex { real, imag } => {
                     self.lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat())
@@ -101,9 +109,14 @@ impl Function<'_, '_> {
                     .map(|e| e.as_deref().map_or_else(|| "0".into(), |e| self.expr(e)));
                 self.op("slice_object", &[&start, &stop, &step])
             }
-            ast::Expr::List(v) => self.display("list", &v.elts),
+            ast::Expr::List(v) => self
+                .permanent_sequence(&v.elts, false)
+                .unwrap_or_else(|| self.display("list", &v.elts)),
             ast::Expr::Set(v) => self.display("set", &v.elts),
             ast::Expr::Tuple(v) => {
+                if let Some(tuple) = self.permanent_sequence(&v.elts, true) {
+                    return tuple;
+                }
                 if let Some(tuple) = self.literal_string_tuple(&v.elts) {
                     return tuple;
                 }
@@ -479,6 +492,40 @@ impl Function<'_, '_> {
             "i64"
         };
         self.value(&format!("phi {ty} {}", incoming.join(", ")))
+    }
+
+    /// Put immutable element handles in the module data for one list or tuple construction.
+    fn permanent_sequence(&mut self, elements: &[ast::Expr], tuple: bool) -> Option<String> {
+        if elements.is_empty() {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        for element in elements {
+            let id = match element {
+                ast::Expr::NoneLiteral(_) => permanent::NONE,
+                ast::Expr::EllipsisLiteral(_) => permanent::ELLIPSIS,
+                ast::Expr::BooleanLiteral(v) => {
+                    if v.value {
+                        permanent::TRUE
+                    } else {
+                        permanent::FALSE
+                    }
+                }
+                ast::Expr::NumberLiteral(v) => {
+                    let ast::Number::Int(n) = &v.value else {
+                        return None;
+                    };
+                    permanent::small_integer_id(n.as_i64()?)?
+                }
+                _ => return None,
+            };
+            bytes.extend_from_slice(&u16::try_from(id).ok()?.to_le_bytes());
+        }
+        let data = self.output.data(&bytes);
+        Some(self.checked(&format!(
+            "call i64 @imre_dyn_permanent_sequence(ptr %ctx, ptr {data}, i64 {}, i1 {tuple})",
+            bytes.len()
+        )))
     }
 
     fn display(&mut self, kind: &str, elements: &[ast::Expr]) -> String {

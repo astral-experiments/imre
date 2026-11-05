@@ -160,7 +160,7 @@ TestCase._addUnexpectedSuccess = case._addUnexpectedSuccess
 
 from unittest import loader, signals, util
 from unittest.main import TestProgram, main
-from unittest.signals import registerResult, removeResult
+from unittest.signals import installHandler, registerResult, removeHandler, removeResult
 
 
 # Lazy import of IsolatedAsyncioTestCase from .async_case

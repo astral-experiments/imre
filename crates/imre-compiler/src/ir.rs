@@ -973,6 +973,8 @@ pub(crate) enum Builtin {
     TupleBufferPush,
     TupleBufferFinish,
     Cycle,
+    /// A first-class cursor that owns its current numeric prefix.
+    AccumulateCursor,
     SysStdout,
     SysHasStdout,
     SysOriginalOutput {
@@ -1311,6 +1313,10 @@ pub(crate) enum Builtin {
     /// Eagerly converts immutable string code points into an integer list,
     /// preserving `list(map(int, text))` errors without character objects.
     StringIntList,
+    /// Materialize exact integer prefixes, optionally starting with an initial value.
+    ListAccumulate,
+    /// Consume the remaining owned values of an integer cursor into a fresh list.
+    CollectIntCursor,
     /// Two nonnegative 31-bit digit subtotals in one immediate, or -1 for fallback.
     TryDigitSums([[u8; 10]; 2]),
     Bytes,
@@ -1415,6 +1421,9 @@ pub(crate) enum Builtin {
     /// Prepare small decimal fields from one private immutable split source.
     SplitIntSource(u8),
     SplitIntCached(u32),
+    SplitTextSource(u8),
+    SplitTextLen,
+    SplitTextField(u8),
     SplitLines,
     /// Only the first line and a joined remainder can be observed.
     JoinedSplitLines,

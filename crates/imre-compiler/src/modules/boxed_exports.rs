@@ -10,6 +10,53 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             }
         };
     }
+    macro_rules! socket_exports {
+        ($module:literal $(, $member:literal)* $(,)?) => {
+            exports!(
+                $module,
+                "AF_INET6",
+                "AI_NUMERICHOST",
+                "AI_NUMERICSERV",
+                "AI_PASSIVE",
+                "EAI_NODATA",
+                "EAI_NONAME",
+                "EAI_SERVICE",
+                "IPPROTO_IPV6",
+                "IPPROTO_UDP",
+                "IPV6_V6ONLY",
+                "NI_DGRAM",
+                "NI_NAMEREQD",
+                "NI_NOFQDN",
+                "NI_NUMERICHOST",
+                "NI_NUMERICSERV",
+                "SOCK_DGRAM",
+                "SOCK_RAW",
+                "SOCK_RDM",
+                "SOCK_SEQPACKET",
+                "SOL_TCP",
+                "SO_REUSEPORT",
+                "SocketType",
+                "close",
+                "getaddrinfo",
+                "gethostbyaddr",
+                "gethostbyname",
+                "gethostname",
+                "getnameinfo",
+                "getservbyname",
+                "getservbyport",
+                "has_ipv6",
+                "if_indextoname",
+                "if_nameindex",
+                "if_nametoindex",
+                "inet_aton",
+                "inet_ntoa",
+                "inet_ntop",
+                "inet_pton",
+                "socketpair",
+                $($member,)*
+            )
+        };
+    }
     let qualified = match module {
         M::Binascii => exports!("binascii", "a2b_qp", "b2a_qp", "crc32"),
         M::Blake2 => exports!(
@@ -101,6 +148,26 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "shake_256"
         ),
         M::SignalNative => exports!("_signal", "SIGALRM", "SIGINT", "SIGTERM"),
+        M::SocketNative => socket_exports!(
+            "_socket",
+            "AF_INET",
+            "AF_UNIX",
+            "AF_UNSPEC",
+            "IPPROTO_TCP",
+            "SHUT_RD",
+            "SHUT_RDWR",
+            "SHUT_WR",
+            "SOCK_STREAM",
+            "SOL_SOCKET",
+            "SOMAXCONN",
+            "SO_REUSEADDR",
+            "SO_SNDBUF",
+            "SO_TYPE",
+            "TCP_NODELAY",
+            "error",
+            "gaierror",
+            "socket"
+        ),
         M::Thread => exports!(
             "_thread",
             "_count",
@@ -432,6 +499,15 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "pack_into",
             "unpack",
             "unpack_from"
+        ),
+        M::Socket => socket_exports!(
+            "socket",
+            "AddressFamily",
+            "AddressInfo",
+            "SocketKind",
+            "create_connection",
+            "create_server",
+            "has_dualstack_ipv6"
         ),
         M::Sys => exports!(
             "sys",

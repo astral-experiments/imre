@@ -1,7 +1,7 @@
 //! Runtime for checked Imre IR on 64-bit hosts.
 //!
 //! Integer handles are either signed 63-bit values tagged with a low one bit, or
-//! live `Shared<BigInt>` pointers to values outside that range. This canonical form
+//! standalone or packed owners of digits outside that range. This canonical form
 //! is always nonzero and lets compiler range proofs imply representation;
 //! extension adapters must normalize incoming integers before exposing them to
 //! generated code.
@@ -55,6 +55,8 @@ mod python_hash;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod run_start;
 
+mod prefix_words;
+
 use objects::exceptions::{Error, Kind, Result, finish};
 
 use num_bigint::BigInt;
@@ -79,6 +81,14 @@ pub const MAX_LIST_LEN: usize = (isize::MAX as usize) / 8;
 #[repr(transparent)]
 struct Int(usize);
 
+/// Standalone immutable digits leave bit three free for a packed prefix slot.
+#[repr(C, align(16))]
+struct HeapInt(BigInt);
+
+fn wide_owner(value: BigInt) -> Shared<HeapInt> {
+    Shared::new(HeapInt(value))
+}
+
 const _: () =
     assert!(size_of::<Int>() == 8 && align_of::<Int>() == 8 && MAX_LIST_LEN <= MAX_SMALL as usize);
 
@@ -97,14 +107,14 @@ impl Int {
         {
             return small;
         }
-        Self(Shared::into_raw(Shared::new(value)) as usize)
+        Self(Shared::into_raw(wide_owner(value)) as usize)
     }
 
     fn try_new(value: BigInt) -> std::result::Result<Self, allocator_api2::alloc::AllocError> {
         if let Some(small) = value.to_i64().and_then(Self::small) {
             return Ok(small);
         }
-        Shared::try_new(value).map(|owner| Self(Shared::into_raw(owner) as usize))
+        Shared::try_new(HeapInt(value)).map(|owner| Self(Shared::into_raw(owner) as usize))
     }
 
     fn try_from_i64(value: i64) -> std::result::Result<Self, allocator_api2::alloc::AllocError> {
@@ -125,22 +135,50 @@ impl Int {
     }
 
     /// Borrows the allocation while the owning handle remains live.
+    #[inline]
     fn big(&self) -> Cow<'_, BigInt> {
         if let Some(value) = self.as_small() {
             Cow::Owned(BigInt::from(value))
+        } else if self.0 & prefix_words::TAG != 0 {
+            Cow::Owned(prefix_words::number(self))
         } else {
-            // SAFETY: Int's invariant owns a live Shared<BigInt> for an untagged handle.
-            Cow::Borrowed(unsafe { &*(self.0 as *const BigInt) })
+            // SAFETY: this aligned word owns standalone immutable digits.
+            Cow::Borrowed(unsafe { &(*(self.0 as *const HeapInt)).0 })
+        }
+    }
+
+    fn is_prefix(&self) -> bool {
+        self.0 & (prefix_words::TAG | 1) == prefix_words::TAG
+    }
+
+    fn bits(&self) -> u64 {
+        if let Some(n) = self.as_small() {
+            u64::from(u64::BITS - n.unsigned_abs().leading_zeros())
+        } else if self.is_prefix() {
+            prefix_words::bits(self)
+        } else {
+            self.big().bits()
         }
     }
 
     /// Counts magnitude bits, excluding the sign and leading zeroes.
     fn bit_length(&self) -> Self {
-        let bits = self.as_small().map_or_else(
-            || self.big().bits(),
-            |n| u64::from(u64::BITS - n.unsigned_abs().leading_zeros()),
-        );
-        Self::from_usize(bits as usize)
+        Self::from_usize(self.bits() as usize)
+    }
+
+    /// Add tagged operands directly, including when only one input is wide.
+    fn add(&self, other: &Self) -> Self {
+        match (self.as_small(), other.as_small()) {
+            // The full sum of two signed 63-bit values fits i64.
+            (Some(a), Some(b)) => Self::from(a + b),
+            // The numerical backing is immutable. Boxed operations give each
+            // result its own Python object independently of these shared digits.
+            (Some(0), None) => other.clone(),
+            (None, Some(0)) => self.clone(),
+            (Some(a), None) => Self::new(other.big().as_ref() + a),
+            (None, Some(b)) => Self::new(self.big().as_ref() + b),
+            (None, None) => Self::new(self.big().as_ref() + other.big().as_ref()),
+        }
     }
 
     fn to_i64(&self) -> Option<i64> {
@@ -185,7 +223,13 @@ impl Clone for Int {
     fn clone(&self) -> Self {
         if self.as_small().is_none() {
             // SAFETY: the original Int owns a live strong reference.
-            unsafe { Shared::increment_strong_count(self.0 as *const BigInt) };
+            unsafe {
+                if self.0 & prefix_words::TAG != 0 {
+                    prefix_words::retain(self.0);
+                } else {
+                    Shared::increment_strong_count(self.0 as *const HeapInt);
+                }
+            }
         }
         Self(self.0)
     }
@@ -195,7 +239,13 @@ impl Drop for Int {
     fn drop(&mut self) {
         if self.as_small().is_none() {
             // SAFETY: this Int owns exactly the reference being released.
-            unsafe { Shared::decrement_strong_count(self.0 as *const BigInt) };
+            unsafe {
+                if self.0 & prefix_words::TAG != 0 {
+                    prefix_words::release(self.0);
+                } else {
+                    Shared::decrement_strong_count(self.0 as *const HeapInt);
+                }
+            }
         }
     }
 }
@@ -904,12 +954,14 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
 
 /// Arithmetic shared by fixed-layout and runtime-discovered Python modules.
 fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
+    if op == 0 {
+        return Ok(a.add(b));
+    }
     if matches!(op, 8 | 9) {
         return integer_shift(a, b, op == 8);
     }
     if let (Some(x), Some(y)) = (a.as_small(), b.as_small()) {
         let result = match op {
-            0 => x.checked_add(y),
             1 => x.checked_sub(y),
             2 => x.checked_mul(y),
             5 => Some(x & y),
@@ -937,7 +989,6 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     }
     let (a, b) = (a.big(), b.big());
     let result = match op {
-        0 => a.as_ref() + b.as_ref(),
         1 => a.as_ref() - b.as_ref(),
         2 => a.as_ref() * b.as_ref(),
         5 => a.as_ref() & b.as_ref(),
@@ -2244,6 +2295,48 @@ pub unsafe extern "C" fn imre_list_sum(list: *const List, start: usize) -> usize
     unsafe { imre_int_binary(start, subtotal.0, 0) }
 }
 
+/// Materializes the running totals of a rooted integer list into one output buffer.
+///
+/// # Safety
+/// The list and the optional nonzero canonical integer handle must stay live for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_accumulate(list: *const List, initial: usize) -> *const List {
+    // SAFETY: a nonzero initial argument borrows the caller's rooted integer.
+    let initial = (initial != 0).then(|| unsafe { Int::borrow(initial) });
+    // SAFETY: the exact source stays rooted and integer addition cannot invoke Python.
+    let values = unsafe {
+        (&*list)
+            .0
+            .with(|items| integer_prefixes(items, initial.as_deref()))
+    };
+    match values.and_then(|v| ListOwner::try_new(List::new(v)).map_err(|_| Error::allocation())) {
+        Ok(list) => ListOwner::into_raw(list),
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
+fn integer_prefixes(items: &[Int], initial: Option<&Int>) -> Result<Vec<Int>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(items.len() + usize::from(initial.is_some()))
+        .map_err(|_| Error::allocation())?;
+    let mut items = items.iter();
+    if let Some(first) = initial.or_else(|| items.next()) {
+        values.push(first.clone());
+        while let Some(item) = items.next() {
+            let previous = values.last().unwrap();
+            let total = previous.add(item);
+            let consecutive_wide = (previous.0 | total.0) & 1 == 0;
+            values.push(total);
+            if consecutive_wide {
+                prefix_words::extend(&mut values, items.as_slice())?;
+                break;
+            }
+        }
+    }
+    Ok(values)
+}
+
 /// Shares exact reduction between whole lists and normalized slice selections.
 /// Cloning the borrowed iterator permits a checked fast pass without acquiring
 /// element owners; neither pass can mutate the source or call user code.
@@ -2268,6 +2361,11 @@ fn sum_ints<'a>(values: impl Iterator<Item = &'a Int> + Clone) -> Int {
             // [-2^62+2^31, 2^62-2^32+1], including every prefix.
             return Int::small(sum).unwrap();
         }
+    }
+    if values.clone().any(Int::is_prefix)
+        && let Some(sum) = prefix_words::sum(values.clone())
+    {
+        return sum;
     }
     values.fold(Int::small(0).unwrap(), |sum, value| {
         // SAFETY: both owned/borrowed canonical integers remain live for addition.
@@ -2643,7 +2741,7 @@ mod tests {
 
     #[test]
     fn paired_append_preserves_order_and_independent_bigint_owners() {
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&big);
         let big_word = Shared::as_ptr(&big) as usize;
         let negative = Int::small(-7).unwrap().0;
@@ -2735,8 +2833,8 @@ mod tests {
 
     #[test]
     fn list_sum_borrows_aliased_inputs_and_owns_results_after_mutation() {
-        let positive = Shared::new(BigInt::from(1) << 120_u32);
-        let negative = Shared::new(-positive.as_ref());
+        let positive = crate::wide_owner(BigInt::from(1) << 120_u32);
+        let negative = wide_owner(-&positive.0);
         let positive_weak = Shared::downgrade(&positive);
         let negative_weak = Shared::downgrade(&negative);
         let list = ListOwner::new(List::new(vec![
@@ -2750,7 +2848,7 @@ mod tests {
         // mutation occurs between reductions, after all storage borrows end.
         let result = unsafe {
             let result = Int(imre_list_sum(ListOwner::as_ptr(&list), start));
-            assert_eq!(result.big().as_ref(), &(positive.as_ref() + 7));
+            assert_eq!(result.big().as_ref(), &(&positive.0 + 7));
             assert_eq!(Shared::strong_count(&positive), 2);
             assert_eq!(Shared::strong_count(&negative), 2);
             assert_eq!(
@@ -2765,7 +2863,7 @@ mod tests {
         drop(list);
         assert_eq!(Shared::strong_count(&positive), 1);
         assert_eq!(Shared::strong_count(&negative), 1);
-        let expected = positive.as_ref() + 7;
+        let expected = &positive.0 + 7;
         drop(positive);
         drop(negative);
         assert!(positive_weak.upgrade().is_none());
@@ -2808,7 +2906,7 @@ mod tests {
     #[test]
     fn list_header_reuse_releases_elements_and_keeps_buffers_separate() {
         std::thread::spawn(|| {
-            let big = Shared::new(BigInt::from(1_u8) << 200_u32);
+            let big = crate::wide_owner(BigInt::from(1_u8) << 200_u32);
             let weak = Shared::downgrade(&big);
             let integer = Int(Shared::into_raw(big) as usize);
             let list = new_list(vec![integer.clone(), integer]);
@@ -2889,7 +2987,7 @@ mod tests {
         struct Teardown(Arc<AtomicBool>);
         impl Drop for Teardown {
             fn drop(&mut self) {
-                let big = Shared::new(BigInt::from(1_u8) << 200_u32);
+                let big = crate::wide_owner(BigInt::from(1_u8) << 200_u32);
                 let weak = Shared::downgrade(&big);
                 let list = new_list(vec![Int(Shared::into_raw(big) as usize)]);
                 // SAFETY: this sole owner must be released even after cache TLS
@@ -2935,7 +3033,7 @@ mod tests {
 
     #[test]
     fn growing_a_list_reuses_storage_and_moves_its_bigint_owners() {
-        let bigint = Shared::new(BigInt::from(1_u128 << 100));
+        let bigint = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&bigint);
         let mut values = Vec::with_capacity(4);
         values.push(Int(Shared::into_raw(bigint) as usize));
@@ -3045,7 +3143,7 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let bigint = Shared::new(BigInt::from(1_u128 << 100));
+        let bigint = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&bigint);
         let mut values = Vec::with_capacity(8);
         values.push(Int(Shared::into_raw(bigint) as usize));
@@ -3089,7 +3187,7 @@ mod tests {
     #[test]
     fn list_drop_preserves_bigint_owners_at_vector_boundaries() {
         for position in [0, 1, 7, 8, 15, 16, 32] {
-            let bigint = Shared::new(BigInt::from(1_u128 << 100));
+            let bigint = crate::wide_owner(BigInt::from(1_u128 << 100));
             let weak = Shared::downgrade(&bigint);
             let mut values = (0..33)
                 .map(|value| Int::small(value - 16).unwrap())
@@ -3366,14 +3464,14 @@ mod tests {
                 objects::imre_object_release(error);
             }
         }
-        let owner = Shared::new(BigInt::from(1) << 130_u32);
+        let owner = crate::wide_owner(BigInt::from(1) << 130_u32);
         let value = Int(Shared::into_raw(owner.clone()) as usize);
         let zero = Int::small(0).unwrap();
         // SAFETY: zero shifting returns an independent owner of the live input.
         let copy = Int(unsafe { imre_int_binary(value.0, zero.0, 8) });
         assert_eq!(Shared::strong_count(&owner), 3);
         drop(value);
-        assert_eq!(copy.big().as_ref(), owner.as_ref());
+        assert_eq!(copy.big().as_ref(), &owner.0);
         drop(copy);
         assert_eq!(Shared::strong_count(&owner), 1);
         assert_eq!(imre_error_pending(), 0);
@@ -3513,7 +3611,7 @@ mod tests {
 
     #[test]
     fn decoded_indices_acquire_before_replacing_the_only_stored_owner() {
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&big);
         let word = Shared::as_ptr(&big) as usize;
         let list = imre_list_new();
@@ -3543,8 +3641,8 @@ mod tests {
 
     #[test]
     fn borrowed_indices_and_list_copy_preserve_bigint_owners() {
-        let source = Shared::new(BigInt::from(1_u128 << 100));
-        let displaced = Shared::new(BigInt::from(1_u128 << 120));
+        let source = crate::wide_owner(BigInt::from(1_u128 << 100));
+        let displaced = crate::wide_owner(BigInt::from(1_u128 << 120));
         let source_weak = Shared::downgrade(&source);
         let displaced_weak = Shared::downgrade(&displaced);
         let list = imre_list_new();
@@ -3593,7 +3691,7 @@ mod tests {
     #[test]
     fn append_windows_publish_small_words_and_keep_owned_bigint_reads() {
         let list = imre_list_new();
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&big);
         let mut window = ListAppendWindow {
             owner: std::ptr::null(),
@@ -3631,7 +3729,7 @@ mod tests {
 
     #[test]
     fn proven_list_reads_borrow_boundary_values_without_acquiring_owners() {
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&big);
         let list = imre_list_new();
         // SAFETY: the empty view is never dereferenced. All later reads are

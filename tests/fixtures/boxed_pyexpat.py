@@ -219,6 +219,17 @@ def buffered_text_after_syntax_error():
         assert events == ["good"]
 
 
+def start_doctype():
+    parser = expat.ParserCreate()
+    events = []
+    parser.StartDoctypeDeclHandler = lambda *args: events.append(("doctype", args))
+    parser.StartElementHandler = lambda name, attrs: events.append(("element", name))
+    parser.Parse('<!DOCTYPE r PUBLIC "sample" "local.dtd" [', False)
+    parser.Parse(']><r/>', True)
+    assert events == [("doctype", ("r", "local.dtd", "sample", 1)), ("element", "r")]
+    assert type(events[0][1][-1]) is int
+
+
 def malformed():
     parser = expat.ParserCreate()
     parser.Parse(b"<r>\n", False)
@@ -240,5 +251,6 @@ replace_buffered_handler(False)
 replace_buffered_handler(True)
 resize_during_flush()
 buffered_text_after_syntax_error()
+start_doctype()
 malformed()
 print("pyexpat ok")

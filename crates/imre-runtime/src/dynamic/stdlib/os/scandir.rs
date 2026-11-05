@@ -123,9 +123,15 @@ pub(in crate::dynamic) fn iterator_repr(scan: &Rc<Scan>) -> String {
     format!("<posix.ScandirIterator object at {:p}>", Rc::as_ptr(scan))
 }
 
+/// Close the directory and stop scheduling cleanup for its iterator.
+fn close(ctx: &mut Context, owner: Id, scan: &Scan) {
+    scan.directory.borrow_mut().close();
+    ctx.heap.disarm_finalizer(owner);
+}
+
 pub(in crate::dynamic) fn finalize(ctx: &mut Context, owner: Id, scan: &Rc<Scan>) {
     if scan.directory.borrow().is_open() {
-        scan.directory.borrow_mut().close();
+        close(ctx, owner, scan);
         let iterator = iterator_repr(scan);
         if let Err(error) = ctx.emit_builtin_warning_with_source(
             crate::objects::exceptions::Kind::ResourceWarning,
@@ -156,12 +162,17 @@ fn spelling(ctx: &mut Context, bytes: Vec<u8>, as_bytes: bool) -> Result<Id> {
     Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?))
 }
 
-pub(in crate::dynamic) fn advance(ctx: &mut Context, scan: Rc<Scan>) -> Result<Option<Id>> {
-    let next = scan
-        .directory
-        .borrow_mut()
-        .next_entry()
-        .map_err(|error| path_error(ctx, error, scan.source.get()))?;
+pub(in crate::dynamic) fn advance(
+    ctx: &mut Context,
+    owner: Id,
+    scan: Rc<Scan>,
+) -> Result<Option<Id>> {
+    let next = scan.directory.borrow_mut().next_entry();
+    // End-of-directory and read failures both close the native directory stream.
+    if !matches!(next, Ok(Some(_))) {
+        ctx.heap.disarm_finalizer(owner);
+    }
+    let next = next.map_err(|error| path_error(ctx, error, scan.source.get()))?;
     let Some(entry) = next else {
         return Ok(None);
     };
@@ -189,7 +200,7 @@ pub(in crate::dynamic) fn advance(ctx: &mut Context, scan: Rc<Scan>) -> Result<O
         })))
     })();
     if result.is_err() {
-        scan.directory.borrow_mut().close();
+        close(ctx, owner, &scan);
     }
     result.map(Some)
 }
@@ -303,9 +314,9 @@ pub(in crate::dynamic) fn method(
                 finalize(ctx, id, &scan);
                 NONE
             }
-            "__next__" => advance(ctx, scan)?.ok_or_else(|| Error::new("StopIteration", ""))?,
+            "__next__" => advance(ctx, id, scan)?.ok_or_else(|| Error::new("StopIteration", ""))?,
             "close" | "__exit__" => {
-                scan.directory.borrow_mut().close();
+                close(ctx, id, &scan);
                 NONE
             }
             _ => unreachable!(),

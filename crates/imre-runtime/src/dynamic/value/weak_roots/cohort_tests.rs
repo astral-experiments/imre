@@ -35,10 +35,10 @@ fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
     heap.release_temporaries_since(0);
 
     heap.learn_finalizer_paths(globals, stdin.as_ref());
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), false));
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 
-    for (list, before_discard) in [(refs, true), (held, false)] {
+    for (list, before_discard) in [(refs, Some(0)), (held, None)] {
         let Value::List(items) = heap.get_mut(list) else {
             unreachable!()
         };
@@ -49,23 +49,55 @@ fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
         };
         items[0] = old;
     }
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 
     let extra = ctx.instance(class, None);
     let heap = &mut ctx.heap;
     heap.register_finalizer(extra);
     heap.release_temporaries_since(0);
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), false));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
     heap.keep(extra);
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), false));
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
     heap.release_temporaries_since(0);
     heap.take_finalizer(extra, false);
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 
     heap.leave(NONE, false);
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), false));
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+}
+
+#[test]
+fn published_loop_sources_and_peeked_items_keep_finalizers_alive() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let class = ctx.builtin("object");
+    let scope = ctx.scope("sample", None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let source = ctx.instance(class, None);
+    let item = ctx.instance(class, None);
+    let cursor = ctx.alloc(Value::LoopIterator {
+        source,
+        peeked: Some(item),
+    });
+    let globals = ctx.finalizer_path_roots();
+    let stdin = stdlib::io::rooted_input_chain(&ctx);
+    let heap = &mut ctx.heap;
+    heap.register_finalizer(source);
+    heap.register_finalizer(item);
+    heap.release_temporaries_since(0);
+    heap.keep(cursor);
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(1)));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+
+    heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
+        unreachable!();
+    };
+    *peeked = None;
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 }
 
 #[test]
@@ -165,4 +197,59 @@ fn late_dictionary_values_keep_the_full_ordinary_search_budget() {
 
     ctx.heap.learn_weak_roots(registry, NONE);
     assert!(ctx.heap.cached_weak_roots([registry, NONE]));
+}
+
+#[test]
+fn iterator_paths_recheck_the_suspended_operands() {
+    use super::{Heap, RootPaths};
+
+    let mut heap = Heap::new();
+    let target = heap.alloc(Value::List(Vec::new()));
+    let cursor = heap.alloc(Value::LoopIterator {
+        source: NONE,
+        peeked: Some(target),
+    });
+    let generator = heap.alloc(Value::Generator {
+        owner: FrameOwner::Module(NONE),
+        frame: None,
+        name: NONE,
+        qualname: NONE,
+        lineno: 0,
+        code: NONE,
+        scope: NONE,
+        iterators: vec![cursor],
+        protected: Vec::new(),
+        offset: Some(0),
+        running: false,
+    });
+    let mapped = heap.alloc(Value::Map {
+        function: NONE,
+        inputs: [generator].into(),
+        strict: false,
+    });
+    let zipped = heap.alloc(Value::Zip {
+        inputs: [mapped].into(),
+        strict: false,
+    });
+    let globals = [zipped, NONE];
+    let paths = RootPaths::discover(&heap, globals, [target].into_iter(), false, false).unwrap();
+    assert!(paths.nodes.contains(&target));
+    assert!(paths.valid(&heap, globals));
+
+    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
+        unreachable!()
+    };
+    *peeked = None;
+    assert!(!paths.valid(&heap, globals));
+    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
+        unreachable!()
+    };
+    *peeked = Some(target);
+    assert!(paths.valid(&heap, globals));
+
+    let Value::Generator { iterators, .. } = heap.get_mut(generator) else {
+        unreachable!()
+    };
+    iterators.clear();
+    assert!(!paths.valid(&heap, globals));
 }

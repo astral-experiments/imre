@@ -58,6 +58,11 @@ impl<'a> Links<'a> {
             Value::Dict(entries) => ([None; 2], Members::Values(entries)),
             Value::Set { entries, .. } => ([None; 2], Members::Keys(entries)),
             Value::List(items) | Value::Tuple(items) => ([None; 2], Members::Sequence(items)),
+            Value::Map { inputs, .. } | Value::Zip { inputs, .. } => {
+                ([None; 2], Members::Sequence(inputs))
+            }
+            Value::Generator { iterators, .. } => ([None; 2], Members::Sequence(iterators)),
+            Value::LoopIterator { source, peeked } => ([Some(*source), *peeked], Members::None),
             Value::Instance {
                 fields,
                 namespace,
@@ -358,7 +363,7 @@ impl Heap {
             .copied()
             .filter(|id| {
                 !stdin.is_some_and(|input| input.contains(id))
-                    && !self.operand_keeps_finalizer(*id, true)
+                    && !self.operand_keeps_finalizer(*id, 0)
             });
         let Some(paths) = RootPaths::discover(self, globals, endpoints, true, false) else {
             return false;
@@ -371,40 +376,36 @@ impl Heap {
         !self.finalizer_roots.nodes.is_empty()
     }
 
-    fn operand_keeps_finalizer(&self, owner: Id, before_discard: bool) -> bool {
-        self.frames
-            .iter()
-            .rev()
-            .skip(usize::from(before_discard))
-            .take(24)
-            .any(|frame| {
-                frame
-                    .live
-                    .iter()
-                    .take(8)
-                    .any(|root| self.short_path_keeps_owner(*root, owner))
-            })
+    /// Check published operands in the caller frames and the surviving prefix of the active frame.
+    fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+        let mut frames = self.frames.iter().rev();
+        let current = frames
+            .next()
+            .into_iter()
+            .flat_map(|frame| frame.live.iter().take(retained_current.min(8)));
+        let callers = frames.take(24).flat_map(|frame| frame.live.iter().take(8));
+        current
+            .chain(callers)
+            .any(|root| self.short_path_keeps_owner(*root, owner))
     }
 
-    /// Scopes and globals survive dropping the current frame's temporaries. During the
-    /// acyclic-finalizer check the current frame's published operands are also roots.
+    /// A pending discard preserves the active frame's operands below its mark. It must also
+    /// preserve descriptor owners and weak references before a release can skip its sweep.
     pub(in crate::dynamic) fn cached_finalizers_kept(
         &self,
         globals: [Id; 2],
         stdin: Option<&[Id; 3]>,
-        before_discard: bool,
+        discard_from: Option<usize>,
     ) -> bool {
-        if !self.finalizer_roots.valid(self, globals) {
-            return false;
-        }
+        let paths_valid = self.finalizer_roots.valid(self, globals);
         let kept = |owner: &Id| {
-            self.finalizer_roots.nodes.contains(owner)
+            (paths_valid && self.finalizer_roots.nodes.contains(owner))
                 || stdin.is_some_and(|input| input.contains(owner))
-                || self.operand_keeps_finalizer(*owner, before_discard)
+                || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
                 || self.bound_in_active_frame(*owner)
         };
         self.ordinary_finalizers.iter().all(&kept)
-            && (!before_discard
+            && (discard_from.is_none()
                 || (self.descriptor_owners.iter().all(kept)
                     && (!self.has_weak_values || self.weak_values_kept_by(globals[0], globals[1]))))
     }

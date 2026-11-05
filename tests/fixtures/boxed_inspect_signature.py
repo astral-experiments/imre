@@ -1,5 +1,7 @@
+import builtins
 from collections import OrderedDict
 import inspect
+import sys
 import warnings
 from annotationlib import Format
 from functools import Placeholder, partial, partialmethod, update_wrapper
@@ -421,6 +423,19 @@ assert str(inspect.signature(object.__new__, follow_wrapped=False)) == "(*args, 
 assert getfullargspec(object.__new__).args == ["type"]
 assert str(inspect.signature("|".join)) == "(iterable, /)"
 assert str(inspect.signature(partial("|".join, ("a", "b")))) == "()"
+
+original_builtins = sys.modules.pop("builtins")
+try:
+    import builtins as fresh_builtins
+    for module in (builtins, fresh_builtins):
+        assert module.sorted.__self__ is original_builtins
+        assert "sorted.__self__" not in vars(module)
+        assert getattr(module, "sorted.__self__", None) is None
+finally:
+    sys.modules["builtins"] = original_builtins
+assert str(inspect.signature(sorted)) == "(iterable, /, *, key=None, reverse=False)"
+assert inspect.getfullargspec(sorted).args == ["iterable"]
+
 try:
     inspect.signature(min)
 except ValueError as exc:

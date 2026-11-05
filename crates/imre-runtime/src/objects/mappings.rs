@@ -183,6 +183,10 @@ trait TableKey {
 
 /// Infallible table keys may choose how they feed the process-keyed hasher.
 trait InfallibleKey: Eq + Hash {
+    fn same_key(&self, other: &Self) -> bool {
+        self == other
+    }
+
     fn table_hash(&self) -> u64 {
         HASHER.hash_one(self)
     }
@@ -194,6 +198,28 @@ impl InfallibleKey for ObjectKey {}
 impl InfallibleKey for crate::BytesOwner {}
 
 impl InfallibleKey for StrOwner {
+    fn same_key(&self, other: &Self) -> bool {
+        if Self::ptr_eq(self, other) {
+            return true;
+        }
+        let (left, right) = (self.as_bytes(), other.as_bytes());
+        if left.len() != right.len() {
+            return false;
+        }
+        // Two overlapping fixed-width loads compare every byte of a short key.
+        match left.len() {
+            4..=8 => {
+                left.first_chunk::<4>() == right.first_chunk::<4>()
+                    && left.last_chunk::<4>() == right.last_chunk::<4>()
+            }
+            9..=16 => {
+                left.first_chunk::<8>() == right.first_chunk::<8>()
+                    && left.last_chunk::<8>() == right.last_chunk::<8>()
+            }
+            _ => left == right,
+        }
+    }
+
     fn table_hash(&self) -> u64 {
         string_hash(self.as_str())
     }
@@ -220,7 +246,7 @@ impl<T: InfallibleKey> TableKey for T {
     }
 
     fn try_eq(&self, other: &Self) -> Result<bool, Error> {
-        Ok(self == other)
+        Ok(self.same_key(other))
     }
 }
 
@@ -3273,6 +3299,8 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                 adapter = Some(Rc::clone(state));
                 Ok(None)
             }
+            Storage::IntegerAccumulate(scan) => Ok(scan.next().map(|item| (item, None))),
+            Storage::Accumulate(scan) => scan.next().map(|item| item.map(|item| (item, None))),
             Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
             Storage::PathIterator(iterator) => iterator.next().map(|path| {
                 // A non-null path transfers its owner to the caller of pull().
@@ -3657,7 +3685,7 @@ mod tests {
 
     #[test]
     fn character_gather_owns_big_integers_and_releases_partial_results() {
-        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let integer = crate::wide_owner(BigInt::from(1_u128 << 120));
         let weak = Shared::downgrade(&integer);
         // SAFETY: dictionary/text handles are exact and rooted. A successful
         // gather transfers one list owner; each failed gather transfers none.
@@ -3731,7 +3759,7 @@ mod tests {
 
     #[test]
     fn character_gather_tracks_heap_value_transitions_in_its_ascii_cache() {
-        let large = Shared::new(BigInt::from(1_u128 << 120));
+        let large = crate::wide_owner(BigInt::from(1_u128 << 120));
         let heap_word = Shared::as_ptr(&large) as usize;
         // SAFETY: every key/value remains rooted, and successful results and
         // pending failures each transfer exactly one owner to Rc.
@@ -3866,8 +3894,8 @@ mod tests {
 
     #[test]
     fn replacement_acquires_sole_owners_and_reclaims_deleted_keys() {
-        let key = Shared::new(BigInt::from(1_u128 << 120));
-        let value = Shared::new(BigInt::from(1_u128 << 100));
+        let key = crate::wide_owner(BigInt::from(1_u128 << 120));
+        let value = crate::wide_owner(BigInt::from(1_u128 << 100));
         let key_weak = Shared::downgrade(&key);
         let value_weak = Shared::downgrade(&value);
         let (key_word, value_word) = (
@@ -4158,8 +4186,8 @@ mod tests {
 
     #[test]
     fn sets_deduplicate_integer_values_and_own_yielded_snapshots() {
-        let original = Shared::new(BigInt::from(1_u128 << 120));
-        let equal = Shared::new(BigInt::from(1_u128 << 120));
+        let original = crate::wide_owner(BigInt::from(1_u128 << 120));
+        let equal = crate::wide_owner(BigInt::from(1_u128 << 120));
         let original_weak = Shared::downgrade(&original);
         let equal_weak = Shared::downgrade(&equal);
         let set = imre_set_new(2);

@@ -818,6 +818,7 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         suspended_typing_frames: 0,
         token_missing: NONE,
         native_code_objects: HashMap::new(),
+        original_builtins: None,
         source_builtins: None,
         zip_directories: HashMap::new(),
         zip_path_importers: NONE,
@@ -1166,6 +1167,42 @@ fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> 
             NONE
         }
     }
+}
+
+/// Construct a fresh sequence using the permanent handles in a linked literal.
+///
+/// # Safety
+/// `ctx` must be live and `data` must contain exactly `len` readable bytes
+/// encoding valid permanent handles as little-endian pairs.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_permanent_sequence(
+    ctx: *mut Context,
+    data: *const u8,
+    len: usize,
+    tuple: bool,
+) -> Id {
+    // SAFETY: generated code supplies a live context and the exact byte length.
+    let (ctx, bytes) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let (handles, rest) = bytes.as_chunks::<2>();
+    debug_assert!(rest.is_empty());
+    let mut items = Vec::new();
+    if items.try_reserve_exact(handles.len()).is_err() {
+        return finish(ctx, Err(Error::new("MemoryError", "")));
+    }
+    items.extend(
+        handles
+            .iter()
+            .map(|&pair| Id::from(u16::from_le_bytes(pair))),
+    );
+    let id = if tuple {
+        ctx.linked_constant(|ctx| ctx.heap.packed_tuple(items, true))
+    } else {
+        ctx.alloc(Value::List(items))
+    };
+    finish(ctx, Ok(id))
 }
 
 #[unsafe(no_mangle)]
@@ -1982,7 +2019,9 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live, replaced == TRUE) && !ctx.can_skip_finalizer_sweep() {
+    if ctx.heap.assignment_target(live, replaced == TRUE)
+        && !ctx.can_skip_finalizer_sweep(ctx.heap.temporary_mark())
+    {
         ctx.collect_unreachable();
     }
 }
@@ -2067,6 +2106,7 @@ impl Context {
                 .chain(self.contexts.iter().copied())
                 .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
+                .chain(self.original_builtins)
                 .chain(self.source_builtins)
                 .chain([
                     self.argv,
@@ -2118,7 +2158,7 @@ impl Context {
         if self.heap.has_ordinary_finalizers()
             && !self.heap.caller_keeps_only_finalizer()
             // A bound stream can keep its underlying finalizer alive without naming it.
-            && !self.can_skip_finalizer_sweep()
+            && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
             && self.heap.has_unbound_finalizer(NONE)
         {
             match self.drain_acyclic_finalizers() {
@@ -2133,7 +2173,9 @@ impl Context {
             }
         }
         let finalizers = self.heap.take_finalizer_check();
-        if self.heap.take_sweep_request() || (finalizers && !self.can_skip_finalizer_sweep()) {
+        if self.heap.take_sweep_request()
+            || (finalizers && !self.can_skip_finalizer_sweep(self.heap.temporary_mark()))
+        {
             let (heap, roots) = self.heap_and_roots();
             if let Some(callbacks) = heap.collect(roots) {
                 self.run_weak_callbacks(callbacks);
@@ -2143,7 +2185,9 @@ impl Context {
 
     /// Flush unreachable file owners before the caller evaluates its next operand.
     pub(super) fn leave_frame(&mut self, result: Id, returning: bool) {
-        if self.heap.leave(result, returning) {
+        if self.heap.leave(result, returning)
+            && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+        {
             self.collect_unreachable();
         }
     }
@@ -2156,7 +2200,7 @@ impl Context {
     /// Release discarded operands and root their result before any weak callbacks or finalizers run.
     pub(super) fn discard_temporaries(&mut self, mark: usize, result: Option<Id>) {
         let collect = if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
-            || self.can_skip_finalizer_sweep()
+            || self.can_skip_finalizer_sweep(mark)
         {
             self.heap.release_temporaries_since(mark);
             false
@@ -2197,7 +2241,7 @@ impl Context {
     }
 
     /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
-    fn can_skip_finalizer_sweep(&self) -> bool {
+    fn can_skip_finalizer_sweep(&self, retained_current: usize) -> bool {
         if self.heap.full_collection_active() {
             return false;
         }
@@ -2212,7 +2256,7 @@ impl Context {
                 .is_some_and(|chain| self.heap.finalizers_kept_by(chain)))
             || self
                 .heap
-                .cached_finalizers_kept(globals, input.as_ref(), true)
+                .cached_finalizers_kept(globals, input.as_ref(), Some(retained_current))
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
@@ -2220,7 +2264,7 @@ impl Context {
         if !self.heap.tracks_finalizers() {
             return;
         }
-        if self.can_skip_finalizer_sweep() {
+        if self.can_skip_finalizer_sweep(mark) {
             self.heap.keep_call_result(mark, result);
         } else if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
@@ -2229,7 +2273,7 @@ impl Context {
 
     /// Finish an assignment that dropped a possible finalizer owner.
     pub(super) fn finish_binding_release(&mut self) {
-        if !self.can_skip_finalizer_sweep() {
+        if !self.can_skip_finalizer_sweep(self.heap.temporary_mark()) {
             self.collect_unreachable();
         }
         self.heap.release_unbound_finalizers();

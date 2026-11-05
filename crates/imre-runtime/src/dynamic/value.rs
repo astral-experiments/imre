@@ -53,15 +53,11 @@ pub(super) struct Hmac {
     pub digest_size: Id,
     pub block_size: Id,
 }
-pub(super) const NONE: Id = 0;
-pub(super) const FALSE: Id = 1;
-pub(super) const TRUE: Id = 2;
-pub(super) const ELLIPSIS: Id = 3;
-pub(super) const NOT_IMPLEMENTED: Id = 4;
-pub(super) const EMPTY_TUPLE: Id = 5;
-const SMALL_INT_MIN: i64 = -5;
-const SMALL_INT_MAX: i64 = 256;
-const FIRST_SMALL_INT: Id = EMPTY_TUPLE + 1;
+mod permanent {
+    include!("../../native/boxed-handles.rs");
+}
+pub(super) use permanent::{ELLIPSIS, EMPTY_TUPLE, FALSE, NONE, NOT_IMPLEMENTED, TRUE};
+use permanent::{FIRST_SMALL_INT, SMALL_INT_MAX, SMALL_INT_MIN};
 const FIRST_DYNAMIC_SLOT: usize =
     FIRST_SMALL_INT as usize + (SMALL_INT_MAX - SMALL_INT_MIN + 1) as usize;
 
@@ -3188,9 +3184,7 @@ impl Heap {
 
     /// Return the permanent heap slot for a cached Python integer.
     pub(super) fn cached_integer(value: i64) -> Option<Id> {
-        (SMALL_INT_MIN..=SMALL_INT_MAX)
-            .contains(&value)
-            .then(|| FIRST_SMALL_INT + (value - SMALL_INT_MIN) as Id)
+        permanent::small_integer_id(value)
     }
 
     pub fn alloc(&mut self, value: Value) -> Id {
@@ -3831,7 +3825,7 @@ impl Heap {
         *frame = None;
         *scope = NONE;
         iterators.clear();
-        self.disarm_generator_finalizer(id);
+        self.disarm_finalizer(id);
     }
 
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
@@ -4209,8 +4203,8 @@ impl Heap {
         }
     }
 
-    /// Running generators have a live frame. Rearm cleanup only if they suspend again.
-    pub(super) fn disarm_generator_finalizer(&mut self, id: Id) {
+    /// Remove cleanup that a live generator or a closed directory iterator no longer needs.
+    pub(super) fn disarm_finalizer(&mut self, id: Id) {
         if self.slots[id as usize].finalization == Finalization::Pending {
             self.take_finalizer(id, false);
         }
@@ -4272,6 +4266,9 @@ impl Heap {
             }
             match heap.get(root) {
                 Value::Method { receiver, .. } => keeps(heap, *receiver, owner, budget),
+                Value::LoopIterator { source, peeked } => {
+                    *source == owner || *peeked == Some(owner)
+                }
                 Value::Instance { fields, .. } => fields
                     .values()
                     .take(*budget)
@@ -4429,9 +4426,9 @@ impl Heap {
             return Ok(None);
         }
         if remaining > 1
-            && (self.cached_finalizers_kept(globals, stdin, false)
+            && (self.cached_finalizers_kept(globals, stdin, None)
                 || (self.learn_finalizer_paths(globals, stdin)
-                    && self.cached_finalizers_kept(globals, stdin, false)))
+                    && self.cached_finalizers_kept(globals, stdin, None)))
         {
             return Ok(None);
         }

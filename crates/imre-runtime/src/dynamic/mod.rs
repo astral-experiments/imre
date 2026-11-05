@@ -164,6 +164,8 @@ pub(crate) struct Context {
     suspended_typing_frames: usize,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
+    // Builtin functions stay bound to the first builtins module across reimports.
+    original_builtins: Option<Id>,
     source_builtins: Option<Id>,
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     zip_path_importers: Id,
@@ -1412,7 +1414,7 @@ impl Context {
                 .map(Some);
         }
         if let Value::Scandir(scan) = self.heap.get(id) {
-            return stdlib::os::scandir::advance(self, scan.clone());
+            return stdlib::os::scandir::advance(self, id, scan.clone());
         }
         if let Value::GenericAliasIterator(source) = self.heap.get_mut(id) {
             let source = source.take();
@@ -3343,6 +3345,10 @@ impl Context {
                 self.default_source_builtins()?
             };
             self.bind(scope, "__builtins__", builtins);
+        } else if name == "math" {
+            // Re-executing the native loader preserves this module's attribute edits.
+            let nextafter = self.builtin("math.nextafter");
+            self.bind(scope, "nextafter", nextafter);
         }
         let origin = source.and_then(|(path, _)| {
             if locations.contains(path) {
@@ -3362,6 +3368,9 @@ impl Context {
             module_state: None,
             constructor: None,
         });
+        if name == "builtins" {
+            self.original_builtins.get_or_insert(module);
+        }
         Ok((module, scope, name_id, origin))
     }
 

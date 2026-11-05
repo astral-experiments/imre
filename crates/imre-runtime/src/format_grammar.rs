@@ -45,6 +45,20 @@ fn grouping(tail: &mut &str) -> Result<Option<char>> {
     Ok(Some(sep))
 }
 
+/// The digits after a point are optional when a fractional grouping separator follows.
+pub(super) fn precision(tail: &mut &str) -> Result<(Option<usize>, Option<char>)> {
+    let Some(rest) = tail.strip_prefix('.') else {
+        return Ok((None, None));
+    };
+    *tail = rest;
+    let digits = decimal(tail)?;
+    let separator = grouping(tail)?;
+    if digits.is_none() && separator.is_none() {
+        return Err("Format specifier missing precision");
+    }
+    Ok((digits, separator))
+}
+
 /// Common lexical prefix for numeric and string format specifications.
 pub(super) struct FormatPrefix<'a> {
     pub(super) fill: char,
@@ -102,16 +116,7 @@ impl<'a> FormatPrefix<'a> {
         use crate::{Error, Kind};
         let error = |message| Error::new(Kind::ValueError, message);
         let mut tail = self.tail;
-        let mut precision = None;
-        let mut frac_group = None;
-        if let Some(rest) = tail.strip_prefix('.') {
-            tail = rest;
-            precision = decimal(&mut tail).map_err(error)?;
-            frac_group = grouping(&mut tail).map_err(error)?;
-            if precision.is_none() && frac_group.is_none() {
-                return Err(error("Format specifier missing precision"));
-            }
-        }
+        let (precision, frac_group) = precision(&mut tail).map_err(error)?;
         let mut chars = tail.chars();
         let code = chars.next().unwrap_or('s');
         if chars.next().is_some() {

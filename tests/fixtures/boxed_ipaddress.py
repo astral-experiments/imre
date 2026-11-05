@@ -1,4 +1,5 @@
 from ipaddress import (
+    IPv6Address,
     collapse_addresses,
     ip_address,
     ip_interface,
@@ -15,6 +16,19 @@ def current():
     print(left.subnet_of(network), network.overlaps(right), left.overlaps(right))
     print(*collapse_addresses([left, right]))
     print(*summarize_address_range(ip_address("192.0.2.4"), ip_address("192.0.2.9")))
+
+    class CustomHextet(IPv6Address):
+        @classmethod
+        def _parse_hextet(cls, text):
+            if text == "abcd":
+                return 42
+            return super()._parse_hextet(text)
+
+    expanded = "abcd:0000:0000:0000:0000:0000:0000:0001"
+    assert int(IPv6Address(expanded.upper())) == (0xABCD << 112) | 1
+    assert int(CustomHextet(expanded)) == (42 << 112) | 1
+    scoped = IPv6Address("fe80:0000:0000:0000:0000:0000:0000:0001%eth0")
+    assert scoped.scope_id == "eth0" and scoped.packed.hex() == "fe800000000000000000000000000001"
 
     address = ip_address("2001:0db8:0:0:0:0:0:1")
     print(address, address.exploded, ip_address(address.packed) == address)

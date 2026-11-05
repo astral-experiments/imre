@@ -97,6 +97,18 @@ def current():
     assert format(1.2, "010,.2") == "0,000,001.2"
     assert format(-123456.0, "013,.2f") == "-0,123,456.00"
     assert format(float("inf"), "09,F") == "000000INF"
+    reading = 123456.123456
+    assert Formatter().format("{:,._f}", reading) == "123,456.123_456"
+    assert format(reading, "023_.10_f") == "0_123_456.123_456_000_0"
+    assert format(reading, "+.11,e") == "+1.234,561,234,56e+05"
+    assert Formatter().format("{:#.6_G}", 999999.96) == "1.000_00E+06"
+    assert "%#.6g" % 999999.96 == "1.00000e+06"
+    try:
+        format(10**400, ".6_%")
+    except OverflowError as error:
+        assert str(error) == "int too large to convert to float"
+    else:
+        raise AssertionError("formatted an integer too large to convert to float")
     try:
         format(NumberWithUnit(1.0), "s")
     except ValueError as error:

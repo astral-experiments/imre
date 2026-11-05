@@ -9954,6 +9954,25 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetPid), vec![]),
                 });
             }
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("itertools.accumulate")))
+                if self.is_accumulate(call) =>
+            {
+                let args = self.accumulate_args(call)?;
+                if args.function.ty != Type::None
+                    || !matches!(
+                        args.source.ty,
+                        Type::ListInt | Type::List(_) | Type::Tuple(_) | Type::VarTuple(_)
+                    )
+                {
+                    return Err(self.object_runtime_export("itertools.accumulate", call));
+                }
+                let mut operands = vec![args.source];
+                operands.extend(args.initial);
+                return Ok(args.scope.finish(Expr {
+                    ty: self.types.cursor(args.element),
+                    kind: ExprKind::Builtin(Builtin::AccumulateCursor, operands),
+                }));
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
             }

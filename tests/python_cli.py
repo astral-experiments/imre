@@ -95,9 +95,12 @@ def check_installed_site(imre, root, run):
     with tarfile.open(sample, "w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "sample"}) as tar:
         tar.add(member, arcname="payload")
     use_sources = (
-        "import importlib, sys, tarfile\n"
+        "import getpass, importlib, os, sys, tarfile\n"
+        "os.environ['LOGNAME'] = 'archive-user'\n"
+        "assert getpass.getuser() == 'archive-user'\n"
         "print(importlib.import_module(sys.argv[1]).Element('root').tag)\n"
         "sorter = importlib.import_module(sys.argv[3]).TopologicalSorter\n"
+        "assert importlib.import_module(sys.argv[4]).mean([2, 3, 4]) == 3\n"
         "assert list(sorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
         "    with tar.extractfile('payload') as member:\n"
@@ -105,7 +108,7 @@ def check_installed_site(imre, root, run):
     )
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
-    bare = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", timeout=300)
+    bare = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", timeout=300)
     assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
     opaque = run(
         launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
@@ -122,7 +125,7 @@ def check_installed_site(imre, root, run):
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported
     archive.write_bytes(exported.stdout)
-    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", timeout=300)
+    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
     reader = root / "read_tar_entry.py"
     reader.write_text(
@@ -3625,6 +3628,7 @@ for name in ("md4", "ripemd160"):
                     native_args=("run", hmac_entry, "--runtime-imports", "--quiet", "--", "legacy-policy"),
                 )
 
+        compare("-B", fixtures / "boxed_unittest_result_registry.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         async_case = fixtures / "unittest_isolated_asyncio.py"
         compare("-IB", async_case, native_args=("run", async_case, "--quiet"), native_timeout=600)
@@ -3763,6 +3767,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_isclose.py",
             "boxed_math_log2.py",
             "boxed_math_ldexp.py",
+            "boxed_math_nextafter.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
@@ -4108,6 +4113,7 @@ for name in ("md4", "ripemd160"):
             "boxed_list_pop.py",
             "boxed_list_iter_descriptor.py",
             "boxed_sequence_repeat.py",
+            "boxed_primitive_sequence_literals.py",
             "boxed_sequence_order.py",
             "boxed_tuple_iter_descriptor.py",
             "boxed_tuple_index.py",

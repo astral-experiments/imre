@@ -270,6 +270,41 @@ impl Parser<'_> {
         ))
     }
 
+    /// Convert the identifier list carried by a global or nonlocal declaration.
+    fn identifiers(&mut self, names: Vec<ast::Identifier>) -> Id {
+        let names = names
+            .into_iter()
+            .map(|name| self.ctx.text(name.as_str()))
+            .collect();
+        self.list(names)
+    }
+
+    /// Preserve the bounds, defaults, and source spans of a declaration's type parameters.
+    fn type_parameters(&mut self, params: Option<Box<ast::TypeParams>>) -> Result<Id> {
+        let Some(params) = params else {
+            return Ok(self.list(Vec::new()));
+        };
+        let mut nodes = Vec::with_capacity(params.len());
+        for param in params.type_params {
+            let range = param.range();
+            let name = self.ctx.text(param.name().as_str());
+            let (kind, fields) = match param {
+                ast::TypeParam::TypeVar(v) => (
+                    "TypeVar",
+                    vec![name, self.optional(v.bound)?, self.optional(v.default)?],
+                ),
+                ast::TypeParam::TypeVarTuple(v) => {
+                    ("TypeVarTuple", vec![name, self.optional(v.default)?])
+                }
+                ast::TypeParam::ParamSpec(v) => {
+                    ("ParamSpec", vec![name, self.optional(v.default)?])
+                }
+            };
+            nodes.push(self.node(kind, &fields, range));
+        }
+        Ok(self.list(nodes))
+    }
+
     fn statement(&mut self, s: ast::Stmt) -> Result<Id> {
         use ast::Stmt;
         let range = self.statement_range(&s);
@@ -301,6 +336,16 @@ impl Parser<'_> {
                     self.expr(*v.annotation)?,
                     self.optional(v.value)?,
                     self.ctx.int(i64::from(v.simple)),
+                ],
+            ),
+            Stmt::Global(v) => ("Global", vec![self.identifiers(v.names)]),
+            Stmt::Nonlocal(v) => ("Nonlocal", vec![self.identifiers(v.names)]),
+            Stmt::TypeAlias(v) => (
+                "TypeAlias",
+                vec![
+                    self.expr(*v.name)?,
+                    self.type_parameters(v.type_params)?,
+                    self.expr(*v.value)?,
                 ],
             ),
             Stmt::Assign(v) => (
@@ -370,7 +415,7 @@ impl Parser<'_> {
                     ],
                 )
             }
-            Stmt::ClassDef(v) if v.type_params.is_none() => {
+            Stmt::ClassDef(v) => {
                 let (bases, keywords) = if let Some(args) = v.arguments {
                     let bases = self.exprs(args.args)?;
                     let keywords = args
@@ -390,7 +435,7 @@ impl Parser<'_> {
                         keywords,
                         self.suite(v.body)?,
                         self.exprs(v.decorator_list.into_iter().map(|d| d.expression))?,
-                        self.list(vec![]),
+                        self.type_parameters(v.type_params)?,
                     ],
                 )
             }
@@ -416,7 +461,7 @@ impl Parser<'_> {
                     vec![self.expr(*v.test)?, self.suite(v.body)?, otherwise],
                 )
             }
-            Stmt::FunctionDef(mut v) if v.type_params.is_none() => {
+            Stmt::FunctionDef(mut v) => {
                 let decorators = v
                     .decorator_list
                     .into_iter()
@@ -435,7 +480,7 @@ impl Parser<'_> {
                         self.list(decorators),
                         self.optional(v.returns)?,
                         NONE,
-                        self.list(vec![]),
+                        self.type_parameters(v.type_params)?,
                     ],
                 )
             }
@@ -762,6 +807,21 @@ impl Parser<'_> {
         Ok(())
     }
 
+    /// Decode a string with the original code points preserved for surrogate escapes.
+    fn string_value(&mut self, v: &ast::ExprStringLiteral) -> Result<Id> {
+        let text = v.value.to_str();
+        let points = crate::dynamic::source_code::original_points(
+            text,
+            self.replacements
+                .range(v.start()..v.end())
+                .flat_map(|(_, points)| points.iter().copied()),
+        )?;
+        Ok(match points {
+            Some(points) => self.ctx.text_codepoints(points),
+            None => self.ctx.text(text),
+        })
+    }
+
     fn expr(&mut self, e: ast::Expr) -> Result<Id> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.expr_inner(e))
     }
@@ -812,20 +872,7 @@ impl Parser<'_> {
             Expr::TString(mut v) if !self.literal => {
                 ("TemplateStr", vec![self.template_values(&mut v)?])
             }
-            Expr::StringLiteral(v) => {
-                let text = v.value.to_str();
-                let points = crate::dynamic::source_code::original_points(
-                    text,
-                    self.replacements
-                        .range(v.start()..v.end())
-                        .flat_map(|(_, points)| points.iter().copied()),
-                )?;
-                let value = match points {
-                    Some(points) => self.ctx.text_codepoints(points),
-                    None => self.ctx.text(text),
-                };
-                ("Constant", vec![value, NONE])
-            }
+            Expr::StringLiteral(v) => ("Constant", vec![self.string_value(&v)?, NONE]),
             Expr::BytesLiteral(v) => (
                 "Constant",
                 vec![
@@ -910,6 +957,8 @@ impl Parser<'_> {
             Expr::Starred(v) if !self.literal => {
                 ("Starred", vec![self.expr(*v.value)?, self.context(v.ctx)?])
             }
+            Expr::Await(v) if !self.literal => ("Await", vec![self.expr(*v.value)?]),
+            Expr::Yield(v) if !self.literal => ("Yield", vec![self.optional(v.value)?]),
             Expr::YieldFrom(v) if !self.literal => ("YieldFrom", vec![self.expr(*v.value)?]),
             Expr::Tuple(v) => ("Tuple", vec![self.exprs(v.elts)?, self.context(v.ctx)?]),
             Expr::List(v) => ("List", vec![self.exprs(v.elts)?, self.context(v.ctx)?]),
@@ -1050,7 +1099,12 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     parse_source(ctx, source, &filename, &mode, false)
 }
 
-pub(super) fn parse_source(
+/// Evaluate literal source after applying the same syntax checks as parsing an expression.
+pub(super) fn literal_source(ctx: &mut Context, source: &str) -> Result<Id> {
+    parse_source(ctx, source, "<unknown>", "eval", true)
+}
+
+fn parse_source(
     ctx: &mut Context,
     source: &str,
     filename: &str,
@@ -1120,8 +1174,20 @@ pub(super) fn parse_source(
                 }
             })?;
             parser.prepare_strings(source, expr.tokens(), expr.syntax())?;
-            let body = parser.expr(*expr.into_syntax().body)?;
-            Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
+            let expr = *expr.into_syntax().body;
+            if literal
+                && let ast::Expr::StringLiteral(text) = &expr
+                && super::literal::plain_string_fields(parser.ctx)
+            {
+                return parser.string_value(text);
+            }
+            let body = parser.expr(expr)?;
+            let expression = parsed_instance(parser.ctx, "Expression", &[body], None);
+            if literal {
+                super::literal::from_node(parser.ctx, expression)
+            } else {
+                Ok(expression)
+            }
         }
         _ => Err(Error::new(
             "ValueError",

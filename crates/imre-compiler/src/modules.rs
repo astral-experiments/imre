@@ -1784,6 +1784,7 @@ impl IntrinsicModule {
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Traceback, "print_exc") => Intrinsic::TracebackPrintExc,
+            (Self::Traceback, "format_tb") => Intrinsic::ScopedObjectExport("traceback.format_tb"),
             (Self::Traceback, "format_exc") => {
                 Intrinsic::TracebackFormatter("traceback.format_exc")
             }
@@ -2070,100 +2071,6 @@ impl IntrinsicModule {
             (Self::SocketNative, "setdefaulttimeout") => {
                 Intrinsic::ScopedObjectExport("_socket.setdefaulttimeout")
             }
-            (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
-                "gaierror" => "_socket.gaierror",
-                "getnameinfo" => "_socket.getnameinfo",
-                "if_indextoname" => "_socket.if_indextoname",
-                "if_nameindex" => "_socket.if_nameindex",
-                "if_nametoindex" => "_socket.if_nametoindex",
-                "NI_DGRAM" => "_socket.NI_DGRAM",
-                "NI_NAMEREQD" => "_socket.NI_NAMEREQD",
-                "NI_NOFQDN" => "_socket.NI_NOFQDN",
-                "NI_NUMERICHOST" => "_socket.NI_NUMERICHOST",
-                "NI_NUMERICSERV" => "_socket.NI_NUMERICSERV",
-                "has_ipv6" => "_socket.has_ipv6",
-                "SocketType" => "_socket.SocketType",
-                "getaddrinfo" => "_socket.getaddrinfo",
-                "AI_NUMERICHOST" => "_socket.AI_NUMERICHOST",
-                "AI_NUMERICSERV" => "_socket.AI_NUMERICSERV",
-                "EAI_SERVICE" => "_socket.EAI_SERVICE",
-                "EAI_NODATA" => "_socket.EAI_NODATA",
-                "EAI_NONAME" => "_socket.EAI_NONAME",
-                "AI_PASSIVE" => "_socket.AI_PASSIVE",
-                "SOL_TCP" => "_socket.SOL_TCP",
-                "AF_INET" => "_socket.AF_INET",
-                "AF_INET6" => "_socket.AF_INET6",
-                "AF_UNSPEC" => "_socket.AF_UNSPEC",
-                "AF_UNIX" => "_socket.AF_UNIX",
-                "SOCK_STREAM" => "_socket.SOCK_STREAM",
-                "SOCK_DGRAM" => "_socket.SOCK_DGRAM",
-                "SOCK_RAW" => "_socket.SOCK_RAW",
-                "SOCK_RDM" => "_socket.SOCK_RDM",
-                "SOCK_SEQPACKET" => "_socket.SOCK_SEQPACKET",
-                "SOL_SOCKET" => "_socket.SOL_SOCKET",
-                "IPPROTO_TCP" => "_socket.IPPROTO_TCP",
-                "IPPROTO_UDP" => "_socket.IPPROTO_UDP",
-                "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
-                "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
-                "SO_TYPE" => "_socket.SO_TYPE",
-                "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
-                "SO_REUSEPORT" => "_socket.SO_REUSEPORT",
-                "SO_SNDBUF" => "_socket.SO_SNDBUF",
-                "TCP_NODELAY" => "_socket.TCP_NODELAY",
-                "SHUT_RD" => "_socket.SHUT_RD",
-                "SHUT_WR" => "_socket.SHUT_WR",
-                "SHUT_RDWR" => "_socket.SHUT_RDWR",
-                "SOMAXCONN" => "_socket.SOMAXCONN",
-                "socket" => "_socket.socket",
-                "socketpair" => "_socket.socketpair",
-                "close" => "_socket.close",
-                "inet_aton" => "_socket.inet_aton",
-                "inet_pton" => "_socket.inet_pton",
-                "inet_ntoa" => "_socket.inet_ntoa",
-                "inet_ntop" => "_socket.inet_ntop",
-                "getservbyname" => "_socket.getservbyname",
-                "getservbyport" => "_socket.getservbyport",
-                "gethostname" => "_socket.gethostname",
-                "gethostbyname" => "_socket.gethostbyname",
-                "gethostbyaddr" => "_socket.gethostbyaddr",
-                "error" => "_socket.error",
-                _ => return None,
-            }),
-            (Self::Socket, "getnameinfo") => Intrinsic::ObjectRuntimeExport("socket.getnameinfo"),
-            (Self::Socket, "if_indextoname") => {
-                Intrinsic::ObjectRuntimeExport("socket.if_indextoname")
-            }
-            (Self::Socket, "if_nameindex") => Intrinsic::ObjectRuntimeExport("socket.if_nameindex"),
-            (Self::Socket, "if_nametoindex") => {
-                Intrinsic::ObjectRuntimeExport("socket.if_nametoindex")
-            }
-            (Self::Socket, "NI_DGRAM") => Intrinsic::ObjectRuntimeExport("socket.NI_DGRAM"),
-            (Self::Socket, "NI_NAMEREQD") => Intrinsic::ObjectRuntimeExport("socket.NI_NAMEREQD"),
-            (Self::Socket, "NI_NOFQDN") => Intrinsic::ObjectRuntimeExport("socket.NI_NOFQDN"),
-            (Self::Socket, "NI_NUMERICHOST") => {
-                Intrinsic::ObjectRuntimeExport("socket.NI_NUMERICHOST")
-            }
-            (Self::Socket, "NI_NUMERICSERV") => {
-                Intrinsic::ObjectRuntimeExport("socket.NI_NUMERICSERV")
-            }
-            (Self::Socket, "AddressFamily") => {
-                Intrinsic::ObjectRuntimeExport("socket.AddressFamily")
-            }
-            (Self::Socket, "SocketKind") => Intrinsic::ObjectRuntimeExport("socket.SocketKind"),
-            (Self::Socket, "getaddrinfo") => Intrinsic::ObjectRuntimeExport("socket.getaddrinfo"),
-            (Self::Socket, "AI_NUMERICHOST") => {
-                Intrinsic::ObjectRuntimeExport("socket.AI_NUMERICHOST")
-            }
-            (Self::Socket, "AI_NUMERICSERV") => {
-                Intrinsic::ObjectRuntimeExport("socket.AI_NUMERICSERV")
-            }
-            (Self::Socket, "AddressInfo") => Intrinsic::ObjectRuntimeExport("socket.AddressInfo"),
-            (Self::Socket, "AI_PASSIVE") => Intrinsic::ObjectRuntimeExport("socket.AI_PASSIVE"),
-            (Self::Socket, "EAI_NODATA") => Intrinsic::ObjectRuntimeExport("socket.EAI_NODATA"),
-            (Self::Socket, "EAI_NONAME") => Intrinsic::ObjectRuntimeExport("socket.EAI_NONAME"),
-            (Self::Socket, "EAI_SERVICE") => Intrinsic::ObjectRuntimeExport("socket.EAI_SERVICE"),
-            (Self::Socket, "SOL_TCP") => Intrinsic::ObjectRuntimeExport("socket.SOL_TCP"),
-            (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
             (Self::Socket, "getdefaulttimeout") => {
                 Intrinsic::ScopedObjectExport("socket.getdefaulttimeout")
             }
@@ -2175,47 +2082,7 @@ impl IntrinsicModule {
             }
             #[cfg(unix)]
             (Self::Socket, "fromfd") => Intrinsic::ScopedObjectExport("socket.fromfd"),
-            (Self::Socket, "create_connection") => {
-                Intrinsic::ObjectRuntimeExport("socket.create_connection")
-            }
-            (Self::Socket, "create_server") => {
-                Intrinsic::ObjectRuntimeExport("socket.create_server")
-            }
-            (Self::Socket, "SO_REUSEPORT") => Intrinsic::ObjectRuntimeExport("socket.SO_REUSEPORT"),
-            (Self::Socket, "has_dualstack_ipv6") => {
-                Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
-            }
-            (Self::Socket, "IPPROTO_UDP") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_UDP"),
-            (Self::Socket, "IPPROTO_IPV6") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_IPV6"),
-            (Self::Socket, "IPV6_V6ONLY") => Intrinsic::ObjectRuntimeExport("socket.IPV6_V6ONLY"),
-            (Self::Socket, "has_ipv6") => Intrinsic::ObjectRuntimeExport("socket.has_ipv6"),
-            (Self::Socket, "AF_INET6") => Intrinsic::ObjectRuntimeExport("socket.AF_INET6"),
-            (Self::Socket, "SOCK_DGRAM") => Intrinsic::ObjectRuntimeExport("socket.SOCK_DGRAM"),
-            (Self::Socket, "SOCK_RAW") => Intrinsic::ObjectRuntimeExport("socket.SOCK_RAW"),
-            (Self::Socket, "SOCK_RDM") => Intrinsic::ObjectRuntimeExport("socket.SOCK_RDM"),
-            (Self::Socket, "SOCK_SEQPACKET") => {
-                Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
-            }
             (Self::Socket, "SocketIO") => Intrinsic::ScopedObjectExport("socket.SocketIO"),
-            (Self::Socket, "socketpair") => Intrinsic::ObjectRuntimeExport("socket.socketpair"),
-            (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
-            (Self::Socket, "inet_aton") => Intrinsic::ObjectRuntimeExport("socket.inet_aton"),
-            (Self::Socket, "inet_pton") => Intrinsic::ObjectRuntimeExport("socket.inet_pton"),
-            (Self::Socket, "inet_ntoa") => Intrinsic::ObjectRuntimeExport("socket.inet_ntoa"),
-            (Self::Socket, "inet_ntop") => Intrinsic::ObjectRuntimeExport("socket.inet_ntop"),
-            (Self::Socket, "getservbyname") => {
-                Intrinsic::ObjectRuntimeExport("socket.getservbyname")
-            }
-            (Self::Socket, "getservbyport") => {
-                Intrinsic::ObjectRuntimeExport("socket.getservbyport")
-            }
-            (Self::Socket, "gethostname") => Intrinsic::ObjectRuntimeExport("socket.gethostname"),
-            (Self::Socket, "gethostbyname") => {
-                Intrinsic::ObjectRuntimeExport("socket.gethostbyname")
-            }
-            (Self::Socket, "gethostbyaddr") => {
-                Intrinsic::ObjectRuntimeExport("socket.gethostbyaddr")
-            }
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
@@ -2234,8 +2101,7 @@ impl IntrinsicModule {
                 "SHUT_RD" => "shut_rd",
                 "SHUT_WR" => "shut_wr",
                 "SHUT_RDWR" => "shut_rdwr",
-
-                _ => return None,
+                _ => return boxed_exports::symbol(self, name),
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
@@ -2356,6 +2222,9 @@ impl IntrinsicModule {
             (Self::OperatorNative, "_compare_digest") => {
                 Intrinsic::ObjectRuntimeExport("_operator._compare_digest")
             }
+            (Self::Operator | Self::OperatorNative, "add" | "__add__") => {
+                Intrinsic::ObjectRuntimeExport("operator.add")
+            }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
@@ -2374,6 +2243,7 @@ impl IntrinsicModule {
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
             (Self::Math, "log2") => Intrinsic::ScopedObjectExport("math.log2"),
             (Self::Math, "ldexp") => Intrinsic::ScopedObjectExport("math.ldexp"),
+            (Self::Math, "nextafter") => Intrinsic::ScopedObjectExport("math.nextafter"),
             (Self::Math, "prod") => Intrinsic::ScopedObjectExport("math.prod"),
             (Self::Math, "sin") => Intrinsic::ScopedObjectExport("math.sin"),
             (Self::Math, "sqrt") => Intrinsic::ScopedObjectExport("math.sqrt"),
@@ -2397,6 +2267,9 @@ impl IntrinsicModule {
             }
             (Self::Itertools, "combinations_with_replacement") => {
                 Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
+            }
+            (Self::Itertools, "accumulate") => {
+                Intrinsic::ObjectRuntimeExport("itertools.accumulate")
             }
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
@@ -2458,6 +2331,7 @@ impl IntrinsicModule {
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
             (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
+            (Self::Random, "sample") => Intrinsic::ScopedObjectExport("random.sample"),
             (Self::Random, "Random") => Intrinsic::ScopedObjectExport("random.Random"),
             (Self::Random, "expovariate") => Intrinsic::ScopedObjectExport("random.expovariate"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
@@ -2946,6 +2820,8 @@ impl SourceModule {
                 )));
             }
             let export = match name {
+                "installHandler" => Some("unittest.installHandler"),
+                "removeHandler" => Some("unittest.removeHandler"),
                 "registerResult" => Some("unittest.registerResult"),
                 "removeResult" => Some("unittest.removeResult"),
                 _ => None,
@@ -5077,6 +4953,7 @@ impl<'a> Loader<'a> {
                     } else if self.modules[target].is_bundled("zoneinfo")
                         || self.modules[target].is_bundled("pyexpat")
                         || self.modules[target].is_bundled("xml.parsers.expat")
+                        || self.modules[target].is_bundled("unittest.signals")
                     {
                         Binding::ConditionalValue
                     } else if self.modules[target].is_package {
@@ -5437,8 +5314,8 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/doctest_typed.py"),
                 ),
             )),
-            // The parser type and the public expat exports are initialized by the object runtime.
-            "pyexpat" | "xml.parsers.expat" => {
+            // The object runtime owns these exports, including the live unittest result registry.
+            "pyexpat" | "xml.parsers.expat" | "unittest.signals" => {
                 self.needs_object_imports = true;
                 bundled_runtime_source(name).map(|(path, _)| (path, ""))
             }

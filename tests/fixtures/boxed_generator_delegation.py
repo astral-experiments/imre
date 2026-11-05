@@ -210,6 +210,26 @@ def delegate(child):
 
 
 def current():
+    closed = []
+
+    def tracked(label):
+        try:
+            yield 1
+        finally:
+            closed.append(label)
+
+    def stop(iterator):
+        for _ in iterator:
+            return
+
+    stop(tracked("temporary"))
+    assert closed == ["temporary"]
+    retained = tracked("retained")
+    stop(retained)
+    assert closed == ["temporary"]
+    del retained
+    assert closed == ["temporary", "retained"]
+
     from itertools import repeat
 
     closed = []
