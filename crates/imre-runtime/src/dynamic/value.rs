@@ -2540,14 +2540,22 @@ enum Finalization {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SlotShape {
     Vacant,
-    ScalarLeaf,
     Other,
+    ScalarLeaf,
+    AsciiStr,
 }
 
 impl SlotShape {
+    /// Both scalar shapes can be marked without visiting children.
+    fn is_scalar_leaf(self) -> bool {
+        matches!(self, Self::ScalarLeaf | Self::AsciiStr)
+    }
+
     /// Record whether a newly occupied slot holds an exact scalar without strong children.
     fn occupied(value: &Value) -> Self {
-        if value.scalar_leaf() {
+        if matches!(value, Value::Str(text) if text.is_ascii()) {
+            Self::AsciiStr
+        } else if value.scalar_leaf() {
             Self::ScalarLeaf
         } else {
             Self::Other
@@ -2671,9 +2679,7 @@ impl MarkQueue<'_> {
                     }
                 }
                 // A complete reachability trace needs no pending visit for an exact scalar.
-                MarkMode::SkipScalarLeaves
-                    if self.slot_shapes[id as usize] == SlotShape::ScalarLeaf =>
-                {
+                MarkMode::SkipScalarLeaves if self.slot_shapes[id as usize].is_scalar_leaf() => {
                     trace.set(END);
                 }
                 _ => {
@@ -3478,6 +3484,11 @@ impl Heap {
         self.interned
             .insert(owner, InternedString { id, literal: false });
         id
+    }
+
+    /// An exact ASCII string has identical UTF-8 byte and Python character offsets.
+    pub(super) fn is_ascii_str(&self, id: Id) -> bool {
+        self.slot_shapes[id as usize] == SlotShape::AsciiStr
     }
 
     pub fn get(&self, id: Id) -> &Value {
@@ -5376,6 +5387,23 @@ mod tests {
         let next = heap.alloc(Value::List(Vec::new()));
         assert_eq!(next, first);
         assert_eq!(heap.allocation_traces.get(next).unwrap()[0].1, 2);
+    }
+
+    #[test]
+    fn ascii_offsets_require_an_unchanged_string() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let text = heap.alloc(Value::Str("cat".repeat(200)));
+        assert!(heap.is_ascii_str(text));
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let next = heap.alloc(Value::Str("猫".repeat(200)));
+        assert_eq!(next, text);
+        assert!(!heap.is_ascii_str(next));
+        let writable = heap.alloc(Value::Str("dog".repeat(200)));
+        assert!(heap.is_ascii_str(writable));
+        *heap.get_mut(writable) = Value::Str("café".repeat(200));
+        assert!(!heap.is_ascii_str(writable));
     }
 
     #[test]

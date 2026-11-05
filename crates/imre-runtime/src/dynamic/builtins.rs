@@ -2630,6 +2630,7 @@ pub(super) fn call(
                 }
                 Value::Deque(ring) => ring.items.len(),
                 Value::Array(array) => array.len(),
+                Value::Str(v) if ctx.heap.is_ascii_str(args[0]) => v.len(),
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
