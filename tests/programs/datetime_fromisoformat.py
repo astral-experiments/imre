@@ -4,7 +4,7 @@ def parse(text: str) -> datetime:
     return datetime.fromisoformat(text)
 
 for text in ["0001-01-01", "2000-02-29T12:34:56.123456+03:00",
-             "2020-W53-7🌙24:00Z", "20250101T235959-00:00:30.000005"]:
+             "2020-W53", "2020W537", "2020-W53-7🌙24:00Z", "20250101T235959-00:00:30.000005"]:
     stamp = parse(text)
     print(stamp.isoformat())
     print((stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute,

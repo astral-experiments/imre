@@ -46,29 +46,18 @@ fn date_length(bytes: &[u8]) -> Option<usize> {
 }
 
 fn parse_date(bytes: &[u8]) -> Option<[i32; 3]> {
-    let year = time::digits(bytes.get(..4)?)?;
-    let suffix = &bytes[4..];
-    let extended = suffix.starts_with(b"-");
-    let suffix = suffix.strip_prefix(b"-").unwrap_or(suffix);
-    if let Some(week) = suffix.strip_prefix(b"W") {
-        let (week, day) = week.split_at_checked(2)?;
-        let day = match (day, extended) {
-            ([], _) => 1,
-            ([b'-', d], true) | ([d], false) => i32::from(d.checked_sub(b'0')?),
-            _ => return None,
-        };
-        return Calendar::iso_week_date(year, time::digits(week)?, day);
+    let ([a, b, c, d], suffix) = bytes.split_first_chunk::<4>()?;
+    let year = time::pair(*a, *b)? * 100 + time::pair(*c, *d)?;
+    match suffix {
+        [b'W', w, x] | [b'-', b'W', w, x] => Calendar::iso_week_date(year, time::pair(*w, *x)?, 1),
+        [b'W', w, x, d] | [b'-', b'W', w, x, b'-', d] => {
+            Calendar::iso_week_date(year, time::pair(*w, *x)?, i32::from(d.checked_sub(b'0')?))
+        }
+        [m, n, d, e] | [b'-', m, n, b'-', d, e] => {
+            Some([year, time::pair(*m, *n)?, time::pair(*d, *e)?])
+        }
+        _ => None,
     }
-    let (month, day) = suffix.split_at_checked(2)?;
-    let day = if extended {
-        day.strip_prefix(b"-")?
-    } else {
-        day
-    };
-    if day.len() != 2 {
-        return None;
-    }
-    Some([year, time::digits(month)?, time::digits(day)?])
 }
 
 pub(crate) fn parse(text: &str) -> Option<Parsed> {
@@ -122,7 +111,7 @@ fn datetime(text: &str) -> Result<crate::ObjectOwner, Error> {
     let zone = match offset {
         None => None,
         Some(0) => Some(utc()),
-        Some(us) => Some(make_zone(try_owner(Value::Delta(i128::from(us)))?, None)?),
+        Some(us) => Some(make_zone(try_owner(Value::delta(i128::from(us)))?, None)?),
     };
     Calendar::iso_midnight(&mut date, &mut clock)?;
     let local = Civil::from_fields(date, clock)?;
