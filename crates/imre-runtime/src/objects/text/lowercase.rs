@@ -1,4 +1,6 @@
 //! Default Unicode 16 case conversion, as used by Python 3.14.
+mod casefold;
+
 use crate::StrOwner;
 use std::sync::LazyLock;
 
@@ -85,6 +87,7 @@ pub(crate) enum Case {
     Capitalize,
     Title,
     Swap,
+    Fold,
 }
 
 /// Apply a full mapping to an original scalar. Only title consults its immediate
@@ -103,7 +106,9 @@ fn mapped_char(
     } else {
         case == Case::Capitalize && first
     };
-    let mapping = if title {
+    let mapping = if case == Case::Fold {
+        casefold::mapping(ch)
+    } else if title {
         unicode_case_mapping::to_titlecase(ch)
     } else if case == Case::Upper || (case == Case::Swap && contains(&LOWERCASE, ch)) {
         unicode_case_mapping::to_uppercase(ch)
@@ -143,7 +148,7 @@ pub(crate) fn case_map(source: &str, case: Case) -> super::Result<String> {
     result
         .try_reserve_exact(source.len())
         .map_err(|_| Error::allocation())?;
-    if case == Case::Lower && source.is_ascii() {
+    if matches!(case, Case::Lower | Case::Fold) && source.is_ascii() {
         result.push_str(source);
         result.make_ascii_lowercase();
         return Ok(result);

@@ -313,6 +313,7 @@ impl BuiltinDescriptor {
             "str.isdigit" => ("str", "isdigit"),
             "str.isidentifier" => ("str", "isidentifier"),
             "str.isprintable" => ("str", "isprintable"),
+            "str.casefold" => ("str", "casefold"),
             "str.lower" => ("str", "lower"),
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
@@ -409,6 +410,7 @@ impl BuiltinDescriptor {
                     | "ljust"
                     | "rjust"
                     | "zfill"
+                    | "casefold"
                     | "lower"
                     | "title"
                     | "swapcase"
@@ -875,6 +877,7 @@ impl BuiltinDescriptor {
                         "B.upper() -> copy of B\n\nReturn a copy of B with all ASCII characters converted to uppercase."
                     }
                     ("upper", _) if matches!(self.owner, "bytes" | "bytearray") => return Some(NONE),
+                    ("casefold", "__doc__") => "Return a version of the string suitable for caseless comparisons.",
                     ("lower", "__doc__") if self.owner == "bytes" => {
                         "B.lower() -> copy of B\n\nReturn a copy of B with all ASCII characters converted to lowercase."
                     }
@@ -887,7 +890,7 @@ impl BuiltinDescriptor {
                     }
                     (
                         "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "isprintable" | "istitle" | "lower" | "title"
-                        | "swapcase",
+                        | "swapcase" | "casefold",
                         _,
                     ) => "($self, /)",
                     ("mro", "__doc__") => "Return a type's method resolution order.",

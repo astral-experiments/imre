@@ -2640,6 +2640,7 @@ pub(super) fn method(
     };
     let mapping = match name {
         "lower" if owner == "str" => Some(Case::Lower),
+        "casefold" if owner == "str" => Some(Case::Fold),
         "title" => Some(Case::Title),
         "swapcase" => Some(Case::Swap),
         _ => None,
