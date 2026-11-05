@@ -878,7 +878,11 @@ impl Builtin {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
                     && bounds(*min, *max)
                     && (!matches!(self, Self::ListGetBoundedInBounds { .. })
-                        || (matches!(args[0].kind, ExprKind::Local(_)) && index(&args[1])))
+                        || (matches!(args[0].kind, ExprKind::Local(_))
+                            && (index(&args[1])
+                                || args[1]
+                                    .local_integer_offset()
+                                    .is_some_and(|(_, offset)| offset >= 0))))
             }
             Self::SequenceGetInBounds | Self::SequenceTakeInBounds => {
                 matches!(args, [source, cursor]
