@@ -9885,6 +9885,11 @@ impl<'a> Checker<'a> {
                 }
                 return Err(self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.prod"))) => {
+                return self
+                    .integer_product(call)
+                    .map_err(|_| self.scoped_builtin_error(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
@@ -9938,7 +9943,6 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
-            Some(Binding::Intrinsic(Intrinsic::MathProd)) => return self.integer_product(call),
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Combinatorial(op))) => {
