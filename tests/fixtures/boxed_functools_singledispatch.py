@@ -26,6 +26,8 @@ def current():
         "directory", "text", "bytes", "link"
     )
     assert describe.dispatch(Link) is link
+    assert describe(None) == "directory"
+    assert describe.dispatch(type(None)) is describe.registry[object]
     assert describe.registry[bytes] is raw
     try:
         describe.registry[bytes] = text
