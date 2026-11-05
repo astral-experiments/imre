@@ -2147,12 +2147,25 @@ impl Context {
             self.heap.get(receiver),
             Value::Str(_) | Value::SurrogateStr(_)
         ) {
-            self.heap.reserve_temporaries(1)?;
-            self.heap.keep(receiver);
-            return Ok((self.builtin(symbol), receiver));
+            return self.retain_builtin_method_receiver(receiver, symbol);
         }
         let name = symbol.strip_prefix("str.").expect("compiled string method");
         Ok((self.lookup_method(receiver, name)?, NONE))
+    }
+
+    /// Resolve an immediate get call while preserving custom attribute lookup for other receivers.
+    pub(super) fn dict_get_target(&mut self, receiver: Id) -> Result<(Id, Id)> {
+        if matches!(self.heap.get(receiver), Value::Dict(_)) {
+            return self.retain_builtin_method_receiver(receiver, "dict.get");
+        }
+        Ok((self.lookup_method(receiver, "get")?, NONE))
+    }
+
+    /// Keep the receiver alive while the caller evaluates the positional arguments.
+    fn retain_builtin_method_receiver(&mut self, receiver: Id, symbol: &str) -> Result<(Id, Id)> {
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(receiver);
+        Ok((self.builtin(symbol), receiver))
     }
 
     /// Resolve an immediately called attribute before its arguments are evaluated.
