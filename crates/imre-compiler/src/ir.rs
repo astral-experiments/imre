@@ -609,6 +609,34 @@ impl Expr {
         }
     }
 
+    /// Return a literal integer that fits the native tagged representation.
+    pub(crate) fn tagged_integer_literal(&self) -> Option<i64> {
+        let value = match &self.kind {
+            ExprKind::Int(value) => value.parse::<i64>().ok()?,
+            ExprKind::Negate(value) => value.tagged_integer_literal()?.checked_neg()?,
+            _ => return None,
+        };
+        (-(1_i64 << 62)..(1_i64 << 62))
+            .contains(&value)
+            .then_some(value)
+    }
+
+    /// Split an integer index into its local and the literal offset added to it.
+    pub(crate) fn local_integer_offset(&self) -> Option<(usize, i64)> {
+        if self.ty != Type::Int {
+            return None;
+        }
+        match &self.kind {
+            ExprKind::Local(slot) => Some((*slot, 0)),
+            ExprKind::Binary(Binary::Add, left, right) => match (&left.kind, &right.kind) {
+                (ExprKind::Local(slot), _) => Some((*slot, right.tagged_integer_literal()?)),
+                (_, ExprKind::Local(slot)) => Some((*slot, left.tagged_integer_literal()?)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Construct an absent optional from a literal None.
     pub(crate) fn absent(ty: Type) -> Self {
         Self {

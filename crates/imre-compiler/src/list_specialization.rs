@@ -115,8 +115,12 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, private_curso
     }
     if let (Some(cursor), Some(arguments)) = (induction, &arguments)
         && !written[cursor]
-        && small_literal(&arguments[0]).is_some_and(|start| start >= 0)
-        && small_literal(&arguments[2]).is_some_and(|step| step > 0)
+        && arguments[0]
+            .tagged_integer_literal()
+            .is_some_and(|start| start >= 0)
+        && arguments[2]
+            .tagged_integer_literal()
+            .is_some_and(|step| step > 0)
     {
         prove_range_windows(
             body,
@@ -222,7 +226,7 @@ fn buffer_appends(
         safe &= match &value.kind {
             ExprKind::Builtin(Builtin::ListGet, args) => {
                 let reads = matches!(args[0].kind, ExprKind::Local(slot) if slot == output)
-                    && small_literal(&args[1]) == Some(-1);
+                    && args[1].tagged_integer_literal() == Some(-1);
                 tail |= reads;
                 reads
             }
@@ -551,7 +555,7 @@ fn while_arguments(test: &Expr) -> Option<([Expr; 3], usize)> {
 fn range_arguments(args: &[Expr]) -> Option<[Expr; 3]> {
     if !args.iter().all(|value| {
         matches!(value.kind, ExprKind::Local(_))
-            || small_literal(value).is_some()
+            || value.tagged_integer_literal().is_some()
             || matches!(
                 &value.kind,
                 ExprKind::Builtin(Builtin::Len, args)
@@ -596,7 +600,7 @@ fn prove_range_windows(
         let ExprKind::Binary(Binary::Subtract, limit, counter) = &rest.kind else {
             return;
         };
-        let Some(width) = small_literal(width) else {
+        let Some(width) = width.tagged_integer_literal() else {
             return;
         };
         let width = match comparisons.as_slice() {
@@ -618,7 +622,9 @@ fn prove_range_windows(
                 return;
             };
             if !inputs.contains_key(&root)
-                || !window_offset(index, cursor).is_some_and(|k| (0..width).contains(&k))
+                || !index
+                    .local_integer_offset()
+                    .is_some_and(|(slot, offset)| slot == cursor && (0..width).contains(&offset))
             {
                 return;
             }
@@ -650,34 +656,6 @@ fn prove_range_windows(
             kind: ExprKind::Compare(vec![stop.clone(), length], vec![Compare::LessEqual]),
         });
     }
-}
-
-/// Returns the constant offset from an induction variable in an integer index.
-fn window_offset(index: &Expr, cursor: usize) -> Option<i64> {
-    if index.ty != Type::Int {
-        return None;
-    }
-    match &index.kind {
-        ExprKind::Local(slot) if *slot == cursor => Some(0),
-        ExprKind::Binary(Binary::Add, left, right) if matches!(left.kind, ExprKind::Local(slot) if slot == cursor) => {
-            small_literal(right)
-        }
-        ExprKind::Binary(Binary::Add, left, right) if matches!(right.kind, ExprKind::Local(slot) if slot == cursor) => {
-            small_literal(left)
-        }
-        _ => None,
-    }
-}
-
-fn small_literal(value: &Expr) -> Option<i64> {
-    let value = match &value.kind {
-        ExprKind::Int(value) => value.parse::<i64>().ok()?,
-        ExprKind::Negate(value) => small_literal(value)?.checked_neg()?,
-        _ => return None,
-    };
-    (-(1_i64 << 62)..(1_i64 << 62))
-        .contains(&value)
-        .then_some(value)
 }
 
 fn alias(expression: &Expr, aliases: &[Option<usize>]) -> Option<usize> {
@@ -727,6 +705,7 @@ print(windows([1, 2, 3, 4], 4))
 "#;
         let proven = |source: &str| {
             let module = optimized(source);
+            crate::verify::module(&module).unwrap();
             let mut count = 0;
             for function in &module.functions {
                 walk_expressions(&function.body, &mut |value| {
@@ -741,6 +720,7 @@ print(windows([1, 2, 3, 4], 4))
             count
         };
         assert_eq!(proven(source), 3);
+        assert_eq!(proven(&source.replace("i + 1", "1 + i")), 3);
         assert_eq!(
             proven(&source.replace("stop - i >= 3", "len(data) - i > 2")),
             3
