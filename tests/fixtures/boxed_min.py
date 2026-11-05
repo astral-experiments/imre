@@ -8,6 +8,20 @@ class Rank:
 
 def current():
     print(min(len('health'), len('healt')))
+    first = int("12345")
+    equal = int("12345")
+    negative_zero = float("-0.0")
+    positive_zero = float("0.0")
+    nan = float("nan")
+    for choose in (min, max):
+        assert choose(first, equal) is first
+        assert choose(equal, first) is equal
+        assert choose(negative_zero, positive_zero) is negative_zero
+        assert choose(nan, positive_zero) is nan
+        assert choose(positive_zero, nan) is positive_zero
+    print(min(equal, -first), max(-first, equal))
+    print(min(-2.5, 1.5), max(-2.5, 1.5))
+    print(min(10**40, 1), max(1, 10**40), min(True, 1) is True)
     rules = [Rank(7), Rank(3), Rank(3)]
     calls = []
 
