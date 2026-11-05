@@ -65,6 +65,58 @@ pub fn byte_pattern(bytes: &[u8]) -> String {
     source
 }
 
+/// Read an ordinary ASCII bracket run without compiling an automaton. Escapes,
+/// nested sets and operators with Python warning behavior use the full parser.
+pub fn plain_run(pattern: &[u8]) -> Option<[u8; 256]> {
+    let body = pattern.strip_prefix(b"[")?.strip_suffix(b"]+")?;
+    let (body, excluded) = body
+        .strip_prefix(b"^")
+        .map_or((body, false), |rest| (rest, true));
+    let atom =
+        |b: u8| b.is_ascii() && !matches!(b, b'[' | b']' | b'\\' | b'-' | b'&' | b'|' | b'~');
+    if body.is_empty() {
+        return None;
+    }
+    let mut members = [u8::from(excluded); 256];
+    let mut at = 0;
+    while at < body.len() {
+        let start = body[at];
+        if !atom(start) {
+            return None;
+        }
+        at += 1;
+        let end = if body.get(at) == Some(&b'-') {
+            let end = *body.get(at + 1)?;
+            if !atom(end) || end < start {
+                return None;
+            }
+            at += 2;
+            end
+        } else {
+            start
+        };
+        members[usize::from(start)..=usize::from(end)].fill(u8::from(!excluded));
+    }
+    Some(members)
+}
+
+/// Find the next maximal byte run without revisiting an accepted byte.
+pub fn next_byte_run(
+    bytes: &[u8],
+    members: &[u8; 256],
+    offset: usize,
+) -> Option<std::ops::Range<usize>> {
+    let skip = bytes[offset..]
+        .iter()
+        .position(|&b| members[usize::from(b)] != 0)?;
+    let start = offset + skip;
+    let mut end = start + 1;
+    while end < bytes.len() && members[usize::from(bytes[end])] != 0 {
+        end += 1;
+    }
+    Some(start..end)
+}
+
 /// Encode a greedy scalar class as a byte lookup followed by little-endian
 /// change points for non-ASCII scalars. A single enclosing findall capture
 /// yields the same string as the complete match.

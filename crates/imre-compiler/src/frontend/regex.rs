@@ -530,6 +530,9 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if receiver.ty == Type::RegexPattern && attribute.attr.as_str() == "findall" {
+            return Err(self.object_builtin_error("re.Pattern.findall", call));
+        }
         self.reject_builtin_keywords(call)?;
         let method = attribute.attr.as_str();
         let args = call.arguments.args.as_ref();
