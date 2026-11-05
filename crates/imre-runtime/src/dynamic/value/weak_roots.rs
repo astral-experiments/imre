@@ -372,6 +372,10 @@ impl Heap {
         globals: [Id; 2],
         stdin: Option<&[Id; 3]>,
     ) -> bool {
+        // Retry from the current roots when a previously proven path loses an anchor or edge.
+        if !self.finalizer_roots.nodes.is_empty() && !self.finalizer_roots.valid(self, globals) {
+            self.finalizer_roots = RootPaths::default();
+        }
         if !self.finalizer_roots.search_due() {
             return false;
         }
