@@ -5283,7 +5283,6 @@ impl<'a> Loader<'a> {
         }
         let bundled = match name {
             "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
-            "decimal" => bundled_source!("decimal.py"),
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
             // Keep the public typeshed decorator signatures available alongside this singleton.
             "dataclasses" => Some((
