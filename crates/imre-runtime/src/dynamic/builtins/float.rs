@@ -166,7 +166,7 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             )));
         }
     };
-    if let Some(number) = from_numeric(ctx, value)? {
+    if let Some(number) = from_numeric_slots(ctx, value)? {
         return Ok(number);
     }
     let parsed = if let Ok(text) = ctx.str_value(value) {
@@ -188,16 +188,41 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     Ok(ctx.alloc(Value::Float(number)))
 }
 
-/// Return the float supplied by the numeric protocol, preserving callback results and errors.
+/// Read the stored double of any float before consulting other numeric objects' slots.
 pub(in crate::dynamic) fn from_numeric(ctx: &mut Context, value: Id) -> Result<Option<Id>> {
+    let scalar = ctx.scalar_value(value);
+    if matches!(ctx.heap.get(scalar), Value::Float(_)) {
+        return Ok(Some(scalar));
+    }
+    from_numeric_slots(ctx, value)
+}
+
+/// float() and explicit complex components honor a float subclass's __float__ override.
+pub(in crate::dynamic) fn from_numeric_slots(ctx: &mut Context, value: Id) -> Result<Option<Id>> {
     if matches!(ctx.heap.get(value), Value::Float(_)) {
         return Ok(Some(value));
     }
     if let Some(method) = ctx.bound_slot(value, "__float__")? {
         let result = ctx.call(method, Vec::new(), Vec::new())?;
         let scalar = ctx.scalar_value(result);
-        if matches!(ctx.heap.get(scalar), Value::Float(_)) {
-            return Ok(Some(scalar));
+        if let Value::Float(number) = *ctx.heap.get(scalar) {
+            if result != scalar {
+                ctx.heap.reserve_temporaries(1)?;
+                ctx.heap.keep(result);
+                let owner = ctx.type_name(value);
+                let returned = ctx.type_name(result);
+                ctx.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::DeprecationWarning,
+                    &format!(
+                        "{}.__float__ returned non-float (type {}).  The ability to return an instance of a strict subclass of float is deprecated, and may be removed in a future version of Python.",
+                        &owner[..owner.floor_char_boundary(50)],
+                        &returned[..returned.floor_char_boundary(50)],
+                    ),
+                    1,
+                )?;
+                return Ok(Some(ctx.alloc(Value::Float(number))));
+            }
+            return Ok(Some(result));
         }
         return Err(type_error(format!(
             "{}.__float__ returned non-float (type {})",
