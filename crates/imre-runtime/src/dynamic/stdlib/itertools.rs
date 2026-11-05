@@ -169,6 +169,7 @@ pub(in crate::dynamic) struct Accumulator {
     function: Id,
     total: Option<Id>,
     initial_pending: bool,
+    addition: bool,
 }
 
 impl Cursor {
@@ -328,6 +329,8 @@ pub(super) fn accumulate_allocate(
                 base: *base,
                 source: *source,
                 function: *function,
+                addition: *function == NONE
+                    || matches!(ctx.heap.get(*function), Value::Native(name) if name == "operator.add"),
                 total: (*initial != NONE).then_some(*initial),
                 initial_pending: *initial != NONE,
             }),
@@ -372,15 +375,20 @@ pub(in crate::dynamic) fn next_accumulated(ctx: &mut Context, receiver: Id) -> R
         return Ok(state.total);
     }
     let source = state.source;
-    let Some(item) = ctx.next_result(source)? else {
+    let item = if matches!(ctx.heap.get(source), Value::Iterator { .. }) {
+        ctx.next_builtin_sequence_item(source)?
+    } else {
+        ctx.next_result(source)?
+    };
+    let Some(item) = item else {
         return Ok(None);
     };
     // Fetch the total after the source returns since its __next__ can reenter us.
     let state = accumulator(ctx, receiver)?;
-    let value = match (state.function, state.total) {
-        (_, None) => item,
-        (function, Some(total)) => {
-            if function == NONE
+    let value = match (state.function, state.total, state.addition) {
+        (_, None, _) => item,
+        (function, Some(total), addition) => {
+            if addition
                 && let (Value::Int(left), Value::Int(right)) =
                     (ctx.heap.get(total), ctx.heap.get(item))
             {
@@ -389,7 +397,7 @@ pub(in crate::dynamic) fn next_accumulated(ctx: &mut Context, receiver: Id) -> R
             } else {
                 ctx.heap.keep(item);
                 ctx.heap.keep(total);
-                if function == NONE {
+                if addition {
                     ctx.binary("+", total, item)?
                 } else {
                     ctx.call(function, vec![total, item], Vec::new())?
