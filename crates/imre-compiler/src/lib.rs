@@ -33,6 +33,7 @@ mod types;
 mod verify;
 mod version;
 mod watch;
+mod write_parts;
 mod zip_entry;
 pub use zip_entry::is_zip_path;
 
@@ -702,6 +703,8 @@ fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "character local specialization")?;
     digit_sums::specialize(module);
     verify_after(module, "digit reduction fusion")?;
+    write_parts::specialize(module);
+    verify_after(module, "text write forwarding")?;
     split_fields::specialize(module);
     verify_after(module, "integer split fields")?;
     case_membership::specialize(module);
