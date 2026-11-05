@@ -460,7 +460,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acos" | "acosh" | "atan2" | "cos"
             | "dist" | "exp" | "fma" | "frexp" | "fsum" | "gcd" | "hypot" | "isclose" | "isfinite"
             | "isinf" | "isnan" | "isqrt" | "lcm" | "ldexp" | "log" | "log2" | "prod" | "sin"
-            | "sqrt" | "tan",
+            | "sqrt" | "tan" | "ulp",
         ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {

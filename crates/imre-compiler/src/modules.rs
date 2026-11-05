@@ -2377,6 +2377,7 @@ impl IntrinsicModule {
             (Self::Math, "sin") => Intrinsic::ScopedObjectExport("math.sin"),
             (Self::Math, "sqrt") => Intrinsic::ScopedObjectExport("math.sqrt"),
             (Self::Math, "tan") => Intrinsic::ScopedObjectExport("math.tan"),
+            (Self::Math, "ulp") => Intrinsic::ScopedObjectExport("math.ulp"),
             (Self::Math, "pi") => Intrinsic::ScopedObjectExport("math.pi"),
             (Self::Math, "e") => Intrinsic::ScopedObjectExport("math.e"),
             (Self::Math, "tau") => Intrinsic::ScopedObjectExport("math.tau"),
