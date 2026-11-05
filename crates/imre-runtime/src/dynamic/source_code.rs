@@ -4289,7 +4289,7 @@ impl Context {
         let (code, frame_scope) = (*code, *scope);
         let mut active = std::mem::take(iterators);
         let mut blocks = std::mem::take(protected);
-        self.heap.disarm_generator_finalizer(id);
+        self.heap.disarm_finalizer(id);
         let result = self
             .prepare_generator(code)
             .and_then(|()| {
@@ -4347,7 +4347,7 @@ impl Context {
         *scope = NONE;
         *frame = None;
         *owner = FrameOwner::Module(NONE);
-        self.heap.disarm_generator_finalizer(id);
+        self.heap.disarm_finalizer(id);
         if self.heap.tracks_finalizers()
             && (!active.is_empty()
                 || !self.scope_data(frame_scope).closure.cells.is_empty()

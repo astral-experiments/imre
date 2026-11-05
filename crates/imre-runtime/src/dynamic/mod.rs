@@ -1414,7 +1414,7 @@ impl Context {
                 .map(Some);
         }
         if let Value::Scandir(scan) = self.heap.get(id) {
-            return stdlib::os::scandir::advance(self, scan.clone());
+            return stdlib::os::scandir::advance(self, id, scan.clone());
         }
         if let Value::GenericAliasIterator(source) = self.heap.get_mut(id) {
             let source = source.take();
