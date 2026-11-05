@@ -202,8 +202,8 @@ impl<'a> Supplied<'a> {
 /// Roots source expressions in Python evaluation order while expanding fixed tuples.
 #[derive(Default)]
 pub(super) struct ArgumentScope {
-    body: Vec<Statement>,
-    clear: Vec<usize>,
+    pub(super) body: Vec<Statement>,
+    pub(super) clear: Vec<usize>,
 }
 
 impl ArgumentScope {

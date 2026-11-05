@@ -3,62 +3,6 @@
 use super::*;
 
 impl Checker<'_> {
-    /// Materialize integer prefixes directly when neither the iterator nor its addition escapes.
-    fn integer_prefix_list(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let positional = ParameterKind::PositionalOrKeyword;
-        let params = [
-            positional.parameter("iterable", Type::ListInt, None),
-            positional.parameter("func", Type::None, Some(Expr::none())),
-            ParameterKind::KeywordOnly.parameter("initial", Type::Int, Some(Expr::none())),
-        ];
-        let args = self
-            .arguments_with(call, &params, None, |checker, index, node| {
-                if index == 1
-                    && matches!(
-                        checker.resolve(node),
-                        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
-                            "operator.add"
-                        )))
-                    )
-                    && checker.graph.session.is_stdlib_function(
-                        checker.module,
-                        node,
-                        "_operator",
-                        "add",
-                    )
-                {
-                    return Ok(Expr::none());
-                }
-                checker.evaluated_argument(node)
-            })
-            .map_err(|_| self.scoped_builtin_error("itertools.accumulate", call))?;
-        let [source, func, initial] = args.order[..] else {
-            unreachable!()
-        };
-        if args.values[source].ty != Type::ListInt
-            || args.values[func].ty != Type::None
-            || !matches!(args.values[initial].ty, Type::None | Type::Int)
-        {
-            return Err(self.scoped_builtin_error("itertools.accumulate", call));
-        }
-        // Hold the arguments in call order before reading the list. An initial
-        // expression can mutate it, including when supplied before iterable=.
-        let mut scope = calls::ArgumentScope::default();
-        let values: Vec<_> = args
-            .values
-            .into_iter()
-            .map(|value| scope.hold(self, value))
-            .collect();
-        let mut operands = vec![values[source].clone()];
-        if values[initial].ty == Type::Int {
-            operands.push(values[initial].clone());
-        }
-        Ok(scope.finish(Expr {
-            ty: Type::ListInt,
-            kind: ExprKind::Builtin(Builtin::ListAccumulate, operands),
-        }))
-    }
-
     pub(super) fn list_call(
         &mut self,
         call: &ast::ExprCall,
@@ -89,24 +33,23 @@ impl Checker<'_> {
             return self.collect_list(input, false, element, call);
         }
         if let ast::Expr::Call(scan) = source
-            && matches!(
-                self.resolve(&scan.func),
-                Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
-                    "itertools.accumulate"
-                )))
-            )
-            && self.graph.session.is_stdlib_class(
-                self.module,
-                &scan.func,
-                "itertools",
-                "accumulate",
-            )
+            && self.is_accumulate(scan)
         {
+            let args = self.accumulate_args(scan)?;
             if let Some(expected) = element {
-                self.expect(expected, Type::Int, source)
+                self.expect(expected, args.element, source)
                     .map_err(|_| self.scoped_builtin_error("itertools.accumulate", scan))?;
             }
-            return self.integer_prefix_list(scan);
+            if args.source.ty == Type::ListInt && args.function.ty == Type::None {
+                let mut operands = vec![args.source];
+                operands.extend(args.initial);
+                return Ok(args.scope.finish(Expr {
+                    ty: Type::ListInt,
+                    kind: ExprKind::Builtin(Builtin::ListAccumulate, operands),
+                }));
+            }
+            let input = self.prepare_accumulate(scan, args)?;
+            return self.collect_list(Iteration::Prepared(input), false, element, call);
         }
         if let Some(diff) = self.materialize_ndiff(source)? {
             if let Some(element) = element {

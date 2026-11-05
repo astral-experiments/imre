@@ -17,3 +17,14 @@ prefixes([])
 prefixes([1, -3, 4])
 wide = 1 << 110
 prefixes([wide, -wide, wide - 1, 1])
+
+
+def difference(a: int, b: int) -> int:
+    if b == 4:
+        raise StopIteration
+    return a - b
+
+
+print(list(scan(range(7), difference)))
+print(sum(scan([2, 3, 4, 5], difference, initial=10)))
+print(list(scan([2.5, -3.0, 1.25], initial=0.5)))
