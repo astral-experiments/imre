@@ -50,6 +50,23 @@ try:
 except* Error:
     pass
 
+type Plain = int
+type Pair[T: int = bool, *Ts = *tuple[()], **P = []] = tuple[T, *Ts]
+class Bag[T: (int, str)]:
+    async def add[U](self, item: U) -> U:
+        return item
+
+async def stream():
+    await work()
+    yield
+    yield await another()
+
+def outer[T](value: T):
+    def inner():
+        global first, second
+        nonlocal value
+    return inner
+
 lookups = ({k: v for k, v in pairs}, {name for name in names})
 render = lambda val: 'prefix ' f'{val = !s:>{width}}' ' suffix'
 """
