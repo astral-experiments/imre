@@ -214,6 +214,7 @@ fn process_clock_fallback() -> Result<(f64, (&'static str, f64)), Error> {
     if unsafe { libc::times(times.as_mut_ptr()) } != !0 {
         // SAFETY: times returned success; _SC_CLK_TCK is a standard sysconf key.
         let times = unsafe { times.assume_init() };
+        // SAFETY: sysconf takes a POSIX configuration selector and no pointers.
         let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
         if ticks <= 0 {
             return Err(super::errno_error(io::Error::last_os_error()));
