@@ -68,7 +68,8 @@ impl Builtin {
                     Len | RowLen | ViewLen(_) | ViewField(..) => Contract::new(false, PreservesLists),
                 }
             }
-            Self::SplitIntSource(_) | Self::StringSliceEqual => Contract::new(false, PreservesLists),
+            Self::SplitIntSource(_) | Self::SplitTextSource(_) | Self::SplitTextLen | Self::StringSliceEqual => Contract::new(false, PreservesLists),
+            Self::SplitTextField(_) => Contract::new(true, PreservesLists),
             Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
@@ -949,6 +950,29 @@ impl Builtin {
             }
             Self::SplitIntSource(mask) => {
                 mask.count_ones() >= 2 && signature(&[Type::Str], Type::Str)
+            }
+            Self::SplitTextSource(count) => {
+                (1..=8).contains(count) && signature(&[Type::Str], Type::Str)
+            }
+            Self::SplitTextLen => {
+                matches!(
+                    args,
+                    [Expr {
+                        kind: ExprKind::Local(_),
+                        ..
+                    }]
+                ) && signature(&[Type::Str], Type::Int)
+            }
+            Self::SplitTextField(i) => {
+                *i < 8
+                    && matches!(
+                        args,
+                        [Expr {
+                            kind: ExprKind::Local(_),
+                            ..
+                        }]
+                    )
+                    && signature(&[Type::Str], Type::Str)
             }
             Self::SplitIntCached(index) => {
                 *index < 8
