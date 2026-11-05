@@ -46,7 +46,7 @@ fn components(mut bytes: &[u8], before_zone: bool) -> Option<[i32; 4]> {
     (before_zone || trailing.is_none_or(|&b| b == 0)).then_some(fields)
 }
 
-pub(super) fn parse(text: &str) -> Option<([i32; 4], Option<i64>)> {
+pub(crate) fn parse(text: &str) -> Option<([i32; 4], Option<i64>)> {
     let bytes = text.as_bytes();
     parse_clock(bytes.strip_prefix(b"T").unwrap_or(bytes))
 }
