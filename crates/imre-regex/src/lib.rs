@@ -147,14 +147,14 @@ impl<'a> ByteRuns<'a> {
         let mut offset = count;
         for block in rest.as_chunks::<32>().0 {
             // Each unsigned subtraction tests one inclusive range across all lanes.
-            let members = block.map(|byte| {
-                u8::from(
-                    (byte.wrapping_sub(ranges[0].0) <= ranges[0].1)
-                        | (byte.wrapping_sub(ranges[1].0) <= ranges[1].1)
-                        | (byte.wrapping_sub(ranges[2].0) <= ranges[2].1),
-                )
-            });
-            if members != [u8::from(INSIDE); 32] {
+            let mut uniform = true;
+            for &byte in block {
+                let member = (byte.wrapping_sub(ranges[0].0) <= ranges[0].1)
+                    | (byte.wrapping_sub(ranges[1].0) <= ranges[1].1)
+                    | (byte.wrapping_sub(ranges[2].0) <= ranges[2].1);
+                uniform &= member == INSIDE;
+            }
+            if !uniform {
                 break;
             }
             offset += 32;
