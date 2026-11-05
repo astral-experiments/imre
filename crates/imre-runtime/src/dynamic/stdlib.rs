@@ -49,7 +49,7 @@ pub(super) use socket::{
 };
 pub(super) mod io;
 mod json;
-mod lzma;
+pub(super) mod lzma;
 mod marshal;
 mod math;
 pub(super) use math::fraction_hash;
@@ -1859,6 +1859,23 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("zlib.Compress.") {
         return zlib::compressor(ctx, method, args, kwargs);
+    }
+    if let Some(member) = name.strip_prefix("_lzma.") {
+        match member {
+            "LZMACompressor" => return lzma::compressor(ctx, "new", args, kwargs),
+            "LZMADecompressor" => return lzma::decompressor(ctx, "new", args, kwargs),
+            "is_check_supported" => return lzma::is_check_supported(ctx, args, kwargs),
+            "_encode_filter_properties" | "_decode_filter_properties" => {
+                return lzma::properties(ctx, member, args, kwargs);
+            }
+            _ => {}
+        }
+        if let Some(method) = member.strip_prefix("LZMACompressor.") {
+            return lzma::compressor(ctx, method, args, kwargs);
+        }
+        if let Some(method) = member.strip_prefix("LZMADecompressor.") {
+            return lzma::decompressor(ctx, method, args, kwargs);
+        }
     }
     if name == "lzma.decompress" {
         return lzma::call(ctx, "decompress", args, kwargs);

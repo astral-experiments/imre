@@ -68,6 +68,12 @@ const FIRST_DYNAMIC_SLOT: usize =
 /// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
 pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
 
+pub(super) const LZMA_COMPRESS_TYPE: &str = "_lzma.LZMACompressor";
+pub(super) const LZMA_DECOMPRESS_TYPE: &str = "_lzma.LZMADecompressor";
+pub(super) const LZMA_COMPRESS_METHODS: &[&str] = &["compress", "flush"];
+pub(super) const LZMA_DECOMPRESS_METHODS: &[&str] = &["decompress"];
+pub(super) const LZMA_DECOMPRESS_FIELDS: &[&str] = &["check", "eof", "needs_input", "unused_data"];
+
 pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
 pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
@@ -1072,6 +1078,8 @@ pub(super) enum Value {
         lease: Option<Id>,
         // An ownerless C buffer has private backing storage but exposes obj as None.
         anonymous: bool,
+        // A native export's Python release callback cannot derive another view.
+        restricted: bool,
         layout: Option<super::memoryview::ViewLayout>,
         readonly: bool,
         hash: Option<i64>,
@@ -1416,6 +1424,8 @@ pub(super) enum Value {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
+    LzmaCompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Compressor>>),
+    LzmaDecompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Decompressor>>),
     ZlibCompressor(crate::Shared<std::cell::RefCell<super::stdlib::zlib::Compressor>>),
     RegexScanner {
         pattern: Id,
@@ -1531,6 +1541,8 @@ impl Value {
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GzipDecoder(_) => "object",
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
+            Self::LzmaCompressor(_) => LZMA_COMPRESS_TYPE,
+            Self::LzmaDecompressor(_) => LZMA_DECOMPRESS_TYPE,
             Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::Struct { .. } => "struct.Struct",
@@ -2220,6 +2232,7 @@ impl Value {
             | Self::TokenMissing
             | Self::ProcessPreparation(_)
             | Self::GzipDecoder(_)
+            | Self::LzmaCompressor(_)
             | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
@@ -2228,6 +2241,7 @@ impl Value {
             | Self::TlsSession(_)
             | Self::TlsListener(_)
             | Self::TlsBioSession(_) => {}
+            Self::LzmaDecompressor(state) => visit.push(state.borrow().unused_data),
             Self::ZlibDecompressor { state, dictionary } => {
                 visit.extend(*dictionary);
                 state.borrow().children(visit);

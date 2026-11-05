@@ -70,6 +70,22 @@ fn structure_error() -> Error {
 }
 
 impl Context {
+    pub(super) fn check_view_export(&self, view: Id) -> Result<()> {
+        if let Value::MemoryView {
+            owner,
+            restricted: true,
+            ..
+        } = self.heap.get(view)
+        {
+            Self::memoryview_owner(*owner)?;
+            return Err(Error::new(
+                "ValueError",
+                "cannot create new view on restricted memoryview",
+            ));
+        }
+        Ok(())
+    }
+
     fn view_owner(&self, view: Id) -> Result<Id> {
         let Value::MemoryView { owner, .. } = *self.heap.get(view) else {
             unreachable!()
@@ -203,6 +219,7 @@ impl Context {
                 ),
             )
         })?;
+        self.check_view_export(view)?;
         let span = self.buffer_span(view)?;
         if !span.layout.is_contiguous() {
             return Err(Error::new(
@@ -342,6 +359,7 @@ impl Context {
     }
 
     pub(super) fn view_bytes(&self, view: Id) -> Result<&[u8]> {
+        self.check_view_export(view)?;
         self.buffer_span(view)?.contiguous()
     }
 
@@ -487,6 +505,7 @@ impl Context {
             return Ok(view);
         }
         if let Value::Slice(parts) = *self.heap.get(key) {
+            self.check_view_export(view)?;
             let layout = self.view_layout(view)?;
             if layout.shape().is_empty() {
                 return Err(Error::new("TypeError", "invalid indexing of 0-dim memory"));
@@ -506,6 +525,7 @@ impl Context {
                 owner: Some(owner),
                 lease,
                 anonymous,
+                restricted: false,
                 readonly,
                 hash: None,
                 layout: Some(layout),

@@ -549,6 +549,7 @@ fn bytes_from_source(ctx: &mut Context, obj: Id, bytes_constructor: bool) -> Res
         return super::super::copy_ids(array.as_bytes());
     }
     if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
+        ctx.check_view_export(obj)?;
         return ctx.memoryview_bytes(obj);
     }
     if matches!(
