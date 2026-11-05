@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 4, 2026, Imre has a paired pass for **11,973 of 16,202 tests (73.9%)** across the 44 standard library module families tracked below.
+As of November 4, 2026, Imre has a paired pass for **11,975 of 16,202 tests (73.9%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -157,7 +157,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
-| `base64` | 38 | 41 | 0 | Both native runs of the full suite passed 38 of 41 originals. The five new passes cover command-line decoding, file and stdin encoding, help, and invalid flags. Two originals errored on b16encode and one skipped. Stock passed all 41. |
+| `base64` | 40 | 41 | 0 | Stock passed all 41 originals. Both native runs passed 40, retaining the 38 earlier passes and adding `BaseXYTestCase.test_RFC4648_test_cases` and `BaseXYTestCase.test_b16encode` (occurrence 1 each). The earlier 38 include five CLI tests for decoding, encoding from files and stdin, help, and invalid flags. Only the CPython-specific `LazyImportTest.test_lazy_import` skipped on Imre. A separate Base16 application produced identical output on stock, O0 and O3. [Public replay revision](https://github.com/astral-experiments/imre/commit/259f2ddc8e20cae1e61a0438a77be7d47b4037b1). |
 | `configparser` | 326 | 344 | 0 | Stock and both native builds passed the same 19 original multiline parsing tests on public main. All 19 are new to the ledger. |
 | `contextlib` | 149 | 149 | 0 | All 149 synchronous and asynchronous originals passed together on public Imre, including `test.test_contextlib.TestSuppress.test_exception_groups` (occurrence 1). |
 | `copy` | 81 | 81 | 0 | Complete suite. Two independent machines ran all 81 upstream originals on stock and public `b9dfd225` at O0 and O3. All six runs passed and exited successfully. |
@@ -176,7 +176,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 252 | 383 | 0 | Across two public revisions, 249 distinct ZIP originals passed on stock and both native levels. Of those, 48 are new and 201 repeat earlier passes. Three earlier CLI passes failed in the later complete runs. The cumulative ledger contains 252 of 383. |
 | `zoneinfo` | 228 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). |
-| **Measured total (19 of 19 families)** | **2,213** | **2,875** | **11** |  |
+| **Measured total (19 of 19 families)** | **2,215** | **2,875** | **11** |  |
 
 ### Whole-suite baselines for later additions
 
