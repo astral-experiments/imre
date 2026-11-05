@@ -100,21 +100,85 @@ pub fn plain_run(pattern: &[u8]) -> Option<[u8; 256]> {
     Some(members)
 }
 
-/// Find the next maximal byte run without revisiting an accepted byte.
-pub fn next_byte_run(
-    bytes: &[u8],
-    members: &[u8; 256],
-    offset: usize,
-) -> Option<std::ops::Range<usize>> {
-    let skip = bytes[offset..]
-        .iter()
-        .position(|&b| members[usize::from(b)] != 0)?;
-    let start = offset + skip;
-    let mut end = start + 1;
-    while end < bytes.len() && members[usize::from(bytes[end])] != 0 {
-        end += 1;
+/// Scan the same byte class across all fields of one subject.
+pub struct ByteRuns<'a> {
+    members: &'a [u8; 256],
+    ranges: Option<[(u8, u8); 3]>,
+}
+
+impl<'a> ByteRuns<'a> {
+    pub fn new(members: &'a [u8; 256], len: usize) -> Self {
+        let ranges = if len >= 256 {
+            small_ranges(members)
+        } else {
+            None
+        };
+        Self { members, ranges }
     }
-    Some(start..end)
+
+    pub fn next(&self, bytes: &[u8], offset: usize) -> Option<std::ops::Range<usize>> {
+        let remaining = &bytes[offset..];
+        let skip = self.prefix::<false>(remaining);
+        if skip == remaining.len() {
+            return None;
+        }
+        let start = offset + skip;
+        let end = start + 1 + self.prefix::<true>(&bytes[start + 1..]);
+        Some(start..end)
+    }
+
+    fn prefix<const INSIDE: bool>(&self, bytes: &[u8]) -> usize {
+        let scalar = |slice: &[u8]| {
+            slice
+                .iter()
+                .position(|&b| (self.members[usize::from(b)] != 0) != INSIDE)
+                .unwrap_or(slice.len())
+        };
+        let Some(ranges) = &self.ranges else {
+            return scalar(bytes);
+        };
+        let (head, rest) = bytes.split_at(bytes.len().min(8));
+        let count = scalar(head);
+        if count < head.len() {
+            return count;
+        }
+        let mut offset = count;
+        for block in rest.as_chunks::<32>().0 {
+            // Each unsigned subtraction tests one inclusive range across all lanes.
+            let members = block.map(|byte| {
+                u8::from(
+                    (byte.wrapping_sub(ranges[0].0) <= ranges[0].1)
+                        | (byte.wrapping_sub(ranges[1].0) <= ranges[1].1)
+                        | (byte.wrapping_sub(ranges[2].0) <= ranges[2].1),
+                )
+            });
+            if members != [u8::from(INSIDE); 32] {
+                break;
+            }
+            offset += 32;
+        }
+        offset + scalar(&bytes[offset..])
+    }
+}
+
+/// Up to three inclusive ranges, stored as lower bounds and widths. Repeat
+/// the first range in unused lanes so all three comparisons are independent.
+fn small_ranges(members: &[u8; 256]) -> Option<[(u8, u8); 3]> {
+    let mut ranges = [(0, 0); 3];
+    let mut count = 0;
+    let mut start = 0;
+    for run in members.chunk_by(|a, b| (*a == 0) == (*b == 0)) {
+        if run[0] != 0 {
+            let range = (start as u8, (run.len() - 1) as u8);
+            if count == 0 {
+                ranges.fill(range);
+            }
+            *ranges.get_mut(count)? = range;
+            count += 1;
+        }
+        start += run.len();
+    }
+    (count != 0).then_some(ranges)
 }
 
 /// Encode a greedy scalar class as a byte lookup followed by little-endian
