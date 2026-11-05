@@ -5065,6 +5065,17 @@ impl Context {
             self.bound_slot(obj, name)?
         };
         let Some(method) = method else {
+            // An inherited integer addition accepts any integer storage, including bool.
+            if matches!(name, "__add__" | "__radd__") {
+                let (left, right) = (self.scalar_value(obj), self.scalar_value(other));
+                if [left, right]
+                    .iter()
+                    .all(|&id| matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
+                {
+                    let sum = self.as_int(left)?.add(&self.as_int(right)?);
+                    return Ok(Some(self.heap.alloc(Value::Int(sum))));
+                }
+            }
             let union = match name {
                 "__or__" => Some([obj, other]),
                 "__ror__" => Some([other, obj]),
@@ -5433,12 +5444,26 @@ impl Context {
         // An exact str has a numeric remainder slot. Order it against Python methods,
         // but leave pairs of exact builtins on the direct formatting path.
         let mixed_remainder = op == "%" && (ac.is_some() || bc.is_some());
-        if set_xor || dict_union || mixed_remainder || matches!(op, "*" | "/" | "**") {
+        let mixed_integer_sum = op == "+"
+            && (ac.is_some() || bc.is_some())
+            && [a, b].iter().all(|&id| {
+                matches!(
+                    self.heap.get(self.scalar_value(id)),
+                    Value::Int(_) | Value::Bool(_)
+                )
+            });
+        if set_xor
+            || dict_union
+            || mixed_remainder
+            || mixed_integer_sum
+            || matches!(op, "*" | "/" | "**")
+        {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
                 if matches!(
                     (op, self.heap.get(value)),
                     ("*" | "/" | "**", Value::Complex(_))
                         | ("%", Value::Str(_) | Value::SurrogateStr(_))
+                        | ("+", Value::Int(_) | Value::Bool(_))
                         | ("^", Value::Set { .. })
                         | ("|", Value::Dict(_) | Value::DefaultDict { .. })
                 ) {
@@ -5489,7 +5514,7 @@ impl Context {
                     .into_iter()
                     .all(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Complex(_)));
             let strict_subclass = ac != bc
-                && if set_xor || dict_union || complex_pair {
+                && if set_xor || dict_union || complex_pair || mixed_integer_sum {
                     self.direct_subclass(bc, ac)
                 } else {
                     self.subclass(bc, ac)
