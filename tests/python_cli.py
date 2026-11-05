@@ -136,6 +136,13 @@ def check_installed_site(imre, root, run):
         "shlex", "'two words' tail", timeout=300,
     )
     assert (words.returncode, words.stdout, words.stderr) == (0, b"'two words' tail\n", b""), words
+    command = run(
+        launcher, "-IB", "-c",
+        "import importlib, sys; shell = importlib.import_module(sys.argv[1]).Cmd(); "
+        "print(shell.parseline('?hello'))",
+        "cmd", timeout=300,
+    )
+    assert (command.returncode, command.stdout, command.stderr) == (0, b"('help', 'hello', 'help hello')\n", b""), command
     reader = root / "read_tar_entry.py"
     reader.write_text(
         "from graphlib import TopologicalSorter\n"

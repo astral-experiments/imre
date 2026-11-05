@@ -1,5 +1,6 @@
 _pydatetime.py
 _pydecimal.py
+cmd.py
 getpass.py
 graphlib.py
 shlex.py
