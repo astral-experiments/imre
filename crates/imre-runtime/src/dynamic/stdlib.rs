@@ -473,11 +473,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_imre_tempfile",
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "finalize_at_shutdown",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        (
-            "_imre_gzip",
-            "writer" | "compress" | "flush_writer" | "decoder" | "raw_tell" | "raw_read"
-            | "raw_mtime" | "raw_rewind",
-        ) => ctx.builtin(&format!("{module}.{name}")),
+        ("_imre_gzip", "decoder" | "raw_tell" | "raw_read" | "raw_mtime" | "raw_rewind") => {
+            ctx.builtin(&format!("{module}.{name}"))
+        }
         ("_imre_gzip", "BadGzipFile") => ctx.builtin("gzip.BadGzipFile"),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),

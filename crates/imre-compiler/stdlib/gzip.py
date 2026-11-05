@@ -141,7 +141,7 @@ class GzipFile(io.BufferedIOBase):
             if owned:
                 fileobj = io.open(name, mode[0] + "b")
             try:
-                compressor = _imre_gzip.writer(compresslevel)
+                compressor = zlib.compressobj(compresslevel, wbits=-zlib.MAX_WBITS)
                 buffer = io.BufferedWriter(_WriteBuffer(self), _WRITE_BUFFER_SIZE)
                 if not self.closed:
                     self.close()

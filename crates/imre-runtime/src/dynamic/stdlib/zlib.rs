@@ -438,22 +438,6 @@ impl Decompressor {
     }
 }
 
-/// The gzip facade writes the framing and owns its file object. These primitives
-/// advance one raw DEFLATE stream and return just its newly produced bytes.
-pub(super) fn gzip_writer(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
-    if name == "writer" {
-        let wbits = ctx.int(-15);
-        compressor(ctx, "new", args, &[("wbits".to_owned(), wbits)])
-    } else {
-        let method = if name == "compress" {
-            "compress"
-        } else {
-            "flush"
-        };
-        compressor(ctx, method, args, &[])
-    }
-}
-
 #[derive(Clone, Copy)]
 enum Codec {
     Compress { config: DeflateConfig },

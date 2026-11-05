@@ -16,8 +16,7 @@ pub(super) fn call(
     let arity = match name {
         "decoder" => 0,
         "raw_read" => 3,
-        "compress" | "flush_writer" => 2,
-        "writer" | "raw_mtime" | "raw_rewind" | "raw_tell" => 1,
+        "raw_mtime" | "raw_rewind" | "raw_tell" => 1,
         _ => unreachable!("registered gzip primitive"),
     };
     if !kwargs.is_empty() || args.len() != arity {
@@ -25,9 +24,6 @@ pub(super) fn call(
             "TypeError",
             format!("_imre_gzip.{name}() requires {arity} positional arguments"),
         ));
-    }
-    if matches!(name, "writer" | "compress" | "flush_writer") {
-        return super::zlib::gzip_writer(ctx, name, args);
     }
     if name == "decoder" {
         let state = crate::Shared::try_new(BoxedGzipDecoder {
