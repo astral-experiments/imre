@@ -2857,7 +2857,7 @@ impl Context {
         let message = match shadow {
             Some(path)
                 if module.is_some_and(|module| {
-                    include_str!("../../native/stdlib-module-names.txt")
+                    crate::sys::STDLIB_MODULE_NAMES
                         .lines()
                         .any(|name| name == module)
                 }) =>
@@ -4030,6 +4030,15 @@ impl Context {
                     self.bind(scope, "modules", self.modules);
                     let version = stdlib::sys_version(self)?;
                     self.bind(scope, "version", version);
+                    let names = self.alloc(Value::Set {
+                        entries: Default::default(),
+                        frozen: true,
+                    });
+                    for name in crate::sys::STDLIB_MODULE_NAMES.lines() {
+                        let key = self.text(name);
+                        builtins::set_add(self, names, key)?;
+                    }
+                    self.bind(scope, "stdlib_module_names", names);
                 }
                 let byteorder = self.text(if cfg!(target_endian = "little") {
                     "little"

@@ -3723,6 +3723,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
             "boxed_sys_byteorder.py",
+            "boxed_sys_stdlib_module_names.py",
             "boxed_sys_float_info.py",
             "boxed_sys_hash_info.py",
             "boxed_sys_thread_info.py",
