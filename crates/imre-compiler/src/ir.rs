@@ -973,6 +973,8 @@ pub(crate) enum Builtin {
     TupleBufferPush,
     TupleBufferFinish,
     Cycle,
+    /// A first-class cursor that owns its current numeric prefix.
+    AccumulateCursor,
     SysStdout,
     SysHasStdout,
     SysOriginalOutput {
