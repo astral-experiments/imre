@@ -284,8 +284,15 @@ def current():
     for source in (OnlyRandom(42), OnlyBits(42)):
         assert source.choice("ab") == "a"
         assert source.randint(3, 7) == 3
+        items = [1, 2, 3, 4]
+        assert source.shuffle(items) is None
+        assert items == [2, 3, 4, 1]
+    for items in ([], [2], list(range(20))):
+        generator.shuffle(items)
+        print(items, generator.getrandbits(32))
     for call, error in (
         (lambda: generator.choice([]), IndexError),
+        (lambda: generator.shuffle((1, 2)), TypeError),
         (lambda: generator.randrange(0, 1, 0), ValueError),
         (lambda: generator.randint(4, 3), ValueError),
         (lambda: generator.sample({1, 2}, 1), TypeError),

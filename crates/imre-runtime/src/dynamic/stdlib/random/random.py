@@ -144,6 +144,15 @@ class Random:
             raise IndexError('Cannot choose from an empty sequence')
         return seq[self._randbelow(len(seq))]
 
+    def shuffle(self, x):
+        """Shuffle list x in place, and return None."""
+
+        randbelow = self._randbelow
+        for i in reversed(range(1, len(x))):
+            # pick an element in x[:i+1] with which to exchange x[i]
+            j = randbelow(i + 1)
+            x[i], x[j] = x[j], x[i]
+
     def sample(self, population, k, *, counts=None):
         """Chooses k unique random elements from a population sequence.
 
