@@ -135,6 +135,7 @@ impl Int {
     }
 
     /// Borrows the allocation while the owning handle remains live.
+    #[inline]
     fn big(&self) -> Cow<'_, BigInt> {
         if let Some(value) = self.as_small() {
             Cow::Owned(BigInt::from(value))
@@ -146,13 +147,23 @@ impl Int {
         }
     }
 
+    fn is_prefix(&self) -> bool {
+        self.0 & (prefix_words::TAG | 1) == prefix_words::TAG
+    }
+
+    fn bits(&self) -> u64 {
+        if let Some(n) = self.as_small() {
+            u64::from(u64::BITS - n.unsigned_abs().leading_zeros())
+        } else if self.is_prefix() {
+            prefix_words::bits(self)
+        } else {
+            self.big().bits()
+        }
+    }
+
     /// Counts magnitude bits, excluding the sign and leading zeroes.
     fn bit_length(&self) -> Self {
-        let bits = self.as_small().map_or_else(
-            || self.big().bits(),
-            |n| u64::from(u64::BITS - n.unsigned_abs().leading_zeros()),
-        );
-        Self::from_usize(bits as usize)
+        Self::from_usize(self.bits() as usize)
     }
 
     /// Add tagged operands directly, including when only one input is wide.
@@ -2350,6 +2361,11 @@ fn sum_ints<'a>(values: impl Iterator<Item = &'a Int> + Clone) -> Int {
             // [-2^62+2^31, 2^62-2^32+1], including every prefix.
             return Int::small(sum).unwrap();
         }
+    }
+    if values.clone().any(Int::is_prefix)
+        && let Some(sum) = prefix_words::sum(values.clone())
+    {
+        return sum;
     }
     values.fold(Int::small(0).unwrap(), |sum, value| {
         // SAFETY: both owned/borrowed canonical integers remain live for addition.

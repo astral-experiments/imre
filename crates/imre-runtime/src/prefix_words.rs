@@ -25,8 +25,10 @@ struct Block {
 unsafe fn locate(word: usize) -> (*const Block, usize) {
     let slot = (word & !TAG) as *const Slot;
     // SAFETY: the supplied slot belongs to the first field of its owning block.
-    let index = usize::from(unsafe { (*slot).index });
-    (unsafe { slot.sub(index).cast::<Block>() }, index)
+    unsafe {
+        let index = usize::from((*slot).index);
+        (slot.sub(index).cast::<Block>(), index)
+    }
 }
 
 pub(super) unsafe fn retain(word: usize) {
@@ -42,14 +44,19 @@ pub(super) unsafe fn release(word: usize) {
 fn row(n: &Int) -> &[u64] {
     assert_eq!(n.0 & (TAG | 1), TAG);
     // SAFETY: the integer owns its immutable block for this entire borrow.
-    let (block, index) = unsafe { locate(n.0) };
-    let block = unsafe { &*block };
+    let (block, index) = unsafe {
+        let (block, index) = locate(n.0);
+        (&*block, index)
+    };
     let offset = (index + 1) * block.width;
     &block.words[offset..offset + block.width]
 }
 
 pub(super) fn number(n: &Int) -> BigInt {
-    let words = row(n);
+    from_words(row(n))
+}
+
+fn from_words(words: &[u64]) -> BigInt {
     #[cfg(target_endian = "little")]
     {
         // SAFETY: all bytes of these initialized u64s are valid and immutable.
@@ -68,19 +75,19 @@ pub(super) fn number(n: &Int) -> BigInt {
     }
 }
 
-fn bits(n: &Int) -> u64 {
-    if let Some(n) = n.as_small() {
-        return u64::from(u64::BITS - n.unsigned_abs().leading_zeros());
-    }
-    if n.0 & TAG == 0 {
-        return n.big().bits();
-    }
+pub(super) fn bits(n: &Int) -> u64 {
     let words = row(n);
     let mask = sign_extension(*words.last().unwrap());
-    let significant = words.iter().rposition(|&word| word != mask);
-    significant.map_or(0, |i| {
-        64 * i as u64 + u64::from(64 - (words[i] ^ mask).leading_zeros())
-    }) + u64::from(mask != 0)
+    let mut carry = u64::from(mask != 0);
+    let mut bits = 0;
+    for (i, &word) in words.iter().enumerate() {
+        let (magnitude, overflow) = (word ^ mask).overflowing_add(carry);
+        carry = u64::from(overflow);
+        if magnitude != 0 {
+            bits = i as u64 * 64 + u64::from(64 - magnitude.leading_zeros());
+        }
+    }
+    bits
 }
 
 fn sign_extension(low: u64) -> u64 {
@@ -89,37 +96,24 @@ fn sign_extension(low: u64) -> u64 {
 
 /// Extend the operand to the row width. Negative magnitudes use complement plus one.
 #[inline]
-fn add_words(
-    result: &mut [u64],
-    previous: &[u64],
-    mut digits: impl Iterator<Item = u64>,
-    fill: u64,
-    flip: u64,
-) {
+fn add_words(result: &mut [u64], mut digits: impl Iterator<Item = u64>, fill: u64, flip: u64) {
     let mut carry = u64::from(flip != 0);
-    for (out, &left) in result.iter_mut().zip(previous) {
+    for out in result {
         let right = digits.next().unwrap_or(fill) ^ flip;
-        let sum = u128::from(left) + u128::from(right) + u128::from(carry);
+        let sum = u128::from(*out) + u128::from(right) + u128::from(carry);
         *out = sum as u64;
         carry = (sum >> 64) as u64;
     }
 }
 
-fn write_sum(result: &mut [u64], previous: &[u64], item: &Int) {
+fn add(result: &mut [u64], item: &Int) {
     if let Some(n) = item.as_small() {
         let word = n as u64;
-        add_words(
-            result,
-            previous,
-            std::iter::once(word),
-            sign_extension(word),
-            0,
-        );
+        add_words(result, std::iter::once(word), sign_extension(word), 0);
     } else if item.0 & TAG != 0 {
         let words = row(item);
         add_words(
             result,
-            previous,
             words.iter().copied(),
             sign_extension(*words.last().unwrap()),
             0,
@@ -127,14 +121,14 @@ fn write_sum(result: &mut [u64], previous: &[u64], item: &Int) {
     } else {
         let n = item.big();
         let flip = if n.sign() == Sign::Minus { u64::MAX } else { 0 };
-        add_words(result, previous, n.iter_u64_digits(), 0, flip);
+        add_words(result, n.iter_u64_digits(), 0, flip);
     }
 }
 
 pub(super) fn extend(output: &mut Vec<Int>, items: &[Int]) -> Result<()> {
     for group in items.chunks(SLOTS) {
         let previous = output.last().unwrap();
-        let largest = group.iter().map(bits).fold(bits(previous), u64::max);
+        let largest = group.iter().map(Int::bits).fold(previous.bits(), u64::max);
         // The starting value and at most 32 addends need six carry bits and a sign.
         let width = largest.saturating_add(7).div_ceil(64) as usize;
         if width > MAX_WORDS {
@@ -149,11 +143,12 @@ pub(super) fn extend(output: &mut Vec<Int>, items: &[Int]) -> Result<()> {
             .try_reserve_exact(count)
             .map_err(|_| Error::allocation())?;
         words.resize(count, 0);
-        const ZERO: [u64; MAX_WORDS] = [0; MAX_WORDS];
-        write_sum(&mut words[..width], &ZERO[..width], previous);
+        add(&mut words[..width], previous);
         for (index, item) in group.iter().enumerate() {
             let (before, after) = words.split_at_mut((index + 1) * width);
-            write_sum(&mut after[..width], &before[index * width..], item);
+            let result = &mut after[..width];
+            result.copy_from_slice(&before[index * width..]);
+            add(result, item);
         }
         let block = Shared::try_new(Block {
             slots: std::array::from_fn(|i| Slot { index: i as u8 }),
@@ -178,6 +173,24 @@ pub(super) fn extend(output: &mut Vec<Int>, items: &[Int]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Reduce materialized prefixes directly from their signed rows.
+pub(super) fn sum<'a>(items: impl Iterator<Item = &'a Int> + Clone) -> Option<Int> {
+    let upper = items.size_hint().1?;
+    let largest = items.clone().map(Int::bits).max()?;
+    let carry_bits = usize::BITS - upper.saturating_sub(1).leading_zeros();
+    let width = largest
+        .saturating_add(u64::from(carry_bits) + 1)
+        .div_ceil(64) as usize;
+    if width > MAX_WORDS {
+        return None;
+    }
+    let mut result = vec![0; width];
+    for item in items {
+        add(&mut result, item);
+    }
+    Some(Int::new(from_words(&result)))
 }
 
 #[cfg(test)]
