@@ -2109,6 +2109,8 @@ impl Context {
         }
         if self.heap.has_ordinary_finalizers()
             && !self.heap.caller_keeps_only_finalizer()
+            // A bound stream can keep its underlying finalizer alive without naming it.
+            && !self.can_skip_finalizer_sweep()
             && self.heap.has_unbound_finalizer(NONE)
         {
             match self.drain_acyclic_finalizers() {
