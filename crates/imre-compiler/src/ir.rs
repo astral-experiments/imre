@@ -1315,6 +1315,8 @@ pub(crate) enum Builtin {
     StringIntList,
     /// Materialize exact integer prefixes, optionally starting with an initial value.
     ListAccumulate,
+    /// Consume the remaining owned values of an integer cursor into a fresh list.
+    CollectIntCursor,
     /// Two nonnegative 31-bit digit subtotals in one immediate, or -1 for fallback.
     TryDigitSums([[u8; 10]; 2]),
     Bytes,

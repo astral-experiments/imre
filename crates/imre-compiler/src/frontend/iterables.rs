@@ -105,6 +105,20 @@ impl Checker<'_> {
         mut element: Option<Type>,
         call: &impl Ranged,
     ) -> Result<Expr, String> {
+        if !convert
+            && element.is_none_or(|expected| expected == Type::Int)
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &input
+            && self.types.cursor_element(iterable.ty) == Some(Type::Int)
+        {
+            return Ok(Expr {
+                ty: Type::ListInt,
+                kind: ExprKind::Builtin(Builtin::CollectIntCursor, vec![iterable.clone()]),
+            });
+        }
         let result = self.hidden(Type::None);
         let mut body = self.expand_items(input, call, |checker, value| {
             let value = checker.consumer_value(value, convert, call)?;
