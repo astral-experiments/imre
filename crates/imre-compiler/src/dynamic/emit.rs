@@ -21,6 +21,7 @@ declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
+declare i64 @imre_dyn_lookup(ptr, i64, ptr, i64)
 declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
@@ -788,6 +789,16 @@ impl Function<'_, '_> {
 
     /// Load a code name and use it as the second operand of a boxed operation.
     fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
+        self.output.interned_identifiers.insert(name.to_owned());
+        if op == "lookup" {
+            // The runtime lookup propagates a pending exception before reading the scope.
+            self.take_matching_check();
+            let data = self.output.data(name.as_bytes());
+            return self.checked(&format!(
+                "call i64 @imre_dyn_lookup(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
+                name.len()
+            ));
+        }
         if !self.output.emitted_named_op {
             self.output.functions.push_str(NAMED_OP);
             self.output.emitted_named_op = true;
@@ -801,7 +812,6 @@ impl Function<'_, '_> {
         } else {
             "@imre_boxed_named_op"
         };
-        self.output.interned_identifiers.insert(name.to_owned());
         let opcode = self.output.data(op.as_bytes());
         let data = self.output.data(name.as_bytes());
         self.checked(&format!(
