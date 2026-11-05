@@ -2079,7 +2079,8 @@ impl Context {
                 Ok(false) => {}
             }
         }
-        if self.heap.take_sweep_request() {
+        let finalizers = self.heap.take_finalizer_check();
+        if self.heap.take_sweep_request() || (finalizers && !self.can_skip_finalizer_sweep()) {
             let (heap, roots) = self.heap_and_roots();
             if let Some(callbacks) = heap.collect(roots) {
                 self.run_weak_callbacks(callbacks);
