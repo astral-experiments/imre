@@ -865,11 +865,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "calcsize" | "iter_unpack" | "pack" | "pack_into" | "unpack" | "unpack_from",
         )
         | ("base64", "b16encode" | "urlsafe_b64encode" | "urlsafe_b64decode")
-        | (
-            "random",
-            "seed" | "getrandbits" | "random" | "choice" | "choices" | "shuffle" | "randint"
-            | "randbytes" | "expovariate",
-        )
+        | ("random", "choice" | "choices" | "shuffle" | "randint" | "randbytes")
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -1675,9 +1671,6 @@ pub(super) fn call(
     }
     if name == "random.seed" {
         return random::seed(ctx, args, kwargs);
-    }
-    if name == "random.expovariate" {
-        return random::expovariate(ctx, args, kwargs, true);
     }
     if name == "random.getrandbits" {
         let count = random::bit_count(ctx, args, kwargs)?;

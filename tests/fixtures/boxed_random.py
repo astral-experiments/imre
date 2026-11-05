@@ -196,6 +196,17 @@ def current():
     from math import log
     from random import expovariate
 
+    saved_random = random.Random.random
+    random.seed(551)
+    local = random.Random(551)
+    local_expo = local.expovariate
+    random.Random.random = lambda self: 0.0
+    try:
+        assert repr(expovariate()) == repr(local_expo()) == "-0.0"
+        assert draw() == saved_random(local)
+    finally:
+        random.Random.random = saved_random
+
     assert expovariate is random.expovariate
     random.seed(seed)
     reference = random.Random(seed)

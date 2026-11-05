@@ -99,26 +99,10 @@ pub(super) fn random_args(args: &[Id], kwargs: &[(String, Id)]) -> Result<()> {
 }
 
 /// Draw from the exponential distribution as in CPython's Random.expovariate.
-pub(super) fn expovariate(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-    module_call: bool,
-) -> Result<Id> {
-    let implicit_self = module_call.then_some(&NONE);
-    let [receiver, rate] = super::python_arguments(
-        "Random.expovariate",
-        ["self", "lambd"],
-        2,
-        1,
-        implicit_self.into_iter().chain(args),
-        kwargs,
-    )?;
-    let random = if module_call {
-        ctx.builtin("random.random")
-    } else {
-        ctx.lookup_attr(receiver.expect("bound self"), "random")?
-    };
+pub(super) fn expovariate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [receiver, rate] =
+        super::python_arguments("Random.expovariate", ["self", "lambd"], 2, 1, args, kwargs)?;
+    let random = ctx.lookup_attr(receiver.expect("required self"), "random")?;
     let draw = ctx.call(random, vec![], vec![])?;
     let one = ctx.alloc(Value::Float(1.0));
     let complement = ctx.binary("-", one, draw)?;

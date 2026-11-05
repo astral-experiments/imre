@@ -1,4 +1,4 @@
-//! The public Random class owns one MT19937 state per instance.
+//! Random instances own independent MT19937 streams; the module singleton shares the native stream.
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -6,6 +6,12 @@ use super::{Context, Error, Id, NONE, Result, Value, objects};
 use crate::Int;
 
 pub(in crate::dynamic) const CLASS: &str = "random.Random";
+
+#[derive(Clone)]
+pub(in crate::dynamic) enum RandomState {
+    Local(Rc<RefCell<objects::Generator>>),
+    Shared,
+}
 
 pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     let fields = ctx.scope("Random", Some(scope));
@@ -19,27 +25,44 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         unreachable!()
     };
     *heap_type = Some(CLASS);
-    for name in ["__init__", "seed", "random", "getrandbits", "expovariate"] {
+    const METHODS: &[&str] = &["seed", "random", "getrandbits", "expovariate"];
+    for name in std::iter::once("__init__").chain(METHODS.iter().copied()) {
         let method = ctx.alloc(Value::HeapTypeMethod { owner: class, name });
         ctx.bind(fields, name, method);
     }
     ctx.bind(scope, "Random", class);
+    let singleton = ctx.instance(class, None);
+    attach_state(ctx, singleton, RandomState::Shared);
+    ctx.set_attr(singleton, "gauss_next", NONE)?;
+    ctx.bind(scope, "_inst", singleton);
+    for &name in METHODS {
+        let bound = ctx.lookup_attr(singleton, name)?;
+        ctx.bind(scope, name, bound);
+    }
     Ok(())
 }
 
-/// Keep the generator out of the Python attribute dictionary, including on subclasses.
-fn state(ctx: &mut Context, receiver: Id) -> Rc<RefCell<objects::Generator>> {
-    if let Value::Random(generator) = ctx.heap.get(ctx.scalar_value(receiver)) {
-        return Rc::clone(generator);
-    }
-    // A subclass can override seed or skip __init__, leaving the native state zeroed.
-    let generator = Rc::new(RefCell::new(objects::Generator::unseeded()));
-    let storage = ctx.alloc(Value::Random(Rc::clone(&generator)));
+/// Keep MT state outside the attribute dictionary, including on subclasses.
+fn attach_state(ctx: &mut Context, receiver: Id, state: RandomState) -> Id {
+    let storage = ctx.alloc(Value::Random(state));
     let Value::Instance { scalar, .. } = ctx.heap.get_mut(receiver) else {
         unreachable!("checked Random receiver")
     };
     *scalar = Some(storage);
-    generator
+    storage
+}
+
+fn state(ctx: &mut Context, receiver: Id) -> &mut RandomState {
+    let mut storage = ctx.scalar_value(receiver);
+    if !matches!(ctx.heap.get(storage), Value::Random(_)) {
+        // A subclass can override seed or skip __init__, leaving its native state zeroed.
+        let local = Rc::new(RefCell::new(objects::Generator::unseeded()));
+        storage = attach_state(ctx, receiver, RandomState::Local(local));
+    }
+    let Value::Random(state) = ctx.heap.get_mut(storage) else {
+        unreachable!()
+    };
+    state
 }
 
 pub(in crate::dynamic) fn call(
@@ -50,7 +73,7 @@ pub(in crate::dynamic) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if method == "expovariate" {
-        return super::expovariate(ctx, args, kwargs, false);
+        return super::expovariate(ctx, args, kwargs);
     }
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
@@ -76,18 +99,27 @@ pub(in crate::dynamic) fn call(
         }
         "seed" => {
             let generator = super::seeded(ctx, args, kwargs)?;
-            *state(ctx, receiver).borrow_mut() = generator;
+            match state(ctx, receiver) {
+                RandomState::Local(local) => *local.borrow_mut() = generator,
+                RandomState::Shared => objects::seed_shared(generator),
+            }
             ctx.set_attr(receiver, "gauss_next", NONE)?;
             Ok(NONE)
         }
         "random" => {
             super::random_args(rest, kwargs)?;
-            let value = state(ctx, receiver).borrow_mut().random();
+            let value = match state(ctx, receiver) {
+                RandomState::Local(local) => local.borrow_mut().random(),
+                RandomState::Shared => objects::imre_random_float(),
+            };
             Ok(ctx.alloc(Value::Float(value)))
         }
         "getrandbits" => {
             let width = super::bit_count(ctx, rest, kwargs)?;
-            let value = state(ctx, receiver).borrow_mut().getrandbits(&width)?;
+            let value = match state(ctx, receiver) {
+                RandomState::Local(local) => local.borrow_mut().getrandbits(&width),
+                RandomState::Shared => objects::random_bits(&width),
+            }?;
             Ok(ctx.alloc(Value::Int(Int::new(value))))
         }
         _ => unreachable!("registered Random method"),
