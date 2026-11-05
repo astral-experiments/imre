@@ -143,6 +143,17 @@ impl Int {
         Self::from_usize(bits as usize)
     }
 
+    /// Add tagged operands directly, including when only one input is wide.
+    fn add(&self, other: &Self) -> Self {
+        match (self.as_small(), other.as_small()) {
+            // The full sum of two signed 63-bit values fits i64.
+            (Some(a), Some(b)) => Self::from(a + b),
+            (Some(a), None) => Self::new(other.big().as_ref() + a),
+            (None, Some(b)) => Self::new(self.big().as_ref() + b),
+            (None, None) => Self::new(self.big().as_ref() + other.big().as_ref()),
+        }
+    }
+
     fn to_i64(&self) -> Option<i64> {
         self.as_small().or_else(|| self.big().to_i64())
     }
@@ -904,12 +915,14 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
 
 /// Arithmetic shared by fixed-layout and runtime-discovered Python modules.
 fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
+    if op == 0 {
+        return Ok(a.add(b));
+    }
     if matches!(op, 8 | 9) {
         return integer_shift(a, b, op == 8);
     }
     if let (Some(x), Some(y)) = (a.as_small(), b.as_small()) {
         let result = match op {
-            0 => x.checked_add(y),
             1 => x.checked_sub(y),
             2 => x.checked_mul(y),
             5 => Some(x & y),
@@ -937,7 +950,6 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     }
     let (a, b) = (a.big(), b.big());
     let result = match op {
-        0 => a.as_ref() + b.as_ref(),
         1 => a.as_ref() - b.as_ref(),
         2 => a.as_ref() * b.as_ref(),
         5 => a.as_ref() & b.as_ref(),
@@ -2273,7 +2285,7 @@ fn integer_prefixes(items: &[Int], initial: Option<&Int>) -> Result<Vec<Int>> {
     if let Some(first) = initial.or_else(|| items.next()) {
         values.push(first.clone());
         for item in items {
-            let total = integer_binary(values.last().unwrap(), item, 0)?;
+            let total = values.last().unwrap().add(item);
             values.push(total);
         }
     }
