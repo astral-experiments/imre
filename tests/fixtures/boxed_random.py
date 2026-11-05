@@ -200,6 +200,10 @@ def current():
     random.seed(551)
     local = random.Random(551)
     local_expo = local.expovariate
+    assert expovariate.__func__ is local_expo.__func__ is random.Random.expovariate
+    replay = random.Random(101)
+    assert expovariate.__func__(replay, 2.0) == random.Random(101).expovariate(2.0)
+    assert not hasattr(draw, "__func__") and not hasattr(local.getrandbits, "__func__")
     random.Random.random = lambda self: 0.0
     try:
         assert repr(expovariate()) == repr(local_expo()) == "-0.0"

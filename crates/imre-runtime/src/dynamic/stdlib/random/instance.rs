@@ -14,28 +14,34 @@ pub(in crate::dynamic) enum RandomState {
 }
 
 pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
-    let fields = ctx.scope("Random", Some(scope));
-    let module = ctx.text("random");
-    let qualname = ctx.text("Random");
-    ctx.bind(fields, "__module__", module);
-    ctx.bind(fields, "__qualname__", qualname);
-    let object = ctx.builtin("object");
-    let class = ctx.allocate_class("Random".into(), fields, vec![object])?;
-    let Value::Class { heap_type, .. } = ctx.heap.get_mut(class) else {
-        unreachable!()
+    let source = ctx.text(include_str!("random.py"));
+    let filename = ctx.text("<imre stdlib>/random.py");
+    let mode = ctx.text("exec");
+    let code = ctx.compile_source(source, filename, mode, false)?;
+    let globals = ctx.module_globals(scope)?;
+    ctx.exec_source(code, globals, None, None)?;
+    let class = ctx
+        .dict_named_item(globals, "Random")
+        .expect("Random class");
+    let Value::Class {
+        heap_type,
+        scope: fields,
+        ..
+    } = ctx.heap.get_mut(class)
+    else {
+        unreachable!("Random class")
     };
     *heap_type = Some(CLASS);
-    const METHODS: &[&str] = &["seed", "random", "getrandbits", "expovariate"];
-    for name in std::iter::once("__init__").chain(METHODS.iter().copied()) {
+    let fields = *fields;
+    for name in ["__init__", "seed", "random", "getrandbits"] {
         let method = ctx.alloc(Value::HeapTypeMethod { owner: class, name });
         ctx.bind(fields, name, method);
     }
-    ctx.bind(scope, "Random", class);
     let singleton = ctx.instance(class, None);
     attach_state(ctx, singleton, RandomState::Shared);
     ctx.set_attr(singleton, "gauss_next", NONE)?;
     ctx.bind(scope, "_inst", singleton);
-    for &name in METHODS {
+    for name in ["seed", "random", "getrandbits", "expovariate"] {
         let bound = ctx.lookup_attr(singleton, name)?;
         ctx.bind(scope, name, bound);
     }
@@ -72,9 +78,6 @@ pub(in crate::dynamic) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if method == "expovariate" {
-        return super::expovariate(ctx, args, kwargs);
-    }
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
