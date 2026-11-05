@@ -42,6 +42,7 @@ class _Sentinel(object):
 sentinel = _Sentinel()
 
 DEFAULT = sentinel.DEFAULT
+_deleted = sentinel.DELETED
 
 
 def _patch_owner(name):
