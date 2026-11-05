@@ -1,6 +1,28 @@
 use super::*;
 use crate::dynamic::complex::Complex;
 
+/// Format the receiver's stored binary64 using Python's hexadecimal spelling.
+pub(super) fn hex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let receiver = noargs_method_receiver(ctx, "float", "hex", args, kwargs)?;
+    let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+        unreachable!("validated float receiver")
+    };
+    if !value.is_finite() {
+        return Ok(ctx.text(crate::floats::render(value)));
+    }
+    let sign = if value.is_sign_negative() { "-" } else { "" };
+    if value == 0.0 {
+        return Ok(ctx.text(format!("{sign}0x0.0p+0")));
+    }
+    let bits = value.to_bits();
+    let biased_exponent = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1 << 52) - 1);
+    // Subnormals use the minimum normal exponent with no implicit leading one.
+    let leading = u8::from(biased_exponent != 0);
+    let exponent = biased_exponent.max(1) - 1023;
+    Ok(ctx.text(format!("{sign}0x{leading}.{fraction:013x}p{exponent:+}")))
+}
+
 /// Parse the string payload, then let a float subclass construct its result.
 pub(super) fn fromhex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (&class, args) = args

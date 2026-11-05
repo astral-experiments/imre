@@ -2745,6 +2745,7 @@ impl<'a> Checker<'a> {
         match attribute.attr.as_str() {
             "real" | "imag" => Some("float components"),
             "fromhex" => Some("float.fromhex"),
+            "hex" => Some("float.hex"),
             _ => None,
         }
     }
@@ -9051,10 +9052,10 @@ impl<'a> Checker<'a> {
             return Err(self.object_builtin_error("fromhex", call));
         }
         if let ast::Expr::Attribute(method) = &*call.func
-            && method.attr.as_str() == "fromhex"
+            && matches!(method.attr.as_str(), "fromhex" | "hex")
             && self.unshadowed_builtin(&method.value, "float")
         {
-            return Err(self.scoped_builtin_error("float.fromhex", call));
+            return Err(self.scoped_builtin_error(&format!("float.{}", method.attr), call));
         }
         if receiver.is_none()
             && let ast::Expr::Attribute(method) = call.func.as_ref()
@@ -10751,6 +10752,9 @@ impl<'a> Checker<'a> {
                 return self.codec_writer_method(receiver, attribute, call);
             }
             let method = attribute.attr.as_str();
+            if receiver.ty == Type::Float && method == "hex" {
+                return Err(self.scoped_builtin_error("float.hex", call));
+            }
             if receiver.ty == Type::Float && method == "is_integer" && call.arguments.is_empty() {
                 return Ok(Expr {
                     ty: Type::Bool,

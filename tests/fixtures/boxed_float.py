@@ -39,6 +39,29 @@ def current():
     class Kind(str):
         pass
 
+    hex_method = float.hex
+    assert hex_method is vars(float)["hex"] and hex_method.__objclass__ is float
+    assert hex_method.__text_signature__ == "($self, /)"
+    for value, expected in (
+        (0.0, "0x0.0p+0"),
+        (-0.0, "-0x0.0p+0"),
+        (-0.1, "-0x1.999999999999ap-4"),
+        (5e-324, "0x0.0000000000001p-1022"),
+        (2.0**-1022, "0x1.0000000000000p-1022"),
+        (1.7976931348623157e308, "0x1.fffffffffffffp+1023"),
+        (float("inf"), "inf"),
+        (float("-inf"), "-inf"),
+        (-nan, "nan"),
+    ):
+        assert value.hex() == expected and hex_method(value) == expected
+    for args, kwargs in (((), {}), ((1,), {}), ((1.0, 2), {}), ((1.0,), {"x": 2})):
+        try:
+            hex_method(*args, **kwargs)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("accepted invalid hex arguments")
+
     assert float.fromhex(Kind("  -.8p+1\v")) == -1.0
     assert repr(float.fromhex("-1p-1075")) == "-0.0"
     assert float.fromhex("1.00000000000008p0") == 1.0
@@ -268,6 +291,7 @@ def current():
     exact = float("-0")
     assert exact.real is exact and repr(exact.imag) == "0.0"
     derived = Raises("-0")
+    assert derived.hex() == float.hex(derived) == "-0x0.0p+0"
     derived.__dict__["real"] = 1
     assert type(derived.real) is float and repr(derived.real) == "-0.0"
     assert derived.real is not derived.real and repr(derived.imag) == "0.0"
