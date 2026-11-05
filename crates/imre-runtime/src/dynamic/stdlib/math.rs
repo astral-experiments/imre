@@ -442,6 +442,35 @@ fn prod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
 
     let iterator = ctx.iterator(values)?;
     ctx.heap.keep(iterator);
+    // Exact factors cannot run Python code. Consume them from the backing slice and
+    // hand the live cursor to generic multiplication at the first unsupported factor.
+    if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(values)
+        && let Value::Int(initial) = ctx.heap.get(product)
+        && let Some(mut total) = initial.as_small()
+    {
+        let mut consumed = 0;
+        for &item in items {
+            let Value::Int(factor) = ctx.heap.get(item) else {
+                break;
+            };
+            let Some(next) = factor.as_small().and_then(|n| total.checked_mul(n)) else {
+                break;
+            };
+            total = next;
+            consumed += 1;
+        }
+        let complete = consumed == items.len();
+        if consumed != 0 {
+            product = ctx.int(total);
+        }
+        if complete {
+            return Ok(product);
+        }
+        let Value::Iterator { offset, .. } = ctx.heap.get_mut(iterator) else {
+            unreachable!("exact list or tuple iterator")
+        };
+        *offset = consumed;
+    }
     let mark = ctx.heap.temporary_mark();
     ctx.heap.keep(product);
     let mut limit = ctx.heap.streaming_collection_limit();
