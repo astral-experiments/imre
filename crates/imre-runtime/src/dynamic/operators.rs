@@ -5017,6 +5017,9 @@ impl Context {
             (
                 "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__pow__" | "__rpow__",
                 Value::Complex(_)
+            ) | (
+                "__mod__" | "__rmod__",
+                Value::Str(_) | Value::SurrogateStr(_)
             ) | ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
                 | ("__xor__" | "__rxor__", Value::Set { .. })
                 | (
@@ -5420,11 +5423,15 @@ impl Context {
                 .into_iter()
                 .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
         let dict_union = op == "|" && [a, b].into_iter().any(|id| self.dict_storage(id).is_some());
-        if set_xor || dict_union || matches!(op, "*" | "/" | "**") {
+        // An exact str has a numeric remainder slot. Order it against Python methods,
+        // but leave pairs of exact builtins on the direct formatting path.
+        let mixed_remainder = op == "%" && (ac.is_some() || bc.is_some());
+        if set_xor || dict_union || mixed_remainder || matches!(op, "*" | "/" | "**") {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
                 if matches!(
                     (op, self.heap.get(value)),
                     ("*" | "/" | "**", Value::Complex(_))
+                        | ("%", Value::Str(_) | Value::SurrogateStr(_))
                         | ("^", Value::Set { .. })
                         | ("|", Value::Dict(_) | Value::DefaultDict { .. })
                 ) {
