@@ -2,6 +2,21 @@ from functools import cmp_to_key
 
 
 def current():
+    import functools
+    import inspect
+    import sys
+    from types import ModuleType
+
+    assert functools.cmp_to_key is cmp_to_key
+    assert str(inspect.signature(cmp_to_key)) == "(mycmp)"
+    owner = cmp_to_key.__self__
+    assert owner is sys.modules[cmp_to_key.__module__]
+    try:
+        sys.modules[cmp_to_key.__module__] = ModuleType("replacement")
+        assert cmp_to_key.__self__ is owner
+    finally:
+        sys.modules[cmp_to_key.__module__] = owner
+
     descending = cmp_to_key(mycmp=lambda x, y: y - x)
     assert descending.obj is None
     assert sorted([2, 3, 1], key=descending) == [3, 2, 1]

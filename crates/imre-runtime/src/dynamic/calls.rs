@@ -84,9 +84,6 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "functools" if matches!(function, "cmp_to_key" | "reduce") => {
-            Some(("_functools", function))
-        }
         "codecs"
             if matches!(
                 function,
@@ -3036,26 +3033,6 @@ impl Context {
                     "__text_signature__" if symbol == "posix.urandom" => {
                         return Ok(self.text("($module, size, /)"));
                     }
-                    "__doc__" if symbol == "functools.cmp_to_key" => {
-                        return Ok(self.text("Convert a cmp= function into a key= function.\n\n  mycmp\n    Function that compares two objects."));
-                    }
-                    "__text_signature__" if symbol == "functools.cmp_to_key" => {
-                        return Ok(self.text("($module, /, mycmp)"));
-                    }
-                    "__doc__" if symbol == "functools.reduce" => {
-                        return Ok(self.text(concat!(
-                            "Apply a function of two arguments cumulatively to the items of an iterable, from left to right.\n\n",
-                            "This effectively reduces the iterable to a single value.  If initial is present,\n",
-                            "it is placed before the items of the iterable in the calculation, and serves as\n",
-                            "a default when the iterable is empty.\n\n",
-                            "For example, reduce(lambda x, y: x+y, [1, 2, 3, 4, 5])\n",
-                            "calculates ((((1 + 2) + 3) + 4) + 5)."
-                        )));
-                    }
-                    "__text_signature__" if symbol == "functools.reduce" => {
-                        return Ok(self
-                            .text("($module, function, iterable, /, initial=<unrepresentable>)"));
-                    }
                     "__doc__"
                         if let Some(function) = super::lowlevel_threads::function_name(symbol) =>
                     {
@@ -3540,6 +3517,23 @@ impl Context {
                             return Ok(self.text(text));
                         }
                         let value = match name {
+                            "__doc__" if method == "functools.cmp_to_key" => Some(
+                                "Convert a cmp= function into a key= function.\n\n  mycmp\n    Function that compares two objects.",
+                            ),
+                            "__text_signature__" if method == "functools.cmp_to_key" => {
+                                Some("($module, /, mycmp)")
+                            }
+                            "__doc__" if method == "functools.reduce" => Some(concat!(
+                                "Apply a function of two arguments cumulatively to the items of an iterable, from left to right.\n\n",
+                                "This effectively reduces the iterable to a single value.  If initial is present,\n",
+                                "it is placed before the items of the iterable in the calculation, and serves as\n",
+                                "a default when the iterable is empty.\n\n",
+                                "For example, reduce(lambda x, y: x+y, [1, 2, 3, 4, 5])\n",
+                                "calculates ((((1 + 2) + 3) + 4) + 5)."
+                            )),
+                            "__text_signature__" if method == "functools.reduce" => {
+                                Some("($module, function, iterable, /, initial=<unrepresentable>)")
+                            }
                             "__doc__" if method == "_locale.localeconv" => {
                                 Some("Returns numeric and monetary locale-specific parameters.")
                             }
@@ -4784,8 +4778,19 @@ impl Context {
                     if let Some(value) = self.scope_name(scope, name) {
                         return Ok(value);
                     }
+                    let bind_to_module =
+                        module == "functools" && matches!(name, "cmp_to_key" | "reduce");
                     match stdlib::attribute(self, &module.to_owned(), name) {
                         Ok(value) => {
+                            let value = if bind_to_module {
+                                self.alloc(Value::Method {
+                                    callable: value,
+                                    receiver: obj,
+                                    explicit: false,
+                                })
+                            } else {
+                                value
+                            };
                             self.bind(scope, name, value);
                             return Ok(value);
                         }
