@@ -4336,6 +4336,10 @@ impl Heap {
                         chain.contains(owner) && self.find_finalizer_binding(stream)
                     })
                 })
+                || chains.iter().flatten().any(|chain| {
+                    matches!(self.get(chain[0]), Value::Instance { fields, .. }
+                        if fields.values().take(16).any(|value| value == owner))
+                })
         })
     }
 
@@ -5503,6 +5507,43 @@ mod tests {
         assert!(!heap.discard_operands(mark, NONE, modules));
         *heap.get_mut(modules) = Value::Dict(Default::default());
         assert!(heap.discard_operands(mark, NONE, modules));
+    }
+
+    #[test]
+    fn a_bound_owners_field_must_still_retain_the_finalizer() {
+        use super::super::{ffi, stdlib};
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let scope = ctx.scope("__main__", None);
+        ctx.heap.frames.last_mut().unwrap().scope = scope;
+        let class = ctx.builtin("object");
+        let root = ctx.instance(class, None);
+        let owner = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.register_finalizer(root);
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names.insert("root".into(), root);
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
+            unreachable!()
+        };
+        fields.insert("resource".into(), owner);
+
+        let input = stdlib::io::rooted_input_chain(&ctx);
+        assert!(ctx.heap.frame_keeps_stream_finalizers(input.as_ref(), &[]));
+        assert!(
+            ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+        );
+
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
+            unreachable!()
+        };
+        fields.insert("resource".into(), NONE);
+        assert!(
+            !ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+        );
     }
 
     #[test]
