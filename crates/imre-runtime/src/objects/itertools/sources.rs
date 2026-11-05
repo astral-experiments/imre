@@ -120,6 +120,29 @@ pub(in crate::objects) struct Progression {
 }
 
 impl Progression {
+    /// Collect a nonempty range of tagged integers in a single allocation.
+    pub(super) fn collect_small(&self) -> Option<crate::Result<Vec<Int>>> {
+        let mut current = self.current.borrow_mut();
+        // SAFETY: all three integer owners remain live throughout the calculation.
+        let count = unsafe { crate::small_range_trips(current.0, self.stop.0, self.step.0) }?;
+        let mut values = Vec::new();
+        if values.try_reserve_exact(count).is_err() {
+            return Some(Err(Error::allocation()));
+        }
+        // Every yielded value lies between the tagged endpoints. A tagged word
+        // is 2*n + 1, so clearing the step's tag gives the stride in words.
+        let mut word = current.0;
+        let stride = self.step.0 & !1;
+        values.extend((0..count).map(|_| {
+            let value = Int(word);
+            word = word.wrapping_add(stride);
+            value
+        }));
+        // The successor of the last element may require a heap integer.
+        *current = values.last().unwrap().add(&self.step);
+        Some(Ok(values))
+    }
+
     pub(super) fn remaining(&self) -> Int {
         let stop = &self.stop;
         let current = self.current.borrow();
