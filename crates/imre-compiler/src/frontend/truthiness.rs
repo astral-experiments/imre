@@ -22,6 +22,9 @@ impl Checker<'_> {
                 }
             }
             exits.finish(self, true);
+            if and && let Some(test) = guarded_string_boundary(&values) {
+                return Ok(test);
+            }
             return Ok(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Boolean(and, values),
@@ -314,6 +317,67 @@ impl Checker<'_> {
             }
         }
         self.expr(expression)
+    }
+}
+
+/// A nonempty string's first or last character equals a single-character literal
+/// exactly when it has that prefix or suffix. Both tests are false on empty input.
+fn guarded_string_boundary(values: &[Expr]) -> Option<Expr> {
+    let [guard, test] = values else { return None };
+    let ExprKind::Builtin(Builtin::Bool, args) = &guard.kind else {
+        return None;
+    };
+    let [source] = args.as_slice() else {
+        return None;
+    };
+    let (Type::Str, ExprKind::Local(slot)) = (source.ty, &source.kind) else {
+        return None;
+    };
+    let boundary = |expr: &Expr| {
+        let ExprKind::Compare(operands, ops) = &expr.kind else {
+            return None;
+        };
+        let ([left, right], [Compare::Equal]) = (operands.as_slice(), ops.as_slice()) else {
+            return None;
+        };
+        let (args, literal, text) = match (&left.kind, &right.kind) {
+            (ExprKind::Builtin(Builtin::StringGet, args), ExprKind::Str(text)) => {
+                (args, right, text)
+            }
+            (ExprKind::Str(text), ExprKind::Builtin(Builtin::StringGet, args)) => {
+                (args, left, text)
+            }
+            _ => return None,
+        };
+        let [receiver, index] = args.as_slice() else {
+            return None;
+        };
+        if !matches!(&receiver.kind, ExprKind::Local(other) if other == slot)
+            || text.chars().next()?.len_utf8() != text.len()
+        {
+            return None;
+        }
+        let op = match &index.kind {
+            ExprKind::Int(index) if index == "0" => ir::TextOperation::StartsWith,
+            ExprKind::Int(index) if index == "-1" => ir::TextOperation::EndsWith,
+            ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(index) if index == "1") => {
+                ir::TextOperation::EndsWith
+            }
+            _ => return None,
+        };
+        Some(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::Text(op), vec![receiver.clone(), literal.clone()]),
+        })
+    };
+    if let ExprKind::Boolean(and, tests) = &test.kind {
+        let tests = tests.iter().map(boundary).collect::<Option<Vec<_>>>()?;
+        Some(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Boolean(*and, tests),
+        })
+    } else {
+        boundary(test)
     }
 }
 
