@@ -3210,6 +3210,10 @@ impl Heap {
         self.slots.try_reserve(1)
     }
 
+    pub(super) fn is_gc_tracked(&self, id: Id) -> bool {
+        self.slots[id as usize].gc_tracked(self)
+    }
+
     pub(super) fn gc_thresholds(&self) -> [i32; 3] {
         self.gc_settings.thresholds()
     }

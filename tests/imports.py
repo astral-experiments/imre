@@ -34,6 +34,12 @@ REJECTED = {
             "print(convert(Decimal('1.25')))\n"
         ),
     }, "invalid-argument-type"),
+    "unused_is_tracked_preserves_typed_call": ({
+        "main.py": "from gc import is_tracked\n" + HELPER + "f('wrong')\n",
+    }, "expected int, got str"),
+    "later_is_tracked_preserves_missing_argument": ({
+        "main.py": "from gc import is_tracked\n" + HELPER + "f()\nprint(is_tracked([]))\n",
+    }, "missing required argument"),
     "unused_isclose_preserves_typed_call": ({
         "main.py": (
             "from math import isclose\n"
