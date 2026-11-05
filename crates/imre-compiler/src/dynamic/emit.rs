@@ -131,8 +131,8 @@ pub(crate) fn emit(
             continue;
         }
         let check_archive = bundled && !providers.is_empty();
-        // Without a matching pack (including -OO), keep the bundled library in the entry.
-        let separate = split && unit != 0 && !source.is_empty() && (!bundled || check_archive);
+        // A standalone initializer can be compiled separately even without a provider pack.
+        let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
         if (check_archive || separate)
             && let Some((symbol, ir)) = initializer(name, path, source, keep_docstrings, bundled)?

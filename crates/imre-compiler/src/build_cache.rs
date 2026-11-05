@@ -5,7 +5,9 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 use imre_compiler::{CodegenUnit, SourceInputs};
 use serde::{Deserialize, Serialize};
@@ -272,8 +274,9 @@ impl ObjectEntry {
 
 pub fn compile_objects(
     units: &[CodegenUnit],
-    toolchain: &NativeToolchain,
+    driver: impl Fn() -> Command + Sync,
     opt: &OsStr,
+    sanitize: bool,
     stage: &Path,
     cache: Option<&Cache>,
     mut progress: impl FnMut(&str, bool),
@@ -283,7 +286,7 @@ pub fn compile_objects(
         fs::create_dir_all(&dir).ok()?;
         Some((dir, c.object_recipe))
     });
-    let ir_path = stage.join("module.ll");
+    let mut pending = Vec::new();
     let mut objects = Vec::with_capacity(units.len());
     for (i, unit) in units.iter().enumerate() {
         let filename = format!("unit-{i}.o");
@@ -310,35 +313,73 @@ pub fn compile_objects(
             );
         }
         if !hit {
-            fs::write(&ir_path, &unit.llvm_ir).map_err(|e| e.to_string())?;
-            let status = toolchain
-                .driver()
-                .current_dir(stage)
-                .arg(format!("-O{}", opt.to_string_lossy()))
-                .args([
-                    "-Wno-override-module",
-                    "-c",
-                    "-x",
-                    "ir",
-                    "module.ll",
-                    "-o",
-                    &filename,
-                ])
-                .status()
-                .map_err(|e| format!("Could not compile {}: {e}", unit.name))?;
-            if !status.success() {
-                return Err(format!(
-                    "LLVM compilation of {} failed: {status}",
-                    unit.name
-                ));
-            }
-            if let Some(entry) = entry {
-                let _ = entry.publish(&staged);
-            }
+            pending.push((i, entry));
         }
         objects.push(staged);
     }
+
+    // Start the largest units first so they can overlap the smaller compilations.
+    pending.sort_unstable_by_key(|(i, _)| std::cmp::Reverse(units[*i].llvm_ir.len()));
+    let workers = thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(4)
+        .min(pending.len());
+    let next = AtomicUsize::new(0);
+    let compile = || {
+        while let Some((i, entry)) = pending.get(next.fetch_add(1, Ordering::Relaxed)) {
+            let object = &objects[*i];
+            if let Err(err) = compile_object(&units[*i], driver(), opt, sanitize, object) {
+                next.store(pending.len(), Ordering::Relaxed);
+                return Err(err);
+            }
+            if let Some(entry) = entry {
+                let _ = entry.publish(object);
+            }
+        }
+        Ok(())
+    };
+    thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers).map(|_| scope.spawn(compile)).collect();
+        for handle in handles {
+            handle.join().expect("codegen worker panicked")?;
+        }
+        Ok::<(), String>(())
+    })?;
     Ok(objects)
+}
+
+/// Compile one LLVM module through the selected driver, keeping its IR in memory.
+fn compile_object(
+    unit: &CodegenUnit,
+    mut driver: Command,
+    opt: &OsStr,
+    sanitize: bool,
+    output: &Path,
+) -> Result<(), String> {
+    let error = |e| format!("Could not compile {}: {e}", unit.name);
+    if sanitize {
+        driver.args(["-fsanitize=address", "-fno-omit-frame-pointer"]);
+    }
+    let mut child = driver
+        .arg(format!("-O{}", opt.to_string_lossy()))
+        .args(["-Wno-override-module", "-c", "-x", "ir", "-", "-o"])
+        .arg(output)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(error)?;
+    let input = child
+        .stdin
+        .take()
+        .expect("piped clang input")
+        .write_all(unit.llvm_ir.as_bytes());
+    let status = child.wait().map_err(error)?;
+    if !status.success() {
+        return Err(format!(
+            "LLVM compilation of {} failed: {status}",
+            unit.name
+        ));
+    }
+    input.map_err(error)
 }
 
 /// Preserve output symlinks, and keep writable user outputs independent of the cache.
