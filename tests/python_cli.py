@@ -95,7 +95,9 @@ def check_installed_site(imre, root, run):
     with tarfile.open(sample, "w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "sample"}) as tar:
         tar.add(member, arcname="payload")
     use_sources = (
-        "import importlib, sys, tarfile\n"
+        "import getpass, importlib, os, sys, tarfile\n"
+        "os.environ['LOGNAME'] = 'archive-user'\n"
+        "assert getpass.getuser() == 'archive-user'\n"
         "print(importlib.import_module(sys.argv[1]).Element('root').tag)\n"
         "sorter = importlib.import_module(sys.argv[3]).TopologicalSorter\n"
         "assert list(sorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
