@@ -91,6 +91,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if operation == "prod" {
+        return prod(ctx, args, kwargs);
+    }
     if operation == "isclose" {
         return isclose(ctx, args, kwargs);
     }
@@ -365,6 +368,51 @@ fn vector_norm(coordinates: &[f64]) -> f64 {
     let h = squared_norm.sqrt();
     let residual = add_product(-h, h);
     ldexp(h + residual / (2.0 * h), exponent)
+}
+
+fn prod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 2 {
+        let kind = if args.is_empty() { "keyword " } else { "" };
+        return Err(Error::new(
+            "TypeError",
+            format!("prod() takes at most 2 {kind}arguments ({count} given)"),
+        ));
+    }
+    let &[values] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "prod() takes exactly 1 positional argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let mut product = match kwargs.first() {
+        None => ctx.int(1),
+        Some((key, start)) if key == "start" => *start,
+        Some((key, _)) => {
+            return Err(crate::dynamic::calls::unexpected_keyword_error(
+                "prod",
+                key,
+                &["start"],
+            ));
+        }
+    };
+
+    let iterator = ctx.iterator(values)?;
+    ctx.heap.keep(iterator);
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(product);
+    let mut limit = ctx.heap.streaming_collection_limit();
+    while let Some(item) = ctx.next_item(iterator)? {
+        ctx.heap.keep(item);
+        product = ctx.binary("*", product, item)?;
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(product);
+        ctx.collect_streaming_garbage(&mut limit);
+    }
+    Ok(product)
 }
 
 fn isclose(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
