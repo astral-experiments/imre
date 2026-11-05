@@ -4238,14 +4238,16 @@ impl Heap {
         let chains = self.bound_finalizer_chains();
         self.ordinary_finalizers.iter().chain(writers).all(|owner| {
             stdin.is_some_and(|input| input.contains(owner))
-                || chains.iter().flatten().any(|chain| {
-                    chain.contains(owner) || self.short_path_keeps_owner(chain[0], *owner)
-                })
+                || chains.iter().flatten().any(|chain| chain.contains(owner))
                 || self.find_finalizer_binding(*owner)
                 || self.ordinary_finalizers.iter().any(|&stream| {
                     super::stdlib::io::text_descriptor_chain(self, stream).is_some_and(|chain| {
                         chain.contains(owner) && self.find_finalizer_binding(stream)
                     })
+                })
+                || chains.iter().flatten().any(|chain| {
+                    matches!(self.get(chain[0]), Value::Instance { fields, .. }
+                        if fields.values().take(16).any(|value| value == owner))
                 })
         })
     }
