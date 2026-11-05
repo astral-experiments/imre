@@ -148,6 +148,10 @@ impl Int {
         match (self.as_small(), other.as_small()) {
             // The full sum of two signed 63-bit values fits i64.
             (Some(a), Some(b)) => Self::from(a + b),
+            // The numerical backing is immutable. Boxed operations give each
+            // result its own Python object independently of these shared digits.
+            (Some(0), None) => other.clone(),
+            (None, Some(0)) => self.clone(),
             (Some(a), None) => Self::new(other.big().as_ref() + a),
             (None, Some(b)) => Self::new(self.big().as_ref() + b),
             (None, None) => Self::new(self.big().as_ref() + other.big().as_ref()),
