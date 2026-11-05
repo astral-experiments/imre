@@ -1632,7 +1632,7 @@ fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) 
                     return Ok(storage);
                 }
                 // An unchanged nonempty str subclass produces a fresh exact str.
-                return ctx.heap.fresh_string(Value::Str(part.to_owned()));
+                return ctx.heap.fresh_string(Value::Str(part.into()));
             }
             Ok(ctx.text(part.to_owned()))
         }
@@ -2106,7 +2106,7 @@ fn justify_string(
         padded.extend(std::iter::repeat_n(ch, left));
         padded.push_str(s);
         padded.extend(std::iter::repeat_n(ch, margin - left));
-        Value::Str(padded)
+        Value::Str(padded.into())
     } else {
         let mut points = Vec::new();
         points
@@ -2290,7 +2290,8 @@ pub(super) fn method(
         let storage = ctx.string_storage(receiver).unwrap();
         let copy = storage != receiver;
         let result = match ctx.heap.get(storage) {
-            Value::Str(text) => crate::objects::zfill::text(text, width, copy)?.map(Value::Str),
+            Value::Str(text) => crate::objects::zfill::text(text, width, copy)?
+                .map(|padded| Value::Str(padded.into())),
             Value::SurrogateStr(points) => {
                 crate::objects::zfill::units(points, points.len(), width, copy)?
                     .map(Value::SurrogateStr)
@@ -2662,7 +2663,7 @@ pub(super) fn method(
         let storage = ctx.string_storage(receiver).unwrap();
         let mapped = match ctx.heap.get(storage) {
             Value::Str(text) if text.is_empty() => return ctx.heap.string_literal(""),
-            Value::Str(text) => Value::Str(crate::objects::case_map(text, case)?),
+            Value::Str(text) => Value::Str(crate::objects::case_map(text, case)?.into()),
             Value::SurrogateStr(points) => {
                 Value::SurrogateStr(crate::objects::case_map_points(points, case)?)
             }
@@ -2859,8 +2860,8 @@ pub(super) fn method(
                 continue;
             };
             let matched = match (part, ctx.heap.get(storage), prefix) {
-                (Window::Utf8(text), Value::Str(needle), true) => text.starts_with(needle),
-                (Window::Utf8(text), Value::Str(needle), false) => text.ends_with(needle),
+                (Window::Utf8(text), Value::Str(needle), true) => text.starts_with(needle.as_str()),
+                (Window::Utf8(text), Value::Str(needle), false) => text.ends_with(needle.as_str()),
                 // SurrogateStr storage always contains at least one surrogate.
                 (Window::Utf8(_), Value::SurrogateStr(_), _) => false,
                 (Window::Points(points), Value::SurrogateStr(needle), true) => {

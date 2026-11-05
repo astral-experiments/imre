@@ -117,7 +117,7 @@ fn write(ctx: &mut Context, stream: Id, text: Id) -> Result<()> {
     Ok(())
 }
 
-fn write_text(ctx: &mut Context, stream: Id, text: impl Into<String>) -> Result<()> {
+fn write_text(ctx: &mut Context, stream: Id, text: impl Into<crate::Str>) -> Result<()> {
     let text = ctx.text(text);
     write(ctx, stream, text)
 }

@@ -2804,7 +2804,7 @@ pub(super) fn call(
                     b.strip_suffix(b"\n").map(|s| Value::Bytes(s.to_vec()))
                 }
                 Value::Str(s) if !s.is_empty() => {
-                    s.strip_suffix('\n').map(|s| Value::Str(s.to_owned()))
+                    s.strip_suffix('\n').map(|s| Value::Str(s.into()))
                 }
                 Value::SurrogateStr(s) if !s.is_empty() => s
                     .strip_suffix(&[u32::from('\n')])
