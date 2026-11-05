@@ -5398,7 +5398,6 @@ impl Context {
         {
             return self.update_exception_field(obj, name, None);
         }
-        self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
             ref file if file.native_io_class_name().is_some() => {
                 let dictionary = self.native_file_dictionary(obj);
@@ -5492,7 +5491,7 @@ impl Context {
                 Err(error)
             }
             Value::Instance { class, .. } if self.builtins.get("object") != Some(&class) => {
-                let layout = self.instance_layout(class, name);
+                let layout = self.checked_instance_layout(obj, class, name)?;
                 if name == "__dict__" && member.is_none() && !self.layout_descriptors_cleared(class)
                 {
                     if !layout.dictionary {
@@ -5508,9 +5507,6 @@ impl Context {
                     } = *self.heap.get(obj)
                 {
                     return self.update_dictionary_field(obj, storage, name, None);
-                }
-                if self.heap.get(class).heap_type().is_some() {
-                    self.check_instance_field(obj, name)?;
                 }
                 if layout.declared_slot && !layout.active_slot {
                     return Err(self.missing_attribute(obj, name));
@@ -6092,18 +6088,20 @@ impl Context {
         Error::new("TypeError", message)
     }
 
-    /// A slot-only instance can retain fields declared by any of its Python bases.
-    fn check_instance_field(&mut self, obj: Id, name: &str) -> Result<()> {
-        let Value::Instance { class, .. } = *self.heap.get(obj) else {
-            return Ok(());
-        };
-        let exact_tzinfo = self.builtins.get(stdlib::datetime::TZINFO) == Some(&class);
-        if !exact_tzinfo && !matches!(self.heap.get(class), Value::Class { .. }) {
-            return Ok(());
-        }
+    /// Resolve the field's storage and reject writes to a slot-only instance without that field.
+    fn checked_instance_layout(
+        &mut self,
+        obj: Id,
+        class: Id,
+        name: &str,
+    ) -> Result<InstanceLayout> {
         let layout = self.instance_layout(class, name);
-        if layout.dictionary || layout.active_slot {
-            return Ok(());
+        let exact_tzinfo = self.builtins.get(stdlib::datetime::TZINFO) == Some(&class);
+        if layout.dictionary
+            || layout.active_slot
+            || (!exact_tzinfo && !matches!(self.heap.get(class), Value::Class { .. }))
+        {
+            return Ok(layout);
         }
         let attribute = self.text(name);
         let quoted = self.repr(attribute);
@@ -6518,7 +6516,6 @@ impl Context {
         {
             return self.assign_instance_class(obj, Some(value));
         }
-        self.check_instance_field(obj, name)?;
         if self.heap.get(obj).native_io_class_name().is_some() && name != "__class__" {
             let dictionary = self.native_file_dictionary(obj);
             return self.update_dictionary_field(obj, dictionary, name, Some(value));
@@ -6541,7 +6538,7 @@ impl Context {
             class, namespace, ..
         } = *self.heap.get(obj)
         {
-            let layout = self.instance_layout(class, name);
+            let layout = self.checked_instance_layout(obj, class, name)?;
             if layout.dictionary
                 && name == "__dict__"
                 && member.is_none()
