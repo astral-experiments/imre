@@ -236,6 +236,7 @@ enum Storage {
     RegexIterator(regexes::FindIter),
     Repeat(Repeat<OwnedWord>),
     Accumulate(itertools::Accumulate),
+    IntegerAccumulate(itertools::IntegerAccumulate),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     SplitFields(SplitFields),
