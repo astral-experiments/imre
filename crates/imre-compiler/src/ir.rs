@@ -1592,8 +1592,8 @@ pub(crate) enum Builtin {
         verbose: bool,
     },
     RegexSub(Vec<u8>),
-    RegexRuns {
-        members: Vec<u8>,
+    RegexCollect {
+        program: imre_regex::Collection,
         split: bool,
     },
     RegexGroupDict,

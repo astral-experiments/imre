@@ -120,14 +120,27 @@ pub fn next_byte_run(
 /// Encode a greedy scalar class as a byte lookup followed by little-endian
 /// change points for non-ASCII scalars. A single enclosing findall capture
 /// yields the same string as the complete match.
-pub fn run_class(pattern: &FixedPattern, whole_capture: bool, bytes: bool) -> Option<Vec<u8>> {
-    use regex_syntax::hir::Class;
+pub fn collection(pattern: &FixedPattern, whole_capture: bool, bytes: bool) -> Option<Collection> {
     let hir = regex_syntax::Parser::new().parse(&pattern.source).ok()?;
     let atom = match (pattern.groups.len(), hir.kind()) {
         (1, _) => &hir,
         (2, HirKind::Capture(capture)) if whole_capture && capture.index == 1 => &capture.sub,
         _ => return None,
     };
+    if let Some(members) = run_class(atom, bytes) {
+        return Some(Collection::Runs(members));
+    }
+    literal_program(atom, bytes).map(Collection::Literals)
+}
+
+#[derive(Clone)]
+pub enum Collection {
+    Runs(Vec<u8>),
+    Literals(Vec<u8>),
+}
+
+fn run_class(atom: &regex_syntax::hir::Hir, bytes: bool) -> Option<Vec<u8>> {
+    use regex_syntax::hir::Class;
     let HirKind::Repetition(repeat) = atom.kind() else {
         return None;
     };
@@ -177,6 +190,59 @@ pub fn run_class(pattern: &FixedPattern, whole_capture: bool, bytes: bool) -> Op
         _ => return None,
     }
     Some(members)
+}
+
+/// Group complete, nonempty literals by leading byte while retaining Python's
+/// branch order inside each group. The first four bytes select a first-byte
+/// search, followed by 257 little-endian offsets and length-prefixed literals.
+fn literal_program(hir: &regex_syntax::hir::Hir, bytes: bool) -> Option<Vec<u8>> {
+    use regex_syntax::hir::literal::Extractor;
+    if !hir.properties().look_set().is_empty() {
+        return None;
+    }
+    let seq = Extractor::new().extract(hir);
+    if !seq.is_exact() {
+        return None;
+    }
+    let mut literals = Vec::new();
+    for literal in seq.literals()? {
+        let value = if bytes {
+            std::str::from_utf8(literal.as_bytes())
+                .ok()?
+                .chars()
+                .map(|ch| u8::try_from(u32::from(ch)).ok())
+                .collect::<Option<Vec<_>>>()?
+        } else {
+            literal.as_bytes().to_vec()
+        };
+        if value.is_empty() || value.len() > 255 {
+            return None;
+        }
+        literals.push(value);
+    }
+    if literals.is_empty() {
+        return None;
+    }
+    let mut header = vec![0; 4];
+    let mut payload = Vec::new();
+    for first in 0..=u8::MAX {
+        let offset = u16::try_from(payload.len()).ok()?;
+        header.extend_from_slice(&offset.to_le_bytes());
+        for literal in literals.iter().filter(|s| s[0] == first) {
+            payload.push(literal.len() as u8);
+            payload.extend_from_slice(literal);
+        }
+        if payload.len() != usize::from(offset) && header[0] < 4 {
+            header[0] += 1;
+            let count = usize::from(header[0]);
+            if count < 4 {
+                header[count] = first;
+            }
+        }
+    }
+    header.extend_from_slice(&u16::try_from(payload.len()).ok()?.to_le_bytes());
+    header.extend_from_slice(&payload);
+    Some(header)
 }
 
 /// A capture may be unnamed or absent on some successful paths.

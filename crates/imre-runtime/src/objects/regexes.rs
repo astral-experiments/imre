@@ -449,27 +449,102 @@ pub unsafe extern "C" fn imre_regex_collect_bytes_runs(
             &*members,
         )
     };
-    collect_runs(
-        source.len(),
-        8,
-        split != 0,
-        byte_runs(&source, members),
-        |parts, span| {
-            parts
-                .values
-                .try_reserve(1)
-                .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-            let field = &source[span];
-            let bytes = if field.len() == source.len() {
-                crate::BytesOwner::clone(&source)
-            } else {
-                super::bytes::copied_bytes(field)
-            };
-            parts
-                .values
-                .push(crate::BytesOwner::into_raw(bytes) as usize);
-        },
-    )
+    collect_byte_fields(&source, split != 0, byte_runs(&source, members))
+}
+
+fn collect_byte_fields(
+    source: &crate::BytesOwner,
+    split: bool,
+    runs: impl Iterator<Item = std::ops::Range<usize>>,
+) -> *const Object {
+    collect_runs(source.len(), 8, split, runs, |parts, span| {
+        parts
+            .values
+            .try_reserve(1)
+            .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+        let field = &source[span];
+        let bytes = if field.len() == source.len() {
+            crate::BytesOwner::clone(source)
+        } else {
+            super::bytes::copied_bytes(field)
+        };
+        parts
+            .values
+            .push(crate::BytesOwner::into_raw(bytes) as usize);
+    })
+}
+
+/// Search the ordered literal payload for the next leftmost, nonempty match.
+fn literal_ranges<'a>(
+    text: &'a [u8],
+    program: &'a [u8],
+) -> impl Iterator<Item = std::ops::Range<usize>> + 'a {
+    let (heads, rest) = program.split_at(4);
+    let (offsets, entries) = rest.split_at(257 * 2);
+    let (offsets, _) = offsets.as_chunks::<2>();
+    let mut at = 0;
+    std::iter::from_fn(move || {
+        loop {
+            let tail = &text[at..];
+            at += match heads[0] {
+                1 => memchr::memchr(heads[1], tail),
+                2 => memchr::memchr2(heads[1], heads[2], tail),
+                3 => memchr::memchr3(heads[1], heads[2], heads[3], tail),
+                _ => tail
+                    .iter()
+                    .position(|&b| offsets[usize::from(b)] != offsets[usize::from(b) + 1]),
+            }?;
+            let group = usize::from(text[at]);
+            let start = usize::from(u16::from_le_bytes(offsets[group]));
+            let end = usize::from(u16::from_le_bytes(offsets[group + 1]));
+            let mut candidates = &entries[start..end];
+            while let Some((&len, rest)) = candidates.split_first() {
+                let (literal, next) = rest.split_at(usize::from(len));
+                if text[at..].starts_with(literal) {
+                    let start = at;
+                    at += literal.len();
+                    return Some(start..at);
+                }
+                candidates = next;
+            }
+            at += 1;
+        }
+    })
+}
+
+/// Collect matches of complete ordered literals or the fields between matches.
+///
+/// # Safety
+/// The compiler supplies the complete immutable literal program. The caller
+/// roots a bytes owner when bit one of `flags` is set, otherwise a string owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_literals(
+    value: *const std::ffi::c_void,
+    program: *const u8,
+    len: usize,
+    flags: u32,
+) -> *const Object {
+    // SAFETY: the compiler supplies the matching constant address and length.
+    let program = unsafe { std::slice::from_raw_parts(program, len) };
+    let split = flags & 1 != 0;
+    if flags & 2 != 0 {
+        // SAFETY: the bytes flag identifies a rooted bytes owner.
+        let source =
+            unsafe { std::mem::ManuallyDrop::new(crate::BytesOwner::from_raw(value.cast())) };
+        collect_byte_fields(&source, split, literal_ranges(&source, program))
+    } else {
+        // SAFETY: a clear bytes flag identifies a rooted string owner.
+        let source = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value.cast())) };
+        collect_runs(
+            source.len(),
+            3,
+            split,
+            literal_ranges(source.as_bytes(), program),
+            |parts, span| {
+                super::text::push_part(parts, &source, &source[span]);
+            },
+        )
+    }
 }
 
 /// Collect a greedy Unicode class using sorted membership change points.
