@@ -4,6 +4,22 @@ from statistics import StatisticsError, mean
 
 
 def current():
+    huge = 1 << 500
+    assert mean((huge, huge)) == huge
+    assert type(mean([huge, -huge])) is int
+    assert mean([0, 1, 1]) == 2 / 3
+    assert mean([2**100, 0.5, -(2**100)]) == 1 / 6
+    assert mean([0.5, 2**100, -(2**100)]) == 1 / 6
+    assert mean((2, 4, Fraction(1, 3))) == Fraction(19, 9)
+
+    class AppendingInt(int):
+        def as_integer_ratio(self):
+            values.append(8)
+            return super().as_integer_ratio()
+
+    values = [2, 4, AppendingInt(6)]
+    assert mean(values) == 5 and values[-1] == 8
+
     class Interrupted:
         def __iter__(self):
             yield 1

@@ -5,7 +5,7 @@ import math
 from decimal import Decimal
 from fractions import Fraction
 from functools import reduce
-from itertools import groupby
+from itertools import chain, groupby, islice
 
 __all__ = ["StatisticsError", "mean"]
 
@@ -48,13 +48,61 @@ def mean(data):
                 numerator = sum(n * (denominator // d) for d, n in partials.items())
                 return float(Fraction(numerator, denominator * count))
 
+        if data and type(value) is int:
+            return _mean_from_integer(data, value, count, partials)
+
     T, total, n = _sum(data)
     if n < 1:
         raise StatisticsError('mean requires at least one data point')
     return _convert(total / n, T)
 
 
-def _sum(data):
+def _mean_from_integer(data, value, count, partials):
+    """Resume after the first exact integer in a builtin sequence."""
+    # The direct float loop stopped on this integer. Resume immediately
+    # after it without repeating the exact float arithmetic.
+    values = iter(data)
+    if count:
+        next(islice(values, count, None), None)
+    else:
+        next(values)
+    integer_sum = value
+    count += 1
+    for value in values:
+        kind = type(value)
+        if kind is int:
+            integer_sum += value
+        elif kind is float and math.isfinite(value):
+            n, d = value.as_integer_ratio()
+            partials[d] = partials.get(d, 0) + n
+        else:
+            if not partials and type(kind) is type:
+                # Seed the usual ratio groups with the exact integer
+                # prefix. The remaining iterator stays live for callbacks.
+                T, total, n = _sum(chain((value,), values), count, integer_sum)
+                return _convert(total / n, T)
+            break
+        count += 1
+    else:
+        if not partials:
+            return _convert(Fraction(integer_sum, count), int)
+        partials[1] = partials.get(1, 0) + integer_sum
+        return _binary_float_mean(partials, count)
+
+    T, total, n = _sum(data)
+    if n < 1:
+        raise StatisticsError('mean requires at least one data point')
+    return _convert(total / n, T)
+
+
+def _binary_float_mean(partials, count):
+    """Combine power-of-two denominators exactly and round only the mean."""
+    denominator = max(partials)
+    numerator = sum(n * (denominator // d) for d, n in partials.items())
+    return float(Fraction(numerator, denominator * count))
+
+
+def _sum(data, count=0, integer_sum=0):
     """_sum(data) -> (type, sum, count)
 
     Return a high-precision sum of the given numeric data as a fraction,
@@ -87,10 +135,10 @@ def _sum(data):
     allowed.
 
     """
-    count = 0
-    types = set()
+    # A preconsumed integer prefix contributes one exact denominator group.
+    types = {int} if count else set()
     types_add = types.add
-    partials = {}
+    partials = {1: integer_sum} if count else {}
     partials_get = partials.get
 
     for typ, values in groupby(data, type):
