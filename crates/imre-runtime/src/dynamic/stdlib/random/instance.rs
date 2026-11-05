@@ -19,7 +19,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         unreachable!()
     };
     *heap_type = Some(CLASS);
-    for name in ["__init__", "seed", "random", "getrandbits"] {
+    for name in ["__init__", "seed", "random", "getrandbits", "expovariate"] {
         let method = ctx.alloc(Value::HeapTypeMethod { owner: class, name });
         ctx.bind(fields, name, method);
     }
@@ -49,6 +49,9 @@ pub(in crate::dynamic) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if method == "expovariate" {
+        return super::expovariate(ctx, args, kwargs, false);
+    }
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",

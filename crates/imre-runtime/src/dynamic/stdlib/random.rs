@@ -98,6 +98,35 @@ pub(super) fn random_args(args: &[Id], kwargs: &[(String, Id)]) -> Result<()> {
     Ok(())
 }
 
+/// Draw from the exponential distribution as in CPython's Random.expovariate.
+pub(super) fn expovariate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    module_call: bool,
+) -> Result<Id> {
+    let implicit_self = module_call.then_some(&NONE);
+    let [receiver, rate] = super::python_arguments(
+        "Random.expovariate",
+        ["self", "lambd"],
+        2,
+        1,
+        implicit_self.into_iter().chain(args),
+        kwargs,
+    )?;
+    let random = if module_call {
+        ctx.builtin("random.random")
+    } else {
+        ctx.lookup_attr(receiver.expect("bound self"), "random")?
+    };
+    let draw = ctx.call(random, vec![], vec![])?;
+    let one = ctx.alloc(Value::Float(1.0));
+    let complement = ctx.binary("-", one, draw)?;
+    let log = super::math::call(ctx, "log", &[complement], &[])?;
+    let numerator = ctx.op("neg", log, NONE, NONE)?;
+    ctx.binary("/", numerator, rate.unwrap_or(one))
+}
+
 pub(super) fn seed(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     objects::seed_shared(seeded(ctx, bound(args), kwargs)?);
     Ok(NONE)

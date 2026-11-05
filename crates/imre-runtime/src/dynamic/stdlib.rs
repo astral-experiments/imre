@@ -868,7 +868,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "random",
             "seed" | "getrandbits" | "random" | "choice" | "choices" | "shuffle" | "randint"
-            | "randbytes",
+            | "randbytes" | "expovariate",
         )
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -1675,6 +1675,9 @@ pub(super) fn call(
     }
     if name == "random.seed" {
         return random::seed(ctx, args, kwargs);
+    }
+    if name == "random.expovariate" {
+        return random::expovariate(ctx, args, kwargs, true);
     }
     if name == "random.getrandbits" {
         let count = random::bit_count(ctx, args, kwargs)?;
