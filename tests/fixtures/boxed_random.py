@@ -265,3 +265,36 @@ def current():
             assert type(caught) is error and len(draws) == count
         else:
             raise AssertionError("invalid exponential rate accepted")
+
+    generator = random.Random(7629)
+    print(generator.choice("ACGT"), generator.randrange(98, -3, -7), generator.randint(-4, 4))
+    print(generator.sample(range(9), 8), generator.sample(range(1000), 6))
+    print(generator.sample("ABC", k=5, counts=[2, 0, 4]))
+    print(generator.uniform(-2, 5), generator.gauss(), generator.gauss(5, 0.25))
+    print(generator.getrandbits(32))
+
+    class OnlyRandom(random.Random):
+        def random(self):
+            return 0.0
+
+    class OnlyBits(random.Random):
+        def getrandbits(self, width):
+            return 0
+
+    for source in (OnlyRandom(42), OnlyBits(42)):
+        assert source.choice("ab") == "a"
+        assert source.randint(3, 7) == 3
+    for call, error in (
+        (lambda: generator.choice([]), IndexError),
+        (lambda: generator.randrange(0, 1, 0), ValueError),
+        (lambda: generator.randint(4, 3), ValueError),
+        (lambda: generator.sample({1, 2}, 1), TypeError),
+        (lambda: generator.sample("ab", 3), ValueError),
+        (lambda: generator.sample("ab", 1, counts=[2]), ValueError),
+    ):
+        try:
+            call()
+        except error as caught:
+            print(type(caught).__name__, str(caught))
+        else:
+            raise AssertionError("invalid sample accepted")

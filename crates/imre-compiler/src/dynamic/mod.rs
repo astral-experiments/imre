@@ -980,6 +980,17 @@ pub(crate) fn compile<const SPLIT: bool>(
         {
             names.push((0, "_collections_abc".to_owned()));
         }
+        // Random.sample needs bisect when sampling with counts. A computed
+        // import can select random without mentioning it in a module name.
+        if imports.uses_import_builtin
+            || imports.computed_import
+            || imports.uses_exec
+            || names
+                .iter()
+                .any(|(level, name)| *level == 0 && name == "random")
+        {
+            names.push((0, "bisect".to_owned()));
+        }
         // The native string scanner imports the decoder's exception on a syntax error.
         if names
             .iter()
