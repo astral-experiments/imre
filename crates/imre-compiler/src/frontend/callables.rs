@@ -122,16 +122,16 @@ pub(super) fn targets(
 }
 
 impl Checker<'_> {
-    /// Capture a native receiver once and give a saved method its positional signature.
-    pub(super) fn bound_builtin(
+    /// Give a native method a positional signature and capture its receiver when present.
+    pub(super) fn builtin_callable(
         &mut self,
         node: &impl Ranged,
-        receiver: Expr,
+        receiver: Option<Expr>,
         builtin: Builtin,
         parameters: Vec<Type>,
         returns: Type,
     ) -> Expr {
-        let mut locals = vec![receiver.ty];
+        let mut locals: Vec<_> = receiver.iter().map(|value| value.ty).collect();
         locals.extend(&parameters);
         let mut arguments: Vec<_> = locals
             .iter()
@@ -166,7 +166,7 @@ impl Checker<'_> {
             ty: self.types.callable(parameters, returns),
             kind: ExprKind::Callable {
                 function: id,
-                receiver: Some(Box::new(receiver)),
+                receiver: receiver.map(Box::new),
             },
         }
     }

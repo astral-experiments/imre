@@ -376,15 +376,27 @@ impl Checker<'_> {
         {
             return self.replace_global(first, statement);
         }
-        let value = match statement {
-            ast::Stmt::ImportFrom(_) => self
-                .import_sys_value(self.graph.modules[self.module].snapshots[&definition.statement]),
-            _ => self.module_assignment(statement)?,
+        let parser = if rebound.is_some() {
+            None
+        } else {
+            self.saved_datetime_parser(statement, calendar::ParserBinding::Global(definition))
+        };
+        let exact_parser = parser.is_some();
+        let value = if let Some((_, value)) = parser {
+            value
+        } else {
+            match statement {
+                ast::Stmt::ImportFrom(_) => self.import_sys_value(
+                    self.graph.modules[self.module].snapshots[&definition.statement],
+                ),
+                _ => self.module_assignment(statement)?,
+            }
         };
         // A native frozenset predicate captures only its already-initialized immutable set.
         let frozen_predicate = matches!(&value.kind, ExprKind::Callable { receiver: Some(set), .. }
             if set.ty == Type::FrozenStrings);
-        if !frozen_predicate && callables::contains_callable(value.ty, self.types) {
+        if !exact_parser && !frozen_predicate && callables::contains_callable(value.ty, self.types)
+        {
             return Err(error(
                 self.source,
                 statement,

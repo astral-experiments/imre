@@ -4653,7 +4653,16 @@ impl<'a> Checker<'a> {
             previous_sum = sum.is_some();
             let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
             let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
-            let (mut lowered, continues) = self.statement(statement, &statements[index + 1..])?;
+            let (mut lowered, continues) = if !self.module_scope
+                && self.block_depth == 1
+                && fresh.is_some()
+                && let Some((target, parser)) = self
+                    .saved_datetime_parser(statement, calendar::ParserBinding::Local(statements))
+            {
+                (vec![self.assign(target, parser)?], true)
+            } else {
+                self.statement(statement, &statements[index + 1..])?
+            };
             self.fixed_tuple = enclosing_tuple;
             if !self.module_scope
                 && let Some((name, rhs)) = fresh
@@ -8461,9 +8470,9 @@ impl<'a> Checker<'a> {
                     return self.json_load_callable(Some(receiver), None, attribute);
                 }
                 if receiver.ty == Type::FrozenStrings && attribute.attr.as_str() == "__contains__" {
-                    return Ok(self.bound_builtin(
+                    return Ok(self.builtin_callable(
                         attribute,
-                        receiver,
+                        Some(receiver),
                         Builtin::SetContains,
                         vec![Type::Str],
                         Type::Bool,
@@ -8471,9 +8480,9 @@ impl<'a> Checker<'a> {
                 }
                 if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some()
                 {
-                    return Ok(self.bound_builtin(
+                    return Ok(self.builtin_callable(
                         attribute,
-                        receiver,
+                        Some(receiver),
                         Builtin::ListReverse,
                         Vec::new(),
                         Type::None,
