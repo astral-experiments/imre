@@ -10210,9 +10210,6 @@ impl<'a> Checker<'a> {
         {
             return self.environ_method(attribute, call, mapping == Intrinsic::EnvironBytes);
         }
-        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
-            self.calendar_class_attribute(attr)?;
-        }
         if let ast::Expr::Attribute(attr) = call.func.as_ref()
             && self.resolve(&attr.value)
                 == Some(Binding::Intrinsic(Intrinsic::Calendar(
@@ -10220,10 +10217,14 @@ impl<'a> Checker<'a> {
                 )))
         {
             match attr.attr.as_str() {
+                "fromisoformat" => return self.datetime_fromisoformat(call),
                 "now" => return self.calendar_now(call),
                 "combine" => return self.calendar_combine(call),
                 _ => {}
             }
+        }
+        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
+            self.calendar_class_attribute(attr)?;
         }
         if let Some(class) = self.class_reference(&call.func) {
             let result = self.construct(call, class);

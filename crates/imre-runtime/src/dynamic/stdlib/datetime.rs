@@ -9,7 +9,7 @@ use crate::objects::{Calendar, CalendarNumber};
 pub(in crate::dynamic) mod comparison;
 mod fromutc;
 mod iso_datetime;
-mod iso_time;
+
 pub(in crate::dynamic) mod isocalendar;
 mod reduction;
 pub(in crate::dynamic) mod render;
@@ -1549,8 +1549,10 @@ fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
             "fromisoformat: argument must be str",
         ));
     };
-    let Some(([mut hour, minute, second, micros], offset)) =
-        ctx.str_value(storage).ok().and_then(iso_time::parse)
+    let Some(([mut hour, minute, second, micros], offset)) = ctx
+        .str_value(storage)
+        .ok()
+        .and_then(crate::objects::iso::parse_time)
     else {
         let repr = crate::dynamic::builtins::call(ctx, "repr", &[input], &[])?;
         return Err(Error::new(

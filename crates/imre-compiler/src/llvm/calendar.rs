@@ -85,6 +85,7 @@ impl Emitter<'_, '_> {
                     Op::SetFirstWeekday => "imre_calendar_setfirstweekday",
                     Op::Date => "imre_calendar_date",
                     Op::DateTime => "imre_calendar_datetime",
+                    Op::FromIsoFormat => "imre_datetime_fromisoformat",
                     Op::Combine => "imre_calendar_combine",
                     Op::Astimezone => "imre_calendar_astimezone",
                     Op::Zone => "imre_calendar_zone",

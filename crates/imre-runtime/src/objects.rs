@@ -33,6 +33,7 @@ pub(crate) use bytes::{
 pub(crate) mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
+pub(crate) use calendar::iso;
 mod chainmap;
 mod charmaps;
 mod codecs;

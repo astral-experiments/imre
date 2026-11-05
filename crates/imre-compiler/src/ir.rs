@@ -193,6 +193,7 @@ pub(crate) enum CalendarOp {
     Date,
     DateTime,
     Combine,
+    FromIsoFormat,
     Replace { timezone_supplied: bool },
     Astimezone,
     Delta,

@@ -3,6 +3,7 @@
 use super::*;
 pub(super) mod boxed;
 mod civil;
+pub(crate) mod iso;
 mod month_grid;
 use civil::Civil;
 mod clock;
@@ -567,7 +568,7 @@ fn check(value: i32, name: &str, low: i32, high: i32) -> Result<(), Error> {
         ))
     }
 }
-fn checked_ordinal(y: i32, m: i32, d: i32) -> Result<i128, Error> {
+fn check_date(y: i32, m: i32, d: i32) -> Result<(), Error> {
     check(y, "year", 1, 9999)?;
     check(m, "month", 1, 12)?;
     let max = month_days(y, m);
@@ -577,6 +578,11 @@ fn checked_ordinal(y: i32, m: i32, d: i32) -> Result<i128, Error> {
             format!("day {d} must be in range 1..{max} for month {m} in year {y}"),
         ));
     }
+    Ok(())
+}
+
+fn checked_ordinal(y: i32, m: i32, d: i32) -> Result<i128, Error> {
+    check_date(y, m, d)?;
     Ok(ordinal(y, m, d))
 }
 
@@ -861,14 +867,15 @@ pub unsafe extern "C" fn imre_calendar_field(o: *const Object, index: usize) -> 
             let [y, m, d] = ord.ymd();
             i128::from([y, m, d][i])
         }
-        Value::Date { local, fold, .. } => local.fields(*fold)[i],
+        Value::Date { local, fold, .. } => local.field(i, *fold),
         Value::Delta(n) => {
             let (d, s, u) = parts(*n);
             [d, s, u][i]
         }
         _ => unreachable!(),
     });
-    Int::new(BigInt::from(n)).into_raw()
+    // All civil fields and normalized duration components fit in a tagged integer.
+    Int::from(n as i64).into_raw()
 }
 /// # Safety
 /// The receiver is a rooted datetime; the optional owned zone is zero only for naive values.
