@@ -241,11 +241,11 @@ class NonCallableMock(_FixedMock):
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
                  wraps=None, parent=None, _new_parent=None, _new_name="", unsafe=False, **attrs):
+        super().__init__(name=name)
         self._mock_add_spec(spec_set if spec_set is not None else spec, spec_set is not None)
         self._mock_set_magics()
         object.__setattr__(self, "_mock_wraps", wraps)
         object.__setattr__(self, "_mock_unsafe", unsafe)
-        super().__init__(name=name)
         self._mock_parent = parent
         self._mock_children = {}
         if _new_parent is None:
@@ -272,6 +272,10 @@ class NonCallableMock(_FixedMock):
         elif methods is not None and type(methods) not in (list, tuple):
             spec_class = type(methods)
             methods = dir(methods)
+        # A plain function spec normalizes assertions without restricting the calls it records.
+        self._node._spec_signature = (
+            _spec_signature(spec) if isinstance(spec, (FunctionType, MethodType)) else None
+        )
         asyncs = _spec_async_methods(spec, methods) if spec_class is not None else ()
         object.__setattr__(self, "_spec_asyncs", asyncs)
         object.__setattr__(self, "_spec_class", spec_class)
@@ -888,11 +892,12 @@ def _autospec_target(spec, name, value):
     return value
 
 
-def _autospec_signature(target):
+def _spec_signature(target):
+    from annotationlib import Format
     from inspect import signature
 
     try:
-        return signature(target)
+        return signature(target, annotation_format=Format.FORWARDREF)
     except ValueError:
         # Some builtin callables do not expose a signature.
         return None
@@ -967,8 +972,8 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None, *, eat_sel
         # use the raw signature, while a factory's return mock eats self too.
         if eat_self:
             target = partial(target, None)
-        sig = _autospec_signature(target)
-        call_sig = _autospec_signature(partial(target, None)) if is_class and as_instance and not eat_self else sig
+        sig = _spec_signature(target)
+        call_sig = _spec_signature(partial(target, None)) if is_class and as_instance and not eat_self else sig
         mock._node._spec_signature = sig
         if call_sig is not None:
             mock._node._call_signature = call_sig
