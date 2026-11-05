@@ -60,7 +60,7 @@ fn parsed_zone(word: &str) -> Result<Option<crate::ObjectOwner>, Error> {
             return make_zone(make_delta(0, words)?, None).map(Some);
         }
     };
-    make_zone(owner(Value::Delta(i128::from(hours) * 3_600_000_000)), None).map(Some)
+    make_zone(owner(Value::delta(i128::from(hours) * 3_600_000_000)), None).map(Some)
 }
 
 // Mirror _parsedate_tz's obsolete RFC 850 and asctime forms, including its

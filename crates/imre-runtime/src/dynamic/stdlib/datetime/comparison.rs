@@ -66,7 +66,7 @@ impl Clock {
                 // time passes None, but destruction of the fold-zero subtype can be observed.
                 self.copy(
                     ctx,
-                    Calendar::time(self.value.wall_microseconds(), 0, zone.as_ref())?,
+                    Calendar::time(self.value.wall_microseconds() as i64, 0, zone.as_ref())?,
                 )?;
                 NONE
             } else {

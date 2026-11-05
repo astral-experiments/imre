@@ -288,7 +288,7 @@ enum Storage {
     LogManager(Option<logging::manager::Manager>),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
-    Calendar(allocator_api2::boxed::Box<calendar::Value>),
+    Calendar(calendar::Value),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
