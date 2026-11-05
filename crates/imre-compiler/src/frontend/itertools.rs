@@ -38,7 +38,7 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Repeat, ty, args))
     }
 
-    fn cursor_source_value(&mut self, node: &ast::Expr) -> Result<Expr, String> {
+    pub(super) fn cursor_source_value(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Call(call) = node
             && matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
             && self.resolve(&call.func).is_none()
@@ -83,7 +83,7 @@ impl Checker<'_> {
         Ok((source, element))
     }
 
-    fn cursor_source_element(&self, ty: Type) -> Option<Type> {
+    pub(super) fn cursor_source_element(&self, ty: Type) -> Option<Type> {
         match ty {
             Type::Str | Type::StrLiteral(_) => Some(Type::Str),
             Type::Bytes => Some(Type::Int),

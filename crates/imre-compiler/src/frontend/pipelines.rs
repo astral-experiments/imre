@@ -93,6 +93,14 @@ impl Prepared {
     }
 }
 
+pub(super) struct AccumulateArgs {
+    pub(super) scope: calls::ArgumentScope,
+    pub(super) source: Expr,
+    pub(super) function: Expr,
+    pub(super) initial: Option<Expr>,
+    pub(super) element: Type,
+}
+
 impl Checker<'_> {
     /// Generator creation captures arguments now. The first pull runs the body
     /// and acquires the list yielded from; later pulls observe that same list.
@@ -404,6 +412,185 @@ impl Checker<'_> {
         }
     }
 
+    pub(super) fn is_accumulate(&self, call: &ast::ExprCall) -> bool {
+        matches!(
+            self.resolve(&call.func),
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                "itertools.accumulate"
+            )))
+        ) && self
+            .graph
+            .session
+            .is_stdlib_class(self.module, &call.func, "itertools", "accumulate")
+    }
+
+    pub(super) fn accumulate_args(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<AccumulateArgs, String> {
+        let positional = ParameterKind::PositionalOrKeyword;
+        let params = [
+            positional.parameter("iterable", Type::ListInt, None),
+            positional.parameter("func", Type::None, Some(Expr::none())),
+            ParameterKind::KeywordOnly.parameter("initial", Type::Int, Some(Expr::none())),
+        ];
+        let args = self
+            .arguments_with(call, &params, None, |checker, index, node| {
+                if index == 0 {
+                    return checker.cursor_source_value(node);
+                }
+                if index == 1
+                    && matches!(
+                        checker.resolve(node),
+                        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                            "operator.add"
+                        )))
+                    )
+                    && checker.graph.session.is_stdlib_function(
+                        checker.module,
+                        node,
+                        "_operator",
+                        "add",
+                    )
+                {
+                    return Ok(Expr::none());
+                }
+                checker.evaluated_argument(node)
+            })
+            .map_err(|_| self.scoped_builtin_error("itertools.accumulate", call))?;
+        let [source, func, start] = args.order[..] else {
+            unreachable!()
+        };
+        let Some(element @ (Type::Int | Type::Float)) =
+            self.cursor_source_element(args.values[source].ty)
+        else {
+            return Err(self.scoped_builtin_error("itertools.accumulate", call));
+        };
+        let operation = args.values[func].ty;
+        if (operation != Type::None
+            && !self
+                .types
+                .signature(operation)
+                .is_some_and(|(params, result)| params == [element, element] && result == element))
+            || (args.values[start].ty != Type::None && args.values[start].ty != element)
+        {
+            return Err(self.scoped_builtin_error("itertools.accumulate", call));
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let values: Vec<_> = args
+            .values
+            .into_iter()
+            .map(|v| scope.hold(self, v))
+            .collect();
+        Ok(AccumulateArgs {
+            element,
+            source: values[source].clone(),
+            function: values[func].clone(),
+            initial: (values[start].ty != Type::None).then(|| values[start].clone()),
+            scope,
+        })
+    }
+
+    /// Each pull owns its result independently of the running total. User code
+    /// may mutate the source or raise StopIteration during an addition.
+    pub(super) fn prepare_accumulate(
+        &mut self,
+        call: &ast::ExprCall,
+        args: AccumulateArgs,
+    ) -> Result<Prepared, String> {
+        let AccumulateArgs {
+            mut scope,
+            source,
+            function,
+            initial,
+            element,
+        } = args;
+        let mut input = if self.types.cursor_element(source.ty).is_some() {
+            self.prepare_cursor(source, element)
+        } else {
+            self.prepare_container(source, false, call, false)?
+        };
+        scope.body.append(&mut input.evaluate);
+        scope.body.append(&mut input.acquire);
+        scope.clear.append(&mut input.clear);
+        let first = self.hidden(Type::Bool);
+        let total = self.hidden(element);
+        let output = self.hidden(element);
+        let ready = self.hidden(Type::Bool);
+        scope
+            .body
+            .push(Statement::Assign(first, Expr::boolean(true)));
+        let custom = function.ty != Type::None;
+        let operation = Expr {
+            ty: element,
+            kind: if custom {
+                ExprKind::Invoke {
+                    callable: Box::new(function),
+                    args: ir::CallArgs::positional(vec![
+                        self.local(total),
+                        self.local(input.value),
+                    ]),
+                }
+            } else {
+                ExprKind::Binary(
+                    Binary::Add,
+                    Box::new(self.local(total)),
+                    Box::new(self.local(input.value)),
+                )
+            },
+        };
+        let addition = Statement::Assign(total, operation);
+        let update = if initial.is_some() {
+            addition
+        } else {
+            Statement::If(
+                self.local(first),
+                vec![
+                    Statement::Assign(first, Expr::boolean(false)),
+                    Statement::Assign(total, self.local(input.value)),
+                ],
+                vec![addition],
+            )
+        };
+        let mut produce = vec![update, Statement::Assign(output, self.local(total))];
+        if custom {
+            produce = catch_stop_iteration(
+                self.types,
+                produce,
+                vec![Statement::Assign(ready, Expr::boolean(false))],
+            );
+        }
+        produce.push(Statement::Clear(input.value));
+        let mut next = input.next;
+        next.push(Statement::Assign(ready, self.local(input.ready)));
+        next.push(Statement::If(self.local(ready), produce, Vec::new()));
+        if let Some(initial) = initial {
+            scope.body.push(Statement::Assign(total, initial));
+            next = vec![Statement::If(
+                self.local(first),
+                vec![
+                    Statement::Assign(first, Expr::boolean(false)),
+                    Statement::Assign(ready, Expr::boolean(true)),
+                    Statement::Assign(output, self.local(total)),
+                ],
+                next,
+            )];
+        }
+        next.insert(0, Statement::Clear(output));
+        scope.clear.extend([first, total, output, ready]);
+        Ok(Prepared {
+            evaluate: scope.body,
+            acquire: Vec::new(),
+            next,
+            ready,
+            value: output,
+            elementless: false,
+            eager_list: None,
+            writes: input.writes,
+            clear: scope.clear,
+        })
+    }
+
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
     pub(super) fn pipeline_input(
         &mut self,
@@ -422,6 +609,12 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
+        if self.is_accumulate(call) {
+            let args = self.accumulate_args(call)?;
+            return Ok(Some(Iteration::Prepared(
+                self.prepare_accumulate(call, args)?,
+            )));
+        }
         if self.is_builtin_iter(call) && call.arguments.args.len() != 1 {
             return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
         }
