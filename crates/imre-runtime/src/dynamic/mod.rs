@@ -1578,6 +1578,17 @@ impl Context {
 
     /// Consume the values required by an assignment, probing one extra item for fixed targets.
     fn unpack_items(&mut self, value: Id, count: usize, star: Option<usize>) -> Result<Vec<Id>> {
+        if star.is_none()
+            && let Value::List(items) | Value::Tuple(items) = self.heap.get(value)
+            && items.len() == count
+        {
+            let items = copy_ids(items)?;
+            self.heap.reserve_temporaries(count)?;
+            for &item in &items {
+                self.heap.keep(item);
+            }
+            return Ok(items);
+        }
         let required = count - usize::from(star.is_some());
         let prefix = star.unwrap_or(count);
         let iter = self.iterator(value)?;
