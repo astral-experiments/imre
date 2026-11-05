@@ -25,6 +25,10 @@ pub(crate) fn specialize(module: &mut Module) {
 }
 
 fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, private_cursors: &[usize]) {
+    let induction = match statement {
+        Statement::For { target, .. } => Some(*target),
+        _ => None,
+    };
     let (arguments, body, orelse, while_source) = match statement {
         Statement::For {
             args, body, orelse, ..
@@ -108,6 +112,20 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, private_curso
             ),
             None => builtin(Builtin::ListPresent, vec![list_local(input)]),
         });
+    }
+    if let (Some(cursor), Some(arguments)) = (induction, &arguments)
+        && !written[cursor]
+        && small_literal(&arguments[0]).is_some_and(|start| start >= 0)
+        && small_literal(&arguments[2]).is_some_and(|step| step > 0)
+    {
+        prove_range_windows(
+            body,
+            cursor,
+            &arguments[1],
+            &written,
+            &plan.inputs,
+            &mut guards,
+        );
     }
     let Plan {
         outputs, appends, ..
@@ -553,6 +571,104 @@ fn range_arguments(args: &[Expr]) -> Option<[Expr; 3]> {
     }
 }
 
+/// The true arm of `limit - i >= width` covers every offset below the width.
+/// The range supplies the lower bound. Only the fast loop can rely on its
+/// input buffers staying stable across these reads.
+fn prove_range_windows(
+    body: &mut [Statement],
+    cursor: usize,
+    stop: &Expr,
+    written: &[bool],
+    inputs: &BTreeMap<usize, usize>,
+    guards: &mut Vec<Expr>,
+) {
+    let mut checked_limits = BTreeSet::new();
+    crate::ir::rewrite_statements(body, &mut |statement| {
+        let Statement::If(test, yes, _) = statement else {
+            return;
+        };
+        let ExprKind::Compare(operands, comparisons) = &test.kind else {
+            return;
+        };
+        let [rest, width] = operands.as_slice() else {
+            return;
+        };
+        let ExprKind::Binary(Binary::Subtract, limit, counter) = &rest.kind else {
+            return;
+        };
+        let Some(width) = small_literal(width) else {
+            return;
+        };
+        let width = match comparisons.as_slice() {
+            [Compare::GreaterEqual] => width,
+            [Compare::Greater] => width + 1,
+            _ => return,
+        };
+        if width <= 0 || !matches!(counter.kind, ExprKind::Local(slot) if slot == cursor) {
+            return;
+        }
+        crate::ir::walk_expressions_mut(yes, &mut |value| {
+            let ExprKind::Builtin(op @ Builtin::ListGetI32, args) = &mut value.kind else {
+                return;
+            };
+            let [source, index] = args.as_slice() else {
+                return;
+            };
+            let ExprKind::Local(root) = source.kind else {
+                return;
+            };
+            if !inputs.contains_key(&root)
+                || !window_offset(index, cursor).is_some_and(|k| (0..width).contains(&k))
+            {
+                return;
+            }
+            match &limit.kind {
+                ExprKind::Builtin(Builtin::Len, items) if matches!(items.as_slice(), [item] if matches!(item.kind, ExprKind::Local(slot) if slot == root)) =>
+                    {}
+                ExprKind::Local(slot)
+                    if !written[*slot]
+                        && limit.ty == Type::Int
+                        && matches!(stop.kind, ExprKind::Local(bound) if bound == *slot) =>
+                {
+                    checked_limits.insert(root);
+                }
+                _ => return,
+            }
+            *op = Builtin::ListGetBoundedInBounds {
+                min: i64::from(i32::MIN),
+                max: i64::from(i32::MAX),
+            };
+        });
+    });
+    for root in checked_limits {
+        let length = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Len, vec![list_local(root)]),
+        };
+        guards.push(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Compare(vec![stop.clone(), length], vec![Compare::LessEqual]),
+        });
+    }
+}
+
+/// Returns the constant offset from an induction variable in an integer index.
+fn window_offset(index: &Expr, cursor: usize) -> Option<i64> {
+    if index.ty != Type::Int {
+        return None;
+    }
+    match &index.kind {
+        ExprKind::Local(slot) if *slot == cursor => Some(0),
+        ExprKind::Binary(Binary::Add, left, right) if matches!(left.kind, ExprKind::Local(slot) if slot == cursor) => {
+            small_literal(right)
+        }
+        ExprKind::Binary(Binary::Add, left, right) if matches!(right.kind, ExprKind::Local(slot) if slot == cursor) => {
+            small_literal(left)
+        }
+        _ => None,
+    }
+}
+
 fn small_literal(value: &Expr) -> Option<i64> {
     let value = match &value.kind {
         ExprKind::Int(value) => value.parse::<i64>().ok()?,
@@ -594,6 +710,54 @@ mod tests {
         crate::tuples::scalarize(&mut module);
         specialize(&mut module);
         module
+    }
+
+    #[test]
+    fn proves_only_dominated_reads_from_stable_range_windows() {
+        let source = r#"
+def windows(data: list[int], stop: int) -> int:
+    total = 0
+    for i in range(0, stop, 3):
+        if stop - i >= 3:
+            total += data[i] + data[1 + i] + data[i + 2]
+        else:
+            total += data[i]
+    return total
+print(windows([1, 2, 3, 4], 4))
+"#;
+        let proven = |source: &str| {
+            let module = optimized(source);
+            let mut count = 0;
+            for function in &module.functions {
+                walk_expressions(&function.body, &mut |value| {
+                    if matches!(
+                        value.kind,
+                        ExprKind::Builtin(Builtin::ListGetBoundedInBounds { .. }, _)
+                    ) {
+                        count += 1;
+                    }
+                });
+            }
+            count
+        };
+        assert_eq!(proven(source), 3);
+        assert_eq!(
+            proven(&source.replace("stop - i >= 3", "len(data) - i > 2")),
+            3
+        );
+        assert_eq!(proven(&source.replace("data[i + 2]", "data[i + 3]")), 2);
+        assert_eq!(
+            proven(&source.replace("range(0, stop, 3)", "range(-1, stop, 3)")),
+            0
+        );
+        assert_eq!(
+            proven(&source.replace("if stop - i", "i = 2\n        if stop - i")),
+            0
+        );
+        assert_eq!(
+            proven(&source.replace("if stop - i", "stop += 1\n        if stop - i")),
+            0
+        );
     }
 
     #[test]

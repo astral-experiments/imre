@@ -7691,7 +7691,11 @@ impl Emitter<'_, '_> {
                     let mut index = args[1].value.clone();
                     index.small_integer = true;
                     let index = self.index_word(&index, true);
-                    self.proven_list_word(slot, &args[0].value, &index)
+                    if let Some((_, data)) = self.guarded_list_buffer(&expressions[0]) {
+                        self.load_list_word(&data, &index)
+                    } else {
+                        self.proven_list_word(slot, &args[0].value, &index)
+                    }
                 } else if matches!(builtin, Builtin::ListGetI32)
                     && self.nonnegative_index(&expressions[1])
                     && let Some(word) =
