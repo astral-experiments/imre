@@ -156,7 +156,12 @@ def split(pattern, string, *args, maxsplit=_zero_sentinel, flags=_zero_sentinel)
             DeprecationWarning, stacklevel=2
         )
 
-    return _split(pattern, string, maxsplit, flags)
+    return _split(
+        pattern,
+        string,
+        0 if maxsplit is _zero_sentinel else maxsplit,
+        0 if flags is _zero_sentinel else flags,
+    )
 split.__text_signature__ = '(pattern, string, maxsplit=0, flags=0)'
 
 class Scanner:

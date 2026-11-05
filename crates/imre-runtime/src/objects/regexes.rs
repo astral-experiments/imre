@@ -426,15 +426,9 @@ fn byte_runs<'a>(
 ) -> impl Iterator<Item = std::ops::Range<usize>> + 'a {
     let mut end = 0;
     std::iter::from_fn(move || {
-        let skip = bytes[end..]
-            .iter()
-            .position(|&b| members[usize::from(b)] != 0)?;
-        let start = end + skip;
-        end = start + 1;
-        while end < bytes.len() && members[usize::from(bytes[end])] != 0 {
-            end += 1;
-        }
-        Some(start..end)
+        let span = imre_regex::next_byte_run(bytes, members, end)?;
+        end = span.end;
+        Some(span)
     })
 }
 

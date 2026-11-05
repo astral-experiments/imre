@@ -2959,6 +2959,7 @@ impl SourceGraph {
     ) -> Option<&'static str> {
         let attr = expr.as_attribute_expr()?;
         let method = match attr.attr.as_str() {
+            "findall" => "re.Pattern.findall",
             "split" => "re.Pattern.split",
             "subn" => "re.Pattern.subn",
             _ => return None,
