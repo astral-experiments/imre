@@ -55,6 +55,24 @@ pub(super) fn getstate(ctx: &mut Context, receiver: Id) -> Result<Id> {
     ))
 }
 
+pub(super) fn readinto_buffer(
+    ctx: &Context,
+    name: &str,
+    buffer: Id,
+) -> Result<(Id, std::ops::Range<usize>)> {
+    ctx.writable_byte_span(buffer)?.ok_or_else(|| {
+        let kind = if buffer == NONE {
+            "None"
+        } else {
+            ctx.type_name(buffer)
+        };
+        Error::new(
+            "TypeError",
+            format!("{name}() argument must be read-write bytes-like object, not {kind}"),
+        )
+    })
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     receiver: Id,
@@ -78,17 +96,7 @@ pub(super) fn call(
             ),
         ));
     };
-    let Some((target, range)) = ctx.writable_byte_span(*buffer)? else {
-        let kind = if *buffer == NONE {
-            "None"
-        } else {
-            ctx.type_name(*buffer)
-        };
-        return Err(Error::new(
-            "TypeError",
-            format!("{name}() argument must be read-write bytes-like object, not {kind}"),
-        ));
-    };
+    let (target, range) = readinto_buffer(ctx, name, *buffer)?;
     let capacity = range.len();
     // Keep the destination exported while looking up and calling the reader override.
     let data = ctx.with_buffer_export(*buffer, |ctx| {
