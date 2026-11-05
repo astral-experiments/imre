@@ -139,8 +139,7 @@ impl Int {
         if let Some(value) = self.as_small() {
             Cow::Owned(BigInt::from(value))
         } else if self.0 & prefix_words::TAG != 0 {
-            // SAFETY: this integer owns the immutable prefix slot.
-            Cow::Owned(unsafe { prefix_words::number(self.0) })
+            Cow::Owned(prefix_words::number(self))
         } else {
             // SAFETY: this aligned word owns standalone immutable digits.
             Cow::Borrowed(unsafe { &(*(self.0 as *const HeapInt)).0 })
@@ -2819,7 +2818,7 @@ mod tests {
     #[test]
     fn list_sum_borrows_aliased_inputs_and_owns_results_after_mutation() {
         let positive = crate::wide_owner(BigInt::from(1) << 120_u32);
-        let negative = Shared::new(-positive.as_ref());
+        let negative = wide_owner(-&positive.0);
         let positive_weak = Shared::downgrade(&positive);
         let negative_weak = Shared::downgrade(&negative);
         let list = ListOwner::new(List::new(vec![
@@ -2833,7 +2832,7 @@ mod tests {
         // mutation occurs between reductions, after all storage borrows end.
         let result = unsafe {
             let result = Int(imre_list_sum(ListOwner::as_ptr(&list), start));
-            assert_eq!(result.big().as_ref(), &(positive.as_ref() + 7));
+            assert_eq!(result.big().as_ref(), &(&positive.0 + 7));
             assert_eq!(Shared::strong_count(&positive), 2);
             assert_eq!(Shared::strong_count(&negative), 2);
             assert_eq!(
@@ -2848,7 +2847,7 @@ mod tests {
         drop(list);
         assert_eq!(Shared::strong_count(&positive), 1);
         assert_eq!(Shared::strong_count(&negative), 1);
-        let expected = positive.as_ref() + 7;
+        let expected = &positive.0 + 7;
         drop(positive);
         drop(negative);
         assert!(positive_weak.upgrade().is_none());
@@ -3456,7 +3455,7 @@ mod tests {
         let copy = Int(unsafe { imre_int_binary(value.0, zero.0, 8) });
         assert_eq!(Shared::strong_count(&owner), 3);
         drop(value);
-        assert_eq!(copy.big().as_ref(), owner.as_ref());
+        assert_eq!(copy.big().as_ref(), &owner.0);
         drop(copy);
         assert_eq!(Shared::strong_count(&owner), 1);
         assert_eq!(imre_error_pending(), 0);

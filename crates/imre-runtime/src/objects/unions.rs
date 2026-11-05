@@ -236,7 +236,9 @@ mod packed_integer_tests {
     #[test]
     fn union_owns_a_packed_prefix_after_the_list_drops() {
         let seed = Int::new(BigInt::from(1_u128 << 100));
-        let prefixes = crate::integer_prefixes(&vec![Int::from(1); 40], Some(&seed)).unwrap();
+        let prefixes = crate::integer_prefixes(&vec![Int::from(1); 40], Some(&seed))
+            .ok()
+            .unwrap();
         let word = integer(prefixes[3].clone());
         drop(prefixes);
         // SAFETY: the tagged word carries a live integer owner, including after cloning.
