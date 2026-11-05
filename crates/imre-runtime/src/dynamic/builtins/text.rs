@@ -2710,6 +2710,33 @@ pub(super) fn method(
     if name == "translate" {
         positional(name, kwargs)?;
         arity(name, args, 1, 1)?;
+        if let Value::List(table) | Value::Tuple(table) = ctx.heap.get(args[0]) {
+            let source = ctx.string_codepoints(receiver)?;
+            let mut output = Vec::with_capacity(source.len());
+            for &point in source.iter() {
+                let Some(&item) = table.get(point as usize) else {
+                    output.push(point);
+                    continue;
+                };
+                match ctx.heap.get(ctx.scalar_value(item)) {
+                    Value::None => {}
+                    Value::Bool(value) => output.push(u32::from(*value)),
+                    Value::Int(value) => match value.to_i64() {
+                        Some(ordinal @ 0..=0x10ffff) => output.push(ordinal as u32),
+                        _ => {
+                            return Err(Error::new(
+                                "ValueError",
+                                "character mapping must be in range(0x110000)",
+                            ));
+                        }
+                    },
+                    Value::Str(value) => output.extend(value.chars().map(u32::from)),
+                    Value::SurrogateStr(points) => output.extend_from_slice(points),
+                    _ => return Err(type_error(translate::INVALID_VALUE)),
+                }
+            }
+            return Ok(ctx.text_codepoints(output));
+        }
         let Value::Dict(table) = ctx.heap.get(args[0]) else {
             return Err(type_error("str.translate requires a plain dictionary"));
         };

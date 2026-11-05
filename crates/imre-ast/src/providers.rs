@@ -74,6 +74,11 @@ pub fn is_native_fallback(name: &str) -> bool {
     cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
 }
 
+/// Packages which also supply a virtual search location when no initializer was linked.
+pub fn is_virtual_package(name: &str) -> bool {
+    matches!(name, "email" | "importlib" | "json" | "re" | "urllib")
+}
+
 fn is_builtin(name: &str) -> bool {
     matches!(
         name,
