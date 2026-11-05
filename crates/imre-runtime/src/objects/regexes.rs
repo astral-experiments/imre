@@ -474,6 +474,136 @@ fn collect_byte_fields(
     })
 }
 
+#[derive(Clone, Copy)]
+struct CaptureAtom<'a> {
+    run: bool,
+    captured: bool,
+    data: &'a [u8],
+}
+
+impl CaptureAtom<'_> {
+    fn match_len(self, text: &[u8]) -> usize {
+        if self.run {
+            text.iter()
+                .position(|&byte| self.data[usize::from(byte)] == 0)
+                .unwrap_or(text.len())
+        } else if text.starts_with(self.data) {
+            self.data.len()
+        } else {
+            0
+        }
+    }
+
+    fn find(self, text: &[u8]) -> Option<std::ops::Range<usize>> {
+        let start = if self.run {
+            text.iter().position(|&b| self.data[usize::from(b)] != 0)?
+        } else {
+            memchr::memmem::find(text, self.data)?
+        };
+        Some(start..start + self.match_len(&text[start..]))
+    }
+}
+
+fn capture_atoms(mut program: &[u8]) -> impl Iterator<Item = CaptureAtom<'_>> + Clone {
+    std::iter::from_fn(move || {
+        let (&flags, rest) = program.split_first()?;
+        let (len, rest) = rest.split_first_chunk::<2>().unwrap();
+        let (data, next) = rest.split_at(usize::from(u16::from_le_bytes(*len)));
+        program = next;
+        Some(CaptureAtom {
+            run: flags & 1 != 0,
+            captured: flags & 2 != 0,
+            data,
+        })
+    })
+}
+
+fn collect_rows(
+    text: &[u8],
+    program: &[u8],
+    layout: &super::records::RecordDescriptor,
+    field: impl Fn(std::ops::Range<usize>) -> usize,
+) -> *const Object {
+    let mut atoms = capture_atoms(program);
+    let first = atoms.next().unwrap();
+    let mut spans = Vec::with_capacity(layout.length);
+    let mut batch = super::records::RecordBatch::new(layout);
+    let mut rows = super::Words::new(6);
+    let mut search = 0;
+    'search: while let Some(span) = first.find(&text[search..]) {
+        let start = search + span.start;
+        let mut end = search + span.end;
+        // Every later start in this class run reaches the same suffix. A
+        // literal can overlap another occurrence, so retry one byte later.
+        search = if first.run { end } else { start + 1 };
+        spans.clear();
+        if first.captured {
+            spans.push(start..end);
+        }
+        for atom in atoms.clone() {
+            let len = atom.match_len(&text[end..]);
+            if len == 0 {
+                continue 'search;
+            }
+            if atom.captured {
+                spans.push(end..end + len);
+            }
+            end += len;
+        }
+        search = end;
+        debug_assert_eq!(spans.len(), layout.length);
+        rows.values
+            .try_reserve(1)
+            .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+        // SAFETY: the compiler emits a static tuple descriptor with one owned
+        // field per capture. Each record owner keeps its allocation alive.
+        let row = unsafe {
+            match &mut batch {
+                Some(batch) => batch.allocate(),
+                None => super::records::imre_record_new(layout),
+            }
+        };
+        for (index, span) in spans.drain(..).enumerate() {
+            // SAFETY: every compulsory capture fills one distinct field of the
+            // descriptor's string or bytes kind before publishing the tuple.
+            unsafe { row.add(index).write(field(span)) };
+        }
+        rows.values.push(row as usize);
+    }
+    crate::ObjectOwner::into_raw(rows.into_object())
+}
+
+/// Collect the compulsory fields of an unambiguous concatenation.
+///
+/// # Safety
+/// The compiler supplies the capture program and a static tuple descriptor
+/// with the matching field kinds. The caller roots the indicated subject.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_rows(
+    value: *const std::ffi::c_void,
+    program: *const u8,
+    len: usize,
+    layout: *const super::records::RecordDescriptor,
+    bytes: u32,
+) -> *const Object {
+    // SAFETY: these pointers and lengths come from immutable compiler metadata.
+    let (program, layout) = unsafe { (std::slice::from_raw_parts(program, len), &*layout) };
+    if bytes != 0 {
+        // SAFETY: the bytes flag identifies a rooted bytes owner.
+        let source =
+            unsafe { std::mem::ManuallyDrop::new(crate::BytesOwner::from_raw(value.cast())) };
+        collect_rows(&source, program, layout, |span| {
+            crate::BytesOwner::into_raw(super::bytes::copied_bytes(&source[span])) as usize
+        })
+    } else {
+        // SAFETY: the clear flag identifies a rooted string owner.
+        let source = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value.cast())) };
+        collect_rows(source.as_bytes(), program, layout, |span| {
+            StrOwner::into_raw(super::text::owned_string(&source[span])) as usize
+        })
+    }
+}
+
 /// Search the ordered literal payload for the next leftmost, nonempty match.
 fn literal_ranges<'a>(
     text: &'a [u8],
