@@ -1531,10 +1531,19 @@ impl Context {
                 ));
             }
         }
-        if !self.iterator_has_item(id)? {
+        self.next_builtin_sequence_item(id)
+    }
+
+    /// Read the current slice once, releasing the source on the first exhausted pull.
+    fn next_builtin_sequence_item(&mut self, id: Id) -> Result<Option<Id>> {
+        let remaining = self.iterator_remaining(id)?;
+        if remaining.is_empty() {
+            if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
+                *sequence = None;
+            }
             return Ok(None);
         }
-        let (item, width) = match self.iterator_remaining(id)? {
+        let (item, width) = match remaining {
             IteratorSlice::Values(values) => (values[0], 1),
             IteratorSlice::Reversed(values) => (values[values.len() - 1], 1),
             IteratorSlice::Array(array, offset) => {

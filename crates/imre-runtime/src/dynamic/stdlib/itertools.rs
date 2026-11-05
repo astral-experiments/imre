@@ -375,7 +375,12 @@ pub(in crate::dynamic) fn next_accumulated(ctx: &mut Context, receiver: Id) -> R
         return Ok(state.total);
     }
     let source = state.source;
-    let Some(item) = ctx.next_result(source)? else {
+    let item = if matches!(ctx.heap.get(source), Value::Iterator { .. }) {
+        ctx.next_builtin_sequence_item(source)?
+    } else {
+        ctx.next_result(source)?
+    };
+    let Some(item) = item else {
         return Ok(None);
     };
     // Fetch the total after the source returns since its __next__ can reenter us.
