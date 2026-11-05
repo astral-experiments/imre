@@ -185,6 +185,68 @@ def current():
     import warnings
     from array import array
 
+    def conversion_error(source):
+        try:
+            float(source)
+        except (TypeError, ValueError, LookupError) as exc:
+            return type(exc), exc.args
+
+    class FloatBytes(bytes):
+        def __buffer__(self, flags):
+            raise AssertionError("float must read bytes storage")
+
+    class FloatByteArray(bytearray):
+        def __repr__(self):
+            return "original\ud800"
+
+    for source in (FloatBytes(b" 12.5 "), FloatByteArray(b"12.5"),
+                   array("B", b"12.5"), memoryview(b"x12.5y")[1:-1]):
+        assert float(source) == 12.5
+    for source in ("\ud8f0", Kind("1\ud800"), FloatByteArray(b"1\0"), array("B", b"x")):
+        assert conversion_error(source) == (ValueError, ("could not convert string to float: " + repr(source),))
+
+    class FloatBuffer:
+        def __init__(self, view, fail_repr=False):
+            self.view = view
+            self.events = []
+            self.fail_repr = fail_repr
+
+        def __buffer__(self, flags):
+            self.events.append(flags)
+            return self.view
+
+        def __repr__(self):
+            try:
+                self.view.release()
+            except BufferError:
+                self.events.append("repr")
+            else:
+                raise AssertionError("repr released an active export")
+            if self.fail_repr:
+                raise LookupError("repr failed")
+            return "field"
+
+        def __release_buffer__(self, view):
+            assert view is self.view
+            view.release()
+            self.events.append("release")
+
+    source = FloatBuffer(memoryview(b"x12.5y")[1:-1])
+    assert float(source) == 12.5 and source.events == [0, "release"]
+    for fail, expected in ((False, (ValueError, ("could not convert string to float: field",))),
+                           (True, (LookupError, ("repr failed",)))):
+        source = FloatBuffer(memoryview(b"1\xff"), fail)
+        assert conversion_error(source) == expected and source.events == [0, "repr", "release"]
+
+    released = memoryview(b"1")
+    released.release()
+    for view in (released, memoryview(b"123")[::2]):
+        exporter = FloatBuffer(view)
+        for source in (view, exporter):
+            kind, (message,) = conversion_error(source)
+            assert kind is TypeError and message.endswith("not '" + type(source).__name__ + "'")
+        assert exporter.events == [0]
+
     class ReturnsFloat:
         def __init__(self, result):
             self.result = result
