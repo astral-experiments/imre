@@ -114,7 +114,7 @@ The paired pass rate is 74.2% for the original 25 families in the first table an
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
-in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover all 52 explicitly omitted originals.
+in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover all 54 explicitly omitted originals.
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
 It passed **15,161**, skipped 1,023, and reported 7 errors.
@@ -165,7 +165,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `copy` | 81 | 81 | 0 | Complete suite. Two independent machines ran all 81 upstream originals on stock and public `b9dfd225` at O0 and O3. All six runs passed and exited successfully. |
 | `fractions` | 50 | 50 | 0 | The ordinary fractions module ran all 50 original parents. Every parent passed on pinned stock and on public Imre O0 and O3. |
 | `glob` | 22 | 24 | 0 | On Linux, CPython and both native builds passed 22 of the 24 tests in the complete module, including the open-file stress test. All three skipped the two Windows tests. |
-| `gzip` | 73 | 75 | 0 | Stock passed all 75 originals. `test_flush_modes` now passes because `GzipFile.flush()` and `GzipFile.close()` both flush the selected compressor. Both O0 and O3 retained all 72 earlier passes. The two remaining errors were `test_decompress_limited` and `test_prepend_error`. [#5511](https://github.com/astral-experiments/imre/pull/5511). |
+| `gzip` | 73 | 75 | 2 | Stock passed all 75 originals. Both native levels passed the same 73, including `test_flush_modes` after the compressor flush fix. The two remaining errors depend on private reader attributes. [#5511](https://github.com/astral-experiments/imre/pull/5511) · [Gzip omission decisions](docs/stdlib-omissions.md#gzip). |
 | `inspect` | 276 | 362 | 0 | An earlier whole run passed 274 of 362 cases on both native builds. The public getcomments change added two source-inspection passes on the pinned stock interpreter and both native builds. [Public change](https://github.com/astral-experiments/imre/pull/5310). |
 | `math` | 47 | 89 | 0 | With CPU resources enabled, the standard unittest loader ran all 89 originals on each engine. Stock passed all 89, compared with 86 in the fixed default Linux run. Imre passed 47 at both O0 and O3, including all 43 earlier pairs. The `math.dist` implementation fixed `test_math_dist_leak`, which checks that unequal dimensions raise `ValueError`. The run also documented existing public passes for `testLog2`, `testLog2Exact`, and `test_prod`. [#5517](https://github.com/astral-experiments/imre/pull/5517). |
 | `ssl` | 50 | 195 | 0 | Stock passed 178 of 195 originals and skipped 17. Both native levels passed 50 in the complete public suite, including `test.test_ssl.SSLErrorTests.test_lib_reason` (occurrence 1). |
@@ -178,7 +178,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 261 | 383 | 0 | Four more selected originals passed on stock and at both native levels. They cover the basic and compression-level tests for stored files, the small-file ZIP64 basic test, and LZMA compression levels. Nine passing observations from interrupted runs remain outside the count. [#5516](https://github.com/astral-experiments/imre/pull/5516). |
 | `zoneinfo` | 228 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). |
-| **Measured total (19 of 19 families)** | **2,313** | **2,875** | **11** |  |
+| **Measured total (19 of 19 families)** | **2,313** | **2,875** | **13** |  |
 
 ### Whole-suite baselines for later additions
 
