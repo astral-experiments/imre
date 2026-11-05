@@ -97,13 +97,15 @@ def check_installed_site(imre, root, run):
     use_sources = (
         "import importlib, sys, tarfile\n"
         "print(importlib.import_module(sys.argv[1]).Element('root').tag)\n"
+        "sorter = importlib.import_module(sys.argv[3]).TopologicalSorter\n"
+        "assert list(sorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
         "    with tar.extractfile('payload') as member:\n"
         "        assert member.read() == b'archive member'\n"
     )
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
-    bare = run(launcher, "-IB", "-c", use_sources, name, sample, timeout=300)
+    bare = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", timeout=300)
     assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
     opaque = run(
         launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
@@ -120,11 +122,13 @@ def check_installed_site(imre, root, run):
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported
     archive.write_bytes(exported.stdout)
-    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, timeout=300)
+    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
     reader = root / "read_tar_entry.py"
     reader.write_text(
+        "from graphlib import TopologicalSorter\n"
         "from tarfile import open as open_archive\n"
+        "assert list(TopologicalSorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         f"with open_archive({str(sample.resolve())!r}, 'r:') as archive:\n"
         "    with archive.extractfile('payload') as member:\n"
         "        print(member.read().decode('ascii'))\n"
@@ -1746,10 +1750,10 @@ def main():
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
-        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py"):
-            exit_stack = Path(__file__).with_name("fixtures") / fixture
-            expected = run(sys.executable, "-B", exit_stack)
-            actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "io_dict_descriptor.py"):
+            script = Path(__file__).with_name("fixtures") / fixture
+            expected = run(sys.executable, "-B", script)
+            actual = run(imre, "run", script, "--runtime-imports", "--quiet")
             assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
             assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
@@ -2972,6 +2976,21 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        invoice = Path(__file__).resolve().with_name("fixtures") / "decimal_invoice.py"
+        # Cold optimized builds include the CPython decimal implementation.
+        compare("-IB", invoice, native_args=("run", invoice, "--quiet"), native_timeout=300)
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nsys.path.insert(0, sys.argv[1])\nimportlib.import_module(sys.argv[2])",
+            invoice.parent, invoice.stem, native_timeout=300,
+        )
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nD = importlib.import_module(sys.argv[1]).Decimal\n"
+            "print((D('-4.225') * D('3.5')).quantize(D('0.01')))",
+            "decimal", native_timeout=300,
+        )
+
         decimal_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
         (helpers / "decimal_values.py").write_text(
             "from decimal import Decimal\n"
@@ -3006,8 +3025,7 @@ def report(text):
             (helpers / "decimal_boundary.py").write_text(
                 f"from decimal import Decimal\nprint({expression})\n"
             )
-            unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_boundary")
-            assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+            compare("-IB", "-c", decimal_import + "import decimal_boundary")
 
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
@@ -3653,13 +3671,17 @@ for name in ("md4", "ripemd160"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
-        padding = root / "bytes_rjust.py"
+        method_entry = root / "scalar_method.py"
         for body in (
             "assert b'xy'.rjust(3, b'.') == b'.xy'",
             "pad = bytes.rjust\nassert pad(b'xy', 3, b'.') == b'.xy'",
+            "assert ' '.isprintable() and not '\\u00a0'.isprintable()",
+            "printable = str.isprintable\n"
+            "assert printable('') and printable('A\\u0301')\n"
+            "assert not printable('\\n') and not printable('\\u20c1') and not printable(chr(0xd800))",
         ):
-            padding.write_text(body + "\n")
-            compare("-B", padding)
+            method_entry.write_text(body + "\n")
+            compare("-B", method_entry)
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_compound.py",
@@ -3676,6 +3698,7 @@ for name in ("md4", "ripemd160"):
             "boxed_inspect_isabstract.py",
             "boxed_numeric_repr.py",
             "boxed_decimal_hash.py",
+            "boxed_decimal_arithmetic.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
             "boxed_positional_string_methods.py",
@@ -3725,9 +3748,13 @@ for name in ("md4", "ripemd160"):
             "boxed_round.py",
             "boxed_math_rounding.py",
             "boxed_math_acosh.py",
+            "boxed_math_dist.py",
             "boxed_math_fma.py",
+            "boxed_math_frexp.py",
             "boxed_math_fsum.py",
             "boxed_math_gcd.py",
+            "boxed_math_hypot.py",
+            "boxed_math_prod.py",
             "boxed_math_isclose.py",
             "boxed_math_log2.py",
             "boxed_math_ldexp.py",
@@ -3759,6 +3786,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
             "boxed_functools_partial_state.py",
+            "boxed_functools_partial_generic_alias.py",
             "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",
@@ -3835,8 +3863,10 @@ for name in ("md4", "ripemd160"):
             "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
+            "boxed_timeit.py",
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
+            "time_strptime.py",
             "boxed_codecs.py",
             "boxed_codec_registry.py",
             "boxed_wide_decode.py",

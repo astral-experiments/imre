@@ -68,6 +68,12 @@ const FIRST_DYNAMIC_SLOT: usize =
 /// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
 pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
 
+pub(super) const LZMA_COMPRESS_TYPE: &str = "_lzma.LZMACompressor";
+pub(super) const LZMA_DECOMPRESS_TYPE: &str = "_lzma.LZMADecompressor";
+pub(super) const LZMA_COMPRESS_METHODS: &[&str] = &["compress", "flush"];
+pub(super) const LZMA_DECOMPRESS_METHODS: &[&str] = &["decompress"];
+pub(super) const LZMA_DECOMPRESS_FIELDS: &[&str] = &["check", "eof", "needs_input", "unused_data"];
+
 pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
 pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
@@ -955,8 +961,34 @@ pub(super) struct BoxedGzipDecoder {
 }
 
 #[derive(Clone)]
+pub(super) struct BoxedFile<T> {
+    file: T,
+    dictionary: Option<Id>,
+}
+
+impl<T> BoxedFile<T> {
+    pub(super) fn new(file: T) -> Self {
+        Self {
+            file,
+            dictionary: None,
+        }
+    }
+}
+
+impl<T> std::ops::Deref for BoxedFile<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.file
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct BoxedTextFile {
+    pub(super) dictionary: Id,
     pub(super) file: crate::objects::TextFile,
+    pub(super) encoding: Id,
+    pub(super) errors: Id,
     pub(super) finalizing: bool,
     pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
@@ -1072,6 +1104,8 @@ pub(super) enum Value {
         lease: Option<Id>,
         // An ownerless C buffer has private backing storage but exposes obj as None.
         anonymous: bool,
+        // A native export's Python release callback cannot derive another view.
+        restricted: bool,
         layout: Option<super::memoryview::ViewLayout>,
         readonly: bool,
         hash: Option<i64>,
@@ -1087,7 +1121,7 @@ pub(super) enum Value {
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     ExpatParser(std::rc::Rc<super::stdlib::pyexpat::NativeParser>),
-    Random(std::rc::Rc<std::cell::RefCell<crate::objects::Generator>>),
+    Random(super::stdlib::random::instance::RandomState),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     #[cfg(unix)]
     MemoryBio(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::Bio>>),
@@ -1409,13 +1443,15 @@ pub(super) enum Value {
         child: Option<crate::objects::BoxedPopen>,
         reported: bool,
     },
-    File(crate::shared::Shared<super::stdlib::BinaryFile>),
+    File(BoxedFile<crate::Shared<super::stdlib::BinaryFile>>),
     TextFile(BoxedTextFile),
     GzipDecoder(crate::Shared<BoxedGzipDecoder>),
     ZlibDecompressor {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
+    LzmaCompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Compressor>>),
+    LzmaDecompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Decompressor>>),
     ZlibCompressor(crate::Shared<std::cell::RefCell<super::stdlib::zlib::Compressor>>),
     RegexScanner {
         pattern: Id,
@@ -1428,7 +1464,7 @@ pub(super) enum Value {
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     BufferedRandom(
-        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        BoxedFile<crate::Shared<std::cell::RefCell<crate::objects::FileState>>>,
         Id,
     ),
     RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
@@ -1461,7 +1497,31 @@ pub(super) struct CachedCall {
     pub hash: i64,
 }
 
+impl Context {
+    pub(super) fn native_file_dictionary(&mut self, obj: Id) -> Id {
+        if let Some(dictionary) = self.heap.get(obj).native_file_dict() {
+            return dictionary;
+        }
+        let dictionary = self.dict(Vec::new());
+        match self.heap.get_mut(obj) {
+            Value::File(file) => file.dictionary = Some(dictionary),
+            Value::BufferedRandom(file, _) => file.dictionary = Some(dictionary),
+            _ => unreachable!("native file without an instance dictionary"),
+        }
+        dictionary
+    }
+}
+
 impl Value {
+    pub(super) fn native_file_dict(&self) -> Option<Id> {
+        match self {
+            Self::TextFile(file) => Some(file.dictionary),
+            Self::File(file) => file.dictionary,
+            Self::BufferedRandom(file, _) => file.dictionary,
+            _ => None,
+        }
+    }
+
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
         match self {
@@ -1531,6 +1591,8 @@ impl Value {
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GzipDecoder(_) => "object",
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
+            Self::LzmaCompressor(_) => LZMA_COMPRESS_TYPE,
+            Self::LzmaDecompressor(_) => LZMA_DECOMPRESS_TYPE,
             Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::Struct { .. } => "struct.Struct",
@@ -2181,6 +2243,7 @@ impl Value {
                 visit.extend(m.cached_regs.get().copied());
             }
             Self::File(file) => {
+                visit.extend(file.dictionary);
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
                 } else if let Some((path, _)) = file.path_metadata() {
@@ -2220,6 +2283,7 @@ impl Value {
             | Self::TokenMissing
             | Self::ProcessPreparation(_)
             | Self::GzipDecoder(_)
+            | Self::LzmaCompressor(_)
             | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
@@ -2228,12 +2292,19 @@ impl Value {
             | Self::TlsSession(_)
             | Self::TlsListener(_)
             | Self::TlsBioSession(_) => {}
+            Self::LzmaDecompressor(state) => visit.push(state.borrow().unused_data),
             Self::ZlibDecompressor { state, dictionary } => {
                 visit.extend(*dictionary);
                 state.borrow().children(visit);
             }
-            Self::TextFile(file) => visit.extend(file.buffer),
-            Self::BufferedRandom(_, name) => visit.push(*name),
+            Self::TextFile(file) => {
+                visit.extend([file.dictionary, file.encoding, file.errors]);
+                visit.extend(file.buffer);
+            }
+            Self::BufferedRandom(file, name) => {
+                visit.extend(file.dictionary);
+                visit.push(*name);
+            }
         }
     }
 }
@@ -2676,7 +2747,8 @@ pub(super) struct Heap {
     pub(super) gc_settings: Arc<GcSettings>,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
-    weak_roots: weak_roots::WeakRoots,
+    weak_roots: weak_roots::RootPaths,
+    finalizer_roots: weak_roots::RootPaths,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
     // Detached workers compare against the original stderr without keeping it alive.
@@ -2684,13 +2756,13 @@ pub(super) struct Heap {
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
-    // Weak handles to buffered output files returned by open().
-    file_writers: Vec<Id>,
+    // Non-rooting handles to files and sockets whose destruction flushes or closes a descriptor.
+    descriptor_owners: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
     finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
-    // Weak class handles, compacted before the collector recycles their slots.
+    // Weak handles in direct-base attachment order, pruned before recycling class slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
     pub(super) discarded_shutdown_write: Option<bool>,
@@ -2819,28 +2891,9 @@ impl Heap {
             return;
         }
         let mut children: HashMap<Id, Vec<Id>> = HashMap::new();
-        for (index, slot) in self.slots.iter().enumerate() {
-            let Some(Value::Class {
-                scope, ancestors, ..
-            }) = slot.value.as_ref()
-            else {
-                continue;
-            };
-            let Value::Scope(data) = self.get(*scope) else {
-                unreachable!()
-            };
-            let bases = match &data.class_namespace {
-                Some(ns) => {
-                    let Value::Tuple(bases) = self.get(ns.bases) else {
-                        continue;
-                    };
-                    bases.as_slice()
-                }
-                // Native AST classes store their single base first in the lineage.
-                None => ancestors.get(..1).unwrap_or_default(),
-            };
-            for &base in bases {
-                children.entry(base).or_default().push(index as Id);
+        for &child in &self.classes {
+            for &base in self.immediate_bases(child) {
+                children.entry(base).or_default().push(child);
             }
         }
         let mut pending = vec![class];
@@ -2903,12 +2956,13 @@ impl Heap {
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
-            weak_roots: weak_roots::WeakRoots::default(),
+            weak_roots: Default::default(),
+            finalizer_roots: Default::default(),
             borrowed_hooks: Vec::new(),
             default_stderr: None,
             has_weak_values: false,
             collect_next_statement: false,
-            file_writers: Vec::new(),
+            descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
             classes: Vec::new(),
@@ -3211,6 +3265,10 @@ impl Heap {
         self.scalar_leaves.try_reserve(1)?;
         self.traces.try_reserve(1)?;
         self.slots.try_reserve(1)
+    }
+
+    pub(super) fn is_gc_tracked(&self, id: Id) -> bool {
+        self.slots[id as usize].gc_tracked(self)
     }
 
     pub(super) fn gc_thresholds(&self) -> [i32; 3] {
@@ -3651,14 +3709,14 @@ impl Heap {
             return false;
         }
         self.keep_call_result(mark, result);
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
-            .any(|&writer| {
-                writer != result
+            .any(|&owner| {
+                owner != result
                     && !self.active_binding_matches(|bound| {
                         let mut budget = 8;
-                        self.keeps_finalizer(bound, writer, &mut budget)
+                        self.keeps_finalizer(bound, owner, &mut budget)
                     })
             })
     }
@@ -3918,20 +3976,18 @@ impl Heap {
     }
 
     /// Iterate over live Python warning locations, starting at the innermost caller.
-    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (&Location, Id)> {
+    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (Location, Id)> {
         self.frames.iter().rev().filter_map(|frame| {
-            frame
-                .location
-                .as_ref()
-                .map(|location| (location, frame.scope))
+            let mut location = frame.location.clone()?;
+            // The executing expression can be on a later line than the start of its call span.
+            location.line = frame.line(self, &location);
+            Some((location, frame.scope))
         })
     }
 
     /// Python stack levels start at one and exclude the native root frame.
     pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
-        self.warning_frames()
-            .nth((level.max(1) - 1) as usize)
-            .map(|(location, scope)| (location.clone(), scope))
+        self.warning_frames().nth((level.max(1) - 1) as usize)
     }
 
     pub(super) fn set_call_position(&mut self, position: Option<[u32; 4]>) {
@@ -4050,6 +4106,39 @@ impl Heap {
         self.clear_marks();
         self.slots[storage as usize].may_have_buffer_views = live != 0;
         Ok(live)
+    }
+
+    fn immediate_bases(&self, class: Id) -> &[Id] {
+        let Value::Class {
+            scope, ancestors, ..
+        } = self.get(class)
+        else {
+            unreachable!("class registry entry")
+        };
+        let Value::Scope(data) = self.get(*scope) else {
+            unreachable!()
+        };
+        let Some(ns) = &data.class_namespace else {
+            // Synthetic AST classes store their single direct base first in the lineage.
+            return ancestors.get(..1).unwrap_or_default();
+        };
+        match self.get(ns.bases) {
+            Value::Tuple(bases) => bases,
+            _ => &[],
+        }
+    }
+
+    pub(super) fn immediate_subclasses(&self, class: Id) -> Vec<Id> {
+        self.classes
+            .iter()
+            .copied()
+            .filter(|&child| self.immediate_bases(child).contains(&class))
+            .collect()
+    }
+
+    pub(super) fn reattach_class(&mut self, class: Id) {
+        self.classes.retain(|&child| child != class);
+        self.classes.push(class);
     }
 
     /// Every live descendant, including unbound local classes, with parents before children.
@@ -4234,9 +4323,9 @@ impl Heap {
     }
 
     /// Check each registration against the surviving frame bindings and native stream edges.
-    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
+    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, owners: &[Id]) -> bool {
         let chains = self.bound_finalizer_chains();
-        self.ordinary_finalizers.iter().chain(writers).all(|owner| {
+        self.ordinary_finalizers.iter().chain(owners).all(|owner| {
             stdin.is_some_and(|input| input.contains(owner))
                 || chains.iter().flatten().any(|chain| chain.contains(owner))
                 || self.find_finalizer_binding(*owner)
@@ -4253,7 +4342,8 @@ impl Heap {
     }
 
     pub(super) fn acyclic_finalizer(
-        &self,
+        &mut self,
+        globals: [Id; 2],
         roots: impl Iterator<Item = Id>,
         stdin: Option<&[Id; 3]>,
     ) -> Result<Option<Id>> {
@@ -4300,6 +4390,13 @@ impl Heap {
         {
             return Ok(None);
         }
+        if remaining > 1
+            && (self.cached_finalizers_kept(globals, stdin, false)
+                || (self.learn_finalizer_paths(globals, stdin)
+                    && self.cached_finalizers_kept(globals, stdin, false)))
+        {
+            return Ok(None);
+        }
         // If the roots keep every pending finalizer alive, no finalizer can run.
         // Keep the visited links until the search ends so resetting a partial
         // trace costs only the slots it touched, even after a large heap peak.
@@ -4341,13 +4438,13 @@ impl Heap {
         next
     }
 
-    /// Track a file that must flush or close its descriptor when its last owner disappears.
-    pub(super) fn alloc_file_writer(&mut self, file: Value) -> Result<Id> {
-        self.file_writers
+    /// Track a descriptor whose flush or close is visible when its last owner disappears.
+    pub(super) fn alloc_descriptor_owner(&mut self, value: Value) -> Result<Id> {
+        self.descriptor_owners
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        let id = self.alloc(file);
-        self.file_writers.push(id);
+        let id = self.alloc(value);
+        self.descriptor_owners.push(id);
         self.frames.last_mut().unwrap().created_finalizer = true;
         Ok(id)
     }
@@ -4397,7 +4494,7 @@ impl Heap {
 
     /// A returned writer or a surviving name keeps a direct owner.
     pub(super) fn has_unbound_finalizer(&self, retained: Id) -> bool {
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
@@ -4405,16 +4502,16 @@ impl Heap {
 
     /// A global input stream and a frame-owned stream can keep all registered owners alive.
     pub(super) fn finalizers_kept_by(&self, input: &[Id; 3]) -> bool {
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
             .all(|owner| input.contains(owner) || self.caller_keeps_generator(*owner))
-            || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
+            || self.frame_keeps_stream_finalizers(Some(input), &self.descriptor_owners)
     }
 
     /// Both the weak reference and its target must keep a strong path from a surviving root.
     pub(super) fn weak_values_kept_by(&self, modules: Id, reference: Id) -> bool {
-        if self.weak_roots.keeps_all(self, [modules, reference]) {
+        if self.cached_weak_roots([modules, reference]) {
             return true;
         }
         if self.weak.len() != 1 {
@@ -4432,12 +4529,12 @@ impl Heap {
     }
 
     pub(super) fn tracks_finalizers(&self) -> bool {
-        !self.file_writers.is_empty() || self.has_ordinary_finalizers()
+        !self.descriptor_owners.is_empty() || self.has_ordinary_finalizers()
     }
 
     /// Count the registrations a root set must cover to avoid a finalizer sweep.
     pub(super) fn tracked_finalizer_count(&self) -> usize {
-        self.file_writers.len() + self.ordinary_finalizers.len()
+        self.descriptor_owners.len() + self.ordinary_finalizers.len()
     }
 
     /// Recheck unbound writers after control flow discards temporary roots.
@@ -5090,12 +5187,13 @@ impl Heap {
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.classes
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
-        self.file_writers.retain(|&id| {
+        self.descriptor_owners.retain(|&id| {
             let slot = &self.slots[id as usize];
             self.traces[id as usize].get() != UNMARKED
                 && match &slot.value {
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
+                    Some(Value::Socket(socket)) => crate::objects::socket::fd(socket) >= 0,
                     _ => false,
                 }
         });
@@ -5543,7 +5641,10 @@ mod tests {
 
         // Only one distinct pending owner is proven by this chain.
         let chain = [input, buffer, input];
-        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
+        let mut check = |roots| {
+            heap.acyclic_finalizer([NONE; 2], roots, Some(&chain))
+                .unwrap()
+        };
         assert_eq!(check(vec![input].into_iter()), Some(dead));
         assert_eq!(check(vec![input, dead].into_iter()), None);
         assert_eq!(check(vec![input].into_iter()), Some(dead));

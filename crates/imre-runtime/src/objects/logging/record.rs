@@ -477,7 +477,11 @@ pub(super) fn append(out: &mut String, text: &str) -> Result<()> {
         .map_err(|_| Error::allocation())
 }
 
-fn percent_text(value: &OwnedWord, conversion: char, precision: Option<usize>) -> Result<String> {
+pub(super) fn percent_text(
+    value: &OwnedWord,
+    conversion: char,
+    precision: Option<usize>,
+) -> Result<String> {
     let end = |s: &str| {
         precision
             .and_then(|n| s.char_indices().nth(n))

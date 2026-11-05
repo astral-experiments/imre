@@ -81,9 +81,16 @@ use value::{
     Result, Scope, TRUE, Value,
 };
 
+/// How a registered module supplies its code object to importlib.
+#[derive(Clone, Copy)]
+enum ModuleInitializer {
+    Native(Code),
+    Source(&'static str),
+}
+
 struct SourceModule {
     path: PathBuf,
-    code: Code,
+    code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
 }
 
@@ -315,6 +322,7 @@ impl Context {
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
+            ("type", _) => self.is_type_object(object),
             (weakref::PROXY_TYPE | weakref::CALLABLE_PROXY_TYPE, Value::Weak(wr)) => {
                 wr.kind.class() == owner
             }
@@ -418,6 +426,7 @@ impl Context {
     }
 
     fn python_buffer_method(&self, object: Id, scoped: bool) -> Result<Option<Id>> {
+        self.check_view_export(object)?;
         let Some(method) = self.buffer_slot(object, "__buffer__") else {
             return Ok(None);
         };
@@ -480,6 +489,51 @@ impl Context {
         }
         self.release_python_buffer(object, view);
         result
+    }
+
+    /// A bytes or bytearray subclass may inherit its native get-buffer slot and
+    /// override only release. The callback receives an ownerless, temporary view
+    /// of the original storage while the native export still prevents resizing.
+    fn with_native_bytes_export<T>(
+        &mut self,
+        object: Id,
+        consume: impl FnOnce(&mut Self, Id) -> Result<T>,
+    ) -> Result<T> {
+        self.with_buffer_export(object, |ctx| {
+            let result = consume(ctx, object);
+            if ctx
+                .buffer_slot(object, "__release_buffer__")
+                .flatten()
+                .is_some()
+            {
+                if let Err(error) = &result {
+                    for id in error.roots() {
+                        ctx.heap.keep(id);
+                    }
+                }
+                let storage = ctx.scalar_value(object);
+                let view = ctx.alloc(Value::MemoryView {
+                    owner: Some(storage),
+                    lease: None,
+                    anonymous: true,
+                    restricted: true,
+                    layout: None,
+                    readonly: matches!(ctx.heap.get(storage), Value::Bytes(_)),
+                    hash: None,
+                });
+                ctx.heap.keep(view);
+                ctx.release_python_buffer(object, view);
+                // The callback can retain or explicitly release the view. Its
+                // storage must be inaccessible once PyBuffer_Release returns.
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(view) else {
+                    unreachable!()
+                };
+                if let Some(storage) = owner.take() {
+                    ctx.heap.weak_edge_removed(storage);
+                }
+            }
+            result
+        })
     }
 
     /// Release a synchronous Python export after its consumer has dropped the view's export.
@@ -696,6 +750,7 @@ impl Context {
             owner: Some(owner),
             lease,
             anonymous,
+            restricted: false,
             layout,
             readonly,
             hash: None,
@@ -1123,6 +1178,34 @@ impl Context {
                     "cannot fit 'int' into an index-sized integer",
                 )
             })
+    }
+
+    /// PySequence_Length only calls the sequence length slot. Python dict subclasses
+    /// acquire it through their type, while the native mappings only have mp_length.
+    fn sequence_protocol_len(&mut self, source: Id) -> Result<usize> {
+        let kind = match self.heap.get(source) {
+            Value::Dict(_) => "dict",
+            Value::DefaultDict { .. } => defaultdict::CLASS,
+            Value::MappingProxy(_) => "mappingproxy",
+            Value::Context(_) => "_contextvars.Context",
+            Value::FrameLocalsProxy { .. } => frame_locals::CLASS,
+            // The accelerated OrderedDict is an immutable class backed by a dict.
+            Value::Instance {
+                class,
+                dictionary: Some(_),
+                ..
+            } if let Value::Class { scope, .. } = self.heap.get(*class)
+                && self
+                    .scope_data(*scope)
+                    .class_namespace
+                    .as_ref()
+                    .is_some_and(|ns| ns.immutable_type) =>
+            {
+                "collections.OrderedDict"
+            }
+            _ => return self.sequence_len(source),
+        };
+        Err(Error::new("TypeError", format!("{kind} is not a sequence")))
     }
 
     /// Sequence-protocol iteration consults the current __getitem__ at each index.
@@ -1558,15 +1641,17 @@ impl Context {
         self.collect_garbage();
     }
 
-    /// Keep yielded values in a traced sequence while discarding each step's other temporaries.
-    fn collect_generator(&mut self, generator: Id, tuple: bool) -> Result<Id> {
+    /// Keep the completed snapshot or exception, releasing iterator temporaries
+    /// before the caller can invoke another Python callback.
+    fn collect_iterable(&mut self, source: Id, tuple: bool) -> Result<Id> {
         let mark = self.heap.temporary_mark();
-        self.heap.reserve_temporaries(2)?;
-        self.heap.keep(generator);
-        let buffer = self.alloc(Value::List(Vec::new()));
-        let step = self.heap.temporary_mark();
-        let result: Result<()> = (|| {
-            while let Some(item) = self.next_item(generator)? {
+        let result: Result<Id> = (|| {
+            self.heap.reserve_temporaries(2)?;
+            let iterator = self.iterator(source)?;
+            self.heap.keep(iterator);
+            let buffer = self.alloc(Value::List(Vec::new()));
+            let step = self.heap.temporary_mark();
+            while let Some(item) = self.next_item(iterator)? {
                 let Value::List(items) = self.heap.get_mut(buffer) else {
                     unreachable!()
                 };
@@ -1576,44 +1661,48 @@ impl Context {
                 items.push(item);
                 self.comprehension_step(step);
             }
-            Ok(())
-        })();
-        self.heap.release_temporaries_since(mark);
-        if let Err(error) = result {
-            for root in error.roots() {
-                self.heap.keep(root);
+            if tuple {
+                let Value::List(items) = self.heap.get_mut(buffer) else {
+                    unreachable!()
+                };
+                let items = std::mem::take(items);
+                return Ok(self.alloc(Value::Tuple(items)));
             }
-            return Err(error);
+            Ok(buffer)
+        })();
+        match &result {
+            Ok(snapshot) => self.heap.keep_call_result(mark, *snapshot),
+            Err(error) => {
+                self.heap.release_temporaries_since(mark);
+                for root in error.roots() {
+                    self.heap.keep(root);
+                }
+            }
         }
-        if tuple {
-            let Value::List(items) = self.heap.get_mut(buffer) else {
-                unreachable!()
-            };
-            let items = std::mem::take(items);
-            return Ok(self.alloc(Value::Tuple(items)));
-        }
-        self.heap.keep(buffer);
-        Ok(buffer)
+        result
     }
 
     /// Check the Python sequence protocol without consuming iterators.
     pub(super) fn is_sequence(&self, id: Id) -> bool {
         // PySequence_Check excludes dict subclasses even if they override __getitem__.
-        self.dict_storage(id).is_none()
-            && (matches!(
-                self.heap.get(self.scalar_value(id)),
-                Value::List(_)
-                    | Value::Tuple(_)
-                    | Value::NamedTuple { .. }
-                    | Value::Range(_)
-                    | Value::Deque(_)
-                    | Value::Str(_)
-                    | Value::SurrogateStr(_)
-                    | Value::Bytes(_)
-                    | Value::ByteArray(_)
-                    | Value::Array(_)
-                    | Value::MemoryView { .. }
-            ) || self.slot(id, "__getitem__").is_some())
+        self.dict_storage(id).is_none() && self.has_sequence_item_slot(id)
+    }
+
+    fn has_sequence_item_slot(&self, id: Id) -> bool {
+        matches!(
+            self.heap.get(self.scalar_value(id)),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::NamedTuple { .. }
+                | Value::Range(_)
+                | Value::Deque(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Array(_)
+                | Value::MemoryView { .. }
+        ) || self.slot(id, "__getitem__").is_some()
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
@@ -1621,7 +1710,7 @@ impl Context {
             return Ok(vec![typing::unpack_parameter(self, id)?]);
         }
         if matches!(self.heap.get(id), Value::Generator { .. }) {
-            let buffer = self.collect_generator(id, false)?;
+            let buffer = self.collect_iterable(id, false)?;
             let Value::List(items) = self.heap.get_mut(buffer) else {
                 unreachable!()
             };
@@ -2452,6 +2541,30 @@ impl Context {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
             self.builtins.insert("object.__class__".into(), descriptor);
         }
+        if matches!(
+            name,
+            value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
+        ) {
+            let mut entries = vec![(
+                self.heap.code_name("__module__"),
+                self.heap.code_name("_lzma"),
+            )];
+            let methods = if name == value::LZMA_DECOMPRESS_TYPE {
+                for &field in value::LZMA_DECOMPRESS_FIELDS {
+                    let member = self.readonly_member(value::LZMA_DECOMPRESS_TYPE, field);
+                    entries.push((self.heap.code_name(field), member));
+                }
+                value::LZMA_DECOMPRESS_METHODS
+            } else {
+                value::LZMA_COMPRESS_METHODS
+            };
+            for &method in methods {
+                let member = self.builtin(&format!("{name}.{method}"));
+                entries.push((self.heap.code_name(method), member));
+            }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == "super" {
             let mut entries = Vec::new();
             for name in [
@@ -2477,6 +2590,7 @@ impl Context {
                 "__new__",
                 "__call__",
                 "__get__",
+                "__class_getitem__",
                 "__reduce__",
                 "__setstate__",
             ] {
@@ -2585,7 +2699,7 @@ impl Context {
                 }
                 &[][..]
             }
-            "type" => &["mro", "__prepare__"][..],
+            "type" => &["mro", "__subclasses__", "__prepare__"][..],
             "object" => &[
                 "__hash__",
                 "__ne__",
@@ -2639,6 +2753,7 @@ impl Context {
             ],
             "complex" => complex::METHODS,
             "bytes" => {
+                self.builtin("bytes.__new__");
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
             }
@@ -3051,7 +3166,7 @@ impl Context {
             self.sources
                 .get(name)
                 .and_then(|sources| sources.first())
-                .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
+                .map(|m| (m.path.clone(), importlib::SourceBody::Registered(m.code)))
         } else if stdlib::is_module(name) || self.is_frozen(name) {
             if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
@@ -3068,7 +3183,7 @@ impl Context {
                     .map(|source| {
                         (
                             source.path.clone(),
-                            importlib::SourceBody::Compiled(source.code),
+                            importlib::SourceBody::Registered(source.code),
                         )
                     })
             })
@@ -3751,6 +3866,24 @@ impl Context {
             "pwd" => stdlib::pwd::install(self, scope),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "termios" if source.is_none() => stdlib::termios::install(self, module, scope)?,
+            "_lzma" if source.is_none() => {
+                for name in [
+                    "is_check_supported",
+                    "_encode_filter_properties",
+                    "_decode_filter_properties",
+                ] {
+                    let function = self.builtin(&format!("_lzma.{name}"));
+                    self.bind(scope, name, function);
+                }
+                for &(name, value) in imre_ast::lzma::INTEGER_CONSTANTS {
+                    let value = self.int(value);
+                    self.bind(scope, name, value);
+                }
+                for name in ["LZMAError", "LZMACompressor", "LZMADecompressor"] {
+                    let class = self.builtin(&format!("_lzma.{name}"));
+                    self.bind(scope, name, class);
+                }
+            }
             "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [
@@ -3906,6 +4039,9 @@ impl Context {
                 self.bind(scope, "byteorder", byteorder);
                 let float_info = stdlib::fixed_structseq::float_info(self);
                 self.bind(scope, "float_info", float_info);
+                // floats::render uses shortest round-tripping digits with Python's decimal spelling.
+                let float_repr_style = self.text("short");
+                self.bind(scope, "float_repr_style", float_repr_style);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
                 for name in [
@@ -4047,7 +4183,7 @@ impl Context {
                     origin.expect("ZIP source has a filename"),
                     loader,
                 ),
-                importlib::SourceBody::Compiled(_)
+                importlib::SourceBody::Registered(_)
                     if let Some(origin) = origin
                         && ((matches!(
                             name,
@@ -4060,10 +4196,9 @@ impl Context {
                 {
                     self.initialize_source(module, scope, name_id, origin, NONE)
                 }
-                importlib::SourceBody::Compiled(entry) => {
-                    let code = self.module_code(entry, &path);
-                    self.execute(code, scope, FrameOwner::Module(name_id))
-                }
+                importlib::SourceBody::Registered(entry) => self
+                    .module_code(entry, &path)
+                    .and_then(|code| self.execute(code, scope, FrameOwner::Module(name_id))),
                 importlib::SourceBody::Filesystem => match origin {
                     Some(file) => self.initialize_source(module, scope, name_id, file, NONE),
                     // Namespace packages have no initializer.

@@ -108,6 +108,7 @@ impl Builtin {
                         | crate::ir::CalendarOp::SetFirstWeekday
                         | crate::ir::CalendarOp::Date
                         | crate::ir::CalendarOp::DateTime
+                        | crate::ir::CalendarOp::FromIsoFormat
                         | crate::ir::CalendarOp::Combine
                         | crate::ir::CalendarOp::Replace { .. }
                         | crate::ir::CalendarOp::Astimezone
@@ -577,6 +578,8 @@ impl Builtin {
             | Self::GeneratorFrameLeave
             | Self::IntExtremum { .. }
             | Self::IntBitLength
+            | Self::FloatIsInteger
+            | Self::FloatLog2
             | Self::IntSignAsFloat
             | Self::FloatCopySign
             | Self::IsInstance(_)
@@ -914,6 +917,8 @@ impl Builtin {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
             Self::IntBitLength => signature(&[Type::Int], Type::Int),
+            Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
+            Self::FloatLog2 => signature(&[Type::Float], Type::Float),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
@@ -1230,6 +1235,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_new"
                 | "imre_log_clock_new"
                 | "imre_calendar_datetime"
+                | "imre_datetime_fromisoformat"
                 | "imre_calendar_instance_grid"
                 | "imre_calendar_month_grid"
                 | "imre_calendar_setfirstweekday"

@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
@@ -119,6 +120,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
         "_strptime" => bundled_source!("_strptime.py"),
         "calendar" => bundled_source!("calendar.py"),
+        // CPython 3.14.5's file wrapper and shared stream reader. See licenses/CPython.txt.
+        "lzma" => bundled_source!("lzma.py"),
+        "compression" => bundled_source!("compression/__init__.py"),
+        "compression._common" => bundled_source!("compression/_common/__init__.py"),
+        "compression._common._streams" => bundled_source!("compression/_common/_streams.py"),
         // CPython 3.14.5 Lib/zoneinfo. See licenses/CPython.txt.
         "zoneinfo" => bundled_source!("zoneinfo/__init__.py"),
         "zoneinfo._common" => bundled_source!("zoneinfo/_common.py"),
@@ -710,6 +716,7 @@ pub(crate) enum IntrinsicModule {
     IoNative,
     Gzip,
     Lzma,
+    LzmaNative,
     UnicodeData,
     WeakRef,
     Threading,
@@ -1018,7 +1025,6 @@ pub(crate) enum Intrinsic {
     Repeat,
     AttrGetter,
     LengthHint,
-    MathProd,
     Count,
     Islice,
     Combinatorial(crate::ir::Combinatorial),
@@ -1284,6 +1290,7 @@ impl IntrinsicModule {
             "_io" => Some(Self::IoNative),
             "gzip" => Some(Self::Gzip),
             "lzma" => Some(Self::Lzma),
+            "_lzma" => Some(Self::LzmaNative),
             "types" => Some(Self::Types),
             "unicodedata" => Some(Self::UnicodeData),
             "weakref" => Some(Self::WeakRef),
@@ -1342,6 +1349,13 @@ impl IntrinsicModule {
         // The bundled ntpath binds platform-dependent names during module initialization.
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
+        }
+        if matches!(self, Self::Lzma | Self::LzmaNative)
+            && let Some(&(_, value)) = imre_ast::lzma::INTEGER_CONSTANTS
+                .iter()
+                .find(|&&(attr, _)| attr == name)
+        {
+            return Some(Binding::Intrinsic(Intrinsic::IntConstant(value)));
         }
         if self == Self::Zlib
             && let Some(value) = imre_ast::zlib::integer_constant(name)
@@ -1542,6 +1556,10 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "strptime") => Intrinsic::ScopedObjectExport("time.strptime"),
+            (Self::Time, "_STRUCT_TM_ITEMS") => {
+                Intrinsic::ScopedObjectExport("time._STRUCT_TM_ITEMS")
+            }
             (Self::Time, "struct_time") => Intrinsic::StructTime,
             (Self::Time, "mktime") => Intrinsic::Mktime,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -1831,6 +1849,9 @@ impl IntrinsicModule {
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
             (Self::Sys, "float_info") => Intrinsic::ScopedObjectExport("sys.float_info"),
+            (Self::Sys, "float_repr_style") => {
+                Intrinsic::ScopedObjectExport("sys.float_repr_style")
+            }
             (Self::Sys, "implementation") => Intrinsic::SysImplementation,
             (Self::Sys, "pycache_prefix") => Intrinsic::SysPycachePrefix,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
@@ -2149,6 +2170,8 @@ impl IntrinsicModule {
             (Self::Socket, "_GLOBAL_DEFAULT_TIMEOUT") => {
                 Intrinsic::ScopedObjectExport("socket._GLOBAL_DEFAULT_TIMEOUT")
             }
+            #[cfg(unix)]
+            (Self::Socket, "fromfd") => Intrinsic::ScopedObjectExport("socket.fromfd"),
             (Self::Socket, "create_connection") => {
                 Intrinsic::ObjectRuntimeExport("socket.create_connection")
             }
@@ -2333,17 +2356,21 @@ impl IntrinsicModule {
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Gc, "is_tracked") => Intrinsic::ScopedObjectExport("gc.is_tracked"),
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
             (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
             (Self::Math, "fma") => Intrinsic::ScopedObjectExport("math.fma"),
+            (Self::Math, "frexp") => Intrinsic::ScopedObjectExport("math.frexp"),
             (Self::Math, "fsum") => Intrinsic::ScopedObjectExport("math.fsum"),
+            (Self::Math, "dist") => Intrinsic::ScopedObjectExport("math.dist"),
+            (Self::Math, "hypot") => Intrinsic::ScopedObjectExport("math.hypot"),
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
             (Self::Math, "log2") => Intrinsic::ScopedObjectExport("math.log2"),
             (Self::Math, "ldexp") => Intrinsic::ScopedObjectExport("math.ldexp"),
-            (Self::Math, "prod") => Intrinsic::MathProd,
+            (Self::Math, "prod") => Intrinsic::ScopedObjectExport("math.prod"),
             (Self::Math, "sin") => Intrinsic::ScopedObjectExport("math.sin"),
             (Self::Math, "sqrt") => Intrinsic::ScopedObjectExport("math.sqrt"),
             (Self::Math, "tan") => Intrinsic::ScopedObjectExport("math.tan"),
@@ -2377,15 +2404,29 @@ impl IntrinsicModule {
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
-            (Self::Lzma, "FORMAT_AUTO") => Intrinsic::IntConstant(0),
-            (Self::Lzma, "FORMAT_XZ") => Intrinsic::IntConstant(1),
-            (Self::Lzma, "FORMAT_ALONE") => Intrinsic::IntConstant(2),
             (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
             (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
                 Intrinsic::StringConstant(imre_ast::zlib::VERSION)
             }
+            (Self::Lzma, "__all__") => Intrinsic::ScopedObjectExport("lzma.__all__"),
+            (Self::Lzma, "LZMACompressor") => Intrinsic::ScopedObjectExport("lzma.LZMACompressor"),
+            (Self::Lzma, "LZMADecompressor") => {
+                Intrinsic::ScopedObjectExport("lzma.LZMADecompressor")
+            }
             (Self::Lzma, "LZMAError") => Intrinsic::ScopedObjectExport("lzma.LZMAError"),
+            (Self::Lzma, "LZMAFile") => Intrinsic::ScopedObjectExport("lzma.LZMAFile"),
+            (Self::Lzma, "compress") => Intrinsic::ScopedObjectExport("lzma.compress"),
             (Self::Lzma, "decompress") => Intrinsic::ScopedObjectExport("lzma.decompress"),
+            (Self::Lzma, "is_check_supported") => {
+                Intrinsic::ScopedObjectExport("lzma.is_check_supported")
+            }
+            (Self::Lzma, "open") => Intrinsic::ScopedObjectExport("lzma.open"),
+            (Self::Lzma, "_decode_filter_properties") => {
+                Intrinsic::ScopedObjectExport("lzma._decode_filter_properties")
+            }
+            (Self::Lzma, "_encode_filter_properties") => {
+                Intrinsic::ScopedObjectExport("lzma._encode_filter_properties")
+            }
             (Self::Zlib, "decompressobj") => Intrinsic::ScopedObjectExport("zlib.decompressobj"),
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
@@ -2413,6 +2454,7 @@ impl IntrinsicModule {
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
             (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
             (Self::Random, "Random") => Intrinsic::ScopedObjectExport("random.Random"),
+            (Self::Random, "expovariate") => Intrinsic::ScopedObjectExport("random.expovariate"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
@@ -2735,6 +2777,32 @@ impl SearchRoots {
     }
 }
 
+/// The boxed provider supplies public Decimal names absent from the scalar module.
+static BOXED_DECIMAL_EXPORTS: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    let source =
+        crate::zip_entry::installed_source("_pydecimal.py").expect("bundled _pydecimal.py");
+    let provider = ruff_python_parser::parse_module(&source).expect("valid bundled _pydecimal.py");
+    let exports = provider
+        .syntax()
+        .body
+        .iter()
+        .find(|stmt| value_name(stmt) == Some("__all__"))
+        .and_then(module_value)
+        .and_then(ast::Expr::as_list_expr)
+        .expect("_pydecimal.__all__ must be a list literal");
+    exports
+        .elts
+        .iter()
+        .map(|item| {
+            item.as_string_literal_expr()
+                .expect("_pydecimal.__all__ must contain only string literals")
+                .value
+                .to_str()
+                .to_owned()
+        })
+        .collect()
+});
+
 /// These public names are supplied by the boxed unittest.mock module.
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
     matches!(
@@ -2886,7 +2954,11 @@ impl SourceModule {
                 "unittest.mock objects",
             )));
         }
-        let binding = *self.bindings.get(name)?;
+        let Some(&binding) = self.bindings.get(name) else {
+            return (self.is_bundled("decimal") && BOXED_DECIMAL_EXPORTS.contains(name)).then_some(
+                Binding::Intrinsic(Intrinsic::ScopedObjectExport("boxed decimal")),
+            );
+        };
         if binding == Binding::Intrinsic(Intrinsic::ZipImportIndex) {
             return None;
         }
@@ -5415,7 +5487,13 @@ impl<'a> Loader<'a> {
             // token initializes its tables and quopri selects a codec from live module globals.
             self.needs_object_imports |= matches!(
                 name,
-                "token" | "http.client" | "fractions" | "quopri" | "xml" | "zoneinfo"
+                "token"
+                    | "http.client"
+                    | "fractions"
+                    | "quopri"
+                    | "xml"
+                    | "zoneinfo"
+                    | "compression._common._streams"
             );
             let pkgutil_source;
             let source = if name == "pkgutil" {

@@ -42,7 +42,7 @@ def current():
     import sys
     import warnings
 
-    for code in ("h", "H", "I", "l", "L", "q"):
+    for code in ("h", "H", "I", "l", "L", "q", "Q"):
         a = array(code)
         bits = a.itemsize * 8
         signed = code.islower()
@@ -61,6 +61,11 @@ def current():
                 pass
             else:
                 raise AssertionError("out-of-range array element accepted")
+    with memoryview(array("Q", [1 << 63])) as view:
+        assert view.format == "Q" and view.itemsize == 8 and view[0] == 1 << 63
+        view[0] = (1 << 64) - 1
+        assert view.obj[0] == (1 << 64) - 1 and view.tobytes() == b"\xff" * 8
+
     transitions = array("q", array("i", [-42, 0, 42]))
     view = memoryview(transitions)
     assert view.format == "q" and view.itemsize == 8

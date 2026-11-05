@@ -3,6 +3,167 @@ use std::ops::Range;
 
 pub(super) type Result<T> = std::result::Result<T, &'static str>;
 
+/// Consume an optional fill character and alignment at the start of a format specifier.
+pub(super) fn alignment(spec: &str) -> (Option<char>, Option<char>, &str) {
+    let mut chars = spec.chars();
+    let first = chars.next();
+    if let Some(align) = chars.next().filter(|c| "<^>=".contains(*c)) {
+        (first, Some(align), chars.as_str())
+    } else if let Some(align) = first.filter(|c| "<^>=".contains(*c)) {
+        (None, Some(align), &spec[1..])
+    } else {
+        (None, None, spec)
+    }
+}
+
+/// Read Unicode decimal digits up to the next token, checking the signed field-size limit.
+pub(super) fn decimal(tail: &mut &str) -> Result<Option<usize>> {
+    let mut value = 0isize;
+    let mut end = 0;
+    for (i, c) in tail.char_indices() {
+        let Some(digit) = crate::integer_text::decimal_digit(c) else {
+            break;
+        };
+        value = value
+            .checked_mul(10)
+            .and_then(|v| v.checked_add(isize::from(digit)))
+            .ok_or("Too many decimal digits in format string")?;
+        end = i + c.len_utf8();
+    }
+    *tail = &tail[end..];
+    Ok((end != 0).then_some(value as usize))
+}
+
+fn grouping(tail: &mut &str) -> Result<Option<char>> {
+    let Some(sep) = tail.chars().next().filter(|c| matches!(c, ',' | '_')) else {
+        return Ok(None);
+    };
+    *tail = &tail[1..];
+    if tail.starts_with(if sep == ',' { '_' } else { ',' }) {
+        return Err("Cannot specify both ',' and '_'.");
+    }
+    Ok(Some(sep))
+}
+
+/// Common lexical prefix for numeric and string format specifications.
+pub(super) struct FormatPrefix<'a> {
+    pub(super) fill: char,
+    pub(super) align: Option<char>,
+    pub(super) sign: Option<char>,
+    pub(super) negative_zero: bool,
+    pub(super) alternate: bool,
+    pub(super) width: usize,
+    pub(super) group: Option<char>,
+    pub(super) tail: &'a str,
+}
+
+impl<'a> FormatPrefix<'a> {
+    pub(super) fn parse(spec: &'a str, zero_align: char, parse_z: bool) -> Result<Self> {
+        let (mut fill, mut align, mut tail) = alignment(spec);
+        let sign = tail.chars().next().filter(|c| matches!(c, '+' | '-' | ' '));
+        if sign.is_some() {
+            tail = &tail[1..];
+        }
+        let negative_zero = parse_z && tail.starts_with('z');
+        if negative_zero {
+            tail = &tail[1..];
+        }
+        let alternate = tail.starts_with('#');
+        if alternate {
+            tail = &tail[1..];
+        }
+        if fill.is_none()
+            && let Some(rest) = tail.strip_prefix('0')
+        {
+            fill = Some('0');
+            align.get_or_insert(zero_align);
+            tail = rest;
+        }
+        let width = decimal(&mut tail)?.unwrap_or(0);
+        let group = grouping(&mut tail)?;
+        Ok(Self {
+            fill: fill.unwrap_or(' '),
+            align,
+            sign,
+            negative_zero,
+            alternate,
+            width,
+            group,
+            tail,
+        })
+    }
+
+    /// Read the presentation code before applying the string-specific flag restrictions.
+    pub(super) fn string_precision(
+        &self,
+        spec: Option<&str>,
+        type_name: &str,
+    ) -> crate::Result<Option<usize>> {
+        use crate::{Error, Kind};
+        let error = |message| Error::new(Kind::ValueError, message);
+        let mut tail = self.tail;
+        let mut precision = None;
+        let mut frac_group = None;
+        if let Some(rest) = tail.strip_prefix('.') {
+            tail = rest;
+            precision = decimal(&mut tail).map_err(error)?;
+            frac_group = grouping(&mut tail).map_err(error)?;
+            if precision.is_none() && frac_group.is_none() {
+                return Err(error("Format specifier missing precision"));
+            }
+        }
+        let mut chars = tail.chars();
+        let code = chars.next().unwrap_or('s');
+        if chars.next().is_some() {
+            let spec = spec.ok_or_else(|| {
+                Error::new(
+                    Kind::UnicodeError,
+                    "operation requires Unicode scalar values",
+                )
+            })?;
+            return Err(Error::new(
+                Kind::ValueError,
+                format!("Invalid format specifier '{spec}' for object of type '{type_name}'"),
+            ));
+        }
+        let code_name = || {
+            if ('!'..='\x7f').contains(&code) {
+                code.to_string()
+            } else {
+                format!("\\x{:x}", code as u32)
+            }
+        };
+        if let Some(sep) = self
+            .group
+            .filter(|&sep| !"defgEG%F\0".contains(code) && !(sep == '_' && "boxX".contains(code)))
+            .or(frac_group.filter(|_| code == 'n'))
+        {
+            return Err(Error::new(
+                Kind::ValueError,
+                format!("Cannot specify '{sep}' with '{}'.", code_name()),
+            ));
+        }
+        if code != 's' {
+            return Err(Error::new(
+                Kind::ValueError,
+                format!(
+                    "Unknown format code '{}' for object of type '{type_name}'",
+                    code_name()
+                ),
+            ));
+        }
+        let invalid = match (self.sign, self.negative_zero, self.alternate, self.align) {
+            (Some(' '), ..) => "Space not allowed in string format specifier",
+            (Some(_), ..) => "Sign not allowed in string format specifier",
+            (_, true, ..) => "Negative zero coercion (z) not allowed in string format specifier",
+            (_, _, true, _) => "Alternate form (#) not allowed in string format specifier",
+            (_, _, _, Some('=')) => "'=' alignment not allowed in string format specifier",
+            _ => return Ok(precision),
+        };
+        Err(error(invalid))
+    }
+}
+
 pub(super) struct Markup {
     pub(super) literal: Range<usize>,
     pub(super) field: Option<Range<usize>>,
@@ -113,18 +274,11 @@ pub(super) enum Key {
 }
 
 fn key(text: &str, span: Range<usize>) -> Result<Key> {
-    if !span.is_empty() {
-        let mut value = 0isize;
-        for c in text[span.clone()].chars() {
-            let Some(digit) = crate::integer_text::decimal_digit(c) else {
-                return Ok(Key::Text(span));
-            };
-            value = value
-                .checked_mul(10)
-                .and_then(|n| n.checked_add(isize::from(digit)))
-                .ok_or("Too many decimal digits in format string")?;
-        }
-        return Ok(Key::Integer(value as usize));
+    let mut tail = &text[span.clone()];
+    if let Some(value) = decimal(&mut tail)?
+        && tail.is_empty()
+    {
+        return Ok(Key::Integer(value));
     }
     Ok(Key::Text(span))
 }

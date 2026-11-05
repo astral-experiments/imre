@@ -363,6 +363,25 @@ impl Checker<'_> {
         };
         Ok(self.ordered_builtin(Builtin::Calendar(op), ty, args))
     }
+    pub(super) fn datetime_fromisoformat(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        // A later operation on the result may need the full datetime protocol.
+        self.graph.needs_object_runtime.set(true);
+        if let [arg] = call.arguments.args.as_slice()
+            && !arg.is_starred_expr()
+            && call.arguments.keywords.is_empty()
+        {
+            let text = self.expr(arg)?;
+            if matches!(text.ty, Type::Str | Type::StrLiteral(_)) {
+                return Ok(op(
+                    Op::FromIsoFormat,
+                    Type::Calendar(C::DateTime),
+                    vec![text],
+                ));
+            }
+        }
+        Err(self.object_runtime_export("datetime.fromisoformat", call))
+    }
+
     pub(super) fn calendar_now(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let zone = self.types.optional(Type::Calendar(C::Zone));
         let args = self.arguments(

@@ -662,7 +662,7 @@ pub(super) fn construct(
     if let [source] = args
         && matches!(ctx.heap.get(*source), Value::Generator { .. })
     {
-        return ctx.collect_generator(*source, name == "tuple");
+        return ctx.collect_iterable(*source, name == "tuple");
     }
     let items = args
         .first()

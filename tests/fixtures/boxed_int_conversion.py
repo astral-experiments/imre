@@ -26,6 +26,20 @@ def current():
         def __index__(self):
             raise AssertionError("__int__ must take precedence")
 
+    class Label(str):
+        def __repr__(self):
+            # Put the last input character at the diagnostic boundary.
+            return "é" * 199 + self[-1] + "suffix"
+
+    for text, base in (("9\ud800", 10), ("é" * 195 + "\ud800'", 16),
+                       (Label("bad!"), 16), (Label("9\ud800"), 16)):
+        try:
+            int(text, base)
+        except ValueError as error:
+            assert error.args == (f"invalid literal for int() with base {base}: {repr(text)[:200]}",)
+        else:
+            raise AssertionError("accepted an invalid integer literal")
+
     assert int(large) is large
     for text in ("-5", "0", "1", "256"):
         assert int(text) is int(text) + 0

@@ -369,6 +369,12 @@ impl Context {
                 return Err(Error::new("TypeError", message));
             }
         }
+        // Only the single positional form reads the stored double of a float subclass.
+        let convert = if single {
+            super::builtins::from_numeric
+        } else {
+            super::builtins::from_numeric_slots
+        };
         let mut component = |argument: Option<Id>| -> Result<f64> {
             let Some(value) = argument else {
                 return Ok(0.0);
@@ -376,7 +382,7 @@ impl Context {
             if let Some(number) = self.real_component(value)? {
                 return Ok(number);
             }
-            let Some(number) = super::builtins::from_numeric(self, value)? else {
+            let Some(number) = convert(self, value)? else {
                 return Err(Error::new(
                     "TypeError",
                     format!("must be real number, not {}", self.type_name(value)),

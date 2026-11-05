@@ -42,6 +42,7 @@ class _Sentinel(object):
 sentinel = _Sentinel()
 
 DEFAULT = sentinel.DEFAULT
+_deleted = sentinel.DELETED
 
 
 def _patch_owner(name):
@@ -78,20 +79,30 @@ def _is_async_spec(spec):
     return iscoroutinefunction(spec) or isawaitable(spec)
 
 
+def _enter_patchings(stack, patchings, kwargs):
+    extra = []
+    for patching in patchings:
+        replacement = stack.enter_context(patching)
+        if patching.attribute_name is not None:
+            kwargs.update(replacement)
+        elif patching.new is DEFAULT:
+            extra.append(replacement)
+    return extra
+
+
 class _patch:
     attribute_name = None
     _active_patches = []
 
     def __init__(self, getter, attribute, new, create, *, spec=None, spec_set=None,
-                 new_callable=None, **kwargs):
+                 autospec=None, new_callable=None, **kwargs):
         if new_callable is not None:
             if new is not DEFAULT:
                 raise ValueError("Cannot use 'new' and 'new_callable' together")
-            if kwargs.get('autospec') is not None:
+            if autospec is not None:
                 raise ValueError("Cannot use 'autospec' and 'new_callable' together")
-        for option in ('autospec', 'unsafe'):
-            if option in kwargs:
-                raise TypeError(f"unsupported patch option: {option!r}")
+        if 'unsafe' in kwargs:
+            raise TypeError("unsupported patch option: 'unsafe'")
         self.getter = getter
         self.attribute = attribute
         self.new = new
@@ -104,6 +115,7 @@ class _patch:
                                    f"target has already been mocked out. [spec_set={spec_set!r}]")
         self.spec = spec
         self.spec_set = spec_set
+        self.autospec = autospec
         self.new_callable = new_callable
         self.mock_kwargs = kwargs
         self.additional_patchers = []
@@ -150,11 +162,14 @@ class _patch:
     def __enter__(self):
         if self.is_started:
             raise RuntimeError("Patch is already started")
+        target = self.getter()
         spec = None if self.spec is False else self.spec
         spec_set = None if self.spec_set is False else self.spec_set
-        if spec is not None and spec_set not in (True, None):
+        autospec = None if self.autospec is False else self.autospec
+        if spec is not None and autospec is not None:
+            raise TypeError("Can't specify spec and autospec")
+        if (spec is not None or autospec is not None) and spec_set not in (True, None):
             raise TypeError("Can't provide explicit spec_set *and* spec or autospec")
-        target = self.getter()
         name = self.attribute
         try:
             original = target.__dict__[name]
@@ -167,7 +182,24 @@ class _patch:
         if original is DEFAULT and not self.create:
             raise AttributeError(f"{target} does not have the attribute {name!r}")
         replacement = self.new
-        if replacement is DEFAULT:
+        if autospec is not None:
+            if replacement is not DEFAULT:
+                raise TypeError("autospec creates the mock for you. Can't specify autospec and new.")
+            if original is DEFAULT:
+                raise TypeError("Can't use 'autospec' with create=True")
+            if autospec is True:
+                autospec = original
+            if _is_instance_mock(target):
+                raise InvalidSpecError(f"Cannot autospec attr {name!r} as the patch target has already "
+                                       f"been mocked out. [target={target!r}, attr={autospec!r}]")
+            if _is_instance_mock(autospec):
+                target_name = getattr(target, '__name__', target)
+                raise InvalidSpecError(f"Cannot autospec attr {name!r} from target {target_name!r} as it "
+                                       f"has already been mocked out. [target={target!r}, attr={autospec!r}]")
+            options = {'name': name}
+            options.update(self.mock_kwargs)
+            replacement = create_autospec(autospec, spec_set=bool(spec_set), **options)
+        elif replacement is DEFAULT:
             replacement = self._new_mock(original, spec, spec_set)
         elif self.mock_kwargs:
             raise TypeError("Can't pass kwargs to a mock we aren't creating")
@@ -226,7 +258,7 @@ class _patch:
 
     def copy(self):
         patcher = _patch(self.getter, self.attribute, self.new, self.create,
-                         spec=self.spec, spec_set=self.spec_set,
+                         spec=self.spec, spec_set=self.spec_set, autospec=self.autospec,
                          new_callable=self.new_callable, **self.mock_kwargs)
         patcher.attribute_name = self.attribute_name
         patcher.additional_patchers = [child.copy() for child in self.additional_patchers]
@@ -245,30 +277,36 @@ class _patch:
             func.patchings.append(self)
             return func
 
-        @wraps(func)
-        def patched(*args, **kwargs):
-            with ExitStack() as stack:
-                extra = []
-                for patching in patched.patchings:
-                    replacement = stack.enter_context(patching)
-                    if patching.attribute_name is not None:
-                        kwargs.update(replacement)
-                    elif patching.new is DEFAULT:
-                        extra.append(replacement)
-                return func(*args, *extra, **kwargs)
+        from inspect import iscoroutinefunction
+        if iscoroutinefunction(func):
+            @wraps(func)
+            async def patched(*args, **kwargs):
+                with ExitStack() as stack:
+                    extra = _enter_patchings(stack, patched.patchings, kwargs)
+                    return await func(*args, *extra, **kwargs)
+        else:
+            @wraps(func)
+            def patched(*args, **kwargs):
+                with ExitStack() as stack:
+                    extra = _enter_patchings(stack, patched.patchings, kwargs)
+                    return func(*args, *extra, **kwargs)
         patched.patchings = [self]
         return patched
 
 
-def _patch_attribute(self, target, new=DEFAULT, spec=None, create=False, spec_set=None, **kwargs):
+def _patch_attribute(self, target, new=DEFAULT, spec=None, create=False, spec_set=None,
+                     autospec=None, new_callable=None, **kwargs):
     getter, attribute = _get_target(target)
-    return _patch(getter, attribute, new, create, spec=spec, spec_set=spec_set, **kwargs)
+    return _patch(getter, attribute, new, create, spec=spec, spec_set=spec_set,
+                  autospec=autospec, new_callable=new_callable, **kwargs)
 
 
-def _patch_object(target, attribute, new=DEFAULT, spec=None, create=False, spec_set=None, **kwargs):
+def _patch_object(target, attribute, new=DEFAULT, spec=None, create=False, spec_set=None,
+                  autospec=None, new_callable=None, **kwargs):
     if type(target) is str:
         raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
-    return _patch(lambda: target, attribute, new, create, spec=spec, spec_set=spec_set, **kwargs)
+    return _patch(lambda: target, attribute, new, create, spec=spec, spec_set=spec_set,
+                  autospec=autospec, new_callable=new_callable, **kwargs)
 
 
 def _patch_multiple(target, spec=None, create=False, spec_set=None,
@@ -276,11 +314,10 @@ def _patch_multiple(target, spec=None, create=False, spec_set=None,
     if not kwargs:
         raise ValueError('Must supply at least one keyword argument with patch.multiple')
     getter = (lambda: _patch_owner(target)) if type(target) is str else (lambda: target)
-    options = {} if autospec is None else {'autospec': autospec}
     patchers = []
     for name, replacement in kwargs.items():
         patcher = _patch(getter, name, replacement, create, spec=spec, spec_set=spec_set,
-                         new_callable=new_callable, **options)
+                         autospec=autospec, new_callable=new_callable)
         patcher.attribute_name = name
         patchers.append(patcher)
     first = patchers[0]

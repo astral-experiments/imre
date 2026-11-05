@@ -12,7 +12,7 @@ pub(super) mod dir;
 mod exceptions;
 mod float;
 mod round;
-pub(super) use float::from_numeric;
+pub(super) use float::{from_numeric, from_numeric_slots};
 mod integer;
 mod power;
 mod print;
@@ -246,6 +246,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "cell"
             | "int"
             | "str"
+            | "bytes"
             | "super"
             | "type"
             | super::thread_local::CLASS
@@ -316,6 +317,7 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 pub(super) const STRUCT_METHODS: &[&str] = &[
     "__init__",
+    "__repr__",
     "pack",
     "pack_into",
     "unpack",
@@ -459,10 +461,12 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
         ],
         "float" => &[
             "__abs__",
+            "__floor__",
             "__float__",
             "__int__",
             "__round__",
             "__trunc__",
+            "hex",
             "is_integer",
         ],
         _ => &[],
@@ -716,6 +720,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             value::STRUCT_UNPACK_ITERATOR
         }
         Value::Struct { .. } if STRUCT_METHODS.contains(&attr) => "struct.Struct",
+        Value::Struct { .. } if attr == "__str__" => "object",
         Value::ZlibDecompressor { .. }
             if matches!(attr, "decompress" | "flush")
                 || value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&attr) =>
@@ -1497,15 +1502,26 @@ pub(super) fn call(
             | "mappingproxy.__ror__"
             | "mappingproxy.__ior__"
             | "super.__repr__"
+            | "struct.Struct.__repr__"
     ) || complex_op.is_some()
     {
-        let (owner, method) = name.split_once('.').unwrap();
+        let (owner, method) = name.rsplit_once('.').unwrap();
+        let owner = if owner == "struct.Struct" {
+            "_struct.Struct"
+        } else {
+            owner
+        };
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
                 "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
         if (owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)))
+            || (owner == "_struct.Struct"
+                && !matches!(
+                    ctx.heap.get(ctx.scalar_value(receiver)),
+                    Value::Struct { .. }
+                ))
             || (matches!(owner, "super" | "complex") && !ctx.builtin_slot_accepts(receiver, owner))
         {
             return Err(type_error(format!(
@@ -1618,6 +1634,9 @@ pub(super) fn call(
         }
         if owner == "super" {
             return Ok(ctx.text(ctx.super_repr(receiver)));
+        }
+        if owner == "_struct.Struct" {
+            return Ok(ctx.text(super::stdlib::structure::repr(ctx, receiver)?));
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
@@ -1881,6 +1900,15 @@ pub(super) fn call(
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 integer::truncate_real(ctx, receiver)
             }
+            "float" if method == "__floor__" => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+                    unreachable!("validated float receiver")
+                };
+                let integer = crate::floats::float_to_integer(value.floor())?;
+                Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
+            }
+            "float" if method == "hex" => float::hex(ctx, args, kwargs),
             "float" if method == "is_integer" => {
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 let Value::Float(value) = ctx.heap.get(ctx.scalar_value(receiver)) else {
@@ -1910,7 +1938,7 @@ pub(super) fn call(
                     get,
                     owner,
                     name: field,
-                    ..
+                    set,
                 } = *ctx.heap.get(descriptor)
                 else {
                     return Err(type_error("expected a getset descriptor"));
@@ -1919,6 +1947,9 @@ pub(super) fn call(
                 {
                     ctx.check_heap_method_receiver(class, field, values[0])?;
                     true
+                } else if let Value::IoMethod { owner: class, .. } = *ctx.heap.get(get) {
+                    super::stdlib::io::receiver_class(ctx, values[0])
+                        .is_some_and(|receiver| ctx.direct_subclass(receiver, class))
                 } else if matches!(owner, "int" | "float")
                     || Context::dict_view_owner(owner).is_some()
                 {
@@ -1937,6 +1968,9 @@ pub(super) fn call(
                         "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
                         ctx.type_name(values[0])
                     )));
+                }
+                if let Some(set) = set {
+                    return ctx.call(set, values.to_vec(), Vec::new());
                 }
                 Err(Error::new(
                     "AttributeError",
