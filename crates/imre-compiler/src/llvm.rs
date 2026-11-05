@@ -7653,6 +7653,17 @@ impl Emitter<'_, '_> {
                 self.retain(&value);
                 value
             }
+            Builtin::ListAccumulate => {
+                let start = args.get(1).map_or("0", |arg| arg.value.operand.as_str());
+                Value {
+                    ty: Type::ListInt,
+                    operand: self.checked_pointer(format!(
+                        "call ptr @imre_list_accumulate(ptr {}, i64 {start})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::ListSum => self.call(
                 "imre_list_sum",
                 Type::Int,
@@ -11137,6 +11148,7 @@ declare i64 @imre_int_pow(i64, i64)
 declare double @imre_int_negative_pow(i64, i64)
 declare i64 @imre_int_modpow(i64, i64, i64)
 declare ptr @imre_list_new()
+declare ptr @imre_list_accumulate(ptr, i64)
 declare i64 @imre_list_sum(ptr, i64)
 declare i64 @imre_list_slice_sum(ptr, i64, i64, i64)
 declare i32 @imre_list_all_i32(ptr, i64, i64, i64)

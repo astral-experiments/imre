@@ -2244,6 +2244,42 @@ pub unsafe extern "C" fn imre_list_sum(list: *const List, start: usize) -> usize
     unsafe { imre_int_binary(start, subtotal.0, 0) }
 }
 
+/// Materializes the running totals of a rooted integer list into one output buffer.
+///
+/// # Safety
+/// The list and the optional nonzero canonical integer handle must stay live for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_accumulate(list: *const List, initial: usize) -> *const List {
+    // SAFETY: a nonzero initial argument borrows the caller's rooted integer.
+    let initial = (initial != 0).then(|| unsafe { Int::borrow(initial) });
+    // SAFETY: the exact source stays rooted and integer addition cannot invoke Python.
+    let values = unsafe {
+        (&*list)
+            .0
+            .with(|items| integer_prefixes(items, initial.as_deref()))
+    };
+    match values.and_then(|v| ListOwner::try_new(List::new(v)).map_err(|_| Error::allocation())) {
+        Ok(list) => ListOwner::into_raw(list),
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
+fn integer_prefixes(items: &[Int], initial: Option<&Int>) -> Result<Vec<Int>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(items.len() + usize::from(initial.is_some()))
+        .map_err(|_| Error::allocation())?;
+    let mut items = items.iter();
+    if let Some(first) = initial.or_else(|| items.next()) {
+        values.push(first.clone());
+        for item in items {
+            let total = integer_binary(values.last().unwrap(), item, 0)?;
+            values.push(total);
+        }
+    }
+    Ok(values)
+}
+
 /// Shares exact reduction between whole lists and normalized slice selections.
 /// Cloning the borrowed iterator permits a checked fast pass without acquiring
 /// element owners; neither pass can mutate the source or call user code.
