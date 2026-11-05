@@ -867,7 +867,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "calcsize" | "iter_unpack" | "pack" | "pack_into" | "unpack" | "unpack_from",
         )
         | ("base64", "b16encode" | "urlsafe_b64encode" | "urlsafe_b64decode")
-        | ("random", "choice" | "choices" | "shuffle" | "randint" | "randbytes")
+        | ("random", "choice" | "choices" | "shuffle" | "randint")
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -1691,9 +1691,6 @@ pub(super) fn call(
     }
     if name == "random.randint" {
         return random::randint(ctx, args, kwargs);
-    }
-    if name == "random.randbytes" {
-        return random::randbytes(ctx, args, kwargs);
     }
     if name == "random.randrange" {
         return random::randrange(ctx, args, kwargs);

@@ -1,8 +1,12 @@
-# Distribution method from CPython 3.14.5 Lib/random.py. See licenses/CPython.txt.
+# Methods from CPython 3.14.5 Lib/random.py. See licenses/CPython.txt.
 from math import log as _log
 
 
 class Random:
+    def randbytes(self, n):
+        """Generate n random bytes."""
+        return self.getrandbits(n * 8).to_bytes(n, 'little')
+
     def expovariate(self, lambd=1.0):
         """Exponential distribution.
 
