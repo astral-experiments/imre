@@ -240,10 +240,11 @@ class NonCallableMock(_FixedMock):
         return object.__new__(type(cls.__name__, bases, {}))
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
-                 wraps=None, parent=None, _new_parent=None, _new_name="", **attrs):
+                 wraps=None, parent=None, _new_parent=None, _new_name="", unsafe=False, **attrs):
         self._mock_add_spec(spec_set if spec_set is not None else spec, spec_set is not None)
         self._mock_set_magics()
         object.__setattr__(self, "_mock_wraps", wraps)
+        object.__setattr__(self, "_mock_unsafe", unsafe)
         super().__init__(name=name)
         self._mock_parent = parent
         self._mock_children = {}
@@ -252,14 +253,12 @@ class NonCallableMock(_FixedMock):
         if _new_parent is not None:
             self._node._owner = _new_parent
             self._node._suffix = _new_name if _new_name == "()" else "." + _new_name
-        self.mock_calls = _CallList()
+        self.__dict__["_mock_mock_calls"] = _CallList()
         self.method_calls = _CallList()
         self.side_effect = side_effect
         if return_value is not _unset_return:
             self.return_value = return_value
         if attrs:
-            if "unsafe" in attrs:
-                raise TypeError("Mock.__init__() got an unexpected keyword argument 'unsafe'")
             self.configure_mock(**attrs)
 
     def _mock_add_spec(self, spec, strict):
@@ -405,11 +404,13 @@ class NonCallableMock(_FixedMock):
     def __delattr__(self, name):
         if name in _mock_magics and name in type(self).__dict__:
             delattr(type(self), name)
-            self._mock_children.pop(name, None)
-            if name in self.__dict__:
-                object.__delattr__(self, name)
-            return
-        object.__delattr__(self, name)
+            if name not in self.__dict__:
+                return
+        if name in self.__dict__:
+            object.__delattr__(self, name)
+        elif self._mock_children.get(name) is _deleted:
+            raise AttributeError(name)
+        self._mock_children[name] = _deleted
 
     def _get_child_mock(self, /, **kwargs):
         # Each instance has a private subclass for its own protocol slots.
@@ -426,7 +427,7 @@ class NonCallableMock(_FixedMock):
 
     def _get_child(self, name, *, magic=False):
         child = self._mock_children.get(name)
-        if child is None:
+        if child is None or child is _deleted:
             kwargs = {} if magic else {"parent": self}
             if not magic and self._mock_wraps is not None:
                 kwargs["wraps"] = getattr(self._mock_wraps, name)
@@ -442,6 +443,10 @@ class NonCallableMock(_FixedMock):
             raise AttributeError(f"Mock object has no attribute {name!r}")
         if name.startswith("_") and (methods is None or name in _mock_magics):
             raise AttributeError(name)
+        if methods is None and not self._mock_unsafe:
+            _check_child_name(name)
+        if self._mock_children.get(name) is _deleted:
+            raise AttributeError(name)
         members = getattr(self._node, "_autospec_members", {})
         if name in members:
             value, target = members[name]
@@ -455,12 +460,16 @@ class NonCallableMock(_FixedMock):
                 seal(child)
             return child
         if self._mock_sealed and name not in self._mock_children:
-            if methods is None:
-                _check_child_name(name)
             raise AttributeError(self._mock_path() + "." + name)
-        if methods is not None:
-            return self._get_child(name)
-        return self._child(name)
+        return self._get_child(name)
+
+    @property
+    def mock_calls(self):
+        return self._mock_mock_calls
+
+    @mock_calls.setter
+    def mock_calls(self, calls):
+        self.__dict__["_mock_mock_calls"] = calls
 
     @property
     def side_effect(self):
@@ -528,7 +537,8 @@ class NonCallableMock(_FixedMock):
                 if _is_instance_mock(result):
                     pending.append((result, False, False))
             for child in current._mock_children.values():
-                pending.append((child, clear_return, clear_effect))
+                if child is not _deleted:
+                    pending.append((child, clear_return, clear_effect))
 
     def _calls_repr(self):
         if not self.mock_calls:
@@ -665,7 +675,7 @@ class _MagicSlot:
         self.parent = parent
 
     def __get__(self, instance, owner):
-        if self.parent._mock_sealed and self.name not in self.parent._mock_children:
+        if self.parent._mock_sealed and self.parent._mock_children.get(self.name, _deleted) is _deleted:
             raise AttributeError(self.parent._mock_path() + "." + self.name)
         child = self.parent._get_child(self.name, magic=True)
         setattr(self.parent, self.name, child)
@@ -1114,7 +1124,7 @@ def seal(mock):
             continue
         seen.add(id(current))
         current._mock_sealed = True
-        names = set(current._mock_children)
+        names = {name for name, child in current._mock_children.items() if child is not _deleted}
         names.update(current.__dict__)
         if current._node._result != -1:
             names.add("return_value")
