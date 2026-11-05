@@ -2841,6 +2841,15 @@ impl Context {
                 }
                 return Ok(self.text(symbol.clone()));
             }
+            Value::Native(ref symbol) if symbol == "sorted" && name == "__text_signature__" => {
+                return Ok(self.text("($module, iterable, /, *, key=None, reverse=False)"));
+            }
+            Value::Native(ref symbol) if symbol == "sorted" && name == "__self__" => {
+                if let Some(module) = self.original_builtins {
+                    return Ok(module);
+                }
+                return self.module("builtins");
+            }
             Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
                     "__text_signature__" if module == "time" => {

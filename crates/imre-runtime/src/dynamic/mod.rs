@@ -164,6 +164,8 @@ pub(crate) struct Context {
     suspended_typing_frames: usize,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
+    // Builtin functions stay bound to the first builtins module across reimports.
+    original_builtins: Option<Id>,
     source_builtins: Option<Id>,
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     zip_path_importers: Id,
@@ -3362,6 +3364,9 @@ impl Context {
             module_state: None,
             constructor: None,
         });
+        if name == "builtins" {
+            self.original_builtins.get_or_insert(module);
+        }
         Ok((module, scope, name_id, origin))
     }
 
