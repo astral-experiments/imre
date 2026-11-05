@@ -3915,20 +3915,18 @@ impl Heap {
     }
 
     /// Iterate over live Python warning locations, starting at the innermost caller.
-    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (&Location, Id)> {
+    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (Location, Id)> {
         self.frames.iter().rev().filter_map(|frame| {
-            frame
-                .location
-                .as_ref()
-                .map(|location| (location, frame.scope))
+            let mut location = frame.location.clone()?;
+            // The executing expression can be on a later line than the start of its call span.
+            location.line = frame.line(self, &location);
+            Some((location, frame.scope))
         })
     }
 
     /// Python stack levels start at one and exclude the native root frame.
     pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
-        self.warning_frames()
-            .nth((level.max(1) - 1) as usize)
-            .map(|(location, scope)| (location.clone(), scope))
+        self.warning_frames().nth((level.max(1) - 1) as usize)
     }
 
     pub(super) fn set_call_position(&mut self, position: Option<[u32; 4]>) {

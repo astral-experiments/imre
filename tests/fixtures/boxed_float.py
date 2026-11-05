@@ -158,6 +158,81 @@ def current():
         def __float__(self):
             raise ValueError("from conversion")
 
+    import math
+    import warnings
+    from array import array
+
+    class ReturnsFloat:
+        def __init__(self, result):
+            self.result = result
+
+        def __float__(self):
+            return self.result
+
+    strict_result = ReturnsFloat(Weight(4.0))
+
+    def convert_weight():
+        return (
+            float(strict_result)
+        )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        result = convert_weight()
+        assert type(result) is float and result == 4.0
+        assert len(caught) == 1 and caught[0].category is DeprecationWarning
+        assert caught[0].filename == convert_weight.__code__.co_filename
+        assert caught[0].lineno == convert_weight.__code__.co_firstlineno + 2
+        assert convert_weight() is not result
+        assert float(ReturnsFloat(result)) is result
+        warnings.simplefilter("error", DeprecationWarning)
+        try:
+            math.sqrt(strict_result)
+        except DeprecationWarning as error:
+            assert str(error) == str(caught[0].message)
+        else:
+            raise AssertionError("accepted strict __float__ result with warnings-as-errors")
+        assert math.sqrt(Weight(4.0)) == 2.0
+
+    def append_weight(destination):
+        (destination
+         .append(strict_result))
+
+    data = array("d", [1.0])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        warnings.filterwarnings("error", category=DeprecationWarning,
+                                lineno=append_weight.__code__.co_firstlineno + 2)
+        try:
+            append_weight(data)
+        except DeprecationWarning:
+            assert list(data) == [1.0]
+        else:
+            raise AssertionError("method-line warning filter did not stop append")
+
+    display_error = TypeError("display hook")
+
+    def fail_display(*args, **kwargs):
+        raise display_error
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("always", DeprecationWarning)
+        warnings.showwarning = fail_display
+        try:
+            float(strict_result)
+        except TypeError as error:
+            assert error is display_error
+        else:
+            raise AssertionError("float lost the warning-hook exception")
+        view = memoryview(data)
+        try:
+            view[0] = strict_result
+        except TypeError as error:
+            assert str(error) == "memoryview: invalid type for format 'd'"
+            assert error is not display_error and view[0] == 1.0
+        else:
+            raise AssertionError("memoryview wrote after a conversion error")
+
     assert float(Both()) == 12.5 and float(Indexed()) == 314.0
     for kind, value in ((TypeError, None), (TypeError, 1j), (TypeError, BadFloat()),
                         (TypeError, BadIndex()), (ValueError, Raising()), (ValueError, "1_e2"),
@@ -197,6 +272,9 @@ def current():
     assert type(derived.real) is float and repr(derived.real) == "-0.0"
     assert derived.real is not derived.real and repr(derived.imag) == "0.0"
 
+    assert repr(array("d", [derived])[0]) == "-0.0"
+    assert repr(complex(derived).real) == "-0.0"
+
     class Shadow(float):
         real = "shadow"
 
@@ -214,6 +292,9 @@ def current():
             raise AssertionError("overwrote a float component")
 
     assert float(Override(1.5)) == 9.5
+    assert complex(Override(1.5)) == 1.5 + 0j
+    assert complex(real=Override(1.5)) == 9.5 + 0j
+    assert complex(Override(1.5), Override(2.5)) == 9.5 + 9.5j
     for cls, kind in ((Raises, ValueError), (Wrong, TypeError)):
         try:
             float(cls(1.5))

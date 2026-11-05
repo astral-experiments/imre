@@ -619,8 +619,25 @@ impl Context {
                 format!("memoryview: invalid value for format '{format}'"),
             )
         };
+        // CPython's fix_error_int handles both floating-point and integer pack failures.
+        let pack_error = |ctx: &mut Self, err: Error| {
+            let type_error = ctx.builtin("TypeError");
+            if ctx.raised_error_matches(&err, type_error) {
+                return invalid_type();
+            }
+            let overflow = ctx.builtin("OverflowError");
+            let value_error = ctx.builtin("ValueError");
+            if ctx.raised_error_matches(&err, overflow)
+                || ctx.raised_error_matches(&err, value_error)
+            {
+                return invalid_value();
+            }
+            err
+        };
         if matches!(format, "f" | "d") {
-            let f = builtins::from_numeric(self, value)?.ok_or_else(invalid_type)?;
+            let f = builtins::from_numeric(self, value)
+                .map_err(|err| pack_error(self, err))?
+                .ok_or_else(invalid_type)?;
             let Value::Float(x) = *self.heap.get(f) else {
                 unreachable!()
             };
@@ -630,25 +647,10 @@ impl Context {
                 x.to_ne_bytes().to_vec()
             });
         }
-        let n = match self.index_value(value) {
-            Ok(Some(n)) => n,
-            Ok(None) => return Err(invalid_type()),
-            Err(err) => {
-                // CPython's fix_error_int also translates exceptions raised by __index__.
-                let type_error = self.builtin("TypeError");
-                if self.raised_error_matches(&err, type_error) {
-                    return Err(invalid_type());
-                }
-                let overflow = self.builtin("OverflowError");
-                let value_error = self.builtin("ValueError");
-                if self.raised_error_matches(&err, overflow)
-                    || self.raised_error_matches(&err, value_error)
-                {
-                    return Err(invalid_value());
-                }
-                return Err(err);
-            }
-        };
+        let n = self
+            .index_value(value)
+            .map_err(|err| pack_error(self, err))?
+            .ok_or_else(invalid_type)?;
         Ok(match format {
             "B" => vec![n.big().to_u8().ok_or_else(invalid_value)?],
             "I" => n

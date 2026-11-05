@@ -12,7 +12,7 @@ pub(super) mod dir;
 mod exceptions;
 mod float;
 mod round;
-pub(super) use float::from_numeric;
+pub(super) use float::{from_numeric, from_numeric_slots};
 mod integer;
 mod power;
 mod print;
