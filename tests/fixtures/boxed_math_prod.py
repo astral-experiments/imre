@@ -11,6 +11,16 @@ def current():
     assert prod((2, 1.5, 4)) == 12.0
     assert prod([2**90, 2**70]) == 2**160
 
+    assert prod((2**45, 2**45, 3)) == 3 * 2**90
+
+    class Extend:
+        def __rmul__(self, left):
+            factors.append(3)
+            return left + 1
+
+    factors = [2, 3, Extend()]
+    assert prod(factors) == 21
+
     class Factor:
         def __rmul__(self, left):
             assert left == 0
