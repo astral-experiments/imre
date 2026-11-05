@@ -915,7 +915,7 @@ pub(super) struct Scope {
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
-    pub closure: allocator_api2::boxed::Box<ClosureScope>,
+    pub closure: ClosureScope,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
     pub exec_globals: Option<ExecGlobals>,
@@ -925,6 +925,26 @@ pub(super) struct Scope {
 }
 
 impl Scope {
+    pub(super) fn new(module: String, parent: Option<Id>) -> Self {
+        Self {
+            class_body: None,
+            enum_namespace: None,
+            is_abstract: false,
+            comprehension: None,
+            class_cell: None,
+            class_namespace: None,
+            first_argument: None,
+            names: Default::default(),
+            closure: Default::default(),
+            namespace: None,
+            globals: Default::default(),
+            exec_globals: None,
+            exec_locals: None,
+            parent,
+            module,
+        }
+    }
+
     /// The class body's live dictionary, once exposed through Python code.
     pub(super) fn class_body_mapping(&self) -> Option<Id> {
         self.class_body.as_ref().and(self.namespace)
@@ -1191,7 +1211,7 @@ pub(super) enum Value {
         factory: Id,
         entries: super::dictionary::Entries,
     },
-    Scope(Scope),
+    Scope(allocator_api2::boxed::Box<Scope>),
     Cell(Option<Id>),
     Super {
         start: Id,
@@ -1287,9 +1307,10 @@ pub(super) enum Value {
     Union(super::union::Union),
     Instance {
         class: Id,
-        fields: indexmap::IndexMap<String, Id>,
+        fields: Box<indexmap::IndexMap<String, Id>>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>,
+        member_values:
+            Option<Box<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -3898,7 +3919,7 @@ impl Heap {
             };
             data.closure.extra_locals = None;
             if !data.closure.cleared {
-                let closure = &mut *data.closure;
+                let closure = &mut data.closure;
                 closure
                     .declared
                     .extend(closure.cells.drain().map(|(name, _)| name));

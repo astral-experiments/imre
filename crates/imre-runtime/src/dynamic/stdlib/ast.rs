@@ -170,7 +170,7 @@ fn parsed_instance(
     ctx.alloc(Value::Instance {
         namespace: None,
         class: ctx.builtins[spec.qualified_name],
-        fields,
+        fields: Box::new(fields),
         dictionary: None,
         scalar: None,
         property: None,
