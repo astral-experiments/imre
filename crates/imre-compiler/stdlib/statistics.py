@@ -31,6 +31,13 @@ def mean(data):
     If ``data`` is empty, StatisticsError will be raised.
 
     """
+    if (type(data) is list or type(data) is tuple) and data:
+        for value in data:
+            if type(value) is not int:
+                break
+        else:
+            # Exact integers share denominator one and can use the native sum.
+            return _convert(Fraction(sum(data), len(data)), int)
     T, total, n = _sum(data)
     if n < 1:
         raise StatisticsError('mean requires at least one data point')

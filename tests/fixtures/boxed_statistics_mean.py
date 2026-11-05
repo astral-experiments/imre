@@ -4,6 +4,10 @@ from statistics import StatisticsError, mean
 
 
 def current():
+    huge = 1 << 500
+    assert mean((huge, huge)) == huge
+    assert type(mean([huge, -huge])) is int
+    assert mean([0, 1, 1]) == 2 / 3
     class Interrupted:
         def __iter__(self):
             yield 1
