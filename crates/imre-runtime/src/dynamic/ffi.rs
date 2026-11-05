@@ -1413,6 +1413,23 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
     finish_method_target(ctx, target, bound_receiver)
 }
 
+/// Prepare an ordinary positional method call before evaluating its arguments.
+///
+/// # Safety
+/// The caller supplies the active context, a NUL-terminated UTF-8 name and a writable receiver slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_builtin_method_target(
+    ctx: *mut Context,
+    receiver: Id,
+    name: *const c_char,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: generated code retains the context and passes static method names.
+    let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
+    let target = ctx.builtin_method_target(receiver, name);
+    finish_method_target(ctx, target, bound_receiver)
+}
+
 /// Resolve an immediate get call before evaluating arguments that may release its receiver.
 ///
 /// # Safety
