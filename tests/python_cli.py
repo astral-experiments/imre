@@ -1435,7 +1435,8 @@ def check_unittest_main_names(imre, root, run):
     built = run(imre, "build", source, "--module-root", root, "--runtime-imports", "--no-cache", "-o", executable)
     assert built.returncode == 0, built
     for args, output in [((), b"a\nb\n"), (("Cases.test_b", "Cases.test_a"), b"b\na\n"),
-                         (("-vk", "test_b", "Cases"), b"b\n")]:
+                         (("-vk", "test_b", "Cases"), b"b\n"),
+                         (("-vbk", "test_b", "Cases"), b""), (("--buf", "Cases.test_a"), b"")]:
         result = run(executable, *args)
         assert result.returncode == 0 and result.stdout == output, result
     for flags, progress in [((), b".\n"), (("-v",), b"test_b (__main__.Cases.test_b) ... ok\n\n"),
@@ -4037,6 +4038,7 @@ for name in ("md4", "ripemd160"):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_format.py",
+            "boxed_unittest_program_options.py",
             "boxed_unittest_result_buffer.py",
             "boxed_unittest_result_registry.py",
             "boxed_unittest_get_description.py",
