@@ -1,4 +1,5 @@
 import gzip
+import io
 from gzip import decompress
 
 
@@ -16,6 +17,22 @@ def current():
     assert decompress(mutable) == b"firstsecondfirst"
     mutable.append(0)
 
+    # The destination keeps the decoded prefix when the next trailer is incomplete.
+    with gzip.GzipFile(fileobj=io.BytesIO(first + second[:-1])) as stream:
+        for method in ("readinto", "readinto1"):
+            try:
+                getattr(stream, method)(None)
+            except TypeError as exc:
+                assert str(exc) == f"{method}() argument must be read-write bytes-like object, not None"
+            else:
+                raise AssertionError("accepted None as a writable buffer")
+        target = bytearray(b"_" * 16)
+        try:
+            stream.readinto(memoryview(target)[1:-1])
+        except EOFError:
+            assert target == b"_firstsecond____"
+        else:
+            raise AssertionError("accepted a truncated trailer")
 
     try:
         decompress(first + second[:-1])

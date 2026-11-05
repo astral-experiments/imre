@@ -111,8 +111,7 @@ class GzipFile(io.BufferedIOBase):
 
     mode = READ
     fileobj = None
-    _reader = None
-    _writer = None
+    _buffer = None
     myfileobj = None
 
     def __init__(self, filename=None, mode=None, compresslevel=9, fileobj=None, mtime=None):
@@ -150,7 +149,7 @@ class GzipFile(io.BufferedIOBase):
                 if owned:
                     fileobj.close()
                 raise
-            self._writer = buffer
+            self._buffer = buffer
             self.mode = WRITE
             self.compress = compressor
             self.name = name
@@ -168,21 +167,20 @@ class GzipFile(io.BufferedIOBase):
             if owned:
                 fileobj.close()
             raise
-        self._writer = None
         self.mode = READ
         self.name = name
         self.fileobj = fileobj
         self.myfileobj = fileobj if owned else None
-        self._reader = reader
+        self._buffer = reader
 
     @property
     def mtime(self):
         """Last modification time read from stream, or None."""
         if self.mode == WRITE:
             raise AttributeError("mtime is only available in read mode")
-        if self._reader is None:
+        if self._buffer is None:
             return self._last_mtime
-        return _imre_gzip.raw_mtime(self._reader.raw.decoder)
+        return _imre_gzip.raw_mtime(self._buffer.raw.decoder)
 
     @property
     def closed(self):
@@ -194,9 +192,9 @@ class GzipFile(io.BufferedIOBase):
 
     def _open_reader(self, operation="read"):
         self._check_open()
-        if self._reader is None:
+        if self.mode != READ:
             raise OSError(errno.EBADF, f"{operation}() on write-only GzipFile object")
-        return self._reader
+        return self._buffer
 
     def readable(self):
         return self.mode == READ
@@ -206,9 +204,9 @@ class GzipFile(io.BufferedIOBase):
 
     def write(self, data):
         self._check_open()
-        if self._writer is None:
+        if self.mode != WRITE:
             raise OSError(errno.EBADF, "write() on read-only GzipFile object")
-        return self._writer.write(data)
+        return self._buffer.write(data)
 
     def read(self, size=-1):
         return self._open_reader().read(-1 if size is None else size)
@@ -216,6 +214,12 @@ class GzipFile(io.BufferedIOBase):
     def read1(self, size=-1):
         reader = self._open_reader()
         return reader.read1(io.DEFAULT_BUFFER_SIZE if size < 0 else size)
+
+    def readinto(self, b):
+        return self._open_reader("readinto").readinto(b)
+
+    def readinto1(self, b):
+        return self._open_reader("readinto1").readinto1(b)
 
     def peek(self, n):
         return self._open_reader("peek").peek(n)
@@ -234,9 +238,9 @@ class GzipFile(io.BufferedIOBase):
     def tell(self):
         self._check_open()
         if self.mode == READ:
-            return self._reader.tell()
-        self._writer.flush()
-        return self._writer.raw.size
+            return self._buffer.tell()
+        self._buffer.flush()
+        return self._buffer.raw.size
 
     def seek(self, offset, whence=io.SEEK_SET):
         if self.mode != WRITE:
@@ -255,15 +259,15 @@ class GzipFile(io.BufferedIOBase):
                 self.write(block)
         self.write(bytes(count % _WRITE_BUFFER_SIZE))
         # Buffered padding does not advance the compressor until it is drained.
-        return self._writer.raw.size
+        return self._buffer.raw.size
 
     def fileno(self):
         return self.fileobj.fileno()
 
     def flush(self, zlib_mode=_Z_SYNC_FLUSH):
         self._check_open()
-        if self._writer is not None:
-            self._writer.flush()
+        if self.mode == WRITE:
+            self._buffer.flush()
             self.fileobj.write(self.compress.flush(zlib_mode))
             self.fileobj.flush()
 
@@ -273,18 +277,17 @@ class GzipFile(io.BufferedIOBase):
 
     def close(self):
         fileobj = self.fileobj
-        reader = self._reader
-        writer = self._writer
-        if fileobj is None or (reader is None and writer is None):
+        buffer = self._buffer
+        if fileobj is None or buffer is None:
             return
         try:
-            if reader is not None:
-                self._last_mtime = _imre_gzip.raw_mtime(reader.raw.decoder)
-                self._reader = None
-                reader.close()
+            if self.mode == READ:
+                self._last_mtime = _imre_gzip.raw_mtime(buffer.raw.decoder)
+                self._buffer = None
+                buffer.close()
             else:
-                raw = writer.raw
-                writer.flush()
+                raw = buffer.raw
+                buffer.flush()
                 fileobj.write(self.compress.flush())
                 fileobj.write(struct.pack("<II", raw.crc, raw.size & 0xffffffff))
         finally:
