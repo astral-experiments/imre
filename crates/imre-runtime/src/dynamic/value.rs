@@ -4367,16 +4367,17 @@ impl Heap {
                     .values()
                     .take(*budget)
                     .any(|&value| keeps(heap, value, owner, budget)),
-                Value::Generator { protected, .. }
-                    if matches!(heap.get(owner), Value::Generator { .. }) =>
-                {
-                    protected
-                        .iter()
-                        .take(*budget)
-                        .flat_map(super::source_code::FinallyBlock::roots)
-                        .take(*budget)
-                        .any(|value| keeps(heap, value, owner, budget))
-                }
+                Value::Generator {
+                    iterators,
+                    protected,
+                    ..
+                } if matches!(heap.get(owner), Value::Generator { .. }) => protected
+                    .iter()
+                    .take(*budget)
+                    .flat_map(super::source_code::FinallyBlock::roots)
+                    .chain(iterators.iter().copied())
+                    .take(*budget)
+                    .any(|value| keeps(heap, value, owner, budget)),
                 _ => false,
             }
         }
