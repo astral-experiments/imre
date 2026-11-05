@@ -406,10 +406,27 @@ impl IntegerAccumulate {
 pub unsafe extern "C" fn imre_collect_int_cursor(cursor: *const Object) -> *const crate::List {
     // SAFETY: the caller roots this cursor for the full call.
     let cursor = unsafe { object(cursor) };
-    // SAFETY: only exact integer-list addition runs under the storage borrow.
+    // SAFETY: the fast paths borrow exact integers and cannot reenter either cursor.
     let bulk = unsafe {
         cursor.0.with_mut(|s| match s {
             Storage::IntegerAccumulate(scan) => Some(scan.collect_remaining()),
+            Storage::Repeat(Repeat {
+                value,
+                remaining: Some(count),
+            }) => {
+                let mut result = Vec::new();
+                Some(
+                    result
+                        .try_reserve_exact(*count)
+                        .map_err(|_| crate::Error::allocation())
+                        .map(|()| {
+                            // The typed cursor owns one integer independent of all yielded copies.
+                            result.resize_with(*count, || (*Int::borrow(value.word)).clone());
+                            *count = 0;
+                            result
+                        }),
+                )
+            }
             _ => None,
         })
     };
