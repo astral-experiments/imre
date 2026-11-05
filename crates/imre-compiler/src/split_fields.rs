@@ -5,6 +5,7 @@ use crate::ir::{
     walk_expressions, walk_expressions_mut,
 };
 use crate::reductions::count_writes;
+mod text;
 
 /// Keep the exact input string in a private local and parse each projection at
 /// its original use. A skipped or reordered read must still see the right error.
@@ -56,6 +57,7 @@ pub(crate) fn specialize(module: &mut Module) {
             };
             value.kind = ExprKind::Builtin(op, vec![input]);
         });
+        text::specialize(function, &reads, &writes);
     }
 }
 

@@ -930,11 +930,15 @@ mod page_tests {
             (8192, 8171, 194),
             (8194, 8171, 194),
             (8191, 8183, 67),
+            (8193, 8180, 195),
+            (16395, 16388, 335),
+            (16395, 16388, 16395 - 335),
             (4096, 4081, 1069),
         ] {
             let period = n / num_integer::gcd(n, step);
             for count in [
                 period / 2,
+                2 * period / 3,
                 3 * period / 4,
                 7 * period / 8,
                 period - period / 32,

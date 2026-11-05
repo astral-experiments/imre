@@ -1415,6 +1415,9 @@ pub(crate) enum Builtin {
     /// Prepare small decimal fields from one private immutable split source.
     SplitIntSource(u8),
     SplitIntCached(u32),
+    SplitTextSource(u8),
+    SplitTextLen,
+    SplitTextField(u8),
     SplitLines,
     /// Only the first line and a joined remainder can be observed.
     JoinedSplitLines,

@@ -1445,6 +1445,64 @@ pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const 
     crate::ObjectOwner::into_raw(result.into_object())
 }
 
+/// Record a split's length and the byte spans of its first observed fields.
+///
+/// # Safety
+/// The caller roots the source and provides space for the tagged count followed
+/// by `fields` pairs of offsets and lengths.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_field_spans(value: *const Str, output: *mut usize, fields: u32) {
+    // SAFETY: the source is rooted for this scan.
+    let source = unsafe { &*value };
+    let mut count = 0;
+    for part in source
+        .split(python_whitespace)
+        .filter(|part| !part.is_empty())
+    {
+        if count < fields as usize {
+            let start = part.as_ptr() as usize - source.as_ptr() as usize;
+            // SAFETY: the caller provides two words for each requested span.
+            unsafe {
+                output.add(1 + 2 * count).write(start);
+                output.add(2 + 2 * count).write(part.len());
+            }
+        }
+        count += 1;
+    }
+    if count > MAX_LIST_LEN {
+        fail("MemoryError", "sequence allocation failed");
+    }
+    // SAFETY: the first word belongs to the count even for an empty split.
+    unsafe { output.write((count << 1) | 1) };
+}
+
+/// Materialize a split field at the original subscription, preserving its bounds error.
+///
+/// # Safety
+/// The caller roots the original source and passes its initialized span table.
+/// The index is below the number of spans requested at the split.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_field_at(
+    value: *const Str,
+    fields: *const usize,
+    index: u32,
+) -> *const Str {
+    let i = index as usize;
+    // SAFETY: the count and source remain live at this projection.
+    let (source, count) = unsafe { (&*value, fields.read() >> 1) };
+    if i >= count {
+        return Error::index().returning(std::ptr::null());
+    }
+    // SAFETY: a requested field below the actual count has an initialized span.
+    let (start, len) = unsafe { (fields.add(1 + 2 * i).read(), fields.add(2 + 2 * i).read()) };
+    if len == source.len() {
+        // SAFETY: a full slice shares the rooted input just as the split list does.
+        unsafe { StrOwner::increment_strong_count(value) };
+        return value;
+    }
+    StrOwner::into_raw(text::owned_string(&source[start..start + len]))
+}
+
 /// Bytes in 0x20..=0x7f contain no Python line break. Reducing fixed-size
 /// blocks lets LLVM check long ASCII lines without branching on each byte.
 fn plain_ascii_line(bytes: &[u8]) -> bool {

@@ -13,7 +13,7 @@ impl Binary {
         spacing: usize,
     ) -> Option<(usize, usize)> {
         let words = n.div_ceil(BLOCK);
-        if !BLOCK.is_multiple_of(spacing) || count < 1024 || count / 8 < words {
+        if spacing > BLOCK || count < 1024 || count / 8 < words {
             return None;
         }
         let period = n / spacing;
@@ -30,8 +30,12 @@ impl Binary {
                 a + b
             }
         };
-        let slots = BLOCK / spacing;
-        let advance = rank(slots);
+        let slots = BLOCK.div_ceil(spacing);
+        let remainder = BLOCK % spacing;
+        let advance = rank(BLOCK / spacing);
+        let extra_advance = add_rank(advance, inverse);
+        let mut first_bit = at % spacing;
+        let fixed_offset = if remainder == 0 { first_bit } else { 0 };
         let mut first = (period - rank(at / spacing)) % period;
 
         // For each bit, its ordinal is (first + offset) % period. It belongs
@@ -43,7 +47,7 @@ impl Binary {
         let (pairs, _) = events.as_chunks_mut::<2>();
         for (slot, [begin, end]) in pairs.iter_mut().enumerate() {
             let offset = rank(slot);
-            let bit = 1u64 << (at % spacing + slot * spacing);
+            let bit = 1u64 << (fixed_offset + slot * spacing);
             let start = (period - offset) % period;
             *begin = (start, bit);
             *end = (add_rank(start, visits), bit);
@@ -58,15 +62,34 @@ impl Binary {
             *value = mask;
         }
 
+        // Slot zero always has a transition at ordinal zero.
+        let mask_at = |rank| {
+            let after = events.partition_point(|event| event.0 <= rank);
+            events[after - 1].1
+        };
         let mut written = 0;
         while written < words && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
         {
             let end = (written + 256).min(words);
-            for word in &mut self.bits[written..end] {
-                // Slot zero always has a transition at ordinal zero.
-                let after = events.partition_point(|event| event.0 <= first);
-                *word = events[after - 1].1;
-                first = add_rank(first, advance);
+            let words = &mut self.bits[written..end];
+            if remainder == 0 {
+                for word in words {
+                    *word = mask_at(first);
+                    first = add_rank(first, advance);
+                }
+            } else {
+                for word in words {
+                    *word = mask_at(first) << first_bit;
+                    // The word has one extra reachable row when the first
+                    // bit falls within the remainder of its width.
+                    if first_bit < remainder {
+                        first_bit += spacing - remainder;
+                        first = add_rank(first, extra_advance);
+                    } else {
+                        first_bit -= remainder;
+                        first = add_rank(first, advance);
+                    }
+                }
             }
             written = end;
         }

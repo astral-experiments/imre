@@ -183,6 +183,10 @@ trait TableKey {
 
 /// Infallible table keys may choose how they feed the process-keyed hasher.
 trait InfallibleKey: Eq + Hash {
+    fn same_key(&self, other: &Self) -> bool {
+        self == other
+    }
+
     fn table_hash(&self) -> u64 {
         HASHER.hash_one(self)
     }
@@ -194,6 +198,28 @@ impl InfallibleKey for ObjectKey {}
 impl InfallibleKey for crate::BytesOwner {}
 
 impl InfallibleKey for StrOwner {
+    fn same_key(&self, other: &Self) -> bool {
+        if Self::ptr_eq(self, other) {
+            return true;
+        }
+        let (left, right) = (self.as_bytes(), other.as_bytes());
+        if left.len() != right.len() {
+            return false;
+        }
+        // Two overlapping fixed-width loads compare every byte of a short key.
+        match left.len() {
+            4..=8 => {
+                left.first_chunk::<4>() == right.first_chunk::<4>()
+                    && left.last_chunk::<4>() == right.last_chunk::<4>()
+            }
+            9..=16 => {
+                left.first_chunk::<8>() == right.first_chunk::<8>()
+                    && left.last_chunk::<8>() == right.last_chunk::<8>()
+            }
+            _ => left == right,
+        }
+    }
+
     fn table_hash(&self) -> u64 {
         string_hash(self.as_str())
     }
@@ -220,7 +246,7 @@ impl<T: InfallibleKey> TableKey for T {
     }
 
     fn try_eq(&self, other: &Self) -> Result<bool, Error> {
-        Ok(self == other)
+        Ok(self.same_key(other))
     }
 }
 

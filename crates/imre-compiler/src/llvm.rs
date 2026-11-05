@@ -2227,7 +2227,18 @@ impl Emitter<'_, '_> {
             self.line(format!("%pair_view{slot} = alloca {{ ptr, i64 }}"));
         }
         let mut field_masks = vec![0_u8; self.locals.len()];
+        let mut text_fields = vec![0_u8; self.locals.len()];
         ir::walk_statements(&function.body, &mut |stmt| {
+            if let Statement::Assign(
+                slot,
+                Expr {
+                    kind: ExprKind::Builtin(Builtin::SplitTextSource(count), _),
+                    ..
+                },
+            ) = stmt
+            {
+                text_fields[*slot] = *count;
+            }
             if let Statement::Assign(
                 slot,
                 Expr {
@@ -2244,6 +2255,14 @@ impl Emitter<'_, '_> {
                 self.line(format!(
                     "%split_fields{slot} = alloca [{} x i64]",
                     8 - mask.leading_zeros()
+                ));
+            }
+        }
+        for (slot, fields) in text_fields.into_iter().enumerate() {
+            if fields != 0 {
+                self.line(format!(
+                    "%text_fields{slot} = alloca [{} x i64]",
+                    1 + fields * 2
                 ));
             }
         }
@@ -2593,6 +2612,13 @@ impl Emitter<'_, '_> {
                 if let ExprKind::Builtin(Builtin::SplitIntSource(mask), args) = &expression.kind {
                     let value = self.expr(&args[0]);
                     self.line(format!("call void @imre_str_prepare_int_fields(ptr {}, ptr %split_fields{slot}, i32 {mask})", value.operand));
+                    self.store(*slot, &value);
+                    return;
+                }
+                if let ExprKind::Builtin(Builtin::SplitTextSource(fields), args) = &expression.kind
+                {
+                    let value = self.expr(&args[0]);
+                    self.line(format!("call void @imre_str_field_spans(ptr {}, ptr %text_fields{slot}, i32 {fields})", value.operand));
                     self.store(*slot, &value);
                     return;
                 }
@@ -8821,8 +8847,25 @@ impl Emitter<'_, '_> {
                     self.unpack_word(word, returns)
                 }
             }
-            Builtin::SplitIntSource(_) => {
+            Builtin::SplitTextSource(_) | Builtin::SplitIntSource(_) => {
                 return self.own_operand(args.into_iter().next().unwrap());
+            }
+            Builtin::SplitTextLen | Builtin::SplitTextField(_) => {
+                let ExprKind::Local(slot) = expressions[0].kind else {
+                    unreachable!()
+                };
+                match builtin {
+                    Builtin::SplitTextField(index) => Value {
+                        ty: Type::Str,
+                        operand: self.checked_pointer(format!("call ptr @imre_str_field_at(ptr {}, ptr %text_fields{slot}, i32 {index})", args[0].value.operand)),
+                        small_integer: false,
+                    },
+                    _ => Value {
+                        ty: Type::Int,
+                        operand: self.instruction(format!("load i64, ptr %text_fields{slot}")),
+                        small_integer: true,
+                    },
+                }
             }
             Builtin::SplitIntCached(index) => {
                 let ExprKind::Local(slot) = expressions[0].kind else {
@@ -10688,6 +10731,8 @@ declare ptr @imre_str_append_literal_owned(ptr, ptr, ptr, i64)
 declare i32 @imre_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @imre_int_str_part_into(i64, ptr, ptr)
 declare ptr @imre_str_split_whitespace(ptr)
+declare void @imre_str_field_spans(ptr, ptr, i32)
+declare ptr @imre_str_field_at(ptr, ptr, i32)
 declare i64 @imre_str_split_int_field(ptr, i32)
 declare void @imre_str_prepare_int_fields(ptr, ptr, i32) nounwind
 declare ptr @imre_str_split(ptr, ptr, i64, i32)
@@ -11691,6 +11736,25 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn temporary_split_fields_can_use_the_original_text() {
+        let body = function_body(
+            "def field(s: str) -> str:\n    fields = s.split()\n    if len(fields) != 2:\n        raise ValueError('two fields required')\n    return fields[1]\n",
+        );
+        assert!(body.contains("@imre_str_field_spans("), "{body}");
+        assert!(body.contains("@imre_str_field_at("), "{body}");
+        assert!(!body.contains("@imre_str_split_whitespace("), "{body}");
+
+        for source in [
+            "def repeated(s: str) -> str:\n    fields = s.split()\n    return fields[0] + fields[0]\n",
+            "def escaped(s: str) -> list[str]:\n    fields = s.split()\n    return fields\n",
+            "def looped(s: str, n: int) -> str:\n    fields = s.split()\n    first = ''\n    for i in range(n):\n        first = fields[0]\n    return first\n",
+        ] {
+            let body = function_body(source);
+            assert!(!body.contains("@imre_str_field_spans("), "{body}");
+        }
     }
 
     #[test]
