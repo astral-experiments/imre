@@ -3161,6 +3161,13 @@ impl Heap {
         }
     }
 
+    /// Return the permanent heap slot for a cached Python integer.
+    pub(super) fn cached_integer(value: i64) -> Option<Id> {
+        (SMALL_INT_MIN..=SMALL_INT_MAX)
+            .contains(&value)
+            .then(|| FIRST_SMALL_INT + (value - SMALL_INT_MIN) as Id)
+    }
+
     pub fn alloc(&mut self, value: Value) -> Id {
         if let Value::Str(text) = &value
             && let Some(owner) = crate::objects::short_string(text)
@@ -3168,9 +3175,9 @@ impl Heap {
             return self.intern_literal(owner, true);
         }
         if let Value::Int(integer) = &value
-            && let Some(n @ SMALL_INT_MIN..=SMALL_INT_MAX) = integer.as_small()
+            && let Some(id) = integer.as_small().and_then(Self::cached_integer)
         {
-            return FIRST_SMALL_INT + (n - SMALL_INT_MIN) as Id;
+            return id;
         }
         match value {
             Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
