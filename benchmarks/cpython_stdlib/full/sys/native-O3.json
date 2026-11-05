@@ -11,6 +11,22 @@
       "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "8581d47c313aa7933ee2e34ddb5abe605dd575bc2397e7d956ff9c4079d5dd4e"
     },
+    "test.test_sys.ActiveExceptionTests.test_exc_info_with_exception_instance": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "b885b25c2d093cc79ffdbed0d3a0b6bcf945612d5f108fc6e5b407476db9a873"
+    },
+    "test.test_sys.ActiveExceptionTests.test_exc_info_with_exception_type": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "59fd1589d4dfba1071dd8f108e5ad5071adc6e001f95d9b832693e95987a2816"
+    },
     "test.test_sys.ActiveExceptionTests.test_sys_exception_no_exception": {
       "status": "pass",
       "execution": "native-body",
@@ -18,6 +34,22 @@
       "assertions": "Imre",
       "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "e9ae316ea5c7f6dcc265f3be947387d10898624e8534aaa215d750a46d69e351"
+    },
+    "test.test_sys.ActiveExceptionTests.test_sys_exception_with_exception_instance": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "4ab3c35ef52082a86d5ca369c4d1cfa8f5c1c12141efc35905e70b361f0f2586"
+    },
+    "test.test_sys.ActiveExceptionTests.test_sys_exception_with_exception_type": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "1b6871855d06208240f34bebfed7f0c5c27d473b13ff15df639f8e9ee40b7d61"
     },
     "test.test_sys.DisplayHookTest.test_original_displayhook": {
       "status": "pass",
@@ -216,6 +248,14 @@
       "assertions": "Imre",
       "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "0f75871bf270a07022d0128057feba227c9345257f0496fd45922758dea29279"
+    },
+    "test.test_sys.SysModuleTest.test_no_duplicates_in_meta_path": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "052d0ca96e2ce7a01b2e057efd0da849a9f5dbfa1af80710a177176187e2f765"
     },
     "test.test_sys.SysModuleTest.test_orig_argv": {
       "status": "pass",

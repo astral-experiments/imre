@@ -2913,7 +2913,7 @@ pub extern "C" fn imre_sys_stdlib_module_names() -> *const Object {
         if let Some(names) = root.get() {
             return crate::ObjectOwner::into_raw(names.clone());
         }
-        let names = include_str!("../../native/stdlib-module-names.txt").lines();
+        let names = crate::sys::STDLIB_MODULE_NAMES.lines();
         match Set::names(names, true) {
             Ok(names) => crate::ObjectOwner::into_raw(root.get_or_init(|| names).clone()),
             Err(error) => error.returning(std::ptr::null()),

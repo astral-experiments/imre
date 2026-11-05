@@ -86,10 +86,21 @@ def select(toolchain, work, source, module):
                      "stdout_sha256": hashlib.sha256(actual[0]).hexdigest(),
                      "stdout_lines": len(actual[0].splitlines()), "matches_cpython": True,
                      "original_method_operations": 0}
+    sys_fixture = "import sys\n" + testcase_fixture()
     for cls, method, fixture, operation in [
-        ("SysModuleTest", "test_43581", "import sys\n" + testcase_fixture(), "sys.__stdout__.encoding and sys.__stderr__.encoding"),
-        ("ActiveExceptionTests", "test_exc_info_no_exception", "import sys\n" + testcase_fixture(), "sys.exc_info() outside a handler"),
+        ("SysModuleTest", "test_43581", sys_fixture, "sys.__stdout__.encoding and sys.__stderr__.encoding"),
+        ("ActiveExceptionTests", "test_exc_info_no_exception", sys_fixture, "sys.exc_info() outside a handler"),
+        ("ActiveExceptionTests", "test_exc_info_with_exception_instance", sys_fixture,
+         "sys.exc_info() retains the type, instance and traceback after raising ValueError(42)"),
+        ("ActiveExceptionTests", "test_exc_info_with_exception_type", sys_fixture,
+         "sys.exc_info() retains the type, instance and traceback after raising the ValueError class"),
         ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL, "sys.exception() outside a handler"),
+        ("ActiveExceptionTests", "test_sys_exception_with_exception_instance", sys_fixture,
+         "sys.exception() returns the caught ValueError(42) instance"),
+        ("ActiveExceptionTests", "test_sys_exception_with_exception_type", sys_fixture,
+         "sys.exception() returns the instance created by raising the ValueError class"),
+        ("SysModuleTest", "test_no_duplicates_in_meta_path", sys_fixture,
+         "sys.meta_path contains distinct finder objects"),
     ]:
         case_id = f"{MODULE}.{cls}.{method}"
         executions[case_id] = native_method(toolchain, directory(work, method),
