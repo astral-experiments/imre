@@ -169,23 +169,54 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     if let Some(number) = from_numeric_slots(ctx, value)? {
         return Ok(number);
     }
-    let parsed = if let Ok(text) = ctx.str_value(value) {
-        crate::floats::parse(text)
-    } else if let Value::Bytes(bytes) | Value::ByteArray(bytes) = ctx.heap.get(value) {
-        crate::floats::parse_bytes(bytes)
-    } else {
-        return Err(type_error(format!(
-            "float() argument must be a string or a real number, not '{}'",
-            ctx.type_name(value)
-        )));
-    };
-    let number = parsed.ok_or_else(|| {
-        Error::new(
-            "ValueError",
-            format!("could not convert string to float: {}", ctx.repr(value)),
-        )
-    })?;
+    let number = parse_input(ctx, value)?;
     Ok(ctx.alloc(Value::Float(number)))
+}
+
+/// Read native strings directly, then request a contiguous buffer from other inputs.
+fn parse_input(ctx: &mut Context, value: Id) -> Result<f64> {
+    let parsed = match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Str(text) => crate::floats::parse(text),
+        Value::SurrogateStr(_) => None,
+        Value::Bytes(bytes) | Value::ByteArray(bytes) => crate::floats::parse_bytes(bytes),
+        _ => {
+            let invalid_input = |ctx: &Context| {
+                let name = ctx.type_name(value);
+                type_error(format!(
+                    "float() argument must be a string or a real number, not '{}'",
+                    &name[..name.floor_char_boundary(200)]
+                ))
+            };
+            if let Some(method) = ctx.buffer_slot(value, "__buffer__").flatten() {
+                // Only acquisition errors are replaced. Format invalid input while the
+                // export is live, so exceptions raised by __repr__ survive release.
+                let view = ctx
+                    .acquire_python_buffer(value, method, 0)
+                    .and_then(|view| ctx.view_bytes(view).map(|_| view))
+                    .map_err(|_| invalid_input(ctx))?;
+                return ctx.with_python_buffer_export(value, view, |ctx| {
+                    let parsed = crate::floats::parse_bytes(ctx.view_bytes(view)?);
+                    parsed_number(ctx, value, parsed)
+                });
+            }
+            let bytes = ctx
+                .native_buffer_bytes(value)
+                .map_err(|_| invalid_input(ctx))?;
+            let parsed = crate::floats::parse_bytes(bytes);
+            return ctx.with_native_bytes_export(value, |ctx, _| parsed_number(ctx, value, parsed));
+        }
+    };
+    parsed_number(ctx, value, parsed)
+}
+
+fn parsed_number(ctx: &mut Context, value: Id, parsed: Option<f64>) -> Result<f64> {
+    if let Some(number) = parsed {
+        return Ok(number);
+    }
+    let repr = super::call(ctx, "repr", &[value], &[])?;
+    let prefix = ctx.text("could not convert string to float: ");
+    let message = ctx.concat_strings(prefix, repr)?;
+    Err(ctx.exception("ValueError", &[message]))
 }
 
 /// Read the stored double of any float before consulting other numeric objects' slots.
