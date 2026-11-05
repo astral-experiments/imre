@@ -5317,6 +5317,16 @@ impl Emitter<'_, '_> {
                 let bytes = args[0].value.ty == Type::Bytes;
                 let split = u32::from(*split);
                 let call = match program {
+                    imre_regex::Collection::Rows { program, .. } => {
+                        let row = self.module.types.element(returns).unwrap();
+                        let layout = self.output.record_layout(row);
+                        let name = self.byte_array(program.clone());
+                        format!(
+                            "call ptr @imre_regex_collect_rows(ptr {text}, ptr @{name}, i64 {}, ptr @{layout}, i32 {})",
+                            program.len(),
+                            u32::from(bytes)
+                        )
+                    }
                     imre_regex::Collection::Literals(program) => {
                         let name = self.byte_array(program.clone());
                         let flags = split | (u32::from(bytes) << 1);
@@ -10999,6 +11009,7 @@ declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_collect_runs(ptr, ptr, i32)
 declare ptr @imre_regex_collect_bytes_runs(ptr, ptr, i32)
 declare ptr @imre_regex_collect_literals(ptr, ptr, i64, i32)
+declare ptr @imre_regex_collect_rows(ptr, ptr, i64, ptr, i32)
 declare ptr @imre_regex_collect_unicode_runs(ptr, ptr, i64, i32)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)

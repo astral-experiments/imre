@@ -400,8 +400,12 @@ impl Checker<'_> {
         if text.ty != kind {
             return Err(self.scoped_builtin_error(name, call));
         }
+        let element = match &program {
+            imre_regex::Collection::Rows { fields, .. } => self.types.tuple(vec![kind; *fields]),
+            _ => kind,
+        };
         Ok(Expr {
-            ty: self.types.list(kind),
+            ty: self.types.list(element),
             kind: ExprKind::Builtin(Builtin::RegexCollect { program, split }, vec![text]),
         })
     }
