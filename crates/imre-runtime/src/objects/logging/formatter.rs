@@ -412,14 +412,13 @@ impl Formatter {
 }
 
 fn number(v: &OwnedWord) -> Result<f64> {
-    use num_traits::ToPrimitive;
     match v.kind.raw() {
         7 => Ok(f64::from_bits(v.word as u64)),
-        // SAFETY: a word of kind two is a rooted Python integer.
-        2 => unsafe { Int::borrow(v.word) }
-            .big()
-            .to_f64()
-            .ok_or_else(|| Error::new(Kind::OverflowError, "int too large to convert to float")),
+        2 => {
+            // SAFETY: a word of kind two is a rooted Python integer.
+            let integer = unsafe { Int::borrow(v.word) };
+            crate::floats::int_to_float(&integer)
+        }
         _ => Err(Error::new(Kind::TypeError, "expected a number")),
     }
 }
@@ -482,6 +481,30 @@ fn default_float(
         text.push_str(".0");
     }
     Ok(text)
+}
+
+/// Group fractional digits from the decimal point outwards, leaving any exponent or '%' intact.
+fn group_fraction(text: String, separator: char) -> Result<String> {
+    let Some(point) = text.find('.') else {
+        return Ok(text);
+    };
+    let start = point + 1;
+    let digits = text[start..].bytes().take_while(u8::is_ascii_digit).count();
+    if digits <= 3 {
+        return Ok(text);
+    }
+    let mut grouped = String::new();
+    grouped
+        .try_reserve_exact(text.len() + (digits - 1) / 3)
+        .map_err(|_| Error::allocation())?;
+    let mut previous = 0;
+    for boundary in (start + 3..start + digits).step_by(3) {
+        grouped.push_str(&text[previous..boundary]);
+        grouped.push(separator);
+        previous = boundary;
+    }
+    grouped.push_str(&text[previous..]);
+    Ok(grouped)
 }
 
 /// Group the integer digits from the right. Sign-aware zero padding participates
@@ -560,18 +583,11 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
     )
     .map_err(error)?;
     let mut tail = prefix.tail;
-    let precision = if string {
+    let (precision, frac_group) = if string {
         tail = "s";
-        prefix.string_precision(Some(spec), "str")?
-    } else if let Some(rest) = tail.strip_prefix('.') {
-        tail = rest;
-        Some(
-            crate::format_grammar::decimal(&mut tail)
-                .map_err(error)?
-                .ok_or_else(|| error("Format specifier missing precision"))?,
-        )
+        (prefix.string_precision(Some(spec), "str")?, None)
     } else {
-        None
+        crate::format_grammar::precision(&mut tail).map_err(error)?
     };
     let crate::format_grammar::FormatPrefix {
         fill,
@@ -603,6 +619,14 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
         }
         _ => return Err(error(format!("Invalid format specifier '{spec}'"))),
     };
+    if c == 'n'
+        && let Some(sep) = frac_group
+    {
+        return Err(error(format!(
+            "Cannot specify '{}' with 'n'.",
+            group.unwrap_or(sep)
+        )));
+    }
     let integer = value.kind.raw() == 2;
     let integer_code = matches!(c, 'b' | 'o' | 'd' | 'x' | 'X' | 'n' | 'c');
     if float {
@@ -730,6 +754,9 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
                 _ => "",
             },
         );
+    }
+    if let Some(sep) = frac_group {
+        s = group_fraction(s, sep)?;
     }
     let sign_len = usize::from(c != 'c' && s.starts_with(['-', '+', ' ']));
     let prefix_len = if integer && alternate && matches!(c, 'b' | 'o' | 'x' | 'X') {
