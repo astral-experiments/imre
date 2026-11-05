@@ -3,6 +3,19 @@ from collections.abc import MutableSequence
 
 
 def current():
+    receivers = [array("B", [1])]
+    original = receivers[0]
+
+    def replace_receiver():
+        receivers[0] = array("B", [9])
+        return 2
+
+    receivers[0].append(replace_receiver())
+    assert original.tolist() == [1, 2] and receivers[0].tolist() == [9]
+    saved_append = original.append
+    saved_append(3)
+    assert original.tolist() == [1, 2, 3]
+
     source = array('I', [1, 2, 3])
     view = memoryview(source)
     copy = source[:]

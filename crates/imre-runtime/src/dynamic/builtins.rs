@@ -792,6 +792,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
+        Value::Array(_) if super::array::has_method(attr) => "array.array",
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) | Value::NamedTuple { .. }
             if matches!(
