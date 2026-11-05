@@ -401,9 +401,12 @@ impl Heap {
             .take(MAX_CALLER_OPERANDS)
             .flat_map(|frame| frame.live.iter().take(8))
             .take(MAX_CALLER_OPERANDS);
-        current
-            .chain(callers)
-            .any(|root| self.short_path_keeps_owner(*root, owner))
+        let mut operands = current.chain(callers);
+        operands.clone().any(|&id| {
+            id == owner
+                || matches!(self.get(id), Value::LoopIterator { source, peeked }
+                if *source == owner || *peeked == Some(owner))
+        }) || operands.any(|&root| self.short_path_keeps_owner(root, owner))
     }
 
     /// A pending discard preserves the active frame's operands below its mark. It must also
