@@ -1948,6 +1948,7 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
     let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
         unreachable!()
     };
+    let frame = frame.as_mut();
     frame.closure.declared.extend(frame.names.keys().cloned());
     frame.closure.declared_complete = true;
     let declared = ctx.alloc(Value::Tuple(params.clone()));

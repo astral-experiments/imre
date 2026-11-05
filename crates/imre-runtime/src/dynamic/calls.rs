@@ -7885,9 +7885,9 @@ impl Context {
                 self.heap
                     .reserve_temporaries(kwargs.len().saturating_add(4))?;
                 let module = copy_label(&self.scope_data(scope).module)?;
-                let closure = allocator_api2::boxed::Box::try_new(value::ClosureScope::default())
+                let local = allocator_api2::boxed::Box::try_new(Scope::new(module, Some(scope)))
                     .map_err(|_| Error::new("MemoryError", ""))?;
-                let local = self.scope_with_closure(module, Some(scope), closure);
+                let local = self.alloc(Value::Scope(local));
                 let sig = self.parsed_parameters(code)?;
                 let names = |key: &str| -> Result<Vec<String>> {
                     let mut names = Vec::new();
