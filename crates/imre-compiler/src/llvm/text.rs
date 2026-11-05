@@ -4,6 +4,66 @@ use super::*;
 use crate::ir::{TextOperation, TextPredicate};
 
 impl Emitter<'_, '_> {
+    /// Reject long ASCII inputs whose folded prefix is absent from a small literal set.
+    /// Short inputs use the existing UTF-8 guard. Non-ASCII input keeps the ordinary case conversion.
+    pub(super) fn excluded_literal_prefix(
+        &mut self,
+        text: &str,
+        mask: u64,
+        tags: &[u32],
+    ) -> String {
+        let end_slot = self.entry_alloca("ptr");
+        let start = self.instruction(format!(
+            "call ptr @imre_str_bounds(ptr {text}, ptr {end_slot})"
+        ));
+        let end = self.instruction(format!("load ptr, ptr {end_slot}"));
+        let start_offset = self.instruction(format!("ptrtoint ptr {start} to i64"));
+        let end_offset = self.instruction(format!("ptrtoint ptr {end} to i64"));
+        let length = self.instruction(format!("sub i64 {end_offset}, {start_offset}"));
+        let has_prefix = self.instruction(format!("icmp uge i64 {length}, 3"));
+        let short = self.label();
+        let full = self.label();
+        let matched = self.label();
+        let other = self.label();
+        let done = self.label();
+        self.branch(&has_prefix, &full, &short);
+
+        self.start(&short);
+        let short_rejected = self.instruction(format!(
+            "call i32 @imre_str_excludes_ascii_prefix3(ptr {text}, i64 {mask})"
+        ));
+        self.jump(&done);
+
+        self.start(&full);
+        let [a, b, c] = std::array::from_fn(|index| {
+            let address = self.instruction(format!("getelementptr i8, ptr {start}, i64 {index}"));
+            let byte = self.instruction(format!("load i8, ptr {address}, align 1"));
+            self.instruction(format!("zext i8 {byte} to i32"))
+        });
+        let high = self.instruction(format!("shl i32 {a}, 16"));
+        let middle = self.instruction(format!("shl i32 {b}, 8"));
+        let first_two = self.instruction(format!("or i32 {high}, {middle}"));
+        let raw = self.instruction(format!("or i32 {first_two}, {c}"));
+        let folded = self.instruction(format!("or i32 {raw}, {}", 0x20_20_20));
+        self.line(format!("switch i32 {folded}, label %{other} ["));
+        for tag in tags {
+            self.line(format!("  i32 {tag}, label %{matched}"));
+        }
+        self.line("]");
+
+        self.start(&other);
+        let high_bits = self.instruction(format!("and i32 {raw}, {}", 0x80_80_80));
+        let ascii = self.instruction(format!("icmp eq i32 {high_bits}, 0"));
+        let rejected = self.instruction(format!("zext i1 {ascii} to i32"));
+        self.jump(&done);
+        self.start(&matched);
+        self.jump(&done);
+        self.start(&done);
+        self.instruction(format!(
+            "phi i32 [{short_rejected}, %{short}], [{rejected}, %{other}], [0, %{matched}]"
+        ))
+    }
+
     /// Tests alternatives on one local string by inspecting its first or last byte once.
     pub(super) fn ascii_affix_alternatives(&mut self, values: &[Expr]) -> Option<Value> {
         /// A one-byte UTF-8 literal is ASCII, so it fits in one of two masks.

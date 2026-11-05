@@ -8724,14 +8724,17 @@ impl Emitter<'_, '_> {
             }
             Builtin::SetCasePrefixPossible(prefix) => {
                 let text = &args[1].value.operand;
-                let rejected = self.instruction(match prefix {
-                    ir::SetCasePrefix::ExcludedBytes([lower, upper]) => format!(
+                let rejected = match prefix {
+                    ir::SetCasePrefix::ExcludedBytes([lower, upper]) => self.instruction(format!(
                         "call i32 @imre_str_affix_ascii(ptr {text}, i64 {lower}, i64 {upper}, i32 0)"
-                    ),
-                    ir::SetCasePrefix::ThreeByteHashes(mask) => format!(
+                    )),
+                    ir::SetCasePrefix::ThreeByteHashes(mask) => self.instruction(format!(
                         "call i32 @imre_str_excludes_ascii_prefix3(ptr {text}, i64 {mask})"
-                    ),
-                });
+                    )),
+                    ir::SetCasePrefix::ThreeByteValues { mask, tags } => {
+                        self.excluded_literal_prefix(text, *mask, tags)
+                    }
+                };
                 let possible = self.instruction(format!("icmp eq i32 {rejected}, 0"));
                 // A module initializer can call a function before the set is bound.
                 let unbound =

@@ -946,10 +946,11 @@ pub(crate) enum PairTableOp {
 }
 
 /// Prefixes that rule out every case-converted key in a literal string set.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum SetCasePrefix {
     ExcludedBytes([u64; 2]),
     ThreeByteHashes(u64),
+    ThreeByteValues { mask: u64, tags: Vec<u32> },
 }
 
 /// Select characters in the given set or below the Unicode scalar threshold.
