@@ -356,6 +356,31 @@ impl Checker<'_> {
         self.fixed_regex(&call.arguments.args[0], flags?)
     }
 
+    /// A capture-free greedy class has a single-pass collector. Other Python
+    /// patterns and call signatures use the ordinary object implementation.
+    pub(super) fn regex_runs(&mut self, call: &ast::ExprCall, split: bool) -> Result<Expr, String> {
+        let name = if split { "re.split" } else { "re.findall" };
+        let ([ast::Expr::StringLiteral(pattern), text], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return Err(self.scoped_builtin_error(name, call));
+        };
+        check_string(pattern, self.source)?;
+        let members = crate::fixed_regex::translate(pattern.value.to_str(), false)
+            .ok()
+            .and_then(|pattern| crate::fixed_regex::ascii_run_class(&pattern.source))
+            .ok_or_else(|| self.scoped_builtin_error(name, call))?;
+        let text = self.expr(text)?;
+        if text.ty != Type::Str {
+            return Err(self.scoped_builtin_error(name, call));
+        }
+        Ok(Expr {
+            ty: self.types.list(Type::Str),
+            kind: ExprKind::Builtin(Builtin::RegexRuns { members, split }, vec![text]),
+        })
+    }
+
     pub(super) fn sub_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let (
             [

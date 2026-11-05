@@ -529,6 +529,7 @@ impl Builtin {
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::RegexRuns { .. }
             | Self::RegexSub(_)
             | Self::UnittestCompilePattern
             | Self::RegexSearchText { .. }

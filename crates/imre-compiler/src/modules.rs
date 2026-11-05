@@ -1009,6 +1009,9 @@ pub(crate) enum Intrinsic {
     RegexSearch,
     RegexMatchStart,
     RegexSub,
+    RegexRuns {
+        split: bool,
+    },
     RegexVerbose,
     RegexUnicode,
     RegexAscii,
@@ -2194,6 +2197,8 @@ impl IntrinsicModule {
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "match") => Intrinsic::RegexMatchStart,
             (Self::Re, "sub") => Intrinsic::RegexSub,
+            (Self::Re, "findall") => Intrinsic::RegexRuns { split: false },
+            (Self::Re, "split") => Intrinsic::RegexRuns { split: true },
             (Self::Re, "DEBUG") => Intrinsic::REGEX_DEBUG,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,

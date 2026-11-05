@@ -1564,6 +1564,10 @@ pub(crate) enum Builtin {
         verbose: bool,
     },
     RegexSub(Vec<u8>),
+    RegexRuns {
+        members: Vec<u8>,
+        split: bool,
+    },
     RegexGroupDict,
     RegexFindIter,
     RegexMatchStart,
