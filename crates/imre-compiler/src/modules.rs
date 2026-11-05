@@ -2359,6 +2359,7 @@ impl IntrinsicModule {
             (Self::Math, "fma") => Intrinsic::ScopedObjectExport("math.fma"),
             (Self::Math, "frexp") => Intrinsic::ScopedObjectExport("math.frexp"),
             (Self::Math, "fsum") => Intrinsic::ScopedObjectExport("math.fsum"),
+            (Self::Math, "dist") => Intrinsic::ScopedObjectExport("math.dist"),
             (Self::Math, "hypot") => Intrinsic::ScopedObjectExport("math.hypot"),
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
