@@ -144,7 +144,9 @@ fn encoder(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<St
                 1 => Check::Crc32,
                 -1 | 4 => Check::Crc64,
                 10 => Check::Sha256,
-                0..=15 => return Err(codec_error(CodecError::UnsupportedCheck)),
+                _ if (0..=15).contains(&check) => {
+                    return Err(codec_error(CodecError::UnsupportedCheck));
+                }
                 _ => return Err(codec_error(CodecError::Program)),
             };
             if spec == NONE {
