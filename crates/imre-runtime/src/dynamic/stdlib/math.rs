@@ -382,6 +382,14 @@ fn logarithm(ctx: &mut Context, value: Id, log: fn(f64) -> f64) -> Result<f64> {
     Ok(log(x))
 }
 
+/// Add non-finite inputs in sequence so the target quiets signaling NaNs and
+/// selects their payloads using the same operation as CPython.
+#[cold]
+#[inline(never)]
+fn fsum_add_special(sum: f64, value: f64) -> f64 {
+    sum + value
+}
+
 /// Accumulate non-overlapping partial sums, as in CPython's math_fsum.
 fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
     let iterator = ctx.iterator(values)?;
@@ -389,7 +397,7 @@ fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
     let mark = ctx.heap.temporary_mark();
     let mut limit = ctx.heap.streaming_collection_limit();
     let mut partials = SmallVec::<[f64; 32]>::new();
-    let mut last_nan = None;
+    let mut special_sum = 0.0_f64;
     let mut inf_sum = 0.0_f64;
 
     while let Some(item) = ctx.next_item(iterator)? {
@@ -399,12 +407,10 @@ fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
         ctx.collect_streaming_garbage(&mut limit);
 
         if !x.is_finite() {
-            if x.is_nan() {
-                // Quiet a signaling NaN while preserving its sign and payload.
-                last_nan = Some(x + 0.0);
-            } else {
+            if x.is_infinite() {
                 inf_sum += x;
             }
+            special_sum = fsum_add_special(special_sum, x);
             partials.clear();
             continue;
         }
@@ -432,7 +438,6 @@ fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
     if inf_sum.is_nan() {
         return Err(Error::new("ValueError", "-inf + inf in fsum"));
     }
-    let special_sum = last_nan.unwrap_or(inf_sum);
     if special_sum != 0.0 {
         return Ok(ctx.alloc(Value::Float(special_sum)));
     }
