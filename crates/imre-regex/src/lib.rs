@@ -46,29 +46,53 @@ pub struct FixedPattern {
     pub groups: Vec<Capture>,
 }
 
-/// Recognize a greedy run of ASCII scalars in a validated engine expression.
-/// Non-ASCII UTF-8 bytes always miss, so every match boundary is a scalar boundary.
-pub fn ascii_run_class(source: &str) -> Option<Vec<u8>> {
+/// Encode a greedy scalar class as a byte lookup followed by little-endian
+/// change points for non-ASCII scalars. A single enclosing findall capture
+/// yields the same string as the complete match.
+pub fn run_class(pattern: &FixedPattern, whole_capture: bool) -> Option<Vec<u8>> {
     use regex_syntax::hir::Class;
-    let hir = regex_syntax::Parser::new().parse(source).ok()?;
-    let HirKind::Repetition(repeat) = hir.kind() else {
+    let hir = regex_syntax::Parser::new().parse(&pattern.source).ok()?;
+    let atom = match (pattern.groups.len(), hir.kind()) {
+        (1, _) => &hir,
+        (2, HirKind::Capture(capture)) if whole_capture && capture.index == 1 => &capture.sub,
+        _ => return None,
+    };
+    let HirKind::Repetition(repeat) = atom.kind() else {
         return None;
     };
     if !repeat.greedy || repeat.min != 1 || repeat.max.is_some() {
         return None;
     }
     let mut members = vec![0; 256];
+    let mut add = |start: char, end: char| {
+        let start = start as u32;
+        let end = end as u32 + 1;
+        if start < 128 {
+            members[start as usize..end.min(128) as usize].fill(1);
+        }
+        if end > 128 {
+            if start <= 128 && end == 0x110000 {
+                // Every non-ASCII scalar matches, independent of its UTF-8 width.
+                members[128..256].fill(1);
+            } else {
+                members.extend_from_slice(&start.max(128).to_le_bytes());
+                members.extend_from_slice(&end.to_le_bytes());
+            }
+        }
+    };
     match repeat.sub.kind() {
         HirKind::Class(Class::Unicode(class)) => {
             for range in class.ranges() {
-                if !range.end().is_ascii() {
-                    return None;
-                }
-                members[range.start() as usize..=range.end() as usize].fill(1);
+                add(range.start(), range.end());
             }
         }
-        HirKind::Literal(literal) if literal.0.len() == 1 && literal.0[0].is_ascii() => {
-            members[usize::from(literal.0[0])] = 1;
+        HirKind::Literal(literal) => {
+            let mut chars = std::str::from_utf8(&literal.0).ok()?.chars();
+            let ch = chars.next()?;
+            if chars.next().is_some() {
+                return None;
+            }
+            add(ch, ch);
         }
         _ => return None,
     }
