@@ -343,6 +343,33 @@ pub(super) struct IntegerAccumulate {
 }
 
 impl IntegerAccumulate {
+    fn collect_remaining(&mut self) -> crate::Result<Vec<Int>> {
+        let Some(list) = &self.list else {
+            return Ok(Vec::new());
+        };
+        // SAFETY: exact integer addition cannot reenter or mutate the rooted list.
+        let result = unsafe {
+            list.0.with(|items| {
+                if self.index == usize::MAX {
+                    return crate::integer_prefixes(items, self.total.as_ref());
+                }
+                let remaining = items.get(self.index..).unwrap_or_default();
+                match (&self.total, remaining.split_first()) {
+                    (Some(previous), Some((next, rest))) => {
+                        crate::integer_prefixes(rest, Some(&previous.add(next)))
+                    }
+                    _ => crate::integer_prefixes(remaining, None),
+                }
+            })
+        }?;
+        if let Some(last) = result.last() {
+            self.total = Some(last.clone());
+        }
+        self.list = None;
+        self.index = 0;
+        Ok(result)
+    }
+
     pub(super) fn next(&mut self) -> Option<OwnedWord> {
         if self.index == usize::MAX {
             self.index = 0;
@@ -368,6 +395,59 @@ impl IntegerAccumulate {
         // SAFETY: the reference being yielded owns this integer independently.
         Some(unsafe { OwnedWord::from_owned(word, WordKind::new(2)) })
     }
+}
+
+/// Materialize a typed integer cursor. A live accumulator can fold its suffix
+/// under one source borrow. Other cursors retain their ordinary pull semantics.
+///
+/// # Safety
+/// The caller roots a cursor whose successful pulls transfer exact integer words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_collect_int_cursor(cursor: *const Object) -> *const crate::List {
+    // SAFETY: the caller roots this cursor for the full call.
+    let cursor = unsafe { object(cursor) };
+    // SAFETY: the fast paths borrow exact integers and cannot reenter either cursor.
+    let bulk = unsafe {
+        cursor.0.with_mut(|s| match s {
+            Storage::IntegerAccumulate(scan) => Some(scan.collect_remaining()),
+            Storage::Repeat(Repeat {
+                value,
+                remaining: Some(count),
+            }) => {
+                let mut result = Vec::new();
+                Some(
+                    result
+                        .try_reserve_exact(*count)
+                        .map_err(|_| crate::Error::allocation())
+                        .map(|()| {
+                            // The typed cursor owns one integer independent of all yielded copies.
+                            result.resize_with(*count, || (*Int::borrow(value.word)).clone());
+                            *count = 0;
+                            result
+                        }),
+                )
+            }
+            _ => None,
+        })
+    };
+    let values = bulk.unwrap_or_else(|| {
+        let mut values = Vec::new();
+        while let Some((item, _)) = mappings::pull(cursor)? {
+            values
+                .try_reserve(1)
+                .map_err(|_| crate::Error::allocation())?;
+            values.push(Int(item.into_word()));
+        }
+        Ok(values)
+    });
+    crate::finish(
+        values.and_then(|values| {
+            crate::ListOwner::try_new(crate::List::new(values))
+                .map(crate::ListOwner::into_raw)
+                .map_err(|_| crate::Error::allocation())
+        }),
+        std::ptr::null(),
+    )
 }
 
 pub(super) struct Accumulate {

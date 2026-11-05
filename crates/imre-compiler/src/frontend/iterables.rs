@@ -51,6 +51,17 @@ impl Checker<'_> {
             let input = self.prepare_accumulate(scan, args)?;
             return self.collect_list(Iteration::Prepared(input), false, element, call);
         }
+        if element.is_none_or(|ty| ty == Type::Int)
+            && let ast::Expr::Name(name) = source
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && self.types.cursor_element(self.locals[slot]) == Some(Type::Int)
+        {
+            let cursor = self.expr(source)?;
+            return Ok(Expr {
+                ty: Type::ListInt,
+                kind: ExprKind::Builtin(Builtin::CollectIntCursor, vec![cursor]),
+            });
+        }
         if let Some(diff) = self.materialize_ndiff(source)? {
             if let Some(element) = element {
                 self.expect(element, Type::Str, source)?;

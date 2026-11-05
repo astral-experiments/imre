@@ -1,4 +1,4 @@
-from itertools import accumulate as scan
+from itertools import accumulate as scan, repeat
 from operator import add
 
 
@@ -41,3 +41,17 @@ def saved(values: list[int]) -> list[int]:
 
 
 print(saved([1 << 100, -(1 << 100), 7]))
+
+
+def collect_pending(values: list[int]) -> None:
+    iterator = scan(values, initial=17)
+    result = list(iterator)
+    values.append(5)
+    print(result, list(iterator))
+
+
+collect_pending([])
+collect_pending([1 << 140, -3, 8])
+repeated = repeat(9, 4)
+next(repeated)
+print(list(repeated), list(repeated))
