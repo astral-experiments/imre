@@ -103,3 +103,16 @@ key.__hash__.return_value = "invalid"
 with check.assertRaises(TypeError):
     hash(key)
 assert key.__hash__.call_count == 3
+
+# Normal protocol dispatch goes through the same child exposed on the mock.
+basket = mock.MagicMock()
+assert len(basket) == 0
+assert bool(basket)
+basket.__radd__.return_value = 9
+assert 5 + basket == 9
+assert basket.mock_calls == [call.__len__(), call.__bool__(), call.__radd__(5)]
+assert basket.method_calls == []
+basket.mock_add_spec(["__len__"])
+basket.__len__.return_value = 0
+assert not basket
+assert not hasattr(basket, "__radd__")

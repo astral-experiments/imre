@@ -227,30 +227,9 @@ class NonCallableMock(_FixedMock):
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
                  wraps=None, parent=None, _new_parent=None, _new_name="", **attrs):
-        methods = spec_set if spec_set is not None else spec
-        if _is_instance_mock(methods):
-            raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
-        original_spec = methods
-        spec_class = None
-        if issubclass(type(methods), type):
-            spec_class = methods
-            methods = dir(methods)
-        elif methods is not None and type(methods) not in (list, tuple):
-            spec_class = type(methods)
-            methods = dir(methods)
-        if spec_class is not None:
-            object.__setattr__(self, "_spec_asyncs", _spec_async_methods(original_spec, methods))
-        object.__setattr__(self, "_spec_class", spec_class)
+        self._mock_add_spec(spec_set if spec_set is not None else spec, spec_set is not None)
+        self._mock_set_magics()
         object.__setattr__(self, "_mock_wraps", wraps)
-        owner = type(self)
-        for magic in owner._mock_auto_magics:
-            if methods is None or magic in methods:
-                if magic not in owner.__dict__:
-                    setattr(owner, magic, _MagicSlot(magic, self))
-            elif magic in owner.__dict__:
-                delattr(self, magic)
-        object.__setattr__(self, "_mock_methods", methods)
-        object.__setattr__(self, "_mock_strict", spec_set is not None)
         super().__init__(name=name)
         self._mock_parent = parent
         self._mock_children = {}
@@ -268,6 +247,40 @@ class NonCallableMock(_FixedMock):
             if "unsafe" in attrs:
                 raise TypeError("Mock.__init__() got an unexpected keyword argument 'unsafe'")
             self.configure_mock(**attrs)
+
+    def _mock_add_spec(self, spec, strict):
+        methods = spec
+        if _is_instance_mock(methods):
+            raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
+        spec_class = None
+        if issubclass(type(methods), type):
+            spec_class = methods
+            methods = dir(methods)
+        elif methods is not None and type(methods) not in (list, tuple):
+            spec_class = type(methods)
+            methods = dir(methods)
+        asyncs = _spec_async_methods(spec, methods) if spec_class is not None else ()
+        object.__setattr__(self, "_spec_asyncs", asyncs)
+        object.__setattr__(self, "_spec_class", spec_class)
+        object.__setattr__(self, "_mock_methods", methods)
+        object.__setattr__(self, "_mock_strict", strict)
+
+    def mock_add_spec(self, spec, spec_set=False):
+        self._mock_add_spec(spec, spec_set)
+
+    def _mock_set_magics(self):
+        owner = type(self)
+        magics = owner._mock_auto_magics
+        if not magics:
+            return
+        present = set(owner.__dict__)
+        allowed = magics
+        if self._mock_methods is not None:
+            allowed = magics.intersection(self._mock_methods)
+            for name in (magics - allowed) & present:
+                delattr(self, name)
+        for name in allowed - present:
+            setattr(owner, name, _MagicSlot(name, self))
 
     @property
     def __class__(self):
@@ -339,6 +352,8 @@ class NonCallableMock(_FixedMock):
         return f"<{type(self).__name__}{name_part}{spec_part} id='{id(self)}'>"
 
     def __setattr__(self, name, value):
+        if name in _unsupported_magics:
+            raise AttributeError(f"Attempting to set unsupported magic method {name!r}.")
         if name in _mock_magics:
             if self._mock_methods is not None and name not in self._mock_methods:
                 raise AttributeError(f"Mock object has no attribute {name!r}")
@@ -386,10 +401,10 @@ class NonCallableMock(_FixedMock):
         # Each instance has a private subclass for its own protocol slots.
         factory = type(self).__mro__[1]
         name = kwargs.get("_new_name")
-        if name in self._spec_asyncs:
+        if name in self._spec_asyncs or (name in _async_method_magics and issubclass(factory, MagicMock)):
             factory = AsyncMock
         elif issubclass(factory, AsyncMock):
-            is_sync = name in _mock_magics or name in (self._mock_methods or ())
+            is_sync = name in _all_sync_magics or name in (self._mock_methods or ())
             factory = MagicMock if is_sync else AsyncMock
         elif not issubclass(factory, CallableMixin):
             factory = MagicMock if issubclass(factory, NonCallableMagicMock) else Mock
@@ -595,16 +610,39 @@ class NonCallableMock(_FixedMock):
         raise AssertionError(f"{_format_recorded_call(expected, self._name())} {action} not found") from cause
 
 
-# CPython's protocol names must not fall through to ordinary attribute children.
-_mock_magics = set("__%s__" % name for name in (
-    "abs add aenter aexit aiter and anext bool ceil complex contains delete delitem dir divmod "
-    "enter eq exit float floor floordiv format fspath ge get getformat getinitargs getitem "
-    "getnewargs getnewargs_ex getstate gt hash iadd iand ifloordiv ilshift imatmul imod imul "
-    "index int invert ior ipow irshift isub iter itruediv ixor le len lshift lt matmul missing "
-    "mod mul ne neg next or pos pow radd rand rdivmod reduce reduce_ex repr reversed rfloordiv "
-    "rlshift rmatmul rmod rmul ror round rpow rrshift rshift rsub rtruediv rxor set setitem "
-    "setstate sizeof str sub subclasses truediv trunc xor"
-).split())
+# Binary operations have reflected and in-place forms. divmod has no in-place form.
+_numeric_magics = "add sub mul matmul truediv floordiv mod lshift rshift and xor or pow".split()
+_magics = {"__%s__" % name for name in (
+    "lt le gt ge eq ne getitem setitem delitem len contains iter hash str sizeof enter exit "
+    "divmod rdivmod neg pos abs invert complex int float index round trunc floor ceil bool next fspath aiter"
+).split()}
+_magics.update("__%s%s__" % (prefix, name) for name in _numeric_magics for prefix in ("", "r", "i"))
+_async_method_magics = {"__aenter__", "__aexit__", "__anext__"}
+_all_sync_magics = _magics | {"__%s__" % name for name in (
+    "get set delete reversed missing reduce reduce_ex getinitargs getnewargs getstate setstate "
+    "getformat repr dir subclasses format getnewargs_ex"
+).split()}
+_mock_magics = _all_sync_magics | _async_method_magics
+_unsupported_magics = {"__getattr__", "__setattr__", "__init__", "__new__", "__prepare__",
+                       "__instancecheck__", "__subclasscheck__", "__del__"}
+
+_magic_return_values = {
+    "__lt__": NotImplemented, "__gt__": NotImplemented, "__le__": NotImplemented, "__ge__": NotImplemented,
+    "__int__": 1, "__index__": 1, "__float__": 1.0, "__complex__": 1j, "__bool__": True,
+    "__len__": 0, "__contains__": False, "__exit__": False, "__aexit__": False,
+}
+
+
+class _AsyncIterator:
+    def __init__(self, iterator):
+        self.iterator = iterator
+
+    async def __anext__(self):
+        try:
+            return next(self.iterator)
+        except StopIteration:
+            pass
+        raise StopAsyncIteration
 
 
 class _MagicSlot:
@@ -617,17 +655,30 @@ class _MagicSlot:
             raise AttributeError(self.parent._mock_path() + "." + self.name)
         child = self.parent._get_child(self.name, magic=True)
         setattr(self.parent, self.name, child)
-        if self.name == "__exit__":
-            child.return_value = False
-        elif self.name == "__hash__":
-            child.return_value = object.__hash__(self.parent)
-        elif self.name == "__int__":
-            child.return_value = 1
-        elif self.name == "__iter__":
+        name = self.name
+        parent = self.parent
+        if name in _magic_return_values:
+            child.return_value = _magic_return_values[name]
+        elif name == "__hash__":
+            child.return_value = object.__hash__(parent)
+        elif name == "__str__":
+            child.return_value = object.__str__(parent)
+        elif name == "__sizeof__":
+            child.return_value = object.__sizeof__(parent)
+        elif name == "__fspath__":
+            child.return_value = f"{type(parent).__name__}/{parent._mock_path()}/{id(parent)}"
+        elif name in ("__eq__", "__ne__"):
+            def compare(other):
+                if child._node._result != -1:
+                    return child.return_value if name == "__eq__" else DEFAULT
+                if parent is other:
+                    return name == "__eq__"
+                return NotImplemented
+            child.side_effect = compare
+        elif name in ("__iter__", "__aiter__"):
             def iterate():
-                if child._node._result == -1:
-                    return iter(())
-                return iter(child.return_value)
+                iterator = iter(()) if child._node._result == -1 else iter(child.return_value)
+                return iterator if name == "__iter__" else _AsyncIterator(iterator)
             child.side_effect = iterate
         return child
 
@@ -694,7 +745,11 @@ class Mock(CallableMixin, NonCallableMock):
 
 
 class MagicMock(Mock):
-    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__setitem__", "__hash__", "__int__", "__iter__", "__next__")
+    _mock_auto_magics = _magics | _async_method_magics
+
+    def mock_add_spec(self, spec, spec_set=False):
+        self._mock_add_spec(spec, spec_set)
+        self._mock_set_magics()
 
 
 class AsyncMock(Mock):
@@ -792,6 +847,7 @@ class AsyncMock(Mock):
 
 class NonCallableMagicMock(NonCallableMock):
     _mock_auto_magics = MagicMock._mock_auto_magics
+    mock_add_spec = MagicMock.mock_add_spec
 
 
 def _autospec_target(spec, name, value):
