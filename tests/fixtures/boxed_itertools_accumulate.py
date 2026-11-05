@@ -3,6 +3,7 @@ import itertools
 import pickle
 import weakref
 from itertools import accumulate
+from operator import add
 
 
 def current():
@@ -11,6 +12,13 @@ def current():
     assert list(accumulate(iterable=(1, 2), func=None, initial=None)) == [1, 3]
     assert list(accumulate(['a', 'b', 'c'])) == ['a', 'ab', 'abc']
     assert list(accumulate((2, 3, 4), lambda a, b: a * b)) == [2, 6, 24]
+    assert list(accumulate([1 << 70, -2, 3], add)) == [1 << 70, (1 << 70) - 2, (1 << 70) + 1]
+
+    class SubtractFrom(int):
+        def __radd__(self, left):
+            return left - int(self)
+
+    assert list(accumulate([5, SubtractFrom(2), 1], add)) == [5, 3, 4]
 
     events = []
     failure = ValueError('source or callback')

@@ -8,6 +8,7 @@ def current():
     assert mean((huge, huge)) == huge
     assert type(mean([huge, -huge])) is int
     assert mean([0, 1, 1]) == 2 / 3
+
     class Interrupted:
         def __iter__(self):
             yield 1
@@ -28,6 +29,21 @@ def current():
     for values in samples:
         result = mean(x for x in values)
         print(type(result).__name__, result)
+    smallest = float.fromhex("0x0.0000000000001p-1022")
+    largest = float.fromhex("0x1.fffffffffffffp+1023")
+    halfway = float.fromhex("0x1.0000000000001p+0")
+    for values in [
+        [largest, largest],
+        [-largest, 1.0, largest],
+        [smallest, 0.0],
+        [-smallest, 0.0],
+        [1.0, halfway],
+        [0.0, -0.0],
+        [1.5, float("inf")],
+        [1.5, 2],
+    ]:
+        print(mean(values).hex(), mean(tuple(values)).hex(), mean(iter(values)).hex())
+
     for values, error in [
         ([], StatisticsError),
         (["x"], TypeError),
