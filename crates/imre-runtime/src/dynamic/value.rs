@@ -4357,8 +4357,12 @@ impl Heap {
             match heap.get(root) {
                 Value::Method { receiver, .. } => keeps(heap, *receiver, owner, budget),
                 Value::LoopIterator { source, peeked } => {
-                    *source == owner || *peeked == Some(owner)
+                    *peeked == Some(owner) || keeps(heap, *source, owner, budget)
                 }
+                Value::Map { inputs, .. } | Value::Zip { inputs, .. } => inputs
+                    .iter()
+                    .take(*budget)
+                    .any(|&input| keeps(heap, input, owner, budget)),
                 Value::Instance { fields, .. } => fields
                     .values()
                     .take(*budget)
@@ -4385,11 +4389,13 @@ impl Heap {
     fn caller_keeps_generator(&self, owner: Id) -> bool {
         matches!(self.get(owner), Value::Generator { .. })
             && self.frames.iter().rev().take(24).skip(1).any(|frame| {
-                // Context manager exits survive at the front of a caller's operands,
-                // even when recent expression temporaries fill the other end.
+                // Context manager exits and loop iterators survive at the front of a
+                // caller's operands as newer expression temporaries fill the other end.
                 frame.live.iter().take(8).any(|id| {
-                    matches!(self.get(*id), Value::Method { .. })
-                        && self.short_path_keeps_owner(*id, owner)
+                    matches!(
+                        self.get(*id),
+                        Value::Method { .. } | Value::LoopIterator { .. }
+                    ) && self.short_path_keeps_owner(*id, owner)
                 })
             })
     }
