@@ -193,6 +193,63 @@ pub(super) fn sum<'a>(items: impl Iterator<Item = &'a Int> + Clone) -> Option<In
     Some(Int::new(from_words(&result)))
 }
 
+/// Write a short packed integer directly from its signed row. Groups of 19
+/// decimal digits fit in one word, and the leading 128 bits use integer formatting.
+pub(super) fn write_short_decimal(
+    n: &Int,
+    output: &mut impl std::fmt::Write,
+    check_digits: bool,
+) -> Option<std::fmt::Result> {
+    let words = row(n);
+    if words.len() > 4 {
+        return None;
+    }
+    let mask = sign_extension(*words.last().unwrap());
+    let mut magnitude = [0_u64; 4];
+    let mut carry = u64::from(mask != 0);
+    for (slot, &word) in magnitude.iter_mut().zip(words) {
+        let (digit, overflow) = (word ^ mask).overflowing_add(carry);
+        *slot = digit;
+        carry = u64::from(overflow);
+    }
+    let mut length = magnitude.iter().rposition(|&v| v != 0).map_or(0, |i| i + 1);
+    const BASE: u128 = 10_000_000_000_000_000_000;
+    let mut tails = [0_u64; 3];
+    let mut count = 0;
+    while length > 2 {
+        let mut remainder = 0_u128;
+        for digit in magnitude[..length].iter_mut().rev() {
+            let current = (remainder << 64) | u128::from(*digit);
+            *digit = (current / BASE) as u64;
+            remainder = current % BASE;
+        }
+        tails[count] = remainder as u64;
+        count += 1;
+        while length > 0 && magnitude[length - 1] == 0 {
+            length -= 1;
+        }
+    }
+    let head = (u128::from(magnitude[1]) << 64) | u128::from(magnitude[0]);
+    let mut buffer = itoa::Buffer::new();
+    let leading = buffer.format(head);
+    if check_digits && !crate::integer_text::decimal_digits_allowed(leading.len() + count * 19) {
+        return None;
+    }
+    Some((|| {
+        if mask != 0 {
+            output.write_char('-')?;
+        }
+        output.write_str(leading)?;
+        let mut buffer = itoa::Buffer::new();
+        for &tail in tails[..count].iter().rev() {
+            let text = buffer.format(tail);
+            output.write_str(&"0000000000000000000"[text.len()..])?;
+            output.write_str(text)?;
+        }
+        Ok(())
+    })())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
