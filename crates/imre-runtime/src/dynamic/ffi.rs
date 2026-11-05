@@ -2019,7 +2019,9 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live, replaced == TRUE) && !ctx.can_skip_finalizer_sweep() {
+    if ctx.heap.assignment_target(live, replaced == TRUE)
+        && !ctx.can_skip_finalizer_sweep(ctx.heap.temporary_mark())
+    {
         ctx.collect_unreachable();
     }
 }
@@ -2156,7 +2158,7 @@ impl Context {
         if self.heap.has_ordinary_finalizers()
             && !self.heap.caller_keeps_only_finalizer()
             // A bound stream can keep its underlying finalizer alive without naming it.
-            && !self.can_skip_finalizer_sweep()
+            && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
             && self.heap.has_unbound_finalizer(NONE)
         {
             match self.drain_acyclic_finalizers() {
@@ -2171,7 +2173,9 @@ impl Context {
             }
         }
         let finalizers = self.heap.take_finalizer_check();
-        if self.heap.take_sweep_request() || (finalizers && !self.can_skip_finalizer_sweep()) {
+        if self.heap.take_sweep_request()
+            || (finalizers && !self.can_skip_finalizer_sweep(self.heap.temporary_mark()))
+        {
             let (heap, roots) = self.heap_and_roots();
             if let Some(callbacks) = heap.collect(roots) {
                 self.run_weak_callbacks(callbacks);
@@ -2181,7 +2185,9 @@ impl Context {
 
     /// Flush unreachable file owners before the caller evaluates its next operand.
     pub(super) fn leave_frame(&mut self, result: Id, returning: bool) {
-        if self.heap.leave(result, returning) {
+        if self.heap.leave(result, returning)
+            && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+        {
             self.collect_unreachable();
         }
     }
@@ -2194,7 +2200,7 @@ impl Context {
     /// Release discarded operands and root their result before any weak callbacks or finalizers run.
     pub(super) fn discard_temporaries(&mut self, mark: usize, result: Option<Id>) {
         let collect = if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
-            || self.can_skip_finalizer_sweep()
+            || self.can_skip_finalizer_sweep(mark)
         {
             self.heap.release_temporaries_since(mark);
             false
@@ -2235,7 +2241,7 @@ impl Context {
     }
 
     /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
-    fn can_skip_finalizer_sweep(&self) -> bool {
+    fn can_skip_finalizer_sweep(&self, retained_current: usize) -> bool {
         if self.heap.full_collection_active() {
             return false;
         }
@@ -2250,7 +2256,7 @@ impl Context {
                 .is_some_and(|chain| self.heap.finalizers_kept_by(chain)))
             || self
                 .heap
-                .cached_finalizers_kept(globals, input.as_ref(), true)
+                .cached_finalizers_kept(globals, input.as_ref(), Some(retained_current))
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
@@ -2258,7 +2264,7 @@ impl Context {
         if !self.heap.tracks_finalizers() {
             return;
         }
-        if self.can_skip_finalizer_sweep() {
+        if self.can_skip_finalizer_sweep(mark) {
             self.heap.keep_call_result(mark, result);
         } else if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
@@ -2267,7 +2273,7 @@ impl Context {
 
     /// Finish an assignment that dropped a possible finalizer owner.
     pub(super) fn finish_binding_release(&mut self) {
-        if !self.can_skip_finalizer_sweep() {
+        if !self.can_skip_finalizer_sweep(self.heap.temporary_mark()) {
             self.collect_unreachable();
         }
         self.heap.release_unbound_finalizers();

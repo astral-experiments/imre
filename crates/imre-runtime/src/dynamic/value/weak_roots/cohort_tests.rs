@@ -35,10 +35,10 @@ fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
     heap.release_temporaries_since(0);
 
     heap.learn_finalizer_paths(globals, stdin.as_ref());
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), false));
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 
-    for (list, before_discard) in [(refs, true), (held, false)] {
+    for (list, before_discard) in [(refs, Some(0)), (held, None)] {
         let Value::List(items) = heap.get_mut(list) else {
             unreachable!()
         };
@@ -49,23 +49,55 @@ fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
         };
         items[0] = old;
     }
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 
     let extra = ctx.instance(class, None);
     let heap = &mut ctx.heap;
     heap.register_finalizer(extra);
     heap.release_temporaries_since(0);
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), false));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
     heap.keep(extra);
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), false));
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
     heap.release_temporaries_since(0);
     heap.take_finalizer(extra, false);
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 
     heap.leave(NONE, false);
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), false));
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), true));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+}
+
+#[test]
+fn published_loop_sources_and_peeked_items_keep_finalizers_alive() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let class = ctx.builtin("object");
+    let scope = ctx.scope("sample", None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let source = ctx.instance(class, None);
+    let item = ctx.instance(class, None);
+    let cursor = ctx.alloc(Value::LoopIterator {
+        source,
+        peeked: Some(item),
+    });
+    let globals = ctx.finalizer_path_roots();
+    let stdin = stdlib::io::rooted_input_chain(&ctx);
+    let heap = &mut ctx.heap;
+    heap.register_finalizer(source);
+    heap.register_finalizer(item);
+    heap.release_temporaries_since(0);
+    heap.keep(cursor);
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(1)));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+
+    heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
+        unreachable!();
+    };
+    *peeked = None;
+    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 }
 
 #[test]
