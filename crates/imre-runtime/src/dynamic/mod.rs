@@ -1916,7 +1916,7 @@ impl Context {
         parent: Option<Id>,
         closure: allocator_api2::boxed::Box<value::ClosureScope>,
     ) -> Id {
-        self.alloc(Value::Scope(Scope {
+        self.alloc(Value::Scope(Box::new(Scope {
             class_body: None,
             enum_namespace: None,
             is_abstract: false,
@@ -1932,7 +1932,7 @@ impl Context {
             exec_locals: None,
             parent,
             module,
-        }))
+        })))
     }
     /// Comprehensions own their loop variables, but assignment expressions bind outside them.
     fn comprehension_scope(&mut self, parent: Id, targets: Id) -> Result<Id> {

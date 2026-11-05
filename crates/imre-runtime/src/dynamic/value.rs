@@ -1191,7 +1191,7 @@ pub(super) enum Value {
         factory: Id,
         entries: super::dictionary::Entries,
     },
-    Scope(Scope),
+    Scope(Box<Scope>),
     Cell(Option<Id>),
     Super {
         start: Id,
@@ -1287,9 +1287,10 @@ pub(super) enum Value {
     Union(super::union::Union),
     Instance {
         class: Id,
-        fields: indexmap::IndexMap<String, Id>,
+        fields: Box<indexmap::IndexMap<String, Id>>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>,
+        member_values:
+            Option<Box<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,

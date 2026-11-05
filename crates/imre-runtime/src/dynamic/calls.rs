@@ -5739,7 +5739,7 @@ impl Context {
         let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
             unreachable!()
         };
-        let original = std::mem::take(fields);
+        let original = std::mem::take(fields.as_mut());
         let mut ordinary = Vec::new();
         let mut retained = indexmap::IndexMap::new();
         for (name, value) in original {
@@ -5752,7 +5752,7 @@ impl Context {
         let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
             unreachable!()
         };
-        *fields = retained;
+        **fields = retained;
         ordinary
     }
 
