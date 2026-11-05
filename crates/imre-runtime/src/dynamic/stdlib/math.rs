@@ -123,7 +123,10 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(result))));
     }
-    if matches!(operation, "atan2" | "copysign" | "ldexp" | "pow") {
+    if matches!(
+        operation,
+        "atan2" | "copysign" | "ldexp" | "pow" | "remainder"
+    ) {
         let &[first, second] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -135,6 +138,7 @@ pub(super) fn call(
             "atan2" => first.atan2(as_double(ctx, second)?),
             "copysign" => first.copysign(as_double(ctx, second)?),
             "pow" => real_power(first, as_double(ctx, second)?)?,
+            "remainder" => ieee_remainder(first, as_double(ctx, second)?)?,
             _ => scale_by_power_of_two(ctx, first, second)?,
         };
         return Ok(ctx.alloc(Value::Float(result)));
@@ -802,8 +806,24 @@ fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
     Ok(result)
 }
 
+/// Reduce by the nearest multiple of the divisor, choosing the even multiple on ties.
+fn ieee_remainder(x: f64, y: f64) -> Result<f64> {
+    // CPython returns the first NaN operand, including its sign and payload.
+    if x.is_nan() {
+        return Ok(x);
+    }
+    if y.is_nan() {
+        return Ok(y);
+    }
+    if x.is_infinite() || y == 0.0 {
+        return Err(Error::new("ValueError", "math domain error"));
+    }
+    Ok(remainder(x, y))
+}
+
 unsafe extern "C" {
     safe fn atanh(x: f64) -> f64;
+    safe fn remainder(x: f64, y: f64) -> f64;
     safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
     #[link_name = "nextafter"]
     safe fn c_nextafter(x: f64, y: f64) -> f64;

@@ -3334,7 +3334,15 @@ impl Context {
             self.bind(scope, "__builtins__", builtins);
         } else if name == "math" {
             // Re-executing the native loader preserves this module's attribute edits.
-            for name in ["asinh", "atanh", "cosh", "nextafter", "sinh", "tanh"] {
+            for name in [
+                "asinh",
+                "atanh",
+                "cosh",
+                "nextafter",
+                "remainder",
+                "sinh",
+                "tanh",
+            ] {
                 let function = self.builtin(&format!("math.{name}"));
                 self.bind(scope, name, function);
             }
