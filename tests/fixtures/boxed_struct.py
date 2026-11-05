@@ -317,6 +317,21 @@ def current():
     else:
         raise AssertionError("lost index error")
 
+    try:
+        struct.pack("B", OverflowingIndex())
+    except struct.error as error:
+        assert str(error) == "'B' format requires 0 <= number <= 255"
+    else:
+        raise AssertionError("unsigned byte accepted a failed conversion")
+
+    target = bytearray(b"!" * 12)
+    try:
+        struct.pack_into(opposite_endian + "BQB", target, 1, 7, Field((1 << 80) + 99), 8)
+    except struct.error:
+        assert target == b"!\x07" + (99).to_bytes(8, "big" if opposite_endian == ">" else "little") + b"\0!"
+    else:
+        raise AssertionError("unsigned long long accepted an out-of-range index")
+
     # The length field of a native cmsghdr has type size_t.
     header = struct.Struct("@Nii")
     assert header.unpack(header.pack(Field(20), 1, 1)) == (20, 1, 1)
