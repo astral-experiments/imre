@@ -127,6 +127,13 @@ def check_installed_site(imre, root, run):
     archive.write_bytes(exported.stdout)
     packaged = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
+    words = run(
+        launcher, "-IB", "-c",
+        "import importlib, sys; lexer = importlib.import_module(sys.argv[1]); "
+        "print(lexer.join(lexer.split(sys.argv[2])))",
+        "shlex", "'two words' tail", timeout=300,
+    )
+    assert (words.returncode, words.stdout, words.stderr) == (0, b"'two words' tail\n", b""), words
     reader = root / "read_tar_entry.py"
     reader.write_text(
         "from graphlib import TopologicalSorter\n"

@@ -244,10 +244,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "glob" => bundled_source!("glob.py"),
         "gzip" => bundled_source!("gzip.py"),
         "ntpath" => bundled_source!("ntpath.py"),
-        "shlex" => Some((
-            "shlex.py",
-            include_str!("../../../../benchmarks/cpython_stdlib/full/shlex/upstream/Lib/shlex.py"),
-        )),
+        "shlex" => bundled_source!("shlex.py"),
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => bundled_source!("shutil.py"),
         "socket" => bundled_source!("socket.py"),
