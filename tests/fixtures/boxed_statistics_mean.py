@@ -27,7 +27,6 @@ def current():
     for values, error in [
         ([], StatisticsError),
         (["x"], TypeError),
-        ([Decimal("0.1"), 1.0], TypeError),
         (Interrupted(), RuntimeError),
     ]:
         try:
@@ -36,3 +35,14 @@ def current():
             print(type(exc).__name__, exc)
         else:
             raise AssertionError("invalid input accepted")
+
+    try:
+        mean([Decimal("0.1"), 1.0])
+    except TypeError as exc:
+        # The types come from a set, so CPython can name them in either order.
+        assert str(exc) in (
+            "don't know how to coerce Decimal and float",
+            "don't know how to coerce float and Decimal",
+        )
+    else:
+        raise AssertionError("mixed Decimal and float accepted")
