@@ -987,6 +987,8 @@ impl<T> std::ops::Deref for BoxedFile<T> {
 pub(super) struct BoxedTextFile {
     pub(super) dictionary: Id,
     pub(super) file: crate::objects::TextFile,
+    pub(super) encoding: Id,
+    pub(super) errors: Id,
     pub(super) finalizing: bool,
     pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
@@ -2296,7 +2298,7 @@ impl Value {
                 state.borrow().children(visit);
             }
             Self::TextFile(file) => {
-                visit.push(file.dictionary);
+                visit.extend([file.dictionary, file.encoding, file.errors]);
                 visit.extend(file.buffer);
             }
             Self::BufferedRandom(file, name) => {

@@ -614,6 +614,8 @@ pub(super) fn text_method(
         ));
     }
     match name {
+        "encoding" => Ok(file.encoding),
+        "errors" => Ok(file.errors),
         "closed" => Ok(crate::dynamic::builtins::boolean(file.closed())),
         "read" | "readline" => Ok(ctx.text(file.read(name == "readline")?.into_string())),
         "write" => {

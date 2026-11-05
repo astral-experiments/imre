@@ -4290,12 +4290,8 @@ impl Context {
             {
                 return self.lookup_attr(buffer, "name");
             }
-            Value::TextFile(ref file)
-                if name == "encoding"
-                    && let Some(encoding) = file.encoding() =>
-            {
-                return Ok(self.text(encoding.as_str()));
-            }
+            Value::TextFile(ref file) if name == "encoding" => return Ok(file.encoding),
+            Value::TextFile(ref file) if name == "errors" => return Ok(file.errors),
             Value::TextFile(ref file) if name == "_finalizing" => {
                 return Ok(builtins::boolean(file.finalizing));
             }
