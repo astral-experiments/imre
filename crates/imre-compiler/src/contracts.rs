@@ -578,6 +578,7 @@ impl Builtin {
             | Self::IntExtremum { .. }
             | Self::IntBitLength
             | Self::FloatIsInteger
+            | Self::FloatLog2
             | Self::IntSignAsFloat
             | Self::FloatCopySign
             | Self::IsInstance(_)
@@ -916,6 +917,7 @@ impl Builtin {
             }
             Self::IntBitLength => signature(&[Type::Int], Type::Int),
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
+            Self::FloatLog2 => signature(&[Type::Float], Type::Float),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;

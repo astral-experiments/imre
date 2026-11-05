@@ -1,3 +1,6 @@
+from math import log2
+
+
 def integer(label: str, value: int) -> int:
     print(label)
     return value
@@ -65,3 +68,11 @@ except ZeroDivisionError:
 print(floating("integer receiver", -0.0).is_integer())
 for value in (2.0, -3.5, 5e-324, 1e308, float("inf"), float("-inf"), float("nan")):
     print(value.is_integer())
+
+print(log2(floating("logarithm receiver", 0.125)))
+print(log2(5e-324), log2(float("inf")), log2(float("nan")))
+for value in (-0.0, -2.5, float("-inf")):
+    try:
+        print(log2(value))
+    except ValueError as error:
+        print(str(error))

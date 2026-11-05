@@ -7456,6 +7456,14 @@ impl Emitter<'_, '_> {
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
+            Builtin::FloatLog2 => Value {
+                ty: Type::Float,
+                operand: self.instruction(format!(
+                    "call double @llvm.log2.f64(double {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::FloatIsInteger => {
                 let value = &args[0].value.operand;
                 let truncated =
@@ -10750,6 +10758,7 @@ declare ptr @imre_popen_selector_class(i32)
 declare void @imre_popen_set_selector(ptr)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
+declare double @llvm.log2.f64(double)
 declare double @llvm.fabs.f64(double)
 declare double @llvm.copysign.f64(double, double)
 declare double @llvm.trunc.f64(double)
