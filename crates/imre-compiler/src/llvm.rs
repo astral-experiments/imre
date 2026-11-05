@@ -5313,23 +5313,36 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::RegexRunCount { members, split } => {
-                let mut matching = members
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, member)| **member != 0);
-                let singleton = match (matching.next(), matching.next()) {
-                    (Some((byte, _)), None) => byte as i32,
-                    _ => -1,
-                };
                 let table = self.byte_array(members.clone());
-                self.output.local_helper(
-                    "count_ascii_regex_runs",
-                    include_str!("llvm/count_ascii_regex_runs.ll"),
-                );
                 let subject = &args[0].value.operand;
-                let operand = self.checked_instruction(format!(
-                    "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split})"
-                ));
+                self.output.local_helper(
+                    "regex_run_count_word",
+                    include_str!("llvm/regex_run_count_word.ll"),
+                );
+                let call = if members.len() == 256 {
+                    let mut matching = members.iter().enumerate().filter(|(_, flag)| **flag != 0);
+                    let singleton = match (matching.next(), matching.next()) {
+                        (Some((byte, _)), None) => byte as i32,
+                        _ => -1,
+                    };
+                    self.output.local_helper(
+                        "count_ascii_regex_runs",
+                        include_str!("llvm/count_ascii_regex_runs.ll"),
+                    );
+                    format!(
+                        "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split})"
+                    )
+                } else {
+                    self.output.local_helper(
+                        "count_unicode_regex_runs",
+                        include_str!("llvm/count_unicode_regex_runs.ll"),
+                    );
+                    let bounds = (members.len() - 256) / 4;
+                    format!(
+                        "call i64 @count_unicode_regex_runs(ptr {subject}, ptr @{table}, i64 {bounds}, i1 {split})"
+                    )
+                };
+                let operand = self.checked_instruction(call);
                 Value {
                     ty: returns,
                     operand,
