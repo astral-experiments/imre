@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 from unittest import TestCase
-from unittest.mock import DEFAULT, Mock, call, create_autospec
+from unittest.mock import DEFAULT, AsyncMock, MagicMock, Mock, call, create_autospec
 
 
 receipts = []
@@ -74,3 +74,23 @@ async def check_dispatch():
 
 
 asyncio.run(check_dispatch())
+
+
+class Carrier:
+    @staticmethod
+    async def send(parcel, /, *, depot):
+        return parcel, depot
+
+
+ship = create_autospec(inspect.getattr_static(Carrier, "send"), return_value="queued")
+assert isinstance(ship, MagicMock) and not isinstance(ship, AsyncMock)
+with check.assertRaises(TypeError):
+    ship(depot="west")
+with check.assertRaises(TypeError):
+    ship("A17")
+ship.assert_not_called()
+pending = ship("A17", depot="west")
+ship.assert_called_once_with("A17", depot="west")
+ship.assert_not_awaited()
+assert asyncio.run(pending) == "queued"
+ship.assert_awaited_once_with("A17", depot="west")

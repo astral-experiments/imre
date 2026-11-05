@@ -175,6 +175,15 @@ def _extract_mock(value):
     return value
 
 
+def _is_async_obj(value):
+    from inspect import isawaitable, iscoroutinefunction
+
+    if _is_instance_mock(value) and not isinstance(value, AsyncMock):
+        return False
+    value = getattr(value, "__func__", value)
+    return iscoroutinefunction(value) or isawaitable(value)
+
+
 def _is_exception(value):
     return isinstance(value, BaseException) or isinstance(value, type) and issubclass(value, BaseException)
 
@@ -223,7 +232,12 @@ class NonCallableMock(_FixedMock):
 
     def __new__(cls, spec=None, *, spec_set=None, **kwargs):
         # Give each mock its own class for special-method lookup.
-        return object.__new__(type(cls.__name__, (cls,), {}))
+        bases = (cls,)
+        if not issubclass(cls, AsyncMockMixin):
+            spec_arg = spec_set or spec
+            if spec_arg is not None and _is_async_obj(spec_arg):
+                bases = (AsyncMockMixin, cls)
+        return object.__new__(type(cls.__name__, bases, {}))
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
                  wraps=None, parent=None, _new_parent=None, _new_name="", **attrs):
@@ -403,7 +417,7 @@ class NonCallableMock(_FixedMock):
         name = kwargs.get("_new_name")
         if name in self._spec_asyncs or (name in _async_method_magics and issubclass(factory, MagicMock)):
             factory = AsyncMock
-        elif issubclass(factory, AsyncMock):
+        elif issubclass(type(self), AsyncMockMixin):
             is_sync = name in _all_sync_magics or name in (self._mock_methods or ())
             factory = MagicMock if is_sync else AsyncMock
         elif not issubclass(factory, CallableMixin):
@@ -501,7 +515,7 @@ class NonCallableMock(_FixedMock):
                 if "__%s__" % name[2:-2] == name:
                     clear_return = False
             node._reset_state(clear_return, clear_effect)
-            if issubclass(type(current), AsyncMock):
+            if issubclass(type(current), AsyncMockMixin):
                 current._reset_await_state()
             current.mock_calls = _CallList()
             current.method_calls = _CallList()
@@ -752,18 +766,14 @@ class MagicMock(Mock):
         self._mock_set_magics()
 
 
-class AsyncMock(Mock):
-    """Record calls immediately, then execute their effects when awaited."""
-
-    _mock_auto_magics = MagicMock._mock_auto_magics
-
+class AsyncMockMixin:
     def __init__(self, /, *args, **kwargs):
         from inspect import markcoroutinefunction
 
         super().__init__(*args, **kwargs)
-        # The marker belongs to the instance, including when spec_set restricts writes.
-        object.__setattr__(self, "_is_coroutine_marker", None)
-        markcoroutinefunction(self)
+        # Marking self would follow a descriptor spec's mocked __func__.
+        marked = markcoroutinefunction(AsyncMockMixin._execute_mock_call)
+        object.__setattr__(self, "_is_coroutine_marker", marked._is_coroutine_marker)
         self._reset_await_state()
 
     def _reset_await_state(self):
@@ -843,6 +853,12 @@ class AsyncMock(Mock):
                 missing.append(item)
         if missing:
             raise AssertionError(f"{tuple(missing)!r} not all found in await list") from cause
+
+
+class AsyncMock(AsyncMockMixin, Mock):
+    """Record calls immediately, then execute their effects when awaited."""
+
+    _mock_auto_magics = MagicMock._mock_auto_magics
 
 
 class NonCallableMagicMock(NonCallableMock):
