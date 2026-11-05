@@ -3865,6 +3865,7 @@ for name in ("md4", "ripemd160"):
             "boxed_timeit.py",
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
+            "time_strptime.py",
             "boxed_codecs.py",
             "boxed_codec_registry.py",
             "boxed_wide_decode.py",
