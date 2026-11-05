@@ -91,7 +91,9 @@ fn published_loop_sources_and_peeked_items_keep_finalizers_alive() {
     assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
     assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
 
-    heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    for _ in 0..32 {
+        heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    }
     assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
     let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
         unreachable!();

@@ -383,7 +383,12 @@ impl Heap {
             .next()
             .into_iter()
             .flat_map(|frame| frame.live.iter().take(retained_current.min(8)));
-        let callers = frames.take(24).flat_map(|frame| frame.live.iter().take(8));
+        // Check the same maximum number of operands across sparse call stacks.
+        const MAX_CALLER_OPERANDS: usize = 192;
+        let callers = frames
+            .take(MAX_CALLER_OPERANDS)
+            .flat_map(|frame| frame.live.iter().take(8))
+            .take(MAX_CALLER_OPERANDS);
         current
             .chain(callers)
             .any(|root| self.short_path_keeps_owner(*root, owner))
