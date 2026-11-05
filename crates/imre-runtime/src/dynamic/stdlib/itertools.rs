@@ -380,9 +380,9 @@ pub(in crate::dynamic) fn next_accumulated(ctx: &mut Context, receiver: Id) -> R
     let value = match (state.function, state.total) {
         (_, None) => item,
         (function, Some(total)) => {
-            if function == NONE
-                && let (Value::Int(left), Value::Int(right)) =
-                    (ctx.heap.get(total), ctx.heap.get(item))
+            if let (Value::Int(left), Value::Int(right)) = (ctx.heap.get(total), ctx.heap.get(item))
+                && (function == NONE
+                    || matches!(ctx.heap.get(function), Value::Native(name) if name == "operator.add"))
             {
                 let sum = crate::integer_binary(left, right, 0)?;
                 ctx.alloc(Value::Int(sum))
