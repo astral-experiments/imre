@@ -2828,7 +2828,12 @@ pub(super) fn method(
         }
         let start = start.as_ref();
         let end = end.as_ref();
-        let part = match ctx.heap.get(ctx.scalar_value(receiver)) {
+        let storage = ctx.scalar_value(receiver);
+        let part = match ctx.heap.get(storage) {
+            Value::Str(text) if ctx.heap.is_ascii_str(storage) => {
+                crate::objects::indexed_search_bounds(text.len(), start, end)
+                    .map(|bounds| Window::Utf8(&text[bounds]))
+            }
             Value::Str(text) => {
                 crate::objects::search_window(text, start, end).map(|(part, _)| Window::Utf8(part))
             }
