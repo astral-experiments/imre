@@ -3,9 +3,10 @@
 import sys
 from abc import ABCMeta as _ABCMeta
 from _collections_abc import (
-    Callable, Collection, Iterable, MutableMapping, Sized, _CallableGenericAlias, _check_methods,
+    Callable, Collection, Iterable, Mapping, MutableMapping, Sized,
+    _CallableGenericAlias, _check_methods,
 )
-from types import GenericAlias
+from types import GenericAlias, MappingProxyType
 
 __all__ = [
     "Awaitable", "Coroutine",
@@ -538,6 +539,7 @@ class ValuesView(MappingView, Collection):
 ValuesView.register(type({}.values()))
 
 
+Mapping.register(MappingProxyType)
 MutableMapping.register(dict)
 
 
