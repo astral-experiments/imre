@@ -385,6 +385,24 @@ impl Descriptor {
             .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))
     }
 
+    fn record_read(&mut self, result: isize) -> io::Result<usize> {
+        let n = count(result)?;
+        self.last_read = n;
+        self.raw_position = self.raw_position.and_then(|p| p.checked_add(n as u64));
+        Ok(n)
+    }
+
+    /// Append one whole-block read directly to the caller's output.
+    fn append_read(&mut self, data: &mut Vec<u8>, length: usize) -> io::Result<usize> {
+        let space = &mut data.spare_capacity_mut()[..length];
+        // SAFETY: the kernel can initialize up to length bytes in the reserved space.
+        let result = unsafe { libc::read(self.fd()?, space.as_mut_ptr().cast(), length) };
+        let n = self.record_read(result)?;
+        // SAFETY: read initialized exactly n additional bytes.
+        unsafe { data.set_len(data.len() + n) };
+        Ok(n)
+    }
+
     fn seek_raw(&mut self, offset: i64, whence: i32) -> io::Result<u64> {
         // SAFETY: lseek takes only integer arguments.
         let n = unsafe { libc::lseek(self.fd()?, offset, whence) };
@@ -408,10 +426,8 @@ fn count(n: isize) -> io::Result<usize> {
 impl Read for Descriptor {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // SAFETY: the buffer is writable for its length. The kernel validates the fd.
-        let n = count(unsafe { libc::read(self.fd()?, buf.as_mut_ptr().cast(), buf.len()) })?;
-        self.last_read = n;
-        self.raw_position = self.raw_position.and_then(|p| p.checked_add(n as u64));
-        Ok(n)
+        let n = unsafe { libc::read(self.fd()?, buf.as_mut_ptr().cast(), buf.len()) };
+        self.record_read(n)
     }
 }
 
@@ -465,46 +481,10 @@ pub(super) fn read_once(reader: &mut BufReader<impl Read>, size: i64) -> Result<
     Ok(bytes)
 }
 
-/// RawFile.tell() exposes read-ahead. Read whole blocks directly and fill one
-/// complete buffer for a final partial block, as CPython's BufferedReader does.
-fn read_bytes(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Option<Vec<u8>>> {
+fn read_all(reader: &mut BufReader<Descriptor>) -> Result<Option<Vec<u8>>> {
     let mut data = Vec::new();
-    let result = (|| -> io::Result<()> {
-        if size < 0 {
-            reader.read_to_end(&mut data)?;
-            return Ok(());
-        }
-        while data.len() < size as usize {
-            let remaining = size as usize - data.len();
-            if reader.buffer().is_empty() && remaining >= reader.capacity() {
-                let direct = remaining - remaining % reader.capacity();
-                if reader
-                    .get_mut()
-                    .take(direct as u64)
-                    .read_to_end(&mut data)?
-                    < direct
-                {
-                    break;
-                }
-            } else {
-                let buffered = match reader.fill_buf() {
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                    result => result?,
-                };
-                let count = remaining.min(buffered.len());
-                if count == 0 {
-                    break;
-                }
-                data.try_reserve(count)
-                    .map_err(|_| io::ErrorKind::OutOfMemory)?;
-                data.extend_from_slice(&buffered[..count]);
-                reader.consume(count);
-            }
-        }
-        Ok(())
-    })();
-    match result {
-        Ok(()) => Ok(Some(data)),
+    match reader.read_to_end(&mut data) {
+        Ok(_) => Ok(Some(data)),
         Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
             Ok((!data.is_empty()).then_some(data))
         }
@@ -776,6 +756,66 @@ impl BufferedFd {
         Ok(())
     }
 
+    /// Keep the prefix across interruptions and release the reader while Python handles a signal.
+    fn read_sized(&self, ctx: &mut Context, size: usize) -> Result<Id> {
+        let mut data = Vec::new();
+        // Reserve before consuming read-ahead so allocation failure leaves the cursor alone.
+        data.try_reserve_exact(size)
+            .map_err(|_| crate::Error::memory_error())?;
+        while data.len() < size {
+            let mut slot = self.buffer.borrow_mut();
+            let Some(Buffer::Reader(reader)) = slot.as_mut() else {
+                return Err(Error::new("ValueError", "read of closed file"));
+            };
+            let remaining = size - data.len();
+            // A sized read bypasses the buffer for whole blocks, preserving raw.tell().
+            let direct = remaining - remaining % reader.capacity();
+            let result = if direct != 0 && reader.buffer().is_empty() {
+                reader.get_mut().append_read(&mut data, direct)
+            } else {
+                match reader.fill_buf() {
+                    Ok(bytes) => {
+                        let n = remaining.min(bytes.len());
+                        data.extend_from_slice(&bytes[..n]);
+                        reader.consume(n);
+                        Ok(n)
+                    }
+                    Err(error) => Err(error),
+                }
+            };
+            match result {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {
+                    drop(slot);
+                    self.callback_active.set(true);
+                    let result = ctx.dispatch_signals();
+                    self.callback_active.set(false);
+                    // The buffered readinto loop also retries a handler's OSError(EINTR).
+                    if let Err(error) = result
+                        && !ctx.has_errno(&error, libc::EINTR)
+                    {
+                        return Err(error);
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    if data.is_empty() {
+                        return Ok(NONE);
+                    }
+                    break;
+                }
+                Err(err) if err.kind() == io::ErrorKind::OutOfMemory => {
+                    return Err(Error::new("MemoryError", ""));
+                }
+                Err(err) => return Err(os_error(err)),
+            }
+        }
+        if data.len() < size {
+            crate::compact_bytes(&mut data);
+        }
+        Ok(ctx.alloc(Value::Bytes(data)))
+    }
+
     /// Realign the raw offset first and let the live FileIO truncate implement its size protocol.
     fn truncate(&self, ctx: &mut Context, size: Id) -> Result<Id> {
         self.check_reentry(ctx)?;
@@ -1009,10 +1049,13 @@ impl BufferedFd {
                     return Ok(ctx.alloc(Value::Bytes(data)));
                 }
                 let r: &mut dyn BufRead = match buffer {
-                    Buffer::Reader(r) if name == "read" => {
-                        return Ok(
-                            read_bytes(r, size)?.map_or(NONE, |data| ctx.alloc(Value::Bytes(data)))
-                        );
+                    Buffer::Reader(reader) if name == "read" => {
+                        if size < 0 {
+                            return Ok(read_all(reader)?
+                                .map_or(NONE, |data| ctx.alloc(Value::Bytes(data))));
+                        }
+                        drop(slot);
+                        return self.read_sized(ctx, size as usize);
                     }
                     Buffer::Random(file) if name == "read" => {
                         let data = file.read_bytes(usize::try_from(size).ok())?;

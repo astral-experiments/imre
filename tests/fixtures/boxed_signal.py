@@ -145,3 +145,29 @@ def check_handlers():
 
 
 check_handlers()
+
+
+def check_buffered_read_eintr():
+    import errno
+    import io
+    import os
+
+    r, w = os.pipe()
+
+    def finish_read(signum, frame):
+        os.write(w, b"bar")
+        raise InterruptedError(errno.EINTR, "retry readinto")
+
+    previous = signal.signal(signal.SIGALRM, finish_read)
+    try:
+        with io.open(r, "rb") as reader:
+            os.write(w, b"foo")
+            signal.alarm(1)
+            assert reader.read(6) == b"foobar"
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+        os.close(w)
+
+
+check_buffered_read_eintr()
