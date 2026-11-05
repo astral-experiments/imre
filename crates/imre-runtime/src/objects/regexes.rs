@@ -469,10 +469,7 @@ pub unsafe extern "C" fn imre_regex_collect_bytes_runs(
             let bytes = if field.len() == source.len() {
                 crate::BytesOwner::clone(&source)
             } else {
-                let mut bytes = super::bytes::allocate(field.len())
-                    .unwrap_or_else(|_| fail("MemoryError", "bytes allocation failed"));
-                bytes.extend_from_slice(field);
-                crate::BytesOwner::new(bytes)
+                super::bytes::copied_bytes(field)
             };
             parts
                 .values

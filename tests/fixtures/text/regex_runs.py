@@ -23,6 +23,12 @@ def byte_runs(data: bytes) -> None:
     print(split(rb"\s+", data))
 
 
+def byte_identity(data: bytes) -> None:
+    first = findall(rb"[^;]+", data)
+    again = findall(rb"[^;]+", data)
+    print(first[0] is first[1], first[0] is again[0])
+
+
 for value in ["", "xx", ",;,", " alpha__beta,,x", "éx,y🐍z;", "x\x00y"]:
     scan(value)
 
@@ -38,3 +44,8 @@ for value in ["", "éé,ß_字👋", "\x7f\u0080x\U0010ffff", "x1٢३y", "\x1c 
 
 for data in [b"", b"\x00\xff", b"a_9 b\xff\xff\x80\x00z", b"\x1c\r\n"]:
     byte_runs(data)
+
+
+byte_identity(b"x;x")
+byte_identity(b"ab;ab")
+byte_identity(b"\xff;\xff")
