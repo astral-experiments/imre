@@ -49,12 +49,13 @@ pub struct FixedPattern {
 /// Encode a greedy scalar class as a byte lookup followed by little-endian
 /// change points for non-ASCII scalars. A single enclosing findall capture
 /// yields the same string as the complete match.
-pub fn run_class(source: &str, whole_capture: bool) -> Option<Vec<u8>> {
+pub fn run_class(pattern: &FixedPattern, whole_capture: bool) -> Option<Vec<u8>> {
     use regex_syntax::hir::Class;
-    let hir = regex_syntax::Parser::new().parse(source).ok()?;
-    let atom = match hir.kind() {
-        HirKind::Capture(capture) if whole_capture => &capture.sub,
-        _ => &hir,
+    let hir = regex_syntax::Parser::new().parse(&pattern.source).ok()?;
+    let atom = match (pattern.groups.len(), hir.kind()) {
+        (1, _) => &hir,
+        (2, HirKind::Capture(capture)) if whole_capture && capture.index == 1 => &capture.sub,
+        _ => return None,
     };
     let HirKind::Repetition(repeat) = atom.kind() else {
         return None;

@@ -369,7 +369,7 @@ impl Checker<'_> {
         check_string(pattern, self.source)?;
         let members = crate::fixed_regex::translate(pattern.value.to_str(), false)
             .ok()
-            .and_then(|pattern| crate::fixed_regex::run_class(&pattern.source, !split))
+            .and_then(|pattern| crate::fixed_regex::run_class(&pattern, !split))
             .ok_or_else(|| self.scoped_builtin_error(name, call))?;
         let text = self.expr(text)?;
         if text.ty != Type::Str {
