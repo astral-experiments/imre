@@ -530,6 +530,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::RegexCollect { .. }
+            | Self::RegexRunCount { .. }
             | Self::RegexSub(_)
             | Self::UnittestCompilePattern
             | Self::RegexSearchText { .. }
@@ -883,6 +884,11 @@ impl Builtin {
                                 || args[1]
                                     .local_integer_offset()
                                     .is_some_and(|(_, offset)| offset >= 0))))
+            }
+            Self::RegexRunCount { members, .. } => {
+                matches!(args, [input] if input.ty == Type::Str)
+                    && result == Type::Int
+                    && members.len() == 256
             }
             Self::SequenceGetInBounds | Self::SequenceTakeInBounds => {
                 matches!(args, [source, cursor]

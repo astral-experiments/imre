@@ -12163,7 +12163,7 @@ impl<'a> Checker<'a> {
                             | Type::VarTuple(_)
                     ) =>
             {
-                (Builtin::Len, Type::Int)
+                return Ok(Expr::sequence_len(args));
             }
             "print"
                 if args.len() == 1
