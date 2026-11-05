@@ -661,6 +661,12 @@ impl Context {
                 .to_vec(),
             "b" => vec![n.big().to_i8().ok_or_else(invalid_value)? as u8],
             "q" => n.to_i64().ok_or_else(invalid_value)?.to_ne_bytes().to_vec(),
+            "Q" => n
+                .big()
+                .to_u64()
+                .ok_or_else(invalid_value)?
+                .to_ne_bytes()
+                .to_vec(),
             "i" => n
                 .big()
                 .to_i32()
