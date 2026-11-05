@@ -1,4 +1,4 @@
-use super::{Heap, Id, Value};
+use super::{Heap, Id, SlotShape, Value};
 use indexmap::IndexMap;
 use std::collections::HashSet;
 
@@ -230,7 +230,10 @@ impl RootPaths {
                 }
                 let found = wanted.remove(&child);
                 // A registry key can prove an endpoint without traversing unrelated keys.
-                if !found && (heap.scalar_leaves[child as usize] || links.is_dict_key(slot)) {
+                if !found
+                    && (heap.slot_shapes[child as usize] == SlotShape::ScalarLeaf
+                        || links.is_dict_key(slot))
+                {
                     continue;
                 }
                 *nodes_left -= 1;

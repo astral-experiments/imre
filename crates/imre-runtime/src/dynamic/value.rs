@@ -2535,6 +2535,25 @@ enum Finalization {
     Done,
 }
 
+/// Compact slot state used by marking and sweeping. Mutable borrows invalidate scalar leaves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SlotShape {
+    Vacant,
+    ScalarLeaf,
+    Other,
+}
+
+impl SlotShape {
+    /// Record whether a newly occupied slot holds an exact scalar without strong children.
+    fn occupied(value: &Value) -> Self {
+        if value.scalar_leaf() {
+            Self::ScalarLeaf
+        } else {
+            Self::Other
+        }
+    }
+}
+
 struct Slot {
     value: Option<Value>,
     // Next in collection order while occupied, or next free slot while vacant.
@@ -2628,7 +2647,7 @@ impl GcOrder {
 pub(super) struct MarkQueue<'a> {
     slots: &'a [Slot],
     traces: &'a [Cell<usize>],
-    scalar_leaves: &'a [bool],
+    slot_shapes: &'a [SlotShape],
     next: usize,
     mode: MarkMode<'a>,
 }
@@ -2651,7 +2670,9 @@ impl MarkQueue<'_> {
                     }
                 }
                 // A complete reachability trace needs no pending visit for an exact scalar.
-                MarkMode::SkipScalarLeaves if self.scalar_leaves[id as usize] => {
+                MarkMode::SkipScalarLeaves
+                    if self.slot_shapes[id as usize] == SlotShape::ScalarLeaf =>
+                {
                     trace.set(END);
                 }
                 _ => {
@@ -2722,8 +2743,8 @@ pub(super) struct Heap {
     pub(super) loading_linked_constant: bool,
     // Keep the collector's links contiguous so it can scan marks without loading every Value.
     traces: Vec<Cell<usize>>,
-    // Marking reads this compact table before touching the much larger value slots.
-    scalar_leaves: Vec<bool>,
+    // Marking and sweeping consult this compact table before reading the much larger slots.
+    slot_shapes: Vec<SlotShape>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
@@ -2931,9 +2952,13 @@ impl Heap {
         }
         let mut heap = Self {
             traces: vec![Cell::new(END); slots.len()],
-            scalar_leaves: slots
+            slot_shapes: slots
                 .iter()
-                .map(|slot| slot.value.as_ref().is_some_and(Value::scalar_leaf))
+                .map(|slot| {
+                    slot.value
+                        .as_ref()
+                        .map_or(SlotShape::Vacant, SlotShape::occupied)
+                })
                 .collect(),
             slots,
             allocation_traces: Default::default(),
@@ -3271,7 +3296,7 @@ impl Heap {
     }
 
     fn reserve_slot(&mut self) -> std::result::Result<(), std::collections::TryReserveError> {
-        self.scalar_leaves.try_reserve(1)?;
+        self.slot_shapes.try_reserve(1)?;
         self.traces.try_reserve(1)?;
         self.slots.try_reserve(1)
     }
@@ -3295,12 +3320,12 @@ impl Heap {
     fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
         let trace = trace && self.allocation_traces.is_tracing();
         let has_gc_header = value.has_gc_header(self);
-        let scalar_leaf = value.scalar_leaf();
+        let shape = SlotShape::occupied(&value);
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
-            self.scalar_leaves[index] = scalar_leaf;
+            self.slot_shapes[index] = shape;
             self.slots[index].value = Some(value);
             self.slots[index].may_have_buffer_views = false;
             self.slots[index].generation = 0;
@@ -3313,7 +3338,7 @@ impl Heap {
                 self.slots.reserve_exact(1);
                 self.next_collection = self.slots.len();
             }
-            self.scalar_leaves.push(scalar_leaf);
+            self.slot_shapes.push(shape);
             self.traces.push(Cell::new(UNMARKED));
             self.slots.push(Slot::new(value));
             self.slots.len() - 1
@@ -3468,16 +3493,20 @@ impl Heap {
         source: Id,
         target: Id,
     ) -> Option<(&Value, &mut Value)> {
+        let target_id = target as usize;
         let [source, target] = self
             .slots
-            .get_disjoint_mut([source as usize, target as usize])
+            .get_disjoint_mut([source as usize, target_id])
             .ok()?;
-        Some((source.value.as_ref()?, target.value.as_mut()?))
+        let source = source.value.as_ref()?;
+        let target = target.value.as_mut()?;
+        self.slot_shapes[target_id] = SlotShape::Other;
+        Some((source, target))
     }
 
     pub fn get_mut(&mut self, id: Id) -> &mut Value {
         // The mutable borrow can replace the value with a different variant.
-        self.scalar_leaves[id as usize] = false;
+        self.slot_shapes[id as usize] = SlotShape::Other;
         self.slots[id as usize]
             .value
             .as_mut()
@@ -4019,7 +4048,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::SkipScalarLeaves,
         };
@@ -4413,7 +4442,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::All,
         };
@@ -4701,7 +4730,7 @@ impl Heap {
     fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
         let mut slots = smallvec::SmallVec::new();
         for (id, trace) in self.traces.iter().enumerate() {
-            if trace.get() == UNMARKED && self.slots[id].value.is_some() {
+            if trace.get() == UNMARKED && self.slot_shapes[id] != SlotShape::Vacant {
                 if slots.len() == 256 {
                     return None;
                 }
@@ -4779,7 +4808,7 @@ impl Heap {
         let mut children = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::All,
         };
@@ -4804,7 +4833,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::All,
         };
@@ -4822,7 +4851,7 @@ impl Heap {
             self.get(id as Id).children(&mut MarkQueue {
                 slots: &self.slots,
                 traces: &self.traces,
-                scalar_leaves: &self.scalar_leaves,
+                slot_shapes: &self.slot_shapes,
                 next: END,
                 mode: MarkMode::Ordered(&mut scan),
             });
@@ -4871,9 +4900,11 @@ impl Heap {
         unowned.clear();
         for index in 0..incoming.len() {
             let id = slot_at(index);
-            if self.traces[id].get() == UNMARKED
-                && let Some(value) = &self.slots[id].value
-            {
+            if self.traces[id].get() == UNMARKED && self.slot_shapes[id] != SlotShape::Vacant {
+                let value = self.slots[id]
+                    .value
+                    .as_ref()
+                    .expect("occupied cycle candidate");
                 // Count the candidate itself so that zero denotes a vacant or reachable slot.
                 incoming[index] += 1;
                 self.unreachable_children(value, |child| incoming[index_of(child)] += 1);
@@ -5231,8 +5262,10 @@ impl Heap {
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for id in FIRST_DYNAMIC_SLOT..self.slots.len() {
-            let slot = &self.slots[id];
-            if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
+            if self.traces[id].replace(UNMARKED) == UNMARKED
+                && self.slot_shapes[id] != SlotShape::Vacant
+            {
+                self.slot_shapes[id] = SlotShape::Vacant;
                 self.gc_order.remove(id, &self.slots);
                 let slot = &mut self.slots[id];
                 if slot.has_gc_header {
@@ -5417,9 +5450,11 @@ mod tests {
         heap.collect(std::iter::empty());
         // A second sweep must leave the free chain intact.
         heap.collect(std::iter::empty());
-        assert_eq!(heap.alloc(Value::Tuple(vec![keep])), parent);
-        assert_eq!(heap.alloc(Value::List(vec![parent])), child);
-        heap.release_temporaries_since(mark);
+        assert_eq!(heap.alloc(Value::Int(crate::Int::from(1024))), parent);
+        *heap.get_mut(parent) = Value::Tuple(vec![keep]);
+        assert_eq!(heap.alloc(Value::Int(crate::Int::from(1025))), child);
+        *heap.source_and_target(keep, child).unwrap().1 = Value::List(vec![parent]);
+        heap.release_temporaries_since(0);
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
