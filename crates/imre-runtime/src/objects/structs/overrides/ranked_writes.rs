@@ -2,6 +2,47 @@ use super::{BLOCK, Binary, position};
 use num_integer::Integer;
 
 impl Binary {
+    /// Apply a dense modular write to existing tags. Build the result separately
+    /// so an interrupt can still resume at the original source index.
+    pub(super) fn merge_ranked_prefix(
+        &mut self,
+        at: usize,
+        step: usize,
+        n: usize,
+        count: usize,
+        set: bool,
+    ) -> Option<(usize, usize)> {
+        let words = n.div_ceil(BLOCK);
+        if count <= 1024 || (count - 1) / 16 < words || words != self.bits.len() {
+            return None;
+        }
+        let spacing = n.gcd(&step);
+        let first = (at + step) % n;
+        let mut result = Self::empty(&[], words)?;
+        // The bitmap writer includes its seed. Begin at the first new store,
+        // leaving the previous index alone unless the orbit actually revisits it.
+        let (done, last) = result.fill_ranked_prefix(first, step, n, count - 1, spacing)?;
+        if done != count - 1 {
+            return Some((0, at));
+        }
+        let mut changed = 0;
+        for (masks, old) in result.bits.chunks_mut(256).zip(self.bits.chunks(256)) {
+            if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+                return Some((0, at));
+            }
+            for (mask, &word) in masks.iter_mut().zip(old) {
+                *mask = if set { word | *mask } else { word & !*mask };
+                changed += mask.count_ones() as usize;
+            }
+        }
+        if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Some((0, at));
+        }
+        self.bits = result.bits;
+        self.changed = changed;
+        Some((count, last))
+    }
+
     /// Write a partial modular orbit in address order by computing each word's mask.
     #[inline(never)]
     pub(super) fn fill_ranked_prefix(
