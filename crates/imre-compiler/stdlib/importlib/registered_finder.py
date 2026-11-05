@@ -11,7 +11,7 @@ def _installed_source_spec(fullname, registry_path, target):
     # A compiled package can have children in the installed archive. Only search
     # those children from their own virtual parent, preserving application shadows.
     parts = fullname.split('.')
-    if fullname not in ('_pydatetime', '_pydecimal', 'getpass', 'graphlib', 'statistics', 'tarfile', 'timeit') and parts[0] != 'xml':
+    if fullname not in ('_pydatetime', '_pydecimal', 'getpass', 'graphlib', 'shlex', 'statistics', 'tarfile', 'timeit') and parts[0] != 'xml':
         return None
     if not all(part.isidentifier() for part in parts):
         return None
