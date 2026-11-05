@@ -552,71 +552,38 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
     if spec.is_empty() {
         return display(value);
     }
-    let mut tail = spec;
-    let mut align = None;
-    let mut fill = ' ';
-    let mut chars = tail.chars();
-    let first = chars.next();
-    let explicit_fill = chars.next().filter(|c| "<^>=".contains(*c));
-    if let Some(second) = explicit_fill {
-        fill = first.unwrap();
-        align = Some(second);
-        tail = chars.as_str();
-    } else if let Some(first) = first.filter(|c| "<^>=".contains(*c)) {
-        align = Some(first);
-        tail = &tail[first.len_utf8()..];
-    }
-    let sign = tail.chars().next().filter(|c| "+ -".contains(*c));
-    if sign.is_some() {
-        tail = &tail[1..];
-    }
-    let float = value.kind.raw() == 7;
-    let negative_zero = (float || value.kind.raw() == 2) && tail.starts_with('z');
-    if negative_zero {
-        tail = &tail[1..];
-    }
-    let alternate = tail.starts_with('#');
-    if alternate {
-        tail = &tail[1..];
-    }
-    if let Some(rest) = tail.strip_prefix('0') {
+    let string = value.kind.raw() == 3;
+    let prefix = crate::format_grammar::FormatPrefix::parse(
+        spec,
+        if string { '<' } else { '=' },
+        matches!(value.kind.raw(), 2 | 3 | 7),
+    )
+    .map_err(error)?;
+    let mut tail = prefix.tail;
+    let precision = if string {
+        tail = "s";
+        prefix.string_precision(Some(spec), "str")?
+    } else if let Some(rest) = tail.strip_prefix('.') {
         tail = rest;
-        if explicit_fill.is_none() {
-            fill = '0';
-        }
-        if align.is_none() {
-            align = Some(if value.kind.raw() == 3 { '<' } else { '=' });
-        }
-    }
-    let size = tail.bytes().take_while(u8::is_ascii_digit).count();
-    let width = if size == 0 {
-        0
-    } else {
-        tail[..size]
-            .parse::<isize>()
-            .map_err(|_| error("Too many decimal digits in format string"))? as usize
-    };
-    tail = &tail[size..];
-    let group = tail.chars().next().filter(|c| ",_".contains(*c));
-    if let Some(group) = group {
-        tail = &tail[1..];
-        if matches!(
-            (group, tail.as_bytes().first()),
-            (',', Some(b'_')) | ('_', Some(b','))
-        ) {
-            return Err(error("Cannot specify both ',' and '_'."));
-        }
-    }
-    let precision = if let Some(rest) = tail.strip_prefix('.') {
-        let n = rest.bytes().take_while(u8::is_ascii_digit).count();
-        if n == 0 {
-            return Err(error("Format specifier missing precision"));
-        }
-        tail = &rest[n..];
-        Some(&rest[..n])
+        Some(
+            crate::format_grammar::decimal(&mut tail)
+                .map_err(error)?
+                .ok_or_else(|| error("Format specifier missing precision"))?,
+        )
     } else {
         None
     };
+    let crate::format_grammar::FormatPrefix {
+        fill,
+        align,
+        sign,
+        negative_zero,
+        alternate,
+        width,
+        group,
+        ..
+    } = prefix;
+    let float = value.kind.raw() == 7;
     let numeric = matches!(value.kind.raw(), 1 | 2 | 7);
     let c = match tail {
         "" => {
@@ -700,8 +667,11 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
         sign.map_or(String::new(), |c| c.to_string()),
         if alternate { "#" } else { "" }
     );
+    let places = precision;
     let precision = precision.map(|p| format!(".{p}")).unwrap_or_default();
-    let mut s = if float && (tail.is_empty() || c == '\0') {
+    let mut s = if string {
+        record::percent_text(value, 's', places)?
+    } else if float && (tail.is_empty() || c == '\0') {
         default_float(value, &flags, &precision, alternate)?
     } else if c == '%' {
         let n = number(value)? * 100.0;

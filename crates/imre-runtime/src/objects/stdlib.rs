@@ -612,20 +612,10 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
 
 /// Parse a decimal format width or field index using Python's Unicode decimal digits.
 pub(crate) fn format_index(name: &str) -> crate::Result<Option<usize>> {
-    let mut index = 0isize;
-    // A decimal prefix can overflow before a nondigit makes this a named field.
-    for ch in name.chars() {
-        let Some(digit) = crate::integer_text::decimal_digit(ch) else {
-            return Ok(None);
-        };
-        index = index
-            .checked_mul(10)
-            .and_then(|value| value.checked_add(isize::from(digit)))
-            .ok_or_else(|| {
-                Error::new(Kind::ValueError, "Too many decimal digits in format string")
-            })?;
-    }
-    Ok(Some(index as usize))
+    let mut tail = name;
+    let value = crate::format_grammar::decimal(&mut tail)
+        .map_err(|message| Error::new(Kind::ValueError, message))?;
+    Ok(tail.is_empty().then_some(value.unwrap_or(0)))
 }
 
 /// Both keyword-only formatters have an empty tuple of positional arguments.
