@@ -390,10 +390,10 @@ impl Checker<'_> {
             }
             _ => return Err(self.scoped_builtin_error(name, call)),
         };
-        let members = pattern
+        let program = pattern
             .ok()
             .and_then(|pattern| {
-                crate::fixed_regex::run_class(&pattern, !split, kind == Type::Bytes)
+                crate::fixed_regex::collection(&pattern, !split, kind == Type::Bytes)
             })
             .ok_or_else(|| self.scoped_builtin_error(name, call))?;
         let text = self.expr(text)?;
@@ -402,7 +402,7 @@ impl Checker<'_> {
         }
         Ok(Expr {
             ty: self.types.list(kind),
-            kind: ExprKind::Builtin(Builtin::RegexRuns { members, split }, vec![text]),
+            kind: ExprKind::Builtin(Builtin::RegexCollect { program, split }, vec![text]),
         })
     }
 
