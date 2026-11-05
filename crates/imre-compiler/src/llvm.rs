@@ -5312,6 +5312,19 @@ impl Emitter<'_, '_> {
                     self.call(name, returns, &values)
                 }
             }
+            Builtin::RegexRuns { members, split } => {
+                let name = self.byte_array(members.clone());
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_regex_collect_runs(ptr {}, ptr @{name}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*split)
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::RegexSub(template) => {
                 let name = self.byte_array(template.clone());
                 let operand = self.checked_instruction(format!(
@@ -10959,6 +10972,7 @@ declare ptr @imre_patch_hunk_text(ptr)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_search_text(ptr, ptr, i1, i1)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
+declare ptr @imre_regex_collect_runs(ptr, ptr, i32)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
 declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)

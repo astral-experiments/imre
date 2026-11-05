@@ -372,6 +372,51 @@ pub unsafe extern "C" fn imre_regex_literal(data: *const u8, len: usize) -> *con
     handle(Storage::RegexPattern(Box::new(pattern)))
 }
 
+/// Collect the runs or gaps of a greedy ASCII class in a single forward scan.
+///
+/// # Safety
+/// The caller roots the subject and supplies a 256-byte membership table with
+/// zeros for all non-ASCII bytes. The returned list owns every string it contains.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_runs(
+    value: *const Str,
+    members: *const [u8; 256],
+    split: u32,
+) -> *const Object {
+    // SAFETY: the caller retains the input owner and the compiler emits static table data.
+    let source = std::mem::ManuallyDrop::new(unsafe { StrOwner::from_raw(value) });
+    // SAFETY: the compiler emitted all 256 entries of this immutable table.
+    let members = unsafe { &*members };
+    let bytes = source.as_bytes();
+    let mut parts = super::Words::new(3);
+    let mut cursor = 0;
+    let mut end = 0;
+    while end < bytes.len() {
+        let Some(skip) = bytes[end..]
+            .iter()
+            .position(|&b| members[usize::from(b)] != 0)
+        else {
+            break;
+        };
+        let start = end + skip;
+        end = start + 1;
+        while end < bytes.len() && members[usize::from(bytes[end])] != 0 {
+            end += 1;
+        }
+        let range = if split != 0 {
+            cursor..start
+        } else {
+            start..end
+        };
+        super::text::push_part(&mut parts, &source, &source[range]);
+        cursor = end;
+    }
+    if split != 0 {
+        super::text::push_part(&mut parts, &source, &source[cursor..]);
+    }
+    crate::ObjectOwner::into_raw(parts.into_object())
+}
+
 /// Return the original Python spelling even when the native engine expanded an escape.
 ///
 /// # Safety

@@ -10277,6 +10277,9 @@ impl<'a> Checker<'a> {
                 return self.fnmatch_call(operation, call);
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::RegexRuns { split })) => {
+                return self.regex_runs(call, split);
+            }
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
             )) => {

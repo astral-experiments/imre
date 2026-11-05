@@ -46,6 +46,35 @@ pub struct FixedPattern {
     pub groups: Vec<Capture>,
 }
 
+/// Recognize a greedy run of ASCII scalars in a validated engine expression.
+/// Non-ASCII UTF-8 bytes always miss, so every match boundary is a scalar boundary.
+pub fn ascii_run_class(source: &str) -> Option<Vec<u8>> {
+    use regex_syntax::hir::Class;
+    let hir = regex_syntax::Parser::new().parse(source).ok()?;
+    let HirKind::Repetition(repeat) = hir.kind() else {
+        return None;
+    };
+    if !repeat.greedy || repeat.min != 1 || repeat.max.is_some() {
+        return None;
+    }
+    let mut members = vec![0; 256];
+    match repeat.sub.kind() {
+        HirKind::Class(Class::Unicode(class)) => {
+            for range in class.ranges() {
+                if !range.end().is_ascii() {
+                    return None;
+                }
+                members[range.start() as usize..=range.end() as usize].fill(1);
+            }
+        }
+        HirKind::Literal(literal) if literal.0.len() == 1 && literal.0[0].is_ascii() => {
+            members[usize::from(literal.0[0])] = 1;
+        }
+        _ => return None,
+    }
+    Some(members)
+}
+
 /// A capture may be unnamed or absent on some successful paths.
 pub struct Capture {
     pub name: Option<String>,
