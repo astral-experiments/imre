@@ -20,7 +20,8 @@ fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
 fn boxed_method(name: &str) -> bool {
     matches!(
         name,
-        "rotate"
+        "insert"
+            | "rotate"
             | "__repr__"
             | "__add__"
             | "__mul__"
