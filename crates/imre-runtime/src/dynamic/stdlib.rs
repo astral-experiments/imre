@@ -2236,10 +2236,7 @@ pub(super) fn call(
         if let Value::Code(code) = ctx.heap.get(code) {
             // Source functions track execution kind and the iterable-coroutine
             // bit even when their full public co_flags value is unavailable.
-            let mut flags = code.flags & (COROUTINE | GENERATOR | ITERABLE_COROUTINE);
-            if code.coroutine {
-                flags |= COROUTINE;
-            }
+            let flags = code.flags & (COROUTINE | GENERATOR | ITERABLE_COROUTINE);
             return Ok(ctx.int(i64::from(flags)));
         }
         return ctx.lookup_attr(code, "co_flags");

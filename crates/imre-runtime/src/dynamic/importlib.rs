@@ -499,7 +499,6 @@ impl Context {
             filename,
             first_line: 1,
             module_definition: true,
-            coroutine: false,
             flags: 0,
             flags_complete: false,
         })))

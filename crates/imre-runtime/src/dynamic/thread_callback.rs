@@ -135,7 +135,7 @@ impl Callback {
             return Ok(None);
         };
         let code = ctx.code_object(code);
-        if code.coroutine || !code.closure_supported {
+        if code.is_coroutine() || !code.closure_supported {
             return Ok(None);
         }
         let signature = ctx.str_value(code.parameters)?;
