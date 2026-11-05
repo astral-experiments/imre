@@ -192,3 +192,53 @@ def current():
     j = events[1][1]
     assert 0 <= j <= 2
     assert events == ["len", ("get", j), ("get", 2), ("set", 2, 2), ("set", j, 3)]
+
+    from math import log
+    from random import expovariate
+
+    saved_random = random.Random.random
+    random.seed(551)
+    local = random.Random(551)
+    local_expo = local.expovariate
+    assert expovariate.__func__ is local_expo.__func__ is random.Random.expovariate
+    replay = random.Random(101)
+    assert expovariate.__func__(replay, 2.0) == random.Random(101).expovariate(2.0)
+    assert not hasattr(draw, "__func__") and not hasattr(local.getrandbits, "__func__")
+    random.Random.random = lambda self: 0.0
+    try:
+        assert repr(expovariate()) == repr(local_expo()) == "-0.0"
+        assert draw() == saved_random(local)
+    finally:
+        random.Random.random = saved_random
+
+    assert expovariate is random.expovariate
+    random.seed(seed)
+    reference = random.Random(seed)
+    assert expovariate() == -log(1.0 - reference.random())
+    assert random.random() == reference.random()
+    assert random.Random(seed).expovariate(lambd=-2) == -log(1.0 - random.Random(seed).random()) / -2
+
+    class Fixed(random.Random):
+        def random(self):
+            draws.append(1)
+            return 0.25
+
+    class Duck:
+        random = Fixed.random
+
+    draws = []
+    source = Fixed()
+    assert source.expovariate() == -log(0.75)
+    assert random.Random.expovariate(self=Duck(), lambd=2) == -log(0.75) / 2
+    assert len(draws) == 2
+    for call, error, count in (
+        (lambda: source.expovariate(1, lambd=2), TypeError, 2),
+        (lambda: source.expovariate(0), ZeroDivisionError, 3),
+        (lambda: source.expovariate(None), TypeError, 4),
+    ):
+        try:
+            call()
+        except (TypeError, ZeroDivisionError) as caught:
+            assert type(caught) is error and len(draws) == count
+        else:
+            raise AssertionError("invalid exponential rate accepted")

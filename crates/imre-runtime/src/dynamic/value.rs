@@ -1095,7 +1095,7 @@ pub(super) enum Value {
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     ExpatParser(std::rc::Rc<super::stdlib::pyexpat::NativeParser>),
-    Random(std::rc::Rc<std::cell::RefCell<crate::objects::Generator>>),
+    Random(super::stdlib::random::instance::RandomState),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     #[cfg(unix)]
     MemoryBio(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::Bio>>),
