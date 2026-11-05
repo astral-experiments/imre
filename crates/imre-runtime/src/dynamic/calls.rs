@@ -8000,17 +8000,27 @@ impl Context {
         }
     }
 
+    /// Check the native stack before descending, using the nesting depth if bounds are unavailable.
+    pub(super) fn check_native_stack(
+        &self,
+        additional: usize,
+        message: &'static str,
+    ) -> Result<()> {
+        if stacker::remaining_stack().map_or(self.slot_depth + additional >= 128, |remaining| {
+            remaining < 64 * 1024
+        }) {
+            return Err(Error::new("RecursionError", message));
+        }
+        Ok(())
+    }
+
     /// Guard nested native slots that can recurse without entering a Python frame.
     pub(super) fn with_slot_depth<T>(
         &mut self,
         message: &'static str,
         operation: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
-        if stacker::remaining_stack()
-            .map_or(self.slot_depth >= 128, |remaining| remaining < 64 * 1024)
-        {
-            return Err(Error::new("RecursionError", message));
-        }
+        self.check_native_stack(0, message)?;
         self.slot_depth += 1;
         let result = operation(self);
         self.slot_depth -= 1;
