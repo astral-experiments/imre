@@ -413,7 +413,7 @@ impl Context {
             "keywords" => {
                 self.merge_mapping(a, b, super::calls::MappingOperation::Keywords(Some(c)))
             }
-            "unpack" => {
+            "unpack" | "unpack_read" => {
                 let count = usize::try_from(self.as_integer(b)?)
                     .map_err(|_| Error::new("ValueError", "invalid unpack length"))?;
                 let star = if c == NONE {
@@ -426,6 +426,13 @@ impl Context {
                     }
                     Some(star)
                 };
+                // Read-only targets can index the immutable tuple throughout assignment.
+                if op == "unpack_read"
+                    && star.is_none()
+                    && matches!(self.heap.get(a), Value::Tuple(items) if items.len() == count)
+                {
+                    return Ok(a);
+                }
                 let items = self.unpack_items(a, count, star)?;
                 Ok(self.alloc(Value::List(items)))
             }
