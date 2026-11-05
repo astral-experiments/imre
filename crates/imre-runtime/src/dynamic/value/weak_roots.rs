@@ -1,4 +1,4 @@
-use super::{Heap, Id, SlotShape, Value};
+use super::{Heap, Id, Value};
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
 use std::collections::HashSet;
@@ -255,7 +255,7 @@ impl RootPaths {
                 let found = wanted.remove(&child);
                 // A registry key can prove an endpoint without traversing unrelated keys.
                 if !found
-                    && (heap.slot_shapes[child as usize] == SlotShape::ScalarLeaf
+                    && (heap.slot_shapes[child as usize].is_scalar_leaf()
                         || links.is_dict_key(slot))
                 {
                     continue;

@@ -1475,11 +1475,10 @@ impl Match {
     }
 
     fn span_bounds(&self, ctx: &Context, span: Span) -> Result<(i64, i64)> {
+        let scalar = ctx.scalar_value(self.subject);
         if self.pattern(ctx).bytes
-            || matches!(
-                ctx.heap.get(ctx.scalar_value(self.subject)),
-                Value::SurrogateStr(_)
-            )
+            || ctx.heap.is_ascii_str(scalar)
+            || matches!(ctx.heap.get(scalar), Value::SurrogateStr(_))
         {
             return Ok((span.start as i64, span.end as i64));
         }
@@ -1707,8 +1706,8 @@ pub(super) fn search(
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
             i.min(text.len())
-        } else if i == 0 {
-            0
+        } else if i == 0 || ctx.heap.is_ascii_str(ctx.scalar_value(string)) {
+            i
         } else {
             std::str::from_utf8(text)
                 .expect("text regex subject is UTF-8")

@@ -3161,6 +3161,10 @@ impl Context {
                 let point = points[position(points.len())?];
                 self.text_codepoints(vec![point])
             }
+            Value::Str(s) if self.heap.is_ascii_str(storage) => {
+                let character = char::from(s.as_bytes()[position(s.len())?]);
+                self.text(character.to_string())
+            }
             Value::Str(s) => {
                 let index = if (0..s.chars().size_hint().0 as i128).contains(&offset) {
                     offset as usize
