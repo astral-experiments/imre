@@ -2357,7 +2357,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_operator._compare_digest")
             }
             (Self::Operator | Self::OperatorNative, "add" | "__add__") => {
-                Intrinsic::ScopedObjectExport("operator.add")
+                Intrinsic::ObjectRuntimeExport("operator.add")
             }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
@@ -2402,7 +2402,7 @@ impl IntrinsicModule {
                 Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
             }
             (Self::Itertools, "accumulate") => {
-                Intrinsic::ScopedObjectExport("itertools.accumulate")
+                Intrinsic::ObjectRuntimeExport("itertools.accumulate")
             }
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,

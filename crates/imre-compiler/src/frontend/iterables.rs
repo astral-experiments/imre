@@ -16,7 +16,7 @@ impl Checker<'_> {
                 if index == 1
                     && matches!(
                         checker.resolve(node),
-                        Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                             "operator.add"
                         )))
                     )
@@ -91,7 +91,7 @@ impl Checker<'_> {
         if let ast::Expr::Call(scan) = source
             && matches!(
                 self.resolve(&scan.func),
-                Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                     "itertools.accumulate"
                 )))
             )
