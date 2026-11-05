@@ -4357,17 +4357,29 @@ impl Heap {
         false
     }
 
-    /// Check each registration against the surviving frame bindings and native stream edges.
-    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, owners: &[Id]) -> bool {
+    /// Check bindings, published operands and the native stream chains they retain.
+    /// A caller that has yet to discard temporaries must omit its operand frames.
+    fn frame_keeps_stream_finalizers(
+        &self,
+        stdin: Option<&[Id; 3]>,
+        owners: &[Id],
+        operand_frames: &[Frame],
+    ) -> bool {
+        let retained = |owner| {
+            self.find_finalizer_binding(owner)
+                || operand_frames
+                    .iter()
+                    .rev()
+                    .any(|frame| frame.live.contains(&owner))
+        };
         let chains = self.bound_finalizer_chains();
         self.ordinary_finalizers.iter().chain(owners).all(|owner| {
             stdin.is_some_and(|input| input.contains(owner))
                 || chains.iter().flatten().any(|chain| chain.contains(owner))
-                || self.find_finalizer_binding(*owner)
+                || retained(*owner)
                 || self.ordinary_finalizers.iter().any(|&stream| {
-                    super::stdlib::io::text_descriptor_chain(self, stream).is_some_and(|chain| {
-                        chain.contains(owner) && self.find_finalizer_binding(stream)
-                    })
+                    super::stdlib::io::text_descriptor_chain(self, stream)
+                        .is_some_and(|chain| chain.contains(owner) && retained(stream))
                 })
                 || chains.iter().flatten().any(|chain| {
                     matches!(self.get(chain[0]), Value::Instance { fields, .. }
@@ -4396,7 +4408,9 @@ impl Heap {
         if remaining == 0 {
             return Ok(None);
         }
-        if remaining <= MAX_FRAME_FINALIZERS && self.frame_keeps_stream_finalizers(stdin, &[]) {
+        if remaining <= MAX_FRAME_FINALIZERS
+            && self.frame_keeps_stream_finalizers(stdin, &[], &self.frames)
+        {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
@@ -4541,7 +4555,7 @@ impl Heap {
             .iter()
             .chain(&self.ordinary_finalizers)
             .all(|owner| input.contains(owner) || self.caller_keeps_generator(*owner))
-            || self.frame_keeps_stream_finalizers(Some(input), &self.descriptor_owners)
+            || self.frame_keeps_stream_finalizers(Some(input), &self.descriptor_owners, &[])
     }
 
     /// Both the weak reference and its target must keep a strong path from a surviving root.
@@ -5569,10 +5583,13 @@ mod tests {
         fields.insert("resource".into(), owner);
 
         let input = stdlib::io::rooted_input_chain(&ctx);
-        assert!(ctx.heap.frame_keeps_stream_finalizers(input.as_ref(), &[]));
         assert!(
             ctx.heap
-                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+                .frame_keeps_stream_finalizers(input.as_ref(), &[], &[])
+        );
+        assert!(
+            ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner], &[])
         );
 
         let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
@@ -5581,7 +5598,7 @@ mod tests {
         fields.insert("resource".into(), NONE);
         assert!(
             !ctx.heap
-                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner], &[])
         );
     }
 
@@ -5604,7 +5621,7 @@ mod tests {
         bindings.names.insert("writer".into(), writer);
         assert!(
             ctx.heap
-                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer], &[])
         );
 
         let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
@@ -5614,7 +5631,7 @@ mod tests {
         bindings.names.insert("replacement".into(), owner);
         assert!(
             !ctx.heap
-                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer], &[])
         );
 
         let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
@@ -5623,14 +5640,33 @@ mod tests {
         bindings.names.insert("renamed".into(), writer);
         assert!(
             ctx.heap
-                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer], &[])
         );
         let replacement = ctx.scope("replacement", None);
         ctx.heap.frames.last_mut().unwrap().scope = replacement;
         assert!(
             !ctx.heap
-                .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer], &[])
         );
+        ctx.heap.release_temporaries_since(0);
+        let mark = ctx.heap.temporary_mark();
+        ctx.heap.keep(owner);
+        ctx.heap.keep(writer);
+        assert!(ctx.heap.frame_keeps_stream_finalizers(
+            input.as_ref(),
+            &[writer],
+            &ctx.heap.frames
+        ));
+        assert!(
+            !ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[writer], &[])
+        );
+        ctx.heap.release_temporaries_since(mark);
+        assert!(!ctx.heap.frame_keeps_stream_finalizers(
+            input.as_ref(),
+            &[writer],
+            &ctx.heap.frames
+        ));
     }
 
     #[test]
