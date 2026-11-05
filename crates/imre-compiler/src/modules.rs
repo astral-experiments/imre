@@ -119,6 +119,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
         "_strptime" => bundled_source!("_strptime.py"),
         "calendar" => bundled_source!("calendar.py"),
+        // CPython 3.14.5's file wrapper and shared stream reader. See licenses/CPython.txt.
+        "lzma" => bundled_source!("lzma.py"),
+        "compression" => bundled_source!("compression/__init__.py"),
+        "compression._common" => bundled_source!("compression/_common/__init__.py"),
+        "compression._common._streams" => bundled_source!("compression/_common/_streams.py"),
         // CPython 3.14.5 Lib/zoneinfo. See licenses/CPython.txt.
         "zoneinfo" => bundled_source!("zoneinfo/__init__.py"),
         "zoneinfo._common" => bundled_source!("zoneinfo/_common.py"),
@@ -1345,7 +1350,7 @@ impl IntrinsicModule {
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
         }
-        if self == Self::LzmaNative
+        if matches!(self, Self::Lzma | Self::LzmaNative)
             && let Some(&(_, value)) = imre_ast::lzma::INTEGER_CONSTANTS
                 .iter()
                 .find(|&&(attr, _)| attr == name)
@@ -2387,15 +2392,29 @@ impl IntrinsicModule {
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
-            (Self::Lzma, "FORMAT_AUTO") => Intrinsic::IntConstant(0),
-            (Self::Lzma, "FORMAT_XZ") => Intrinsic::IntConstant(1),
-            (Self::Lzma, "FORMAT_ALONE") => Intrinsic::IntConstant(2),
             (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
             (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
                 Intrinsic::StringConstant(imre_ast::zlib::VERSION)
             }
+            (Self::Lzma, "__all__") => Intrinsic::ScopedObjectExport("lzma.__all__"),
+            (Self::Lzma, "LZMACompressor") => Intrinsic::ScopedObjectExport("lzma.LZMACompressor"),
+            (Self::Lzma, "LZMADecompressor") => {
+                Intrinsic::ScopedObjectExport("lzma.LZMADecompressor")
+            }
             (Self::Lzma, "LZMAError") => Intrinsic::ScopedObjectExport("lzma.LZMAError"),
+            (Self::Lzma, "LZMAFile") => Intrinsic::ScopedObjectExport("lzma.LZMAFile"),
+            (Self::Lzma, "compress") => Intrinsic::ScopedObjectExport("lzma.compress"),
             (Self::Lzma, "decompress") => Intrinsic::ScopedObjectExport("lzma.decompress"),
+            (Self::Lzma, "is_check_supported") => {
+                Intrinsic::ScopedObjectExport("lzma.is_check_supported")
+            }
+            (Self::Lzma, "open") => Intrinsic::ScopedObjectExport("lzma.open"),
+            (Self::Lzma, "_decode_filter_properties") => {
+                Intrinsic::ScopedObjectExport("lzma._decode_filter_properties")
+            }
+            (Self::Lzma, "_encode_filter_properties") => {
+                Intrinsic::ScopedObjectExport("lzma._encode_filter_properties")
+            }
             (Self::Zlib, "decompressobj") => Intrinsic::ScopedObjectExport("zlib.decompressobj"),
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
@@ -5425,7 +5444,13 @@ impl<'a> Loader<'a> {
             // token initializes its tables and quopri selects a codec from live module globals.
             self.needs_object_imports |= matches!(
                 name,
-                "token" | "http.client" | "fractions" | "quopri" | "xml" | "zoneinfo"
+                "token"
+                    | "http.client"
+                    | "fractions"
+                    | "quopri"
+                    | "xml"
+                    | "zoneinfo"
+                    | "compression._common._streams"
             );
             let pkgutil_source;
             let source = if name == "pkgutil" {
