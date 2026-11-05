@@ -168,9 +168,9 @@ pub(super) fn call(
                 ));
             }
         };
-        let mut result = natural_log(ctx, *value)?;
+        let mut result = logarithm(ctx, *value, f64::ln)?;
         if let Some(base) = base {
-            let denominator = natural_log(ctx, *base)?;
+            let denominator = logarithm(ctx, *base, f64::ln)?;
             if denominator == 0.0 {
                 return Err(Error::new("ZeroDivisionError", "division by zero"));
             }
@@ -187,6 +187,10 @@ pub(super) fn call(
             ),
         ));
     };
+    if operation == "log2" {
+        let result = logarithm(ctx, value, f64::log2)?;
+        return Ok(ctx.alloc(Value::Float(result)));
+    }
     if operation == "fsum" {
         return fsum(ctx, value);
     }
@@ -337,7 +341,7 @@ fn isclose(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
 
 /// Take the log of an int's stored value, including those too large for a double.
 /// Other numbers go through the same real conversion as the unary math functions.
-fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
+fn logarithm(ctx: &mut Context, value: Id, log: fn(f64) -> f64) -> Result<f64> {
     match ctx.heap.get(ctx.scalar_value(value)) {
         Value::Bool(true) => return Ok(0.0),
         Value::Bool(false) => return Err(Error::new("ValueError", "expected a positive input")),
@@ -347,7 +351,7 @@ fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
                 return Err(Error::new("ValueError", "expected a positive input"));
             }
             if let Ok(x) = crate::floats::int_to_float(integer) {
-                return Ok(x.ln());
+                return Ok(log(x));
             }
             // CPython's loghelper uses a rounded mantissa and a separate exponent
             // on overflow. Keep one sticky bit so the cast rounds ties correctly.
@@ -361,7 +365,7 @@ fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
                 mantissa = 0.5;
                 exponent += 1;
             }
-            return Ok(mantissa.ln() + std::f64::consts::LN_2 * exponent as f64);
+            return Ok(log(mantissa) + log(2.0) * exponent as f64);
         }
         _ => {}
     }
@@ -375,7 +379,7 @@ fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
             ),
         ));
     }
-    Ok(x.ln())
+    Ok(log(x))
 }
 
 /// Accumulate non-overlapping partial sums, as in CPython's math_fsum.
