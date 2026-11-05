@@ -888,7 +888,8 @@ impl Builtin {
             Self::RegexRunCount { members, .. } => {
                 matches!(args, [input] if input.ty == Type::Str)
                     && result == Type::Int
-                    && members.len() == 256
+                    && members.len() >= 256
+                    && members.len().is_multiple_of(4)
             }
             Self::SequenceGetInBounds | Self::SequenceTakeInBounds => {
                 matches!(args, [source, cursor]

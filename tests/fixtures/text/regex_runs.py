@@ -18,6 +18,8 @@ def unicode_runs(text: str) -> None:
     print(findall(r"(é+)", text))
     print(len(findall(r"(\w+)", text)))
     print(len(split(r"\d+", text)))
+    print(len(findall(r"[\x7f-\u0080\U0010ffff]+", text)))
+    print(len(split(r"[^é狐]+", text)))
     print(findall(r"[^,]+", text))
     print(split(r"\d+", text))
     print(split(r"[\x7f-\u0080\U0010ffff]+", text))

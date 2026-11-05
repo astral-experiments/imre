@@ -652,7 +652,8 @@ impl Expr {
                         ),
                     ..
                 },
-            ] if members.len() == 256
+            ] if members.len() >= 256
+                && members.len().is_multiple_of(4)
                 && matches!(input.as_slice(), [text] if text.ty == Type::Str) =>
             {
                 ExprKind::Builtin(
