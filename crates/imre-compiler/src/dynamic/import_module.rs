@@ -410,6 +410,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",
                                  "_warn_import(globals(), 'sys.path_hooks is empty', 1224, _is_frozen)"),
                     section("class FileFinder:", "class AppleFrameworkLoader("),
+                    &format!(
+                        "_installed_source_files = frozenset({:?})",
+                        include_str!("../../stdlib/installed-sources.txt").lines().collect::<Vec<_>>()
+                    ),
                     include_str!("../../stdlib/importlib/registered_finder.py"),
                     section("def _set_bootstrap_module(", "def _install("),
                 ].join("\n")

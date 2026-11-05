@@ -137,8 +137,10 @@ def check_installed_site(imre, root, run):
     assert (words.returncode, words.stdout, words.stderr) == (0, b"'two words' tail\n", b""), words
     reader = root / "read_tar_entry.py"
     reader.write_text(
+        "from email.header import Header, decode_header\n"
         "from graphlib import TopologicalSorter\n"
         "from tarfile import open as open_archive\n"
+        "assert decode_header(Header('Café', 'iso-8859-1').encode()) == [(b'Caf\\xe9', 'iso-8859-1')]\n"
         "assert list(TopologicalSorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         f"with open_archive({str(sample.resolve())!r}, 'r:') as archive:\n"
         "    with archive.extractfile('payload') as member:\n"
@@ -169,6 +171,7 @@ def check_installed_site(imre, root, run):
     )
     missing = run(launcher, "-B", consumer, timeout=300)
     assert (missing.returncode, missing.stdout, missing.stderr) == (0, b"start\nxml.etree.ElementTree\n", b""), missing
+    check_local_email_package(launcher, root, run)
     target = run(launcher, "build-target")
     assert target.returncode == 0, target.stderr
     version = json.loads(target.stdout)["python_version"]
@@ -210,6 +213,53 @@ def check_installed_site(imre, root, run):
     result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
     check_symlinked_venv(launcher, site, root.resolve(), run)
+
+
+def check_local_email_package(launcher, root, run):
+    app = root / "email_app"
+    package = app / "email"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("marker = 'local email'\n")
+    script = app / "read_header.py"
+    script.write_text(
+        "import email, sys\n"
+        "try:\n"
+        "    import email.header\n"
+        "except ModuleNotFoundError as error:\n"
+        "    print(error.name)\n"
+        "print(email.marker, 'email.header' in sys.modules, hasattr(email, 'header'))\n"
+    )
+    missing = run(launcher, "-B", script, timeout=300)
+    assert (missing.returncode, missing.stdout, missing.stderr) == (
+        0, b"email.header\nlocal email False False\n", b"",
+    ), missing
+
+    (package / "header.py").write_text("marker = 'local header'\n")
+    dynamic = (
+        "import importlib, sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "header = importlib.import_module(sys.argv[2])\n"
+        "parent = sys.modules['email']\n"
+        "print(parent.marker, header.marker)\n"
+        "print(parent.header is header is sys.modules[sys.argv[2]])\n"
+    )
+    present = run(launcher, "-B", "-c", dynamic, app, "email.header", timeout=300)
+    assert (present.returncode, present.stdout, present.stderr) == (0, b"local email local header\nTrue\n", b""), present
+
+    external = root / "external_header"
+    external.mkdir()
+    (external / "header.py").write_text("def marker() -> int:\n    return 73\n")
+    (package / "header.py").write_text("def marker() -> int:\n    return 11\n")
+    (package / "__init__.py").write_text(f"__path__ = [{str(external)!r}]\n")
+    reader = app / "read_marker.py"
+    reader.write_text("from email.header import marker\nprint(marker())\n")
+    redirected = run(launcher, "-B", reader, timeout=300)
+    assert (redirected.returncode, redirected.stdout, redirected.stderr) == (0, b"73\n", b""), redirected
+
+    (package / "__init__.py").write_text("__path__ = []\n")
+    empty = run(launcher, "-B", reader, timeout=300)
+    assert empty.returncode == 1 and empty.stdout == b"", empty
+    assert empty.stderr.splitlines()[-1:] == [b"ModuleNotFoundError: No module named 'email.header'"], empty
 
 
 def check_symlinked_venv(launcher, base_site, root, run):

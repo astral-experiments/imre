@@ -101,9 +101,27 @@ impl Context {
         Some((source.path.clone(), SourceBody::Registered(source.code)))
     }
 
+    /// A regular Python package and its native helpers follow the package's search path.
+    pub(super) fn path_native(&self, name: &str) -> bool {
+        let root = name.split_once('.').map_or(name, |(root, _)| root);
+        imre_ast::providers::is_native_fallback(name)
+            || imre_ast::providers::is_virtual_package(root)
+            || self
+                .bundled_registration(root)
+                .is_some_and(|entry| entry.path.ends_with("__init__.py"))
+    }
+
+    /// The virtual directory in which this module's native fallback can participate.
+    pub(super) fn native_path_entry(&self, name: &str) -> Option<PathBuf> {
+        let mut entry = PathBuf::from(self.config["bundled_root"].as_str()?);
+        if let Some((parent, _)) = name.rsplit_once('.') {
+            entry.extend(parent.split('.'));
+        }
+        Some(entry)
+    }
+
     fn sealed_native(&self, name: &str) -> bool {
-        self.is_frozen(name)
-            || (stdlib::is_module(name) && !imre_ast::providers::is_native_fallback(name))
+        self.is_frozen(name) || (stdlib::is_module(name) && !self.path_native(name))
     }
 
     /// Look up a module owned by this loader, including native modules without a Python body.
@@ -148,7 +166,7 @@ impl Context {
         {
             return Ok(vec![path.parent().unwrap().to_owned()]);
         }
-        if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
+        if imre_ast::providers::is_virtual_package(name) {
             return Ok(vec![PathBuf::from(format!("<imre stdlib>/{name}"))]);
         }
         Ok(Vec::new())
@@ -164,19 +182,17 @@ impl Context {
             return Ok(NONE);
         }
         if bundled && path != NONE {
-            let Some((source, _)) = &source else {
-                return Ok(NONE);
+            let directory = match &source {
+                Some((source, _)) if source.ends_with("__init__.py") => {
+                    source.parent().and_then(Path::parent).map(Path::to_owned)
+                }
+                Some((source, _)) => source.parent().map(Path::to_owned),
+                None => self.native_path_entry(name),
             };
-            let directory = if source.ends_with("__init__.py") {
-                source.parent().and_then(Path::parent)
-            } else {
-                source.parent()
-            };
-            if !self
-                .items(path)?
-                .iter()
-                .any(|id| self.str_value(*id).ok().map(Path::new) == directory)
-            {
+            if !self.items(path)?.iter().any(|id| {
+                self.str_value(*id)
+                    .is_ok_and(|entry| Some(Path::new(entry)) == directory.as_deref())
+            }) {
                 return Ok(NONE);
             }
         }

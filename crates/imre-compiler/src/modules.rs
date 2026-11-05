@@ -3933,6 +3933,7 @@ pub(crate) enum EntryImportFailure {
     AfterStatement,
     MissingModule,
     ZipImport,
+    RuntimePackagePath,
 }
 
 struct Loader<'a> {
@@ -3940,7 +3941,8 @@ struct Loader<'a> {
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
-    wildcard_import: Option<String>,
+    deferred_object_error: Option<String>,
+    check_package_path_calls: bool,
     inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
     zip_sources: HashMap<PathBuf, crate::zip_entry::ZipSources>,
@@ -4021,7 +4023,8 @@ impl<'a> Loader<'a> {
             zip_files: zip_inputs.files,
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
-            wildcard_import: None,
+            deferred_object_error: None,
+            check_package_path_calls: false,
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -4207,11 +4210,15 @@ impl<'a> Loader<'a> {
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
             has_native_bytearray: Default::default(),
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
-            check_fallback_calls: Default::default(),
+            check_fallback_calls: if self.check_package_path_calls {
+                FallbackCalls::All.into()
+            } else {
+                Default::default()
+            },
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
             object_builtin_errors: Default::default(),
-            deferred_object_error: self.wildcard_import.into(),
+            deferred_object_error: self.deferred_object_error.into(),
             return_errors: Default::default(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
@@ -4293,7 +4300,10 @@ impl<'a> Loader<'a> {
                 .map(|import| import.module_name)
                 .collect::<std::collections::BTreeSet<_>>()
             {
-                self.intrinsic_module(module_name, None)?;
+                if self.intrinsic_module(module_name, None)?.is_none() {
+                    imports.retain(|import| import.module_name != module_name);
+                    self.needs_object_imports = true;
+                }
             }
             // Typeshed omits CPython's private _translate companion. The import
             // was resolved above against the sealed module's real export.
@@ -4720,14 +4730,17 @@ impl<'a> Loader<'a> {
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
                         continue;
                     }
-                    let leaf = self.load_module(name)?;
-                    let (name, target) = if let Some(alias) = &alias.asname {
-                        (alias.as_str(), leaf)
+                    let leaf = self.imported_module(name)?;
+                    let (name, binding) = if let Some(alias) = &alias.asname {
+                        (
+                            alias.as_str(),
+                            leaf.map_or(Binding::ConditionalValue, Binding::Module),
+                        )
                     } else {
                         let first = name.split('.').next().unwrap();
-                        (first, self.by_name[first])
+                        (first, Binding::Module(self.by_name[first]))
                     };
-                    self.bind(id, name, Binding::Module(target), alias)?;
+                    self.bind(id, name, binding, alias)?;
                 }
             }
             ast::Stmt::ImportFrom(import) => {
@@ -4739,10 +4752,10 @@ impl<'a> Loader<'a> {
                     // The module initializer chooses its exports. Still resolve the
                     // dependency so checked files retain their ordinary diagnostics.
                     if import.level != 0 || self.intrinsic_module(&name, None)?.is_none() {
-                        self.load_module(&name)?;
+                        self.imported_module(&name)?;
                     }
                     self.needs_object_imports = true;
-                    self.wildcard_import.get_or_insert_with(|| {
+                    self.deferred_object_error.get_or_insert_with(|| {
                         self.modules[id].error(import, "wildcard imports require runtime binding")
                     });
                     return Ok(());
@@ -4921,7 +4934,16 @@ impl<'a> Loader<'a> {
                     {
                         target
                     }
-                    _ => self.load_module(&name)?,
+                    _ => match self.imported_module(&name)? {
+                        Some(target) => target,
+                        None => {
+                            for alias in &import.names {
+                                let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                                self.bind(id, local.as_str(), Binding::ConditionalValue, alias)?;
+                            }
+                            return Ok(());
+                        }
+                    },
                 };
                 for alias in &import.names {
                     let binding = if let Some(binding) =
@@ -4974,7 +4996,8 @@ impl<'a> Loader<'a> {
                             self.ordered_imports = true;
                             Binding::Module(child)
                         } else {
-                            Binding::Module(self.load_module(&child_name)?)
+                            self.imported_module(&child_name)?
+                                .map_or(Binding::ConditionalValue, Binding::Module)
                         }
                     } else if self.modules[target].is_bundled("http.client")
                         || self.modules[target].is_bundled("dis")
@@ -5007,16 +5030,16 @@ impl<'a> Loader<'a> {
         Ok(())
     }
 
-    /// Intrinsic imports use fixed identities, but never silently accept a
-    /// first-party file that attempts to shadow the standard-library namespace.
+    /// Select an intrinsic only after resolving regular first-party package roots.
     fn intrinsic_module(
         &mut self,
         name: &str,
         imports: Option<&[ast::Alias]>,
     ) -> Result<Option<IntrinsicModule>, String> {
-        if self.allow_imports
-            && imre_ast::providers::is_native_fallback(name)
-            && self.has_project_source(name)
+        if self.shadows_bundled_package(name)
+            || (self.allow_imports
+                && imre_ast::providers::is_native_fallback(name)
+                && self.has_project_source(name))
         {
             return Ok(None);
         }
@@ -5189,6 +5212,20 @@ impl<'a> Loader<'a> {
         Ok(module)
     }
 
+    /// An earlier module or regular package owns its whole subtree. A directory
+    /// without an initializer alone cannot displace a later regular package.
+    fn shadows_bundled_package(&mut self, name: &str) -> bool {
+        let root = name.split('.').next().unwrap();
+        self.allow_imports
+            && stdlib_top_level(root)
+            && (imre_ast::providers::is_virtual_package(root)
+                || bundled_runtime_source(root)
+                    .is_some_and(|(member, _)| member.ends_with("/__init__.py"))
+                || crate::zip_entry::installed_member(root)
+                    .is_some_and(|member| member.ends_with("/__init__.py")))
+            && self.has_project_source(root)
+    }
+
     /// Look for a source file on the project search path before using a bundled fallback.
     fn has_project_source(&mut self, name: &str) -> bool {
         let roots = std::iter::once(&self.root)
@@ -5259,6 +5296,20 @@ impl<'a> Loader<'a> {
         serde_json::to_string(&roots).map_err(|e| e.to_string())
     }
 
+    /// Keep a live package lookup in the Python importer while checking the rest of the file.
+    fn imported_module(&mut self, name: &str) -> Result<Option<ModuleId>, String> {
+        match self.load_module(name) {
+            Err(error) if self.import_failure == Some(EntryImportFailure::RuntimePackagePath) => {
+                self.import_failure = None;
+                self.needs_object_imports = true;
+                self.check_package_path_calls = true;
+                self.deferred_object_error.get_or_insert(error);
+                Ok(None)
+            }
+            result => result.map(Some),
+        }
+    }
+
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
         if name == FRACTION_CLASS {
             return Err("the private Fraction implementation is not an importable module".into());
@@ -5288,7 +5339,9 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
+        let project_package = self.shadows_bundled_package(name);
         let bundled = match name {
+            _ if project_package => None,
             "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
             // Keep the public typeshed decorator signatures available alongside this singleton.
@@ -5419,7 +5472,7 @@ impl<'a> Loader<'a> {
             return Err("first-party import nesting exceeds 96 levels".into());
         }
         self.import_depth += 1;
-        let result = self.load_new_module(name);
+        let result = self.load_new_module(name, project_package);
         self.import_depth -= 1;
         result
     }
@@ -5433,15 +5486,29 @@ impl<'a> Loader<'a> {
             Some(id) if self.loading.contains(&id) && self.modules[id].is_package => id,
             _ => self.load_module(parent)?,
         };
-        if !self.modules[id].is_package {
+        let package = &self.modules[id];
+        if !package.is_package {
             return Err(format!("{parent:?} is not a package"));
+        }
+        // An initializer can replace its path or pass the mutable list to another caller.
+        if !package.bundled
+            && ast::helpers::any_over_body(&package.parsed.syntax().body, |expr| {
+                expr.as_name_expr()
+                    .is_some_and(|name| name.id == "__path__")
+            })
+        {
+            self.import_failure = Some(EntryImportFailure::RuntimePackagePath);
+            return Err(format!(
+                "importing {name:?} requires the live {parent}.__path__"
+            ));
         }
         Ok(Some((id, child)))
     }
 
-    fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
+    fn load_new_module(&mut self, name: &str, project_package: bool) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
+            && !project_package
             && !((first == "quopri" || imre_ast::providers::is_native_fallback(first))
                 && self.has_project_source(first))
             && (IntrinsicModule::named(first).is_some()

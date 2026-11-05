@@ -47,7 +47,12 @@ impl Context {
                     || (entry.path == root && entry.path.file_name() == Some(leaf))
             })
         });
-        Ok(if registered {
+        // Native packages can have archive children even when no child was compiled.
+        let virtual_package = bundle
+            .and_then(|dir| root.strip_prefix(dir).ok())
+            .and_then(Path::to_str)
+            .is_some_and(imre_ast::providers::is_virtual_package);
+        Ok(if registered || virtual_package {
             self.text(root.to_string_lossy())
         } else {
             NONE
@@ -57,9 +62,11 @@ impl Context {
     /// Return a ModuleSpec for a compiled package, module or namespace portion on this entry.
     pub(super) fn registered_path_spec(&mut self, name: Id, path: Id) -> Result<Id> {
         let fullname = self.str_value(name)?;
-        // A native extension uses its place in the virtual stdlib even without a Python file.
-        if imre_ast::providers::is_native_fallback(fullname)
-            && self.config["bundled_root"].as_str() == Some(self.str_value(path)?)
+        // At the provider's own entry, use the loader which initializes its native state.
+        if super::stdlib::is_module(fullname)
+            && !self.is_frozen(fullname)
+            && self.path_native(fullname)
+            && self.native_path_entry(fullname).as_deref() == Some(Path::new(self.str_value(path)?))
         {
             let loader = self.lookup_attr(self.bootstrap_module, "_BundledImporter")?;
             let find = self.lookup_attr(loader, "find_spec")?;

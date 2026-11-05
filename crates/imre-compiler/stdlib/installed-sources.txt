@@ -1,5 +1,10 @@
 _pydatetime.py
 _pydecimal.py
+email/base64mime.py
+email/charset.py
+email/encoders.py
+email/header.py
+email/quoprimime.py
 getpass.py
 graphlib.py
 shlex.py
