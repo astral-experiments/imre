@@ -1510,22 +1510,9 @@ fn date_strptime(
         ctx.heap.keep(parser);
         ctx.call(parser, vec![class, text, format], vec![])
     });
-    // Release the callable before its module, preserving the result or exception across finalizers.
-    for mark in [parser_mark, module_mark] {
-        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
-        match &result {
-            Ok(value) => ctx.heap.keep(*value),
-            Err(error) => {
-                for value in error.roots() {
-                    ctx.heap.keep(value);
-                }
-            }
-        }
-        if collect {
-            ctx.collect_unreachable();
-        }
-    }
-    result
+    // CPython's datetime classmethods release the callable before its module.
+    let result = ctx.release_with_result(parser_mark, result);
+    ctx.release_with_result(module_mark, result)
 }
 
 fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

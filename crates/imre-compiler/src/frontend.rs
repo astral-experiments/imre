@@ -8959,6 +8959,19 @@ impl<'a> Checker<'a> {
         {
             return Err(self.scoped_builtin_error("__import__", call));
         }
+        if self.unshadowed_builtin(&call.func, "getattr")
+            && call.arguments.keywords.is_empty()
+            && let [owner, ast::Expr::StringLiteral(key)]
+            | [owner, ast::Expr::StringLiteral(key), _] = call.arguments.args.as_ref()
+            && self.resolve(owner)
+                == Some(Binding::IntrinsicModule(
+                    crate::modules::IntrinsicModule::Time,
+                ))
+            && let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export))) =
+                crate::modules::IntrinsicModule::Time.symbol(key.value.to_str())
+        {
+            return Err(self.scoped_builtin_error(export, call));
+        }
         if let Some(method) = self.boxed_descriptor(&call.func) {
             return Err(self.scoped_builtin_error(method, call));
         }

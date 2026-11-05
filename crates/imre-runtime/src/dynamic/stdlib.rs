@@ -645,6 +645,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         #[cfg(target_os = "linux")]
         ("time", "CLOCK_REALTIME") => ctx.int(i64::from(libc::CLOCK_REALTIME)),
+        ("time", "_STRUCT_TM_ITEMS") => ctx.int(11),
         ("time", "struct_time") => ctx.builtin("time.struct_time"),
         ("time", name) if time::is_function(name) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),

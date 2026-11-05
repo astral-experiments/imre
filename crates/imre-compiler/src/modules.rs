@@ -1556,6 +1556,10 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "strptime") => Intrinsic::ScopedObjectExport("time.strptime"),
+            (Self::Time, "_STRUCT_TM_ITEMS") => {
+                Intrinsic::ScopedObjectExport("time._STRUCT_TM_ITEMS")
+            }
             (Self::Time, "struct_time") => Intrinsic::StructTime,
             (Self::Time, "mktime") => Intrinsic::Mktime,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),

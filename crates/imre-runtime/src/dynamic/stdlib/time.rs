@@ -20,6 +20,7 @@ pub(in crate::dynamic) fn is_function(name: &str) -> bool {
             | "localtime"
             | "mktime"
             | "strftime"
+            | "strptime"
             | "ctime"
             | "tzset"
     ) || text_signature(name).is_some()
@@ -368,6 +369,16 @@ pub(super) fn call(
                 ),
             )),
         },
+        "strptime" => {
+            let mark = ctx.heap.temporary_mark();
+            let parser = ctx
+                .import_with_builtins("_strptime")
+                .and_then(|module| ctx.lookup_attr(module, "_strptime_time"));
+            // PyImport_ImportModuleAttr drops the module before the parser is called.
+            let parser = ctx.release_with_result(mark, parser)?;
+            let result = ctx.call(parser, args.to_vec(), vec![]);
+            ctx.release_with_result(mark, result)
+        }
         "strftime" => {
             let format = match args {
                 [format] | [format, _] => *format,

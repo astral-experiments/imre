@@ -358,7 +358,7 @@ impl<'a> Visitor<'a> for Imports {
             self.add(0, "importlib");
             if matches!(
                 name.value.to_str().split('.').next(),
-                Some("decimal" | "_pydecimal" | "pyexpat" | "xml" | "zoneinfo")
+                Some("decimal" | "_pydecimal" | "pyexpat" | "time" | "xml" | "zoneinfo")
             ) {
                 self.add(0, name.value.to_str());
             }
@@ -917,8 +917,10 @@ pub(crate) fn compile<const SPLIT: bool>(
             {
                 imports.add(0, "posixpath");
             }
-            // The native time.strptime classmethod imports its Python parser on first use.
-            if seen.contains("_datetime") && !seen.contains("_strptime") {
+            // Native time and datetime parsers import their Python helper on first use.
+            if (seen.contains("time") || seen.contains("_datetime") || computed_import)
+                && !seen.contains("_strptime")
+            {
                 imports.names.push((0, "_strptime".to_owned()));
             }
             // Python 3.13 path pickles name this module even when the reader never imports pathlib.

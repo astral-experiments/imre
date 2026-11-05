@@ -34,6 +34,12 @@ REJECTED = {
             "print(convert(Decimal('1.25')))\n"
         ),
     }, "invalid-argument-type"),
+    "clock_lookup_preserves_typed_call": ({
+        "main.py": "import time\n" + HELPER + "f('wrong')\nprint(getattr(time, 'monotonic_ns')())\n",
+    }, "expected int, got str"),
+    "unused_strptime_preserves_typed_call": ({
+        "main.py": "from time import strptime\n" + HELPER + "f('wrong')\n",
+    }, "expected int, got str"),
     "unused_is_tracked_preserves_typed_call": ({
         "main.py": "from gc import is_tracked\n" + HELPER + "f('wrong')\n",
     }, "expected int, got str"),

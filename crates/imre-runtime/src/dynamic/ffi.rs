@@ -2117,6 +2117,23 @@ impl Context {
         }
     }
 
+    /// Release temporary operands while their return value or raised exception stays live.
+    pub(super) fn release_with_result(&mut self, mark: usize, result: Result<Id>) -> Result<Id> {
+        let collect = self.heap.discard_truth_operands(mark, self.modules);
+        match &result {
+            Ok(value) => self.heap.keep(*value),
+            Err(error) => {
+                for root in error.roots() {
+                    self.heap.keep(root);
+                }
+            }
+        }
+        if collect {
+            self.collect_unreachable();
+        }
+        result
+    }
+
     pub(super) fn finalizer_path_roots(&self) -> [Id; 2] {
         use super::stdlib::datetime::isocalendar::MODULE_REF;
         [
