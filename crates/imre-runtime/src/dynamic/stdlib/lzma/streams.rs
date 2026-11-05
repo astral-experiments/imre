@@ -19,7 +19,8 @@ pub(in crate::dynamic) struct Decompressor {
     xz_check_byte: u8,
     eof: bool,
     needs_input: bool,
-    // Unconsumed input. After EOF, the same tail is exposed as unused_data.
+    pub(in crate::dynamic) unused_data: Id,
+    // Unconsumed input between calls, or the suffix to publish on reaching EOF.
     pending: Vec<u8>,
     offset: usize,
 }
@@ -181,6 +182,13 @@ pub(super) fn with_input<T>(
     data: Id,
     consume: impl FnOnce(&mut Context, Id) -> Result<T>,
 ) -> Result<T> {
+    if matches!(
+        ctx.heap.get(ctx.scalar_value(data)),
+        Value::Bytes(_) | Value::ByteArray(_)
+    ) && ctx.buffer_slot(data, "__buffer__") == Some(None)
+    {
+        return ctx.with_native_bytes_export(data, consume);
+    }
     if let Some(method) = ctx.python_buffer_method(data, true)? {
         ctx.with_contiguous_python_buffer(data, method, 0, consume)
     } else {
@@ -323,7 +331,9 @@ impl Decompressor {
         let tail = &input[consumed..];
         self.needs_input = !self.eof && tail.is_empty() && output.len() < limit;
         if !tail.is_empty() {
-            if buffered {
+            // At EOF retain only the suffix, even when the pending allocation
+            // also holds a large consumed prefix.
+            if buffered && !self.eof {
                 self.offset = pending.len() - tail.len();
                 self.pending = pending;
             } else {
@@ -405,6 +415,7 @@ pub(in crate::dynamic) fn decompressor(
             xz_check_byte: 0,
             eof: false,
             needs_input: true,
+            unused_data: ctx.heap.bytes_from_data(Vec::new()),
             pending: Vec::new(),
             offset: 0,
         };
@@ -437,9 +448,15 @@ pub(in crate::dynamic) fn decompressor(
             .transpose()?
             .unwrap_or(-1);
         let input = ctx.native_buffer_bytes(view)?;
-        handle
-            .borrow_mut()
-            .decode(input, usize::try_from(limit).unwrap_or(usize::MAX))
+        let mut state = handle.borrow_mut();
+        let output = state.decode(input, usize::try_from(limit).unwrap_or(usize::MAX))?;
+        if state.eof && !state.pending.is_empty() {
+            let tail = std::mem::take(&mut state.pending);
+            drop(state);
+            let unused_data = ctx.heap.bytes_from_data(tail);
+            handle.borrow_mut().unused_data = unused_data;
+        }
+        Ok(output)
     })?;
     Ok(ctx.alloc(Value::Bytes(output)))
 }
@@ -458,14 +475,7 @@ pub(in crate::dynamic) fn decompressor_attr(
         "check" => Ok(ctx.int(i64::from(state.check))),
         "eof" => Ok(builtins::boolean(state.eof)),
         "needs_input" => Ok(builtins::boolean(state.needs_input)),
-        "unused_data" => {
-            let bytes = if state.eof {
-                state.pending[state.offset..].to_vec()
-            } else {
-                Vec::new()
-            };
-            Ok(ctx.alloc(Value::Bytes(bytes)))
-        }
+        "unused_data" => Ok(state.unused_data),
         _ => Err(Error::new("AttributeError", name)),
     }
 }
@@ -478,12 +488,14 @@ mod tests {
     fn pending_input_survives_reserve_failure() {
         let mut filters = Filters::new();
         filters.lzma2(LzmaOptions::new_preset(0).unwrap().dict_size(4096));
+        let mut heap = crate::dynamic::Heap::new();
         let mut decoder = Decompressor {
             stream: Stream::new_raw_decoder(&filters).unwrap(),
             check: 0,
             xz_check_byte: 0,
             eof: false,
             needs_input: true,
+            unused_data: heap.bytes_from_data(Vec::new()),
             pending: Vec::new(),
             offset: 0,
         };

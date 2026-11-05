@@ -1078,6 +1078,8 @@ pub(super) enum Value {
         lease: Option<Id>,
         // An ownerless C buffer has private backing storage but exposes obj as None.
         anonymous: bool,
+        // A native export's Python release callback cannot derive another view.
+        restricted: bool,
         layout: Option<super::memoryview::ViewLayout>,
         readonly: bool,
         hash: Option<i64>,
@@ -2231,7 +2233,6 @@ impl Value {
             | Self::ProcessPreparation(_)
             | Self::GzipDecoder(_)
             | Self::LzmaCompressor(_)
-            | Self::LzmaDecompressor(_)
             | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
@@ -2240,6 +2241,7 @@ impl Value {
             | Self::TlsSession(_)
             | Self::TlsListener(_)
             | Self::TlsBioSession(_) => {}
+            Self::LzmaDecompressor(state) => visit.push(state.borrow().unused_data),
             Self::ZlibDecompressor { state, dictionary } => {
                 visit.extend(*dictionary);
                 state.borrow().children(visit);

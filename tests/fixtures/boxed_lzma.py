@@ -141,6 +141,28 @@ def raw_filter_sequences():
             raise AssertionError("accepted a plain dictionary as a filter chain")
 
 
+def compressor_buffer_release():
+    observations = []
+
+    class Input(bytearray):
+        def __release_buffer__(self, view):
+            observations.append((view.obj is None, view.tobytes(), view.readonly))
+
+    data = Input(b"abc")
+    encoder = LZMACompressor()
+    stream = encoder.compress(data)
+    assert observations == [(True, b"abc", False)]
+    data.append(100)
+    assert LZMADecompressor().decompress(stream + encoder.flush()) == b"abc"
+    try:
+        encoder.compress(data)
+    except ValueError as error:
+        assert str(error) == "Compressor has been flushed"
+    else:
+        raise AssertionError("accepted input after flush")
+    assert observations == [(True, b"abc", False), (True, b"abcd", False)]
+
+
 def extension_stream():
     from _lzma import _decode_filter_properties, _encode_filter_properties
 
@@ -180,7 +202,10 @@ def extension_stream():
     assert decoder.decompress(data[1:] + b"tail", max_length=11) == payload[:11]
     assert not decoder.eof and not decoder.needs_input
     assert decoder.decompress(b"") == payload[11:] and decoder.eof
-    assert decoder.unused_data == b"tail"
+    gc.collect()
+    tail = decoder.unused_data
+    assert tail == b"tail" and decoder.unused_data is tail
+    compressor_buffer_release()
 
     for error_type, operation, args in (
         (ValueError, encoder.compress, (b"",)),

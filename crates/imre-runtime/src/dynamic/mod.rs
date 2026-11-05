@@ -418,6 +418,7 @@ impl Context {
     }
 
     fn python_buffer_method(&self, object: Id, scoped: bool) -> Result<Option<Id>> {
+        self.check_view_export(object)?;
         let Some(method) = self.buffer_slot(object, "__buffer__") else {
             return Ok(None);
         };
@@ -480,6 +481,51 @@ impl Context {
         }
         self.release_python_buffer(object, view);
         result
+    }
+
+    /// A bytes or bytearray subclass may inherit its native get-buffer slot and
+    /// override only release. The callback receives an ownerless, temporary view
+    /// of the original storage while the native export still prevents resizing.
+    fn with_native_bytes_export<T>(
+        &mut self,
+        object: Id,
+        consume: impl FnOnce(&mut Self, Id) -> Result<T>,
+    ) -> Result<T> {
+        self.with_buffer_export(object, |ctx| {
+            let result = consume(ctx, object);
+            if ctx
+                .buffer_slot(object, "__release_buffer__")
+                .flatten()
+                .is_some()
+            {
+                if let Err(error) = &result {
+                    for id in error.roots() {
+                        ctx.heap.keep(id);
+                    }
+                }
+                let storage = ctx.scalar_value(object);
+                let view = ctx.alloc(Value::MemoryView {
+                    owner: Some(storage),
+                    lease: None,
+                    anonymous: true,
+                    restricted: true,
+                    layout: None,
+                    readonly: matches!(ctx.heap.get(storage), Value::Bytes(_)),
+                    hash: None,
+                });
+                ctx.heap.keep(view);
+                ctx.release_python_buffer(object, view);
+                // The callback can retain or explicitly release the view. Its
+                // storage must be inaccessible once PyBuffer_Release returns.
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(view) else {
+                    unreachable!()
+                };
+                if let Some(storage) = owner.take() {
+                    ctx.heap.weak_edge_removed(storage);
+                }
+            }
+            result
+        })
     }
 
     /// Release a synchronous Python export after its consumer has dropped the view's export.
@@ -696,6 +742,7 @@ impl Context {
             owner: Some(owner),
             lease,
             anonymous,
+            restricted: false,
             layout,
             readonly,
             hash: None,
