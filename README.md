@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 5, 2026, Imre has a paired pass for **12,025 of 16,202 tests (74.2%)** across the 44 standard library module families tracked below.
+As of November 5, 2026, Imre has a paired pass for **12,030 of 16,202 tests (74.3%)** across the 44 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -165,7 +165,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `glob` | 22 | 24 | 0 | On Linux, CPython and both native builds passed 22 of the 24 tests in the complete module, including the open-file stress test. All three skipped the two Windows tests. |
 | `gzip` | 68 | 75 | 0 | The public whole suite reported 69 passing parents, including peek and a file object without a name. Two O0 and two O3 replays each linked all nine gzip children at the requested level, restoring six CLI originals. A mixed O0 control linked their seven isolated children at O3. An earlier compiler failure keeps `test_compress_stdin_outfile` under separate review. [Replay revision](https://github.com/astral-experiments/imre/commit/09d13bf1713411dde5e9af07c1f58ca7f157bb93). |
 | `inspect` | 276 | 362 | 0 | An earlier whole run passed 274 of 362 cases on both native builds. The public getcomments change added two source-inspection passes on the pinned stock interpreter and both native builds. [Public change](https://github.com/astral-experiments/imre/pull/5310). |
-| `math` | 42 | 89 | 0 | Stock passed all 89 originals. The earlier 39 paired passes include atan2, sine, and tangent. Stock and both native levels also passed `MathTests.testLdexp` and `MathTests.testLdexp_denormal` (occurrence 1 each). The public `frexp` fix added `MathTests.testFrexp`. [ldexp replay](https://github.com/astral-experiments/imre/commit/8e86084cd4f0ec88503550469923909e6f6d966d) · [#5462](https://github.com/astral-experiments/imre/pull/5462). |
+| `math` | 43 | 89 | 0 | Stock passed all 89 originals. The earlier 39 paired passes include atan2, sine, and tangent. Stock and both native levels also passed `MathTests.testLdexp` and `MathTests.testLdexp_denormal` (occurrence 1 each). The public `frexp` fix added `MathTests.testFrexp`. On #5492, `MathTests.testHypotAccuracy` passed on stock and at O0 and O3. The separate `testHypot` still stops at `math.gamma(3.5)` on Imre. [ldexp replay](https://github.com/astral-experiments/imre/commit/8e86084cd4f0ec88503550469923909e6f6d966d) · [#5462](https://github.com/astral-experiments/imre/pull/5462) · [#5492](https://github.com/astral-experiments/imre/pull/5492). |
 | `ssl` | 50 | 195 | 0 | Stock passed 178 of 195 originals and skipped 17. Both native levels passed 50 in the complete public suite, including `test.test_ssl.SSLErrorTests.test_lib_reason` (occurrence 1). |
 | `struct` | 33 | 43 | 0 | All three runs registered 43 originals. Stock passed 41 and skipped two. O0 and O3 each passed 33, retaining all 32 earlier passes and adding `test.test_struct.StructTest.test_705836` (occurrence 1). [Previous 32](https://github.com/astral-experiments/imre/commit/486fde67a585cc27180334bf1bc239affc3a40b3) · [Public replay revision](https://github.com/astral-experiments/imre/commit/dbeabb7cf3753ccd9de8bf53e7b5d78382d75542). |
 | `tokenize` | 53 | 130 | 0 | The unchanged test_max_indent passed on stock and public Imre at O0 and O3. It adds one new paired pass. |
@@ -174,9 +174,9 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `uuid` | 48 | 120 | 1 | Both native builds passed 47 of 120 originals on the public squash, including 47 of 48 frozen CPython-positive cases. An earlier host also passed the IP-dependent lookup. The private enum layout check has a [documented omission decision](docs/stdlib-omissions.md#uuid). [Public change](https://github.com/astral-experiments/imre/pull/5313). |
 | `warnings` | 181 | 187 | 0 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| `zipfile` | 253 | 383 | 0 | The public CLI replay restored `test_bad_use`, `test_extract_command` and `test_test_command`, and added `test_create_command`. The earlier 249 already include `test_list_command`. All 11 subprocesses at each level retained their flags, used the requested Clang optimization and ran the ELF executable produced by the observed link. [Public replay revision](https://github.com/astral-experiments/imre/commit/43e3abd7ef56de4162e1ca8c4484b4ce2707a34a). |
+| `zipfile` | 257 | 383 | 0 | The partial runs and their continuations paired 255 of 383 originals. Of those, 251 already counted and four were new. The new passes cover writer attributes for stored and deflated entries, forced ZIP64, and unseekable output with a known size. Two earlier passes bring the cumulative count to 257. Five `big_o` complexity tests did not register in the replay. All 22 CLI children (11 per native level) ran the image linked at the requested optimization. [Public replay revision](https://github.com/astral-experiments/imre/commit/43e3abd7ef56de4162e1ca8c4484b4ce2707a34a). |
 | `zoneinfo` | 228 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). |
-| **Measured total (19 of 19 families)** | **2,220** | **2,875** | **11** |  |
+| **Measured total (19 of 19 families)** | **2,225** | **2,875** | **11** |  |
 
 ### Whole-suite baselines for later additions
 
@@ -186,6 +186,7 @@ We track these families separately to keep the original 16,202-test baseline com
 | --- | ---: | ---: | --- | --- |
 | `binascii` | 32 | 93 | 76 passed, 17 skipped | 32 passed, 8 failures, 36 errors, 17 skipped |
 | `colorsys` | 7 | 7 | 7 passed | 7 passed. [Public revision](https://github.com/astral-experiments/imre/commit/46bd6bc7dd58da8cfb9f17c56c923cdb549ce265). |
+| `float` | 40 | 54 | 53 passed, 1 skipped | 40 passed, 10 errors, 1 failure, 3 skipped. All six `HexFloatTestCase` originals passed on stock and at both native levels. [Public change](https://github.com/astral-experiments/imre/pull/5498). |
 | `graphlib` | 17 | 17 | 17 passed | 17 passed. [Public change](https://github.com/astral-experiments/imre/pull/5469). |
 | `http.client` | 131 | 144 | 139 passed, 5 skipped | 131 passed, 9 errors, 4 skipped |
 | `lzma` | 118 | 121 | 120 passed, 1 skipped | 118 passed, 2 errors, 1 skipped. Both native runs retained all 117 prior passes and added `FileTestCase.test_issue44439`. [Public change](https://github.com/astral-experiments/imre/pull/5489). |
@@ -195,6 +196,8 @@ We track these families separately to keep the original 16,202-test baseline com
 | `shlex` | 18 | 19 | 19 passed | 18 passed, 1 skipped |
 | `timeit` | 41 | 41 | 41 passed | 41 passed. [Public change](https://github.com/astral-experiments/imre/pull/5474). |
 | `zlib` | 57 | 76 | 74 passed, 2 skipped | 57 passed, 15 errors, 4 skipped |
+
+The LZMA row reports the complete suite on #5489. In a later focused run, `CompressorDecompressorTestCase.test_pickle` passed on stock and on public Imre at O0 and O3. [Focused replay on #5501](https://github.com/astral-experiments/imre/pull/5501).
 
 Seven XML encoding tests account for the increase from 26 to 33 passes. Both independent Linux workers registered all 60 originals. One class-setup skip occurred before its method ran, so unittest reported 59 tests. [Public Imre revision](https://github.com/astral-experiments/imre/commit/56f7c1d949541a578424c7fdb6db103c7b30beab)
 
