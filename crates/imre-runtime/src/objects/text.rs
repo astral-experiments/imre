@@ -1092,13 +1092,23 @@ pub(crate) fn codepoint_search_window<'a>(
     start: Option<&Int>,
     end: Option<&Int>,
 ) -> Option<(&'a [u32], usize)> {
-    let length = || source.len();
+    let bounds = indexed_search_bounds(source.len(), start, end)?;
+    let begin = bounds.start;
+    Some((&source[bounds], begin))
+}
+
+/// Resolve search bounds for strings whose stored elements each represent one code point.
+pub(crate) fn indexed_search_bounds(
+    length: usize,
+    start: Option<&Int>,
+    end: Option<&Int>,
+) -> Option<std::ops::Range<usize>> {
     let end = end
-        .and_then(|n| search_offset(Some(n), length))
-        .unwrap_or(source.len())
-        .min(source.len());
-    let start = search_offset(start, length)?;
-    Some((source.get(start..end)?, start))
+        .and_then(|n| search_offset(Some(n), || length))
+        .unwrap_or(length)
+        .min(length);
+    let start = search_offset(start, || length)?;
+    (start <= end).then_some(start..end)
 }
 
 /// Find the first or last match when either string contains surrogate code points.
