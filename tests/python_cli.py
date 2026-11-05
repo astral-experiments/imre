@@ -2976,6 +2976,21 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        invoice = Path(__file__).resolve().with_name("fixtures") / "decimal_invoice.py"
+        # Cold optimized builds include the CPython decimal implementation.
+        compare("-IB", invoice, native_args=("run", invoice, "--quiet"), native_timeout=300)
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nsys.path.insert(0, sys.argv[1])\nimportlib.import_module(sys.argv[2])",
+            invoice.parent, invoice.stem, native_timeout=300,
+        )
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nD = importlib.import_module(sys.argv[1]).Decimal\n"
+            "print((D('-4.225') * D('3.5')).quantize(D('0.01')))",
+            "decimal", native_timeout=300,
+        )
+
         decimal_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
         (helpers / "decimal_values.py").write_text(
             "from decimal import Decimal\n"
@@ -3010,8 +3025,7 @@ def report(text):
             (helpers / "decimal_boundary.py").write_text(
                 f"from decimal import Decimal\nprint({expression})\n"
             )
-            unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_boundary")
-            assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+            compare("-IB", "-c", decimal_import + "import decimal_boundary")
 
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
@@ -3684,6 +3698,7 @@ for name in ("md4", "ripemd160"):
             "boxed_inspect_isabstract.py",
             "boxed_numeric_repr.py",
             "boxed_decimal_hash.py",
+            "boxed_decimal_arithmetic.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
             "boxed_positional_string_methods.py",

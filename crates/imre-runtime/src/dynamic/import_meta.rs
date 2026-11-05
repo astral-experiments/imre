@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::objects::exceptions::string_repr;
 
 use super::{
-    Context, SourceModule,
+    Context, ModuleInitializer, SourceModule,
     importlib::SourceBody,
     stdlib,
     value::{Code, Error, Id, NONE, Result, Value},
@@ -76,7 +76,8 @@ impl Context {
     /// Mark the class defined by the bundled body, including when a file loader executes it.
     pub(super) fn register_decimal_class(&mut self, code: Id, entry: Code, scope: Id) {
         if let Some(source) = self.bundled_registration("decimal")
-            && std::ptr::fn_addr_eq(source.code, entry)
+            && let ModuleInitializer::Native(registered) = source.code
+            && std::ptr::fn_addr_eq(registered, entry)
             && matches!(self.heap.get(self.code_object(code).filename), Value::Str(path) if source.path == Path::new(path))
             && let Some(class) = self.scope_name(scope, "Decimal")
             && let Value::Class {
@@ -97,7 +98,7 @@ impl Context {
 
     fn bundled_source(&self, name: &str) -> Option<(PathBuf, SourceBody)> {
         let source = self.bundled_registration(name)?;
-        Some((source.path.clone(), SourceBody::Compiled(source.code)))
+        Some((source.path.clone(), SourceBody::Registered(source.code)))
     }
 
     fn sealed_native(&self, name: &str) -> bool {
@@ -121,7 +122,7 @@ impl Context {
             return Ok(NONE);
         };
         let (entry, path) = (source.code, source.path.clone());
-        Ok(self.module_code(entry, &path))
+        self.module_code(entry, &path)
     }
 
     /// Return the source of this loader's registered initializer when it has a Python body.

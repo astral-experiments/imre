@@ -1,4 +1,5 @@
 _pydatetime.py
+_pydecimal.py
 graphlib.py
 tarfile.py
 timeit.py

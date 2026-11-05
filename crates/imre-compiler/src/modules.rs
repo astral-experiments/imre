@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
@@ -2745,6 +2746,32 @@ impl SearchRoots {
     }
 }
 
+/// The boxed provider supplies public Decimal names absent from the scalar module.
+static BOXED_DECIMAL_EXPORTS: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    let source =
+        crate::zip_entry::installed_source("_pydecimal.py").expect("bundled _pydecimal.py");
+    let provider = ruff_python_parser::parse_module(&source).expect("valid bundled _pydecimal.py");
+    let exports = provider
+        .syntax()
+        .body
+        .iter()
+        .find(|stmt| value_name(stmt) == Some("__all__"))
+        .and_then(module_value)
+        .and_then(ast::Expr::as_list_expr)
+        .expect("_pydecimal.__all__ must be a list literal");
+    exports
+        .elts
+        .iter()
+        .map(|item| {
+            item.as_string_literal_expr()
+                .expect("_pydecimal.__all__ must contain only string literals")
+                .value
+                .to_str()
+                .to_owned()
+        })
+        .collect()
+});
+
 /// These public names are supplied by the boxed unittest.mock module.
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
     matches!(
@@ -2896,7 +2923,11 @@ impl SourceModule {
                 "unittest.mock objects",
             )));
         }
-        let binding = *self.bindings.get(name)?;
+        let Some(&binding) = self.bindings.get(name) else {
+            return (self.is_bundled("decimal") && BOXED_DECIMAL_EXPORTS.contains(name)).then_some(
+                Binding::Intrinsic(Intrinsic::ScopedObjectExport("boxed decimal")),
+            );
+        };
         if binding == Binding::Intrinsic(Intrinsic::ZipImportIndex) {
             return None;
         }
