@@ -1,5 +1,7 @@
 //! Immutable byte values with exact ownership, Python repr, and strict UTF-8.
 
+mod output_window;
+
 use crate::StrOwner;
 
 use num_traits::ToPrimitive;
