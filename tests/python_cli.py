@@ -674,7 +674,7 @@ def call_allocation_flags(root):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lookup,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
 
 
@@ -791,16 +791,17 @@ def check_boxed_call_allocation(imre, run, flags):
         for size in (0, 56):
             result = run(imre, "-B", "-c", source, extra={
                 "IMRE_ENCODED_FLAGS": flags,
-                "IMRE_TEST_CALL_OP": operation,
+                "IMRE_TEST_CALL_OP": "assign_target" if operation == "assign" else operation,
                 "IMRE_TEST_CALL_SIZE": str(size),
                 "IMRE_TEST_GETTER_ALLOCATION": "1",
             })
             if operation == "lookup":
-                expected = (b"caught ()\n" if size else b"value 3\n") + b"retry 3\n"
+                # A compiled lookup reads the identifier directly from the code object.
+                expected = b"value 3\nretry 3\n"
             else:
                 expected = (b"caught () True\n" if size else b"value 7\n") + b"preserved True\nretry 3\n"
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, expected, b"refused\n" if size else b"",
+                0, expected, b"refused\n" if size and operation == "assign" else b"",
             ), (operation, size, result)
 
     # Refuse the dictionary snapshot and the equally sized sort buffer separately.

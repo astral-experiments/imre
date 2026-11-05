@@ -1268,6 +1268,25 @@ fn load_linked_literal(ctx: &mut Context, kind: i32, data: &[u8]) -> Id {
     finish(ctx, value)
 }
 
+/// Resolve an identifier from the linked code object in the current Python scope.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_lookup(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+) -> Id {
+    // SAFETY: the emitter supplies a live context and a constant of exactly len bytes.
+    let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = std::str::from_utf8(name)
+        .map_err(|error| Error::new("UnicodeError", error.to_string()))
+        .and_then(|name| ctx.lookup(scope, name));
+    finish(ctx, result)
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_op_at(
     ctx: *mut Context,
