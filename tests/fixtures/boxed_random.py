@@ -104,9 +104,17 @@ def current():
         raise AssertionError("empty integer interval accepted")
 
     assert randbytes is random.randbytes
+    assert randbytes.__self__ is random._inst
+    assert randbytes.__func__ is random.Random.randbytes
     for size in (0, 1, 4, 5, 35):
         value = randbytes(n=size)
         assert type(value) is bytes and len(value) == size
+
+    generator = random.Random(42)
+    reference = random.Random(42)
+    for size in (0, 1, 4, 5, 35):
+        expected = reference.getrandbits(size * 8).to_bytes(size, "little")
+        assert generator.randbytes(n=size) == expected
 
     class Length:
         def __mul__(self, other):
@@ -117,6 +125,21 @@ def current():
             return 3
 
     assert randbytes(Length()) == bytes(3)
+
+    class Draw:
+        def to_bytes(self, length, byteorder):
+            assert length is size_arg and byteorder == "little"
+            return self
+
+    class CustomRandom(random.Random):
+        def getrandbits(self, width):
+            assert width == 0
+            return result
+
+    size_arg = Length()
+    result = Draw()
+    assert CustomRandom().randbytes(size_arg) is result
+
     events = []
     try:
         randrange(Index(3), Index(6), Index(-2))
