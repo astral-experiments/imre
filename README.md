@@ -109,8 +109,8 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 5, 2026, Imre has a paired pass for **12,199 of 16,202 tests (75.3%)** across the 44 standard library module families tracked below.
-The paired pass rate is 74.2% for the original 25 families in the first table and 80.5% for the 19 additional families in the second.
+As of November 5, 2026, Imre has a paired pass for **12,267 of 16,202 tests (75.7%)** across the 44 standard library module families tracked below.
+The paired pass rate is 74.7% for the original 25 families in the first table and 80.5% for the 19 additional families in the second.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -118,7 +118,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover all
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
 It passed **15,161**, skipped 1,023, and reported 7 errors.
-Across the Imre revisions tested, **12,152 of those 15,161 stock Linux passes (80.2%)** also passed at both native optimization levels. Another 1,493 paired passes from this set would bring the share to 90%.
+Across the Imre revisions tested, **12,220 of those 15,161 stock Linux passes (80.6%)** also passed at both native optimization levels. Another 1,425 paired passes from this set would bring the share to 90%.
 The remaining 47 paired tests passed in separate stock runs. In this Linux run, CPython skipped 40 of them and reported errors for seven.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
@@ -146,9 +146,9 @@ The remaining 47 paired tests passed in separate stock runs. In this Linux run, 
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 95 | 228 | 1 | The earlier whole suite qualified 91 of 92 apparent successes, including four signal tests and two shutdown tests. One test accepted an unrelated child compiler failure. Three `AtexitTests` originals and `ThreadTests.test_locals_at_exit` added four pairs. All 16 native children across two public revisions matched the stdout of the four stock children. The installed O0 replay ran O0 children. A separate O0 control launched O3 children and received no credit. The common-revision audit already counted all four. [Common revision](https://github.com/astral-experiments/imre/commit/b9dfd225b1f91796c594ac4caf4a84ef3f389f75) · [Public replay](https://github.com/astral-experiments/imre/commit/c047d423c21207a400beb165da196bd8b451117c). |
 | `typing` | 710 | 712 | 2 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. Upstream-defined CPython-only guards skipped two tests on Imre. Both passed on stock and have [individual omission decisions](docs/stdlib-omissions.md#typing). |
-| `unittest` | 730 | 1,090 | 0 | Stock passed all 85 selected async mock tests. At both O0 and O3, Imre passed 61, failed 20, and errored on four. The 61 passes add to the earlier 669 pairs. Two of the 61 had confirmed errors on the immediate parent. [#5523](https://github.com/astral-experiments/imre/pull/5523). |
+| `unittest` | 798 | 1,090 | 0 | Stock passed all 88 selected mock tests. Imre passed the same 68 at O0 and O3. At each level, 11 failed and nine errored. The 68 new pairs include the five focused mock-deletion tests. [#5519](https://github.com/astral-experiments/imre/pull/5519). |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,886** | **13,327** | **41** | **3 complete suites match stock on `main`** |
+| **Total** | **9,954** | **13,327** | **41** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
