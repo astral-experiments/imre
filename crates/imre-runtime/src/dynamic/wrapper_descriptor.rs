@@ -52,7 +52,7 @@ impl BuiltinDescriptor {
             });
         }
         if let Some((stdlib::functools::PARTIAL_CLASS, attr)) = symbol.rsplit_once('.')
-            && let Some(&name) = ["__reduce__", "__setstate__"]
+            && let Some(&name) = ["__class_getitem__", "__reduce__", "__setstate__"]
                 .iter()
                 .find(|&&name| name == attr)
         {
@@ -410,6 +410,7 @@ impl BuiltinDescriptor {
                 | ("int", "from_bytes")
                 | ("float", "fromhex")
                 | ("dict", "fromkeys")
+                | (stdlib::functools::PARTIAL_CLASS, "__class_getitem__")
                 | ("typing.Generic", "__init_subclass__")
         ) {
             "classmethod_descriptor"
@@ -601,6 +602,8 @@ impl BuiltinDescriptor {
                     ctx.text(format!("Return self{op}value."))
                 }
             }
+            "__doc__" if self.name == "__class_getitem__" => ctx.text("See PEP 585"),
+            "__text_signature__" if self.name == "__class_getitem__" => ctx.text("($type, object, /)"),
             "__doc__" if self.owner == "typing.Generic" => ctx.text("Function to initialize subclasses."),
             "__text_signature__" if self.owner == "typing.Generic" => NONE,
             "__name__" => ctx.text(self.name),

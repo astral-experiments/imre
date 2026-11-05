@@ -932,6 +932,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     | "set"
                     | "frozenset"
                     | "mappingproxy"
+                    | super::stdlib::functools::PARTIAL_CLASS
                     | "type"
                     | super::value::REGEX_PATTERN_TYPE
                     | super::value::REGEX_MATCH_TYPE
