@@ -2178,7 +2178,8 @@ impl Context {
         let value = self.heap.get(receiver);
         if matches!(
             value,
-            Value::List(_)
+            Value::Array(_)
+                | Value::List(_)
                 | Value::Tuple(_)
                 | Value::RegexPattern(_)
                 | Value::RegexMatch(_)
