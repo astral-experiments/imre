@@ -1,4 +1,4 @@
-from selectors import EVENT_READ, EVENT_WRITE, PollSelector, SelectSelector
+from selectors import BaseSelector, EVENT_READ, EVENT_WRITE, PollSelector, SelectSelector
 import selectors
 from collections.abc import Mapping
 import os
@@ -17,11 +17,46 @@ class Missing:
 
 
 def current():
+    class Wrapper(BaseSelector):
+        def __init__(self, backend):
+            self.backend = backend
+
+        def register(self, fileobj, events, data=None):
+            return self.backend.register(fileobj, events, data)
+
+        def unregister(self, fileobj):
+            return self.backend.unregister(fileobj)
+
+        def select(self, timeout=None):
+            return self.backend.select(timeout)
+
+        def get_map(self):
+            return self.backend.get_map()
+
+    try:
+        BaseSelector()
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("abstract selector accepted")
     assert SelectSelector is selectors.SelectSelector
     assert PollSelector is selectors.PollSelector
     assert SelectSelector is not PollSelector
     for factory, other in ((SelectSelector, PollSelector), (PollSelector, SelectSelector)):
         with factory() as selector:
+            assert issubclass(factory, BaseSelector) and isinstance(selector, BaseSelector)
+            with Wrapper(selector) as wrapper:
+                rd, wr = os.pipe()
+                try:
+                    key = wrapper.register(rd, EVENT_READ, "first")
+                    assert wrapper.get_key(rd) is key
+                    key = wrapper.modify(rd, EVENT_READ, "second")
+                    os.write(wr, b"x")
+                    assert wrapper.select(0) == [(key, EVENT_READ)]
+                    assert wrapper.unregister(rd) is key
+                finally:
+                    os.close(rd)
+                    os.close(wr)
             assert type(selector) is factory
             assert isinstance(selector, factory)
             assert not isinstance(selector, other)

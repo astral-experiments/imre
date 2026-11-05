@@ -45,6 +45,12 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
     let base = super::super::mapping_abc::class(ctx, "Mapping")?;
     let class = ctx.allocate_class("_SelectorMapping".into(), fields, vec![base])?;
     ctx.bind(scope, "_SelectorMapping", class);
+    let source = ctx.text(include_str!("selectors_base.py"));
+    let filename = ctx.text("<imre stdlib>/selectors.py");
+    let mode = ctx.text("exec");
+    let code = ctx.compile_source(source, filename, mode, false)?;
+    let globals = ctx.module_globals(scope)?;
+    ctx.exec_source(code, globals, None, None)?;
     Ok(())
 }
 
