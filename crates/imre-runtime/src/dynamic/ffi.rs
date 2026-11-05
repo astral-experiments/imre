@@ -818,6 +818,7 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         suspended_typing_frames: 0,
         token_missing: NONE,
         native_code_objects: HashMap::new(),
+        original_builtins: None,
         source_builtins: None,
         zip_directories: HashMap::new(),
         zip_path_importers: NONE,
@@ -2067,6 +2068,7 @@ impl Context {
                 .chain(self.contexts.iter().copied())
                 .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
+                .chain(self.original_builtins)
                 .chain(self.source_builtins)
                 .chain([
                     self.argv,
