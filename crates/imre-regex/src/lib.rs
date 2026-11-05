@@ -71,10 +71,10 @@ pub fn preserve_zero_repeat_groups(source: String) -> Result<String, String> {
                         Range(RepetitionRange::Exactly(0) | RepetitionRange::Bounded(0, 0))
                     )
                 {
-                    // The empty class makes this optional branch unreachable in both
-                    // text and byte regexes, so its captures never participate.
+                    // The disjoint digits form an empty class in both text and byte
+                    // regexes without folding a Unicode-wide class under ignore-case.
                     let group = rep.ast.span();
-                    edits.push((group.start.offset, group.start.offset, r"(?:[^\s\S]"));
+                    edits.push((group.start.offset, group.start.offset, "(?:[0&&1]"));
                     edits.push((group.end.offset, rep.span.end.offset, ")?"));
                 }
                 nodes.push(&rep.ast);
@@ -988,7 +988,8 @@ fn tokenize(
                     if size == 0 {
                         output.push_str("(?!)");
                     } else {
-                        output.push_str(r"[^\s\S]");
+                        // A one-character atom that cannot match in any case mode.
+                        output.push_str("[0&&1]");
                         if (2..u64::from(u32::MAX)).contains(&size) {
                             write!(output, "{{{size}}}").unwrap();
                         }
