@@ -16,6 +16,19 @@ import zipfile
 from pathlib import Path
 
 
+def check_getpass_provider(root, compare):
+    for command in ("import getpass; print(getpass.getuser())",
+                    "from getpass import getuser; print(getuser())"):
+        compare("-B", "-c", command, extra={"LOGNAME": "getpass-test-user"}, native_timeout=300)
+
+    shadow = root / "shadow_getpass"
+    shadow.mkdir()
+    (shadow / "getpass.py").write_text("marker = 'project getpass'\n")
+    entry = shadow / "entry.py"
+    entry.write_text("from getpass import marker\nprint(marker)\n")
+    compare("-B", entry, native_timeout=300)
+
+
 def check_command_stdin(imre, run):
     source = (
         "import os, sys\n"
@@ -3401,6 +3414,7 @@ def report(text):
             "print(colors.rgb_to_hls(0.25, 0.5, 0.75))\n",
             "colorsys", native_timeout=300,
         )
+        check_getpass_provider(root, compare)
         # A from-import elsewhere in the same program would already select the boxed runtime.
         queue_lookup = root / "queue_lookup.py"
         for statement, name in (("import logging.handlers", "logging.handlers"),

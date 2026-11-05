@@ -689,14 +689,19 @@ pub(crate) fn compile<const SPLIT: bool>(
     let tokenize_script = !object_entry && imports_provider("tokenize");
     let configparser_script = !object_entry && imports_provider("configparser");
     let pyio_script = !object_entry && imports_provider("_pyio");
+    let getpass_script = !object_entry && imports_provider("getpass");
     let installed_script = !object_entry
         && startup_fallback
         && first
             .names
             .iter()
             .any(|(level, name)| *level == 0 && crate::zip_entry::installed_member(name).is_some());
-    let fallback_script =
-        logging_script || tokenize_script || configparser_script || pyio_script || installed_script;
+    let fallback_script = logging_script
+        || tokenize_script
+        || configparser_script
+        || pyio_script
+        || getpass_script
+        || installed_script;
     let ordered_only = !object_entry && !fallback_script;
     if ordered_only
         && (!ordered_command
@@ -901,6 +906,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                     "_pyio",
                     "colorsys",
                     "configparser",
+                    "getpass",
                     "optparse",
                     "py_compile",
                     "sysconfig",
@@ -1155,7 +1161,8 @@ pub(crate) fn compile<const SPLIT: bool>(
                             || (logging_script && prefix == "logging")
                             || (tokenize_script && prefix == "tokenize")
                             || (configparser_script && prefix == "configparser")
-                            || (pyio_script && prefix == "_pyio"))
+                            || (pyio_script && prefix == "_pyio")
+                            || (getpass_script && prefix == "getpass"))
                     {
                         return Ok(None);
                     }

@@ -547,6 +547,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/colorsys.py. See licenses/CPython.txt.
         "colorsys" => bundled_source!("colorsys.py"),
         "getopt" => bundled_source!("getopt.py"),
+        // CPython 3.14.5 Lib/getpass.py. See licenses/CPython.txt.
+        "getpass" => bundled_source!("getpass.py"),
         // CPython 3.14.5 Lib/optparse.py. See licenses/Optik.txt and licenses/CPython.txt.
         "optparse" => bundled_source!("optparse.py"),
         "gettext" => bundled_source!("gettext.py"),
@@ -5405,7 +5407,11 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
-            "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
+            "_pyio" | "getpass" | "quopri"
+                if self.allow_imports && self.has_project_source(name) =>
+            {
+                None
+            }
             // Fixed-layout Decimal values use the scalar methods. Rich comparisons use the
             // complete provider on the boxed route, where Python dispatches equality and hashing.
             "decimal" => Some((
@@ -5437,8 +5443,8 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/doctest_typed.py"),
                 ),
             )),
-            // The parser type and the public expat exports are initialized by the object runtime.
-            "pyexpat" | "xml.parsers.expat" => {
+            // The object runtime selects the getpass implementation and initializes the expat exports.
+            "getpass" | "pyexpat" | "xml.parsers.expat" => {
                 self.needs_object_imports = true;
                 bundled_runtime_source(name).map(|(path, _)| (path, ""))
             }
@@ -5551,7 +5557,8 @@ impl<'a> Loader<'a> {
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
-            && !((first == "quopri" || imre_ast::providers::is_native_fallback(first))
+            && !((matches!(first, "getpass" | "quopri")
+                || imre_ast::providers::is_native_fallback(first))
                 && self.has_project_source(first))
             && (IntrinsicModule::named(first).is_some()
                 || imre_ast::providers::provider(first).is_some()
