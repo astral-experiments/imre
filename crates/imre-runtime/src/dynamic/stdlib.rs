@@ -1062,6 +1062,29 @@ pub(super) fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
 }
 
+enum CacheFilename {
+    Text(String),
+    Object(Id),
+}
+
+/// Keep a reflected addition's result for the provider's normal join protocol.
+fn cache_filename(ctx: &mut Context, suffixes: Id, mut stem: String) -> Result<CacheFilename> {
+    let suffix = if let Value::List(entries) = ctx.heap.get(suffixes)
+        && let Some(&first) = entries.first()
+    {
+        first
+    } else {
+        let zero = ctx.int(0);
+        ctx.get_item(suffixes, zero)?
+    };
+    if let Value::Str(text) = ctx.heap.get(suffix) {
+        stem.push_str(text);
+        return Ok(CacheFilename::Text(stem));
+    }
+    let base = ctx.text(stem);
+    ctx.binary("+", base, suffix).map(CacheFilename::Object)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -2268,24 +2291,63 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_importlib.") {
         match (method, args, kwargs) {
-            ("cache_name", [path, tag, optimization, prefix], []) => {
-                let prefix = (*prefix != NONE)
-                    .then(|| ctx.str_value(*prefix))
-                    .transpose()?;
-                let path = crate::objects::cache_paths::cache_name(
+            ("cache_name", [path, tag, optimization, suffixes, sys, join], []) => {
+                use crate::objects::cache_paths;
+                if matches!(
+                    ctx.heap.get(ctx.scalar_value(*optimization)),
+                    Value::SurrogateStr(_)
+                ) {
+                    let quoted = ctx.object_repr(*optimization)?;
+                    return Err(Error::new(
+                        "ValueError",
+                        format!("{} is not alphanumeric", ctx.str_value(quoted)?),
+                    ));
+                }
+                let (head, stem) = cache_paths::cache_stem(
                     ctx.str_value(*path)?,
                     ctx.str_value(*tag)?,
                     ctx.str_value(*optimization)?,
-                    prefix,
                 )?;
-                return Ok(ctx.text(path.to_string()));
+                let head_end = head.len();
+                let filename = cache_filename(ctx, *suffixes, stem)?;
+                let prefix = ctx.lookup_attr(*sys, "pycache_prefix")?;
+                // The suffix may execute Python; borrow the immutable path again after it returns.
+                let head = &ctx.str_value(*path)?[..head_end];
+                match filename {
+                    CacheFilename::Text(name) => {
+                        let prefix = (prefix != NONE)
+                            .then(|| ctx.str_value(prefix))
+                            .transpose()?;
+                        let result = cache_paths::cache_location(head, &name, prefix)?;
+                        return Ok(ctx.text(result.to_string()));
+                    }
+                    CacheFilename::Object(name) => {
+                        let (first, second) = if prefix == NONE {
+                            (ctx.text(head.to_owned()), ctx.text(cache_paths::PYCACHE))
+                        } else {
+                            (prefix, ctx.text(cache_paths::cache_relative_head(head)?))
+                        };
+                        return ctx.call(*join, vec![first, second, name], Vec::new());
+                    }
+                }
             }
-            ("source_name", [path, prefix], []) => {
+            ("source_name", [path, prefix, suffixes, join], []) => {
+                use crate::objects::cache_paths;
                 let prefix = (*prefix != NONE)
                     .then(|| ctx.str_value(*prefix))
                     .transpose()?;
-                let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
-                return Ok(ctx.text(path.to_string()));
+                let (dir, base) = cache_paths::source_parts(ctx.str_value(*path)?, prefix)?;
+                let (dir, base) = (dir.to_owned(), base.to_owned());
+                match cache_filename(ctx, *suffixes, base)? {
+                    CacheFilename::Text(name) => {
+                        let result = cache_paths::source_location(&dir, &name);
+                        return Ok(ctx.text(result.to_string()));
+                    }
+                    CacheFilename::Object(name) => {
+                        let head = ctx.text(dir);
+                        return ctx.call(*join, vec![head, name], Vec::new());
+                    }
+                }
             }
             ("warn_legacy_load", [source_globals], []) => {
                 ctx.warn_legacy_load(*source_globals)?;
