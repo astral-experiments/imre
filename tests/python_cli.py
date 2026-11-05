@@ -3898,6 +3898,7 @@ for name in ("md4", "ripemd160"):
             "boxed_logging_rlock.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
+            "boxed_selector_signal.py",
             "boxed_pipe_flags.py",
             "boxed_os_environb.py",
             "boxed_os_python_fspath.py",
@@ -4190,7 +4191,7 @@ for name in ("md4", "ripemd160"):
             "boxed_string_strip.py",
             "boxed_string_expandtabs.py",
         ):
-            if fixture in ("boxed_stat.py", "boxed_signal.py") and sys.platform not in ("linux", "darwin"):
+            if fixture in ("boxed_stat.py", "boxed_signal.py", "boxed_selector_signal.py") and sys.platform not in ("linux", "darwin"):
                 continue
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":
