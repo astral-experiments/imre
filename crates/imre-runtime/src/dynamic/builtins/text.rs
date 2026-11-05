@@ -2551,6 +2551,7 @@ pub(super) fn method(
         "isdigit" => Some(crate::objects::python_isdigit),
         "isidentifier" => Some(crate::objects::python_isidentifier),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
+        "isprintable" => Some(crate::objects::python_isprintable),
         "isspace" => Some(crate::objects::python_isspace),
         "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
         "isupper" => Some(|text| crate::objects::python_isupper(text.chars())),
@@ -2590,7 +2591,13 @@ pub(super) fn method(
     if let Some(predicate) = predicate {
         if matches!(
             name,
-            "isalnum" | "isascii" | "isalpha" | "isdigit" | "isidentifier" | "isspace"
+            "isalnum"
+                | "isascii"
+                | "isalpha"
+                | "isdigit"
+                | "isidentifier"
+                | "isprintable"
+                | "isspace"
         ) && matches!(
             ctx.heap.get(ctx.scalar_value(receiver)),
             Value::SurrogateStr(_)

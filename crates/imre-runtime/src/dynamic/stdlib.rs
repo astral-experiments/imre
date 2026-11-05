@@ -458,8 +458,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "math",
             "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "atan2" | "cos" | "exp"
-            | "fma" | "fsum" | "gcd" | "isclose" | "isfinite" | "isinf" | "isnan" | "isqrt" | "lcm"
-            | "ldexp" | "log" | "log2" | "sin" | "sqrt" | "tan",
+            | "fma" | "frexp" | "fsum" | "gcd" | "isclose" | "isfinite" | "isinf" | "isnan"
+            | "isqrt" | "lcm" | "ldexp" | "log" | "log2" | "sin" | "sqrt" | "tan",
         ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
@@ -2748,6 +2748,23 @@ pub(super) fn call(
             ));
         }
         return Ok(functools::placeholder(ctx));
+    }
+    if name == "functools.partial.__class_getitem__" {
+        let Some((&owner, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "descriptor '__class_getitem__' of 'functools.partial' object needs an argument",
+            ));
+        };
+        datetime::validate_classmethod_receiver(
+            ctx,
+            functools::PARTIAL_CLASS,
+            "__class_getitem__",
+            owner,
+        )?;
+        let qualified = format!("{}.__class_getitem__", ctx.class_qualname(owner));
+        let index = builtins::one_positional_arg(&qualified, rest, kwargs)?;
+        return Ok(super::typing::builtin_alias(ctx, owner, index));
     }
     if name == "functools.partial.__reduce__" {
         let receiver = builtins::noargs_method_receiver(

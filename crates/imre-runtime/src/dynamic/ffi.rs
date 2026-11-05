@@ -2073,19 +2073,31 @@ impl Context {
         }
     }
 
+    pub(super) fn finalizer_path_roots(&self) -> [Id; 2] {
+        use super::stdlib::datetime::isocalendar::MODULE_REF;
+        [
+            self.modules,
+            self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
+        ]
+    }
+
     /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
     fn can_skip_finalizer_sweep(&self) -> bool {
-        use super::stdlib::datetime::isocalendar::MODULE_REF;
+        if self.heap.full_collection_active() {
+            return false;
+        }
+        let globals = self.finalizer_path_roots();
+        let input = super::stdlib::io::rooted_input_chain(self);
         // Include the three owners retained by sys.__stdin__.
-        self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
-            && !self.heap.full_collection_active()
+        (self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
             && (!self.heap.has_weak_values
-                || self.heap.weak_values_kept_by(
-                    self.modules,
-                    self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
-                ))
-            && super::stdlib::io::rooted_input_chain(self)
-                .is_some_and(|input| self.heap.finalizers_kept_by(&input))
+                || self.heap.weak_values_kept_by(globals[0], globals[1]))
+            && input
+                .as_ref()
+                .is_some_and(|chain| self.heap.finalizers_kept_by(chain)))
+            || self
+                .heap
+                .cached_finalizers_kept(globals, input.as_ref(), true)
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
@@ -2117,12 +2129,8 @@ impl Context {
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);
         }
-        let reference = self
-            .builtins
-            .get(super::stdlib::datetime::isocalendar::MODULE_REF)
-            .copied()
-            .unwrap_or(NONE);
-        self.heap.learn_weak_roots(self.modules, reference);
+        let [modules, reference] = self.finalizer_path_roots();
+        self.heap.learn_weak_roots(modules, reference);
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.

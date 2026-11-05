@@ -52,7 +52,7 @@ impl BuiltinDescriptor {
             });
         }
         if let Some((stdlib::functools::PARTIAL_CLASS, attr)) = symbol.rsplit_once('.')
-            && let Some(&name) = ["__reduce__", "__setstate__"]
+            && let Some(&name) = ["__class_getitem__", "__reduce__", "__setstate__"]
                 .iter()
                 .find(|&&name| name == attr)
         {
@@ -300,6 +300,7 @@ impl BuiltinDescriptor {
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
             "str.isidentifier" => ("str", "isidentifier"),
+            "str.isprintable" => ("str", "isprintable"),
             "str.lower" => ("str", "lower"),
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
@@ -390,6 +391,7 @@ impl BuiltinDescriptor {
                     | "isdigit"
                     | "isidentifier"
                     | "islower"
+                    | "isprintable"
                     | "istitle"
                     | "center"
                     | "ljust"
@@ -410,6 +412,7 @@ impl BuiltinDescriptor {
                 | ("int", "from_bytes")
                 | ("float", "fromhex")
                 | ("dict", "fromkeys")
+                | (stdlib::functools::PARTIAL_CLASS, "__class_getitem__")
                 | ("typing.Generic", "__init_subclass__")
         ) {
             "classmethod_descriptor"
@@ -601,6 +604,8 @@ impl BuiltinDescriptor {
                     ctx.text(format!("Return self{op}value."))
                 }
             }
+            "__doc__" if self.name == "__class_getitem__" => ctx.text("See PEP 585"),
+            "__text_signature__" if self.name == "__class_getitem__" => ctx.text("($type, object, /)"),
             "__doc__" if self.owner == "typing.Generic" => ctx.text("Function to initialize subclasses."),
             "__text_signature__" if self.owner == "typing.Generic" => NONE,
             "__name__" => ctx.text(self.name),
@@ -818,6 +823,9 @@ impl BuiltinDescriptor {
                     ("isidentifier", "__doc__") => {
                         "Return True if the string is a valid Python identifier, False otherwise.\n\nCall keyword.iskeyword(s) to test whether string s is a reserved identifier,\nsuch as \"def\" or \"class\"."
                     }
+                    ("isprintable", "__doc__") => {
+                        "Return True if all characters in the string are printable, False otherwise.\n\nA character is printable if repr() may use it in its output."
+                    }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
@@ -864,7 +872,7 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "lower" | "title"
+                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "isprintable" | "istitle" | "lower" | "title"
                         | "swapcase",
                         _,
                     ) => "($self, /)",

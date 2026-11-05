@@ -316,6 +316,7 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 pub(super) const STRUCT_METHODS: &[&str] = &[
     "__init__",
+    "__repr__",
     "pack",
     "pack_into",
     "unpack",
@@ -716,6 +717,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             value::STRUCT_UNPACK_ITERATOR
         }
         Value::Struct { .. } if STRUCT_METHODS.contains(&attr) => "struct.Struct",
+        Value::Struct { .. } if attr == "__str__" => "object",
         Value::ZlibDecompressor { .. }
             if matches!(attr, "decompress" | "flush")
                 || value::ZLIB_DECOMPRESS_COPY_METHODS.contains(&attr) =>
@@ -1497,15 +1499,26 @@ pub(super) fn call(
             | "mappingproxy.__ror__"
             | "mappingproxy.__ior__"
             | "super.__repr__"
+            | "struct.Struct.__repr__"
     ) || complex_op.is_some()
     {
-        let (owner, method) = name.split_once('.').unwrap();
+        let (owner, method) = name.rsplit_once('.').unwrap();
+        let owner = if owner == "struct.Struct" {
+            "_struct.Struct"
+        } else {
+            owner
+        };
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
                 "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
         if (owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)))
+            || (owner == "_struct.Struct"
+                && !matches!(
+                    ctx.heap.get(ctx.scalar_value(receiver)),
+                    Value::Struct { .. }
+                ))
             || (matches!(owner, "super" | "complex") && !ctx.builtin_slot_accepts(receiver, owner))
         {
             return Err(type_error(format!(
@@ -1618,6 +1631,9 @@ pub(super) fn call(
         }
         if owner == "super" {
             return Ok(ctx.text(ctx.super_repr(receiver)));
+        }
+        if owner == "_struct.Struct" {
+            return Ok(ctx.text(super::stdlib::structure::repr(ctx, receiver)?));
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);

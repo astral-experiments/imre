@@ -3653,13 +3653,17 @@ for name in ("md4", "ripemd160"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
-        padding = root / "bytes_rjust.py"
+        method_entry = root / "scalar_method.py"
         for body in (
             "assert b'xy'.rjust(3, b'.') == b'.xy'",
             "pad = bytes.rjust\nassert pad(b'xy', 3, b'.') == b'.xy'",
+            "assert ' '.isprintable() and not '\\u00a0'.isprintable()",
+            "printable = str.isprintable\n"
+            "assert printable('') and printable('A\\u0301')\n"
+            "assert not printable('\\n') and not printable('\\u20c1') and not printable(chr(0xd800))",
         ):
-            padding.write_text(body + "\n")
-            compare("-B", padding)
+            method_entry.write_text(body + "\n")
+            compare("-B", method_entry)
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_compound.py",
@@ -3726,6 +3730,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_rounding.py",
             "boxed_math_acosh.py",
             "boxed_math_fma.py",
+            "boxed_math_frexp.py",
             "boxed_math_fsum.py",
             "boxed_math_gcd.py",
             "boxed_math_isclose.py",
@@ -3759,6 +3764,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
             "boxed_functools_partial_state.py",
+            "boxed_functools_partial_generic_alias.py",
             "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",
@@ -3835,6 +3841,7 @@ for name in ("md4", "ripemd160"):
             "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
+            "boxed_timeit.py",
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",

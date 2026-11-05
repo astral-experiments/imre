@@ -481,6 +481,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "monotonic_ns",
             "perf_counter",
             "perf_counter_ns",
+            "process_time",
             "time_ns",
             "timezone",
             "tzname",

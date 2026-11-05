@@ -1,5 +1,6 @@
 _pydatetime.py
 tarfile.py
+timeit.py
 xml/__init__.py
 xml/etree/__init__.py
 xml/etree/ElementPath.py

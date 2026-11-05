@@ -2095,6 +2095,10 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
+                        Value::Struct { .. } => {
+                            append_rendered_text(&mut output, &stdlib::structure::repr(&ctx, id)?)?;
+                            continue;
+                        }
                         Value::RegexMatch(m) => {
                             append_rendered_text(&mut output, &m.repr(&ctx)?)?;
                             continue;
