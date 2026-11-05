@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 143 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 145 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 458 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,490 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 459 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,490 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -30,6 +30,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `codeop` | Yes | No API example recorded. | — | — | — |
 | `collections` | Yes | `Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations. [Evidence](../benchmarks/cpython_stdlib/full/collections/README.md) | [8 / 659](../benchmarks/cpython_stdlib/full/collections/) | 8 | 14 |
 | `colorsys` | Reachable only | No API example recorded. | — | — | — |
+| `compression` | Yes | No API example recorded. | — | — | — |
 | `configparser` | Reachable only | `ConfigParser` can be bound in unreachable code. Its constructor does not run natively. [Evidence](../crates/imre-compiler/src/modules/declarations.rs) | — | — | — |
 | `contextlib` | Yes | `nullcontext` and selected single-yield `@contextmanager` functions. [Evidence](../tests/fixtures/processes/async_resource_arguments.py) | — | — | — |
 | `contextvars` | Yes | Create and copy contexts, set and reset variable bindings, and isolate them in supported asyncio tasks. [Evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md) | [2 / 56](../benchmarks/cpython_stdlib/full/contextvars/) | 0 | 12 |
@@ -79,7 +80,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `opcode` | Yes | No API example recorded. | — | — | — |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `optparse` | Yes | No API example recorded. | — | — | — |
-| `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 31 | 14 |
+| `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 32 | 14 |
 | `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 141 | 58 |
 | `pickle` | Yes | Encode integers, booleans, strings, `None` and tuples with `dumps` protocols 0–5. Custom reductions can return an importable global name or a reconstruction callable with positional arguments. Reduction state and cycles are outside this subset. Pre‑4 protocols support top-level globals, with a subset of Python 2 compatibility names for protocols 0–2. [Evidence](../tests/fixtures/boxed_pickle_reduction.py) | — | — | — |
 | `pkgutil` | Yes | No API example recorded. | — | — | — |
@@ -147,7 +148,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `cmath` |
 | `cmd` |
 | `compileall` |
-| `compression` |
 | `concurrent` |
 | `ctypes` |
 | `curses` |
@@ -245,6 +245,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_io` | Yes | No API example recorded. | — | — | — |
 | `_json` | Yes | No API example recorded. | — | — | — |
 | `_locale` | Yes | No API example recorded. | — | — | — |
+| `_lzma` | Yes | No API example recorded. | — | — | — |
 | `_md5` | Yes | No API example recorded. | — | — | — |
 | `_opcode` | Yes | `ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` are both zero for Imre’s native executables. [Evidence](../tests/fixtures/imports/opcode_flags.py) | — | — | — |
 | `_opcode_metadata` | Yes | No API example recorded. | — | — | — |
@@ -298,7 +299,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_interpreters` |
 | `_ios_support` |
 | `_lsprof` |
-| `_lzma` |
 | `_markupbase` |
 | `_multibytecodec` |
 | `_multiprocessing` |
