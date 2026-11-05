@@ -487,9 +487,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_locale", "LC_TIME") => ctx.int(libc::LC_TIME.into()),
         ("_locale", "LC_MESSAGES") => ctx.int(libc::LC_MESSAGES.into()),
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
-        ("gc", "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold") => {
-            ctx.builtin(&format!("gc.{name}"))
-        }
+        (
+            "gc",
+            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked",
+        ) => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
@@ -2730,6 +2731,10 @@ pub(super) fn call(
         }
         ctx.heap.set_gc_thresholds(&values[..args.len()]);
         return Ok(NONE);
+    }
+    if name == "gc.is_tracked" {
+        let obj = builtins::one_positional_arg(name, args, kwargs)?;
+        return Ok(builtins::boolean(ctx.heap.is_gc_tracked(obj)));
     }
     if name == "gc.collect" {
         let generation = if args.is_empty() && kwargs.is_empty() {
