@@ -270,6 +270,82 @@ impl Parser<'_> {
         ))
     }
 
+    /// Convert a case clause, which has no independent source position in Python's AST.
+    fn match_case(&mut self, case: ast::MatchCase) -> Result<Id> {
+        let pattern = self.pattern(case.pattern)?;
+        let guard = self.optional(case.guard)?;
+        let body = self.suite(case.body)?;
+        Ok(parsed_instance(
+            self.ctx,
+            "match_case",
+            &[pattern, guard, body],
+            None,
+        ))
+    }
+
+    fn patterns(&mut self, patterns: impl IntoIterator<Item = ast::Pattern>) -> Result<Id> {
+        let elements = patterns
+            .into_iter()
+            .map(|p| self.pattern(p))
+            .collect::<Result<_>>()?;
+        Ok(self.list(elements))
+    }
+
+    /// Preserve the shape and byte positions of nested structural patterns.
+    fn pattern(&mut self, pattern: ast::Pattern) -> Result<Id> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.pattern_inner(pattern))
+    }
+
+    fn pattern_inner(&mut self, pattern: ast::Pattern) -> Result<Id> {
+        use ast::Pattern;
+        let range = pattern.range();
+        let (kind, fields) = match pattern {
+            Pattern::MatchValue(p) => ("MatchValue", vec![self.expr(*p.value)?]),
+            Pattern::MatchSingleton(p) => {
+                let value = match p.value {
+                    ast::Singleton::None => NONE,
+                    ast::Singleton::True => TRUE,
+                    ast::Singleton::False => FALSE,
+                };
+                ("MatchSingleton", vec![value])
+            }
+            Pattern::MatchSequence(p) => ("MatchSequence", vec![self.patterns(p.patterns)?]),
+            Pattern::MatchMapping(p) => (
+                "MatchMapping",
+                vec![
+                    self.exprs(p.keys)?,
+                    self.patterns(p.patterns)?,
+                    p.rest.map_or(NONE, |name| self.ctx.text(name.as_str())),
+                ],
+            ),
+            Pattern::MatchClass(p) => {
+                let cls = self.expr(*p.cls)?;
+                let positional = self.patterns(p.arguments.patterns)?;
+                let mut attrs = Vec::with_capacity(p.arguments.keywords.len());
+                let mut patterns = Vec::with_capacity(p.arguments.keywords.len());
+                for kw in p.arguments.keywords {
+                    attrs.push(self.ctx.text(kw.attr.as_str()));
+                    patterns.push(self.pattern(kw.pattern)?);
+                }
+                (
+                    "MatchClass",
+                    vec![cls, positional, self.list(attrs), self.list(patterns)],
+                )
+            }
+            Pattern::MatchStar(p) => (
+                "MatchStar",
+                vec![p.name.map_or(NONE, |name| self.ctx.text(name.as_str()))],
+            ),
+            Pattern::MatchAs(p) => {
+                let inner = p.pattern.map_or(Ok(NONE), |p| self.pattern(*p))?;
+                let name = p.name.map_or(NONE, |name| self.ctx.text(name.as_str()));
+                ("MatchAs", vec![inner, name])
+            }
+            Pattern::MatchOr(p) => ("MatchOr", vec![self.patterns(p.patterns)?]),
+        };
+        Ok(self.node(kind, &fields, range))
+    }
+
     /// Convert the identifier list carried by a global or nonlocal declaration.
     fn identifiers(&mut self, names: Vec<ast::Identifier>) -> Id {
         let names = names
@@ -397,6 +473,15 @@ impl Parser<'_> {
                     if v.is_async { "AsyncWith" } else { "With" },
                     vec![self.list(items), self.suite(v.body)?, NONE],
                 )
+            }
+            Stmt::Match(v) => {
+                let subject = self.expr(*v.subject)?;
+                let cases = v
+                    .cases
+                    .into_iter()
+                    .map(|case| self.match_case(case))
+                    .collect::<Result<_>>()?;
+                ("Match", vec![subject, self.list(cases)])
             }
             Stmt::Try(v) => {
                 let body = self.suite(v.body)?;
