@@ -247,6 +247,10 @@ pub(super) fn call(
         let result = crate::floats::acos(as_double(ctx, value)?)?;
         return Ok(ctx.alloc(Value::Float(result)));
     }
+    if operation == "ulp" {
+        let result = ulp(as_double(ctx, value)?);
+        return Ok(ctx.alloc(Value::Float(result)));
+    }
     if operation == "acosh" {
         let x = as_double(ctx, value)?;
         let result = x.acosh();
@@ -649,6 +653,22 @@ pub(super) fn as_double(ctx: &mut Context, value: Id) -> Result<f64> {
             };
             Ok(x)
         }
+    }
+}
+
+/// Return the spacing above the magnitude, or below it at the largest finite float.
+fn ulp(value: f64) -> f64 {
+    if value.is_nan() {
+        return value;
+    }
+    let magnitude = value.abs();
+    if magnitude.is_infinite() {
+        return magnitude;
+    }
+    if magnitude == f64::MAX {
+        magnitude - magnitude.next_down()
+    } else {
+        magnitude.next_up() - magnitude
     }
 }
 
