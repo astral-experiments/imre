@@ -2805,7 +2805,7 @@ impl Context {
             }
             Value::SurrogateStr(points) => surrogate_repr(points),
             Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
-            Value::Str(s) => s.clone(),
+            Value::Str(s) => s.to_string(),
             Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).hash_type() => {
                 format!("<{name} object at {id:#x}>")
             }
@@ -3521,7 +3521,7 @@ impl Context {
                     let skip = (len as i64 - 1 - start) as usize;
                     sliced_text(text.chars().rev().skip(skip), stride, count)?
                 };
-                Value::Str(value)
+                Value::Str(value.into())
             }
             Value::Bytes(data) if step == 1 => {
                 if receiver == obj && count == len {

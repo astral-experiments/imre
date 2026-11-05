@@ -446,7 +446,7 @@ impl Reader {
             part.try_reserve_exact(n)
                 .map_err(|_| crate::Error::allocation())?;
             part.push_str(text);
-            Value::Str(part)
+            Value::Str(part.into())
         } else {
             let mut points = Vec::new();
             points

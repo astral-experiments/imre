@@ -1298,7 +1298,7 @@ fn newline_history(ctx: &mut Context, seen: u8) -> Id {
 impl From<crate::objects::MemoryText> for Value {
     fn from(snapshot: crate::objects::MemoryText) -> Self {
         match snapshot {
-            crate::objects::MemoryText::Utf8(text) => Value::Str(text.into_string()),
+            crate::objects::MemoryText::Utf8(text) => Value::Str(text),
             crate::objects::MemoryText::Surrogates(points) => Value::SurrogateStr(points),
         }
     }

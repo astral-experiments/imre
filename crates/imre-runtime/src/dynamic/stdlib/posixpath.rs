@@ -64,7 +64,11 @@ fn normpath(ctx: &mut Context, path: Id) -> Result<Id> {
     let normalized = crate::objects::posixpath::normalize(bytes, None)
         .map_err(|_| Error::new("MemoryError", ""))?;
     let result = match value {
-        Value::Str(_) => Value::Str(String::from_utf8(normalized).expect("whole UTF-8 components")),
+        Value::Str(_) => Value::Str(
+            String::from_utf8(normalized)
+                .expect("whole UTF-8 components")
+                .into(),
+        ),
         _ => Value::Bytes(normalized),
     };
     Ok(ctx.alloc(result))

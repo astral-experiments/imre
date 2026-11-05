@@ -719,7 +719,7 @@ impl Pickler {
         let fields = match ctx.heap.get(reduction) {
             Value::Str(name) => {
                 let name = name.clone();
-                return self.save_global(ctx, obj, Some(name));
+                return self.save_global(ctx, obj, Some(name.to_string()));
             }
             Value::Tuple(fields) if (2..=6).contains(&fields.len()) => fields.clone(),
             _ => {

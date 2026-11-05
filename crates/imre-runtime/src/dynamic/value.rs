@@ -1102,7 +1102,7 @@ pub(super) enum Value {
     },
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
-    Str(String),
+    Str(crate::Str),
     /// Python code points for text containing at least one surrogate.
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
@@ -3403,7 +3403,7 @@ impl Heap {
             self.keep(id);
             return id;
         }
-        let id = self.alloc_slot_with_trace(Value::Str(owner.to_string()), !static_character);
+        let id = self.alloc_slot_with_trace(Value::Str((*owner).clone()), !static_character);
         self.interned
             .insert(owner, InternedString { id, literal: true });
         id
@@ -3443,14 +3443,14 @@ impl Heap {
             .map_err(|_| crate::Error::memory_error())?;
         value.push_str(text);
         if !intern {
-            return Ok(self.alloc(Value::Str(value)));
+            return Ok(self.alloc(Value::Str(value.into())));
         }
         let owner = crate::objects::try_literal_string(text)?;
         let owner = crate::sys::try_intern_owner(&owner).ok_or_else(crate::Error::memory_error)?;
         self.interned
             .try_reserve(1)
             .map_err(|_| crate::Error::memory_error())?;
-        let id = self.alloc_slot(Value::Str(value));
+        let id = self.alloc_slot(Value::Str(value.into()));
         self.interned
             .insert(owner, InternedString { id, literal: true });
         Ok(id)
@@ -3467,7 +3467,7 @@ impl Heap {
         let mut value = String::new();
         value.try_reserve_exact(text.len()).ok()?;
         value.push_str(text);
-        let id = self.alloc(Value::Str(value));
+        let id = self.alloc(Value::Str(value.into()));
         Some(if intern {
             self.intern(id, std::iter::empty())
         } else {

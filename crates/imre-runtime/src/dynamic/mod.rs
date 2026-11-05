@@ -245,7 +245,7 @@ impl Context {
         self.register_instance_finalizer(id, class);
         id
     }
-    fn text(&mut self, value: impl Into<String>) -> Id {
+    fn text(&mut self, value: impl Into<crate::Str>) -> Id {
         self.alloc(Value::Str(value.into()))
     }
     /// Use the ordinary UTF-8 layout whenever all Python code points are scalars.

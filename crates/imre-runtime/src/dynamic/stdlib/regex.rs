@@ -1324,7 +1324,7 @@ fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) ->
         } else {
             match ctx.heap.get(subject) {
                 Value::Str(s) => {
-                    let part = s[span].to_owned();
+                    let part = crate::Str::new(&s[span]);
                     ctx.alloc(Value::Str(part))
                 }
                 Value::Bytes(b) => {
@@ -1616,7 +1616,9 @@ fn group_value(data: &[u8], bytes: bool) -> Value {
         Value::Bytes(data.to_vec())
     } else {
         Value::Str(
-            String::from_utf8(data.to_vec()).expect("text regex captures end at UTF-8 boundaries"),
+            std::str::from_utf8(data)
+                .expect("text regex captures end at UTF-8 boundaries")
+                .into(),
         )
     }
 }
