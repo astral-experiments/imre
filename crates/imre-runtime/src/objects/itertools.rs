@@ -410,6 +410,10 @@ pub unsafe extern "C" fn imre_collect_int_cursor(cursor: *const Object) -> *cons
     let bulk = unsafe {
         cursor.0.with_mut(|s| match s {
             Storage::IntegerAccumulate(scan) => Some(scan.collect_remaining()),
+            Storage::IteratorAdapter(state) => match &**state {
+                Adapter::Progression(range) => range.collect_small(),
+                _ => None,
+            },
             Storage::Repeat(Repeat {
                 value,
                 remaining: Some(count),

@@ -55,3 +55,15 @@ collect_pending([1 << 140, -3, 8])
 repeated = repeat(9, 4)
 next(repeated)
 print(list(repeated), list(repeated))
+
+
+def range_tail(start: int, stop: int, step: int) -> None:
+    cursor = iter(range(start, stop, step))
+    alias = cursor
+    print(next(cursor), list(alias), list(cursor))
+
+
+range_tail(-5, 10, 3)
+range_tail(5, -10, -3)
+range_tail((1 << 62) - 3, (1 << 62) - 1, 4)
+range_tail(1 << 100, (1 << 100) + 7, 2)
