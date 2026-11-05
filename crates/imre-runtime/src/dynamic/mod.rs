@@ -81,9 +81,16 @@ use value::{
     Result, Scope, TRUE, Value,
 };
 
+/// How a registered module supplies its code object to importlib.
+#[derive(Clone, Copy)]
+enum ModuleInitializer {
+    Native(Code),
+    Source(&'static str),
+}
+
 struct SourceModule {
     path: PathBuf,
-    code: Code,
+    code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
 }
 
@@ -3155,7 +3162,7 @@ impl Context {
             self.sources
                 .get(name)
                 .and_then(|sources| sources.first())
-                .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
+                .map(|m| (m.path.clone(), importlib::SourceBody::Registered(m.code)))
         } else if stdlib::is_module(name) || self.is_frozen(name) {
             if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
@@ -3172,7 +3179,7 @@ impl Context {
                     .map(|source| {
                         (
                             source.path.clone(),
-                            importlib::SourceBody::Compiled(source.code),
+                            importlib::SourceBody::Registered(source.code),
                         )
                     })
             })
@@ -4169,7 +4176,7 @@ impl Context {
                     origin.expect("ZIP source has a filename"),
                     loader,
                 ),
-                importlib::SourceBody::Compiled(_)
+                importlib::SourceBody::Registered(_)
                     if let Some(origin) = origin
                         && ((matches!(
                             name,
@@ -4182,10 +4189,9 @@ impl Context {
                 {
                     self.initialize_source(module, scope, name_id, origin, NONE)
                 }
-                importlib::SourceBody::Compiled(entry) => {
-                    let code = self.module_code(entry, &path);
-                    self.execute(code, scope, FrameOwner::Module(name_id))
-                }
+                importlib::SourceBody::Registered(entry) => self
+                    .module_code(entry, &path)
+                    .and_then(|code| self.execute(code, scope, FrameOwner::Module(name_id))),
                 importlib::SourceBody::Filesystem => match origin {
                     Some(file) => self.initialize_source(module, scope, name_id, file, NONE),
                     // Namespace packages have no initializer.
