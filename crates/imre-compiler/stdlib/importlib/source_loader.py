@@ -92,13 +92,13 @@ def cache_from_source(path, debug_override=None, *, optimization=None):
         raise TypeError(f"sequence item 2: expected str instance, {type(tag).__name__} found")
     if optimization is None:
         optimization = sys.flags.optimize or ""
-    return _cache_name(path, tag, str(optimization), sys.pycache_prefix)
+    return _cache_name(path, tag, str(optimization), BYTECODE_SUFFIXES, sys, _path_join)
 
 
 def source_from_cache(path):
     if sys.implementation.cache_tag is None:
         raise NotImplementedError("sys.implementation.cache_tag is None")
-    return _source_name(_cache_path(path), sys.pycache_prefix)
+    return _source_name(_cache_path(path), sys.pycache_prefix, SOURCE_SUFFIXES, _path_join)
 
 
 class _LoaderBasics:
