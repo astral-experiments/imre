@@ -890,8 +890,17 @@ pub(super) fn call(
         }
         ("release_session", &[handle]) => match ctx.heap.get(handle) {
             Value::TlsSession(state) => {
-                let tls = state.borrow_mut().take();
-                Ok(tls.map_or(NONE, |tls| ctx.alloc(Value::Socket(tls.into_socket()))))
+                let state = Rc::clone(state);
+                let mut tls = state.borrow_mut();
+                let Some(session) = tls.as_ref() else {
+                    return Ok(NONE);
+                };
+                // Keep the session intact if registering its returned socket fails.
+                let socket = ctx
+                    .heap
+                    .alloc_descriptor_owner(Value::Socket(session.socket().clone()))?;
+                drop(tls.take().unwrap().into_socket());
+                Ok(socket)
             }
             Value::Socket(_) | Value::TlsListener(_) | Value::None => Ok(handle),
             _ => Err(Error::new("TypeError", "expected a TLS socket")),

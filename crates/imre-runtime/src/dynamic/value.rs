@@ -2699,8 +2699,8 @@ pub(super) struct Heap {
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
-    // Weak handles to buffered output files returned by open().
-    file_writers: Vec<Id>,
+    // Non-rooting handles to files and sockets whose destruction flushes or closes a descriptor.
+    descriptor_owners: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
@@ -2905,7 +2905,7 @@ impl Heap {
             default_stderr: None,
             has_weak_values: false,
             collect_next_statement: false,
-            file_writers: Vec::new(),
+            descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
             classes: Vec::new(),
@@ -3648,14 +3648,14 @@ impl Heap {
             return false;
         }
         self.keep_call_result(mark, result);
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
-            .any(|&writer| {
-                writer != result
+            .any(|&owner| {
+                owner != result
                     && !self.active_binding_matches(|bound| {
                         let mut budget = 8;
-                        self.keeps_finalizer(bound, writer, &mut budget)
+                        self.keeps_finalizer(bound, owner, &mut budget)
                     })
             })
     }
@@ -4264,9 +4264,9 @@ impl Heap {
     }
 
     /// Check each registration against the surviving frame bindings and native stream edges.
-    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
+    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, owners: &[Id]) -> bool {
         let chains = self.bound_finalizer_chains();
-        self.ordinary_finalizers.iter().chain(writers).all(|owner| {
+        self.ordinary_finalizers.iter().chain(owners).all(|owner| {
             stdin.is_some_and(|input| input.contains(owner))
                 || chains.iter().flatten().any(|chain| chain.contains(owner))
                 || self.find_finalizer_binding(*owner)
@@ -4375,13 +4375,13 @@ impl Heap {
         next
     }
 
-    /// Track a file that must flush or close its descriptor when its last owner disappears.
-    pub(super) fn alloc_file_writer(&mut self, file: Value) -> Result<Id> {
-        self.file_writers
+    /// Track a descriptor whose flush or close is visible when its last owner disappears.
+    pub(super) fn alloc_descriptor_owner(&mut self, value: Value) -> Result<Id> {
+        self.descriptor_owners
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        let id = self.alloc(file);
-        self.file_writers.push(id);
+        let id = self.alloc(value);
+        self.descriptor_owners.push(id);
         self.frames.last_mut().unwrap().created_finalizer = true;
         Ok(id)
     }
@@ -4431,7 +4431,7 @@ impl Heap {
 
     /// A returned writer or a surviving name keeps a direct owner.
     pub(super) fn has_unbound_finalizer(&self, retained: Id) -> bool {
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
@@ -4439,11 +4439,11 @@ impl Heap {
 
     /// A global input stream and a frame-owned stream can keep all registered owners alive.
     pub(super) fn finalizers_kept_by(&self, input: &[Id; 3]) -> bool {
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
             .all(|owner| input.contains(owner) || self.caller_keeps_generator(*owner))
-            || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
+            || self.frame_keeps_stream_finalizers(Some(input), &self.descriptor_owners)
     }
 
     /// Both the weak reference and its target must keep a strong path from a surviving root.
@@ -4466,12 +4466,12 @@ impl Heap {
     }
 
     pub(super) fn tracks_finalizers(&self) -> bool {
-        !self.file_writers.is_empty() || self.has_ordinary_finalizers()
+        !self.descriptor_owners.is_empty() || self.has_ordinary_finalizers()
     }
 
     /// Count the registrations a root set must cover to avoid a finalizer sweep.
     pub(super) fn tracked_finalizer_count(&self) -> usize {
-        self.file_writers.len() + self.ordinary_finalizers.len()
+        self.descriptor_owners.len() + self.ordinary_finalizers.len()
     }
 
     /// Recheck unbound writers after control flow discards temporary roots.
@@ -5124,12 +5124,13 @@ impl Heap {
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.classes
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
-        self.file_writers.retain(|&id| {
+        self.descriptor_owners.retain(|&id| {
             let slot = &self.slots[id as usize];
             self.traces[id as usize].get() != UNMARKED
                 && match &slot.value {
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
+                    Some(Value::Socket(socket)) => crate::objects::socket::fd(socket) >= 0,
                     _ => false,
                 }
         });

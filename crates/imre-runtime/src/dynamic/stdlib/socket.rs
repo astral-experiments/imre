@@ -1155,7 +1155,7 @@ fn new_socket(ctx: &mut Context, socket: crate::ObjectOwner) -> Result<Id> {
     {
         native::set_timeout(&socket, Some(timeout))?;
     }
-    Ok(ctx.alloc(Value::Socket(socket)))
+    ctx.heap.alloc_descriptor_owner(Value::Socket(socket))
 }
 
 pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -1465,7 +1465,11 @@ pub(super) fn call(
         "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
             return endpoint_method(ctx, method, &s, args);
         }
-        "dup" => return Ok(ctx.alloc(Value::Socket(native::dup(&s)?))),
+        "dup" => {
+            return ctx
+                .heap
+                .alloc_descriptor_owner(Value::Socket(native::dup(&s)?));
+        }
         "get_inheritable" => {
             let enabled = crate::objects::os::INHERITABLE.enabled(native::fd(&s))?;
             return Ok(if enabled { super::TRUE } else { super::FALSE });

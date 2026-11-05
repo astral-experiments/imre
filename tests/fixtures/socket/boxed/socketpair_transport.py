@@ -1,3 +1,4 @@
+import _socket
 import errno
 import os
 import socket
@@ -66,3 +67,43 @@ try:
             assert other.gettimeout() is None and left.gettimeout() == 0.75
 finally:
     socket.setdefaulttimeout(previous)
+
+
+finalized = []
+
+
+class QuietOwner:
+    def __del__(self):
+        finalized.append(True)
+
+
+def peer_and_holder():
+    peer, endpoint = _socket.socketpair()
+    peer.setblocking(False)
+    return peer, [endpoint]
+
+
+def check_last_endpoint(keep):
+    peer, holder = peer_and_holder()
+    retained = holder.copy() if keep else []
+    # Let the runtime learn the paths to the unrelated finalizers before discarding the socket.
+    for i in range(160):
+        assert owners[i % 10] is not None
+    try:
+        received = holder.pop() and peer.recv(1)
+    except BlockingIOError:
+        assert retained
+        assert retained[0].send(b"x") == 1
+        assert peer.recv(1) == b"x"
+        retained[0].close()
+        assert peer.recv(1) == b""
+    else:
+        assert not retained and received == b""
+    assert not finalized
+    peer.close()
+
+
+owners = [QuietOwner() for _ in range(10)]
+check_last_endpoint(False)
+check_last_endpoint(True)
+owners.clear()

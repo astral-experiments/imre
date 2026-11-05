@@ -311,7 +311,7 @@ impl Heap {
         let endpoints = self
             .ordinary_finalizers
             .iter()
-            .chain(&self.file_writers)
+            .chain(&self.descriptor_owners)
             .copied()
             .filter(|id| {
                 !stdin.is_some_and(|input| input.contains(id))
@@ -362,7 +362,7 @@ impl Heap {
         };
         self.ordinary_finalizers.iter().all(&kept)
             && (!before_discard
-                || (self.file_writers.iter().all(kept)
+                || (self.descriptor_owners.iter().all(kept)
                     && (!self.has_weak_values || self.weak_values_kept_by(globals[0], globals[1]))))
     }
 }
