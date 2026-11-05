@@ -1,5 +1,5 @@
 import random
-from random import choice, choices, randbytes, randint, random as draw, shuffle
+from random import choice, choices, randbytes, randint, random as draw, sample as sample_items, shuffle
 
 
 def current():
@@ -305,3 +305,9 @@ def current():
             print(type(caught).__name__, str(caught))
         else:
             raise AssertionError("invalid sample accepted")
+
+    assert sample_items is random.sample and sample_items.__self__ is random._inst
+    random.seed(419)
+    reference = random.Random(419)
+    assert sample_items(range(40), 5) == reference.sample(range(40), 5)
+    assert random.getrandbits(32) == reference.getrandbits(32)
