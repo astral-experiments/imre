@@ -1,4 +1,18 @@
 def current():
+    row = [1, 2]
+    output = [0]
+
+    def change_row():
+        row[1] = 99
+        return 0
+
+    for output[change_row()], second in [row]:
+        assert (output[0], second) == (1, 2)
+    pair = (3, 4)
+    for output[0], second in [pair]:
+        assert (output[0], second) == pair
+    assert pair == (3, 4)
+
     cursor = enumerate(["a", "b"], 3)
     print(cursor.__iter__() is cursor)
     print(cursor.__next__())

@@ -1162,7 +1162,8 @@ impl Function<'_, '_> {
             .iter()
             .position(|v| matches!(v, ast::Expr::Starred(_)))
             .map_or_else(|| "0".into(), |i| self.integer(i));
-        let sequence = self.op("unpack", &[value, &count, &star]);
+        let operation = if owned { "unpack" } else { "unpack_read" };
+        let sequence = self.op(operation, &[value, &count, &star]);
         if owned {
             self.live.push(sequence.clone());
         }
