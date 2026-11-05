@@ -3627,6 +3627,7 @@ for name in ("md4", "ripemd160"):
                     native_args=("run", hmac_entry, "--runtime-imports", "--quiet", "--", "legacy-policy"),
                 )
 
+        compare("-B", fixtures / "boxed_unittest_result_registry.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         async_case = fixtures / "unittest_isolated_asyncio.py"
         compare("-IB", async_case, native_args=("run", async_case, "--quiet"), native_timeout=600)
