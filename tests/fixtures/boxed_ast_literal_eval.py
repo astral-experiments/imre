@@ -7,6 +7,20 @@ def current():
     value = literal_eval(source.replace("_", ""))
     assert type(value) is float and value == 10.5
     assert repr(literal_eval("-0.0")) == "-0.0"
+    assert literal_eval("'left' 'right'") == "leftright"
+    assert literal_eval(r"'\ud800'") == "\ud800"
+
+    def read_constant(self, name):
+        if name == "value":
+            return "custom constant"
+        return object.__getattribute__(self, name)
+
+    ast.Constant.__getattribute__ = read_constant
+    try:
+        assert literal_eval("'text'") == "custom constant"
+    finally:
+        del ast.Constant.__getattribute__
+
     assert literal_eval("(-2.5-3j, b'x', ..., {1, 1}, set())") == (-2.5-3j, b"x", ..., {1}, set())
     assert literal_eval("{'x': 1, 'x': [True, None]}") == {"x": [True, None]}
     tree = ast.parse("1+0j", mode="eval")
