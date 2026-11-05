@@ -26,6 +26,9 @@ pub(super) struct RootPaths {
     nodes: HashSet<Id>,
     edges: Vec<(Id, usize, Id)>,
     retry: u8,
+    // Dictionary slots must be interpreted the same way during discovery and validation.
+    dict_keys: bool,
+    retry_with_keys: bool,
 }
 
 /// Strong edges in ordinary containers and namespaces. A missing edge merely loses the proof.
@@ -40,16 +43,18 @@ enum Members<'a> {
     Names(&'a IndexMap<String, Id>),
     Keys(&'a [(Id, Id)]),
     Values(&'a [(Id, Id)]),
+    Entries(&'a [(Id, Id)]),
 }
 
 impl<'a> Links<'a> {
-    fn from(value: &'a Value) -> Self {
+    fn from(value: &'a Value, dict_keys: bool) -> Self {
         let (direct, members) = match value {
             Value::Module { scope, .. } => ([Some(*scope), None], Members::None),
             Value::Scope(scope) => (
                 [scope.namespace, scope.exec_globals.map(|g| g.dict)],
                 Members::Names(&scope.names),
             ),
+            Value::Dict(entries) if dict_keys => ([None; 2], Members::Entries(entries)),
             Value::Dict(entries) => ([None; 2], Members::Values(entries)),
             Value::Set { entries, .. } => ([None; 2], Members::Keys(entries)),
             Value::List(items) | Value::Tuple(items) => ([None; 2], Members::Sequence(items)),
@@ -76,7 +81,14 @@ impl<'a> Links<'a> {
                 Members::Sequence(items) => items.len(),
                 Members::Names(names) => names.len(),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
+                Members::Entries(entries) => entries.len() * 2,
             }
+    }
+
+    fn is_dict_key(&self, slot: usize) -> bool {
+        matches!(self.members, Members::Entries(_))
+            && slot >= self.direct.len()
+            && (slot - self.direct.len()).is_multiple_of(2)
     }
 
     fn get(&self, index: usize) -> Option<Id> {
@@ -90,6 +102,10 @@ impl<'a> Links<'a> {
             Members::Names(names) => names.get_index(index).map(|(_, id)| *id),
             Members::Keys(entries) => entries.get(index).map(|(key, _)| *key),
             Members::Values(entries) => entries.get(index).map(|(_, value)| *value),
+            Members::Entries(entries) => {
+                let &(key, value) = entries.get(index / 2)?;
+                Some(if index.is_multiple_of(2) { key } else { value })
+            }
         }
     }
 }
@@ -106,7 +122,7 @@ impl RootPaths {
                 Root::Global(index) => globals[index] == root,
             })
             && self.edges.iter().all(|&(parent, slot, child)| {
-                Links::from(heap.get(parent)).get(slot) == Some(child)
+                Links::from(heap.get(parent), self.dict_keys).get(slot) == Some(child)
             })
     }
 
@@ -115,6 +131,7 @@ impl RootPaths {
         globals: [Id; 2],
         endpoints: impl Iterator<Item = Id>,
         from_frames: bool,
+        dict_keys: bool,
     ) -> Option<Self> {
         let mut edges_left = MAX_EDGES;
         let mut nodes_left = heap.slots.len().min(MAX_NODES);
@@ -124,7 +141,10 @@ impl RootPaths {
             wanted.try_reserve(1).ok()?;
             wanted.insert(id);
         }
-        let mut paths = Self::default();
+        let mut paths = Self {
+            dict_keys,
+            ..Self::default()
+        };
         if from_frames && !wanted.is_empty() {
             let roots = heap
                 .frames
@@ -196,7 +216,7 @@ impl RootPaths {
             if !follow_modules && matches!(value, Value::Module { .. }) {
                 continue;
             }
-            let links = Links::from(value);
+            let links = Links::from(value, self.dict_keys);
             for slot in 0..links.len().min(*edges_left) {
                 *edges_left -= 1;
                 let Some(child) = links.get(slot) else {
@@ -209,7 +229,8 @@ impl RootPaths {
                     break 'search;
                 }
                 let found = wanted.remove(&child);
-                if !found && heap.scalar_leaves[child as usize] {
+                // A registry key can prove an endpoint without traversing unrelated keys.
+                if !found && (heap.scalar_leaves[child as usize] || links.is_dict_key(slot)) {
                     continue;
                 }
                 *nodes_left -= 1;
@@ -290,11 +311,30 @@ impl Heap {
         {
             return;
         }
-        if self.weak_roots.search_due()
-            && let Some(paths) = RootPaths::discover(self, globals, endpoints, from_frames)
-        {
+        if !self.weak_roots.search_due() {
+            return;
+        }
+        let dict_keys = self.weak_roots.retry_with_keys;
+        if let Some(paths) = RootPaths::discover(
+            self,
+            globals,
+            endpoints,
+            from_frames || dict_keys,
+            dict_keys,
+        ) {
+            // A weak-key registry can hold the reference while a caller holds its target.
+            // Only spend a later search budget on keys after an ordinary path was insufficient.
+            let retry_with_keys = !dict_keys
+                && self.weak.values().flatten().any(|&id| {
+                    !paths.nodes.contains(&id)
+                        && self
+                            .get(id)
+                            .weak_reference()
+                            .is_some_and(|wr| wr.hash.is_some())
+                });
             self.weak_roots = RootPaths {
                 retry: SEARCH_BACKOFF,
+                retry_with_keys,
                 ..paths
             };
         }
@@ -317,7 +357,7 @@ impl Heap {
                 !stdin.is_some_and(|input| input.contains(id))
                     && !self.operand_keeps_finalizer(*id, true)
             });
-        let Some(paths) = RootPaths::discover(self, globals, endpoints, true) else {
+        let Some(paths) = RootPaths::discover(self, globals, endpoints, true, false) else {
             return false;
         };
         self.finalizer_roots = RootPaths {
