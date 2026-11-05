@@ -5283,15 +5283,7 @@ impl<'a> Loader<'a> {
         }
         let bundled = match name {
             "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
-            // Fixed-layout Decimal values use the scalar methods. Rich comparisons use the
-            // complete provider on the boxed route, where Python dispatches equality and hashing.
-            "decimal" => Some((
-                "decimal.py",
-                include_str!("../stdlib/decimal.py")
-                    .split_once("    # Object-protocol methods for the boxed runtime.")
-                    .expect("Decimal boxed methods")
-                    .0,
-            )),
+            "decimal" => bundled_source!("decimal.py"),
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
             // Keep the public typeshed decorator signatures available alongside this singleton.
             "dataclasses" => Some((
