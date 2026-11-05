@@ -169,6 +169,7 @@ pub(in crate::dynamic) struct Accumulator {
     function: Id,
     total: Option<Id>,
     initial_pending: bool,
+    addition: bool,
 }
 
 impl Cursor {
@@ -328,6 +329,8 @@ pub(super) fn accumulate_allocate(
                 base: *base,
                 source: *source,
                 function: *function,
+                addition: *function == NONE
+                    || matches!(ctx.heap.get(*function), Value::Native(name) if name == "operator.add"),
                 total: (*initial != NONE).then_some(*initial),
                 initial_pending: *initial != NONE,
             }),
@@ -377,19 +380,19 @@ pub(in crate::dynamic) fn next_accumulated(ctx: &mut Context, receiver: Id) -> R
     };
     // Fetch the total after the source returns since its __next__ can reenter us.
     let state = accumulator(ctx, receiver)?;
-    let value = match (state.function, state.total) {
-        (_, None) => item,
-        (function, Some(total)) => {
-            if let (Value::Int(left), Value::Int(right)) = (ctx.heap.get(total), ctx.heap.get(item))
-                && (function == NONE
-                    || matches!(ctx.heap.get(function), Value::Native(name) if name == "operator.add"))
+    let value = match (state.function, state.total, state.addition) {
+        (_, None, _) => item,
+        (function, Some(total), addition) => {
+            if addition
+                && let (Value::Int(left), Value::Int(right)) =
+                    (ctx.heap.get(total), ctx.heap.get(item))
             {
                 let sum = crate::integer_binary(left, right, 0)?;
                 ctx.alloc(Value::Int(sum))
             } else {
                 ctx.heap.keep(item);
                 ctx.heap.keep(total);
-                if function == NONE {
+                if addition {
                     ctx.binary("+", total, item)?
                 } else {
                     ctx.call(function, vec![total, item], Vec::new())?
