@@ -458,8 +458,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "math",
             "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "atan2" | "cos" | "exp"
-            | "fma" | "frexp" | "fsum" | "gcd" | "isclose" | "isfinite" | "isinf" | "isnan"
-            | "isqrt" | "lcm" | "ldexp" | "log" | "log2" | "sin" | "sqrt" | "tan",
+            | "fma" | "frexp" | "fsum" | "gcd" | "hypot" | "isclose" | "isfinite" | "isinf"
+            | "isnan" | "isqrt" | "lcm" | "ldexp" | "log" | "log2" | "sin" | "sqrt" | "tan",
         ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
