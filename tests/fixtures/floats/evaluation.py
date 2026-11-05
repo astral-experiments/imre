@@ -61,3 +61,7 @@ try:
     print((1.0 / floating("imaginary divisor", 0.0)).imag)
 except ZeroDivisionError:
     print("receiver raised")
+
+print(floating("integer receiver", -0.0).is_integer())
+for value in (2.0, -3.5, 5e-324, 1e308, float("inf"), float("-inf"), float("nan")):
+    print(value.is_integer())

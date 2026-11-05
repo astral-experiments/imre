@@ -10676,6 +10676,12 @@ impl<'a> Checker<'a> {
                 return self.codec_writer_method(receiver, attribute, call);
             }
             let method = attribute.attr.as_str();
+            if receiver.ty == Type::Float && method == "is_integer" && call.arguments.is_empty() {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::FloatIsInteger, vec![receiver]),
+                });
+            }
             if (method == "to_bytes"
                 || (method == "bit_length"
                     && call.arguments.args.is_empty()
