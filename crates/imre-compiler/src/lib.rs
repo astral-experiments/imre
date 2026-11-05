@@ -33,6 +33,7 @@ mod types;
 mod verify;
 mod version;
 mod watch;
+mod write_parts;
 mod zip_entry;
 pub use zip_entry::is_zip_path;
 
@@ -111,8 +112,10 @@ pub struct CompileOptions {
     pub bundled_provider_archive: Option<PathBuf>,
     /// Compiler-owned archive for a Python launcher missing its installed companion.
     pub stdlib_fallback: Option<PathBuf>,
-    /// Existing pure-Python site directory of a Python-style launcher.
-    pub system_site: Option<PathBuf>,
+    /// Existing user and prefix package directories in the launcher's search order.
+    pub site_dirs: Vec<PathBuf>,
+    /// User directory with .pth files to process during Python startup.
+    pub user_site_pth: Option<PathBuf>,
     /// A source sitecustomize module is visible before the command path is prepended.
     pub sitecustomize: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
@@ -134,11 +137,15 @@ impl CompileOptions {
             })
     }
 
-    fn implicit_site(&self) -> Option<&PathBuf> {
-        self.system_site.as_ref().filter(|_| {
-            self.python_startup()
-                .is_none_or(|(flags, _)| !flags.no_site)
-        })
+    fn implicit_sites(&self) -> &[PathBuf] {
+        if self
+            .python_startup()
+            .is_some_and(|(flags, _)| flags.no_site)
+        {
+            &[]
+        } else {
+            &self.site_dirs
+        }
     }
 
     fn load_graph(
@@ -442,6 +449,7 @@ fn object_fallback<const SPLIT: bool, T>(
                     .modules
                     .iter()
                     .position(|module| module.is_bundled("socketserver")),
+                checked_file.then_some(&graph.modules),
             )?;
         }
         Ok(())
@@ -696,6 +704,8 @@ fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "character local specialization")?;
     digit_sums::specialize(module);
     verify_after(module, "digit reduction fusion")?;
+    write_parts::specialize(module);
+    verify_after(module, "text write forwarding")?;
     split_fields::specialize(module);
     verify_after(module, "integer split fields")?;
     case_membership::specialize(module);

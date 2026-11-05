@@ -912,7 +912,7 @@ impl Encoder {
                 let string = match key {
                     // CPython reuses the constant names but renders numeric keys afresh.
                     NONE | TRUE | FALSE => ctx.heap.string_literal(&text)?,
-                    _ => ctx.heap.fresh_string(Value::Str(text.to_string()))?,
+                    _ => ctx.heap.fresh_string(Value::Str(text))?,
                 };
                 self.string(ctx, string)?;
                 ctx.heap.release_temporaries_since(mark);

@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use crate::objects::exceptions::string_repr;
 
 use super::{
-    Context, stdlib,
-    value::{self, Code, Error, FALSE, Id, NONE, Result, TRUE, Value},
+    Context, ModuleInitializer, stdlib,
+    value::{self, Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 
-/// A compiled body, a newly discovered filesystem source, or its ZIP loader.
+/// A registered body, a newly discovered filesystem source, or its ZIP loader.
 #[derive(Clone, Copy)]
 pub(super) enum SourceBody {
-    Compiled(Code),
+    Registered(ModuleInitializer),
     Filesystem,
     Namespace,
     Zip(Id),
@@ -20,7 +20,7 @@ pub(super) enum SourceBody {
 impl SourceBody {
     fn loader(self) -> Id {
         match self {
-            Self::Compiled(_) | Self::Filesystem | Self::Namespace => NONE,
+            Self::Registered(_) | Self::Filesystem | Self::Namespace => NONE,
             Self::Zip(loader) => loader,
         }
     }
@@ -416,7 +416,7 @@ impl Context {
                     }
                     return Ok(Some((
                         path,
-                        entry.map_or(SourceBody::Filesystem, SourceBody::Compiled),
+                        entry.map_or(SourceBody::Filesystem, SourceBody::Registered),
                     )));
                 }
             }
@@ -474,10 +474,19 @@ impl Context {
         Ok(Some((PathBuf::from(self.str_value(*origin)?), *loader)))
     }
 
-    pub(super) fn module_code(&mut self, entry: Code, path: &Path) -> Id {
+    pub(super) fn module_code(&mut self, entry: ModuleInitializer, path: &Path) -> Result<Id> {
         let filename = self.text(path.to_string_lossy());
+        let entry = match entry {
+            ModuleInitializer::Native(entry) => entry,
+            ModuleInitializer::Source(text) => {
+                let source = self.text(text);
+                let mode = self.text("exec");
+                // An imported module has its own future flags, independent of its caller.
+                return self.compile_source_with_flags(source, filename, mode, false, 0);
+            }
+        };
         let name_id = self.text("<module>");
-        self.alloc(Value::Code(value::CodeObject {
+        Ok(self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
             body: value::Body::Native(entry),
             parameters: NONE,
@@ -490,13 +499,12 @@ impl Context {
             filename,
             first_line: 1,
             module_definition: true,
-            coroutine: false,
             flags: 0,
             flags_complete: false,
-        }))
+        })))
     }
 
-    /// Return the compiled body for this loader, or None to read the source through get_data.
+    /// Return the registered body for this loader, or None to read the source through get_data.
     pub(super) fn registered_code(&mut self, name: Id, path: Id) -> Result<Id> {
         let name = self.str_value(name)?;
         let filename = self.str_value(path)?;
@@ -506,7 +514,7 @@ impl Context {
             .and_then(|sources| sources.iter().find(|s| s.path == Path::new(filename)))
         {
             let (entry, path) = (source.code, source.path.clone());
-            return Ok(self.module_code(entry, &path));
+            return self.module_code(entry, &path);
         }
         Ok(NONE)
     }

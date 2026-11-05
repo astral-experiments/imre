@@ -1,3 +1,4 @@
+import io
 import logging
 import os
 
@@ -11,6 +12,19 @@ class TracedHandler(logging.FileHandler):
 
 
 def current():
+    class FramedStream(logging.StreamHandler):
+        terminator = "\0"
+
+    output = io.StringIO()
+    framed = FramedStream(output)
+    record = logging.makeLogRecord({"msg": "row"})
+    framed.handle(record)
+    FramedStream.terminator = "|"
+    framed.handle(record)
+    framed.terminator = "~"
+    framed.handle(record)
+    assert output.getvalue() == "row\0row|row~"
+
     path = __file__ + ".log"
     logger = logging.Logger("file")
 

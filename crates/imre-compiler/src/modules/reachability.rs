@@ -228,9 +228,25 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr)
             && self.found.definitions.insert(id)
-            && self.graph.is_unittest_main(id)
         {
-            self.found.root_unittest_main(self.graph, id.module);
+            if self.graph.is_unittest_main(id) {
+                self.found.root_unittest_main(self.graph, id.module);
+            }
+            let module = &self.graph.modules[id.module];
+            if module.is_bundled(super::FRACTION_CLASS) {
+                // Constructor conversion depends on the checked argument types.
+                self.found
+                    .definitions
+                    .extend(
+                        module
+                            .bindings
+                            .values()
+                            .filter_map(|binding| match binding {
+                                Binding::Definition(def) => Some(*def),
+                                _ => None,
+                            }),
+                    );
+            }
         }
         if let ast::Expr::Call(call) = expr
             && let Some(method) = call.func.as_attribute_expr()

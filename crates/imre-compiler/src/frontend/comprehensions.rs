@@ -656,7 +656,7 @@ impl Checker<'_> {
         } else {
             None
         };
-        let loops = helper.comprehension_clause(display, 0, Some(input), expected, result)?;
+        let (ty, mut body) = helper.comprehension_body(display, input, expected, result)?;
         if let Some((iterable, target)) = list_binding {
             self.helpers.list_builds.borrow_mut().insert(
                 id,
@@ -667,25 +667,6 @@ impl Checker<'_> {
                 },
             );
         }
-        let ty = helper.locals[result];
-        let empty = match display.value {
-            Yield::List(_) => ExprKind::List(Vec::new()),
-            Yield::Sum(_) => ExprKind::Int("0".into()),
-            Yield::Set(_) => ExprKind::Set {
-                element: self.types.set_element(ty).unwrap(),
-                values: Vec::new(),
-            },
-            Yield::Dict(..) => {
-                let (key, value) = self.types.mapping(ty).unwrap();
-                ExprKind::Dict {
-                    key,
-                    value,
-                    entries: Vec::new(),
-                }
-            }
-        };
-        let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
-        body.extend(loops);
         body.push(Statement::Return(helper.local(result)));
         if ty == Type::ListInt
             && let Some(mut input) = gather_input
@@ -829,26 +810,7 @@ impl Checker<'_> {
         self.comprehension_targets.extend(private_targets);
         self.comprehension_depth += 1;
         let result = self.hidden(Type::None);
-        let loops = self.comprehension_clause(display, 0, Some(input), expected, result)?;
-        let ty = self.locals[result];
-        let empty = match display.value {
-            Yield::List(_) => ExprKind::List(Vec::new()),
-            Yield::Sum(_) => ExprKind::Int("0".into()),
-            Yield::Set(_) => ExprKind::Set {
-                element: self.types.set_element(ty).unwrap(),
-                values: Vec::new(),
-            },
-            Yield::Dict(..) => {
-                let (key, value) = self.types.mapping(ty).unwrap();
-                ExprKind::Dict {
-                    key,
-                    value,
-                    entries: Vec::new(),
-                }
-            }
-        };
-        let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
-        body.extend(loops);
+        let (ty, body) = self.comprehension_body(display, input, expected, result)?;
         self.comprehension_depth -= 1;
         self.comprehension_targets = targets;
         self.names = names;
@@ -882,21 +844,48 @@ impl Checker<'_> {
         })
     }
 
+    /// Lower the loops first so their leaf determines the type of the initial value.
+    fn comprehension_body(
+        &mut self,
+        display: Display<'_>,
+        input: Iteration,
+        expected: Option<Type>,
+        result: usize,
+    ) -> Result<(Type, Vec<Statement>), String> {
+        let loops = self.comprehension_clause(display, 0, input, expected, result)?;
+        let ty = self.locals[result];
+        let empty = match display.value {
+            Yield::List(_) => ExprKind::List(Vec::new()),
+            Yield::Sum(_) => ExprKind::Int("0".into()),
+            Yield::Set(_) => ExprKind::Set {
+                element: self.types.set_element(ty).unwrap(),
+                values: Vec::new(),
+            },
+            Yield::Dict(..) => {
+                let (key, value) = self.types.mapping(ty).unwrap();
+                ExprKind::Dict {
+                    key,
+                    value,
+                    entries: Vec::new(),
+                }
+            }
+        };
+        let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
+        body.extend(loops);
+        Ok((ty, body))
+    }
+
     /// Filters are nested in source order and contribute facts only on their true
     /// edges. Each nested iterable is evaluated anew under the preceding bindings.
     fn comprehension_clause(
         &mut self,
         display: Display<'_>,
         index: usize,
-        first: Option<Iteration>,
+        input: Iteration,
         expected: Option<Type>,
         result: usize,
     ) -> Result<Vec<Statement>, String> {
         let clause = &display.clauses[index];
-        let input = match first {
-            Some(input) => input,
-            None => self.iteration_input(&clause.iter, None)?,
-        };
         for name in display.repeated_writes(index) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
@@ -912,7 +901,8 @@ impl Checker<'_> {
                 let guarded = conditions.last().and_then(present_field);
                 checker.comprehension_leaf(display.value, expected, result, guarded)?
             } else {
-                checker.comprehension_clause(display, index + 1, None, expected, result)?
+                let input = checker.iteration_input(&display.clauses[index + 1].iter, None)?;
+                checker.comprehension_clause(display, index + 1, input, expected, result)?
             };
             for condition in conditions.into_iter().rev() {
                 body = vec![Statement::If(condition, body, Vec::new())];

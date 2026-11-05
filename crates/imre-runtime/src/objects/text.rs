@@ -263,6 +263,22 @@ pub(crate) fn python_isidentifier(text: &str) -> bool {
     chars.next().is_some_and(|ch| in_ranges(ch, START)) && chars.all(|ch| in_ranges(ch, CONTINUE))
 }
 
+/// Matches CPython 3.14's printable characters using its Unicode 16 repertoire.
+pub(crate) fn python_isprintable(text: &str) -> bool {
+    use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
+
+    const NONPRINTABLE: GeneralCategoryGroup =
+        GeneralCategoryGroup::Other.union(GeneralCategoryGroup::Separator);
+    text.chars().all(|ch| {
+        if ch.is_ascii() {
+            (' '..='~').contains(&ch)
+        } else {
+            !NONPRINTABLE.contains(GeneralCategory::for_char(ch))
+                && !crate::integer_text::newer_printable(ch)
+        }
+    })
+}
+
 pub(crate) fn python_isdigit(text: &str) -> bool {
     if text.is_ascii() {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
@@ -1076,13 +1092,23 @@ pub(crate) fn codepoint_search_window<'a>(
     start: Option<&Int>,
     end: Option<&Int>,
 ) -> Option<(&'a [u32], usize)> {
-    let length = || source.len();
+    let bounds = indexed_search_bounds(source.len(), start, end)?;
+    let begin = bounds.start;
+    Some((&source[bounds], begin))
+}
+
+/// Resolve search bounds for strings whose stored elements each represent one code point.
+pub(crate) fn indexed_search_bounds(
+    length: usize,
+    start: Option<&Int>,
+    end: Option<&Int>,
+) -> Option<std::ops::Range<usize>> {
     let end = end
-        .and_then(|n| search_offset(Some(n), length))
-        .unwrap_or(source.len())
-        .min(source.len());
-    let start = search_offset(start, length)?;
-    Some((source.get(start..end)?, start))
+        .and_then(|n| search_offset(Some(n), || length))
+        .unwrap_or(length)
+        .min(length);
+    let start = search_offset(start, || length)?;
+    (start <= end).then_some(start..end)
 }
 
 /// Find the first or last match when either string contains surrogate code points.

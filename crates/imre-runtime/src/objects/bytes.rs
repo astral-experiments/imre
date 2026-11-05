@@ -449,16 +449,35 @@ pub(super) fn write_quoted_repr(
     output.write_char(quote)
 }
 
+/// CPython gives the empty bytes literal and every possible one-byte slice a
+/// fixed identity. Build the complete alphabet together so all copies can use it.
+pub(super) fn copied_bytes(data: &[u8]) -> crate::BytesOwner {
+    static ALPHABET: std::sync::LazyLock<[crate::BytesOwner; 257]> =
+        std::sync::LazyLock::new(|| {
+            std::array::from_fn(|i| {
+                crate::BytesOwner::new(if i == 256 { Vec::new() } else { vec![i as u8] })
+            })
+        });
+    let index = match data {
+        [] => 256,
+        [byte] => usize::from(*byte),
+        _ => {
+            let mut value = allocate(data.len())
+                .unwrap_or_else(|_| fail("MemoryError", "bytes allocation failed"));
+            value.extend_from_slice(data);
+            return crate::BytesOwner::new(value);
+        }
+    };
+    crate::BytesOwner::clone(&ALPHABET[index])
+}
+
 /// # Safety
 /// `data` points to `length` initialized bytes for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_literal(data: *const u8, length: usize) -> *const Bytes {
     // SAFETY: the compiler passes a live constant byte array, including for length zero.
     let data = unsafe { std::slice::from_raw_parts(data, length) };
-    let mut value =
-        allocate(length).unwrap_or_else(|_| fail("MemoryError", "bytes allocation failed"));
-    value.extend_from_slice(data);
-    crate::BytesOwner::into_raw(crate::BytesOwner::new(value))
+    crate::BytesOwner::into_raw(copied_bytes(data))
 }
 
 /// # Safety

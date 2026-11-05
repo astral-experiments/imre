@@ -388,17 +388,9 @@ impl Reader {
         Ok(count.is_some())
     }
 
-    fn read_into(&self, ctx: &mut Context, dst: Id, once: bool) -> Result<Id> {
-        let Some((target, range)) = ctx.writable_byte_span(dst)? else {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "{}() argument must be read-write bytes-like object, not {}",
-                    if once { "readinto1" } else { "readinto" },
-                    ctx.type_name(dst)
-                ),
-            ));
-        };
+    fn read_into(&self, ctx: &mut Context, name: &str, dst: Id) -> Result<Id> {
+        let (target, range) = super::buffered_io::readinto_buffer(ctx, name, dst)?;
+        let once = name == "readinto1";
         ctx.with_buffer_export(dst, |ctx| {
             ctx.with_buffer_export(target, |ctx| self.read_into_span(ctx, target, range, once))
         })
@@ -674,7 +666,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
     ctx.heap.keep(raw);
     ctx.heap.keep(reader.buffer);
     match name {
-        "readinto" | "readinto1" => reader.read_into(ctx, args[0], name == "readinto1"),
+        "readinto" | "readinto1" => reader.read_into(ctx, name, args[0]),
         "closed" | "name" | "mode" => ctx.lookup_attr(raw, name),
         "write" | "flush" | "truncate" if reader.update.is_some() => {
             reader.update_call(ctx, name, args)

@@ -15,6 +15,16 @@ from comprehensions import BOOTSTRAP, cases, require_result, run, snapshot, writ
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "assignments"
 
 REJECTED = {
+    "boxed_literal_initializer": 'values = {1} ^ {2}\nunits: int = "three"\n',
+    "boxed_alias_initializer": (
+        'values = {1} ^ {2}\ntype Count = int\ntype Units = Count\nunits: Units = "three"\n'
+    ),
+    "boxed_unused_initializer": (
+        "from fractions import Fraction\n"
+        "def active() -> bool:\n    return Fraction(1, 2) < 1\n"
+        'def unused() -> int:\n    units: int = "three"\n    return units\n'
+        "print(active())\n"
+    ),
     "conditional_assignment": "def bad(flag: bool) -> int:\n    value = (saved := 1) if flag else 0\n    return saved\n",
     "short_circuit_and": "def bad(flag: bool) -> int:\n    value = flag and (saved := 1) > 0\n    return saved\n",
     "short_circuit_or": "def bad(flag: bool) -> int:\n    value = flag or (saved := 1) > 0\n    return saved\n",

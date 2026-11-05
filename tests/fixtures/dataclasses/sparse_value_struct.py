@@ -23,6 +23,18 @@ def key(point: Point) -> int:
 
 
 def main() -> None:
+    # Scattered edits can share a projected value.
+    sparse = [Point(1.0, False)] * 512
+    sparse[3] = Point(5.0, True)
+    sparse[127] = Point(5.0, True)
+    print(scan(sparse))
+    # Adding the remaining ones individually rounds differently from a grouped sum.
+    sparse[3] = Point(9007199254740992.0, True)
+    sparse[127] = sparse[3]
+    print(scan(sparse))
+    sparse[-1] = Point(7.0, True)
+    print(scan(sparse))
+
     p = Point(-0.0, False)
     rows = [p] * 2048
     dense = [p for i in range(2048)]

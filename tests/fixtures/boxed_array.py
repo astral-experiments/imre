@@ -3,6 +3,19 @@ from collections.abc import MutableSequence
 
 
 def current():
+    receivers = [array("B", [1])]
+    original = receivers[0]
+
+    def replace_receiver():
+        receivers[0] = array("B", [9])
+        return 2
+
+    receivers[0].append(replace_receiver())
+    assert original.tolist() == [1, 2] and receivers[0].tolist() == [9]
+    saved_append = original.append
+    saved_append(3)
+    assert original.tolist() == [1, 2, 3]
+
     source = array('I', [1, 2, 3])
     view = memoryview(source)
     copy = source[:]
@@ -42,7 +55,7 @@ def current():
     import sys
     import warnings
 
-    for code in ("h", "H", "I", "l", "L", "q"):
+    for code in ("h", "H", "I", "l", "L", "q", "Q"):
         a = array(code)
         bits = a.itemsize * 8
         signed = code.islower()
@@ -61,6 +74,11 @@ def current():
                 pass
             else:
                 raise AssertionError("out-of-range array element accepted")
+    with memoryview(array("Q", [1 << 63])) as view:
+        assert view.format == "Q" and view.itemsize == 8 and view[0] == 1 << 63
+        view[0] = (1 << 64) - 1
+        assert view.obj[0] == (1 << 64) - 1 and view.tobytes() == b"\xff" * 8
+
     transitions = array("q", array("i", [-42, 0, 42]))
     view = memoryview(transitions)
     assert view.format == "q" and view.itemsize == 8

@@ -30,7 +30,7 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
         4 => 6,                                      // fixed record
         6 => 5,                                      // pathlib.Path
         5 => return (value >> 3, WordKind::new(10)), // ordinary Enum tag
-        7 => 2, // aligned Shared<BigInt>, even for an ordinary immediate integer
+        7 => 2, // aligned integer storage, even for an ordinary immediate integer
         _ => unreachable!(),
     };
     (value & !7, WordKind::new(kind))
@@ -84,7 +84,7 @@ pub unsafe extern "C" fn imre_union_into_float(word: usize, optional: bool) -> u
 /// inside the union; an existing large integer transfers its allocation.
 pub(super) fn integer(value: Int) -> usize {
     let word = match value.as_small() {
-        Some(small) => Shared::into_raw(Shared::new(BigInt::from(small))) as usize,
+        Some(small) => Shared::into_raw(crate::wide_owner(BigInt::from(small))) as usize,
         None => value.into_raw(),
     };
     word | 7
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
                 super::Storage::ObjectValue(v) => f64::from_bits(v.word as u64) != 0.0,
                 _ => crate::finish(s.sequence().map(|words| !words.values.is_empty()), false),
             }),
-            7 => !(*(word as *const BigInt)).is_zero(),
+            7 => !Int::borrow(word).big().is_zero(),
             _ => true,
         })
     }
@@ -225,6 +225,31 @@ mod tests {
             assert_eq!(StrOwner::strong_count(&text), 1);
             assert_eq!(crate::BytesOwner::strong_count(&bytes), 1);
             drop(WordKind::new(256 | 9).acquire(0));
+        }
+    }
+}
+
+#[cfg(test)]
+mod packed_integer_tests {
+    use super::*;
+
+    #[test]
+    fn union_owns_a_packed_prefix_after_the_list_drops() {
+        let seed = Int::new(BigInt::from(1_u128 << 100));
+        let prefixes = crate::integer_prefixes(&vec![Int::from(1); 40], Some(&seed))
+            .ok()
+            .unwrap();
+        let word = integer(prefixes[3].clone());
+        drop(prefixes);
+        // SAFETY: the tagged word carries a live integer owner, including after cloning.
+        unsafe {
+            imre_union_retain(word);
+            imre_union_release(word);
+            assert_eq!(imre_union_truthy(word), 1);
+            assert_eq!(
+                Int(imre_union_into_int(word)).big().as_ref(),
+                &(seed.big().as_ref() + 3)
+            );
         }
     }
 }

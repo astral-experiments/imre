@@ -82,7 +82,7 @@ class xmlparser:
     __slots__ = _handlers + (
         "_handle", "_intern", "_buffer_text", "_buffer_size",
         "_ordered_attributes", "_specified_attributes", "_namespace_prefixes",
-        "_character_handler", "_ignore_unhandled_text",
+        "_character_handler", "_ignore_unhandled_text", "_start_doctype_decl_handler",
     )
 
     def __new__(cls, *args, **kwargs):
@@ -92,6 +92,19 @@ class xmlparser:
         for name in _handlers:
             setattr(self, name, None)
         self.CharacterDataHandler = None
+        self._start_doctype_decl_handler = None
+
+    @property
+    def StartDoctypeDeclHandler(self):
+        return self._start_doctype_decl_handler
+
+    @StartDoctypeDeclHandler.setter
+    def StartDoctypeDeclHandler(self, handler):
+        self._start_doctype_decl_handler = handler
+
+    @StartDoctypeDeclHandler.deleter
+    def StartDoctypeDeclHandler(self):
+        raise RuntimeError("Cannot delete attribute")
 
     @property
     def CharacterDataHandler(self):

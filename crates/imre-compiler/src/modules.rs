@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
@@ -119,6 +120,13 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
         "_strptime" => bundled_source!("_strptime.py"),
         "calendar" => bundled_source!("calendar.py"),
+        "html" => bundled_source!("html/__init__.py"),
+        "html.entities" => bundled_source!("html/entities.py"),
+        // CPython 3.14.5's file wrapper and shared stream reader. See licenses/CPython.txt.
+        "lzma" => bundled_source!("lzma.py"),
+        "compression" => bundled_source!("compression/__init__.py"),
+        "compression._common" => bundled_source!("compression/_common/__init__.py"),
+        "compression._common._streams" => bundled_source!("compression/_common/_streams.py"),
         // CPython 3.14.5 Lib/zoneinfo. See licenses/CPython.txt.
         "zoneinfo" => bundled_source!("zoneinfo/__init__.py"),
         "zoneinfo._common" => bundled_source!("zoneinfo/_common.py"),
@@ -126,7 +134,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "zoneinfo._zoneinfo" => bundled_source!("zoneinfo/_zoneinfo.py"),
         // CPython 3.14.5 Lib/fractions.py and its numeric ABCs. See licenses/CPython.txt.
         "fractions" => bundled_source!("fractions.py"),
+        "ipaddress" => bundled_source!("ipaddress.py"),
         "numbers" => bundled_source!("numbers.py"),
+        "statistics" => bundled_source!("statistics.py"),
+        // CPython 3.14.5 Lib/wave.py. See licenses/CPython.txt.
+        "wave" => bundled_source!("wave.py"),
         "_compat_pickle" => bundled_source!("_compat_pickle.py"),
         "_tokenize" => bundled_source!("_tokenize.py"),
         "__future__" => bundled_source!("__future__.py"),
@@ -653,6 +665,7 @@ pub(crate) enum IntrinsicModule {
     LocaleNative,
     Functools,
     Calendar,
+    Fractions,
     Fnmatch,
     Time,
     Warnings,
@@ -664,6 +677,7 @@ pub(crate) enum IntrinsicModule {
     Shutil,
     Grp,
     Pwd,
+    Termios,
     Resource,
     Fcntl,
     Random,
@@ -708,6 +722,7 @@ pub(crate) enum IntrinsicModule {
     IoNative,
     Gzip,
     Lzma,
+    LzmaNative,
     UnicodeData,
     WeakRef,
     Threading,
@@ -856,6 +871,7 @@ pub(crate) enum Intrinsic {
     NullContext,
     IntConstant(i64),
     WallTime,
+    MathAcos,
     TimeSleep,
     WarningFilter {
         simple: bool,
@@ -997,6 +1013,9 @@ pub(crate) enum Intrinsic {
     RegexSearch,
     RegexMatchStart,
     RegexSub,
+    RegexRuns {
+        split: bool,
+    },
     RegexVerbose,
     RegexUnicode,
     RegexAscii,
@@ -1016,7 +1035,6 @@ pub(crate) enum Intrinsic {
     Repeat,
     AttrGetter,
     LengthHint,
-    MathProd,
     Count,
     Islice,
     Combinatorial(crate::ir::Combinatorial),
@@ -1202,6 +1220,7 @@ impl IntrinsicModule {
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "calendar" => Some(Self::Calendar),
+            "fractions" => Some(Self::Fractions),
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
@@ -1214,6 +1233,7 @@ impl IntrinsicModule {
             "fcntl" if cfg!(target_os = "linux") => Some(Self::Fcntl),
             "grp" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Grp),
             "pwd" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Pwd),
+            "termios" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Termios),
             "resource" if cfg!(target_os = "linux") => Some(Self::Resource),
             "random" => Some(Self::Random),
             "secrets" => Some(Self::Secrets),
@@ -1280,6 +1300,7 @@ impl IntrinsicModule {
             "_io" => Some(Self::IoNative),
             "gzip" => Some(Self::Gzip),
             "lzma" => Some(Self::Lzma),
+            "_lzma" => Some(Self::LzmaNative),
             "types" => Some(Self::Types),
             "unicodedata" => Some(Self::UnicodeData),
             "weakref" => Some(Self::WeakRef),
@@ -1317,6 +1338,9 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Fractions {
+            return (name != "Fraction").then_some(Binding::ConditionalValue);
+        }
         if self == Self::Calendar {
             return Some(match name {
                 "Calendar" | "TextCalendar" => return None,
@@ -1335,6 +1359,13 @@ impl IntrinsicModule {
         // The bundled ntpath binds platform-dependent names during module initialization.
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
+        }
+        if matches!(self, Self::Lzma | Self::LzmaNative)
+            && let Some(&(_, value)) = imre_ast::lzma::INTEGER_CONSTANTS
+                .iter()
+                .find(|&&(attr, _)| attr == name)
+        {
+            return Some(Binding::Intrinsic(Intrinsic::IntConstant(value)));
         }
         if self == Self::Zlib
             && let Some(value) = imre_ast::zlib::integer_constant(name)
@@ -1440,6 +1471,7 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
             (Self::Numbers, "Number") => Intrinsic::Number,
+            (Self::Numbers, "Rational") => Intrinsic::ScopedObjectExport("numbers.Rational"),
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
@@ -1534,6 +1566,10 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "strptime") => Intrinsic::ScopedObjectExport("time.strptime"),
+            (Self::Time, "_STRUCT_TM_ITEMS") => {
+                Intrinsic::ScopedObjectExport("time._STRUCT_TM_ITEMS")
+            }
             (Self::Time, "struct_time") => Intrinsic::StructTime,
             (Self::Time, "mktime") => Intrinsic::Mktime,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -1755,6 +1791,7 @@ impl IntrinsicModule {
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Traceback, "print_exc") => Intrinsic::TracebackPrintExc,
+            (Self::Traceback, "format_tb") => Intrinsic::ScopedObjectExport("traceback.format_tb"),
             (Self::Traceback, "format_exc") => {
                 Intrinsic::TracebackFormatter("traceback.format_exc")
             }
@@ -1823,6 +1860,9 @@ impl IntrinsicModule {
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
             (Self::Sys, "float_info") => Intrinsic::ScopedObjectExport("sys.float_info"),
+            (Self::Sys, "float_repr_style") => {
+                Intrinsic::ScopedObjectExport("sys.float_repr_style")
+            }
             (Self::Sys, "implementation") => Intrinsic::SysImplementation,
             (Self::Sys, "pycache_prefix") => Intrinsic::SysPycachePrefix,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
@@ -2038,100 +2078,6 @@ impl IntrinsicModule {
             (Self::SocketNative, "setdefaulttimeout") => {
                 Intrinsic::ScopedObjectExport("_socket.setdefaulttimeout")
             }
-            (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
-                "gaierror" => "_socket.gaierror",
-                "getnameinfo" => "_socket.getnameinfo",
-                "if_indextoname" => "_socket.if_indextoname",
-                "if_nameindex" => "_socket.if_nameindex",
-                "if_nametoindex" => "_socket.if_nametoindex",
-                "NI_DGRAM" => "_socket.NI_DGRAM",
-                "NI_NAMEREQD" => "_socket.NI_NAMEREQD",
-                "NI_NOFQDN" => "_socket.NI_NOFQDN",
-                "NI_NUMERICHOST" => "_socket.NI_NUMERICHOST",
-                "NI_NUMERICSERV" => "_socket.NI_NUMERICSERV",
-                "has_ipv6" => "_socket.has_ipv6",
-                "SocketType" => "_socket.SocketType",
-                "getaddrinfo" => "_socket.getaddrinfo",
-                "AI_NUMERICHOST" => "_socket.AI_NUMERICHOST",
-                "AI_NUMERICSERV" => "_socket.AI_NUMERICSERV",
-                "EAI_SERVICE" => "_socket.EAI_SERVICE",
-                "EAI_NODATA" => "_socket.EAI_NODATA",
-                "EAI_NONAME" => "_socket.EAI_NONAME",
-                "AI_PASSIVE" => "_socket.AI_PASSIVE",
-                "SOL_TCP" => "_socket.SOL_TCP",
-                "AF_INET" => "_socket.AF_INET",
-                "AF_INET6" => "_socket.AF_INET6",
-                "AF_UNSPEC" => "_socket.AF_UNSPEC",
-                "AF_UNIX" => "_socket.AF_UNIX",
-                "SOCK_STREAM" => "_socket.SOCK_STREAM",
-                "SOCK_DGRAM" => "_socket.SOCK_DGRAM",
-                "SOCK_RAW" => "_socket.SOCK_RAW",
-                "SOCK_RDM" => "_socket.SOCK_RDM",
-                "SOCK_SEQPACKET" => "_socket.SOCK_SEQPACKET",
-                "SOL_SOCKET" => "_socket.SOL_SOCKET",
-                "IPPROTO_TCP" => "_socket.IPPROTO_TCP",
-                "IPPROTO_UDP" => "_socket.IPPROTO_UDP",
-                "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
-                "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
-                "SO_TYPE" => "_socket.SO_TYPE",
-                "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
-                "SO_REUSEPORT" => "_socket.SO_REUSEPORT",
-                "SO_SNDBUF" => "_socket.SO_SNDBUF",
-                "TCP_NODELAY" => "_socket.TCP_NODELAY",
-                "SHUT_RD" => "_socket.SHUT_RD",
-                "SHUT_WR" => "_socket.SHUT_WR",
-                "SHUT_RDWR" => "_socket.SHUT_RDWR",
-                "SOMAXCONN" => "_socket.SOMAXCONN",
-                "socket" => "_socket.socket",
-                "socketpair" => "_socket.socketpair",
-                "close" => "_socket.close",
-                "inet_aton" => "_socket.inet_aton",
-                "inet_pton" => "_socket.inet_pton",
-                "inet_ntoa" => "_socket.inet_ntoa",
-                "inet_ntop" => "_socket.inet_ntop",
-                "getservbyname" => "_socket.getservbyname",
-                "getservbyport" => "_socket.getservbyport",
-                "gethostname" => "_socket.gethostname",
-                "gethostbyname" => "_socket.gethostbyname",
-                "gethostbyaddr" => "_socket.gethostbyaddr",
-                "error" => "_socket.error",
-                _ => return None,
-            }),
-            (Self::Socket, "getnameinfo") => Intrinsic::ObjectRuntimeExport("socket.getnameinfo"),
-            (Self::Socket, "if_indextoname") => {
-                Intrinsic::ObjectRuntimeExport("socket.if_indextoname")
-            }
-            (Self::Socket, "if_nameindex") => Intrinsic::ObjectRuntimeExport("socket.if_nameindex"),
-            (Self::Socket, "if_nametoindex") => {
-                Intrinsic::ObjectRuntimeExport("socket.if_nametoindex")
-            }
-            (Self::Socket, "NI_DGRAM") => Intrinsic::ObjectRuntimeExport("socket.NI_DGRAM"),
-            (Self::Socket, "NI_NAMEREQD") => Intrinsic::ObjectRuntimeExport("socket.NI_NAMEREQD"),
-            (Self::Socket, "NI_NOFQDN") => Intrinsic::ObjectRuntimeExport("socket.NI_NOFQDN"),
-            (Self::Socket, "NI_NUMERICHOST") => {
-                Intrinsic::ObjectRuntimeExport("socket.NI_NUMERICHOST")
-            }
-            (Self::Socket, "NI_NUMERICSERV") => {
-                Intrinsic::ObjectRuntimeExport("socket.NI_NUMERICSERV")
-            }
-            (Self::Socket, "AddressFamily") => {
-                Intrinsic::ObjectRuntimeExport("socket.AddressFamily")
-            }
-            (Self::Socket, "SocketKind") => Intrinsic::ObjectRuntimeExport("socket.SocketKind"),
-            (Self::Socket, "getaddrinfo") => Intrinsic::ObjectRuntimeExport("socket.getaddrinfo"),
-            (Self::Socket, "AI_NUMERICHOST") => {
-                Intrinsic::ObjectRuntimeExport("socket.AI_NUMERICHOST")
-            }
-            (Self::Socket, "AI_NUMERICSERV") => {
-                Intrinsic::ObjectRuntimeExport("socket.AI_NUMERICSERV")
-            }
-            (Self::Socket, "AddressInfo") => Intrinsic::ObjectRuntimeExport("socket.AddressInfo"),
-            (Self::Socket, "AI_PASSIVE") => Intrinsic::ObjectRuntimeExport("socket.AI_PASSIVE"),
-            (Self::Socket, "EAI_NODATA") => Intrinsic::ObjectRuntimeExport("socket.EAI_NODATA"),
-            (Self::Socket, "EAI_NONAME") => Intrinsic::ObjectRuntimeExport("socket.EAI_NONAME"),
-            (Self::Socket, "EAI_SERVICE") => Intrinsic::ObjectRuntimeExport("socket.EAI_SERVICE"),
-            (Self::Socket, "SOL_TCP") => Intrinsic::ObjectRuntimeExport("socket.SOL_TCP"),
-            (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
             (Self::Socket, "getdefaulttimeout") => {
                 Intrinsic::ScopedObjectExport("socket.getdefaulttimeout")
             }
@@ -2141,47 +2087,9 @@ impl IntrinsicModule {
             (Self::Socket, "_GLOBAL_DEFAULT_TIMEOUT") => {
                 Intrinsic::ScopedObjectExport("socket._GLOBAL_DEFAULT_TIMEOUT")
             }
-            (Self::Socket, "create_connection") => {
-                Intrinsic::ObjectRuntimeExport("socket.create_connection")
-            }
-            (Self::Socket, "create_server") => {
-                Intrinsic::ObjectRuntimeExport("socket.create_server")
-            }
-            (Self::Socket, "SO_REUSEPORT") => Intrinsic::ObjectRuntimeExport("socket.SO_REUSEPORT"),
-            (Self::Socket, "has_dualstack_ipv6") => {
-                Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
-            }
-            (Self::Socket, "IPPROTO_UDP") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_UDP"),
-            (Self::Socket, "IPPROTO_IPV6") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_IPV6"),
-            (Self::Socket, "IPV6_V6ONLY") => Intrinsic::ObjectRuntimeExport("socket.IPV6_V6ONLY"),
-            (Self::Socket, "has_ipv6") => Intrinsic::ObjectRuntimeExport("socket.has_ipv6"),
-            (Self::Socket, "AF_INET6") => Intrinsic::ObjectRuntimeExport("socket.AF_INET6"),
-            (Self::Socket, "SOCK_DGRAM") => Intrinsic::ObjectRuntimeExport("socket.SOCK_DGRAM"),
-            (Self::Socket, "SOCK_RAW") => Intrinsic::ObjectRuntimeExport("socket.SOCK_RAW"),
-            (Self::Socket, "SOCK_RDM") => Intrinsic::ObjectRuntimeExport("socket.SOCK_RDM"),
-            (Self::Socket, "SOCK_SEQPACKET") => {
-                Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
-            }
+            #[cfg(unix)]
+            (Self::Socket, "fromfd") => Intrinsic::ScopedObjectExport("socket.fromfd"),
             (Self::Socket, "SocketIO") => Intrinsic::ScopedObjectExport("socket.SocketIO"),
-            (Self::Socket, "socketpair") => Intrinsic::ObjectRuntimeExport("socket.socketpair"),
-            (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
-            (Self::Socket, "inet_aton") => Intrinsic::ObjectRuntimeExport("socket.inet_aton"),
-            (Self::Socket, "inet_pton") => Intrinsic::ObjectRuntimeExport("socket.inet_pton"),
-            (Self::Socket, "inet_ntoa") => Intrinsic::ObjectRuntimeExport("socket.inet_ntoa"),
-            (Self::Socket, "inet_ntop") => Intrinsic::ObjectRuntimeExport("socket.inet_ntop"),
-            (Self::Socket, "getservbyname") => {
-                Intrinsic::ObjectRuntimeExport("socket.getservbyname")
-            }
-            (Self::Socket, "getservbyport") => {
-                Intrinsic::ObjectRuntimeExport("socket.getservbyport")
-            }
-            (Self::Socket, "gethostname") => Intrinsic::ObjectRuntimeExport("socket.gethostname"),
-            (Self::Socket, "gethostbyname") => {
-                Intrinsic::ObjectRuntimeExport("socket.gethostbyname")
-            }
-            (Self::Socket, "gethostbyaddr") => {
-                Intrinsic::ObjectRuntimeExport("socket.gethostbyaddr")
-            }
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
@@ -2200,8 +2108,7 @@ impl IntrinsicModule {
                 "SHUT_RD" => "shut_rd",
                 "SHUT_WR" => "shut_wr",
                 "SHUT_RDWR" => "shut_rdwr",
-
-                _ => return None,
+                _ => return boxed_exports::symbol(self, name),
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
@@ -2294,6 +2201,8 @@ impl IntrinsicModule {
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "match") => Intrinsic::RegexMatchStart,
             (Self::Re, "sub") => Intrinsic::RegexSub,
+            (Self::Re, "findall") => Intrinsic::RegexRuns { split: false },
+            (Self::Re, "split") => Intrinsic::RegexRuns { split: true },
             (Self::Re, "DEBUG") => Intrinsic::REGEX_DEBUG,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
@@ -2322,21 +2231,39 @@ impl IntrinsicModule {
             (Self::OperatorNative, "_compare_digest") => {
                 Intrinsic::ObjectRuntimeExport("_operator._compare_digest")
             }
+            (Self::Operator | Self::OperatorNative, "add" | "__add__") => {
+                Intrinsic::ObjectRuntimeExport("operator.add")
+            }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Gc, "is_tracked") => Intrinsic::ScopedObjectExport("gc.is_tracked"),
+            (Self::Math, "acos") => Intrinsic::MathAcos,
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
+            (Self::Math, "asinh") => Intrinsic::ScopedObjectExport("math.asinh"),
             (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
+            (Self::Math, "atanh") => Intrinsic::ScopedObjectExport("math.atanh"),
+            (Self::Math, "cosh") => Intrinsic::ScopedObjectExport("math.cosh"),
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
             (Self::Math, "fma") => Intrinsic::ScopedObjectExport("math.fma"),
+            (Self::Math, "frexp") => Intrinsic::ScopedObjectExport("math.frexp"),
             (Self::Math, "fsum") => Intrinsic::ScopedObjectExport("math.fsum"),
+            (Self::Math, "dist") => Intrinsic::ScopedObjectExport("math.dist"),
+            (Self::Math, "hypot") => Intrinsic::ScopedObjectExport("math.hypot"),
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
-            (Self::Math, "prod") => Intrinsic::MathProd,
+            (Self::Math, "log2") => Intrinsic::ScopedObjectExport("math.log2"),
+            (Self::Math, "ldexp") => Intrinsic::ScopedObjectExport("math.ldexp"),
+            (Self::Math, "nextafter") => Intrinsic::ScopedObjectExport("math.nextafter"),
+            (Self::Math, "pow") => Intrinsic::ScopedObjectExport("math.pow"),
+            (Self::Math, "prod") => Intrinsic::ScopedObjectExport("math.prod"),
             (Self::Math, "sin") => Intrinsic::ScopedObjectExport("math.sin"),
+            (Self::Math, "sinh") => Intrinsic::ScopedObjectExport("math.sinh"),
             (Self::Math, "sqrt") => Intrinsic::ScopedObjectExport("math.sqrt"),
             (Self::Math, "tan") => Intrinsic::ScopedObjectExport("math.tan"),
+            (Self::Math, "tanh") => Intrinsic::ScopedObjectExport("math.tanh"),
+            (Self::Math, "ulp") => Intrinsic::ScopedObjectExport("math.ulp"),
             (Self::Math, "pi") => Intrinsic::ScopedObjectExport("math.pi"),
             (Self::Math, "e") => Intrinsic::ScopedObjectExport("math.e"),
             (Self::Math, "tau") => Intrinsic::ScopedObjectExport("math.tau"),
@@ -2356,6 +2283,9 @@ impl IntrinsicModule {
             (Self::Itertools, "combinations_with_replacement") => {
                 Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
             }
+            (Self::Itertools, "accumulate") => {
+                Intrinsic::ObjectRuntimeExport("itertools.accumulate")
+            }
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
@@ -2367,15 +2297,29 @@ impl IntrinsicModule {
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
-            (Self::Lzma, "FORMAT_AUTO") => Intrinsic::IntConstant(0),
-            (Self::Lzma, "FORMAT_XZ") => Intrinsic::IntConstant(1),
-            (Self::Lzma, "FORMAT_ALONE") => Intrinsic::IntConstant(2),
             (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
             (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
                 Intrinsic::StringConstant(imre_ast::zlib::VERSION)
             }
+            (Self::Lzma, "__all__") => Intrinsic::ScopedObjectExport("lzma.__all__"),
+            (Self::Lzma, "LZMACompressor") => Intrinsic::ScopedObjectExport("lzma.LZMACompressor"),
+            (Self::Lzma, "LZMADecompressor") => {
+                Intrinsic::ScopedObjectExport("lzma.LZMADecompressor")
+            }
             (Self::Lzma, "LZMAError") => Intrinsic::ScopedObjectExport("lzma.LZMAError"),
+            (Self::Lzma, "LZMAFile") => Intrinsic::ScopedObjectExport("lzma.LZMAFile"),
+            (Self::Lzma, "compress") => Intrinsic::ScopedObjectExport("lzma.compress"),
             (Self::Lzma, "decompress") => Intrinsic::ScopedObjectExport("lzma.decompress"),
+            (Self::Lzma, "is_check_supported") => {
+                Intrinsic::ScopedObjectExport("lzma.is_check_supported")
+            }
+            (Self::Lzma, "open") => Intrinsic::ScopedObjectExport("lzma.open"),
+            (Self::Lzma, "_decode_filter_properties") => {
+                Intrinsic::ScopedObjectExport("lzma._decode_filter_properties")
+            }
+            (Self::Lzma, "_encode_filter_properties") => {
+                Intrinsic::ScopedObjectExport("lzma._encode_filter_properties")
+            }
             (Self::Zlib, "decompressobj") => Intrinsic::ScopedObjectExport("zlib.decompressobj"),
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
@@ -2402,7 +2346,9 @@ impl IntrinsicModule {
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
             (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
+            (Self::Random, "sample") => Intrinsic::ScopedObjectExport("random.sample"),
             (Self::Random, "Random") => Intrinsic::ScopedObjectExport("random.Random"),
+            (Self::Random, "expovariate") => Intrinsic::ScopedObjectExport("random.expovariate"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
@@ -2725,6 +2671,32 @@ impl SearchRoots {
     }
 }
 
+/// The boxed provider supplies public Decimal names absent from the scalar module.
+static BOXED_DECIMAL_EXPORTS: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    let source =
+        crate::zip_entry::installed_source("_pydecimal.py").expect("bundled _pydecimal.py");
+    let provider = ruff_python_parser::parse_module(&source).expect("valid bundled _pydecimal.py");
+    let exports = provider
+        .syntax()
+        .body
+        .iter()
+        .find(|stmt| value_name(stmt) == Some("__all__"))
+        .and_then(module_value)
+        .and_then(ast::Expr::as_list_expr)
+        .expect("_pydecimal.__all__ must be a list literal");
+    exports
+        .elts
+        .iter()
+        .map(|item| {
+            item.as_string_literal_expr()
+                .expect("_pydecimal.__all__ must contain only string literals")
+                .value
+                .to_str()
+                .to_owned()
+        })
+        .collect()
+});
+
 /// These public names are supplied by the boxed unittest.mock module.
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
     matches!(
@@ -2793,6 +2765,15 @@ impl SourceModule {
         self.bundled && self.name == name
     }
 
+    /// Subclasses of these fixed-layout stdlib types can override their protocols.
+    pub(crate) fn python_subclasses(&self) -> Option<&'static str> {
+        match self.name.as_str() {
+            CALENDAR_CLASSES if self.bundled => Some("calendar subclasses"),
+            FRACTION_CLASS if self.bundled => Some("Fraction subclasses"),
+            _ => None,
+        }
+    }
+
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
         if self.is_bundled("uuid") {
@@ -2854,6 +2835,8 @@ impl SourceModule {
                 )));
             }
             let export = match name {
+                "installHandler" => Some("unittest.installHandler"),
+                "removeHandler" => Some("unittest.removeHandler"),
                 "registerResult" => Some("unittest.registerResult"),
                 "removeResult" => Some("unittest.removeResult"),
                 _ => None,
@@ -2867,7 +2850,11 @@ impl SourceModule {
                 "unittest.mock objects",
             )));
         }
-        let binding = *self.bindings.get(name)?;
+        let Some(&binding) = self.bindings.get(name) else {
+            return (self.is_bundled("decimal") && BOXED_DECIMAL_EXPORTS.contains(name)).then_some(
+                Binding::Intrinsic(Intrinsic::ScopedObjectExport("boxed decimal")),
+            );
+        };
         if binding == Binding::Intrinsic(Intrinsic::ZipImportIndex) {
             return None;
         }
@@ -2973,6 +2960,7 @@ impl SourceGraph {
     ) -> Option<&'static str> {
         let attr = expr.as_attribute_expr()?;
         let method = match attr.attr.as_str() {
+            "findall" => "re.Pattern.findall",
             "split" => "re.Pattern.split",
             "subn" => "re.Pattern.subn",
             _ => return None,
@@ -3438,7 +3426,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], None, FileSystem::default())?;
+        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], &[], FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
@@ -3465,7 +3453,7 @@ impl SourceGraph {
             root.clone(),
             &options.extension_paths,
             &options.python_archive_indices,
-            options.implicit_site().map(PathBuf::as_path),
+            options.implicit_sites(),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3526,7 +3514,7 @@ impl SourceGraph {
             root,
             &options.extension_paths,
             &options.python_archive_indices,
-            options.implicit_site().map(PathBuf::as_path),
+            options.implicit_sites(),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;
@@ -3613,7 +3601,7 @@ impl SourceGraph {
         let source = fs
             .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root, extension_paths, &[], None, fs)?;
+        let mut loader = Loader::new(root, extension_paths, &[], &[], fs)?;
         loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
@@ -3887,6 +3875,7 @@ const METADATA_VERSION: &str = "__imre_metadata_version__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
+pub(crate) const FRACTION_CLASS: &str = "__imre_fraction_class__";
 pub(crate) const CALENDAR_CLASSES: &str = "__imre_calendar_classes__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
@@ -3926,6 +3915,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
             IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
+            IntrinsicModule::Fractions if name == "Fraction" => FRACTION_CLASS,
             IntrinsicModule::Calendar if matches!(name, "Calendar" | "TextCalendar") => CALENDAR_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
             _ => return None,
@@ -3937,7 +3927,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Calendar | IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
+                    (IntrinsicModule::Calendar | IntrinsicModule::Fractions | IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::ImportlibMetadata | IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
@@ -3988,7 +3978,7 @@ impl<'a> Loader<'a> {
         root: PathBuf,
         extension_paths: &[PathBuf],
         python_archive_indices: &[usize],
-        system_site: Option<&Path>,
+        site_dirs: &[PathBuf],
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
@@ -4020,7 +4010,7 @@ impl<'a> Loader<'a> {
         }
         let archive_roots = search_roots.len();
         let mut inputs = crate::SourceInputs::default();
-        if let Some(site) = system_site {
+        for site in site_dirs {
             let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
             inputs
                 .directories
@@ -4979,6 +4969,7 @@ impl<'a> Loader<'a> {
                     } else if self.modules[target].is_bundled("zoneinfo")
                         || self.modules[target].is_bundled("pyexpat")
                         || self.modules[target].is_bundled("xml.parsers.expat")
+                        || self.modules[target].is_bundled("unittest.signals")
                     {
                         Binding::ConditionalValue
                     } else if self.modules[target].is_package {
@@ -5032,14 +5023,27 @@ impl<'a> Loader<'a> {
         name: &str,
         imports: Option<&[ast::Alias]>,
     ) -> Result<Option<IntrinsicModule>, String> {
+        if self.allow_imports
+            && imre_ast::providers::is_native_fallback(name)
+            && self.has_project_source(name)
+        {
+            return Ok(None);
+        }
         let module = IntrinsicModule::named(name).filter(|module| {
             self.reachable_only || !matches!(module, IntrinsicModule::Declaration(_))
         });
         if let Some(module) = module {
             self.reject_stdlib_shadow(name)?;
+            if module == IntrinsicModule::Fractions {
+                // The checked representation has the same import shadowing rules as fractions.py.
+                for dependency in ["functools", "math", "numbers", "operator", "re", "sys"] {
+                    self.reject_stdlib_shadow(dependency)?;
+                }
+            }
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Calendar
+                    | IntrinsicModule::Fractions
                     | IntrinsicModule::Ast
                     | IntrinsicModule::NtPath
                     | IntrinsicModule::Blake2
@@ -5103,6 +5107,9 @@ impl<'a> Loader<'a> {
         // A named import loads only the bundled definitions it can call.
         let bundles = [
             metadata.as_deref().map(|source| (METADATA_VERSION, source)),
+            (module == Some(IntrinsicModule::Fractions)
+                && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "Fraction")))
+            .then_some((FRACTION_CLASS, include_str!("../stdlib/fraction_pair.py"))),
             (module == Some(IntrinsicModule::Calendar)
                 && imports.is_none_or(|names| {
                     names
@@ -5150,6 +5157,8 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/logging/typed_handler.py"),
                     "\n",
                     include_str!("../stdlib/logging/stream.py.inc"),
+                    "\n",
+                    include_str!("../stdlib/logging/typed_stream.py.inc"),
                     "\n",
                     include_str!("../stdlib/logging/classes.py")
                 ),
@@ -5260,6 +5269,9 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == FRACTION_CLASS {
+            return Err("the private Fraction implementation is not an importable module".into());
+        }
         if name == METADATA_VERSION {
             return Err(
                 "the private importlib.metadata implementation is not an importable module".into(),
@@ -5287,15 +5299,6 @@ impl<'a> Loader<'a> {
         }
         let bundled = match name {
             "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
-            // Fixed-layout Decimal values use the scalar methods. Rich comparisons use the
-            // complete provider on the boxed route, where Python dispatches equality and hashing.
-            "decimal" => Some((
-                "decimal.py",
-                include_str!("../stdlib/decimal.py")
-                    .split_once("    # Object-protocol methods for the boxed runtime.")
-                    .expect("Decimal boxed methods")
-                    .0,
-            )),
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
             // Keep the public typeshed decorator signatures available alongside this singleton.
             "dataclasses" => Some((
@@ -5318,8 +5321,8 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/doctest_typed.py"),
                 ),
             )),
-            // The parser type and the public expat exports are initialized by the object runtime.
-            "pyexpat" | "xml.parsers.expat" => {
+            // The object runtime owns these exports, including the live unittest result registry.
+            "pyexpat" | "xml.parsers.expat" | "unittest.signals" => {
                 self.needs_object_imports = true;
                 bundled_runtime_source(name).map(|(path, _)| (path, ""))
             }
@@ -5373,7 +5376,15 @@ impl<'a> Loader<'a> {
             // token initializes its tables and quopri selects a codec from live module globals.
             self.needs_object_imports |= matches!(
                 name,
-                "token" | "http.client" | "fractions" | "quopri" | "xml" | "zoneinfo"
+                "token"
+                    | "html"
+                    | "wave"
+                    | "http.client"
+                    | "fractions"
+                    | "quopri"
+                    | "xml"
+                    | "zoneinfo"
+                    | "compression._common._streams"
             );
             let pkgutil_source;
             let source = if name == "pkgutil" {
@@ -5387,11 +5398,11 @@ impl<'a> Loader<'a> {
             } else {
                 source
             };
-            let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-                Some((self.load_module(parent)?, child))
-            } else {
-                None
-            };
+            let parent = self.package_parent(name)?;
+            // Initializing the package may already have imported this child.
+            if let Some(&id) = self.by_name.get(name) {
+                return Ok(id);
+            }
             // ty resolves this immutable source at its Python import path in the
             // in-memory project. It is part of the compiler, not a disk input.
             let path = self.root.join(filename);
@@ -5423,16 +5434,33 @@ impl<'a> Loader<'a> {
         result
     }
 
+    /// Resolve the containing package, including one that is importing this child itself.
+    fn package_parent<'n>(&mut self, name: &'n str) -> Result<Option<(ModuleId, &'n str)>, String> {
+        let Some((parent, child)) = name.rsplit_once('.') else {
+            return Ok(None);
+        };
+        let id = match self.by_name.get(parent).copied() {
+            Some(id) if self.loading.contains(&id) && self.modules[id].is_package => id,
+            _ => self.load_module(parent)?,
+        };
+        if !self.modules[id].is_package {
+            return Err(format!("{parent:?} is not a package"));
+        }
+        Ok(Some((id, child)))
+    }
+
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
-            && !(first == "quopri" && self.has_project_source(first))
+            && !((first == "quopri" || imre_ast::providers::is_native_fallback(first))
+                && self.has_project_source(first))
             && (IntrinsicModule::named(first).is_some()
                 || imre_ast::providers::provider(first).is_some()
                 || !self
                     .search_roots
-                    .get(self.archive_roots)
-                    .is_some_and(|site| {
+                    .iter()
+                    .skip(self.archive_roots)
+                    .any(|site| {
                         // A typeshed declaration alone does not supply an importable module.
                         let path = site.join(first);
                         self.fs.is_file(&path.with_extension("py"))
@@ -5443,18 +5471,7 @@ impl<'a> Loader<'a> {
                 "standard-library imports and shadowing are unsupported: {first:?}"
             ));
         }
-        let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-            let id = match self.by_name.get(parent).copied() {
-                Some(id) if self.loading.contains(&id) && self.modules[id].is_package => id,
-                _ => self.load_module(parent)?,
-            };
-            if !self.modules[id].is_package {
-                return Err(format!("{parent:?} is not a package"));
-            }
-            Some((id, child))
-        } else {
-            None
-        };
+        let parent = self.package_parent(name)?;
         // Parent initialization can have loaded this child while exposing re-exports.
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {

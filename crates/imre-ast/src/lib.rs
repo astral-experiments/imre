@@ -3,26 +3,9 @@
 /// CPython 3.14.5's pyc magic number followed by CRLF in little-endian wire order.
 pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' as u32) << 24);
 
-/// Methods that the boxed runtime registers on the built-in frozenset type.
-pub const FROZENSET_METHODS: &[&str] = &[
-    "__class_getitem__",
-    "__contains__",
-    "__iter__",
-    "__len__",
-    "__reduce__",
-    "__repr__",
-    "copy",
-    "difference",
-    "intersection",
-    "isdisjoint",
-    "issubset",
-    "issuperset",
-    "symmetric_difference",
-    "union",
-];
-
 pub mod exceptions;
 pub mod layout;
+pub mod lzma;
 pub mod providers;
 pub mod python_nodes;
 pub mod startup;

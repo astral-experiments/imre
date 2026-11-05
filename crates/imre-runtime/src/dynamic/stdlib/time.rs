@@ -14,11 +14,13 @@ pub(in crate::dynamic) fn is_function(name: &str) -> bool {
             | "monotonic_ns"
             | "perf_counter"
             | "perf_counter_ns"
+            | "process_time"
             | "sleep"
             | "gmtime"
             | "localtime"
             | "mktime"
             | "strftime"
+            | "strptime"
             | "ctime"
             | "tzset"
     ) || text_signature(name).is_some()
@@ -194,6 +196,7 @@ pub(super) fn call(
         "monotonic_ns" => "time.monotonic_ns",
         "perf_counter" => "time.perf_counter",
         "perf_counter_ns" => "time.perf_counter_ns",
+        "process_time" => "time.process_time",
         "mktime" => "time.mktime",
         "tzset" => "time.tzset",
         _ => name,
@@ -332,6 +335,9 @@ pub(super) fn call(
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
             Ok(ctx.alloc(Value::Float(stamp.as_secs_f64())))
         }
+        "process_time" if args.is_empty() => {
+            Ok(ctx.alloc(Value::Float(crate::objects::time::process_time()?)))
+        }
         "tzset" if args.is_empty() => {
             let module = ctx.module("time")?;
             let Value::Module { scope, .. } = *ctx.heap.get(module) else {
@@ -346,7 +352,7 @@ pub(super) fn call(
             Ok(NONE)
         }
         "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter" | "perf_counter_ns"
-        | "tzset" => Err(Error::new(
+        | "process_time" | "tzset" => Err(Error::new(
             "TypeError",
             format!("{function}() takes no arguments ({} given)", args.len()),
         )),
@@ -363,6 +369,16 @@ pub(super) fn call(
                 ),
             )),
         },
+        "strptime" => {
+            let mark = ctx.heap.temporary_mark();
+            let parser = ctx
+                .import_with_builtins("_strptime")
+                .and_then(|module| ctx.lookup_attr(module, "_strptime_time"));
+            // PyImport_ImportModuleAttr drops the module before the parser is called.
+            let parser = ctx.release_with_result(mark, parser)?;
+            let result = ctx.call(parser, args.to_vec(), vec![]);
+            ctx.release_with_result(mark, result)
+        }
         "strftime" => {
             let format = match args {
                 [format] | [format, _] => *format,

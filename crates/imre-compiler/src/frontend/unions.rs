@@ -290,9 +290,25 @@ impl Checker<'_> {
         {
             return Err(self.object_runtime_export("typing.Sequence", expression));
         }
-        if self.collection_binding(expression) == Some(Binding::Intrinsic(Intrinsic::Number)) {
-            // int includes bool and IntEnum. The typed value representation has no complex.
-            return Ok(vec![Exact(Type::Int), Exact(Type::Float)]);
+        let numeric = self.collection_binding(expression);
+        let number = numeric == Some(Binding::Intrinsic(Intrinsic::Number));
+        if number
+            || numeric
+                == Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                    "numbers.Rational",
+                )))
+        {
+            // Int includes bool and IntEnum; Fraction inherits Rational and Number.
+            let mut types = vec![Exact(Type::Int)];
+            if number {
+                types.push(Exact(Type::Float));
+            }
+            if let Some(fraction) = (0..self.classes.declarations.definitions.len())
+                .find(|&class| self.fraction_class(class))
+            {
+                types.push(Exact(Type::Class(fraction)));
+            }
+            return Ok(types);
         }
         match self.collection_class_name(expression) {
             Some("collections.deque") => return Ok(vec![Deque]),

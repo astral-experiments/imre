@@ -24,10 +24,13 @@ pub unsafe extern "C" fn imre_int_parse_hex(text: *const Str) -> usize {
 
 /// Parse Python integer text at a validated radix, including prefixes and Unicode decimal digits.
 pub(crate) fn parse_radix(source: &str, base: u32) -> crate::Result<crate::Int> {
+    try_parse_radix(source, base)?.ok_or_else(|| invalid_literal_in_base(source, base))
+}
+
+/// Return `None` for invalid syntax so callers can display the original Python object.
+pub(crate) fn try_parse_radix(source: &str, base: u32) -> crate::Result<Option<crate::Int>> {
     let prefix = source.split('\0').next().unwrap_or_default();
-    parse_radix_or(prefix, base, prefix.len() != source.len(), || {
-        invalid_literal_in_base(source, base)
-    })
+    parse_radix_digits(prefix, base, prefix.len() != source.len())
 }
 
 pub(crate) fn parse_bytes_radix(source: &[u8], base: u32) -> crate::Result<crate::Int> {
@@ -45,20 +48,19 @@ pub(crate) fn parse_bytes_radix(source: &[u8], base: u32) -> crate::Result<crate
     if !prefix.is_ascii() {
         return Err(invalid());
     }
-    parse_radix_or(
+    parse_radix_digits(
         std::str::from_utf8(prefix).expect("ASCII integer"),
         base,
         prefix.len() != source.len(),
-        invalid,
-    )
+    )?
+    .ok_or_else(invalid)
 }
 
-fn parse_radix_or(
+fn parse_radix_digits(
     source: &str,
     mut base: u32,
     has_nul: bool,
-    error: impl Fn() -> Error,
-) -> crate::Result<crate::Int> {
+) -> crate::Result<Option<crate::Int>> {
     let source = source.trim();
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
@@ -101,7 +103,7 @@ fn parse_radix_or(
         || digits.contains("__")
         || !digits.chars().all(|ch| ch == '_' || ch.is_digit(base))
     {
-        return Err(error());
+        return Ok(None);
     }
     if !base.is_power_of_two() {
         let limit = decimal_digit_limit();
@@ -111,7 +113,7 @@ fn parse_radix_or(
     }
     // The length-aware Python APIs reject embedded NULs after validating the C-string prefix.
     if has_nul {
-        return Err(error());
+        return Ok(None);
     }
     let normalized = if digits.contains('_') {
         let mut text = String::new();
@@ -122,11 +124,15 @@ fn parse_radix_or(
     } else {
         Cow::Borrowed(digits)
     };
-    let value = BigInt::parse_bytes(normalized.as_bytes(), base).ok_or_else(&error)?;
+    let Some(value) = BigInt::parse_bytes(normalized.as_bytes(), base) else {
+        return Ok(None);
+    };
     if guessed && !prefixed && digits.starts_with('0') && !value.is_zero() {
-        return Err(error());
+        return Ok(None);
     }
-    crate::Int::try_new(if negative { -value } else { value }).map_err(|_| Error::allocation())
+    crate::Int::try_new(if negative { -value } else { value })
+        .map(Some)
+        .map_err(|_| Error::allocation())
 }
 
 /// Record the interpreter setting before any user code can change the environment.

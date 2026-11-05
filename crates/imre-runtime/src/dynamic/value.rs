@@ -26,7 +26,6 @@ pub(super) struct CodeObject {
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
-    pub coroutine: bool,
     /// CPython flags for boxed Python function definitions.
     pub flags: u32,
     /// Runtime source retains execution flags even when its complete co_flags is unknown.
@@ -34,6 +33,12 @@ pub(super) struct CodeObject {
     pub nested: Vec<(usize, Id)>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
+}
+
+impl CodeObject {
+    pub(super) fn is_coroutine(&self) -> bool {
+        self.flags & imre_ast::code_flags::COROUTINE != 0
+    }
 }
 
 #[derive(Clone)]
@@ -53,20 +58,22 @@ pub(super) struct Hmac {
     pub digest_size: Id,
     pub block_size: Id,
 }
-pub(super) const NONE: Id = 0;
-pub(super) const FALSE: Id = 1;
-pub(super) const TRUE: Id = 2;
-pub(super) const ELLIPSIS: Id = 3;
-pub(super) const NOT_IMPLEMENTED: Id = 4;
-pub(super) const EMPTY_TUPLE: Id = 5;
-const SMALL_INT_MIN: i64 = -5;
-const SMALL_INT_MAX: i64 = 256;
-const FIRST_SMALL_INT: Id = EMPTY_TUPLE + 1;
+mod permanent {
+    include!("../../native/boxed-handles.rs");
+}
+pub(super) use permanent::{ELLIPSIS, EMPTY_TUPLE, FALSE, NONE, NOT_IMPLEMENTED, TRUE};
+use permanent::{FIRST_SMALL_INT, SMALL_INT_MAX, SMALL_INT_MIN};
 const FIRST_DYNAMIC_SLOT: usize =
     FIRST_SMALL_INT as usize + (SMALL_INT_MAX - SMALL_INT_MIN + 1) as usize;
 
 /// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
 pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
+
+pub(super) const LZMA_COMPRESS_TYPE: &str = "_lzma.LZMACompressor";
+pub(super) const LZMA_DECOMPRESS_TYPE: &str = "_lzma.LZMADecompressor";
+pub(super) const LZMA_COMPRESS_METHODS: &[&str] = &["compress", "flush"];
+pub(super) const LZMA_DECOMPRESS_METHODS: &[&str] = &["decompress"];
+pub(super) const LZMA_DECOMPRESS_FIELDS: &[&str] = &["check", "eof", "needs_input", "unused_data"];
 
 pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
 pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
@@ -638,6 +645,7 @@ impl Context {
             Value::ParamSpec(_) => "ParamSpec",
             Value::ParamSpecMarker(kind, _) => kind.class().rsplit_once('.').unwrap().1,
             Value::ConstEvaluator(_) => "constevaluator",
+            Value::FractionHash(_) => "builtin_function_or_method",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -907,7 +915,7 @@ pub(super) struct Scope {
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
-    pub closure: allocator_api2::boxed::Box<ClosureScope>,
+    pub closure: ClosureScope,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
     pub exec_globals: Option<ExecGlobals>,
@@ -917,6 +925,26 @@ pub(super) struct Scope {
 }
 
 impl Scope {
+    pub(super) fn new(module: String, parent: Option<Id>) -> Self {
+        Self {
+            class_body: None,
+            enum_namespace: None,
+            is_abstract: false,
+            comprehension: None,
+            class_cell: None,
+            class_namespace: None,
+            first_argument: None,
+            names: Default::default(),
+            closure: Default::default(),
+            namespace: None,
+            globals: Default::default(),
+            exec_globals: None,
+            exec_locals: None,
+            parent,
+            module,
+        }
+    }
+
     /// The class body's live dictionary, once exposed through Python code.
     pub(super) fn class_body_mapping(&self) -> Option<Id> {
         self.class_body.as_ref().and(self.namespace)
@@ -954,8 +982,34 @@ pub(super) struct BoxedGzipDecoder {
 }
 
 #[derive(Clone)]
+pub(super) struct BoxedFile<T> {
+    file: T,
+    dictionary: Option<Id>,
+}
+
+impl<T> BoxedFile<T> {
+    pub(super) fn new(file: T) -> Self {
+        Self {
+            file,
+            dictionary: None,
+        }
+    }
+}
+
+impl<T> std::ops::Deref for BoxedFile<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.file
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct BoxedTextFile {
+    pub(super) dictionary: Id,
     pub(super) file: crate::objects::TextFile,
+    pub(super) encoding: Id,
+    pub(super) errors: Id,
     pub(super) finalizing: bool,
     pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
@@ -973,6 +1027,8 @@ impl std::ops::Deref for BoxedTextFile {
 #[derive(Clone, Copy)]
 pub(super) enum NativeModuleState {
     LocaleError(Id),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    TermiosError(Id),
     IsoCalendarDate(Id),
     SslError(Id),
     PickleWriter {
@@ -987,6 +1043,8 @@ impl NativeModuleState {
             Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => {
                 visit.push(class)
             }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            Self::TermiosError(class) => visit.push(class),
             Self::PickleWriter {
                 pickling_error,
                 dispatch_table,
@@ -1044,7 +1102,7 @@ pub(super) enum Value {
     },
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
-    Str(String),
+    Str(crate::Str),
     /// Python code points for text containing at least one surrogate.
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
@@ -1067,6 +1125,8 @@ pub(super) enum Value {
         lease: Option<Id>,
         // An ownerless C buffer has private backing storage but exposes obj as None.
         anonymous: bool,
+        // A native export's Python release callback cannot derive another view.
+        restricted: bool,
         layout: Option<super::memoryview::ViewLayout>,
         readonly: bool,
         hash: Option<i64>,
@@ -1082,7 +1142,7 @@ pub(super) enum Value {
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     ExpatParser(std::rc::Rc<super::stdlib::pyexpat::NativeParser>),
-    Random(std::rc::Rc<std::cell::RefCell<crate::objects::Generator>>),
+    Random(super::stdlib::random::instance::RandomState),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     #[cfg(unix)]
     MemoryBio(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::Bio>>),
@@ -1151,7 +1211,7 @@ pub(super) enum Value {
         factory: Id,
         entries: super::dictionary::Entries,
     },
-    Scope(Scope),
+    Scope(allocator_api2::boxed::Box<Scope>),
     Cell(Option<Id>),
     Super {
         start: Id,
@@ -1229,6 +1289,7 @@ pub(super) enum Value {
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
     ConstEvaluator(Id),
+    FractionHash(Id),
     TypeAlias {
         name: Id,
         parameters: Id,
@@ -1246,9 +1307,10 @@ pub(super) enum Value {
     Union(super::union::Union),
     Instance {
         class: Id,
-        fields: indexmap::IndexMap<String, Id>,
+        fields: Box<indexmap::IndexMap<String, Id>>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>,
+        member_values:
+            Option<Box<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -1403,13 +1465,15 @@ pub(super) enum Value {
         child: Option<crate::objects::BoxedPopen>,
         reported: bool,
     },
-    File(crate::shared::Shared<super::stdlib::BinaryFile>),
+    File(BoxedFile<crate::Shared<super::stdlib::BinaryFile>>),
     TextFile(BoxedTextFile),
     GzipDecoder(crate::Shared<BoxedGzipDecoder>),
     ZlibDecompressor {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
+    LzmaCompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Compressor>>),
+    LzmaDecompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Decompressor>>),
     ZlibCompressor(crate::Shared<std::cell::RefCell<super::stdlib::zlib::Compressor>>),
     RegexScanner {
         pattern: Id,
@@ -1422,7 +1486,7 @@ pub(super) enum Value {
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     BufferedRandom(
-        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        BoxedFile<crate::Shared<std::cell::RefCell<crate::objects::FileState>>>,
         Id,
     ),
     RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
@@ -1455,7 +1519,31 @@ pub(super) struct CachedCall {
     pub hash: i64,
 }
 
+impl Context {
+    pub(super) fn native_file_dictionary(&mut self, obj: Id) -> Id {
+        if let Some(dictionary) = self.heap.get(obj).native_file_dict() {
+            return dictionary;
+        }
+        let dictionary = self.dict(Vec::new());
+        match self.heap.get_mut(obj) {
+            Value::File(file) => file.dictionary = Some(dictionary),
+            Value::BufferedRandom(file, _) => file.dictionary = Some(dictionary),
+            _ => unreachable!("native file without an instance dictionary"),
+        }
+        dictionary
+    }
+}
+
 impl Value {
+    pub(super) fn native_file_dict(&self) -> Option<Id> {
+        match self {
+            Self::TextFile(file) => Some(file.dictionary),
+            Self::File(file) => file.dictionary,
+            Self::BufferedRandom(file, _) => file.dictionary,
+            _ => None,
+        }
+    }
+
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
         match self {
@@ -1525,6 +1613,8 @@ impl Value {
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GzipDecoder(_) => "object",
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
+            Self::LzmaCompressor(_) => LZMA_COMPRESS_TYPE,
+            Self::LzmaDecompressor(_) => LZMA_DECOMPRESS_TYPE,
             Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::Struct { .. } => "struct.Struct",
@@ -1994,7 +2084,9 @@ impl Value {
                 ..
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
-            Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
+            Self::ParamSpecMarker(_, origin)
+            | Self::ConstEvaluator(origin)
+            | Self::FractionHash(origin) => visit.push(*origin),
             Self::TypeAlias {
                 name,
                 parameters,
@@ -2173,6 +2265,7 @@ impl Value {
                 visit.extend(m.cached_regs.get().copied());
             }
             Self::File(file) => {
+                visit.extend(file.dictionary);
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
                 } else if let Some((path, _)) = file.path_metadata() {
@@ -2212,6 +2305,7 @@ impl Value {
             | Self::TokenMissing
             | Self::ProcessPreparation(_)
             | Self::GzipDecoder(_)
+            | Self::LzmaCompressor(_)
             | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
@@ -2220,12 +2314,19 @@ impl Value {
             | Self::TlsSession(_)
             | Self::TlsListener(_)
             | Self::TlsBioSession(_) => {}
+            Self::LzmaDecompressor(state) => visit.push(state.borrow().unused_data),
             Self::ZlibDecompressor { state, dictionary } => {
                 visit.extend(*dictionary);
                 state.borrow().children(visit);
             }
-            Self::TextFile(file) => visit.extend(file.buffer),
-            Self::BufferedRandom(_, name) => visit.push(*name),
+            Self::TextFile(file) => {
+                visit.extend([file.dictionary, file.encoding, file.errors]);
+                visit.extend(file.buffer);
+            }
+            Self::BufferedRandom(file, name) => {
+                visit.extend(file.dictionary);
+                visit.push(*name);
+            }
         }
     }
 }
@@ -2456,6 +2557,41 @@ enum Finalization {
     Done,
 }
 
+/// Compact slot state used by marking and sweeping. Mutable borrows invalidate scalar leaves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SlotShape {
+    Vacant,
+    Other,
+    ScalarLeaf,
+    AsciiStr,
+}
+
+impl SlotShape {
+    /// Both scalar shapes can be marked without visiting children.
+    fn is_scalar_leaf(self) -> bool {
+        matches!(self, Self::ScalarLeaf | Self::AsciiStr)
+    }
+
+    fn text(value: &str) -> Self {
+        if value.is_ascii() {
+            Self::AsciiStr
+        } else {
+            Self::ScalarLeaf
+        }
+    }
+
+    /// Record whether a newly occupied slot holds an exact scalar without strong children.
+    fn occupied(value: &Value) -> Self {
+        if let Value::Str(text) = value {
+            Self::text(text)
+        } else if value.scalar_leaf() {
+            Self::ScalarLeaf
+        } else {
+            Self::Other
+        }
+    }
+}
+
 struct Slot {
     value: Option<Value>,
     // Next in collection order while occupied, or next free slot while vacant.
@@ -2549,7 +2685,7 @@ impl GcOrder {
 pub(super) struct MarkQueue<'a> {
     slots: &'a [Slot],
     traces: &'a [Cell<usize>],
-    scalar_leaves: &'a [bool],
+    slot_shapes: &'a [SlotShape],
     next: usize,
     mode: MarkMode<'a>,
 }
@@ -2557,6 +2693,7 @@ pub(super) struct MarkQueue<'a> {
 enum MarkMode<'a> {
     All,
     SkipScalarLeaves,
+    CycleEdges,
     Ordered(&'a mut GcOrder),
 }
 
@@ -2565,14 +2702,20 @@ impl MarkQueue<'_> {
         let trace = &self.traces[id as usize];
         if trace.get() == UNMARKED {
             match &mut self.mode {
+                MarkMode::CycleEdges if self.slot_shapes[id as usize].is_scalar_leaf() => {}
                 MarkMode::Ordered(order) => {
                     trace.set(END);
-                    if self.slots[id as usize].gc_next.get() == UNMARKED {
-                        order.push(id as usize, self.slots);
+                    let index = id as usize;
+                    let slot = &self.slots[index];
+                    let shape = self.slot_shapes[index];
+                    if slot.gc_next.get() == UNMARKED
+                        && (!shape.is_scalar_leaf() || slot.has_gc_header)
+                    {
+                        order.push(index, self.slots);
                     }
                 }
                 // A complete reachability trace needs no pending visit for an exact scalar.
-                MarkMode::SkipScalarLeaves if self.scalar_leaves[id as usize] => {
+                MarkMode::SkipScalarLeaves if self.slot_shapes[id as usize].is_scalar_leaf() => {
                     trace.set(END);
                 }
                 _ => {
@@ -2643,8 +2786,8 @@ pub(super) struct Heap {
     pub(super) loading_linked_constant: bool,
     // Keep the collector's links contiguous so it can scan marks without loading every Value.
     traces: Vec<Cell<usize>>,
-    // Marking reads this compact table before touching the much larger value slots.
-    scalar_leaves: Vec<bool>,
+    // Marking and sweeping consult this compact table before reading the much larger slots.
+    slot_shapes: Vec<SlotShape>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
@@ -2668,7 +2811,8 @@ pub(super) struct Heap {
     pub(super) gc_settings: Arc<GcSettings>,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
-    weak_roots: weak_roots::WeakRoots,
+    weak_roots: weak_roots::RootPaths,
+    finalizer_roots: weak_roots::RootPaths,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
     // Detached workers compare against the original stderr without keeping it alive.
@@ -2676,13 +2820,14 @@ pub(super) struct Heap {
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
-    // Weak handles to buffered output files returned by open().
-    file_writers: Vec<Id>,
+    check_finalizers_next_statement: bool,
+    // Non-rooting handles to files and sockets whose destruction flushes or closes a descriptor.
+    descriptor_owners: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
     finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
-    // Weak class handles, compacted before the collector recycles their slots.
+    // Weak handles in direct-base attachment order, pruned before recycling class slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
     pub(super) discarded_shutdown_write: Option<bool>,
@@ -2811,28 +2956,9 @@ impl Heap {
             return;
         }
         let mut children: HashMap<Id, Vec<Id>> = HashMap::new();
-        for (index, slot) in self.slots.iter().enumerate() {
-            let Some(Value::Class {
-                scope, ancestors, ..
-            }) = slot.value.as_ref()
-            else {
-                continue;
-            };
-            let Value::Scope(data) = self.get(*scope) else {
-                unreachable!()
-            };
-            let bases = match &data.class_namespace {
-                Some(ns) => {
-                    let Value::Tuple(bases) = self.get(ns.bases) else {
-                        continue;
-                    };
-                    bases.as_slice()
-                }
-                // Native AST classes store their single base first in the lineage.
-                None => ancestors.get(..1).unwrap_or_default(),
-            };
-            for &base in bases {
-                children.entry(base).or_default().push(index as Id);
+        for &child in &self.classes {
+            for &base in self.immediate_bases(child) {
+                children.entry(base).or_default().push(child);
             }
         }
         let mut pending = vec![class];
@@ -2869,9 +2995,13 @@ impl Heap {
         }
         let mut heap = Self {
             traces: vec![Cell::new(END); slots.len()],
-            scalar_leaves: slots
+            slot_shapes: slots
                 .iter()
-                .map(|slot| slot.value.as_ref().is_some_and(Value::scalar_leaf))
+                .map(|slot| {
+                    slot.value
+                        .as_ref()
+                        .map_or(SlotShape::Vacant, SlotShape::occupied)
+                })
                 .collect(),
             slots,
             allocation_traces: Default::default(),
@@ -2895,12 +3025,14 @@ impl Heap {
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
-            weak_roots: weak_roots::WeakRoots::default(),
+            weak_roots: Default::default(),
+            finalizer_roots: Default::default(),
             borrowed_hooks: Vec::new(),
             default_stderr: None,
             has_weak_values: false,
             collect_next_statement: false,
-            file_writers: Vec::new(),
+            check_finalizers_next_statement: false,
+            descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
             classes: Vec::new(),
@@ -3097,16 +3229,26 @@ impl Heap {
         }
     }
 
-    pub fn alloc(&mut self, value: Value) -> Id {
-        if let Value::Str(text) = &value
-            && let Some(owner) = crate::objects::short_string(text)
-        {
+    /// Return the permanent heap slot for a cached Python integer.
+    pub(super) fn cached_integer(value: i64) -> Option<Id> {
+        permanent::small_integer_id(value)
+    }
+
+    pub(super) fn owned_text(&mut self, text: crate::Str) -> Id {
+        if let Some(owner) = crate::objects::short_string(&text) {
             return self.intern_literal(owner, true);
         }
+        self.fill_slot(SlotShape::text(&text), false, true, || Value::Str(text))
+    }
+
+    pub fn alloc(&mut self, value: Value) -> Id {
+        if let Value::Str(text) = value {
+            return self.owned_text(text);
+        }
         if let Value::Int(integer) = &value
-            && let Some(n @ SMALL_INT_MIN..=SMALL_INT_MAX) = integer.as_small()
+            && let Some(id) = integer.as_small().and_then(Self::cached_integer)
         {
-            return FIRST_SMALL_INT + (n - SMALL_INT_MIN) as Id;
+            return id;
         }
         match value {
             Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
@@ -3200,9 +3342,13 @@ impl Heap {
     }
 
     fn reserve_slot(&mut self) -> std::result::Result<(), std::collections::TryReserveError> {
-        self.scalar_leaves.try_reserve(1)?;
+        self.slot_shapes.try_reserve(1)?;
         self.traces.try_reserve(1)?;
         self.slots.try_reserve(1)
+    }
+
+    pub(super) fn is_gc_tracked(&self, id: Id) -> bool {
+        self.slots[id as usize].gc_tracked(self)
     }
 
     pub(super) fn gc_thresholds(&self) -> [i32; 3] {
@@ -3218,15 +3364,25 @@ impl Heap {
     }
 
     fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
-        let trace = trace && self.allocation_traces.is_tracing();
         let has_gc_header = value.has_gc_header(self);
-        let scalar_leaf = value.scalar_leaf();
+        let shape = SlotShape::occupied(&value);
+        self.fill_slot(shape, has_gc_header, trace, || value)
+    }
+
+    fn fill_slot(
+        &mut self,
+        shape: SlotShape,
+        has_gc_header: bool,
+        trace: bool,
+        value: impl FnOnce() -> Value,
+    ) -> Id {
+        let trace = trace && self.allocation_traces.is_tracing();
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
-            self.scalar_leaves[index] = scalar_leaf;
-            self.slots[index].value = Some(value);
+            self.slot_shapes[index] = shape;
+            self.slots[index].value = Some(value());
             self.slots[index].may_have_buffer_views = false;
             self.slots[index].generation = 0;
             index
@@ -3238,12 +3394,16 @@ impl Heap {
                 self.slots.reserve_exact(1);
                 self.next_collection = self.slots.len();
             }
-            self.scalar_leaves.push(scalar_leaf);
+            self.slot_shapes.push(shape);
             self.traces.push(Cell::new(UNMARKED));
-            self.slots.push(Slot::new(value));
+            self.slots.push(Slot::new(value()));
             self.slots.len() - 1
         };
-        self.gc_order.push(index, &self.slots);
+        // Only objects with children or a Python GC header participate in
+        // traversal order. Exact untracked scalars remain live through tracing.
+        if !shape.is_scalar_leaf() || has_gc_header {
+            self.gc_order.push(index, &self.slots);
+        }
         self.slots[index].untracked_tuple.set(false);
         self.slots[index].has_gc_header = has_gc_header;
         if has_gc_header {
@@ -3277,7 +3437,7 @@ impl Heap {
             self.keep(id);
             return id;
         }
-        let id = self.alloc_slot_with_trace(Value::Str(owner.to_string()), !static_character);
+        let id = self.alloc_slot_with_trace(Value::Str((*owner).clone()), !static_character);
         self.interned
             .insert(owner, InternedString { id, literal: true });
         id
@@ -3317,14 +3477,14 @@ impl Heap {
             .map_err(|_| crate::Error::memory_error())?;
         value.push_str(text);
         if !intern {
-            return Ok(self.alloc(Value::Str(value)));
+            return Ok(self.alloc(Value::Str(value.into())));
         }
         let owner = crate::objects::try_literal_string(text)?;
         let owner = crate::sys::try_intern_owner(&owner).ok_or_else(crate::Error::memory_error)?;
         self.interned
             .try_reserve(1)
             .map_err(|_| crate::Error::memory_error())?;
-        let id = self.alloc_slot(Value::Str(value));
+        let id = self.alloc_slot(Value::Str(value.into()));
         self.interned
             .insert(owner, InternedString { id, literal: true });
         Ok(id)
@@ -3341,7 +3501,7 @@ impl Heap {
         let mut value = String::new();
         value.try_reserve_exact(text.len()).ok()?;
         value.push_str(text);
-        let id = self.alloc(Value::Str(value));
+        let id = self.alloc(Value::Str(value.into()));
         Some(if intern {
             self.intern(id, std::iter::empty())
         } else {
@@ -3381,6 +3541,11 @@ impl Heap {
         id
     }
 
+    /// An exact ASCII string has identical UTF-8 byte and Python character offsets.
+    pub(super) fn is_ascii_str(&self, id: Id) -> bool {
+        self.slot_shapes[id as usize] == SlotShape::AsciiStr
+    }
+
     pub fn get(&self, id: Id) -> &Value {
         self.slots[id as usize]
             .value
@@ -3393,16 +3558,33 @@ impl Heap {
         source: Id,
         target: Id,
     ) -> Option<(&Value, &mut Value)> {
+        let target_id = target as usize;
+        if source != target && self.slot_shapes.get(target_id)?.is_scalar_leaf() {
+            self.slots.get(source as usize)?.value.as_ref()?;
+            self.prepare_slot_write(target_id);
+        }
         let [source, target] = self
             .slots
-            .get_disjoint_mut([source as usize, target as usize])
+            .get_disjoint_mut([source as usize, target_id])
             .ok()?;
-        Some((source.value.as_ref()?, target.value.as_mut()?))
+        let source = source.value.as_ref()?;
+        let target = target.value.as_mut()?;
+        Some((source, target))
+    }
+
+    fn prepare_slot_write(&mut self, index: usize) {
+        if !self.slot_shapes[index].is_scalar_leaf() {
+            return;
+        }
+        if index >= FIRST_DYNAMIC_SLOT && self.slots[index].gc_prev.get() == UNMARKED {
+            self.gc_order.push(index, &self.slots);
+        }
+        self.slot_shapes[index] = SlotShape::Other;
     }
 
     pub fn get_mut(&mut self, id: Id) -> &mut Value {
-        // The mutable borrow can replace the value with a different variant.
-        self.scalar_leaves[id as usize] = false;
+        // A mutable borrow can replace an untracked scalar with a container.
+        self.prepare_slot_write(id as usize);
         self.slots[id as usize]
             .value
             .as_mut()
@@ -3643,14 +3825,14 @@ impl Heap {
             return false;
         }
         self.keep_call_result(mark, result);
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
-            .any(|&writer| {
-                writer != result
+            .any(|&owner| {
+                owner != result
                     && !self.active_binding_matches(|bound| {
                         let mut budget = 8;
-                        self.keeps_finalizer(bound, writer, &mut budget)
+                        self.keeps_finalizer(bound, owner, &mut budget)
                     })
             })
     }
@@ -3727,7 +3909,7 @@ impl Heap {
         *frame = None;
         *scope = NONE;
         iterators.clear();
-        self.disarm_generator_finalizer(id);
+        self.disarm_finalizer(id);
     }
 
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
@@ -3784,7 +3966,7 @@ impl Heap {
             };
             data.closure.extra_locals = None;
             if !data.closure.cleared {
-                let closure = &mut *data.closure;
+                let closure = &mut data.closure;
                 closure
                     .declared
                     .extend(closure.cells.drain().map(|(name, _)| name));
@@ -3910,20 +4092,18 @@ impl Heap {
     }
 
     /// Iterate over live Python warning locations, starting at the innermost caller.
-    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (&Location, Id)> {
+    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (Location, Id)> {
         self.frames.iter().rev().filter_map(|frame| {
-            frame
-                .location
-                .as_ref()
-                .map(|location| (location, frame.scope))
+            let mut location = frame.location.clone()?;
+            // The executing expression can be on a later line than the start of its call span.
+            location.line = frame.line(self, &location);
+            Some((location, frame.scope))
         })
     }
 
     /// Python stack levels start at one and exclude the native root frame.
     pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
-        self.warning_frames()
-            .nth((level.max(1) - 1) as usize)
-            .map(|(location, scope)| (location.clone(), scope))
+        self.warning_frames().nth((level.max(1) - 1) as usize)
     }
 
     pub(super) fn set_call_position(&mut self, position: Option<[u32; 4]>) {
@@ -3946,7 +4126,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::SkipScalarLeaves,
         };
@@ -4044,6 +4224,39 @@ impl Heap {
         Ok(live)
     }
 
+    fn immediate_bases(&self, class: Id) -> &[Id] {
+        let Value::Class {
+            scope, ancestors, ..
+        } = self.get(class)
+        else {
+            unreachable!("class registry entry")
+        };
+        let Value::Scope(data) = self.get(*scope) else {
+            unreachable!()
+        };
+        let Some(ns) = &data.class_namespace else {
+            // Synthetic AST classes store their single direct base first in the lineage.
+            return ancestors.get(..1).unwrap_or_default();
+        };
+        match self.get(ns.bases) {
+            Value::Tuple(bases) => bases,
+            _ => &[],
+        }
+    }
+
+    pub(super) fn immediate_subclasses(&self, class: Id) -> Vec<Id> {
+        self.classes
+            .iter()
+            .copied()
+            .filter(|&child| self.immediate_bases(child).contains(&class))
+            .collect()
+    }
+
+    pub(super) fn reattach_class(&mut self, class: Id) {
+        self.classes.retain(|&child| child != class);
+        self.classes.push(class);
+    }
+
     /// Every live descendant, including unbound local classes, with parents before children.
     pub(super) fn class_hierarchy(&self, class: Id) -> Vec<Id> {
         let mut affected = Vec::new();
@@ -4074,8 +4287,8 @@ impl Heap {
         }
     }
 
-    /// Running generators have a live frame. Rearm cleanup only if they suspend again.
-    pub(super) fn disarm_generator_finalizer(&mut self, id: Id) {
+    /// Remove cleanup that a live generator or a closed directory iterator no longer needs.
+    pub(super) fn disarm_finalizer(&mut self, id: Id) {
         if self.slots[id as usize].finalization == Finalization::Pending {
             self.take_finalizer(id, false);
         }
@@ -4137,6 +4350,9 @@ impl Heap {
             }
             match heap.get(root) {
                 Value::Method { receiver, .. } => keeps(heap, *receiver, owner, budget),
+                Value::LoopIterator { source, peeked } => {
+                    *source == owner || *peeked == Some(owner)
+                }
                 Value::Instance { fields, .. } => fields
                     .values()
                     .take(*budget)
@@ -4226,9 +4442,9 @@ impl Heap {
     }
 
     /// Check each registration against the surviving frame bindings and native stream edges.
-    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
+    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, owners: &[Id]) -> bool {
         let chains = self.bound_finalizer_chains();
-        self.ordinary_finalizers.iter().chain(writers).all(|owner| {
+        self.ordinary_finalizers.iter().chain(owners).all(|owner| {
             stdin.is_some_and(|input| input.contains(owner))
                 || chains.iter().flatten().any(|chain| chain.contains(owner))
                 || self.find_finalizer_binding(*owner)
@@ -4237,11 +4453,16 @@ impl Heap {
                         chain.contains(owner) && self.find_finalizer_binding(stream)
                     })
                 })
+                || chains.iter().flatten().any(|chain| {
+                    matches!(self.get(chain[0]), Value::Instance { fields, .. }
+                        if fields.values().take(16).any(|value| value == owner))
+                })
         })
     }
 
     pub(super) fn acyclic_finalizer(
-        &self,
+        &mut self,
+        globals: [Id; 2],
         roots: impl Iterator<Item = Id>,
         stdin: Option<&[Id; 3]>,
     ) -> Result<Option<Id>> {
@@ -4288,6 +4509,13 @@ impl Heap {
         {
             return Ok(None);
         }
+        if remaining > 1
+            && (self.cached_finalizers_kept(globals, stdin, None)
+                || (self.learn_finalizer_paths(globals, stdin)
+                    && self.cached_finalizers_kept(globals, stdin, None)))
+        {
+            return Ok(None);
+        }
         // If the roots keep every pending finalizer alive, no finalizer can run.
         // Keep the visited links until the search ends so resetting a partial
         // trace costs only the slots it touched, even after a large heap peak.
@@ -4295,7 +4523,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::All,
         };
@@ -4329,13 +4557,13 @@ impl Heap {
         next
     }
 
-    /// Track a file that must flush or close its descriptor when its last owner disappears.
-    pub(super) fn alloc_file_writer(&mut self, file: Value) -> Result<Id> {
-        self.file_writers
+    /// Track a descriptor whose flush or close is visible when its last owner disappears.
+    pub(super) fn alloc_descriptor_owner(&mut self, value: Value) -> Result<Id> {
+        self.descriptor_owners
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        let id = self.alloc(file);
-        self.file_writers.push(id);
+        let id = self.alloc(value);
+        self.descriptor_owners.push(id);
         self.frames.last_mut().unwrap().created_finalizer = true;
         Ok(id)
     }
@@ -4385,7 +4613,7 @@ impl Heap {
 
     /// A returned writer or a surviving name keeps a direct owner.
     pub(super) fn has_unbound_finalizer(&self, retained: Id) -> bool {
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
@@ -4393,16 +4621,16 @@ impl Heap {
 
     /// A global input stream and a frame-owned stream can keep all registered owners alive.
     pub(super) fn finalizers_kept_by(&self, input: &[Id; 3]) -> bool {
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
             .all(|owner| input.contains(owner) || self.caller_keeps_generator(*owner))
-            || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
+            || self.frame_keeps_stream_finalizers(Some(input), &self.descriptor_owners)
     }
 
     /// Both the weak reference and its target must keep a strong path from a surviving root.
     pub(super) fn weak_values_kept_by(&self, modules: Id, reference: Id) -> bool {
-        if self.weak_roots.keeps_all(self, [modules, reference]) {
+        if self.cached_weak_roots([modules, reference]) {
             return true;
         }
         if self.weak.len() != 1 {
@@ -4420,17 +4648,17 @@ impl Heap {
     }
 
     pub(super) fn tracks_finalizers(&self) -> bool {
-        !self.file_writers.is_empty() || self.has_ordinary_finalizers()
+        !self.descriptor_owners.is_empty() || self.has_ordinary_finalizers()
     }
 
     /// Count the registrations a root set must cover to avoid a finalizer sweep.
     pub(super) fn tracked_finalizer_count(&self) -> usize {
-        self.file_writers.len() + self.ordinary_finalizers.len()
+        self.descriptor_owners.len() + self.ordinary_finalizers.len()
     }
 
     /// Recheck unbound writers after control flow discards temporary roots.
     pub fn release_unbound_finalizers(&mut self) {
-        self.collect_next_statement |= self.has_unbound_finalizer(NONE);
+        self.check_finalizers_next_statement |= self.has_unbound_finalizer(NONE);
     }
 
     /// Keep the operands needed by later targets after a source assignment releases its old value.
@@ -4464,7 +4692,8 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        if self.take_sweep_request() {
+        let finalizers = self.take_finalizer_check();
+        if self.take_sweep_request() || finalizers {
             self.collect(globals)
         } else {
             None
@@ -4505,7 +4734,15 @@ impl Heap {
 
     /// A discarded owner or the allocation threshold has requested a sweep.
     pub(super) fn collection_requested(&self) -> bool {
-        self.collect_next_statement || self.watermark_due() || self.gc_schedule.requested()
+        self.collect_next_statement
+            || self.check_finalizers_next_statement
+            || self.watermark_due()
+            || self.gc_schedule.requested()
+    }
+
+    /// A potentially unbound finalizer needs its roots checked after publishing the next statement.
+    pub(super) fn take_finalizer_check(&mut self) -> bool {
+        std::mem::take(&mut self.check_finalizers_next_statement)
     }
 
     /// Consume a pending heap sweep before assembling its root iterators.
@@ -4570,11 +4807,11 @@ impl Heap {
         self.sweep()
     }
 
-    /// Keep cycle scratch proportional to the garbage when most occupied slots are reachable.
+    /// Keep cycle scratch proportional to the garbage using only containers with outgoing edges.
     fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
         let mut slots = smallvec::SmallVec::new();
         for (id, trace) in self.traces.iter().enumerate() {
-            if trace.get() == UNMARKED && self.slots[id].value.is_some() {
+            if trace.get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
                 if slots.len() == 256 {
                     return None;
                 }
@@ -4613,11 +4850,17 @@ impl Heap {
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
     ) {
-        self.identify_indexed_cycles(cycles, &slot_at, index_of);
-        // Peeling leaves both cycles and their unreachable descendants. Every
-        // strong child of a member is therefore already live or itself a member.
-        for index in cycles.members() {
-            self.traces[slot_at(index as usize)].set(END);
+        let (_, cyclic) = self.identify_indexed_cycles(cycles, &slot_at, index_of);
+        if cyclic {
+            for index in cycles.members() {
+                let id = slot_at(index as usize);
+                self.traces[id].set(END);
+                // Every nonleaf descendant is already a member. Scalar children
+                // have no incoming-count slot in the compact candidate graph.
+                self.unreachable_children(self.get(id as Id), MarkMode::All, |child| {
+                    self.traces[child].set(END);
+                });
+            }
         }
     }
 
@@ -4648,13 +4891,18 @@ impl Heap {
 
     /// Visit each distinct strong child outside the live graph. The queue skips live
     /// slots automatically; restore its scratch marks before visiting another owner.
-    fn unreachable_children(&self, value: &Value, mut visit: impl FnMut(usize)) {
+    fn unreachable_children(
+        &self,
+        value: &Value,
+        mode: MarkMode<'_>,
+        mut visit: impl FnMut(usize),
+    ) {
         let mut children = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
-            mode: MarkMode::All,
+            mode,
         };
         value.children(&mut children);
         while let Some(id) = children.pop() {
@@ -4677,7 +4925,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::All,
         };
@@ -4695,7 +4943,7 @@ impl Heap {
             self.get(id as Id).children(&mut MarkQueue {
                 slots: &self.slots,
                 traces: &self.traces,
-                scalar_leaves: &self.scalar_leaves,
+                slot_shapes: &self.slot_shapes,
                 next: END,
                 mode: MarkMode::Ordered(&mut scan),
             });
@@ -4726,7 +4974,26 @@ impl Heap {
     /// dead objects that refcounting alone would release from the Python GC count.
     /// The incoming counts must start at zero.
     fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
-        self.identify_indexed_cycles(cycles, std::convert::identity, std::convert::identity)
+        let (finalizer, cyclic) =
+            self.identify_indexed_cycles(cycles, std::convert::identity, std::convert::identity);
+        // Scalars have no outgoing edges and cannot take part in a cycle.
+        // Only the scalars retained by a surviving cycle join its isolate.
+        if cyclic {
+            for id in 0..cycles.incoming.len() {
+                if cycles.incoming[id] != 0 && self.slot_shapes[id] == SlotShape::Other {
+                    self.unreachable_children(
+                        self.slots[id].value.as_ref().unwrap(),
+                        MarkMode::All,
+                        |child| {
+                            if self.slot_shapes[child].is_scalar_leaf() {
+                                cycles.incoming[child] = 1;
+                            }
+                        },
+                    );
+                }
+            }
+        }
+        finalizer
     }
 
     fn identify_indexed_cycles(
@@ -4734,7 +5001,7 @@ impl Heap {
         cycles: &mut CycleSet,
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
-    ) -> Option<Id> {
+    ) -> (Option<Id>, bool) {
         let mut first_finalizer = None;
         let CycleSet {
             incoming,
@@ -4744,36 +5011,48 @@ impl Heap {
         unowned.clear();
         for index in 0..incoming.len() {
             let id = slot_at(index);
-            if self.traces[id].get() == UNMARKED
-                && let Some(value) = &self.slots[id].value
-            {
-                // Count the candidate itself so that zero denotes a vacant or reachable slot.
-                incoming[index] += 1;
-                self.unreachable_children(value, |child| incoming[index_of(child)] += 1);
+            if self.traces[id].get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
+                let value = self.slots[id]
+                    .value
+                    .as_ref()
+                    .expect("occupied cycle candidate");
+                unowned.push(index);
+                self.unreachable_children(value, MarkMode::CycleEdges, |child| {
+                    incoming[index_of(child)] += 1
+                });
             }
         }
-        for (id, count) in incoming.iter_mut().enumerate() {
-            if *count != 0 {
-                *count -= 1;
-                if *count == 0 {
-                    unowned.push(id);
-                }
-            }
+        let mut remaining = unowned.len();
+        unowned.retain(|&index| incoming[index] == 0);
+        // With no edges there is nothing to peel. Preserve the queue's LIFO
+        // finalizer order, including when the compact candidate set is empty.
+        if unowned.len() == remaining {
+            first_finalizer = unowned.iter().rev().find_map(|&index| {
+                let id = slot_at(index);
+                (self.slots[id].finalization == Finalization::Pending).then_some(id as Id)
+            });
+            unowned.clear();
+            return (first_finalizer, false);
         }
         while let Some(index) = unowned.pop() {
+            remaining -= 1;
             let id = slot_at(index);
             if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
                 first_finalizer = Some(id as Id);
             }
-            self.unreachable_children(self.slots[id].value.as_ref().unwrap(), |child| {
-                let child = index_of(child);
-                incoming[child] -= 1;
-                if incoming[child] == 0 {
-                    unowned.push(child);
-                }
-            });
+            self.unreachable_children(
+                self.slots[id].value.as_ref().unwrap(),
+                MarkMode::CycleEdges,
+                |child| {
+                    let child = index_of(child);
+                    incoming[child] -= 1;
+                    if incoming[child] == 0 {
+                        unowned.push(child);
+                    }
+                },
+            );
         }
-        first_finalizer
+        (first_finalizer, remaining != 0)
     }
 
     /// Age participating slots before Python callbacks can allocate into a recycled slot.
@@ -5078,12 +5357,13 @@ impl Heap {
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.classes
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
-        self.file_writers.retain(|&id| {
+        self.descriptor_owners.retain(|&id| {
             let slot = &self.slots[id as usize];
             self.traces[id as usize].get() != UNMARKED
                 && match &slot.value {
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
+                    Some(Value::Socket(socket)) => crate::objects::socket::fd(socket) >= 0,
                     _ => false,
                 }
         });
@@ -5103,15 +5383,22 @@ impl Heap {
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for id in FIRST_DYNAMIC_SLOT..self.slots.len() {
-            let slot = &self.slots[id];
-            if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
-                self.gc_order.remove(id, &self.slots);
+            if self.traces[id].replace(UNMARKED) == UNMARKED
+                && self.slot_shapes[id] != SlotShape::Vacant
+            {
+                let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
+                if self.slots[id].gc_prev.get() != UNMARKED {
+                    self.gc_order.remove(id, &self.slots);
+                }
+                // Only compound values can own a recorded Python hash.
+                if !shape.is_scalar_leaf() {
+                    self.immutable_hashes.remove(&(id as Id));
+                }
                 let slot = &mut self.slots[id];
                 if slot.has_gc_header {
                     self.gc_schedule.freed();
                 }
                 slot.value = None;
-                self.immutable_hashes.remove(&(id as Id));
                 slot.gc_next.set(self.free_head);
                 self.free_head = id;
                 self.free_count += 1;
@@ -5149,6 +5436,25 @@ mod tests {
             assert!(matches!(heap.get(id), Value::Int(value) if value.as_small() == Some(n)));
             assert_eq!(heap.alloc(Value::Int(crate::Int::from(n))), id);
         }
+    }
+
+    #[test]
+    fn checking_a_finalizer_preserves_a_byte_buffer_sweep() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        heap.release_temporaries_since(mark);
+        heap.release_unbound_finalizers();
+        assert!(heap.take_finalizer_check());
+        assert!(!heap.take_sweep_request());
+
+        heap.release_unbound_finalizers();
+        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        buffer.extend_from_slice(b"allocated");
+        heap.alloc(Value::Bytes(buffer));
+        assert!(heap.take_finalizer_check());
+        assert!(heap.take_sweep_request());
     }
 
     #[test]
@@ -5197,6 +5503,23 @@ mod tests {
     }
 
     #[test]
+    fn ascii_offsets_require_an_unchanged_string() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let text = heap.alloc(Value::Str("cat".repeat(200).into()));
+        assert!(heap.is_ascii_str(text));
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let next = heap.alloc(Value::Str("猫".repeat(200).into()));
+        assert_eq!(next, text);
+        assert!(!heap.is_ascii_str(next));
+        let writable = heap.alloc(Value::Str("dog".repeat(200).into()));
+        assert!(heap.is_ascii_str(writable));
+        *heap.get_mut(writable) = Value::Str("café".repeat(200).into());
+        assert!(!heap.is_ascii_str(writable));
+    }
+
+    #[test]
     fn tracing_a_replaced_scalar_visits_its_new_children() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -5209,6 +5532,31 @@ mod tests {
         assert!(heap.slots[child as usize].value.is_some());
         heap.collect(std::iter::empty());
         assert!(heap.slots[child as usize].value.is_none());
+    }
+
+    #[test]
+    fn prompt_collection_keeps_scalar_children_of_a_cycle() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let cycle = heap.alloc(Value::Str("initially a scalar".into()));
+        let mut children = vec![cycle];
+        for index in 0..300 {
+            children.push(heap.alloc(Value::Str(format!("field-{index}").into())));
+        }
+        let leaf = children[1];
+        let (_, target) = heap.source_and_target(leaf, cycle).unwrap();
+        *target = Value::List(children);
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        assert!(matches!(heap.get(leaf), Value::Str(text) if text == "field-0"));
+
+        let Value::List(children) = heap.get_mut(cycle) else {
+            unreachable!();
+        };
+        children.clear();
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[leaf as usize].value.is_none());
+        assert!(heap.slots[cycle as usize].value.is_none());
     }
 
     #[test]
@@ -5270,9 +5618,11 @@ mod tests {
         heap.collect(std::iter::empty());
         // A second sweep must leave the free chain intact.
         heap.collect(std::iter::empty());
-        assert_eq!(heap.alloc(Value::Tuple(vec![keep])), parent);
-        assert_eq!(heap.alloc(Value::List(vec![parent])), child);
-        heap.release_temporaries_since(mark);
+        assert_eq!(heap.alloc(Value::Int(crate::Int::from(1024))), parent);
+        *heap.get_mut(parent) = Value::Tuple(vec![keep]);
+        assert_eq!(heap.alloc(Value::Int(crate::Int::from(1025))), child);
+        *heap.source_and_target(keep, child).unwrap().1 = Value::List(vec![parent]);
+        heap.release_temporaries_since(0);
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
@@ -5367,6 +5717,43 @@ mod tests {
         assert!(!heap.discard_operands(mark, NONE, modules));
         *heap.get_mut(modules) = Value::Dict(Default::default());
         assert!(heap.discard_operands(mark, NONE, modules));
+    }
+
+    #[test]
+    fn a_bound_owners_field_must_still_retain_the_finalizer() {
+        use super::super::{ffi, stdlib};
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let scope = ctx.scope("__main__", None);
+        ctx.heap.frames.last_mut().unwrap().scope = scope;
+        let class = ctx.builtin("object");
+        let root = ctx.instance(class, None);
+        let owner = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.register_finalizer(root);
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names.insert("root".into(), root);
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
+            unreachable!()
+        };
+        fields.insert("resource".into(), owner);
+
+        let input = stdlib::io::rooted_input_chain(&ctx);
+        assert!(ctx.heap.frame_keeps_stream_finalizers(input.as_ref(), &[]));
+        assert!(
+            ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+        );
+
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
+            unreachable!()
+        };
+        fields.insert("resource".into(), NONE);
+        assert!(
+            !ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+        );
     }
 
     #[test]
@@ -5494,7 +5881,10 @@ mod tests {
 
         // Only one distinct pending owner is proven by this chain.
         let chain = [input, buffer, input];
-        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
+        let mut check = |roots| {
+            heap.acyclic_finalizer([NONE; 2], roots, Some(&chain))
+                .unwrap()
+        };
         assert_eq!(check(vec![input].into_iter()), Some(dead));
         assert_eq!(check(vec![input, dead].into_iter()), None);
         assert_eq!(check(vec![input].into_iter()), Some(dead));

@@ -1,7 +1,9 @@
 """Finder operations for the standalone native source registry."""
 
 from ._bootstrap import _find_spec, _resolve_name, module_from_spec, spec_from_loader
-from ._bootstrap_external import MAGIC_NUMBER, cache_from_source, source_from_cache, spec_from_file_location
+from ._bootstrap_external import (
+    MAGIC_NUMBER, cache_from_source, decode_source, source_from_cache, spec_from_file_location,
+)
 from _imre_importlib import find_spec as _find_cached_spec
 from ._abc import Loader
 

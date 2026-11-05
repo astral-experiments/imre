@@ -189,11 +189,13 @@ def current():
 
     field = WireField(">H")
     assert field.size == 1
+    assert repr(field) == "WireField('>H')"
     pack_field = field.pack
     payload = bytearray(b"\x00\x01abcd")
     rows = field.iter_unpack(payload)
     assert next(rows) == (1,)
     field.__init__("B")
+    assert repr(field) == "WireField('B')"
     assert rows.__length_hint__() == 4
     assert list(rows) == [(97,), (98,), (99,), (100,)]
     payload.append(0)
@@ -211,6 +213,7 @@ def current():
     fmt = b"<4s4H2LH"
     values = (b"PK\x05\x06", 0, 0, 1, 1, 55, 99, 0)
     record = struct.Struct(fmt)
+    assert repr(record) == "Struct('<4s4H2LH')"
     data = struct.pack(fmt, *values)
     assert struct.calcsize(fmt) == record.size == len(data) == 22
     assert record.unpack(data) == struct.unpack(fmt, data) == values
@@ -313,6 +316,21 @@ def current():
         pass
     else:
         raise AssertionError("lost index error")
+
+    try:
+        struct.pack("B", OverflowingIndex())
+    except struct.error as error:
+        assert str(error) == "'B' format requires 0 <= number <= 255"
+    else:
+        raise AssertionError("unsigned byte accepted a failed conversion")
+
+    target = bytearray(b"!" * 12)
+    try:
+        struct.pack_into(opposite_endian + "BQB", target, 1, 7, Field((1 << 80) + 99), 8)
+    except struct.error:
+        assert target == b"!\x07" + (99).to_bytes(8, "big" if opposite_endian == ">" else "little") + b"\0!"
+    else:
+        raise AssertionError("unsigned long long accepted an out-of-range index")
 
     # The length field of a native cmsghdr has type size_t.
     header = struct.Struct("@Nii")

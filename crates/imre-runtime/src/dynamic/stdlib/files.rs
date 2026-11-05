@@ -83,7 +83,7 @@ impl BinaryFile {
     /// A refused handle allocation drops its reader and releases any retained socket.
     pub(in crate::dynamic) fn into_value(self) -> Result<Value> {
         crate::shared::Shared::try_new(self)
-            .map(Value::File)
+            .map(|file| Value::File(super::super::value::BoxedFile::new(file)))
             .map_err(|_| Error::new("MemoryError", ""))
     }
 
@@ -614,6 +614,8 @@ pub(super) fn text_method(
         ));
     }
     match name {
+        "encoding" => Ok(file.encoding),
+        "errors" => Ok(file.errors),
         "closed" => Ok(crate::dynamic::builtins::boolean(file.closed())),
         "read" | "readline" => Ok(ctx.text(file.read(name == "readline")?.into_string())),
         "write" => {

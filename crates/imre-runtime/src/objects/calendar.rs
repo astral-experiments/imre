@@ -1,8 +1,9 @@
-//! Immutable Python calendar values. Civil dates use an ordinal and microseconds of day;
-//! fixed zones keep their original offset and owner, including the canonical UTC singleton.
+//! Immutable Python calendar values. Civil dates keep their fields or local microseconds.
+//! Fixed zones own their offset, including the canonical UTC singleton.
 use super::*;
 pub(super) mod boxed;
 mod civil;
+pub(crate) mod iso;
 mod month_grid;
 use civil::Civil;
 mod clock;
@@ -56,8 +57,8 @@ pub extern "C" fn imre_calendar_zone_limit(max: bool) -> *const Object {
 
 fn zone_limit(max: bool) -> crate::ObjectOwner {
     thread_local! {
-        static MIN:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::Delta(-86_340_000_000)),name:None});
-        static MAX:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::Delta(86_340_000_000)),name:None});
+        static MIN:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::delta(-86_340_000_000)),name:None});
+        static MAX:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::delta(86_340_000_000)),name:None});
     }
     if max {
         MAX.with(crate::ObjectOwner::clone)
@@ -116,7 +117,7 @@ fn compare_rooted(
                         )
                     })?
                 }
-                (Value::Delta(a), Value::Delta(b)) => a.cmp(b),
+                (Value::Delta(a), Value::Delta(b)) => a.micros().cmp(&b.micros()),
                 (Value::DateOnly(a), Value::DateOnly(b)) => a.compare(*b),
                 (Value::DateOnly(_), Value::Date { .. })
                 | (Value::Date { .. }, Value::DateOnly(_)) => {
@@ -183,11 +184,28 @@ const FACTORS: [i64; 7] = [
     604_800_000_000,
 ];
 
+/// A duration needs 68 signed bits at Python's maximum magnitude. Store the
+/// native-endian bytes so an inline calendar payload keeps the ordinary object alignment.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct Duration([u8; 16]);
+
+impl Duration {
+    fn micros(self) -> i128 {
+        i128::from_ne_bytes(self.0)
+    }
+}
+
+impl Value {
+    fn delta(micros: i128) -> Self {
+        Self::Delta(Duration(micros.to_ne_bytes()))
+    }
+}
+
 pub(super) enum Value {
-    Delta(i128),
+    Delta(Duration),
     DateOnly(Civil),
     Time {
-        local: i128,
+        local: i64,
         zone: Option<crate::ObjectOwner>,
         fold: i32,
     },
@@ -205,13 +223,10 @@ pub(super) enum Value {
 }
 
 fn owner(value: Value) -> crate::ObjectOwner {
-    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Calendar(
-        allocator_api2::boxed::Box::new(value),
-    ))))
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Calendar(value))))
 }
 
 fn try_owner(value: Value) -> Result<crate::ObjectOwner, Error> {
-    let value = allocator_api2::boxed::Box::try_new(value).map_err(|_| Error::allocation())?;
     crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Calendar(value))))
         .map_err(|_| Error::allocation())
 }
@@ -234,7 +249,7 @@ pub unsafe extern "C" fn imre_calendar_truth(o: *const Object) -> bool {
 }
 fn delta(obj: &Object) -> i128 {
     with(obj, |v| match v {
-        Value::Delta(us) => *us,
+        Value::Delta(us) => us.micros(),
         _ => unreachable!(),
     })
 }
@@ -247,7 +262,7 @@ fn offset(zone: &Object) -> i128 {
 }
 
 thread_local! {
-    static UTC: crate::ObjectOwner = owner(Value::Zone { offset:owner(Value::Delta(0)), name:None });
+    static UTC: crate::ObjectOwner = owner(Value::Zone { offset:owner(Value::delta(0)), name:None });
 }
 fn utc() -> crate::ObjectOwner {
     UTC.with(crate::ObjectOwner::clone)
@@ -310,7 +325,7 @@ fn make_delta(mask: u32, words: [usize; 7]) -> Result<crate::ObjectOwner, Error>
             0
         };
     total += near + correction;
-    Ok(owner(Value::Delta(validate_delta(&total)?)))
+    Ok(owner(Value::delta(validate_delta(&total)?)))
 }
 
 fn parts(value: i128) -> (i128, i128, i128) {
@@ -332,7 +347,7 @@ fn write_named_repr(
 ) -> std::fmt::Result {
     use std::fmt::Write as _;
     match v {
-        Value::Delta(n) => write_delta_repr(*n, name.unwrap_or("datetime.timedelta"), out)?,
+        Value::Delta(n) => write_delta_repr(n.micros(), name.unwrap_or("datetime.timedelta"), out)?,
         Value::DateOnly(ord) => {
             let [y, m, d] = ord.ymd();
             write!(out, "{}({y}, {m}, {d})", name.unwrap_or("datetime.date"))?;
@@ -353,7 +368,7 @@ fn write_named_repr(
         Value::Date { zone, fold, .. } | Value::Time { zone, fold, .. } => {
             let local = match v {
                 Value::Date { local, .. } => *local,
-                Value::Time { local, .. } => Civil::from_micros(*local),
+                Value::Time { local, .. } => Civil::from_micros(i128::from(*local)),
                 _ => unreachable!(),
             };
             if matches!(v, Value::Date { .. }) {
@@ -567,7 +582,7 @@ fn check(value: i32, name: &str, low: i32, high: i32) -> Result<(), Error> {
         ))
     }
 }
-fn checked_ordinal(y: i32, m: i32, d: i32) -> Result<i128, Error> {
+fn check_date(y: i32, m: i32, d: i32) -> Result<(), Error> {
     check(y, "year", 1, 9999)?;
     check(m, "month", 1, 12)?;
     let max = month_days(y, m);
@@ -577,6 +592,11 @@ fn checked_ordinal(y: i32, m: i32, d: i32) -> Result<i128, Error> {
             format!("day {d} must be in range 1..{max} for month {m} in year {y}"),
         ));
     }
+    Ok(())
+}
+
+fn checked_ordinal(y: i32, m: i32, d: i32) -> Result<i128, Error> {
+    check_date(y, m, d)?;
     Ok(ordinal(y, m, d))
 }
 
@@ -593,7 +613,7 @@ fn datetime_from_fields(
     zone: Option<crate::ObjectOwner>,
 ) -> Result<crate::ObjectOwner, Error> {
     let ord = checked_ordinal(y, m, d)?;
-    let local = (ord - 1) * DAY + time_micros([h, mn, s, u, fold])?;
+    let local = (ord - 1) * DAY + i128::from(time_micros([h, mn, s, u, fold])?);
     try_owner(Value::Date {
         local: Civil::from_micros(local),
         zone,
@@ -601,7 +621,7 @@ fn datetime_from_fields(
     })
 }
 
-fn time_micros([h, mn, s, u, fold]: [i32; 5]) -> Result<i128, Error> {
+fn time_micros([h, mn, s, u, fold]: [i32; 5]) -> Result<i64, Error> {
     check(h, "hour", 0, 23)?;
     check(mn, "minute", 0, 59)?;
     check(s, "second", 0, 59)?;
@@ -612,7 +632,7 @@ fn time_micros([h, mn, s, u, fold]: [i32; 5]) -> Result<i128, Error> {
             format!("fold must be either 0 or 1, not {fold}"),
         ));
     }
-    Ok(i128::from(h * 3600 + mn * 60 + s) * 1_000_000 + i128::from(u))
+    Ok(i64::from(h * 3600 + mn * 60 + s) * 1_000_000 + i64::from(u))
 }
 
 /// # Safety
@@ -672,13 +692,15 @@ fn combine(
         Value::Time { local, fold, .. } => {
             if let Civil::Scalar(day) = date {
                 return try_owner(Value::Date {
-                    local: Civil::from_micros(i128::from(day).div_euclid(DAY) * DAY + local),
+                    local: Civil::from_micros(
+                        i128::from(day).div_euclid(DAY) * DAY + i128::from(*local),
+                    ),
                     zone,
                     fold: *fold,
                 });
             }
             let [y, m, d] = date.ymd();
-            let [h, mi, s, us, fold] = time_fields(*local, *fold).map(|n| n as i32);
+            let [h, mi, s, us, fold] = time_fields(i128::from(*local), *fold).map(|n| n as i32);
             datetime_from_fields([y, m, d, h, mi, s, us, fold], zone)
         }
         _ => unreachable!(),
@@ -793,7 +815,7 @@ pub unsafe extern "C" fn imre_calendar_datetime(
 /// Combine normalized microseconds and validate the resulting timedelta.
 fn shift_delta(left: i128, right: i128, subtract: bool) -> Result<crate::ObjectOwner, Error> {
     let total = if subtract { left - right } else { left + right };
-    try_owner(Value::Delta(validate_delta(&BigInt::from(total))?))
+    try_owner(Value::delta(validate_delta(&BigInt::from(total))?))
 }
 
 /// # Safety
@@ -832,14 +854,14 @@ fn shift(dt: &Object, n: i128, sub: bool) -> Result<crate::ObjectOwner, Error> {
             },
             zone.clone(),
         ),
-        Value::Delta(left) => shift_delta(*left, n, sub),
+        Value::Delta(left) => shift_delta(left.micros(), n, sub),
         _ => unreachable!(),
     })
 }
 /// Negating the minimum representable day is valid, but a fractional maximum day can overflow.
 fn negate_delta(value: &Object) -> Result<crate::ObjectOwner, Error> {
     let micros = validate_delta(&BigInt::from(-delta(value)))?;
-    try_owner(Value::Delta(micros))
+    try_owner(Value::delta(micros))
 }
 
 /// # Safety
@@ -861,14 +883,15 @@ pub unsafe extern "C" fn imre_calendar_field(o: *const Object, index: usize) -> 
             let [y, m, d] = ord.ymd();
             i128::from([y, m, d][i])
         }
-        Value::Date { local, fold, .. } => local.fields(*fold)[i],
+        Value::Date { local, fold, .. } => local.field(i, *fold),
         Value::Delta(n) => {
-            let (d, s, u) = parts(*n);
+            let (d, s, u) = parts(n.micros());
             [d, s, u][i]
         }
         _ => unreachable!(),
     });
-    Int::new(BigInt::from(n)).into_raw()
+    // All civil fields and normalized duration components fit in a tagged integer.
+    Int::from(n as i64).into_raw()
 }
 /// # Safety
 /// The receiver is a rooted datetime; the optional owned zone is zero only for naive values.
@@ -927,10 +950,10 @@ fn calendar_text(value: &Value, iso: bool) -> String {
             let [y, m, d] = ord.ymd();
             format!("{y:04}-{m:02}-{d:02}")
         }
-        Value::Time { local, zone, .. } => time_text(Civil::from_micros(*local), zone),
+        Value::Time { local, zone, .. } => time_text(Civil::from_micros(i128::from(*local)), zone),
         Value::Date { local, zone, .. } => date_text(*local, zone, if iso { 'T' } else { ' ' }),
         Value::Delta(n) => {
-            let (d, s, u) = parts(*n);
+            let (d, s, u) = parts(n.micros());
             let prefix = if d == 0 {
                 String::new()
             } else {

@@ -32,7 +32,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
         if !seen.insert(name.clone()) {
             continue;
         }
-        let Some((file, source)) = bundled_module_source(&name) else {
+        let Some((file, source)) = bundled_module_source(&name, true) else {
             continue;
         };
         write_module(&name, file, &source).map_err(|err| err.to_string())?;

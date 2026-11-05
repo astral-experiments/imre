@@ -68,12 +68,14 @@ impl Builtin {
                     Len | RowLen | ViewLen(_) | ViewField(..) => Contract::new(false, PreservesLists),
                 }
             }
-            Self::SplitIntSource(_) | Self::StringSliceEqual => Contract::new(false, PreservesLists),
+            Self::SplitIntSource(_) | Self::SplitTextSource(_) | Self::SplitTextLen | Self::StringSliceEqual => Contract::new(false, PreservesLists),
+            Self::SplitTextField(_) => Contract::new(true, PreservesLists),
             Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
             Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
+            Self::CollectIntCursor => Contract::new(true, Unknown),
             Self::ListExtendBuffer | Self::ListExtendSnapshot | Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::MarkCoroutine(_) => Contract::new(false, Unknown),
@@ -108,6 +110,7 @@ impl Builtin {
                         | crate::ir::CalendarOp::SetFirstWeekday
                         | crate::ir::CalendarOp::Date
                         | crate::ir::CalendarOp::DateTime
+                        | crate::ir::CalendarOp::FromIsoFormat
                         | crate::ir::CalendarOp::Combine
                         | crate::ir::CalendarOp::Replace { .. }
                         | crate::ir::CalendarOp::Astimezone
@@ -503,6 +506,7 @@ impl Builtin {
             | Self::JsonEncoderEncode(_)
             | Self::JsonErrorField(_)
             | Self::HashRecord
+            | Self::FractionHash(_, _)
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
@@ -525,6 +529,8 @@ impl Builtin {
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::RegexCollect { .. }
+            | Self::RegexRunCount { .. }
             | Self::RegexSub(_)
             | Self::UnittestCompilePattern
             | Self::RegexSearchText { .. }
@@ -535,9 +541,10 @@ impl Builtin {
             | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
+            | Self::ListAccumulate
             | Self::EnumLookup(_)
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
-            Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
+            Self::FloatAcos | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
             | Self::DictIsOrdered
@@ -576,6 +583,8 @@ impl Builtin {
             | Self::GeneratorFrameLeave
             | Self::IntExtremum { .. }
             | Self::IntBitLength
+            | Self::FloatIsInteger
+            | Self::FloatLog2
             | Self::IntSignAsFloat
             | Self::FloatCopySign
             | Self::IsInstance(_)
@@ -773,7 +782,8 @@ impl Builtin {
             | Self::TupleIndex
             | Self::Combinatorial(_)
             | Self::Islice
-            | Self::Cycle => Contract::new(true, PreservesLists),
+            | Self::Cycle
+            | Self::AccumulateCursor => Contract::new(true, PreservesLists),
             Self::DefaultListDict
             | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
@@ -869,7 +879,16 @@ impl Builtin {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
                     && bounds(*min, *max)
                     && (!matches!(self, Self::ListGetBoundedInBounds { .. })
-                        || (matches!(args[0].kind, ExprKind::Local(_)) && index(&args[1])))
+                        || (matches!(args[0].kind, ExprKind::Local(_))
+                            && (index(&args[1])
+                                || args[1]
+                                    .local_integer_offset()
+                                    .is_some_and(|(_, offset)| offset >= 0))))
+            }
+            Self::RegexRunCount { members, .. } => {
+                matches!(args, [input] if input.ty == Type::Str)
+                    && result == Type::Int
+                    && members.len() == 256
             }
             Self::SequenceGetInBounds | Self::SequenceTakeInBounds => {
                 matches!(args, [source, cursor]
@@ -908,11 +927,29 @@ impl Builtin {
             }
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
+            Self::AccumulateCursor => {
+                let Some(element @ (Type::Int | Type::Float)) = types.cursor_element(result) else {
+                    return Err("accumulate cursor requires a numeric element");
+                };
+                matches!(args, [source] | [source, _]
+                    if types.element(source.ty)
+                        .or_else(|| types.homogeneous_tuple_element(source.ty))
+                        .or_else(|| types.var_tuple_element(source.ty)) == Some(element)
+                        && args.get(1).is_none_or(|seed| seed.ty == element))
+            }
+            Self::CollectIntCursor => matches!(args, [source]
+                if types.cursor_element(source.ty) == Some(Type::Int) && result == Type::ListInt),
+            Self::ListAccumulate => {
+                signature(&[Type::ListInt], Type::ListInt)
+                    || signature(&[Type::ListInt, Type::Int], Type::ListInt)
+            }
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
             Self::IntBitLength => signature(&[Type::Int], Type::Int),
+            Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
+            Self::FloatAcos | Self::FloatLog2 => signature(&[Type::Float], Type::Float),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
@@ -943,6 +980,29 @@ impl Builtin {
             }
             Self::SplitIntSource(mask) => {
                 mask.count_ones() >= 2 && signature(&[Type::Str], Type::Str)
+            }
+            Self::SplitTextSource(count) => {
+                (1..=8).contains(count) && signature(&[Type::Str], Type::Str)
+            }
+            Self::SplitTextLen => {
+                matches!(
+                    args,
+                    [Expr {
+                        kind: ExprKind::Local(_),
+                        ..
+                    }]
+                ) && signature(&[Type::Str], Type::Int)
+            }
+            Self::SplitTextField(i) => {
+                *i < 8
+                    && matches!(
+                        args,
+                        [Expr {
+                            kind: ExprKind::Local(_),
+                            ..
+                        }]
+                    )
+                    && signature(&[Type::Str], Type::Str)
             }
             Self::SplitIntCached(index) => {
                 *index < 8
@@ -1229,6 +1289,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_new"
                 | "imre_log_clock_new"
                 | "imre_calendar_datetime"
+                | "imre_datetime_fromisoformat"
                 | "imre_calendar_instance_grid"
                 | "imre_calendar_month_grid"
                 | "imre_calendar_setfirstweekday"
@@ -1453,6 +1514,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_parse"
                 | "imre_int_parse_hex"
                 | "imre_int_float"
+                | "imre_float_acos"
                 | "imre_float_int"
                 | "imre_float_parse"
                 | "imre_bytes_float"

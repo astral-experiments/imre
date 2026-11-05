@@ -193,6 +193,7 @@ pub(crate) enum CalendarOp {
     Date,
     DateTime,
     Combine,
+    FromIsoFormat,
     Replace { timezone_supplied: bool },
     Astimezone,
     Delta,
@@ -608,6 +609,68 @@ impl Expr {
         }
     }
 
+    /// Return a literal integer that fits the native tagged representation.
+    pub(crate) fn tagged_integer_literal(&self) -> Option<i64> {
+        let value = match &self.kind {
+            ExprKind::Int(value) => value.parse::<i64>().ok()?,
+            ExprKind::Negate(value) => value.tagged_integer_literal()?.checked_neg()?,
+            _ => return None,
+        };
+        (-(1_i64 << 62)..(1_i64 << 62))
+            .contains(&value)
+            .then_some(value)
+    }
+
+    /// Split an integer index into its local and the literal offset added to it.
+    pub(crate) fn local_integer_offset(&self) -> Option<(usize, i64)> {
+        if self.ty != Type::Int {
+            return None;
+        }
+        match &self.kind {
+            ExprKind::Local(slot) => Some((*slot, 0)),
+            ExprKind::Binary(Binary::Add, left, right) => match (&left.kind, &right.kind) {
+                (ExprKind::Local(slot), _) => Some((*slot, right.tagged_integer_literal()?)),
+                (_, ExprKind::Local(slot)) => Some((*slot, left.tagged_integer_literal()?)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Construct a sequence length, counting regex runs directly when the list cannot escape.
+    pub(crate) fn sequence_len(mut values: Vec<Self>) -> Self {
+        let kind = match values.as_mut_slice() {
+            [
+                Self {
+                    kind:
+                        ExprKind::Builtin(
+                            Builtin::RegexCollect {
+                                program: imre_regex::Collection::Runs(members),
+                                split,
+                            },
+                            input,
+                        ),
+                    ..
+                },
+            ] if members.len() == 256
+                && matches!(input.as_slice(), [text] if text.ty == Type::Str) =>
+            {
+                ExprKind::Builtin(
+                    Builtin::RegexRunCount {
+                        members: std::mem::take(members),
+                        split: *split,
+                    },
+                    std::mem::take(input),
+                )
+            }
+            _ => ExprKind::Builtin(Builtin::Len, values),
+        };
+        Self {
+            ty: Type::Int,
+            kind,
+        }
+    }
+
     /// Construct an absent optional from a literal None.
     pub(crate) fn absent(ty: Type) -> Self {
         Self {
@@ -917,10 +980,11 @@ pub(crate) enum PairTableOp {
 }
 
 /// Prefixes that rule out every case-converted key in a literal string set.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum SetCasePrefix {
     ExcludedBytes([u64; 2]),
     ThreeByteHashes(u64),
+    ThreeByteValues { mask: u64, tags: Vec<u32> },
 }
 
 /// Select characters in the given set or below the Unicode scalar threshold.
@@ -972,6 +1036,8 @@ pub(crate) enum Builtin {
     TupleBufferPush,
     TupleBufferFinish,
     Cycle,
+    /// A first-class cursor that owns its current numeric prefix.
+    AccumulateCursor,
     SysStdout,
     SysHasStdout,
     SysOriginalOutput {
@@ -1145,6 +1211,10 @@ pub(crate) enum Builtin {
         minimum: bool,
     },
     IntBitLength,
+    FloatIsInteger,
+    FloatAcos,
+    /// Base-two logarithm after checking the Python domain in the caller.
+    FloatLog2,
     IntSignAsFloat,
     Bool,
     Str,
@@ -1306,6 +1376,10 @@ pub(crate) enum Builtin {
     /// Eagerly converts immutable string code points into an integer list,
     /// preserving `list(map(int, text))` errors without character objects.
     StringIntList,
+    /// Materialize exact integer prefixes, optionally starting with an initial value.
+    ListAccumulate,
+    /// Consume the remaining owned values of an integer cursor into a fresh list.
+    CollectIntCursor,
     /// Two nonnegative 31-bit digit subtotals in one immediate, or -1 for fallback.
     TryDigitSums([[u8; 10]; 2]),
     Bytes,
@@ -1410,6 +1484,9 @@ pub(crate) enum Builtin {
     /// Prepare small decimal fields from one private immutable split source.
     SplitIntSource(u8),
     SplitIntCached(u32),
+    SplitTextSource(u8),
+    SplitTextLen,
+    SplitTextField(u8),
     SplitLines,
     /// Only the first line and a joined remainder can be observed.
     JoinedSplitLines,
@@ -1500,6 +1577,7 @@ pub(crate) enum Builtin {
     HashStr,
     HashBytes,
     HashRecord,
+    FractionHash(usize, usize),
     /// A dictionary with a read-only JSON receiver and a literal string key.
     JsonGet {
         key: String,
@@ -1549,6 +1627,14 @@ pub(crate) enum Builtin {
         verbose: bool,
     },
     RegexSub(Vec<u8>),
+    RegexCollect {
+        program: imre_regex::Collection,
+        split: bool,
+    },
+    RegexRunCount {
+        members: Vec<u8>,
+        split: bool,
+    },
     RegexGroupDict,
     RegexFindIter,
     RegexMatchStart,

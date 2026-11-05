@@ -130,7 +130,7 @@ pub(super) fn call(
     };
     let target = unwrap_method_and_partial(ctx, target);
     if let Value::Function { code, .. } = ctx.heap.get(target)
-        && ctx.code_object(*code).coroutine
+        && ctx.code_object(*code).is_coroutine()
     {
         return Ok(TRUE);
     }
@@ -206,13 +206,20 @@ fn layout(ctx: &mut Context, obj: Id) -> Result<Id> {
 fn shadowed_dict(ctx: &Context, class: Id) -> Option<Id> {
     ctx.find_in_mro(class, |entry| {
         let value = ctx.own_class_attr(entry, "__dict__")?;
-        if matches!(ctx.heap.get(value), Value::LayoutDescriptor(owner, "__dict__") if *owner == entry)
-            || matches!(ctx.heap.get(value), Value::GetSetDescriptor { owner, name: "__dict__", .. }
-            if ctx.builtins.get(*owner) == Some(&entry))
-        {
-            return None;
-        }
-        Some(value)
+        let owner = match *ctx.heap.get(value) {
+            Value::LayoutDescriptor(owner, "__dict__") => Some(owner),
+            Value::GetSetDescriptor {
+                get,
+                owner,
+                name: "__dict__",
+                ..
+            } => match *ctx.heap.get(get) {
+                Value::IoMethod { owner, .. } | Value::HeapTypeMethod { owner, .. } => Some(owner),
+                _ => ctx.builtins.get(owner).copied(),
+            },
+            _ => None,
+        };
+        (owner != Some(entry)).then_some(value)
     })
 }
 
@@ -281,7 +288,7 @@ fn static_member(ctx: &mut Context, obj: Id, attr: Id, missing: Id) -> Result<Id
             Value::Cached { dictionary, .. }
             | Value::ClassMethod { dictionary, .. }
             | Value::StaticMethod { dictionary, .. } => Some(dictionary),
-            _ => None,
+            ref value => value.native_file_dict(),
         };
         if let Some(storage) = dict.and_then(|dict| ctx.dict_storage(dict)) {
             let (_, index) = ctx.find_dictionary_key(storage, attr, None)?;

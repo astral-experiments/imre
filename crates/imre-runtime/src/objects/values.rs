@@ -659,6 +659,10 @@ unsafe fn write_repr_with(
                             })?;
                             Ok(None)
                         }
+                        Storage::Accumulate(_) | Storage::IntegerAccumulate(_) => {
+                            write!(output, "<itertools.accumulate object at {owner:p}>")?;
+                            Ok(None)
+                        }
                         Storage::IteratorAdapter(adapter) => {
                             adapter.write_repr(output, owner)?;
                             Ok(None)
@@ -983,16 +987,24 @@ fn format_entry(
 pub(super) unsafe fn write_int_repr(output: &mut impl Write, word: usize) -> std::fmt::Result {
     // SAFETY: the caller roots the integer for this borrow.
     let value = unsafe { Int::borrow(word) };
+    write_integer(output, &value, true)
+}
+
+fn write_integer(output: &mut impl Write, value: &Int, check_digits: bool) -> std::fmt::Result {
     if let Some(small) = value.as_small() {
-        write!(output, "{small}")
-    } else {
-        let value = value.big();
-        if let Err(error) = crate::integer_text::check_decimal(&value) {
-            error.raise();
-            return Err(std::fmt::Error);
-        }
-        write!(output, "{value}")
+        return output.write_str(itoa::Buffer::new().format(small));
     }
+    if value.is_prefix()
+        && let Some(result) = crate::prefix_words::write_short_decimal(value, output, check_digits)
+    {
+        return result;
+    }
+    let value = value.big();
+    if check_digits && let Err(error) = crate::integer_text::check_decimal(&value) {
+        error.raise();
+        return Err(std::fmt::Error);
+    }
+    write!(output, "{value}")
 }
 
 /// # Safety
@@ -1025,17 +1037,7 @@ unsafe fn write_scalar(
                 output.write_str(if value == 0 { "False" } else { "True" })?;
             }
             2 => {
-                let value = Int::borrow(word);
-                if let Some(value) = value.as_small() {
-                    output.write_str(itoa::Buffer::new().format(value))?;
-                } else {
-                    let value = value.big();
-                    if check_digits && let Err(error) = crate::integer_text::check_decimal(&value) {
-                        error.raise();
-                        return Err(std::fmt::Error);
-                    }
-                    write!(output, "{value}")?;
-                }
+                write_integer(output, &Int::borrow(word), check_digits)?;
             }
             3 => super::exceptions::write_quoted_repr(&*(word as *const Str), output)?,
             4 => (&*(word as *const List))

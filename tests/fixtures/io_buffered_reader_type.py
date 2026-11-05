@@ -230,3 +230,19 @@ with NamedReader(io.BytesIO()) as reader:
         assert exc.args == ("name unavailable",)
     else:
         raise AssertionError("reader suppressed a name lookup error")
+
+
+def check_detached_stream_lifetime(wrapper_type):
+    import weakref
+
+    raw = io.BytesIO(b"abc")
+    owner = weakref.ref(raw)
+    buffered = wrapper_type(raw)
+    del raw
+    assert buffered.raw is owner()
+    assert buffered.detach() is owner()
+    assert owner() is None
+
+
+check_detached_stream_lifetime(io.BufferedReader)
+check_detached_stream_lifetime(io.BufferedWriter)

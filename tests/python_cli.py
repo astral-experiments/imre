@@ -95,15 +95,22 @@ def check_installed_site(imre, root, run):
     with tarfile.open(sample, "w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "sample"}) as tar:
         tar.add(member, arcname="payload")
     use_sources = (
-        "import importlib, sys, tarfile\n"
+        "import getpass, importlib, os, sys, tarfile\n"
+        "os.environ['LOGNAME'] = 'archive-user'\n"
+        "assert getpass.getuser() == 'archive-user'\n"
         "print(importlib.import_module(sys.argv[1]).Element('root').tag)\n"
+        "sorter = importlib.import_module(sys.argv[3]).TopologicalSorter\n"
+        "assert importlib.import_module(sys.argv[4]).mean([2, 3, 4]) == 3\n"
+        "assert importlib.import_module(sys.argv[5]).unescape('&lt;&amp;&gt;') == '<&>'\n"
+        "assert importlib.import_module(sys.argv[6]).Wave_read.__name__ == 'Wave_read'\n"
+        "assert list(sorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
         "    with tar.extractfile('payload') as member:\n"
         "        assert member.read() == b'archive member'\n"
     )
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
-    bare = run(launcher, "-IB", "-c", use_sources, name, sample, timeout=300)
+    bare = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", "html", "wave", timeout=300)
     assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
     opaque = run(
         launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
@@ -120,11 +127,27 @@ def check_installed_site(imre, root, run):
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported
     archive.write_bytes(exported.stdout)
-    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, timeout=300)
+    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", "html", "wave", timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
+    words = run(
+        launcher, "-IB", "-c",
+        "import importlib, sys; lexer = importlib.import_module(sys.argv[1]); "
+        "print(lexer.join(lexer.split(sys.argv[2])))",
+        "shlex", "'two words' tail", timeout=300,
+    )
+    assert (words.returncode, words.stdout, words.stderr) == (0, b"'two words' tail\n", b""), words
+    command = run(
+        launcher, "-IB", "-c",
+        "import importlib, sys; shell = importlib.import_module(sys.argv[1]).Cmd(); "
+        "print(shell.parseline('?hello'))",
+        "cmd", timeout=300,
+    )
+    assert (command.returncode, command.stdout, command.stderr) == (0, b"('help', 'hello', 'help hello')\n", b""), command
     reader = root / "read_tar_entry.py"
     reader.write_text(
+        "from graphlib import TopologicalSorter\n"
         "from tarfile import open as open_archive\n"
+        "assert list(TopologicalSorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         f"with open_archive({str(sample.resolve())!r}, 'r:') as archive:\n"
         "    with archive.extractfile('payload') as member:\n"
         "        print(member.read().decode('ascii'))\n"
@@ -194,6 +217,39 @@ def check_installed_site(imre, root, run):
     init.write_text("def value(): return 23\n")
     result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
+    check_symlinked_venv(launcher, site, root.resolve(), run)
+
+
+def check_symlinked_venv(launcher, base_site, root, run):
+    base = launcher.parent.parent
+    venv = root / "symlink-venv"
+    link = venv / "bin" / "venv-python"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(launcher)
+    local_site = venv / base_site.relative_to(base)
+    local_site.mkdir(parents=True)
+    decoy = root / "decoy-bin"
+    decoy.mkdir()
+    (decoy / link.name).write_text("not executable\n")
+    env = {"PATH": os.pathsep.join([str(decoy), str(link.parent), os.environ["PATH"]])}
+    code = (
+        "import importlib.util, site, sys\n"
+        "print(sys.executable == sys.argv[1], sys._base_executable == sys.argv[2], "
+        "sys.prefix == sys.exec_prefix == sys.argv[3], sys.base_prefix == sys.base_exec_prefix == sys.argv[4])\n"
+        "print(site.getsitepackages() == sys.argv[5:], site.ENABLE_USER_SITE, "
+        "importlib.util.find_spec('installed_example') is not None)\n"
+    )
+    for enabled, flag in [(True, "-sB"), (False, "-B")]:
+        (venv / "pyvenv.cfg").write_text(
+            f"home = {launcher.parent}\ninclude-system-site-packages = {str(enabled).lower()}\n"
+        )
+        expected_sites = [local_site, base_site] if enabled else [local_site]
+        result = run(link.name, flag, "-c", code, link, launcher, venv, base, *expected_sites,
+                     extra=env, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"True True True True\nTrue False " + str(enabled).encode() + b"\n", b"",
+        ), result
+
 
 
 def check_sysconfig_build(imre, root, run):
@@ -221,6 +277,42 @@ def check_sysconfig_build(imre, root, run):
         (modules / "Setup.local").touch()
         result = run(imre, "-B", fixture, project, home, empty, extra=extra)
         assert (result.returncode, result.stdout, result.stderr) == (0, b"build markers passed\n", b""), result
+
+
+def check_user_site(imre, root, run):
+    root = root.resolve()
+    version = json.loads(run(imre, "build-target").stdout)["python_version"]
+    base = root / "user_base"
+    packages = base / "lib" / f"python{version}" / "site-packages"
+    packages.mkdir(parents=True)
+    (packages / "user_site_probe.py").write_text("value = 73\n")
+    extras = root / "user_extras"
+    extras.mkdir()
+    (extras / "pth_probe.py").write_text("value = 51\n")
+    (packages / "extras.pth").write_text(str(extras) + "\n")
+    extra = {"PYTHONUSERBASE": str(base)}
+    code = (
+        "import importlib.util, site, sys\n"
+        "print(site.USER_BASE == site.getuserbase() == sys.argv[1], "
+        "site.USER_SITE == site.getusersitepackages() == sys.argv[2])\n"
+        "print(site.ENABLE_USER_SITE, sys.flags.no_user_site, "
+        "importlib.util.find_spec('user_site_probe') is not None, "
+        "importlib.util.find_spec('pth_probe') is not None)\n"
+    )
+    for flags, expected in [("-B", b"True 0 True True"), ("-sB", b"False 1 False False")]:
+        result = run(imre, flags, "-c", code, str(base), str(packages), extra=extra, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"True True\n" + expected + b"\n", b"",
+        ), result
+    imported = run(imre, "-B", "-c", "import user_site_probe; print(user_site_probe.value)", extra=extra, timeout=300)
+    assert (imported.returncode, imported.stdout, imported.stderr) == (0, b"73\n", b""), imported
+    lazy = run(
+        imre, "-SB", "-c",
+        "import site, sys; print(site.USER_BASE, site.USER_SITE, site.ENABLE_USER_SITE); "
+        "print(site.getuserbase() == sys.argv[1], site.getusersitepackages() == sys.argv[2], sys.argv[2] in sys.path)",
+        str(base), str(packages), extra=extra, timeout=300,
+    )
+    assert (lazy.returncode, lazy.stdout, lazy.stderr) == (0, b"None None None\nTrue True False\n", b""), lazy
 
 
 def check_script_sitecustomize(imre, root, run):
@@ -601,7 +693,7 @@ def call_allocation_flags(root):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lookup,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
 
 
@@ -718,16 +810,17 @@ def check_boxed_call_allocation(imre, run, flags):
         for size in (0, 56):
             result = run(imre, "-B", "-c", source, extra={
                 "IMRE_ENCODED_FLAGS": flags,
-                "IMRE_TEST_CALL_OP": operation,
+                "IMRE_TEST_CALL_OP": "assign_target" if operation == "assign" else operation,
                 "IMRE_TEST_CALL_SIZE": str(size),
                 "IMRE_TEST_GETTER_ALLOCATION": "1",
             })
             if operation == "lookup":
-                expected = (b"caught ()\n" if size else b"value 3\n") + b"retry 3\n"
+                # A compiled lookup reads the identifier directly from the code object.
+                expected = b"value 3\nretry 3\n"
             else:
                 expected = (b"caught () True\n" if size else b"value 7\n") + b"preserved True\nretry 3\n"
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, expected, b"refused\n" if size else b"",
+                0, expected, b"refused\n" if size and operation == "assign" else b"",
             ), (operation, size, result)
 
     # Refuse the dictionary snapshot and the equally sized sort buffer separately.
@@ -1362,7 +1455,8 @@ def check_unittest_main_names(imre, root, run):
     built = run(imre, "build", source, "--module-root", root, "--runtime-imports", "--no-cache", "-o", executable)
     assert built.returncode == 0, built
     for args, output in [((), b"a\nb\n"), (("Cases.test_b", "Cases.test_a"), b"b\na\n"),
-                         (("-vk", "test_b", "Cases"), b"b\n")]:
+                         (("-vk", "test_b", "Cases"), b"b\n"),
+                         (("-vbk", "test_b", "Cases"), b""), (("--buf", "Cases.test_a"), b"")]:
         result = run(executable, *args)
         assert result.returncode == 0 and result.stdout == output, result
     for flags, progress in [((), b".\n"), (("-v",), b"test_b (__main__.Cases.test_b) ... ok\n\n"),
@@ -1511,6 +1605,7 @@ def main():
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
+            check_user_site(imre, root, run)
             check_script_sitecustomize(imre, root, run)
             check_explicit_site_directory(imre, root, run)
         if sys.platform.startswith("linux"):
@@ -1676,10 +1771,10 @@ def main():
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
-        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py"):
-            exit_stack = Path(__file__).with_name("fixtures") / fixture
-            expected = run(sys.executable, "-B", exit_stack)
-            actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "io_dict_descriptor.py"):
+            script = Path(__file__).with_name("fixtures") / fixture
+            expected = run(sys.executable, "-B", script)
+            actual = run(imre, "run", script, "--runtime-imports", "--quiet")
             assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
             assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
@@ -1880,7 +1975,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             app.writestr("mailcli.py", mail_module)
         (later.parent / "quopri.py").write_text(codec % b"directory:")
         (later.parent / "mailcli.py").write_text(mail_module)
-        for roots in ((archive, later.parent), (later.parent, archive)):
+        for roots in ((archive, archive, later.parent), (later.parent, archive)):
             for args in ((mailapp,), ("-c", mail_command), ("-m", "mailcli")):
                 compare("-B", *args, extra={"PYTHONPATH": os.pathsep.join(map(str, roots))},
                         native_timeout=300)
@@ -2902,6 +2997,21 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        invoice = Path(__file__).resolve().with_name("fixtures") / "decimal_invoice.py"
+        # Cold optimized builds include the CPython decimal implementation.
+        compare("-IB", invoice, native_args=("run", invoice, "--quiet"), native_timeout=300)
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nsys.path.insert(0, sys.argv[1])\nimportlib.import_module(sys.argv[2])",
+            invoice.parent, invoice.stem, native_timeout=300,
+        )
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nD = importlib.import_module(sys.argv[1]).Decimal\n"
+            "print((D('-4.225') * D('3.5')).quantize(D('0.01')))",
+            "decimal", native_timeout=300,
+        )
+
         decimal_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
         (helpers / "decimal_values.py").write_text(
             "from decimal import Decimal\n"
@@ -2936,8 +3046,7 @@ def report(text):
             (helpers / "decimal_boundary.py").write_text(
                 f"from decimal import Decimal\nprint({expression})\n"
             )
-            unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_boundary")
-            assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+            compare("-IB", "-c", decimal_import + "import decimal_boundary")
 
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
@@ -3535,6 +3644,7 @@ for name in ("md4", "ripemd160"):
                     native_args=("run", hmac_entry, "--runtime-imports", "--quiet", "--", "legacy-policy"),
                 )
 
+        compare("-B", fixtures / "boxed_unittest_result_registry.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         async_case = fixtures / "unittest_isolated_asyncio.py"
         compare("-IB", async_case, native_args=("run", async_case, "--quiet"), native_timeout=600)
@@ -3583,13 +3693,17 @@ for name in ("md4", "ripemd160"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
-        padding = root / "bytes_rjust.py"
+        method_entry = root / "scalar_method.py"
         for body in (
             "assert b'xy'.rjust(3, b'.') == b'.xy'",
             "pad = bytes.rjust\nassert pad(b'xy', 3, b'.') == b'.xy'",
+            "assert ' '.isprintable() and not '\\u00a0'.isprintable()",
+            "printable = str.isprintable\n"
+            "assert printable('') and printable('A\\u0301')\n"
+            "assert not printable('\\n') and not printable('\\u20c1') and not printable(chr(0xd800))",
         ):
-            padding.write_text(body + "\n")
-            compare("-B", padding)
+            method_entry.write_text(body + "\n")
+            compare("-B", method_entry)
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_compound.py",
@@ -3606,8 +3720,10 @@ for name in ("md4", "ripemd160"):
             "boxed_inspect_isabstract.py",
             "boxed_numeric_repr.py",
             "boxed_decimal_hash.py",
+            "boxed_decimal_arithmetic.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
+            "boxed_positional_builtin_methods.py",
             "boxed_positional_string_methods.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
@@ -3628,6 +3744,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
             "boxed_sys_byteorder.py",
+            "boxed_sys_stdlib_module_names.py",
             "boxed_sys_float_info.py",
             "boxed_sys_hash_info.py",
             "boxed_sys_thread_info.py",
@@ -3647,6 +3764,7 @@ for name in ("md4", "ripemd160"):
             "boxed_int_to_bytes.py",
             "boxed_int_rational_fields.py",
             "boxed_int_from_bytes.py",
+            "boxed_ipaddress.py",
             "boxed_int_conversion.py",
             "boxed_comparison_wrappers.py",
             "boxed_divmod_slots.py",
@@ -3655,10 +3773,20 @@ for name in ("md4", "ripemd160"):
             "boxed_round.py",
             "boxed_math_rounding.py",
             "boxed_math_acosh.py",
+            "boxed_math_dist.py",
             "boxed_math_fma.py",
+            "boxed_math_pow.py",
+            "boxed_math_frexp.py",
+            "boxed_statistics_mean.py",
             "boxed_math_fsum.py",
             "boxed_math_gcd.py",
+            "boxed_math_hyperbolic.py",
+            "boxed_math_hypot.py",
+            "boxed_math_prod.py",
             "boxed_math_isclose.py",
+            "boxed_math_log2.py",
+            "boxed_math_ldexp.py",
+            "boxed_math_nextafter.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
@@ -3687,6 +3815,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
             "boxed_functools_partial_state.py",
+            "boxed_functools_partial_generic_alias.py",
             "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",
@@ -3761,10 +3890,14 @@ for name in ("md4", "ripemd160"):
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
             "boxed_email_addresses.py",
+            "boxed_html.py",
+            "boxed_wave.py",
             "boxed_http_message.py",
             "boxed_time.py",
+            "boxed_timeit.py",
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
+            "time_strptime.py",
             "boxed_codecs.py",
             "boxed_codec_registry.py",
             "boxed_wide_decode.py",
@@ -3811,6 +3944,7 @@ for name in ("md4", "ripemd160"):
             "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
+            "boxed_termios_attributes.py",
             "boxed_os_fchmod.py",
             "boxed_os_makedirs.py",
             "boxed_os_walk.py",
@@ -3936,6 +4070,7 @@ for name in ("md4", "ripemd160"):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_format.py",
+            "boxed_unittest_program_options.py",
             "boxed_unittest_result_buffer.py",
             "boxed_unittest_result_registry.py",
             "boxed_unittest_get_description.py",
@@ -3999,6 +4134,7 @@ for name in ("md4", "ripemd160"):
             "boxed_list_pop.py",
             "boxed_list_iter_descriptor.py",
             "boxed_sequence_repeat.py",
+            "boxed_primitive_sequence_literals.py",
             "boxed_sequence_order.py",
             "boxed_tuple_iter_descriptor.py",
             "boxed_tuple_index.py",

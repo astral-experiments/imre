@@ -372,6 +372,352 @@ pub unsafe extern "C" fn imre_regex_literal(data: *const u8, len: usize) -> *con
     handle(Storage::RegexPattern(Box::new(pattern)))
 }
 
+/// Emit the match spans or the gaps before, between and after them.
+fn collect_runs(
+    len: usize,
+    kind: u32,
+    split: bool,
+    runs: impl Iterator<Item = std::ops::Range<usize>>,
+    mut push: impl FnMut(&mut super::Words, std::ops::Range<usize>),
+) -> *const Object {
+    let mut parts = super::Words::new(kind);
+    let mut cursor = 0;
+    for span in runs {
+        if split {
+            push(&mut parts, cursor..span.start);
+            cursor = span.end;
+        } else {
+            push(&mut parts, span);
+        }
+    }
+    if split {
+        push(&mut parts, cursor..len);
+    }
+    crate::ObjectOwner::into_raw(parts.into_object())
+}
+
+/// Collect a greedy class whose membership is uniform for all non-ASCII scalars.
+///
+/// # Safety
+/// The caller roots the subject and supplies a 256-byte membership table
+/// with the same value for every non-ASCII byte.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_runs(
+    value: *const Str,
+    members: *const [u8; 256],
+    split: u32,
+) -> *const Object {
+    // SAFETY: the caller owns the subject and the compiler emits all 256 entries.
+    let (source, members) = unsafe {
+        (
+            std::mem::ManuallyDrop::new(StrOwner::from_raw(value)),
+            &*members,
+        )
+    };
+    let runs = byte_runs(source.as_bytes(), members);
+    collect_runs(source.len(), 3, split != 0, runs, |parts, span| {
+        super::text::push_part(parts, &source, &source[span]);
+    })
+}
+
+fn byte_runs<'a>(
+    bytes: &'a [u8],
+    members: &'a [u8; 256],
+) -> impl Iterator<Item = std::ops::Range<usize>> + 'a {
+    let mut end = 0;
+    std::iter::from_fn(move || {
+        let span = imre_regex::next_byte_run(bytes, members, end)?;
+        end = span.end;
+        Some(span)
+    })
+}
+
+/// Collect binary regex matches or split fields into an owned list of bytes.
+///
+/// # Safety
+/// The caller roots the bytes subject and supplies its 256-entry membership table.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_bytes_runs(
+    value: *const crate::Bytes,
+    members: *const [u8; 256],
+    split: u32,
+) -> *const Object {
+    // SAFETY: both pointers remain live for the whole call.
+    let (source, members) = unsafe {
+        (
+            std::mem::ManuallyDrop::new(crate::BytesOwner::from_raw(value)),
+            &*members,
+        )
+    };
+    collect_byte_fields(&source, split != 0, byte_runs(&source, members))
+}
+
+fn collect_byte_fields(
+    source: &crate::BytesOwner,
+    split: bool,
+    runs: impl Iterator<Item = std::ops::Range<usize>>,
+) -> *const Object {
+    collect_runs(source.len(), 8, split, runs, |parts, span| {
+        parts
+            .values
+            .try_reserve(1)
+            .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+        let field = &source[span];
+        let bytes = if field.len() == source.len() {
+            crate::BytesOwner::clone(source)
+        } else {
+            super::bytes::copied_bytes(field)
+        };
+        parts
+            .values
+            .push(crate::BytesOwner::into_raw(bytes) as usize);
+    })
+}
+
+#[derive(Clone, Copy)]
+struct CaptureAtom<'a> {
+    run: bool,
+    captured: bool,
+    data: &'a [u8],
+}
+
+impl CaptureAtom<'_> {
+    fn match_len(self, text: &[u8]) -> usize {
+        if self.run {
+            text.iter()
+                .position(|&byte| self.data[usize::from(byte)] == 0)
+                .unwrap_or(text.len())
+        } else if text.starts_with(self.data) {
+            self.data.len()
+        } else {
+            0
+        }
+    }
+
+    fn find(self, text: &[u8]) -> Option<std::ops::Range<usize>> {
+        let start = if self.run {
+            text.iter().position(|&b| self.data[usize::from(b)] != 0)?
+        } else {
+            memchr::memmem::find(text, self.data)?
+        };
+        Some(start..start + self.match_len(&text[start..]))
+    }
+}
+
+fn capture_atoms(mut program: &[u8]) -> impl Iterator<Item = CaptureAtom<'_>> + Clone {
+    std::iter::from_fn(move || {
+        let (&flags, rest) = program.split_first()?;
+        let (len, rest) = rest.split_first_chunk::<2>().unwrap();
+        let (data, next) = rest.split_at(usize::from(u16::from_le_bytes(*len)));
+        program = next;
+        Some(CaptureAtom {
+            run: flags & 1 != 0,
+            captured: flags & 2 != 0,
+            data,
+        })
+    })
+}
+
+fn collect_rows(
+    text: &[u8],
+    program: &[u8],
+    layout: &super::records::RecordDescriptor,
+    field: impl Fn(std::ops::Range<usize>) -> usize,
+) -> *const Object {
+    let mut atoms = capture_atoms(program);
+    let first = atoms.next().unwrap();
+    let mut spans = Vec::with_capacity(layout.length);
+    let mut batch = super::records::RecordBatch::new(layout);
+    let mut rows = super::Words::new(6);
+    let mut search = 0;
+    'search: while let Some(span) = first.find(&text[search..]) {
+        let start = search + span.start;
+        let mut end = search + span.end;
+        // Every later start in this class run reaches the same suffix. A
+        // literal can overlap another occurrence, so retry one byte later.
+        search = if first.run { end } else { start + 1 };
+        spans.clear();
+        if first.captured {
+            spans.push(start..end);
+        }
+        for atom in atoms.clone() {
+            let len = atom.match_len(&text[end..]);
+            if len == 0 {
+                continue 'search;
+            }
+            if atom.captured {
+                spans.push(end..end + len);
+            }
+            end += len;
+        }
+        search = end;
+        debug_assert_eq!(spans.len(), layout.length);
+        rows.values
+            .try_reserve(1)
+            .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+        // SAFETY: the compiler emits a static tuple descriptor with one owned
+        // field per capture. Each record owner keeps its allocation alive.
+        let row = unsafe {
+            match &mut batch {
+                Some(batch) => batch.allocate(),
+                None => super::records::imre_record_new(layout),
+            }
+        };
+        for (index, span) in spans.drain(..).enumerate() {
+            // SAFETY: every compulsory capture fills one distinct field of the
+            // descriptor's string or bytes kind before publishing the tuple.
+            unsafe { row.add(index).write(field(span)) };
+        }
+        rows.values.push(row as usize);
+    }
+    crate::ObjectOwner::into_raw(rows.into_object())
+}
+
+/// Collect the compulsory fields of an unambiguous concatenation.
+///
+/// # Safety
+/// The compiler supplies the capture program and a static tuple descriptor
+/// with the matching field kinds. The caller roots the indicated subject.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_rows(
+    value: *const std::ffi::c_void,
+    program: *const u8,
+    len: usize,
+    layout: *const super::records::RecordDescriptor,
+    bytes: u32,
+) -> *const Object {
+    // SAFETY: these pointers and lengths come from immutable compiler metadata.
+    let (program, layout) = unsafe { (std::slice::from_raw_parts(program, len), &*layout) };
+    if bytes != 0 {
+        // SAFETY: the bytes flag identifies a rooted bytes owner.
+        let source =
+            unsafe { std::mem::ManuallyDrop::new(crate::BytesOwner::from_raw(value.cast())) };
+        collect_rows(&source, program, layout, |span| {
+            crate::BytesOwner::into_raw(super::bytes::copied_bytes(&source[span])) as usize
+        })
+    } else {
+        // SAFETY: the clear flag identifies a rooted string owner.
+        let source = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value.cast())) };
+        collect_rows(source.as_bytes(), program, layout, |span| {
+            StrOwner::into_raw(super::text::owned_string(&source[span])) as usize
+        })
+    }
+}
+
+/// Search the ordered literal payload for the next leftmost, nonempty match.
+fn literal_ranges<'a>(
+    text: &'a [u8],
+    program: &'a [u8],
+) -> impl Iterator<Item = std::ops::Range<usize>> + 'a {
+    let (heads, rest) = program.split_at(4);
+    let (offsets, entries) = rest.split_at(257 * 2);
+    let (offsets, _) = offsets.as_chunks::<2>();
+    let mut at = 0;
+    std::iter::from_fn(move || {
+        loop {
+            let tail = &text[at..];
+            at += match heads[0] {
+                1 => memchr::memchr(heads[1], tail),
+                2 => memchr::memchr2(heads[1], heads[2], tail),
+                3 => memchr::memchr3(heads[1], heads[2], heads[3], tail),
+                _ => tail
+                    .iter()
+                    .position(|&b| offsets[usize::from(b)] != offsets[usize::from(b) + 1]),
+            }?;
+            let group = usize::from(text[at]);
+            let start = usize::from(u16::from_le_bytes(offsets[group]));
+            let end = usize::from(u16::from_le_bytes(offsets[group + 1]));
+            let mut candidates = &entries[start..end];
+            while let Some((&len, rest)) = candidates.split_first() {
+                let (literal, next) = rest.split_at(usize::from(len));
+                if text[at..].starts_with(literal) {
+                    let start = at;
+                    at += literal.len();
+                    return Some(start..at);
+                }
+                candidates = next;
+            }
+            at += 1;
+        }
+    })
+}
+
+/// Collect matches of complete ordered literals or the fields between matches.
+///
+/// # Safety
+/// The compiler supplies the complete immutable literal program. The caller
+/// roots a bytes owner when bit one of `flags` is set, otherwise a string owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_literals(
+    value: *const std::ffi::c_void,
+    program: *const u8,
+    len: usize,
+    flags: u32,
+) -> *const Object {
+    // SAFETY: the compiler supplies the matching constant address and length.
+    let program = unsafe { std::slice::from_raw_parts(program, len) };
+    let split = flags & 1 != 0;
+    if flags & 2 != 0 {
+        // SAFETY: the bytes flag identifies a rooted bytes owner.
+        let source =
+            unsafe { std::mem::ManuallyDrop::new(crate::BytesOwner::from_raw(value.cast())) };
+        collect_byte_fields(&source, split, literal_ranges(&source, program))
+    } else {
+        // SAFETY: a clear bytes flag identifies a rooted string owner.
+        let source = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value.cast())) };
+        collect_runs(
+            source.len(),
+            3,
+            split,
+            literal_ranges(source.as_bytes(), program),
+            |parts, span| {
+                super::text::push_part(parts, &source, &source[span]);
+            },
+        )
+    }
+}
+
+/// Collect a greedy Unicode class using sorted membership change points.
+///
+/// # Safety
+/// The caller roots the subject and supplies the complete immutable program
+/// from imre_regex::run_class, including its first 256 byte entries.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_unicode_runs(
+    value: *const Str,
+    class: *const u8,
+    len: usize,
+    split: u32,
+) -> *const Object {
+    // SAFETY: the caller owns the subject and the compiler supplies the program length.
+    let (source, class) = unsafe {
+        (
+            std::mem::ManuallyDrop::new(StrOwner::from_raw(value)),
+            std::slice::from_raw_parts(class, len),
+        )
+    };
+    let (members, ranges) = class.split_at(256);
+    let (bounds, _) = ranges.as_chunks::<4>();
+    let member = |ch: char| {
+        if ch.is_ascii() {
+            members[ch as usize] != 0
+        } else {
+            bounds.partition_point(|bound| u32::from_le_bytes(*bound) <= ch as u32) % 2 == 1
+        }
+    };
+    let mut chars = source.char_indices();
+    let runs = std::iter::from_fn(|| {
+        let (start, _) = chars.find(|&(_, ch)| member(ch))?;
+        let end = chars
+            .find(|&(_, ch)| !member(ch))
+            .map_or(source.len(), |(i, _)| i);
+        Some(start..end)
+    });
+    collect_runs(source.len(), 3, split != 0, runs, |parts, span| {
+        super::text::push_part(parts, &source, &source[span]);
+    })
+}
+
 /// Return the original Python spelling even when the native engine expanded an escape.
 ///
 /// # Safety

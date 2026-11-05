@@ -182,18 +182,16 @@ impl State {
     pub(super) fn digest(&self, method: &str, length: Option<&Int>) -> Result<Value> {
         let hex = method == "hexdigest";
         Ok(match (self, length) {
-            (Self::Portable(hash), Some(length)) if hex => {
-                Value::Str(hash.xof_hexdigest(length)?.to_string())
-            }
+            (Self::Portable(hash), Some(length)) if hex => Value::Str(hash.xof_hexdigest(length)?),
             (Self::Portable(hash), Some(length)) => Value::Bytes(hash.xof_digest(length)?),
-            (Self::Portable(hash), None) if hex => Value::Str(hash.hexdigest()?.to_string()),
+            (Self::Portable(hash), None) if hex => Value::Str(hash.hexdigest()?),
             (Self::Portable(hash), None) => {
                 Value::Bytes(hash.fixed_digest(method, |bytes| Ok(bytes.to_vec()))?)
             }
             (Self::OpenSsl(hash), None) => {
                 let bytes = hash.digest()?;
                 if hex {
-                    Value::Str(hash_hex(&bytes)?.to_string())
+                    Value::Str(hash_hex(&bytes)?)
                 } else {
                     Value::Bytes(bytes)
                 }

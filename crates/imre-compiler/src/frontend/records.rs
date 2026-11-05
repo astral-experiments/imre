@@ -1005,7 +1005,7 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(receiver, value))
     }
 
-    /// Route inherited unittest operations to the object runtime when a typed class lacks the member.
+    /// Route members supplied by the object runtime when the typed class lacks them.
     pub(super) fn missing_class_member(
         &self,
         class: usize,
@@ -1013,6 +1013,9 @@ impl Checker<'_> {
         node: &impl Ranged,
         diagnostic: &str,
     ) -> String {
+        if name == "quantize" && self.decimal_class(class) {
+            return self.scoped_builtin_error("Decimal.quantize", node);
+        }
         if matches!(
             name,
             "addTypeEqualityFunc"
@@ -1055,6 +1058,9 @@ impl Checker<'_> {
                 attribute,
                 "private native mock operations cannot be accessed directly",
             ));
+        }
+        if attribute.attr.as_str() == "__module__" && self.fraction_class(class) {
+            return Ok(self.evaluated_receiver(receiver, unpacking::string("fractions")));
         }
         if attribute.attr.as_str() == "__float__" && self.decimal_class(class) {
             return Err(self.scoped_builtin_error("Decimal.__float__", attribute));
@@ -1428,6 +1434,9 @@ impl Checker<'_> {
         ty: Type,
         at: &ast::Expr,
     ) -> Result<Expr, String> {
+        if self.fraction_class(class) {
+            return Err(self.object_builtin_error("Fraction constructor callback", at));
+        }
         let declared = &self.classes.declarations.definitions[class];
         if (class != base && !declared.bases.contains(&base))
             || !declared.abstract_methods.is_empty()
@@ -1578,6 +1587,11 @@ impl Checker<'_> {
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
         self.check_unittest_class_fixtures(call, class)?;
+        if self.fraction_class(class)
+            && !self.graph.modules[self.module].is_bundled(crate::modules::FRACTION_CLASS)
+        {
+            return self.fraction_constructor(call, class);
+        }
         if self.decimal_class(class) {
             return self.decimal_constructor(call, class);
         }

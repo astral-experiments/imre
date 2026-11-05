@@ -22,6 +22,7 @@ mod asyncio;
 mod byte_outputs;
 mod calendar;
 mod callables;
+mod character_filters;
 mod conditionals;
 mod contextvars;
 mod int_buffers;
@@ -2226,7 +2227,18 @@ impl Emitter<'_, '_> {
             self.line(format!("%pair_view{slot} = alloca {{ ptr, i64 }}"));
         }
         let mut field_masks = vec![0_u8; self.locals.len()];
+        let mut text_fields = vec![0_u8; self.locals.len()];
         ir::walk_statements(&function.body, &mut |stmt| {
+            if let Statement::Assign(
+                slot,
+                Expr {
+                    kind: ExprKind::Builtin(Builtin::SplitTextSource(count), _),
+                    ..
+                },
+            ) = stmt
+            {
+                text_fields[*slot] = *count;
+            }
             if let Statement::Assign(
                 slot,
                 Expr {
@@ -2243,6 +2255,14 @@ impl Emitter<'_, '_> {
                 self.line(format!(
                     "%split_fields{slot} = alloca [{} x i64]",
                     8 - mask.leading_zeros()
+                ));
+            }
+        }
+        for (slot, fields) in text_fields.into_iter().enumerate() {
+            if fields != 0 {
+                self.line(format!(
+                    "%text_fields{slot} = alloca [{} x i64]",
+                    1 + fields * 2
                 ));
             }
         }
@@ -2592,6 +2612,13 @@ impl Emitter<'_, '_> {
                 if let ExprKind::Builtin(Builtin::SplitIntSource(mask), args) = &expression.kind {
                     let value = self.expr(&args[0]);
                     self.line(format!("call void @imre_str_prepare_int_fields(ptr {}, ptr %split_fields{slot}, i32 {mask})", value.operand));
+                    self.store(*slot, &value);
+                    return;
+                }
+                if let ExprKind::Builtin(Builtin::SplitTextSource(fields), args) = &expression.kind
+                {
+                    let value = self.expr(&args[0]);
+                    self.line(format!("call void @imre_str_field_spans(ptr {}, ptr %text_fields{slot}, i32 {fields})", value.operand));
                     self.store(*slot, &value);
                     return;
                 }
@@ -5285,6 +5312,77 @@ impl Emitter<'_, '_> {
                     self.call(name, returns, &values)
                 }
             }
+            Builtin::RegexRunCount { members, split } => {
+                let mut matching = members
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, member)| **member != 0);
+                let singleton = match (matching.next(), matching.next()) {
+                    (Some((byte, _)), None) => byte as i32,
+                    _ => -1,
+                };
+                let table = self.byte_array(members.clone());
+                self.output.local_helper(
+                    "count_ascii_regex_runs",
+                    include_str!("llvm/count_ascii_regex_runs.ll"),
+                );
+                let subject = &args[0].value.operand;
+                let operand = self.checked_instruction(format!(
+                    "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split})"
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::RegexCollect { program, split } => {
+                let text = &args[0].value.operand;
+                let bytes = args[0].value.ty == Type::Bytes;
+                let split = u32::from(*split);
+                let call = match program {
+                    imre_regex::Collection::Rows { program, .. } => {
+                        let row = self.module.types.element(returns).unwrap();
+                        let layout = self.output.record_layout(row);
+                        let name = self.byte_array(program.clone());
+                        format!(
+                            "call ptr @imre_regex_collect_rows(ptr {text}, ptr @{name}, i64 {}, ptr @{layout}, i32 {})",
+                            program.len(),
+                            u32::from(bytes)
+                        )
+                    }
+                    imre_regex::Collection::Literals(program) => {
+                        let name = self.byte_array(program.clone());
+                        let flags = split | (u32::from(bytes) << 1);
+                        format!(
+                            "call ptr @imre_regex_collect_literals(ptr {text}, ptr @{name}, i64 {}, i32 {flags})",
+                            program.len()
+                        )
+                    }
+                    imre_regex::Collection::Runs(members) => {
+                        let name = self.byte_array(members.clone());
+                        if members.len() == 256 {
+                            let collect = if bytes {
+                                "imre_regex_collect_bytes_runs"
+                            } else {
+                                "imre_regex_collect_runs"
+                            };
+                            format!("call ptr @{collect}(ptr {text}, ptr @{name}, i32 {split})")
+                        } else {
+                            format!(
+                                "call ptr @imre_regex_collect_unicode_runs(ptr {text}, ptr @{name}, i64 {}, i32 {split})",
+                                members.len()
+                            )
+                        }
+                    }
+                };
+                let operand = self.checked_instruction(call);
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::RegexSub(template) => {
                 let name = self.byte_array(template.clone());
                 let operand = self.checked_instruction(format!(
@@ -5663,6 +5761,13 @@ impl Emitter<'_, '_> {
             }
             Builtin::HashStr => self.call("imre_string_hash", returns, &[&args[0].value]),
             Builtin::HashBytes => self.call("imre_bytes_hash", returns, &[&args[0].value]),
+            Builtin::FractionHash(numerator, denominator) => {
+                let [n, d] = [numerator, denominator].map(|index| {
+                    let pointer = self.field_pointer(&args[0].value, *index);
+                    self.field_value(&pointer, Type::Int)
+                });
+                self.call("imre_fraction_hash", Type::Int, &[&n, &d])
+            }
             Builtin::HashRecord => Value {
                 ty: Type::Int,
                 operand: self.checked_instruction(format!(
@@ -7448,6 +7553,31 @@ impl Emitter<'_, '_> {
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
+            Builtin::FloatAcos => self.call("imre_float_acos", Type::Float, &[&args[0].value]),
+            Builtin::FloatLog2 => Value {
+                ty: Type::Float,
+                operand: self.instruction(format!(
+                    "call double @llvm.log2.f64(double {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::FloatIsInteger => {
+                let value = &args[0].value.operand;
+                let truncated =
+                    self.instruction(format!("call double @llvm.trunc.f64(double {value})"));
+                let whole = self.instruction(format!("fcmp oeq double {value}, {truncated}"));
+                // Infinities also compare equal to their truncation.
+                let magnitude =
+                    self.instruction(format!("call double @llvm.fabs.f64(double {value})"));
+                let finite =
+                    self.instruction(format!("fcmp olt double {magnitude}, 0x7FF0000000000000"));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("and i1 {finite}, {whole}")),
+                    small_integer: false,
+                }
+            }
             Builtin::IntSignAsFloat => {
                 let order = self.instruction(format!(
                     "call i32 @compare_int(i64 {}, i64 {})",
@@ -7594,6 +7724,25 @@ impl Emitter<'_, '_> {
                 self.retain(&value);
                 value
             }
+            Builtin::CollectIntCursor => Value {
+                ty: Type::ListInt,
+                operand: self.checked_pointer(format!(
+                    "call ptr @imre_collect_int_cursor(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::ListAccumulate => {
+                let start = args.get(1).map_or("0", |arg| arg.value.operand.as_str());
+                Value {
+                    ty: Type::ListInt,
+                    operand: self.checked_pointer(format!(
+                        "call ptr @imre_list_accumulate(ptr {}, i64 {start})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::ListSum => self.call(
                 "imre_list_sum",
                 Type::Int,
@@ -7621,7 +7770,11 @@ impl Emitter<'_, '_> {
                     let mut index = args[1].value.clone();
                     index.small_integer = true;
                     let index = self.index_word(&index, true);
-                    self.proven_list_word(slot, &args[0].value, &index)
+                    if let Some((_, data)) = self.guarded_list_buffer(&expressions[0]) {
+                        self.load_list_word(&data, &index)
+                    } else {
+                        self.proven_list_word(slot, &args[0].value, &index)
+                    }
                 } else if matches!(builtin, Builtin::ListGetI32)
                     && self.nonnegative_index(&expressions[1])
                     && let Some(word) =
@@ -7922,6 +8075,22 @@ impl Emitter<'_, '_> {
                 Value {
                     ty: returns,
                     operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::AccumulateCursor => {
+                let source = &args[0].value;
+                let mode = iterable_mode(source.ty);
+                let word = self.word(source);
+                let (kind, initial) = args.get(1).map_or((0, "0".to_owned()), |arg| {
+                    (
+                        representation_kind(arg.value.ty, &self.module.types),
+                        self.word(&arg.value),
+                    )
+                });
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("call ptr @imre_accumulate_cursor(i32 {mode}, i64 {word}, i32 {kind}, i64 {initial})")),
                     small_integer: false,
                 }
             }
@@ -8579,14 +8748,17 @@ impl Emitter<'_, '_> {
             }
             Builtin::SetCasePrefixPossible(prefix) => {
                 let text = &args[1].value.operand;
-                let rejected = self.instruction(match prefix {
-                    ir::SetCasePrefix::ExcludedBytes([lower, upper]) => format!(
+                let rejected = match prefix {
+                    ir::SetCasePrefix::ExcludedBytes([lower, upper]) => self.instruction(format!(
                         "call i32 @imre_str_affix_ascii(ptr {text}, i64 {lower}, i64 {upper}, i32 0)"
-                    ),
-                    ir::SetCasePrefix::ThreeByteHashes(mask) => format!(
+                    )),
+                    ir::SetCasePrefix::ThreeByteHashes(mask) => self.instruction(format!(
                         "call i32 @imre_str_excludes_ascii_prefix3(ptr {text}, i64 {mask})"
-                    ),
-                });
+                    )),
+                    ir::SetCasePrefix::ThreeByteValues { mask, tags } => {
+                        self.excluded_literal_prefix(text, *mask, tags)
+                    }
+                };
                 let possible = self.instruction(format!("icmp eq i32 {rejected}, 0"));
                 // A module initializer can call a function before the set is bound.
                 let unbound =
@@ -8743,7 +8915,7 @@ impl Emitter<'_, '_> {
                     && matches!(args[0].value.ty, Type::List(_))
                     && matches!(
                         args[1].value.ty,
-                        Type::Tuple(_) | Type::List(_) | Type::ListInt
+                        Type::Tuple(_) | Type::List(_) | Type::ListInt | Type::Calendar(_)
                     )
                 {
                     let item = &args[1].value;
@@ -8788,8 +8960,25 @@ impl Emitter<'_, '_> {
                     self.unpack_word(word, returns)
                 }
             }
-            Builtin::SplitIntSource(_) => {
+            Builtin::SplitTextSource(_) | Builtin::SplitIntSource(_) => {
                 return self.own_operand(args.into_iter().next().unwrap());
+            }
+            Builtin::SplitTextLen | Builtin::SplitTextField(_) => {
+                let ExprKind::Local(slot) = expressions[0].kind else {
+                    unreachable!()
+                };
+                match builtin {
+                    Builtin::SplitTextField(index) => Value {
+                        ty: Type::Str,
+                        operand: self.checked_pointer(format!("call ptr @imre_str_field_at(ptr {}, ptr %text_fields{slot}, i32 {index})", args[0].value.operand)),
+                        small_integer: false,
+                    },
+                    _ => Value {
+                        ty: Type::Int,
+                        operand: self.instruction(format!("load i64, ptr %text_fields{slot}")),
+                        small_integer: true,
+                    },
+                }
             }
             Builtin::SplitIntCached(index) => {
                 let ExprKind::Local(slot) = expressions[0].kind else {
@@ -8875,13 +9064,15 @@ impl Emitter<'_, '_> {
                 let keys = &args[1].value.operand;
                 let call = format!("call ptr @{symbol}(ptr {text}, ptr {keys}, i32 {below})");
                 let operand = if optional && let Some(table) = filter.ascii_table() {
+                    let matcher =
+                        character_filters::vector_matcher(self.output, &table, self.strings.len());
                     let table = self.byte_array(table);
                     self.output.local_helper(
                         "text_has_table_byte",
                         include_str!("llvm/text_has_table_byte.ll"),
                     );
                     let hit = self.instruction(format!(
-                        "call i1 @text_has_table_byte(ptr {text}, ptr @{table})"
+                        "call i1 @text_has_table_byte(ptr {text}, ptr @{table}, ptr {matcher})"
                     ));
                     let unbound = self.instruction(format!("icmp eq ptr {keys}, null"));
                     let collect = self.instruction(format!("or i1 {hit}, {unbound}"));
@@ -9984,6 +10175,7 @@ declare i64 @imre_string_hash(ptr)
 declare i64 @imre_bytes_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
+declare i64 @imre_fraction_hash(i64, i64)
 declare ptr @imre_subprocess_shell_output(ptr, i32, i64, i64, ptr)
 declare ptr @imre_popen_config(ptr)
 declare i64 @imre_call_config(ptr, i32, i64, i1 zeroext)
@@ -10192,6 +10384,7 @@ declare ptr @imre_float_str(double)
 declare void @imre_print_float(double)
 declare i64 @imre_int_bit_length(i64)
 declare double @imre_int_float(i64)
+declare double @imre_float_acos(double)
 declare i64 @imre_float_int(double)
 declare double @imre_float_parse(ptr)
 declare double @imre_bytes_float(ptr)
@@ -10526,7 +10719,7 @@ declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
 declare i64 @imre_struct_sparse_indexed_count(ptr, ptr, i64, i64, i64, i64) nounwind
 declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
-declare ptr @imre_struct_row(ptr, i64) nounwind
+declare ptr @imre_struct_row(ptr, i64) nounwind willreturn memory(read)
 declare ptr @imre_struct_row_checked(ptr, i64)
 declare i32 @imre_struct_append(ptr, ptr, ptr)
 declare i32 @imre_struct_list_contains(ptr, ptr) nounwind
@@ -10651,6 +10844,8 @@ declare ptr @imre_str_append_literal_owned(ptr, ptr, ptr, i64)
 declare i32 @imre_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @imre_int_str_part_into(i64, ptr, ptr)
 declare ptr @imre_str_split_whitespace(ptr)
+declare void @imre_str_field_spans(ptr, ptr, i32)
+declare ptr @imre_str_field_at(ptr, ptr, i32)
 declare i64 @imre_str_split_int_field(ptr, i32)
 declare void @imre_str_prepare_int_fields(ptr, ptr, i32) nounwind
 declare ptr @imre_str_split(ptr, ptr, i64, i32)
@@ -10723,6 +10918,7 @@ declare ptr @imre_popen_selector_class(i32)
 declare void @imre_popen_set_selector(ptr)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
+declare double @llvm.log2.f64(double)
 declare double @llvm.fabs.f64(double)
 declare double @llvm.copysign.f64(double, double)
 declare double @llvm.trunc.f64(double)
@@ -10837,11 +11033,17 @@ declare ptr @imre_patch_hunk_text(ptr)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_search_text(ptr, ptr, i1, i1)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
+declare ptr @imre_regex_collect_runs(ptr, ptr, i32)
+declare ptr @imre_regex_collect_bytes_runs(ptr, ptr, i32)
+declare ptr @imre_regex_collect_literals(ptr, ptr, i64, i32)
+declare ptr @imre_regex_collect_rows(ptr, ptr, i64, ptr, i32)
+declare ptr @imre_regex_collect_unicode_runs(ptr, ptr, i64, i32)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
 declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)
 declare ptr @imre_calendar_datetime(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare ptr @imre_calendar_date(i64, i64, i64)
+declare ptr @imre_datetime_fromisoformat(ptr)
 declare ptr @imre_calendar_combine(ptr, ptr, i64)
 declare ptr @imre_calendar_replace(ptr, i64, i64, i64, i64, i64, i64, i64, i64, i64, i1)
 declare ptr @imre_calendar_astimezone(ptr, ptr)
@@ -11001,6 +11203,7 @@ declare ptr @imre_tuple_buffer_new()
 declare i32 @imre_tuple_buffer_push(ptr, i32, i64)
 declare ptr @imre_tuple_buffer_finish(ptr)
 declare ptr @imre_cycle(i32, i64)
+declare ptr @imre_accumulate_cursor(i32, i64, i32, i64)
 declare ptr @imre_iterable_tuple(i32, i64)
 declare ptr @imre_combinatorial(i32, i64, ptr, ptr, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
@@ -11053,6 +11256,8 @@ declare i64 @imre_int_pow(i64, i64)
 declare double @imre_int_negative_pow(i64, i64)
 declare i64 @imre_int_modpow(i64, i64, i64)
 declare ptr @imre_list_new()
+declare ptr @imre_list_accumulate(ptr, i64)
+declare ptr @imre_collect_int_cursor(ptr)
 declare i64 @imre_list_sum(ptr, i64)
 declare i64 @imre_list_slice_sum(ptr, i64, i64, i64)
 declare i32 @imre_list_all_i32(ptr, i64, i64, i64)
@@ -11652,6 +11857,25 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn temporary_split_fields_can_use_the_original_text() {
+        let body = function_body(
+            "def field(s: str) -> str:\n    fields = s.split()\n    if len(fields) != 2:\n        raise ValueError('two fields required')\n    return fields[1]\n",
+        );
+        assert!(body.contains("@imre_str_field_spans("), "{body}");
+        assert!(body.contains("@imre_str_field_at("), "{body}");
+        assert!(!body.contains("@imre_str_split_whitespace("), "{body}");
+
+        for source in [
+            "def repeated(s: str) -> str:\n    fields = s.split()\n    return fields[0] + fields[0]\n",
+            "def escaped(s: str) -> list[str]:\n    fields = s.split()\n    return fields\n",
+            "def looped(s: str, n: int) -> str:\n    fields = s.split()\n    first = ''\n    for i in range(n):\n        first = fields[0]\n    return first\n",
+        ] {
+            let body = function_body(source);
+            assert!(!body.contains("@imre_str_field_spans("), "{body}");
+        }
     }
 
     #[test]

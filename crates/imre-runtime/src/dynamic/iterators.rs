@@ -141,7 +141,7 @@ impl Context {
             return error;
         }
         let cause = self.raised_instance(error);
-        let message = if self.code_object(code).coroutine {
+        let message = if self.code_object(code).is_coroutine() {
             "coroutine raised StopIteration"
         } else {
             "generator raised StopIteration"

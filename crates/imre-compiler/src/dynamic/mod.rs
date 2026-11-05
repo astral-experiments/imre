@@ -358,7 +358,7 @@ impl<'a> Visitor<'a> for Imports {
             self.add(0, "importlib");
             if matches!(
                 name.value.to_str().split('.').next(),
-                Some("pyexpat" | "xml" | "zoneinfo")
+                Some("decimal" | "_pydecimal" | "pyexpat" | "time" | "xml" | "zoneinfo")
             ) {
                 self.add(0, name.value.to_str());
             }
@@ -760,16 +760,33 @@ pub(crate) fn compile<const SPLIT: bool>(
     } else if !safe_path {
         initial.push(root);
     }
-    initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
-    let installed_layout = options
-        .system_site
-        .as_ref()
-        .is_some_and(|p| !initial.contains(p));
-    let site = options.implicit_site().filter(|_| installed_layout);
+    // site removes duplicate startup paths before Python prepends path[0].
+    let path0_len = initial.len();
+    let dedup = startup.is_some_and(|(flags, _)| !flags.no_site);
+    let mut seen = HashSet::new();
+    initial.extend(
+        options
+            .extension_paths
+            .iter()
+            .map(|p| cwd.join(p))
+            .filter(|p| !dedup || seen.insert(p.clone())),
+    );
+    let startup_paths = &initial[path0_len..];
+    let installed_layout = options.site_dirs.iter().any(|p| !startup_paths.contains(p));
+    let sites: Vec<_> = options
+        .implicit_sites()
+        .iter()
+        .filter(|p| !startup_paths.contains(p))
+        .cloned()
+        .collect();
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
-    let implicit_site = site.filter(|p| !roots.contains(p));
-    roots.extend(implicit_site.cloned());
+    let implicit_sites: Vec<_> = sites
+        .iter()
+        .filter(|p| !roots.contains(p))
+        .cloned()
+        .collect();
+    roots.extend(implicit_sites.iter().cloned());
     // Discover each search directory once even when it appears twice in sys.path.
     let mut seen_roots = HashSet::new();
     roots.retain(|root| seen_roots.insert(root.clone()));
@@ -784,10 +801,10 @@ pub(crate) fn compile<const SPLIT: bool>(
         .map(|(_, path)| cwd.join(path))
         .chain((options.path_entry && !entry.is_dir()).then(|| entry.clone()))
     {
-        archives.insert(
-            path.clone(),
-            crate::zip_entry::ZipSources::open(&path, &mut inputs)?,
-        );
+        if let std::collections::hash_map::Entry::Vacant(entry) = archives.entry(path) {
+            let archive = crate::zip_entry::ZipSources::open(entry.key(), &mut inputs)?;
+            entry.insert(archive);
+        }
     }
     let mut sources = vec![(
         "__main__".to_owned(),
@@ -815,6 +832,7 @@ pub(crate) fn compile<const SPLIT: bool>(
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
     let mut computed_import = registered_imports.computed;
+    let mut source_only_provider = None;
     let mut bundled_only = false;
     let mut getters = VecDeque::new();
     let mut bundled_imports = VecDeque::new();
@@ -841,6 +859,14 @@ pub(crate) fn compile<const SPLIT: bool>(
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
+            // A runtime-selected decimal module in a standalone binary needs its private provider.
+            if startup.is_none() && computed_import && !seen.contains("decimal") {
+                // Carry its source for relocation, but leave compilation until the name is chosen.
+                if !seen.contains("_pydecimal") {
+                    source_only_provider = Some("_pydecimal");
+                }
+                imports.add(0, "decimal");
+            }
             if computed_import && !seen.contains("zoneinfo") {
                 imports.names.push((0, "zoneinfo".to_owned()));
             }
@@ -850,6 +876,9 @@ pub(crate) fn compile<const SPLIT: bool>(
             }
             // Late imports can select children of a bundled package without naming them in source.
             if uses_exec || uses_import_builtin || seen.contains("importlib") {
+                if !seen.contains("lzma") {
+                    imports.add(0, "lzma");
+                }
                 for (parent, child) in [
                     ("email", "email._header_value_parser"),
                     ("logging", "logging.config"),
@@ -882,8 +911,16 @@ pub(crate) fn compile<const SPLIT: bool>(
                     }
                 }
             }
-            // The native time.strptime classmethod imports its Python parser on first use.
-            if seen.contains("_datetime") && !seen.contains("_strptime") {
+            // The runtime's site module calls os.path even when the entry never imports it.
+            if (options.user_site_pth.is_some() || seen.contains("site"))
+                && !seen.contains("posixpath")
+            {
+                imports.add(0, "posixpath");
+            }
+            // Native time and datetime parsers import their Python helper on first use.
+            if (seen.contains("time") || seen.contains("_datetime") || computed_import)
+                && !seen.contains("_strptime")
+            {
                 imports.names.push((0, "_strptime".to_owned()));
             }
             // Python 3.13 path pickles name this module even when the reader never imports pathlib.
@@ -943,6 +980,17 @@ pub(crate) fn compile<const SPLIT: bool>(
         {
             names.push((0, "_collections_abc".to_owned()));
         }
+        // Random.sample needs bisect when sampling with counts. A computed
+        // import can select random without mentioning it in a module name.
+        if imports.uses_import_builtin
+            || imports.computed_import
+            || imports.uses_exec
+            || names
+                .iter()
+                .any(|(level, name)| *level == 0 && name == "random")
+        {
+            names.push((0, "bisect".to_owned()));
+        }
         // The native string scanner imports the decoder's exception on a syntax error.
         if names
             .iter()
@@ -980,13 +1028,13 @@ pub(crate) fn compile<const SPLIT: bool>(
                 if prefix == "_imp" && !frozen_imports.names.is_empty() {
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
-                let bundled = bundled_module_source(&prefix);
+                let bundled = bundled_module_source(&prefix, startup.is_none());
                 let mut installed = if bundled.is_none() {
                     crate::zip_entry::installed_member(&prefix)
                 } else {
                     None
                 };
-                if implicit_site.is_some()
+                if !implicit_sites.is_empty()
                     && (bundled.is_some()
                         || installed.is_some()
                         || imre_ast::providers::provider(&prefix).is_some()
@@ -1031,7 +1079,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                     continue;
                 }
                 for root in roots.iter().filter(|_| !bundled_only) {
-                    if implicit_site == Some(root) && before_site.contains(&prefix) {
+                    if implicit_sites.contains(root) && before_site.contains(&prefix) {
                         continue;
                     }
                     if let Some((parent, _)) = prefix.rsplit_once('.')
@@ -1059,7 +1107,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                             {
                                 work.push_back((prefix.clone(), package, imports));
                             }
-                            if implicit_site.is_some() {
+                            if !implicit_sites.is_empty() {
                                 before_site.insert(prefix.clone());
                             }
                             entry_sources.insert(prefix.clone(), (root.clone(), package));
@@ -1091,7 +1139,7 @@ pub(crate) fn compile<const SPLIT: bool>(
                         }
                         continue;
                     };
-                    if implicit_site.is_some() && implicit_site != Some(root) {
+                    if !implicit_sites.is_empty() && !implicit_sites.contains(root) {
                         before_site.insert(prefix.clone());
                     }
                     // A late command import can use the runtime's builtins and bundled
@@ -1198,13 +1246,27 @@ pub(crate) fn compile<const SPLIT: bool>(
         .filter(|_| installed_layout)
         .map(|(_, executable)| Path::new(executable).join(bundled_root));
     initial.extend(bundle_entry.iter().cloned());
-    initial.extend(site.cloned());
+    let mut after_user_site = Vec::new();
+    if let Some(user) = &options.user_site_pth
+        && let Some(i) = options.site_dirs.iter().position(|p| p == user)
+    {
+        // A user's .pth files run before the following prefix site is visible.
+        for site in sites {
+            if options.site_dirs[i + 1..].contains(&site) {
+                after_user_site.push(site);
+            } else {
+                initial.push(site);
+            }
+        }
+    } else {
+        initial.extend(sites);
+    }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
-        "sitecustomize":options.sitecustomize,"path0":options.path_entry || !safe_path,
+        "sitecustomize":options.sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":options.path_entry || !safe_path,
         "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
@@ -1242,6 +1304,7 @@ pub(crate) fn compile<const SPLIT: bool>(
         Path::new(bundled_root),
         &providers,
         SPLIT,
+        source_only_provider,
     )?;
     inputs.boxed_imports = true;
     Ok(Some(UnitCompilation {
@@ -1327,8 +1390,14 @@ const RUNTIME_PROVIDERS: &[&str] = &[
 ];
 
 /// Return the effective source used for a discovered bundled module on this target.
-fn bundled_module_source(name: &str) -> Option<(&'static str, std::borrow::Cow<'static, str>)> {
-    let (file, source) = if name == "dataclasses" {
+fn bundled_module_source(
+    name: &str,
+    standalone: bool,
+) -> Option<(&'static str, std::borrow::Cow<'static, str>)> {
+    let (file, source) = if standalone && name == "_pydecimal" {
+        // Standalone executables can run without the Python launcher's installed stdlib ZIP.
+        ("_pydecimal.py", include_str!("../../stdlib/_pydecimal.py"))
+    } else if name == "dataclasses" {
         (
             "dataclasses.py",
             concat!(

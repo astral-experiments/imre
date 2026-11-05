@@ -1,5 +1,5 @@
 NAMES = {"ABC", "SSS", "abc", "ÉTA"}
-LONG_NAMES = {"ABC", "SNAP", "SSS", "NUL"}
+LONG_NAMES = {"ABC", "SNAP", "SSS", "NUL", "[AB"}
 MUTABLE = {"abc"}
 WITH_EMPTY = {"", "abc"}
 
@@ -32,7 +32,7 @@ def main() -> None:
         print(first_name(text))
         print(lower_name(text))
         print(empty_name(text))
-    for text in ("AbC.tail", "cba", "ſnap", "ßs", "aß", "", "ab", "NUL .tail", "xxx", "é"):
+    for text in ("AbC.tail", "cba", "ſnap", "ßs", "aß", "", "ab", "NUL .tail", "xxx", "é", "[ab.tail", "{ab.tail", "abé"):
         print(long_name(text))
     alias = MUTABLE
     print(mutable_name("xyz.suffix"))

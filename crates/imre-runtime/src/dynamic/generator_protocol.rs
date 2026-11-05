@@ -383,7 +383,7 @@ impl Context {
             ));
         };
         if running {
-            let message = if self.code_object(code).coroutine {
+            let message = if self.code_object(code).is_coroutine() {
                 "coroutine already executing"
             } else {
                 "generator already executing"
@@ -391,7 +391,7 @@ impl Context {
             return Err(Error::new("ValueError", message));
         }
         if offset.is_none() {
-            return if self.code_object(code).coroutine {
+            return if self.code_object(code).is_coroutine() {
                 Err(Error::new(
                     "RuntimeError",
                     "cannot reuse already awaited coroutine",
@@ -443,7 +443,7 @@ impl Context {
             ));
         };
         if running {
-            let message = if self.code_object(code).coroutine {
+            let message = if self.code_object(code).is_coroutine() {
                 "coroutine already executing"
             } else {
                 "generator already executing"
@@ -468,7 +468,7 @@ impl Context {
             Ok(None) => Ok(NONE),
             Ok(Some(_)) => Err(Error::new(
                 "RuntimeError",
-                if self.code_object(code).coroutine {
+                if self.code_object(code).is_coroutine() {
                     "coroutine ignored GeneratorExit"
                 } else {
                     "generator ignored GeneratorExit"

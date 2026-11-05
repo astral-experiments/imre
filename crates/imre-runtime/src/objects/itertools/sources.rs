@@ -24,34 +24,7 @@ impl Sequence {
             let Some(owner) = owner.as_ref() else {
                 return Ok(None);
             };
-            // SAFETY: the constructor roots a list or homogeneous tuple of this exact
-            // kind. Copy or acquire the element before releasing any storage borrow.
-            unsafe {
-                match owner.kind.raw() {
-                    4 => (&*(owner.word as *const List))
-                        .0
-                        .with(|values| values.get(index).map(|n| WordKind::new(2).acquire(n.0))),
-                    5 => object(owner.word as *const Object).0.with(|storage| {
-                        let values = storage.sequence_storage();
-                        if let Some(rows) = values.rows() {
-                            return (index < rows.len())
-                                .then(|| rows.owned_row(index))
-                                .transpose();
-                        }
-                        let values = values.resolved()?;
-                        Ok(values.values.get(index).map(|&v| values.kind.acquire(v)))
-                    })?,
-                    6 => {
-                        let tuple = owner.word as *const usize;
-                        let layout = records::descriptor(tuple);
-                        (index < layout.length).then(|| {
-                            let kind = WordKind::new(*layout.kinds.add(index));
-                            kind.acquire(kind.read_record_field(tuple.add(index)))
-                        })
-                    }
-                    _ => unreachable!(),
-                }
-            }
+            Self::item_at(owner, index)?
         };
         if item.is_some() {
             self.index.set(index + 1);
@@ -59,6 +32,37 @@ impl Sequence {
             self.owner.take();
         }
         Ok(item)
+    }
+
+    pub(super) fn item_at(owner: &OwnedWord, index: usize) -> Result<Option<OwnedWord>, Error> {
+        // SAFETY: the constructor roots a list or homogeneous tuple of this exact
+        // kind. Copy or acquire the element before releasing any storage borrow.
+        Ok(unsafe {
+            match owner.kind.raw() {
+                4 => (&*(owner.word as *const List))
+                    .0
+                    .with(|values| values.get(index).map(|n| WordKind::new(2).acquire(n.0))),
+                5 => object(owner.word as *const Object).0.with(|storage| {
+                    let values = storage.sequence_storage();
+                    if let Some(rows) = values.rows() {
+                        return (index < rows.len())
+                            .then(|| rows.owned_row(index))
+                            .transpose();
+                    }
+                    let values = values.resolved()?;
+                    Ok(values.values.get(index).map(|&v| values.kind.acquire(v)))
+                })?,
+                6 => {
+                    let tuple = owner.word as *const usize;
+                    let layout = records::descriptor(tuple);
+                    (index < layout.length).then(|| {
+                        let kind = WordKind::new(*layout.kinds.add(index));
+                        kind.acquire(kind.read_record_field(tuple.add(index)))
+                    })
+                }
+                _ => unreachable!(),
+            }
+        })
     }
 }
 
@@ -116,6 +120,29 @@ pub(in crate::objects) struct Progression {
 }
 
 impl Progression {
+    /// Collect a nonempty range of tagged integers in a single allocation.
+    pub(super) fn collect_small(&self) -> Option<crate::Result<Vec<Int>>> {
+        let mut current = self.current.borrow_mut();
+        // SAFETY: all three integer owners remain live throughout the calculation.
+        let count = unsafe { crate::small_range_trips(current.0, self.stop.0, self.step.0) }?;
+        let mut values = Vec::new();
+        if values.try_reserve_exact(count).is_err() {
+            return Some(Err(Error::allocation()));
+        }
+        // Every yielded value lies between the tagged endpoints. A tagged word
+        // is 2*n + 1, so clearing the step's tag gives the stride in words.
+        let mut word = current.0;
+        let stride = self.step.0 & !1;
+        values.extend((0..count).map(|_| {
+            let value = Int(word);
+            word = word.wrapping_add(stride);
+            value
+        }));
+        // The successor of the last element may require a heap integer.
+        *current = values.last().unwrap().add(&self.step);
+        Some(Ok(values))
+    }
+
     pub(super) fn remaining(&self) -> Int {
         let stop = &self.stop;
         let current = self.current.borrow();

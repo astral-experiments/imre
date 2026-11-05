@@ -412,14 +412,13 @@ impl Formatter {
 }
 
 fn number(v: &OwnedWord) -> Result<f64> {
-    use num_traits::ToPrimitive;
     match v.kind.raw() {
         7 => Ok(f64::from_bits(v.word as u64)),
-        // SAFETY: a word of kind two is a rooted Python integer.
-        2 => unsafe { Int::borrow(v.word) }
-            .big()
-            .to_f64()
-            .ok_or_else(|| Error::new(Kind::OverflowError, "int too large to convert to float")),
+        2 => {
+            // SAFETY: a word of kind two is a rooted Python integer.
+            let integer = unsafe { Int::borrow(v.word) };
+            crate::floats::int_to_float(&integer)
+        }
         _ => Err(Error::new(Kind::TypeError, "expected a number")),
     }
 }
@@ -482,6 +481,30 @@ fn default_float(
         text.push_str(".0");
     }
     Ok(text)
+}
+
+/// Group fractional digits from the decimal point outwards, leaving any exponent or '%' intact.
+fn group_fraction(text: String, separator: char) -> Result<String> {
+    let Some(point) = text.find('.') else {
+        return Ok(text);
+    };
+    let start = point + 1;
+    let digits = text[start..].bytes().take_while(u8::is_ascii_digit).count();
+    if digits <= 3 {
+        return Ok(text);
+    }
+    let mut grouped = String::new();
+    grouped
+        .try_reserve_exact(text.len() + (digits - 1) / 3)
+        .map_err(|_| Error::allocation())?;
+    let mut previous = 0;
+    for boundary in (start + 3..start + digits).step_by(3) {
+        grouped.push_str(&text[previous..boundary]);
+        grouped.push(separator);
+        previous = boundary;
+    }
+    grouped.push_str(&text[previous..]);
+    Ok(grouped)
 }
 
 /// Group the integer digits from the right. Sign-aware zero padding participates
@@ -552,71 +575,31 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
     if spec.is_empty() {
         return display(value);
     }
-    let mut tail = spec;
-    let mut align = None;
-    let mut fill = ' ';
-    let mut chars = tail.chars();
-    let first = chars.next();
-    let explicit_fill = chars.next().filter(|c| "<^>=".contains(*c));
-    if let Some(second) = explicit_fill {
-        fill = first.unwrap();
-        align = Some(second);
-        tail = chars.as_str();
-    } else if let Some(first) = first.filter(|c| "<^>=".contains(*c)) {
-        align = Some(first);
-        tail = &tail[first.len_utf8()..];
-    }
-    let sign = tail.chars().next().filter(|c| "+ -".contains(*c));
-    if sign.is_some() {
-        tail = &tail[1..];
-    }
+    let string = value.kind.raw() == 3;
+    let prefix = crate::format_grammar::FormatPrefix::parse(
+        spec,
+        if string { '<' } else { '=' },
+        matches!(value.kind.raw(), 2 | 3 | 7),
+    )
+    .map_err(error)?;
+    let mut tail = prefix.tail;
+    let (precision, frac_group) = if string {
+        tail = "s";
+        (prefix.string_precision(Some(spec), "str")?, None)
+    } else {
+        crate::format_grammar::precision(&mut tail).map_err(error)?
+    };
+    let crate::format_grammar::FormatPrefix {
+        fill,
+        align,
+        sign,
+        negative_zero,
+        alternate,
+        width,
+        group,
+        ..
+    } = prefix;
     let float = value.kind.raw() == 7;
-    let negative_zero = (float || value.kind.raw() == 2) && tail.starts_with('z');
-    if negative_zero {
-        tail = &tail[1..];
-    }
-    let alternate = tail.starts_with('#');
-    if alternate {
-        tail = &tail[1..];
-    }
-    if let Some(rest) = tail.strip_prefix('0') {
-        tail = rest;
-        if explicit_fill.is_none() {
-            fill = '0';
-        }
-        if align.is_none() {
-            align = Some(if value.kind.raw() == 3 { '<' } else { '=' });
-        }
-    }
-    let size = tail.bytes().take_while(u8::is_ascii_digit).count();
-    let width = if size == 0 {
-        0
-    } else {
-        tail[..size]
-            .parse::<isize>()
-            .map_err(|_| error("Too many decimal digits in format string"))? as usize
-    };
-    tail = &tail[size..];
-    let group = tail.chars().next().filter(|c| ",_".contains(*c));
-    if let Some(group) = group {
-        tail = &tail[1..];
-        if matches!(
-            (group, tail.as_bytes().first()),
-            (',', Some(b'_')) | ('_', Some(b','))
-        ) {
-            return Err(error("Cannot specify both ',' and '_'."));
-        }
-    }
-    let precision = if let Some(rest) = tail.strip_prefix('.') {
-        let n = rest.bytes().take_while(u8::is_ascii_digit).count();
-        if n == 0 {
-            return Err(error("Format specifier missing precision"));
-        }
-        tail = &rest[n..];
-        Some(&rest[..n])
-    } else {
-        None
-    };
     let numeric = matches!(value.kind.raw(), 1 | 2 | 7);
     let c = match tail {
         "" => {
@@ -636,6 +619,14 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
         }
         _ => return Err(error(format!("Invalid format specifier '{spec}'"))),
     };
+    if c == 'n'
+        && let Some(sep) = frac_group
+    {
+        return Err(error(format!(
+            "Cannot specify '{}' with 'n'.",
+            group.unwrap_or(sep)
+        )));
+    }
     let integer = value.kind.raw() == 2;
     let integer_code = matches!(c, 'b' | 'o' | 'd' | 'x' | 'X' | 'n' | 'c');
     if float {
@@ -700,8 +691,11 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
         sign.map_or(String::new(), |c| c.to_string()),
         if alternate { "#" } else { "" }
     );
+    let places = precision;
     let precision = precision.map(|p| format!(".{p}")).unwrap_or_default();
-    let mut s = if float && (tail.is_empty() || c == '\0') {
+    let mut s = if string {
+        record::percent_text(value, 's', places)?
+    } else if float && (tail.is_empty() || c == '\0') {
         default_float(value, &flags, &precision, alternate)?
     } else if c == '%' {
         let n = number(value)? * 100.0;
@@ -760,6 +754,9 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
                 _ => "",
             },
         );
+    }
+    if let Some(sep) = frac_group {
+        s = group_fraction(s, sep)?;
     }
     let sign_len = usize::from(c != 'c' && s.starts_with(['-', '+', ' ']));
     let prefix_len = if integer && alternate && matches!(c, 'b' | 'o' | 'x' | 'X') {

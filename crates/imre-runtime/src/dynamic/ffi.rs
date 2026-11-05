@@ -476,16 +476,6 @@ impl Context {
                 };
                 self.class(b, c, keywords, op == "parameterized_class")
             }
-            "coroutine_function" => {
-                let Value::Function { code, .. } = *self.heap.get(a) else {
-                    return Err(Error::new("SystemError", "invalid coroutine definition"));
-                };
-                let Value::Code(code) = self.heap.get_mut(code) else {
-                    unreachable!("function code")
-                };
-                code.coroutine = true;
-                Ok(a)
-            }
             "mark_module_annotation" => {
                 self.mark_module_annotation(a, b)?;
                 Ok(NONE)
@@ -708,6 +698,12 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
+    if config["no_site"] != true {
+        // site normally caches this value before the entry can change its environment.
+        config["initial_user_base"] = imre_ast::layout::InterpreterLayout::user_base()
+            .and_then(|base| base.into_os_string().into_string().ok())
+            .into();
+    }
     let ignore_environment = config["ignore_environment"].as_bool().unwrap_or(false)
         || config["isolated"].as_bool().unwrap_or(false);
     if config["faulthandler"].is_null() {
@@ -762,7 +758,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     Box::into_raw(Box::new(new_context(config, args)))
 }
 
-pub(super) fn new_context<S: Into<String>>(
+pub(super) fn new_context<S: Into<crate::Str>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
@@ -773,7 +769,7 @@ pub(super) fn new_context<S: Into<String>>(
     new_context_with_heap(config, args, heap)
 }
 
-pub(super) fn new_context_with_heap<S: Into<String>>(
+pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
     heap: Heap,
@@ -785,8 +781,10 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
+    let interpreter_layout = stdlib::interpreter_layout(&config, &executable);
     let mut ctx = Context {
         heap,
+        interpreter_layout,
         threads: Default::default(),
         workers: Default::default(),
         socket_default_timeout: Default::default(),
@@ -810,6 +808,7 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         suspended_typing_frames: 0,
         token_missing: NONE,
         native_code_objects: HashMap::new(),
+        original_builtins: None,
         source_builtins: None,
         zip_directories: HashMap::new(),
         zip_path_importers: NONE,
@@ -885,6 +884,50 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     // SAFETY: non-null text points to a static source constant with exactly len bytes.
     let bundled_text =
         (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
+    register_source(
+        ctx,
+        name,
+        file,
+        ModuleInitializer::Native(code),
+        bundled_text,
+    );
+}
+
+/// Register a bundled Python module whose loader compiles its source on request.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_bundled_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+) {
+    // SAFETY: the compiler supplies static UTF-8 source and module names.
+    let (ctx, name, file, bytes) = unsafe {
+        (
+            &mut *ctx,
+            cstr(name),
+            cstr(file),
+            std::slice::from_raw_parts(text, len as usize),
+        )
+    };
+    let source = std::str::from_utf8(bytes).expect("compiler-emitted Python is UTF-8");
+    register_source(
+        ctx,
+        name,
+        file,
+        ModuleInitializer::Source(source),
+        Some(bytes),
+    );
+}
+
+fn register_source(
+    ctx: &mut Context,
+    name: &str,
+    file: &str,
+    code: ModuleInitializer,
+    bundled_text: Option<&'static [u8]>,
+) {
     ctx.sources
         .entry(name.to_owned())
         .or_default()
@@ -1116,6 +1159,42 @@ fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> 
     }
 }
 
+/// Construct a fresh sequence using the permanent handles in a linked literal.
+///
+/// # Safety
+/// `ctx` must be live and `data` must contain exactly `len` readable bytes
+/// encoding valid permanent handles as little-endian pairs.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_permanent_sequence(
+    ctx: *mut Context,
+    data: *const u8,
+    len: usize,
+    tuple: bool,
+) -> Id {
+    // SAFETY: generated code supplies a live context and the exact byte length.
+    let (ctx, bytes) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let (handles, rest) = bytes.as_chunks::<2>();
+    debug_assert!(rest.is_empty());
+    let mut items = Vec::new();
+    if items.try_reserve_exact(handles.len()).is_err() {
+        return finish(ctx, Err(Error::new("MemoryError", "")));
+    }
+    items.extend(
+        handles
+            .iter()
+            .map(|&pair| Id::from(u16::from_le_bytes(pair))),
+    );
+    let id = if tuple {
+        ctx.linked_constant(|ctx| ctx.heap.packed_tuple(items, true))
+    } else {
+        ctx.alloc(Value::List(items))
+    };
+    finish(ctx, Ok(id))
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_lit(
     ctx: *mut Context,
@@ -1129,6 +1208,14 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 }
 
 fn load_linked_literal(ctx: &mut Context, kind: i32, data: &[u8]) -> Id {
+    // Small decimal integers already occupy permanent slots and need no temporary root.
+    if kind == 0
+        && let Ok(text) = std::str::from_utf8(data)
+        && let Ok(value) = text.parse::<i64>()
+        && let Some(id) = Heap::cached_integer(value)
+    {
+        return id;
+    }
     // Each literal roots its value and the returned handle; metadata roots every name.
     let roots = if kind == 5 {
         data.iter()
@@ -1216,6 +1303,25 @@ fn load_linked_literal(ctx: &mut Context, kind: i32, data: &[u8]) -> Id {
     finish(ctx, value)
 }
 
+/// Resolve an identifier from the linked code object in the current Python scope.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_lookup(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+) -> Id {
+    // SAFETY: the emitter supplies a live context and a constant of exactly len bytes.
+    let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = std::str::from_utf8(name)
+        .map_err(|error| Error::new("UnicodeError", error.to_string()))
+        .and_then(|name| ctx.lookup(scope, name));
+    finish(ctx, result)
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_op_at(
     ctx: *mut Context,
@@ -1278,33 +1384,12 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     })
 }
 
-/// Resolve a positional method call and publish its exact built-in receiver, if any.
+/// Look up an immediate call before evaluating its arguments. Exact string methods
+/// can pass their receiver as the first positional operand without allocating a method.
 ///
 /// # Safety
-/// The caller supplies the active context, a NUL-terminated qualified method symbol,
-/// and a writable slot for the receiver. The slot is initialized on success.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_builtin_method_target(
-    ctx: *mut Context,
-    receiver: Id,
-    name: *const c_char,
-    bound_receiver: *mut Id,
-) -> Id {
-    // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
-    let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    let result = ctx
-        .builtin_method_target(receiver, name)
-        .map(|(callable, receiver)| {
-            *bound_receiver = receiver;
-            callable
-        });
-    finish(ctx, result)
-}
-
-/// Accept string method lookups emitted by earlier compilers.
-///
-/// # Safety
-/// The arguments satisfy the same contract as `imre_dyn_builtin_method_target`.
+/// The caller supplies the active context, a NUL-terminated ordinary str method symbol, and a
+/// writable receiver slot. The slot is initialized on successful lookup.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
     ctx: *mut Context,
@@ -1312,8 +1397,56 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
     name: *const c_char,
     bound_receiver: *mut Id,
 ) -> Id {
-    // SAFETY: the existing string lookup ABI supplies the same four arguments.
-    unsafe { imre_dyn_builtin_method_target(ctx, receiver, name, bound_receiver) }
+    // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
+    let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
+    let target = ctx.string_method_target(receiver, name);
+    finish_method_target(ctx, target, bound_receiver)
+}
+
+/// Prepare an ordinary positional method call before evaluating its arguments.
+///
+/// # Safety
+/// The caller supplies the active context, a NUL-terminated UTF-8 name and a writable receiver slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_builtin_method_target(
+    ctx: *mut Context,
+    receiver: Id,
+    name: *const c_char,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: generated code retains the context and passes static method names.
+    let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
+    let target = ctx.builtin_method_target(receiver, name);
+    finish_method_target(ctx, target, bound_receiver)
+}
+
+/// Resolve an immediate get call before evaluating arguments that may release its receiver.
+///
+/// # Safety
+/// The caller supplies the active context and a writable receiver slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_dict_get_target(
+    ctx: *mut Context,
+    receiver: Id,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: generated code owns the context and passes one writable slot.
+    let (ctx, bound_receiver) = unsafe { (&mut *ctx, &mut *bound_receiver) };
+    let target = ctx.dict_get_target(receiver);
+    finish_method_target(ctx, target, bound_receiver)
+}
+
+/// Publish the receiver only after method lookup succeeds.
+fn finish_method_target(
+    ctx: &mut Context,
+    target: Result<(Id, Id)>,
+    bound_receiver: &mut Id,
+) -> Id {
+    let result = target.map(|(callable, receiver)| {
+        *bound_receiver = receiver;
+        callable
+    });
+    finish(ctx, result)
 }
 
 /// Test a handle against the evaluated elements of a literal tuple.
@@ -1707,7 +1840,6 @@ impl Context {
             filename,
             first_line: location.line,
             module_definition,
-            coroutine: false,
             flags: flags.unwrap_or_default(),
             flags_complete: flags.is_some(),
             nested: Vec::new(),
@@ -1893,7 +2025,9 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live, replaced == TRUE) && !ctx.can_skip_finalizer_sweep() {
+    if ctx.heap.assignment_target(live, replaced == TRUE)
+        && !ctx.can_skip_finalizer_sweep(ctx.heap.temporary_mark())
+    {
         ctx.collect_unreachable();
     }
 }
@@ -1978,6 +2112,7 @@ impl Context {
                 .chain(self.contexts.iter().copied())
                 .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
+                .chain(self.original_builtins)
                 .chain(self.source_builtins)
                 .chain([
                     self.argv,
@@ -2028,6 +2163,8 @@ impl Context {
         }
         if self.heap.has_ordinary_finalizers()
             && !self.heap.caller_keeps_only_finalizer()
+            // A bound stream can keep its underlying finalizer alive without naming it.
+            && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
             && self.heap.has_unbound_finalizer(NONE)
         {
             match self.drain_acyclic_finalizers() {
@@ -2041,7 +2178,10 @@ impl Context {
                 Ok(false) => {}
             }
         }
-        if self.heap.take_sweep_request() {
+        let finalizers = self.heap.take_finalizer_check();
+        if self.heap.take_sweep_request()
+            || (finalizers && !self.can_skip_finalizer_sweep(self.heap.temporary_mark()))
+        {
             let (heap, roots) = self.heap_and_roots();
             if let Some(callbacks) = heap.collect(roots) {
                 self.run_weak_callbacks(callbacks);
@@ -2051,7 +2191,9 @@ impl Context {
 
     /// Flush unreachable file owners before the caller evaluates its next operand.
     pub(super) fn leave_frame(&mut self, result: Id, returning: bool) {
-        if self.heap.leave(result, returning) {
+        if self.heap.leave(result, returning)
+            && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+        {
             self.collect_unreachable();
         }
     }
@@ -2064,7 +2206,7 @@ impl Context {
     /// Release discarded operands and root their result before any weak callbacks or finalizers run.
     pub(super) fn discard_temporaries(&mut self, mark: usize, result: Option<Id>) {
         let collect = if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
-            || self.can_skip_finalizer_sweep()
+            || self.can_skip_finalizer_sweep(mark)
         {
             self.heap.release_temporaries_since(mark);
             false
@@ -2079,19 +2221,48 @@ impl Context {
         }
     }
 
-    /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
-    fn can_skip_finalizer_sweep(&self) -> bool {
+    /// Release temporary operands while their return value or raised exception stays live.
+    pub(super) fn release_with_result(&mut self, mark: usize, result: Result<Id>) -> Result<Id> {
+        let collect = self.heap.discard_truth_operands(mark, self.modules);
+        match &result {
+            Ok(value) => self.heap.keep(*value),
+            Err(error) => {
+                for root in error.roots() {
+                    self.heap.keep(root);
+                }
+            }
+        }
+        if collect {
+            self.collect_unreachable();
+        }
+        result
+    }
+
+    pub(super) fn finalizer_path_roots(&self) -> [Id; 2] {
         use super::stdlib::datetime::isocalendar::MODULE_REF;
+        [
+            self.modules,
+            self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
+        ]
+    }
+
+    /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
+    fn can_skip_finalizer_sweep(&self, retained_current: usize) -> bool {
+        if self.heap.full_collection_active() {
+            return false;
+        }
+        let globals = self.finalizer_path_roots();
+        let input = super::stdlib::io::rooted_input_chain(self);
         // Include the three owners retained by sys.__stdin__.
-        self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
-            && !self.heap.full_collection_active()
+        (self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
             && (!self.heap.has_weak_values
-                || self.heap.weak_values_kept_by(
-                    self.modules,
-                    self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
-                ))
-            && super::stdlib::io::rooted_input_chain(self)
-                .is_some_and(|input| self.heap.finalizers_kept_by(&input))
+                || self.heap.weak_values_kept_by(globals[0], globals[1]))
+            && input
+                .as_ref()
+                .is_some_and(|chain| self.heap.finalizers_kept_by(chain)))
+            || self
+                .heap
+                .cached_finalizers_kept(globals, input.as_ref(), Some(retained_current))
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
@@ -2099,7 +2270,7 @@ impl Context {
         if !self.heap.tracks_finalizers() {
             return;
         }
-        if self.can_skip_finalizer_sweep() {
+        if self.can_skip_finalizer_sweep(mark) {
             self.heap.keep_call_result(mark, result);
         } else if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
@@ -2108,7 +2279,7 @@ impl Context {
 
     /// Finish an assignment that dropped a possible finalizer owner.
     pub(super) fn finish_binding_release(&mut self) {
-        if !self.can_skip_finalizer_sweep() {
+        if !self.can_skip_finalizer_sweep(self.heap.temporary_mark()) {
             self.collect_unreachable();
         }
         self.heap.release_unbound_finalizers();
@@ -2123,12 +2294,8 @@ impl Context {
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);
         }
-        let reference = self
-            .builtins
-            .get(super::stdlib::datetime::isocalendar::MODULE_REF)
-            .copied()
-            .unwrap_or(NONE);
-        self.heap.learn_weak_roots(self.modules, reference);
+        let [modules, reference] = self.finalizer_path_roots();
+        self.heap.learn_weak_roots(modules, reference);
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.
@@ -2195,6 +2362,26 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn linked_small_integer_literals_use_permanent_slots() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the argument and configuration pointers outlive context initialization.
+        let mut ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+        ctx.heap
+            .enter(NONE, NONE, value::FrameOwner::Function(NONE));
+        let mark = ctx.heap.temporary_mark();
+        for (text, expected) in [("-5", -5), ("0", 0), ("256", 256)] {
+            let id = load_linked_literal(&mut ctx, 0, text.as_bytes());
+            assert!(matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(expected)));
+            assert_eq!(ctx.heap.temporary_mark(), mark);
+        }
+        for (text, expected) in [("-6", -6), ("257", 257), ("0xff", 255), ("1_0", 10)] {
+            let id = load_linked_literal(&mut ctx, 0, text.as_bytes());
+            assert!(matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(expected)));
+        }
+    }
 
     #[test]
     fn dictionary_view_intersection_collects_discarded_values() {

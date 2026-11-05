@@ -112,19 +112,6 @@ pub(super) fn randint(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     Ok(ctx.alloc(Value::Int(Int::new(draw))))
 }
 
-pub(super) fn randbytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [_, length] =
-        super::required_arguments("Random.randbytes", ["self", "n"], bound(args), kwargs)?;
-    // Random.randbytes calls getrandbits(n * 8) before to_bytes indexes n.
-    let eight = ctx.int(8);
-    let count = ctx.binary("*", length, eight)?;
-    let count = ctx.index_integer(count)?;
-    let draw = objects::random_bits(&count)?;
-    let draw = ctx.alloc(Value::Int(Int::new(draw)));
-    let little = ctx.text("little");
-    builtins::call(ctx, "int.to_bytes", &[draw, length, little], &[])
-}
-
 /// Select the original element through Python's length and subscription protocols.
 pub(super) fn choice(
     ctx: &mut Context,

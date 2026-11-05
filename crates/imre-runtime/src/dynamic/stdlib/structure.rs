@@ -337,12 +337,30 @@ fn unpack_from(
     Ok(unpacked_tuple(ctx, fields))
 }
 
+fn uninitialized() -> Error {
+    Error::new("RuntimeError", "Struct object is not initialized")
+}
+
+/// Render the stored format even when a subclass overrides the format property.
+pub(in crate::dynamic) fn repr(ctx: &Context, receiver: Id) -> Result<String> {
+    let Value::Struct { format, layout } = ctx.heap.get(ctx.scalar_value(receiver)) else {
+        unreachable!("validated Struct repr receiver")
+    };
+    layout.as_ref().ok_or_else(uninitialized)?;
+    let name = ctx.type_name(receiver).rsplit('.').next().unwrap();
+    let quoted = crate::objects::exceptions::string_repr(format);
+    Ok(format!("{name}({quoted})"))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "__repr__" {
+        return super::super::builtins::call(ctx, "struct.Struct.__repr__", args, kwargs);
+    }
     let Some((&receiver, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
@@ -368,9 +386,7 @@ pub(super) fn method(
     if name == "size" {
         return Ok(ctx.int(layout.as_ref().map_or(-1, |layout| layout.size as i64)));
     }
-    let layout = layout
-        .as_ref()
-        .ok_or_else(|| Error::new("RuntimeError", "Struct object is not initialized"))?;
+    let layout = layout.as_ref().ok_or_else(uninitialized)?;
     if name == "format" {
         return Ok(ctx.text(format.to_owned()));
     }
@@ -553,7 +569,31 @@ fn pack_number(
     mut write: impl FnMut(&mut Context, Range<usize>, u64) -> Result<()>,
 ) -> Result<()> {
     if !matches!(code, b'F' | b'D') {
-        let word = pack_word(ctx, id, code, range.len(), layout.little_endian)?;
+        let word = match code {
+            b'c' => match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Bytes(bytes) if bytes.len() == 1 => u64::from(bytes[0]),
+                _ => {
+                    return Err(format_error(
+                        ctx,
+                        "char format requires a bytes object of length 1",
+                    ));
+                }
+            },
+            b'?' => u64::from(ctx.truth(id)?),
+            b'e' => u64::from(half_bits(ctx, id)?),
+            b'f' => u64::from(single_bits(ctx, id)?),
+            b'd' => float_value(ctx, id)?.to_bits(),
+            _ => {
+                return pack_integer(
+                    ctx,
+                    id,
+                    code,
+                    range.len(),
+                    layout.little_endian,
+                    |ctx, word| write(ctx, range, word),
+                );
+            }
+        };
         return write(ctx, range, word);
     }
     let value = complex_value(ctx, id)
@@ -602,29 +642,6 @@ fn complex_value(ctx: &mut Context, id: Id) -> Option<Complex> {
         .ok()?;
     }
     Some(number)
-}
-
-fn pack_word(
-    ctx: &mut Context,
-    id: Id,
-    code: u8,
-    width: usize,
-    little_endian: bool,
-) -> Result<u64> {
-    match code {
-        b'c' => match ctx.heap.get(ctx.scalar_value(id)) {
-            Value::Bytes(bytes) if bytes.len() == 1 => Ok(u64::from(bytes[0])),
-            _ => Err(format_error(
-                ctx,
-                "char format requires a bytes object of length 1",
-            )),
-        },
-        b'?' => ctx.truth(id).map(u64::from),
-        b'e' => half_bits(ctx, id).map(u64::from),
-        b'f' => single_bits(ctx, id).map(u64::from),
-        b'd' => float_value(ctx, id).map(f64::to_bits),
-        _ => integer_field(ctx, id, code, width, little_endian),
-    }
 }
 
 fn float_overflow(ctx: &Context, id: Id, code: char) -> Error {
@@ -702,71 +719,64 @@ fn float_value(ctx: &mut Context, id: Id) -> Result<f64> {
     Ok(value)
 }
 
-fn integer_field(
+fn pack_integer(
     ctx: &mut Context,
     id: Id,
     code: u8,
     width: usize,
     little_endian: bool,
-) -> Result<u64> {
-    let value = ctx.index_value(id).and_then(|value| {
-        value.ok_or_else(|| format_error(ctx, "required argument is not an integer"))
-    });
-    if matches!(code, b'b' | b'h' | b'i' | b'l' | b'q' | b'n') {
-        let max = i64::MAX >> ((8 - width) * 8);
-        let min = !max;
-        let number = match value {
-            Ok(value) => value.to_i64(),
-            Err(error) => {
-                let overflow = ctx.builtin("OverflowError");
-                // CPython's non-native-endian q packer propagates __index__ errors.
-                if (code == b'q' && little_endian != cfg!(target_endian = "little"))
-                    || !ctx.raised_error_matches(&error, overflow)
-                {
-                    return Err(error);
-                }
-                None
-            }
-        };
-        return number
-            .filter(|n| (min..=max).contains(n))
-            .map(|n| n as u64)
-            .ok_or_else(|| {
-                format_error(
-                    ctx,
-                    format!(
-                        "'{}' format requires {min} <= number <= {max}",
-                        char::from(code)
-                    ),
-                )
-            });
-    }
-    let max = u64::MAX >> ((8 - width) * 8);
-    match value {
-        Ok(value) => {
-            if let Some(n) = value.big().to_u64().filter(|&n| n <= max) {
-                return Ok(n);
-            }
-            if code == b'P' {
-                return value
-                    .to_i64()
-                    .and_then(|v| isize::try_from(v).ok())
-                    .map(|v| v as usize as u64)
-                    .ok_or_else(|| format_error(ctx, "int too large to convert"));
-            }
-        }
+    write: impl FnOnce(&mut Context, u64) -> Result<()>,
+) -> Result<()> {
+    let signed = matches!(code, b'b' | b'h' | b'i' | b'l' | b'q' | b'n');
+    let limit = 1_i128 << (width * 8 - usize::from(signed));
+    let min = if signed { -limit } else { 0 };
+    let max = limit - 1;
+    let range_error = |ctx: &Context| {
+        format_error(
+            ctx,
+            format!(
+                "'{}' format requires {min} <= number <= {max}",
+                char::from(code)
+            ),
+        )
+    };
+    let swapped_long_long =
+        matches!(code, b'q' | b'Q') && little_endian != cfg!(target_endian = "little");
+    let value = match ctx.index_value(id) {
+        Ok(Some(value)) => value,
+        Ok(None) => return Err(format_error(ctx, "required argument is not an integer")),
         Err(error) => {
+            // The byte-array and pointer packers propagate errors from __index__ itself.
             let overflow = ctx.builtin("OverflowError");
-            if code != b'N' || !ctx.raised_error_matches(&error, overflow) {
-                return Err(error);
+            if !swapped_long_long && code != b'P' && ctx.raised_error_matches(&error, overflow) {
+                return Err(range_error(ctx));
             }
+            return Err(error);
+        }
+    };
+    let number = value
+        .as_small()
+        .map(i128::from)
+        .or_else(|| value.big().to_i128());
+    if let Some(number) = number.filter(|n| (min..=max).contains(n)) {
+        return write(ctx, number as u64);
+    }
+    if code == b'P' {
+        let pointer = value
+            .to_i64()
+            .and_then(|n| isize::try_from(n).ok())
+            .ok_or_else(|| format_error(ctx, "int too large to convert"))?;
+        return write(ctx, pointer as usize as u64);
+    }
+    if swapped_long_long {
+        // PyLong_AsByteArray writes the low bytes before reporting overflow, except
+        // when rejecting a negative number for an unsigned field.
+        let big = value.big();
+        let negative = big.sign() == num_bigint::Sign::Minus;
+        if signed || !negative {
+            let low = big.magnitude().iter_u64_digits().next().unwrap_or(0);
+            write(ctx, if negative { low.wrapping_neg() } else { low })?;
         }
     }
-    Err(format_error(
-        ctx,
-        format!(
-            "'{}' format requires 0 <= number <= {max}",
-            char::from(code)
-        ),
-    ))
+    Err(range_error(ctx))
 }

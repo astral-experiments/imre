@@ -6,6 +6,7 @@
 
 void *__real_malloc(size_t size);
 void *__real_realloc(void *ptr, size_t size);
+uint64_t __real_imre_dyn_lookup(void *, uint64_t, const unsigned char *, size_t);
 uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
 uint64_t __real_imre_dyn_op_at(void *, const char *, uint64_t, uint64_t, uint64_t, const uint32_t (*)[4]);
 uint64_t __real_imre_dyn_scoped_call_at(void *, uint64_t, uint64_t, uint64_t, size_t, const uint32_t (*)[4], uint64_t);
@@ -49,6 +50,11 @@ static uint64_t leave(const char *op, int probe, uint64_t result) {
     if (probe) { remaining = 0; in_call = 0; }
     if (strcmp(op, "put") == 0 && !getenv("IMRE_TEST_CALL_SIZE")) after_put = 1;
     return result;
+}
+
+uint64_t __wrap_imre_dyn_lookup(void *ctx, uint64_t scope, const unsigned char *name, size_t len) {
+    int probe = enter("lookup");
+    return leave("lookup", probe, __real_imre_dyn_lookup(ctx, scope, name, len));
 }
 
 uint64_t __wrap_imre_dyn_op_at(void *ctx, const char *op, uint64_t a, uint64_t b, uint64_t c, const uint32_t (*span)[4]) {

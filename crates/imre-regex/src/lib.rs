@@ -46,6 +46,262 @@ pub struct FixedPattern {
     pub groups: Vec<Capture>,
 }
 
+/// Preserve byte literals outside ASCII in the regex parser's text input.
+pub fn byte_pattern(bytes: &[u8]) -> String {
+    let mut source = String::with_capacity(bytes.len());
+    let mut escaped = false;
+    for &b in bytes {
+        if b.is_ascii() {
+            source.push(char::from(b));
+            escaped = b == b'\\' && !escaped;
+        } else {
+            if !escaped {
+                source.push('\\');
+            }
+            write!(source, "x{b:02x}").unwrap();
+            escaped = false;
+        }
+    }
+    source
+}
+
+/// Read an ordinary ASCII bracket run without compiling an automaton. Escapes,
+/// nested sets and operators with Python warning behavior use the full parser.
+pub fn plain_run(pattern: &[u8]) -> Option<[u8; 256]> {
+    let body = pattern.strip_prefix(b"[")?.strip_suffix(b"]+")?;
+    let (body, excluded) = body
+        .strip_prefix(b"^")
+        .map_or((body, false), |rest| (rest, true));
+    let atom =
+        |b: u8| b.is_ascii() && !matches!(b, b'[' | b']' | b'\\' | b'-' | b'&' | b'|' | b'~');
+    if body.is_empty() {
+        return None;
+    }
+    let mut members = [u8::from(excluded); 256];
+    let mut at = 0;
+    while at < body.len() {
+        let start = body[at];
+        if !atom(start) {
+            return None;
+        }
+        at += 1;
+        let end = if body.get(at) == Some(&b'-') {
+            let end = *body.get(at + 1)?;
+            if !atom(end) || end < start {
+                return None;
+            }
+            at += 2;
+            end
+        } else {
+            start
+        };
+        members[usize::from(start)..=usize::from(end)].fill(u8::from(!excluded));
+    }
+    Some(members)
+}
+
+/// Find the next maximal byte run without revisiting an accepted byte.
+pub fn next_byte_run(
+    bytes: &[u8],
+    members: &[u8; 256],
+    offset: usize,
+) -> Option<std::ops::Range<usize>> {
+    let skip = bytes[offset..]
+        .iter()
+        .position(|&b| members[usize::from(b)] != 0)?;
+    let start = offset + skip;
+    let mut end = start + 1;
+    while end < bytes.len() && members[usize::from(bytes[end])] != 0 {
+        end += 1;
+    }
+    Some(start..end)
+}
+
+/// Encode a greedy scalar class as a byte lookup followed by little-endian
+/// change points for non-ASCII scalars. A single enclosing findall capture
+/// yields the same string as the complete match.
+pub fn collection(pattern: &FixedPattern, whole_capture: bool, bytes: bool) -> Option<Collection> {
+    let hir = regex_syntax::Parser::new().parse(&pattern.source).ok()?;
+    if whole_capture && pattern.groups.len() > 2 {
+        let fields = pattern.groups.len() - 1;
+        let program = capture_program(&hir, fields, bytes)?;
+        return Some(Collection::Rows { fields, program });
+    }
+    let atom = match (pattern.groups.len(), hir.kind()) {
+        (1, _) => &hir,
+        (2, HirKind::Capture(capture)) if whole_capture && capture.index == 1 => &capture.sub,
+        _ => return None,
+    };
+    if let Some(members) = run_class(atom, bytes) {
+        return Some(Collection::Runs(members));
+    }
+    literal_program(atom, bytes).map(Collection::Literals)
+}
+
+#[derive(Clone)]
+pub enum Collection {
+    Runs(Vec<u8>),
+    Literals(Vec<u8>),
+    Rows { fields: usize, program: Vec<u8> },
+}
+
+fn run_class(atom: &regex_syntax::hir::Hir, bytes: bool) -> Option<Vec<u8>> {
+    use regex_syntax::hir::Class;
+    let HirKind::Repetition(repeat) = atom.kind() else {
+        return None;
+    };
+    if !repeat.greedy || repeat.min != 1 || repeat.max.is_some() {
+        return None;
+    }
+    let mut members = vec![0; 256];
+    let mut add = |start: char, end: char| {
+        let start = start as u32;
+        let end = end as u32 + 1;
+        if bytes {
+            members[start.min(256) as usize..end.min(256) as usize].fill(1);
+            return;
+        }
+        if start < 128 {
+            members[start as usize..end.min(128) as usize].fill(1);
+        }
+        if end > 128 {
+            if start <= 128 && end == 0x110000 {
+                // Every non-ASCII scalar matches, independent of its UTF-8 width.
+                members[128..256].fill(1);
+            } else {
+                members.extend_from_slice(&start.max(128).to_le_bytes());
+                members.extend_from_slice(&end.to_le_bytes());
+            }
+        }
+    };
+    match repeat.sub.kind() {
+        HirKind::Class(Class::Bytes(class)) if bytes => {
+            for range in class.ranges() {
+                add(char::from(range.start()), char::from(range.end()));
+            }
+        }
+        HirKind::Class(Class::Unicode(class)) => {
+            for range in class.ranges() {
+                add(range.start(), range.end());
+            }
+        }
+        HirKind::Literal(literal) => {
+            let mut chars = std::str::from_utf8(&literal.0).ok()?.chars();
+            let ch = chars.next()?;
+            if chars.next().is_some() {
+                return None;
+            }
+            add(ch, ch);
+        }
+        _ => return None,
+    }
+    Some(members)
+}
+
+/// Lower concatenations with compulsory, source-ordered fields. A repeated
+/// class must be disjoint from the next atom's first byte, so consuming the
+/// maximal run never takes a byte the suffix needs.
+fn capture_program(hir: &regex_syntax::hir::Hir, fields: usize, bytes: bool) -> Option<Vec<u8>> {
+    let HirKind::Concat(atoms) = hir.kind() else {
+        return None;
+    };
+    let mut program = Vec::new();
+    let mut previous_run = None;
+    let mut captures = 0;
+    for atom in atoms {
+        let captured = matches!(atom.kind(), HirKind::Capture(_));
+        let atom = if let HirKind::Capture(capture) = atom.kind() {
+            captures += 1;
+            if capture.index as usize != captures {
+                return None;
+            }
+            &capture.sub
+        } else {
+            atom
+        };
+        let (run, data) = match atom.kind() {
+            HirKind::Literal(literal) => (false, literal_bytes(&literal.0, bytes)?),
+            _ => (true, run_class(atom, bytes)?),
+        };
+        if data.is_empty() || (run && data.len() != 256) {
+            return None;
+        }
+        if let Some(start) = previous_run {
+            let previous = &program[start..start + 256];
+            let overlaps = if run {
+                data.iter().zip(previous).any(|(&a, &b)| a & b != 0)
+            } else {
+                previous[usize::from(data[0])] != 0
+            };
+            if overlaps {
+                return None;
+            }
+        }
+        program.push(u8::from(run) | (u8::from(captured) << 1));
+        program.extend_from_slice(&u16::try_from(data.len()).ok()?.to_le_bytes());
+        previous_run = run.then_some(program.len());
+        program.extend_from_slice(&data);
+    }
+    (captures == fields).then_some(program)
+}
+
+fn literal_bytes(value: &[u8], bytes: bool) -> Option<Vec<u8>> {
+    if bytes {
+        std::str::from_utf8(value)
+            .ok()?
+            .chars()
+            .map(|ch| u8::try_from(u32::from(ch)).ok())
+            .collect()
+    } else {
+        Some(value.to_vec())
+    }
+}
+
+/// Group complete, nonempty literals by leading byte while retaining Python's
+/// branch order inside each group. The first four bytes select a first-byte
+/// search, followed by 257 little-endian offsets and length-prefixed literals.
+fn literal_program(hir: &regex_syntax::hir::Hir, bytes: bool) -> Option<Vec<u8>> {
+    use regex_syntax::hir::literal::Extractor;
+    if !hir.properties().look_set().is_empty() {
+        return None;
+    }
+    let seq = Extractor::new().extract(hir);
+    if !seq.is_exact() {
+        return None;
+    }
+    let mut literals = Vec::new();
+    for literal in seq.literals()? {
+        let value = literal_bytes(literal.as_bytes(), bytes)?;
+        if value.is_empty() || value.len() > 255 {
+            return None;
+        }
+        literals.push(value);
+    }
+    if literals.is_empty() {
+        return None;
+    }
+    let mut header = vec![0; 4];
+    let mut payload = Vec::new();
+    for first in 0..=u8::MAX {
+        let offset = u16::try_from(payload.len()).ok()?;
+        header.extend_from_slice(&offset.to_le_bytes());
+        for literal in literals.iter().filter(|s| s[0] == first) {
+            payload.push(literal.len() as u8);
+            payload.extend_from_slice(literal);
+        }
+        if payload.len() != usize::from(offset) && header[0] < 4 {
+            header[0] += 1;
+            let count = usize::from(header[0]);
+            if count < 4 {
+                header[count] = first;
+            }
+        }
+    }
+    header.extend_from_slice(&u16::try_from(payload.len()).ok()?.to_le_bytes());
+    header.extend_from_slice(&payload);
+    Some(header)
+}
+
 /// A capture may be unnamed or absent on some successful paths.
 pub struct Capture {
     pub name: Option<String>,
@@ -71,10 +327,10 @@ pub fn preserve_zero_repeat_groups(source: String) -> Result<String, String> {
                         Range(RepetitionRange::Exactly(0) | RepetitionRange::Bounded(0, 0))
                     )
                 {
-                    // The empty class makes this optional branch unreachable in both
-                    // text and byte regexes, so its captures never participate.
+                    // The disjoint digits form an empty class in both text and byte
+                    // regexes without folding a Unicode-wide class under ignore-case.
                     let group = rep.ast.span();
-                    edits.push((group.start.offset, group.start.offset, r"(?:[^\s\S]"));
+                    edits.push((group.start.offset, group.start.offset, "(?:[0&&1]"));
                     edits.push((group.end.offset, rep.span.end.offset, ")?"));
                 }
                 nodes.push(&rep.ast);
@@ -988,7 +1244,8 @@ fn tokenize(
                     if size == 0 {
                         output.push_str("(?!)");
                     } else {
-                        output.push_str(r"[^\s\S]");
+                        // A one-character atom that cannot match in any case mode.
+                        output.push_str("[0&&1]");
                         if (2..u64::from(u32::MAX)).contains(&size) {
                             write!(output, "{{{size}}}").unwrap();
                         }

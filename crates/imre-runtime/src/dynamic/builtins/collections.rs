@@ -53,6 +53,24 @@ pub(super) fn extremum(
             "{name} expected at least 1 argument, got 0"
         )));
     };
+    if let [left, right] = *args
+        && kwargs.is_empty()
+    {
+        // Two exact numbers have no comparison callbacks or iterator state to retain.
+        let order = match (ctx.heap.get(right), ctx.heap.get(left)) {
+            (Value::Int(right), Value::Int(left)) => Some(right.cmp(left)),
+            (Value::Float(right), Value::Float(left)) => right.partial_cmp(left),
+            _ => None,
+        };
+        if let Some(order) = order {
+            let better = if name == "min" {
+                order.is_lt()
+            } else {
+                order.is_gt()
+            };
+            return Ok(if better { right } else { left });
+        }
+    }
     let [key, default] = bind_method_arguments(name, &[], kwargs, ["key", "default"], 0)?;
     let key = key.filter(|&key| key != NONE);
     if args.len() > 1 {
@@ -662,7 +680,7 @@ pub(super) fn construct(
     if let [source] = args
         && matches!(ctx.heap.get(*source), Value::Generator { .. })
     {
-        return ctx.collect_generator(*source, name == "tuple");
+        return ctx.collect_iterable(*source, name == "tuple");
     }
     let items = args
         .first()

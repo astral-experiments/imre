@@ -789,6 +789,9 @@ impl Checker<'_> {
             || types == [Type::ByteArray; 2]
             || types == [Type::Hash; 2])
         {
+            if types.iter().all(|ty| matches!(ty, Type::Tuple(_))) {
+                return Err(self.scoped_builtin_error("tuple identity comparison", node));
+            }
             return Err(error(
                 self.source,
                 node,

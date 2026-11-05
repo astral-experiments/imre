@@ -57,6 +57,14 @@ impl Context {
     /// Return a ModuleSpec for a compiled package, module or namespace portion on this entry.
     pub(super) fn registered_path_spec(&mut self, name: Id, path: Id) -> Result<Id> {
         let fullname = self.str_value(name)?;
+        // A native extension uses its place in the virtual stdlib even without a Python file.
+        if imre_ast::providers::is_native_fallback(fullname)
+            && self.config["bundled_root"].as_str() == Some(self.str_value(path)?)
+        {
+            let loader = self.lookup_attr(self.bootstrap_module, "_BundledImporter")?;
+            let find = self.lookup_attr(loader, "find_spec")?;
+            return self.call(find, vec![name], Vec::new());
+        }
         let Some(entries) = self.sources.get(fullname) else {
             return Ok(NONE);
         };

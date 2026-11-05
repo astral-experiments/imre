@@ -387,25 +387,6 @@ fn build_regex(
     Matcher::new(regex, hir, !bytes, assertions)
 }
 
-/// Preserve byte literals outside ASCII in the regex parser's text input.
-fn byte_pattern(bytes: &[u8]) -> String {
-    let mut source = String::with_capacity(bytes.len());
-    let mut escaped = false;
-    for &b in bytes {
-        if b.is_ascii() {
-            source.push(char::from(b));
-            escaped = b == b'\\' && !escaped;
-        } else {
-            if !escaped {
-                source.push('\\');
-            }
-            write!(source, "x{b:02x}").unwrap();
-            escaped = false;
-        }
-    }
-    source
-}
-
 /// Only Python's redundant positive Unicode mode can fall back to the raw engine.
 fn raw_unicode_compatible(source: &str, ascii: bool, boundaries: &[usize]) -> bool {
     use regex_syntax::ast::{Ast, Flag, parse::Parser};
@@ -1077,7 +1058,7 @@ fn valid_prefix(id: Id, prefix: &[u8], flags: i64, bytes: bool, inline_verbose: 
 // The raw regex backend accepts extra syntax such as Unicode property escapes.
 fn valid_translated_prefix(prefix: &[u8], flags: i64, bytes: bool) -> bool {
     let spelling = if bytes {
-        byte_pattern(prefix)
+        imre_regex::byte_pattern(prefix)
     } else {
         std::str::from_utf8(prefix).unwrap().to_owned()
     };
@@ -1107,7 +1088,7 @@ fn prepare(
     let repeated = repeated_literal_capture(spelling, flags, bytes);
     let spelling = repeated.as_deref().unwrap_or(spelling);
     let source = if bytes {
-        byte_pattern(spelling)
+        imre_regex::byte_pattern(spelling)
     } else {
         std::str::from_utf8(spelling)
             .expect("text pattern")
@@ -1314,6 +1295,59 @@ fn prepare(
     })
 }
 
+/// A fresh list of exact string or bytes fields for a runtime-supplied class.
+/// Heap slots can move on allocation, so borrow the subject again for each
+/// field. Only the returned payloads are copied.
+fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) -> Option<Id> {
+    let members = match (ctx.heap.get(pattern), ctx.heap.get(subject)) {
+        (Value::Str(pattern), Value::Str(_)) => imre_regex::plain_run(pattern.as_bytes())?,
+        (Value::Bytes(pattern), Value::Bytes(_)) => imre_regex::plain_run(pattern)?,
+        _ => return None,
+    };
+    let mark = ctx.heap.temporary_mark();
+    let mut fields = Vec::new();
+    let mut cursor = 0;
+    loop {
+        let data = match ctx.heap.get(subject) {
+            Value::Str(s) => s.as_bytes(),
+            Value::Bytes(b) => b,
+            _ => unreachable!(),
+        };
+        let next = imre_regex::next_byte_run(data, &members, cursor);
+        let span = match &next {
+            Some(run) if split => cursor..run.start,
+            Some(run) => run.clone(),
+            None if split => cursor..data.len(),
+            None => break,
+        };
+        let field = if span.len() == data.len() {
+            subject
+        } else {
+            match ctx.heap.get(subject) {
+                Value::Str(s) => {
+                    let part = crate::Str::new(&s[span]);
+                    ctx.heap.owned_text(part)
+                }
+                Value::Bytes(b) => {
+                    let part = b[span].to_vec();
+                    ctx.heap.bytes_from_data(part)
+                }
+                _ => unreachable!(),
+            }
+        };
+        fields.push(field);
+        let Some(run) = next else { break };
+        cursor = run.end;
+    }
+    let result = ctx.alloc(Value::List(fields));
+    ctx.heap.keep_call_result(mark, result);
+    Some(result)
+}
+
+fn omitted_or_zero(ctx: &Context, value: Option<Id>) -> bool {
+    value.is_none_or(|id| matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(0)))
+}
+
 pub(super) fn module_call(
     ctx: &mut Context,
     name: &str,
@@ -1344,6 +1378,13 @@ pub(super) fn module_call(
             kwargs,
             ["pattern", "string", "maxsplit", "flags"],
         )?;
+        if let (Some(pattern), Some(string)) = (pattern, string)
+            && omitted_or_zero(ctx, flags)
+            && omitted_or_zero(ctx, maxsplit)
+            && let Some(fields) = plain_collection(ctx, pattern, string, true)
+        {
+            return Ok(fields);
+        }
         let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
         return split(
             ctx,
@@ -1354,6 +1395,13 @@ pub(super) fn module_call(
     }
     let [pattern, string, flags] = bind(name, args, kwargs, ["pattern", "string", "flags"])?;
     let string = string.ok_or_else(|| missing("string"))?;
+    if name == "re.findall"
+        && omitted_or_zero(ctx, flags)
+        && let Some(pattern) = pattern
+        && let Some(fields) = plain_collection(ctx, pattern, string, false)
+    {
+        return Ok(fields);
+    }
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
     match name.strip_prefix("re.") {
         Some(method @ ("match" | "fullmatch" | "search" | "finditer" | "findall")) => {
@@ -1494,11 +1542,10 @@ impl Match {
     }
 
     fn span_bounds(&self, ctx: &Context, span: Span) -> Result<(i64, i64)> {
+        let scalar = ctx.scalar_value(self.subject);
         if self.pattern(ctx).bytes
-            || matches!(
-                ctx.heap.get(ctx.scalar_value(self.subject)),
-                Value::SurrogateStr(_)
-            )
+            || ctx.heap.is_ascii_str(scalar)
+            || matches!(ctx.heap.get(scalar), Value::SurrogateStr(_))
         {
             return Ok((span.start as i64, span.end as i64));
         }
@@ -1572,7 +1619,9 @@ fn group_value(data: &[u8], bytes: bool) -> Value {
         Value::Bytes(data.to_vec())
     } else {
         Value::Str(
-            String::from_utf8(data.to_vec()).expect("text regex captures end at UTF-8 boundaries"),
+            std::str::from_utf8(data)
+                .expect("text regex captures end at UTF-8 boundaries")
+                .into(),
         )
     }
 }
@@ -1721,13 +1770,21 @@ pub(super) fn search(
             ));
         }
     };
+    if method == "findall"
+        && pos.is_none()
+        && endpos.is_none()
+        && (pattern.flags == 0 || !pattern.bytes && pattern.flags == UNICODE)
+        && let Some(fields) = plain_collection(ctx, pattern.source, string, false)
+    {
+        return Ok(fields);
+    }
     let (pattern, subject) = SearchSubject::for_pattern(ctx, &pattern, string, method)?;
     let text = subject.bytes(ctx)?;
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
             i.min(text.len())
-        } else if i == 0 {
-            0
+        } else if i == 0 || ctx.heap.is_ascii_str(ctx.scalar_value(string)) {
+            i
         } else {
             std::str::from_utf8(text)
                 .expect("text regex subject is UTF-8")

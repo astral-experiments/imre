@@ -2,6 +2,47 @@ use super::{BLOCK, Binary, position};
 use num_integer::Integer;
 
 impl Binary {
+    /// Apply a dense modular write to existing tags. Build the result separately
+    /// so an interrupt can still resume at the original source index.
+    pub(super) fn merge_ranked_prefix(
+        &mut self,
+        at: usize,
+        step: usize,
+        n: usize,
+        count: usize,
+        set: bool,
+    ) -> Option<(usize, usize)> {
+        let words = n.div_ceil(BLOCK);
+        if count <= 1024 || (count - 1) / 16 < words || words != self.bits.len() {
+            return None;
+        }
+        let spacing = n.gcd(&step);
+        let first = (at + step) % n;
+        let mut result = Self::empty(&[], words)?;
+        // The bitmap writer includes its seed. Begin at the first new store,
+        // leaving the previous index alone unless the orbit actually revisits it.
+        let (done, last) = result.fill_ranked_prefix(first, step, n, count - 1, spacing)?;
+        if done != count - 1 {
+            return Some((0, at));
+        }
+        let mut changed = 0;
+        for (masks, old) in result.bits.chunks_mut(256).zip(self.bits.chunks(256)) {
+            if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+                return Some((0, at));
+            }
+            for (mask, &word) in masks.iter_mut().zip(old) {
+                *mask = if set { word | *mask } else { word & !*mask };
+                changed += mask.count_ones() as usize;
+            }
+        }
+        if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Some((0, at));
+        }
+        self.bits = result.bits;
+        self.changed = changed;
+        Some((count, last))
+    }
+
     /// Write a partial modular orbit in address order by computing each word's mask.
     #[inline(never)]
     pub(super) fn fill_ranked_prefix(
@@ -12,12 +53,8 @@ impl Binary {
         count: usize,
         spacing: usize,
     ) -> Option<(usize, usize)> {
-        let words = n / BLOCK;
-        if !n.is_multiple_of(BLOCK)
-            || !BLOCK.is_multiple_of(spacing)
-            || count < 1024
-            || count / 8 < words
-        {
+        let words = n.div_ceil(BLOCK);
+        if spacing > BLOCK || count < 1024 || count / 8 < words {
             return None;
         }
         let period = n / spacing;
@@ -34,8 +71,12 @@ impl Binary {
                 a + b
             }
         };
-        let slots = BLOCK / spacing;
-        let advance = rank(slots);
+        let slots = BLOCK.div_ceil(spacing);
+        let remainder = BLOCK % spacing;
+        let advance = rank(BLOCK / spacing);
+        let extra_advance = add_rank(advance, inverse);
+        let mut first_bit = at % spacing;
+        let fixed_offset = if remainder == 0 { first_bit } else { 0 };
         let mut first = (period - rank(at / spacing)) % period;
 
         // For each bit, its ordinal is (first + offset) % period. It belongs
@@ -47,7 +88,7 @@ impl Binary {
         let (pairs, _) = events.as_chunks_mut::<2>();
         for (slot, [begin, end]) in pairs.iter_mut().enumerate() {
             let offset = rank(slot);
-            let bit = 1u64 << (at % spacing + slot * spacing);
+            let bit = 1u64 << (fixed_offset + slot * spacing);
             let start = (period - offset) % period;
             *begin = (start, bit);
             *end = (add_rank(start, visits), bit);
@@ -62,15 +103,34 @@ impl Binary {
             *value = mask;
         }
 
+        // Slot zero always has a transition at ordinal zero.
+        let mask_at = |rank| {
+            let after = events.partition_point(|event| event.0 <= rank);
+            events[after - 1].1
+        };
         let mut written = 0;
         while written < words && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
         {
             let end = (written + 256).min(words);
-            for word in &mut self.bits[written..end] {
-                // Slot zero always has a transition at ordinal zero.
-                let after = events.partition_point(|event| event.0 <= first);
-                *word = events[after - 1].1;
-                first = add_rank(first, advance);
+            let words = &mut self.bits[written..end];
+            if remainder == 0 {
+                for word in words {
+                    *word = mask_at(first);
+                    first = add_rank(first, advance);
+                }
+            } else {
+                for word in words {
+                    *word = mask_at(first) << first_bit;
+                    // The word has one extra reachable row when the first
+                    // bit falls within the remainder of its width.
+                    if first_bit < remainder {
+                        first_bit += spacing - remainder;
+                        first = add_rank(first, extra_advance);
+                    } else {
+                        first_bit -= remainder;
+                        first = add_rank(first, advance);
+                    }
+                }
             }
             written = end;
         }
@@ -79,6 +139,12 @@ impl Binary {
             let (block, seed) = position(at);
             self.bits[block] = seed;
             return Some((0, at));
+        }
+        // Ranks wrap at the modulus. Bits past it in the last physical word
+        // would duplicate the first rows, which are outside this word.
+        let tail = n % BLOCK;
+        if tail != 0 {
+            self.bits[words - 1] &= (1u64 << tail) - 1;
         }
         self.changed = visits;
         let last = (at as u128 + count as u128 * step as u128) % n as u128;

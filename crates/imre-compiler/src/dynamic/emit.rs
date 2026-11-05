@@ -15,12 +15,18 @@ mod patterns;
 mod statements;
 mod strings;
 
+mod permanent {
+    include!("../../../imre-runtime/native/boxed-handles.rs");
+}
+
 const ABI: &str = "\
 %code_site = type { ptr, ptr, i32, i32 }
 declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
+declare i64 @imre_dyn_permanent_sequence(ptr, ptr, i64, i1)
+declare i64 @imre_dyn_lookup(ptr, i64, ptr, i64)
 declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
@@ -35,7 +41,9 @@ declare i64 @imre_dyn_contains_literal_tuple(ptr, i64, ptr, i64, i32)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
 declare i64 @imre_dyn_positional_method_at(ptr, i64, ptr, i64, i64, ptr, i64)
 declare i64 @imre_dyn_partition_field_at(ptr, i64, ptr, i32, ptr, i64, ptr, i64)
+declare i64 @imre_dyn_string_method_target(ptr, i64, ptr, ptr)
 declare i64 @imre_dyn_builtin_method_target(ptr, i64, ptr, ptr)
+declare i64 @imre_dyn_dict_get_target(ptr, i64, ptr)
 declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
 declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
@@ -90,6 +98,7 @@ pub(crate) fn emit(
     bundled_root: &Path,
     providers: &HashSet<String>,
     split: bool,
+    source_only_provider: Option<&str>,
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
     let mut units = Vec::new();
     let mut used_archive = false;
@@ -102,9 +111,25 @@ pub(crate) fn emit(
     let mut main = format!(
         "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
+    if source_only_provider.is_some() {
+        output
+            .functions
+            .push_str("declare void @imre_dyn_register_bundled_source(ptr, ptr, ptr, ptr, i64)\n");
+    }
     let mut declarations = HashSet::new();
     for (unit, (name, path, source)) in modules.iter().enumerate() {
         let bundled = path.starts_with(bundled_root);
+        let module_name = output.data(name.as_bytes());
+        let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
+        if bundled && source_only_provider == Some(name.as_str()) {
+            let text = output.data(source.as_bytes());
+            writeln!(
+                main,
+                "  call void @imre_dyn_register_bundled_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {})",
+                source.len()
+            ).unwrap();
+            continue;
+        }
         let check_archive = bundled && !providers.is_empty();
         // Without a matching pack (including -OO), keep the bundled library in the entry.
         let separate = split && unit != 0 && !source.is_empty() && (!bundled || check_archive);
@@ -127,8 +152,6 @@ pub(crate) fn emit(
                 external = Some(format!("@{symbol}"));
             }
         }
-        let module_name = output.data(name.as_bytes());
-        let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
         let code = match external {
             Some(symbol) => symbol,
             None => output.module(unit, name, path, source, &file, bundled)?,
@@ -782,12 +805,27 @@ impl Function<'_, '_> {
         self.lit(6, name.as_bytes())
     }
 
-    fn integer(&mut self, n: impl ToString) -> String {
+    fn integer(&mut self, n: impl TryInto<i64> + ToString + Copy) -> String {
+        if let Ok(value) = n.try_into()
+            && let Some(id) = permanent::small_integer_id(value)
+        {
+            return id.to_string();
+        }
         self.lit(0, n.to_string().as_bytes())
     }
 
     /// Load a code name and use it as the second operand of a boxed operation.
     fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
+        self.output.interned_identifiers.insert(name.to_owned());
+        if op == "lookup" {
+            // The runtime lookup propagates a pending exception before reading the scope.
+            self.take_matching_check();
+            let data = self.output.data(name.as_bytes());
+            return self.checked(&format!(
+                "call i64 @imre_dyn_lookup(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
+                name.len()
+            ));
+        }
         if !self.output.emitted_named_op {
             self.output.functions.push_str(NAMED_OP);
             self.output.emitted_named_op = true;
@@ -801,7 +839,6 @@ impl Function<'_, '_> {
         } else {
             "@imre_boxed_named_op"
         };
-        self.output.interned_identifiers.insert(name.to_owned());
         let opcode = self.output.data(op.as_bytes());
         let data = self.output.data(name.as_bytes());
         self.checked(&format!(
@@ -1034,7 +1071,7 @@ mod tests {
         );
         let symbols = HashSet::from([symbol.clone()]);
         let refs = |modules: &[_]| {
-            let (units, used) = emit(modules, "{}", true, root, &symbols, false).unwrap();
+            let (units, used) = emit(modules, "{}", true, root, &symbols, false, None).unwrap();
             let ir = &units[0].llvm_ir;
             assert!(used);
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
@@ -1055,12 +1092,36 @@ mod tests {
                 true,
                 root,
                 &symbols,
-                false
+                false,
+                None
             )
             .unwrap()
             .1
         );
         assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
+
+        let (units, used) = emit(
+            &[bundled.clone(), project.clone()],
+            "{}",
+            true,
+            root,
+            &symbols,
+            false,
+            Some("example"),
+        )
+        .unwrap();
+        assert!(!used);
+        let ir = &units[0].llvm_ir;
+        assert_eq!(
+            ir.matches("call void @imre_dyn_register_bundled_source(")
+                .count(),
+            1
+        );
+        assert_eq!(
+            ir.matches("call void @imre_dyn_register_source(").count(),
+            1
+        );
+        assert!(!ir.contains(&symbol));
 
         let shadow = (
             project.0.clone(),
@@ -1074,6 +1135,7 @@ mod tests {
             root,
             &symbols,
             true,
+            None,
         )
         .unwrap();
         assert!(used);

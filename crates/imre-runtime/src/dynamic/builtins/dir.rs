@@ -123,7 +123,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         Value::Method { .. } if ctx.builtin_type_name(object) == Some("method") => {
             return namespace_directory(ctx, object, true);
         }
-        value if value.is_weak_proxy() => return namespace_directory(ctx, object, true),
+        value if value.is_weak_proxy() || value.native_io_class_name().is_some() => {
+            return namespace_directory(ctx, object, true);
+        }
         Value::Class { .. }
             if ctx.has_base(object, "tuple") || ctx.layout_descriptors_cleared(object) =>
         {

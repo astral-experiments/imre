@@ -1,4 +1,6 @@
 //! Process text streams and their native encoding and buffering.
+pub(crate) const STDLIB_MODULE_NAMES: &str = include_str!("../native/stdlib-module-names.txt");
+
 pub(crate) mod context_warnings;
 #[cfg(target_os = "linux")]
 pub(crate) mod cpu_count;

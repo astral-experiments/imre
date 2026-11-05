@@ -84,7 +84,7 @@ pub(super) fn read_row(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
                     ),
                 ));
             }
-            Field::Text(text) => Value::Str(text),
+            Field::Text(text) => Value::Str(text.into()),
             Field::Surrogates(points) => Value::SurrogateStr(points),
         };
         fields

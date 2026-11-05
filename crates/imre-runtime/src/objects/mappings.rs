@@ -9,6 +9,8 @@ use std::fmt::{self, Write};
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+#[cfg(target_arch = "x86_64")]
+mod ascii_gather;
 mod counters;
 mod ranking;
 mod record_hash;
@@ -179,13 +181,72 @@ trait TableKey {
     fn try_eq(&self, other: &Self) -> Result<bool, Error>;
 }
 
-impl<T: Eq + Hash> TableKey for T {
+/// Infallible table keys may choose how they feed the process-keyed hasher.
+trait InfallibleKey: Eq + Hash {
+    fn same_key(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn table_hash(&self) -> u64 {
+        HASHER.hash_one(self)
+    }
+}
+
+impl InfallibleKey for usize {}
+impl InfallibleKey for IntKey {}
+impl InfallibleKey for ObjectKey {}
+impl InfallibleKey for crate::BytesOwner {}
+
+impl InfallibleKey for StrOwner {
+    fn same_key(&self, other: &Self) -> bool {
+        if Self::ptr_eq(self, other) {
+            return true;
+        }
+        let (left, right) = (self.as_bytes(), other.as_bytes());
+        if left.len() != right.len() {
+            return false;
+        }
+        // Two overlapping fixed-width loads compare every byte of a short key.
+        match left.len() {
+            4..=8 => {
+                left.first_chunk::<4>() == right.first_chunk::<4>()
+                    && left.last_chunk::<4>() == right.last_chunk::<4>()
+            }
+            9..=16 => {
+                left.first_chunk::<8>() == right.first_chunk::<8>()
+                    && left.last_chunk::<8>() == right.last_chunk::<8>()
+            }
+            _ => left == right,
+        }
+    }
+
+    fn table_hash(&self) -> u64 {
+        string_hash(self.as_str())
+    }
+}
+
+/// Pack four through eight UTF-8 bytes into one keyed hash input. The 0xff
+/// terminator cannot occur in UTF-8, so different short strings stay distinct.
+fn string_hash(key: &str) -> u64 {
+    let bytes = key.as_bytes();
+    let shift = bytes.len().wrapping_sub(4);
+    if shift <= 4 {
+        let first = u32::from_le_bytes(*bytes.first_chunk::<4>().unwrap());
+        let last = u32::from_le_bytes(*bytes.last_chunk::<4>().unwrap());
+        let suffix = (u64::from(last) | (0xff << 32)) << (shift * 8);
+        HASHER.hash_one(u64::from(first) | suffix)
+    } else {
+        HASHER.hash_one(key)
+    }
+}
+
+impl<T: InfallibleKey> TableKey for T {
     fn try_hash(&self) -> Result<u64, Error> {
-        Ok(HASHER.hash_one(self))
+        Ok(self.table_hash())
     }
 
     fn try_eq(&self, other: &Self) -> Result<bool, Error> {
-        Ok(self == other)
+        Ok(self.same_key(other))
     }
 }
 
@@ -551,11 +612,11 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>>
     where
-        K: Eq + Hash,
+        K: InfallibleKey,
     {
         // SAFETY: the caller roots this table's exact key representation.
         let key = unsafe { K::borrow(word) };
-        self.position(HASHER.hash_one(&*key), &*key)
+        self.position(key.table_hash(), &*key)
             .map(|position| self.entries[position].as_ref().unwrap())
     }
 
@@ -839,8 +900,12 @@ impl AsciiIntCache {
         text: &[u8],
         output: &mut [std::mem::MaybeUninit<Int>],
     ) -> bool {
-        let mut present = 1;
-        for (&character, slot) in text.iter().zip(output) {
+        #[cfg(target_arch = "x86_64")]
+        let (start, mut present) =
+            ascii_gather::copy_prefix(&self.values, text, output).unwrap_or((0, 1));
+        #[cfg(not(target_arch = "x86_64"))]
+        let (start, mut present) = (0, 1);
+        for (&character, slot) in text[start..].iter().zip(&mut output[start..]) {
             // SAFETY: the caller proved that character indexes the ASCII table.
             let word = unsafe { *self.values.get_unchecked(usize::from(character)) };
             present &= word;
@@ -2543,7 +2608,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                     let mut key = Str::new("");
                     key.push(character);
                     table
-                        .position(HASHER.hash_one(&key), &key)
+                        .position(string_hash(&key), &key)
                         .map_or(0, |position| {
                             table.entries[position].as_ref().unwrap().value
                         })
@@ -2874,7 +2939,7 @@ pub extern "C" fn imre_sys_stdlib_module_names() -> *const Object {
         if let Some(names) = root.get() {
             return crate::ObjectOwner::into_raw(names.clone());
         }
-        let names = include_str!("../../native/stdlib-module-names.txt").lines();
+        let names = crate::sys::STDLIB_MODULE_NAMES.lines();
         match Set::names(names, true) {
             Ok(names) => crate::ObjectOwner::into_raw(root.get_or_init(|| names).clone()),
             Err(error) => error.returning(std::ptr::null()),
@@ -3117,7 +3182,7 @@ unsafe fn filter_character_set(
                 let present = u32::from(c) < below
                     || match ascii {
                         Some(members) if c.is_ascii() => members[c as usize],
-                        _ => keys.position(HASHER.hash_one(&*key), &*key).is_some(),
+                        _ => keys.position(string_hash(key), &*key).is_some(),
                     };
                 present.then(|| {
                     super::text::try_owned_string(key).map(|key| {
@@ -3234,6 +3299,8 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                 adapter = Some(Rc::clone(state));
                 Ok(None)
             }
+            Storage::IntegerAccumulate(scan) => Ok(scan.next().map(|item| (item, None))),
+            Storage::Accumulate(scan) => scan.next().map(|item| item.map(|item| (item, None))),
             Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
             Storage::PathIterator(iterator) => iterator.next().map(|path| {
                 // A non-null path transfers its owner to the caller of pull().
@@ -3618,7 +3685,7 @@ mod tests {
 
     #[test]
     fn character_gather_owns_big_integers_and_releases_partial_results() {
-        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let integer = crate::wide_owner(BigInt::from(1_u128 << 120));
         let weak = Shared::downgrade(&integer);
         // SAFETY: dictionary/text handles are exact and rooted. A successful
         // gather transfers one list owner; each failed gather transfers none.
@@ -3692,7 +3759,7 @@ mod tests {
 
     #[test]
     fn character_gather_tracks_heap_value_transitions_in_its_ascii_cache() {
-        let large = Shared::new(BigInt::from(1_u128 << 120));
+        let large = crate::wide_owner(BigInt::from(1_u128 << 120));
         let heap_word = Shared::as_ptr(&large) as usize;
         // SAFETY: every key/value remains rooted, and successful results and
         // pending failures each transfer exactly one owner to Rc.
@@ -3827,8 +3894,8 @@ mod tests {
 
     #[test]
     fn replacement_acquires_sole_owners_and_reclaims_deleted_keys() {
-        let key = Shared::new(BigInt::from(1_u128 << 120));
-        let value = Shared::new(BigInt::from(1_u128 << 100));
+        let key = crate::wide_owner(BigInt::from(1_u128 << 120));
+        let value = crate::wide_owner(BigInt::from(1_u128 << 100));
         let key_weak = Shared::downgrade(&key);
         let value_weak = Shared::downgrade(&value);
         let (key_word, value_word) = (
@@ -4119,8 +4186,8 @@ mod tests {
 
     #[test]
     fn sets_deduplicate_integer_values_and_own_yielded_snapshots() {
-        let original = Shared::new(BigInt::from(1_u128 << 120));
-        let equal = Shared::new(BigInt::from(1_u128 << 120));
+        let original = crate::wide_owner(BigInt::from(1_u128 << 120));
+        let equal = crate::wide_owner(BigInt::from(1_u128 << 120));
         let original_weak = Shared::downgrade(&original);
         let equal_weak = Shared::downgrade(&equal);
         let set = imre_set_new(2);

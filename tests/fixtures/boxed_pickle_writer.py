@@ -50,7 +50,32 @@ def check_global_reduction():
         del sys.modules[second.__name__]
 
 
+def check_frame_reader():
+    def frame(opcodes):
+        return pickle.FRAME + len(opcodes).to_bytes(8, "little") + opcodes
+
+    # Two independent SHORT_BINBYTES opcodes from a stock protocol-5 pickle.
+    a, b = pickle.loads(b"\x80\x05" + frame(b"C\x01x\x94C\x01x\x94\x86\x94."))
+    assert a == b == b"x" and a is not b
+
+    # Build a list across two frames, then load a separate pickle from the same stream.
+    first = b"\x80\x04" + frame(b"](") + frame(b"K\x01I2\ne.")
+    second = b"I42\n."
+    stream = io.BytesIO(first + second)
+    reader = pickle.Unpickler(stream)
+    assert reader.load() == [1, 2] and stream.tell() == len(first)
+    assert reader.load() == 42 and stream.tell() == len(first) + len(second)
+
+    try:
+        pickle.loads(b"\x80\x04" + frame(b"I42\n.")[:-2])
+    except pickle.UnpicklingError:
+        pass
+    else:
+        raise AssertionError("accepted a truncated pickle frame")
+
+
 def current():
+    check_frame_reader()
     assert pickle.bytes_types == (bytes, bytearray)
     for name in ("Pickler", "Unpickler", "dump", "load", "dumps", "loads", "HIGHEST_PROTOCOL", "STOP"):
         assert name in pickle.__all__ and hasattr(pickle, name)

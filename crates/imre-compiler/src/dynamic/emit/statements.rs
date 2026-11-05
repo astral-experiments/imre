@@ -386,11 +386,6 @@ impl Function<'_, '_> {
                         ),
                         body,
                     );
-                    if v.is_async && !generator {
-                        // Set CO_COROUTINE on the definition before any decorator
-                        // can inspect it. Async generators use a different flag.
-                        self.op("coroutine_function", &[&function]);
-                    }
                     self.decorated(&v.name, &decorators, function);
                 }
                 ast::Stmt::ClassDef(v) => {

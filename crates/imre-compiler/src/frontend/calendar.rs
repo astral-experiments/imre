@@ -2,6 +2,10 @@
 use super::calls::parameter;
 use super::*;
 use ir::{CalendarOp as Op, CalendarType as C};
+pub(super) enum ParserBinding<'a> {
+    Local(&'a [ast::Stmt]),
+    Global(DefinitionId),
+}
 pub(super) fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -363,6 +367,85 @@ impl Checker<'_> {
         };
         Ok(self.ordered_builtin(Builtin::Calendar(op), ty, args))
     }
+    /// Recognize a saved built-in parser only when every reference calls it directly.
+    pub(super) fn saved_datetime_parser<'a>(
+        &mut self,
+        statement: &'a ast::Stmt,
+        binding: ParserBinding<'_>,
+    ) -> Option<(&'a ast::Expr, Expr)> {
+        let assignment = statement.as_assign_stmt()?;
+        let [target @ ast::Expr::Name(name)] = assignment.targets.as_slice() else {
+            return None;
+        };
+        let attr = assignment.value.as_attribute_expr()?;
+        if attr.attr.as_str() != "fromisoformat"
+            || self.resolve(&attr.value)
+                != Some(Binding::Intrinsic(Intrinsic::Calendar(C::DateTime)))
+        {
+            return None;
+        }
+        let positional = |call: &ast::ExprCall| {
+            call.arguments.keywords.is_empty()
+                && matches!(call.arguments.args.as_slice(), [arg] if !arg.is_starred_expr())
+        };
+        let observed = match binding {
+            ParserBinding::Local(suite) => local_functions::reads_function_value(
+                suite,
+                |expr| matches!(expr, ast::Expr::Name(n) if n.id == name.id),
+                Some(target.range()),
+                positional,
+            ),
+            ParserBinding::Global(definition) => {
+                self.graph
+                    .modules
+                    .iter()
+                    .enumerate()
+                    .any(|(module, source)| {
+                        local_functions::reads_function_value(
+                            &source.parsed.syntax().body,
+                            |expr| {
+                                matches!(expr, ast::Expr::Name(_) | ast::Expr::Attribute(_))
+                                    && self.graph.resolve(module, expr)
+                                        == Some(Binding::Value(definition))
+                            },
+                            (module == definition.module).then_some(target.range()),
+                            positional,
+                        )
+                    })
+            }
+        };
+        if observed {
+            return None;
+        }
+        self.graph.needs_object_runtime.set(true);
+        let parser = self.builtin_callable(
+            attr,
+            None,
+            Builtin::Calendar(Op::FromIsoFormat),
+            vec![Type::Str],
+            Type::Calendar(C::DateTime),
+        );
+        Some((target, parser))
+    }
+    pub(super) fn datetime_fromisoformat(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        // A later operation on the result may need the full datetime protocol.
+        self.graph.needs_object_runtime.set(true);
+        if let [arg] = call.arguments.args.as_slice()
+            && !arg.is_starred_expr()
+            && call.arguments.keywords.is_empty()
+        {
+            let text = self.expr(arg)?;
+            if matches!(text.ty, Type::Str | Type::StrLiteral(_)) {
+                return Ok(op(
+                    Op::FromIsoFormat,
+                    Type::Calendar(C::DateTime),
+                    vec![text],
+                ));
+            }
+        }
+        Err(self.object_runtime_export("datetime.fromisoformat", call))
+    }
+
     pub(super) fn calendar_now(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let zone = self.types.optional(Type::Calendar(C::Zone));
         let args = self.arguments(

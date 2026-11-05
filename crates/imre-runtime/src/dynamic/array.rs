@@ -18,6 +18,7 @@ enum Format {
     Long,
     UnsignedLong,
     LongLong,
+    UnsignedLongLong,
     Unicode,
     Float,
     Double,
@@ -36,6 +37,7 @@ impl Format {
             Self::Long => "l",
             Self::UnsignedLong => "L",
             Self::LongLong => "q",
+            Self::UnsignedLongLong => "Q",
             Self::Unicode => "u",
             Self::Float => "f",
             Self::Double => "d",
@@ -48,7 +50,7 @@ impl Format {
             Self::SignedByte | Self::UnsignedByte => 1,
             Self::Short | Self::UnsignedShort => 2,
             Self::Long | Self::UnsignedLong => size_of::<c_long>(),
-            Self::LongLong | Self::Double => 8,
+            Self::LongLong | Self::UnsignedLongLong | Self::Double => 8,
             _ => 4,
         }
     }
@@ -97,6 +99,20 @@ impl Format {
                     .to_i64()
                     .ok_or_else(|| Error::new("OverflowError", "int too big to convert"))?;
                 out = n.to_ne_bytes();
+            }
+            Self::UnsignedLongLong => {
+                let n = ctx.index_integer(item)?;
+                let n = n.big();
+                if n.is_negative() {
+                    return Err(Error::new(
+                        "OverflowError",
+                        "can't convert negative int to unsigned",
+                    ));
+                }
+                out = n
+                    .to_u64()
+                    .ok_or_else(|| Error::new("OverflowError", "int too big to convert"))?
+                    .to_ne_bytes();
             }
             Self::UnsignedInt | Self::UnsignedLong => {
                 let n = ctx.index_integer(item)?;
@@ -267,6 +283,9 @@ impl Array {
             Format::LongLong => {
                 Value::Int(Int::from(i64::from_ne_bytes(element.try_into().unwrap())))
             }
+            Format::UnsignedLongLong => Value::Int(Int::new(
+                u64::from_ne_bytes(element.try_into().unwrap()).into(),
+            )),
             Format::UnsignedLong => Value::Int(Int::new(
                 c_ulong::from_ne_bytes(element.try_into().unwrap()).into(),
             )),
@@ -287,7 +306,8 @@ impl Array {
                         .ok_or_else(|| {
                             Error::new("ValueError", "chr() arg not in range(0x110000)")
                         })?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 )
             }
         })
@@ -397,13 +417,14 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
         "l" => Format::Long,
         "L" => Format::UnsignedLong,
         "q" => Format::LongLong,
+        "Q" => Format::UnsignedLongLong,
         // Imre's supported Linux and macOS targets store wchar_t as a 32-bit code point.
         #[cfg(unix)]
         "u" if size_of::<libc::wchar_t>() == 4 => Format::Unicode,
         "f" => Format::Float,
         "d" => Format::Double,
         "w" => Format::Wide,
-        "u" | "Q" => {
+        "u" => {
             return Err(Error::new(
                 "NotImplementedError",
                 format!("unsupported array typecode '{code}'"),

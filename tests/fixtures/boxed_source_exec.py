@@ -520,6 +520,36 @@ class Postponed:
 """, ns)
     assert ns["Postponed"].__annotations__ == {"x": "Missing"}
 
+    exec("""def try_fields(failures):
+    class Fields:
+        for fail in failures:
+            try:
+                try:
+                    body: record("body")
+                    if fail:
+                        raise ValueError
+                except ValueError:
+                    handled: record("handled")
+                    raise RuntimeError
+                else:
+                    success: record("success")
+                finally:
+                    cleanup: record("cleanup")
+            except RuntimeError:
+                escaped: record("escaped")
+    return Fields
+""", ns)
+    for failures, expected in [
+        ((False,), ["body", "success", "cleanup"]),
+        ((True,), ["body", "handled", "cleanup", "escaped"]),
+        ((True, False, True, False), ["body", "success", "handled", "cleanup", "cleanup", "escaped"]),
+    ]:
+        seen.clear()
+        fields = ns["try_fields"](failures)
+        assert seen == []
+        assert list(fields.__annotations__) == list(dict.fromkeys(expected))
+        assert seen == expected
+
 
 def module_annotations():
     events = []
@@ -1078,6 +1108,16 @@ def exec_caller_namespaces():
     assert exec(compile("40 + 2", "caller", "eval"), {}, separate) is None
     exec("result = n", globals={"n": 8}, locals=separate, closure=None)
     assert separate == {"result": 8}
+
+    outer = {"__doc__": "outer"}
+    exec(
+        '"""  Measure time.\n\tRead the clock.\n"""\n'
+        'before = __doc__\n__doc__ = "updated"',
+        outer,
+        separate,
+    )
+    assert separate["before"] == "Measure time.\nRead the clock.\n"
+    assert separate["__doc__"] == "updated" and outer["__doc__"] == "outer"
 
 
 def source_set_displays():

@@ -39,6 +39,11 @@ def format_stack(f=None, limit=None):
     return format_list(extract_stack(f, limit=limit))
 
 
+def format_tb(tb, limit=None):
+    """A shorthand for 'format_list(extract_tb(tb, limit))'."""
+    return extract_tb(tb, limit=limit).format()
+
+
 def extract_tb(tb, limit=None):
     """Return a StackSummary of the traceback, starting at its outermost frame."""
     return StackSummary._extract_from_extended_frame_gen(_walk_tb_positions(tb), limit=limit)

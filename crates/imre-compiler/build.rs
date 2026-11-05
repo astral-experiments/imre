@@ -15,7 +15,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unix_permissions(0o644);
     println!("cargo:rerun-if-changed=stdlib/installed-sources.txt");
     for name in include_str!("stdlib/installed-sources.txt").lines() {
-        let path = Path::new("stdlib").join(name);
+        let path = match name {
+            "shlex.py" => {
+                PathBuf::from("../../benchmarks/cpython_stdlib/full/shlex/upstream/Lib/shlex.py")
+            }
+            _ => Path::new("stdlib").join(name),
+        };
         println!("cargo:rerun-if-changed={}", path.display());
         archive.start_file(name, options)?;
         io::copy(&mut File::open(path)?, &mut archive)?;

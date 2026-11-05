@@ -112,14 +112,13 @@ pub(super) fn resolve(
                         if args.args.len() == 1 && args.keywords.is_empty() => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}
                     Some(Binding::Definition(source)) if ids.contains_key(&source) => {
-                        if graph.modules[source.module].is_bundled(crate::modules::CALENDAR_CLASSES)
-                            && !module.is_bundled(crate::modules::CALENDAR_CLASSES)
+                        if source.module != definition.module
+                            && let Some(name) = graph.modules[source.module].python_subclasses()
                         {
-                            // The Python method dispatches through the subclass's itermonthdays
-                            // and firstweekday descriptors and can yield an arbitrary row shape.
                             graph.needs_object_runtime.set(true);
-                            return Err(module
-                                .error(argument, "calendar subclasses require object lowering"));
+                            return Err(
+                                module.error(argument, &format!("{name} require object lowering"))
+                            );
                         }
                         if source.module == definition.module
                             && source.statement >= definition.statement

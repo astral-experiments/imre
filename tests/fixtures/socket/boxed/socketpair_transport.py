@@ -1,7 +1,8 @@
+import _socket
 import errno
 import os
 import socket
-from socket import socketpair
+from socket import fromfd, socketpair
 
 
 left, right = socketpair()
@@ -55,6 +56,17 @@ with right, left.dup() as copy:
     finally:
         os.close(old_fd)
 
+left, right = socketpair()
+with left, right:
+    left.settimeout(1)
+    with fromfd(left.fileno(), left.family, left.type) as copy:
+        assert copy.fileno() != left.fileno() and not copy.get_inheritable()
+        assert copy.gettimeout() == socket.getdefaulttimeout()
+        left.close()
+        right.sendall(b"x")
+        right.shutdown(socket.SHUT_WR)
+        assert copy.recv(1) == b"x" and copy.recv(1) == b""
+
 previous = socket.getdefaulttimeout()
 try:
     socket.setdefaulttimeout(0.75)
@@ -66,3 +78,43 @@ try:
             assert other.gettimeout() is None and left.gettimeout() == 0.75
 finally:
     socket.setdefaulttimeout(previous)
+
+
+finalized = []
+
+
+class QuietOwner:
+    def __del__(self):
+        finalized.append(True)
+
+
+def peer_and_holder():
+    peer, endpoint = _socket.socketpair()
+    peer.setblocking(False)
+    return peer, [endpoint]
+
+
+def check_last_endpoint(keep):
+    peer, holder = peer_and_holder()
+    retained = holder.copy() if keep else []
+    # Let the runtime learn the paths to the unrelated finalizers before discarding the socket.
+    for i in range(160):
+        assert owners[i % 10] is not None
+    try:
+        received = holder.pop() and peer.recv(1)
+    except BlockingIOError:
+        assert retained
+        assert retained[0].send(b"x") == 1
+        assert peer.recv(1) == b"x"
+        retained[0].close()
+        assert peer.recv(1) == b""
+    else:
+        assert not retained and received == b""
+    assert not finalized
+    peer.close()
+
+
+owners = [QuietOwner() for _ in range(10)]
+check_last_endpoint(False)
+check_last_endpoint(True)
+owners.clear()

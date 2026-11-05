@@ -356,6 +356,60 @@ impl Checker<'_> {
         self.fixed_regex(&call.arguments.args[0], flags?)
     }
 
+    /// A greedy class with a known output shape has a single-pass collector. Other Python
+    /// patterns and call signatures use the ordinary object implementation.
+    pub(super) fn regex_runs(&mut self, call: &ast::ExprCall, split: bool) -> Result<Expr, String> {
+        let name = if split { "re.split" } else { "re.findall" };
+        let ([pattern, text], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return Err(self.scoped_builtin_error(name, call));
+        };
+        let (pattern, kind) = match pattern {
+            ast::Expr::StringLiteral(pattern) => {
+                check_string(pattern, self.source)?;
+                (
+                    crate::fixed_regex::translate(pattern.value.to_str(), false),
+                    Type::Str,
+                )
+            }
+            ast::Expr::BytesLiteral(pattern) => {
+                let bytes: Vec<_> = pattern.value.bytes().collect();
+                let source = crate::fixed_regex::byte_pattern(&bytes);
+                (
+                    crate::fixed_regex::translate_pattern(
+                        &source,
+                        false,
+                        crate::fixed_regex::Alphabet::Bytes,
+                        false,
+                        true,
+                    ),
+                    Type::Bytes,
+                )
+            }
+            _ => return Err(self.scoped_builtin_error(name, call)),
+        };
+        let program = pattern
+            .ok()
+            .and_then(|pattern| {
+                crate::fixed_regex::collection(&pattern, !split, kind == Type::Bytes)
+            })
+            .ok_or_else(|| self.scoped_builtin_error(name, call))?;
+        let text = self.expr(text)?;
+        if text.ty != kind {
+            return Err(self.scoped_builtin_error(name, call));
+        }
+        let element = match &program {
+            imre_regex::Collection::Rows { fields, .. } => self.types.tuple(vec![kind; *fields]),
+            _ => kind,
+        };
+        Ok(Expr {
+            ty: self.types.list(element),
+            kind: ExprKind::Builtin(Builtin::RegexCollect { program, split }, vec![text]),
+        })
+    }
+
     pub(super) fn sub_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let (
             [
@@ -480,6 +534,9 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if receiver.ty == Type::RegexPattern && attribute.attr.as_str() == "findall" {
+            return Err(self.object_builtin_error("re.Pattern.findall", call));
+        }
         self.reject_builtin_keywords(call)?;
         let method = attribute.attr.as_str();
         let args = call.arguments.args.as_ref();

@@ -33,6 +33,7 @@ pub(crate) use bytes::{
 pub(crate) mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
+pub(crate) use calendar::iso;
 mod chainmap;
 mod charmaps;
 mod codecs;
@@ -117,20 +118,22 @@ pub(crate) mod stdio;
 use sorted_split_fields::SortedSplitFields;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
-pub(crate) use stdlib::{format_fixed_float, format_index, replace_text};
+pub(crate) use stdlib::{format_fixed_float, replace_text};
 mod string_enums;
 mod structs;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use text::{codepoint_search_window, dedent, hexadecimal, search_window};
+pub(crate) use text::{
+    codepoint_search_window, dedent, hexadecimal, indexed_search_bounds, search_window,
+};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
     ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_isidentifier, python_islower, python_isspace, python_istitle, python_isupper,
-    split_parts,
+    python_isidentifier, python_islower, python_isprintable, python_isspace, python_istitle,
+    python_isupper, split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};
@@ -234,6 +237,8 @@ enum Storage {
     StringIterator(sequences::StringIterator),
     RegexIterator(regexes::FindIter),
     Repeat(Repeat<OwnedWord>),
+    Accumulate(itertools::Accumulate),
+    IntegerAccumulate(itertools::IntegerAccumulate),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     SplitFields(SplitFields),
@@ -287,7 +292,7 @@ enum Storage {
     LogManager(Option<logging::manager::Manager>),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
-    Calendar(allocator_api2::boxed::Box<calendar::Value>),
+    Calendar(calendar::Value),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
@@ -586,12 +591,12 @@ pub unsafe extern "C" fn imre_seq_set_index(
     finish(old.map(drop), ());
 }
 
-/// Append one list or tuple owner without taking a redundant reference. On
-/// failure, the caller still owns the word for ordinary exception cleanup.
+/// Transfer a word-backed list element on success. On failure, the caller
+/// retains the owner for ordinary exception cleanup.
 ///
 /// # Safety
-/// The receiver is a list of exact tuples or lists. The caller transfers a
-/// rooted element of that kind on success. Neither operation can reenter Python.
+/// The receiver must use ordinary word storage. The rooted element must match
+/// its kind and preserve acyclicity. Neither operation can reenter Python.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_seq_append_owned(
     value: *const Object,
@@ -1444,6 +1449,64 @@ pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const 
     crate::ObjectOwner::into_raw(result.into_object())
 }
 
+/// Record a split's length and the byte spans of its first observed fields.
+///
+/// # Safety
+/// The caller roots the source and provides space for the tagged count followed
+/// by `fields` pairs of offsets and lengths.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_field_spans(value: *const Str, output: *mut usize, fields: u32) {
+    // SAFETY: the source is rooted for this scan.
+    let source = unsafe { &*value };
+    let mut count = 0;
+    for part in source
+        .split(python_whitespace)
+        .filter(|part| !part.is_empty())
+    {
+        if count < fields as usize {
+            let start = part.as_ptr() as usize - source.as_ptr() as usize;
+            // SAFETY: the caller provides two words for each requested span.
+            unsafe {
+                output.add(1 + 2 * count).write(start);
+                output.add(2 + 2 * count).write(part.len());
+            }
+        }
+        count += 1;
+    }
+    if count > MAX_LIST_LEN {
+        fail("MemoryError", "sequence allocation failed");
+    }
+    // SAFETY: the first word belongs to the count even for an empty split.
+    unsafe { output.write((count << 1) | 1) };
+}
+
+/// Materialize a split field at the original subscription, preserving its bounds error.
+///
+/// # Safety
+/// The caller roots the original source and passes its initialized span table.
+/// The index is below the number of spans requested at the split.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_field_at(
+    value: *const Str,
+    fields: *const usize,
+    index: u32,
+) -> *const Str {
+    let i = index as usize;
+    // SAFETY: the count and source remain live at this projection.
+    let (source, count) = unsafe { (&*value, fields.read() >> 1) };
+    if i >= count {
+        return Error::index().returning(std::ptr::null());
+    }
+    // SAFETY: a requested field below the actual count has an initialized span.
+    let (start, len) = unsafe { (fields.add(1 + 2 * i).read(), fields.add(2 + 2 * i).read()) };
+    if len == source.len() {
+        // SAFETY: a full slice shares the rooted input just as the split list does.
+        unsafe { StrOwner::increment_strong_count(value) };
+        return value;
+    }
+    StrOwner::into_raw(text::owned_string(&source[start..start + len]))
+}
+
 /// Bytes in 0x20..=0x7f contain no Python line break. Reducing fixed-size
 /// blocks lets LLVM check long ASCII lines without branching on each byte.
 fn plain_ascii_line(bytes: &[u8]) -> bool {
@@ -1917,7 +1980,7 @@ mod tests {
             } else {
                 // SAFETY: the integer owns this exact BigInt allocation. The
                 // temporary acquired reference is released before formatting.
-                let owner = unsafe { Shared::<BigInt>::acquire_word(integer.0) };
+                let owner = unsafe { Shared::<crate::HeapInt>::acquire_word(integer.0) };
                 Some(Shared::downgrade(&owner))
             };
             let mut buffer = [0xcc_u8; 22];
@@ -2540,7 +2603,7 @@ mod tests {
         use num_bigint::BigInt;
 
         let text = StrOwner::new(Str::from("borrowed sequence word"));
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let float = Rc::new(-0.0_f64);
         let text_weak = StrOwner::downgrade(&text);
         let big_weak = Shared::downgrade(&big);
@@ -2688,7 +2751,7 @@ mod tests {
     #[test]
     fn optional_bigint_sequence_replacement_releases_only_displaced_owners() {
         use num_bigint::BigInt;
-        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let integer = crate::wide_owner(BigInt::from(1_u128 << 120));
         let weak = Shared::downgrade(&integer);
         let word = Shared::as_ptr(&integer) as usize;
         // SAFETY: nullable Int word0 and canonical nonzero words are distinct;

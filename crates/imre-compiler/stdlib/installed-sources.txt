@@ -1,6 +1,16 @@
 _pydatetime.py
+_pydecimal.py
+cmd.py
+getpass.py
+graphlib.py
+shlex.py
+statistics.py
 tarfile.py
+timeit.py
+wave.py
 xml/__init__.py
 xml/etree/__init__.py
 xml/etree/ElementPath.py
 xml/etree/ElementTree.py
+html/__init__.py
+html/entities.py
