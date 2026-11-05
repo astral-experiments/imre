@@ -3095,7 +3095,7 @@ mod tests {
 
     #[test]
     fn caught_arithmetic_and_list_failures_preserve_owners_and_allow_recovery() {
-        let big = Shared::new(BigInt::from(1_u8) << 120_u32);
+        let big = crate::wide_owner(BigInt::from(1_u8) << 120_u32);
         let weak = Shared::downgrade(&big);
         let integer = Int(Shared::into_raw(big) as usize);
         // SAFETY: the constructor transfers one owned list reference.

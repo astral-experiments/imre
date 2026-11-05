@@ -1978,7 +1978,7 @@ mod tests {
             } else {
                 // SAFETY: the integer owns this exact BigInt allocation. The
                 // temporary acquired reference is released before formatting.
-                let owner = unsafe { Shared::<BigInt>::acquire_word(integer.0) };
+                let owner = unsafe { Shared::<crate::HeapInt>::acquire_word(integer.0) };
                 Some(Shared::downgrade(&owner))
             };
             let mut buffer = [0xcc_u8; 22];
@@ -2601,7 +2601,7 @@ mod tests {
         use num_bigint::BigInt;
 
         let text = StrOwner::new(Str::from("borrowed sequence word"));
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let float = Rc::new(-0.0_f64);
         let text_weak = StrOwner::downgrade(&text);
         let big_weak = Shared::downgrade(&big);
@@ -2749,7 +2749,7 @@ mod tests {
     #[test]
     fn optional_bigint_sequence_replacement_releases_only_displaced_owners() {
         use num_bigint::BigInt;
-        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let integer = crate::wide_owner(BigInt::from(1_u128 << 120));
         let weak = Shared::downgrade(&integer);
         let word = Shared::as_ptr(&integer) as usize;
         // SAFETY: nullable Int word0 and canonical nonzero words are distinct;

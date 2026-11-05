@@ -3685,7 +3685,7 @@ mod tests {
 
     #[test]
     fn character_gather_owns_big_integers_and_releases_partial_results() {
-        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let integer = crate::wide_owner(BigInt::from(1_u128 << 120));
         let weak = Shared::downgrade(&integer);
         // SAFETY: dictionary/text handles are exact and rooted. A successful
         // gather transfers one list owner; each failed gather transfers none.
@@ -3759,7 +3759,7 @@ mod tests {
 
     #[test]
     fn character_gather_tracks_heap_value_transitions_in_its_ascii_cache() {
-        let large = Shared::new(BigInt::from(1_u128 << 120));
+        let large = crate::wide_owner(BigInt::from(1_u128 << 120));
         let heap_word = Shared::as_ptr(&large) as usize;
         // SAFETY: every key/value remains rooted, and successful results and
         // pending failures each transfer exactly one owner to Rc.
@@ -3894,8 +3894,8 @@ mod tests {
 
     #[test]
     fn replacement_acquires_sole_owners_and_reclaims_deleted_keys() {
-        let key = Shared::new(BigInt::from(1_u128 << 120));
-        let value = Shared::new(BigInt::from(1_u128 << 100));
+        let key = crate::wide_owner(BigInt::from(1_u128 << 120));
+        let value = crate::wide_owner(BigInt::from(1_u128 << 100));
         let key_weak = Shared::downgrade(&key);
         let value_weak = Shared::downgrade(&value);
         let (key_word, value_word) = (
@@ -4186,8 +4186,8 @@ mod tests {
 
     #[test]
     fn sets_deduplicate_integer_values_and_own_yielded_snapshots() {
-        let original = Shared::new(BigInt::from(1_u128 << 120));
-        let equal = Shared::new(BigInt::from(1_u128 << 120));
+        let original = crate::wide_owner(BigInt::from(1_u128 << 120));
+        let equal = crate::wide_owner(BigInt::from(1_u128 << 120));
         let original_weak = Shared::downgrade(&original);
         let equal_weak = Shared::downgrade(&equal);
         let set = imre_set_new(2);
