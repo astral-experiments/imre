@@ -198,3 +198,58 @@ fn late_dictionary_values_keep_the_full_ordinary_search_budget() {
     ctx.heap.learn_weak_roots(registry, NONE);
     assert!(ctx.heap.cached_weak_roots([registry, NONE]));
 }
+
+#[test]
+fn iterator_paths_recheck_the_suspended_operands() {
+    use super::{Heap, RootPaths};
+
+    let mut heap = Heap::new();
+    let target = heap.alloc(Value::List(Vec::new()));
+    let cursor = heap.alloc(Value::LoopIterator {
+        source: NONE,
+        peeked: Some(target),
+    });
+    let generator = heap.alloc(Value::Generator {
+        owner: FrameOwner::Module(NONE),
+        frame: None,
+        name: NONE,
+        qualname: NONE,
+        lineno: 0,
+        code: NONE,
+        scope: NONE,
+        iterators: vec![cursor],
+        protected: Vec::new(),
+        offset: Some(0),
+        running: false,
+    });
+    let mapped = heap.alloc(Value::Map {
+        function: NONE,
+        inputs: [generator].into(),
+        strict: false,
+    });
+    let zipped = heap.alloc(Value::Zip {
+        inputs: [mapped].into(),
+        strict: false,
+    });
+    let globals = [zipped, NONE];
+    let paths = RootPaths::discover(&heap, globals, [target].into_iter(), false, false).unwrap();
+    assert!(paths.nodes.contains(&target));
+    assert!(paths.valid(&heap, globals));
+
+    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
+        unreachable!()
+    };
+    *peeked = None;
+    assert!(!paths.valid(&heap, globals));
+    let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
+        unreachable!()
+    };
+    *peeked = Some(target);
+    assert!(paths.valid(&heap, globals));
+
+    let Value::Generator { iterators, .. } = heap.get_mut(generator) else {
+        unreachable!()
+    };
+    iterators.clear();
+    assert!(!paths.valid(&heap, globals));
+}

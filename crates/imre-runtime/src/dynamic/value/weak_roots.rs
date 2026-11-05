@@ -58,6 +58,11 @@ impl<'a> Links<'a> {
             Value::Dict(entries) => ([None; 2], Members::Values(entries)),
             Value::Set { entries, .. } => ([None; 2], Members::Keys(entries)),
             Value::List(items) | Value::Tuple(items) => ([None; 2], Members::Sequence(items)),
+            Value::Map { inputs, .. } | Value::Zip { inputs, .. } => {
+                ([None; 2], Members::Sequence(inputs))
+            }
+            Value::Generator { iterators, .. } => ([None; 2], Members::Sequence(iterators)),
+            Value::LoopIterator { source, peeked } => ([Some(*source), *peeked], Members::None),
             Value::Instance {
                 fields,
                 namespace,
