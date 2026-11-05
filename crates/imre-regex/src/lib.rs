@@ -117,6 +117,134 @@ pub fn next_byte_run(
     Some(start..end)
 }
 
+/// Stream the boundaries of one byte class. A full block contributes one bit
+/// for every change between accepted and rejected bytes.
+pub struct ByteRuns<'a> {
+    members: &'a [u8; 256],
+    ranges: Option<[(u8, u8); 3]>,
+    offset: usize,
+    changes: u32,
+    previous: u32,
+}
+
+impl<'a> ByteRuns<'a> {
+    /// Prepare the class for a subject of the given byte length.
+    pub fn new(members: &'a [u8; 256], len: usize) -> Self {
+        let ranges = if len >= 256 {
+            small_ranges(members)
+        } else {
+            None
+        };
+        Self {
+            members,
+            ranges,
+            offset: 0,
+            changes: 0,
+            previous: 0,
+        }
+    }
+
+    /// Visit successive maximal runs. The caller can reborrow its subject
+    /// between fields when allocating the result can move the owning slot.
+    #[inline]
+    pub fn next(&mut self, bytes: &[u8]) -> Option<std::ops::Range<usize>> {
+        if self.ranges.is_none() {
+            let run = next_byte_run(bytes, self.members, self.offset)?;
+            self.offset = run.end;
+            return Some(run);
+        }
+        let start = self.boundary(bytes)?;
+        Some(start..self.boundary(bytes).unwrap_or(bytes.len()))
+    }
+
+    #[inline]
+    fn boundary(&mut self, bytes: &[u8]) -> Option<usize> {
+        if self.changes == 0 {
+            self.fill(bytes)?;
+        }
+        let bit = self.changes.trailing_zeros();
+        self.changes &= self.changes - 1;
+        Some(self.offset - 32 + bit as usize)
+    }
+
+    // Keep the live block and its range tests out of the per-field path.
+    #[inline(never)]
+    fn fill(&mut self, bytes: &[u8]) -> Option<()> {
+        let ranges = self.ranges.as_ref()?;
+        while self.changes == 0 {
+            let remaining = bytes.get(self.offset..).filter(|tail| !tail.is_empty())?;
+            let mask = if let Some(block) = remaining.first_chunk::<32>() {
+                block_mask(block, ranges)
+            } else {
+                remaining.iter().enumerate().fold(0, |mask, (i, &byte)| {
+                    mask | (u32::from(self.members[usize::from(byte)] != 0) << i)
+                })
+            };
+            self.changes = mask ^ ((mask << 1) | self.previous);
+            self.previous = mask >> 31;
+            self.offset += 32;
+        }
+        Some(())
+    }
+}
+
+fn block_mask(block: &[u8; 32], ranges: &[(u8, u8); 3]) -> u32 {
+    let mut flags = [0; 32];
+    for (flag, &byte) in flags.iter_mut().zip(block) {
+        *flag = 0u8.wrapping_sub(u8::from(
+            (byte.wrapping_sub(ranges[0].0) <= ranges[0].1)
+                | (byte.wrapping_sub(ranges[1].0) <= ranges[1].1)
+                | (byte.wrapping_sub(ranges[2].0) <= ranges[2].1),
+        ));
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::x86_64::{_mm_loadu_si128, _mm_movemask_epi8};
+        // SAFETY: SSE2 is available on x86-64 and both loads fit in flags.
+        unsafe {
+            let lo = _mm_loadu_si128(flags.as_ptr().cast());
+            let hi = _mm_loadu_si128(flags.as_ptr().add(16).cast());
+            _mm_movemask_epi8(lo) as u32 | ((_mm_movemask_epi8(hi) as u32) << 16)
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        portable_mask(&flags)
+    }
+}
+
+#[cfg(any(test, not(target_arch = "x86_64")))]
+fn portable_mask(flags: &[u8; 32]) -> u32 {
+    // Gather the low bit of each byte into the high byte of the product.
+    let mut mask = 0;
+    for (i, group) in flags.as_chunks::<8>().0.iter().enumerate() {
+        let low = u64::from_le_bytes(*group) & 0x0101_0101_0101_0101;
+        let packed = low.wrapping_mul(0x0102_0408_1020_4080) >> 56;
+        mask |= (packed as u32) << (i * 8);
+    }
+    mask
+}
+
+/// Up to three inclusive ranges, stored as lower bounds and widths. Repeat
+/// the first range in unused lanes so all three comparisons are independent.
+fn small_ranges(members: &[u8; 256]) -> Option<[(u8, u8); 3]> {
+    let mut ranges = [(0, 0); 3];
+    let mut count = 0;
+    let mut start = 0;
+    for run in members.chunk_by(|a, b| (*a == 0) == (*b == 0)) {
+        if run[0] != 0 {
+            let range = (start as u8, (run.len() - 1) as u8);
+            if count == 0 {
+                ranges.fill(range);
+            }
+            *ranges.get_mut(count)? = range;
+            count += 1;
+        }
+        start += run.len();
+    }
+    (count != 0).then_some(ranges)
+}
+
 /// Encode a greedy scalar class as a byte lookup followed by little-endian
 /// change points for non-ASCII scalars. A single enclosing findall capture
 /// yields the same string as the complete match.
@@ -2284,6 +2412,63 @@ fn parse_class(
 mod tests {
     use super::translate;
     use regex::Regex;
+
+    #[test]
+    fn packed_match_bits_preserve_lane_order() {
+        let ranges = [(b'a', 0); 3];
+        for low in 0..=u16::MAX {
+            let mask = u32::from(low) | (u32::from(!low) << 16);
+            let block = std::array::from_fn(|i| if mask & (1 << i) != 0 { b'a' } else { b'!' });
+            let flags = block.map(|b| if b == b'a' { u8::MAX } else { 0 });
+            assert_eq!(super::block_mask(&block, &ranges), mask);
+            assert_eq!(super::portable_mask(&flags), mask);
+        }
+    }
+
+    #[test]
+    fn byte_class_blocks_preserve_boundaries() {
+        use super::ByteRuns;
+
+        let cases: &[&[(u8, u8)]] = &[
+            &[],
+            &[(0, 255)],
+            &[(255, 255)],
+            &[(0, 31), (125, 129), (240, 255)],
+            &[(0, 1), (3, 7), (33, 65), (240, 255)],
+        ];
+        for &ranges in cases {
+            let mut members = [0; 256];
+            for &(first, last) in ranges {
+                members[usize::from(first)..=usize::from(last)].fill(17);
+            }
+            let (inside, outside): (Vec<_>, _) =
+                (0..=255u8).partition(|&b| members[usize::from(b)] != 0);
+            let mut bytes = Vec::new();
+            for len in [1, 7, 8, 9, 31, 32, 33, 39, 40, 41, 63, 64, 65, 255] {
+                for pool in [&outside, &inside] {
+                    bytes.extend(pool.iter().copied().cycle().take(len));
+                }
+            }
+            for offset in 0..=bytes.len() {
+                let tail = &bytes[offset..];
+                let mut runs = ByteRuns::new(&members, tail.len());
+                let mut cursor = 0;
+                while let Some(skip) = tail[cursor..]
+                    .iter()
+                    .position(|&b| members[usize::from(b)] != 0)
+                {
+                    let start = cursor + skip;
+                    let len = tail[start..]
+                        .iter()
+                        .take_while(|&&b| members[usize::from(b)] != 0)
+                        .count();
+                    cursor = start + len;
+                    assert_eq!(runs.next(tail), Some(start..cursor));
+                }
+                assert_eq!(runs.next(tail), None);
+            }
+        }
+    }
 
     #[test]
     fn escape_errors_observe_source_order_and_token_boundaries() {

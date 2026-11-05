@@ -1299,11 +1299,14 @@ fn prepare(
 /// Heap slots can move on allocation, so borrow the subject again for each
 /// field. Only the returned payloads are copied.
 fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) -> Option<Id> {
-    let members = match (ctx.heap.get(pattern), ctx.heap.get(subject)) {
-        (Value::Str(pattern), Value::Str(_)) => imre_regex::plain_run(pattern.as_bytes())?,
-        (Value::Bytes(pattern), Value::Bytes(_)) => imre_regex::plain_run(pattern)?,
+    let (members, len) = match (ctx.heap.get(pattern), ctx.heap.get(subject)) {
+        (Value::Str(pattern), Value::Str(s)) => {
+            (imre_regex::plain_run(pattern.as_bytes())?, s.len())
+        }
+        (Value::Bytes(pattern), Value::Bytes(b)) => (imre_regex::plain_run(pattern)?, b.len()),
         _ => return None,
     };
+    let mut runs = imre_regex::ByteRuns::new(&members, len);
     let mark = ctx.heap.temporary_mark();
     let mut fields = Vec::new();
     let mut cursor = 0;
@@ -1313,7 +1316,7 @@ fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) ->
             Value::Bytes(b) => b,
             _ => unreachable!(),
         };
-        let next = imre_regex::next_byte_run(data, &members, cursor);
+        let next = runs.next(data);
         let span = match &next {
             Some(run) if split => cursor..run.start,
             Some(run) => run.clone(),

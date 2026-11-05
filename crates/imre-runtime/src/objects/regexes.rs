@@ -424,12 +424,8 @@ fn byte_runs<'a>(
     bytes: &'a [u8],
     members: &'a [u8; 256],
 ) -> impl Iterator<Item = std::ops::Range<usize>> + 'a {
-    let mut end = 0;
-    std::iter::from_fn(move || {
-        let span = imre_regex::next_byte_run(bytes, members, end)?;
-        end = span.end;
-        Some(span)
-    })
+    let mut runs = imre_regex::ByteRuns::new(members, bytes.len());
+    std::iter::from_fn(move || runs.next(bytes))
 }
 
 /// Collect binary regex matches or split fields into an owned list of bytes.
