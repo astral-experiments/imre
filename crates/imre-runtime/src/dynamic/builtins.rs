@@ -460,6 +460,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
         ],
         "float" => &[
             "__abs__",
+            "__floor__",
             "__float__",
             "__int__",
             "__round__",
@@ -1897,6 +1898,14 @@ pub(super) fn call(
             "int" | "float" if method == "__trunc__" => {
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 integer::truncate_real(ctx, receiver)
+            }
+            "float" if method == "__floor__" => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+                    unreachable!("validated float receiver")
+                };
+                let integer = crate::floats::float_to_integer(value.floor())?;
+                Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
             }
             "float" if method == "hex" => float::hex(ctx, args, kwargs),
             "float" if method == "is_integer" => {
