@@ -1080,6 +1080,8 @@ pub(super) enum Value {
         tzoffset: Id,
         tzname: Id,
     },
+    #[cfg(target_os = "linux")]
+    Epoll(std::rc::Rc<crate::objects::epoll::Epoll>),
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
     Scandir(std::rc::Rc<super::stdlib::os::scandir::Scan>),
     DirEntry(super::stdlib::os::scandir::Entry),
@@ -1566,6 +1568,8 @@ impl Value {
     /// Returns the name used for both builtin class lookup and diagnostic messages.
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
+            #[cfg(target_os = "linux")]
+            Self::Epoll(_) => "select.epoll",
             Self::Selector(handle) => handle.borrow().class_name(),
             #[cfg(unix)]
             Self::MemoryBio(_) => "_ssl.MemoryBIO",
@@ -2272,6 +2276,8 @@ impl Value {
                     visit.push(path);
                 }
             }
+            #[cfg(target_os = "linux")]
+            Self::Epoll(_) => {}
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -5363,6 +5369,8 @@ impl Heap {
                 && match &slot.value {
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
+                    #[cfg(target_os = "linux")]
+                    Some(Value::Epoll(epoll)) => epoll.fd() >= 0,
                     Some(Value::Socket(socket)) => crate::objects::socket::fd(socket) >= 0,
                     _ => false,
                 }

@@ -1367,6 +1367,13 @@ impl IntrinsicModule {
         {
             return Some(Binding::Intrinsic(Intrinsic::IntConstant(value)));
         }
+        #[cfg(target_os = "linux")]
+        if self == Self::Select && imre_ast::epoll::FLAGS.iter().any(|&(flag, _)| name == flag) {
+            // Resolve the target ABI flag in the same runtime as the epoll descriptor.
+            return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                "select epoll constant",
+            )));
+        }
         if self == Self::Zlib
             && let Some(value) = imre_ast::zlib::integer_constant(name)
         {
@@ -1873,6 +1880,12 @@ impl IntrinsicModule {
             (Self::Sys, "maxunicode") => Intrinsic::IntConstant(0x10FFFF),
             (Self::Sys, "hexversion") => Intrinsic::SysHexversion,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
+            #[cfg(target_os = "linux")]
+            (Self::Select, "epoll") => Intrinsic::ObjectRuntimeExport("select.epoll"),
+            #[cfg(target_os = "linux")]
+            (Self::Selectors, "EpollSelector") => {
+                Intrinsic::ObjectRuntimeExport("selectors.EpollSelector")
+            }
             (Self::Select, "poll") => Intrinsic::Readiness(crate::ir::Readiness::New),
             (Self::Select, "select") => Intrinsic::Readiness(crate::ir::Readiness::Select),
             (Self::Select, "POLLIN") => Intrinsic::DescriptorConstant("pollin"),

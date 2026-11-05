@@ -1573,6 +1573,7 @@ impl Context {
                     return Some("typing._CallableType");
                 }
                 if HashState::is_provider_class(name)
+                    || (cfg!(target_os = "linux") && name == "select.epoll")
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
                     || matches!(
@@ -1796,6 +1797,8 @@ impl Context {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
                     || self.raised_error_matches(error, class)
             }
+            #[cfg(target_os = "linux")]
+            ("select.epoll", Value::Epoll(_)) => true,
             (name, Value::Selector(handle)) if name == handle.borrow().class_name() => true,
             ("array.array", Value::Array(_))
             | ("bytearray", Value::ByteArray(_))
@@ -4304,6 +4307,22 @@ impl Context {
             {
                 return Ok(self.heap.code_name("partial"));
             }
+            #[cfg(target_os = "linux")]
+            Value::Native(ref class) if class == "select.epoll" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("epoll")),
+                "__module__" => return Ok(self.text("select")),
+                "fromfd" => return Ok(self.builtin("select.epoll.fromfd")),
+                method if stdlib::epoll::METHODS.contains(&method) => {
+                    return Ok(self.builtin(&format!("select.epoll.{method}")));
+                }
+                _ => {}
+            },
+            #[cfg(target_os = "linux")]
+            Value::Epoll(ref epoll) if name == "closed" => {
+                return Ok(if epoll.fd() < 0 { TRUE } else { FALSE });
+            }
+            #[cfg(target_os = "linux")]
+            Value::Epoll(_) if name == "fromfd" => return Ok(self.builtin("select.epoll.fromfd")),
             Value::Native(ref class) if class == "socket.socket" => match name {
                 "__name__" => return Ok(self.text("socket")),
                 "connect_ex" => return Ok(self.builtin("socket.socket.connect_ex")),

@@ -814,6 +814,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             super::defaultdict::CLASS
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
+        #[cfg(target_os = "linux")]
+        Value::Epoll(_) if super::stdlib::epoll::METHODS.contains(&attr) => "select.epoll",
         Value::Poll(_) if matches!(attr, "register" | "modify" | "unregister" | "poll") => {
             "select.poll"
         }

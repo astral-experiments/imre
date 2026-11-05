@@ -4025,6 +4025,15 @@ impl Context {
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),
             "ast" => stdlib::ast::install(self, scope),
+            #[cfg(target_os = "linux")]
+            "select" => {
+                let epoll = self.builtin("select.epoll");
+                self.bind(scope, "epoll", epoll);
+                for &(name, mask) in imre_ast::epoll::FLAGS {
+                    let value = self.int(i64::from(mask));
+                    self.bind(scope, name, value);
+                }
+            }
             "selectors" => {
                 stdlib::readiness::initialize(self, scope)?;
             }
