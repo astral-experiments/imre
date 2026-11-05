@@ -10,7 +10,7 @@ pub(in crate::objects) struct Sequence {
 }
 
 impl Sequence {
-    fn new(owner: OwnedWord) -> Self {
+    pub(super) fn new(owner: OwnedWord) -> Self {
         Self {
             owner: RefCell::new(Some(owner)),
             index: Cell::new(0),

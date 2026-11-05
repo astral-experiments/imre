@@ -235,6 +235,7 @@ enum Storage {
     StringIterator(sequences::StringIterator),
     RegexIterator(regexes::FindIter),
     Repeat(Repeat<OwnedWord>),
+    Accumulate(itertools::Accumulate),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     SplitFields(SplitFields),

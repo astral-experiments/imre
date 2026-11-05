@@ -3299,6 +3299,7 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                 adapter = Some(Rc::clone(state));
                 Ok(None)
             }
+            Storage::Accumulate(scan) => scan.next().map(|item| item.map(|item| (item, None))),
             Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
             Storage::PathIterator(iterator) => iterator.next().map(|path| {
                 // A non-null path transfers its owner to the caller of pull().

@@ -336,6 +336,119 @@ pub unsafe extern "C" fn imre_islice(
     })))
 }
 
+pub(super) struct Accumulate {
+    source: AccumulateSource,
+    initial_pending: bool,
+}
+
+enum AccumulateSource {
+    Integers {
+        list: Option<crate::ListOwner>,
+        index: usize,
+        total: Option<Int>,
+    },
+    Sequence {
+        source: sources::Sequence,
+        total: Option<OwnedWord>,
+    },
+}
+
+impl Accumulate {
+    pub(super) fn next(&mut self) -> ItemResult {
+        let initial = std::mem::take(&mut self.initial_pending);
+        match &mut self.source {
+            AccumulateSource::Integers { list, index, total } => {
+                if !initial {
+                    let Some(owner) = list.as_ref() else {
+                        return Ok(None);
+                    };
+                    // SAFETY: reading an exact integer and adding it cannot invoke Python.
+                    let next = unsafe {
+                        owner.0.with(|values| {
+                            values
+                                .get(*index)
+                                .map(|n| match &*total {
+                                    Some(previous) => crate::integer_binary(previous, n, 0),
+                                    None => Ok(n.clone()),
+                                })
+                                .transpose()
+                        })
+                    }?;
+                    let Some(next) = next else {
+                        *list = None;
+                        return Ok(None);
+                    };
+                    *index += 1;
+                    *total = Some(next);
+                }
+                let word = total.as_ref().unwrap().clone().into_raw();
+                // SAFETY: the yielded reference owns this exact integer independently.
+                Ok(Some(unsafe {
+                    OwnedWord::from_owned(word, WordKind::new(2))
+                }))
+            }
+            AccumulateSource::Sequence { source, total } => {
+                if initial {
+                    return Ok(total.clone());
+                }
+                let Some(item) = source.next()? else {
+                    return Ok(None);
+                };
+                let value = if let Some(previous) = total.as_ref() {
+                    let word = if item.kind == WordKind::new(2) {
+                        // SAFETY: the homogeneous numeric sequence roots both operands.
+                        let (a, b) =
+                            unsafe { (Int::borrow(previous.word), Int::borrow(item.word)) };
+                        crate::integer_binary(&a, &b, 0)?.into_raw()
+                    } else {
+                        let sum =
+                            f64::from_bits(previous.word as u64) + f64::from_bits(item.word as u64);
+                        sum.to_bits() as usize
+                    };
+                    // SAFETY: the result is an owned word of the same numeric kind.
+                    unsafe { OwnedWord::from_owned(word, item.kind) }
+                } else {
+                    item
+                };
+                *total = Some(value.clone());
+                Ok(Some(value))
+            }
+        }
+    }
+}
+
+/// # Safety
+/// The caller roots the concrete source and any supplied exact int or float.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_accumulate_cursor(
+    mode: u32,
+    source: usize,
+    initial_kind: u32,
+    initial: usize,
+) -> *const Object {
+    let initial_pending = initial_kind != 0;
+    let source = if mode == 3 {
+        // SAFETY: mode 3 borrows a native integer list and an optional integer seed.
+        AccumulateSource::Integers {
+            list: Some(unsafe { crate::ListOwner::acquire_word(source) }),
+            index: 0,
+            total: initial_pending.then(|| unsafe { (*Int::borrow(initial)).clone() }),
+        }
+    } else {
+        // SAFETY: the checked source and seed use their supplied concrete representations.
+        AccumulateSource::Sequence {
+            source: sources::Sequence::new(unsafe { WordKind::new(mode + 1).acquire(source) }),
+            total: initial_pending.then(|| unsafe { WordKind::new(initial_kind).acquire(initial) }),
+        }
+    };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Accumulate(Accumulate {
+            source,
+            initial_pending,
+        }),
+    ))))
+}
+
 pub(super) struct Cycle {
     source: RefCell<Option<crate::ObjectOwner>>,
     saved: RefCell<Vec<OwnedWord>>,

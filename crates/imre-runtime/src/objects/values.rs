@@ -659,6 +659,10 @@ unsafe fn write_repr_with(
                             })?;
                             Ok(None)
                         }
+                        Storage::Accumulate(_) => {
+                            write!(output, "<itertools.accumulate object at {owner:p}>")?;
+                            Ok(None)
+                        }
                         Storage::IteratorAdapter(adapter) => {
                             adapter.write_repr(output, owner)?;
                             Ok(None)

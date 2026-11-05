@@ -7995,6 +7995,22 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::AccumulateCursor => {
+                let source = &args[0].value;
+                let mode = iterable_mode(source.ty);
+                let word = self.word(source);
+                let (kind, initial) = args.get(1).map_or((0, "0".to_owned()), |arg| {
+                    (
+                        representation_kind(arg.value.ty, &self.module.types),
+                        self.word(&arg.value),
+                    )
+                });
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("call ptr @imre_accumulate_cursor(i32 {mode}, i64 {word}, i32 {kind}, i64 {initial})")),
+                    small_integer: false,
+                }
+            }
             Builtin::Islice | Builtin::Cycle => {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
@@ -11096,6 +11112,7 @@ declare ptr @imre_tuple_buffer_new()
 declare i32 @imre_tuple_buffer_push(ptr, i32, i64)
 declare ptr @imre_tuple_buffer_finish(ptr)
 declare ptr @imre_cycle(i32, i64)
+declare ptr @imre_accumulate_cursor(i32, i64, i32, i64)
 declare ptr @imre_iterable_tuple(i32, i64)
 declare ptr @imre_combinatorial(i32, i64, ptr, ptr, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
