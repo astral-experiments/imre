@@ -72,11 +72,16 @@ pub(super) fn construct(
                 }
                 Some(ctx.scalar_value(value))
             } else {
-                value
+                value.map(|id| ctx.string_storage(id).unwrap_or(id))
             };
             let number = match storage.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
-                Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
+                Some(Value::Str(s)) if value == storage => {
+                    crate::integer_text::parse_radix(s, radix as u32)?
+                }
+                Some(Value::Str(_) | Value::SurrogateStr(_)) => {
+                    parse_integer_string(ctx, value.unwrap(), radix as u32)?
+                }
                 Some(Value::Bytes(b) | Value::ByteArray(b)) => {
                     crate::integer_text::parse_bytes_radix(b, radix as u32)?
                 }
@@ -256,6 +261,38 @@ pub(super) fn construct(
         }
         _ => Err(type_error(format!("unsupported type {name}"))),
     }
+}
+
+/// Parse a string whose original Python repr is needed if conversion fails.
+fn parse_integer_string(ctx: &mut Context, value: Id, base: u32) -> Result<crate::Int> {
+    const REPR_LIMIT: usize = 200;
+
+    let text = match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Str(s) => Cow::Borrowed(s.as_str()),
+        Value::SurrogateStr(points) => {
+            // CPython substitutes '?' at the first unconvertible code point. Keep the
+            // prefix so an embedded NUL still gets the normal integer digit-limit check.
+            let mut text: String = points.iter().map_while(|&cp| char::from_u32(cp)).collect();
+            text.push('?');
+            Cow::Owned(text)
+        }
+        _ => unreachable!("expected str storage"),
+    };
+    if let Some(integer) = crate::integer_text::try_parse_radix(&text, base)? {
+        return Ok(integer);
+    }
+    let repr = super::call(ctx, "repr", &[value], &[])?;
+    let mut message: Vec<_> = format!("invalid literal for int() with base {base}: ")
+        .chars()
+        .map(u32::from)
+        .collect();
+    match ctx.heap.get(ctx.scalar_value(repr)) {
+        Value::Str(text) => message.extend(text.chars().take(REPR_LIMIT).map(u32::from)),
+        Value::SurrogateStr(points) => message.extend(points.iter().take(REPR_LIMIT)),
+        _ => return Err(type_error("expected str")),
+    }
+    let message = ctx.text_codepoints(message);
+    Err(ctx.exception("ValueError", &[message]))
 }
 
 pub(super) fn bytes_hex(
