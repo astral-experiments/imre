@@ -3343,6 +3343,10 @@ impl Context {
                 self.default_source_builtins()?
             };
             self.bind(scope, "__builtins__", builtins);
+        } else if name == "math" {
+            // Re-executing the native loader preserves this module's attribute edits.
+            let nextafter = self.builtin("math.nextafter");
+            self.bind(scope, "nextafter", nextafter);
         }
         let origin = source.and_then(|(path, _)| {
             if locations.contains(path) {

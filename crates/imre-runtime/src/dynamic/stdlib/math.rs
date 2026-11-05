@@ -94,6 +94,9 @@ pub(super) fn call(
     if operation == "prod" {
         return prod(ctx, args, kwargs);
     }
+    if operation == "nextafter" {
+        return nextafter(ctx, args, kwargs);
+    }
     if operation == "isclose" {
         return isclose(ctx, args, kwargs);
     }
@@ -488,6 +491,83 @@ fn prod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     Ok(product)
 }
 
+fn nextafter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 3 {
+        let kind = if args.is_empty() { "keyword " } else { "" };
+        return Err(Error::new(
+            "TypeError",
+            format!("nextafter() takes at most 3 {kind}arguments ({count} given)"),
+        ));
+    }
+    let &[x, y] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "nextafter() takes exactly 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let steps = match kwargs.first() {
+        None => super::NONE,
+        Some((key, steps)) if key == "steps" => *steps,
+        Some((key, _)) => {
+            return Err(crate::dynamic::calls::unexpected_keyword_error(
+                "nextafter",
+                key,
+                &["steps"],
+            ));
+        }
+    };
+    let x = as_double(ctx, x)?;
+    let y = as_double(ctx, y)?;
+    let result = if steps == super::NONE {
+        c_nextafter(x, y)
+    } else {
+        let steps = ctx.index_integer(steps)?;
+        let steps = steps.big();
+        if steps.sign() == num_bigint::Sign::Minus {
+            return Err(Error::new(
+                "ValueError",
+                "steps must be a non-negative integer",
+            ));
+        }
+        nextafter_steps(x, y, steps.to_u64().unwrap_or(u64::MAX))
+    };
+    Ok(ctx.alloc(Value::Float(result)))
+}
+
+/// Advance by binary64 encodings, counting the two signed zeros as one point.
+fn nextafter_steps(x: f64, y: f64, steps: u64) -> f64 {
+    if steps == 0 || x.is_nan() {
+        return x;
+    }
+    if y.is_nan() {
+        return y;
+    }
+    let from = x.to_bits();
+    let to = y.to_bits();
+    if x.is_sign_negative() == y.is_sign_negative() {
+        let bits = if from < to {
+            from + steps.min(to - from)
+        } else {
+            from - steps.min(from - to)
+        };
+        return f64::from_bits(bits);
+    }
+    let to_zero = x.abs().to_bits();
+    let from_zero = y.abs().to_bits();
+    if steps >= to_zero + from_zero {
+        y
+    } else if steps <= to_zero {
+        // Approaching zero retains the starting sign until we cross it.
+        f64::from_bits(from - steps)
+    } else {
+        f64::from_bits(steps - to_zero).copysign(y)
+    }
+}
+
 fn isclose(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [Some(a), Some(b), rel_tol, abs_tol] =
         builtins::bind_two_positional("isclose", args, kwargs, ["a", "b", "rel_tol", "abs_tol"])?
@@ -697,6 +777,8 @@ fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
 
 unsafe extern "C" {
     safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
+    #[link_name = "nextafter"]
+    safe fn c_nextafter(x: f64, y: f64) -> f64;
     #[link_name = "frexp"]
     fn c_frexp(x: f64, exponent: *mut std::ffi::c_int) -> f64;
 }
