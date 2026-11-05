@@ -1364,12 +1364,36 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
 ) -> Id {
     // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
     let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    let result = ctx
-        .string_method_target(receiver, name)
-        .map(|(callable, receiver)| {
-            *bound_receiver = receiver;
-            callable
-        });
+    let target = ctx.string_method_target(receiver, name);
+    finish_method_target(ctx, target, bound_receiver)
+}
+
+/// Resolve an immediate get call before evaluating arguments that may release its receiver.
+///
+/// # Safety
+/// The caller supplies the active context and a writable receiver slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_dict_get_target(
+    ctx: *mut Context,
+    receiver: Id,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: generated code owns the context and passes one writable slot.
+    let (ctx, bound_receiver) = unsafe { (&mut *ctx, &mut *bound_receiver) };
+    let target = ctx.dict_get_target(receiver);
+    finish_method_target(ctx, target, bound_receiver)
+}
+
+/// Publish the receiver only after method lookup succeeds.
+fn finish_method_target(
+    ctx: &mut Context,
+    target: Result<(Id, Id)>,
+    bound_receiver: &mut Id,
+) -> Id {
+    let result = target.map(|(callable, receiver)| {
+        *bound_receiver = receiver;
+        callable
+    });
     finish(ctx, result)
 }
 
