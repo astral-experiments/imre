@@ -75,8 +75,8 @@ pub fn collection(pattern: &FixedPattern, whole_capture: bool, bytes: bool) -> O
         (2, HirKind::Capture(capture)) if whole_capture && capture.index == 1 => &capture.sub,
         _ => return None,
     };
-    if matches!(atom.kind(), HirKind::Repetition(_)) {
-        return run_class(atom, bytes).map(Collection::Runs);
+    if let Some(members) = run_class(atom, bytes) {
+        return Some(Collection::Runs(members));
     }
     literal_program(atom, bytes).map(Collection::Literals)
 }
