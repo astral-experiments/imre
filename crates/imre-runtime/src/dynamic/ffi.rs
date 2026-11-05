@@ -1168,6 +1168,42 @@ fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> 
     }
 }
 
+/// Construct a fresh sequence using the permanent handles in a linked literal.
+///
+/// # Safety
+/// `ctx` must be live and `data` must contain exactly `len` readable bytes
+/// encoding valid permanent handles as little-endian pairs.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_permanent_sequence(
+    ctx: *mut Context,
+    data: *const u8,
+    len: usize,
+    tuple: bool,
+) -> Id {
+    // SAFETY: generated code supplies a live context and the exact byte length.
+    let (ctx, bytes) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let (handles, rest) = bytes.as_chunks::<2>();
+    debug_assert!(rest.is_empty());
+    let mut items = Vec::new();
+    if items.try_reserve_exact(handles.len()).is_err() {
+        return finish(ctx, Err(Error::new("MemoryError", "")));
+    }
+    items.extend(
+        handles
+            .iter()
+            .map(|&pair| Id::from(u16::from_le_bytes(pair))),
+    );
+    let id = if tuple {
+        ctx.linked_constant(|ctx| ctx.heap.packed_tuple(items, true))
+    } else {
+        ctx.alloc(Value::List(items))
+    };
+    finish(ctx, Ok(id))
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_lit(
     ctx: *mut Context,

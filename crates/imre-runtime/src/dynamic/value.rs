@@ -53,15 +53,11 @@ pub(super) struct Hmac {
     pub digest_size: Id,
     pub block_size: Id,
 }
-pub(super) const NONE: Id = 0;
-pub(super) const FALSE: Id = 1;
-pub(super) const TRUE: Id = 2;
-pub(super) const ELLIPSIS: Id = 3;
-pub(super) const NOT_IMPLEMENTED: Id = 4;
-pub(super) const EMPTY_TUPLE: Id = 5;
-const SMALL_INT_MIN: i64 = -5;
-const SMALL_INT_MAX: i64 = 256;
-const FIRST_SMALL_INT: Id = EMPTY_TUPLE + 1;
+mod permanent {
+    include!("../../native/boxed-handles.rs");
+}
+pub(super) use permanent::{ELLIPSIS, EMPTY_TUPLE, FALSE, NONE, NOT_IMPLEMENTED, TRUE};
+use permanent::{FIRST_SMALL_INT, SMALL_INT_MAX, SMALL_INT_MIN};
 const FIRST_DYNAMIC_SLOT: usize =
     FIRST_SMALL_INT as usize + (SMALL_INT_MAX - SMALL_INT_MIN + 1) as usize;
 
@@ -3188,9 +3184,7 @@ impl Heap {
 
     /// Return the permanent heap slot for a cached Python integer.
     pub(super) fn cached_integer(value: i64) -> Option<Id> {
-        (SMALL_INT_MIN..=SMALL_INT_MAX)
-            .contains(&value)
-            .then(|| FIRST_SMALL_INT + (value - SMALL_INT_MIN) as Id)
+        permanent::small_integer_id(value)
     }
 
     pub fn alloc(&mut self, value: Value) -> Id {

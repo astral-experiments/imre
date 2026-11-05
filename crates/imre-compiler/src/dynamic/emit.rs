@@ -15,12 +15,17 @@ mod patterns;
 mod statements;
 mod strings;
 
+mod permanent {
+    include!("../../../imre-runtime/native/boxed-handles.rs");
+}
+
 const ABI: &str = "\
 %code_site = type { ptr, ptr, i32, i32 }
 declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
+declare i64 @imre_dyn_permanent_sequence(ptr, ptr, i64, i1)
 declare i64 @imre_dyn_lookup(ptr, i64, ptr, i64)
 declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
@@ -799,7 +804,12 @@ impl Function<'_, '_> {
         self.lit(6, name.as_bytes())
     }
 
-    fn integer(&mut self, n: impl ToString) -> String {
+    fn integer(&mut self, n: impl TryInto<i64> + ToString + Copy) -> String {
+        if let Ok(value) = n.try_into()
+            && let Some(id) = permanent::small_integer_id(value)
+        {
+            return id.to_string();
+        }
         self.lit(0, n.to_string().as_bytes())
     }
 
