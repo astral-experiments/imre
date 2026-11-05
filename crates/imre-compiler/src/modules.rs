@@ -2945,6 +2945,8 @@ impl SourceModule {
                 )));
             }
             let export = match name {
+                "installHandler" => Some("unittest.installHandler"),
+                "removeHandler" => Some("unittest.removeHandler"),
                 "registerResult" => Some("unittest.registerResult"),
                 "removeResult" => Some("unittest.removeResult"),
                 _ => None,
@@ -5076,6 +5078,7 @@ impl<'a> Loader<'a> {
                     } else if self.modules[target].is_bundled("zoneinfo")
                         || self.modules[target].is_bundled("pyexpat")
                         || self.modules[target].is_bundled("xml.parsers.expat")
+                        || self.modules[target].is_bundled("unittest.signals")
                     {
                         Binding::ConditionalValue
                     } else if self.modules[target].is_package {
@@ -5436,8 +5439,8 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/doctest_typed.py"),
                 ),
             )),
-            // The parser type and the public expat exports are initialized by the object runtime.
-            "pyexpat" | "xml.parsers.expat" => {
+            // The object runtime owns these exports, including the live unittest result registry.
+            "pyexpat" | "xml.parsers.expat" | "unittest.signals" => {
                 self.needs_object_imports = true;
                 bundled_runtime_source(name).map(|(path, _)| (path, ""))
             }

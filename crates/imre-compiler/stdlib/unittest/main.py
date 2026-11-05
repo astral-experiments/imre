@@ -5,6 +5,7 @@ import os
 import sys
 
 from . import loader, runner
+from .signals import installHandler
 
 __unittest = True
 _NO_TESTS_EXITCODE = 5
@@ -154,7 +155,6 @@ class TestProgram(object):
 
     def runTests(self):
         if self.catchbreak:
-            from .signals import installHandler
             installHandler()
         if self.testRunner is None:
             self.testRunner = runner.TextTestRunner
