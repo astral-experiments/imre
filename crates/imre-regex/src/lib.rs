@@ -46,10 +46,29 @@ pub struct FixedPattern {
     pub groups: Vec<Capture>,
 }
 
+/// Preserve byte literals outside ASCII in the regex parser's text input.
+pub fn byte_pattern(bytes: &[u8]) -> String {
+    let mut source = String::with_capacity(bytes.len());
+    let mut escaped = false;
+    for &b in bytes {
+        if b.is_ascii() {
+            source.push(char::from(b));
+            escaped = b == b'\\' && !escaped;
+        } else {
+            if !escaped {
+                source.push('\\');
+            }
+            write!(source, "x{b:02x}").unwrap();
+            escaped = false;
+        }
+    }
+    source
+}
+
 /// Encode a greedy scalar class as a byte lookup followed by little-endian
 /// change points for non-ASCII scalars. A single enclosing findall capture
 /// yields the same string as the complete match.
-pub fn run_class(pattern: &FixedPattern, whole_capture: bool) -> Option<Vec<u8>> {
+pub fn run_class(pattern: &FixedPattern, whole_capture: bool, bytes: bool) -> Option<Vec<u8>> {
     use regex_syntax::hir::Class;
     let hir = regex_syntax::Parser::new().parse(&pattern.source).ok()?;
     let atom = match (pattern.groups.len(), hir.kind()) {
@@ -67,6 +86,10 @@ pub fn run_class(pattern: &FixedPattern, whole_capture: bool) -> Option<Vec<u8>>
     let mut add = |start: char, end: char| {
         let start = start as u32;
         let end = end as u32 + 1;
+        if bytes {
+            members[start.min(256) as usize..end.min(256) as usize].fill(1);
+            return;
+        }
         if start < 128 {
             members[start as usize..end.min(128) as usize].fill(1);
         }
@@ -81,6 +104,11 @@ pub fn run_class(pattern: &FixedPattern, whole_capture: bool) -> Option<Vec<u8>>
         }
     };
     match repeat.sub.kind() {
+        HirKind::Class(Class::Bytes(class)) if bytes => {
+            for range in class.ranges() {
+                add(char::from(range.start()), char::from(range.end()));
+            }
+        }
         HirKind::Class(Class::Unicode(class)) => {
             for range in class.ranges() {
                 add(range.start(), range.end());
