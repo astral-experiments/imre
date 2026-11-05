@@ -4266,6 +4266,9 @@ impl Heap {
             }
             match heap.get(root) {
                 Value::Method { receiver, .. } => keeps(heap, *receiver, owner, budget),
+                Value::LoopIterator { source, peeked } => {
+                    *source == owner || *peeked == Some(owner)
+                }
                 Value::Instance { fields, .. } => fields
                     .values()
                     .take(*budget)
@@ -4423,9 +4426,9 @@ impl Heap {
             return Ok(None);
         }
         if remaining > 1
-            && (self.cached_finalizers_kept(globals, stdin, false)
+            && (self.cached_finalizers_kept(globals, stdin, None)
                 || (self.learn_finalizer_paths(globals, stdin)
-                    && self.cached_finalizers_kept(globals, stdin, false)))
+                    && self.cached_finalizers_kept(globals, stdin, None)))
         {
             return Ok(None);
         }
