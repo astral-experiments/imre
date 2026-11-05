@@ -91,6 +91,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if operation == "prod" {
+        return prod(ctx, args, kwargs);
+    }
     if operation == "isclose" {
         return isclose(ctx, args, kwargs);
     }
@@ -132,6 +135,42 @@ pub(super) fn call(
         };
         return Ok(ctx.alloc(Value::Float(result)));
     }
+    if operation == "dist" {
+        let &[p, q] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("dist expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let p = point_coordinates(ctx, p)?;
+        let q = point_coordinates(ctx, q)?;
+        if p.len() != q.len() {
+            return Err(Error::new(
+                "ValueError",
+                "both points must have the same number of dimensions",
+            ));
+        }
+        let mut differences = SmallVec::<[f64; 16]>::new();
+        differences
+            .try_reserve_exact(p.len())
+            .map_err(|_| Error::new("MemoryError", "math.dist coordinates"))?;
+        for (px, qx) in p.into_iter().zip(q) {
+            let px = as_double(ctx, px)?;
+            let qx = as_double(ctx, qx)?;
+            differences.push((px - qx).abs());
+        }
+        return Ok(ctx.alloc(Value::Float(vector_norm(&differences))));
+    }
+    if operation == "hypot" {
+        let mut coordinates = SmallVec::<[f64; 16]>::new();
+        coordinates
+            .try_reserve_exact(args.len())
+            .map_err(|_| Error::new("MemoryError", "math.hypot coordinates"))?;
+        for &arg in args {
+            coordinates.push(as_double(ctx, arg)?.abs());
+        }
+        return Ok(ctx.alloc(Value::Float(vector_norm(&coordinates))));
+    }
     if operation == "fma" {
         let &[x, y, z] = args else {
             return Err(Error::new(
@@ -168,9 +207,9 @@ pub(super) fn call(
                 ));
             }
         };
-        let mut result = natural_log(ctx, *value)?;
+        let mut result = logarithm(ctx, *value, f64::ln)?;
         if let Some(base) = base {
-            let denominator = natural_log(ctx, *base)?;
+            let denominator = logarithm(ctx, *base, f64::ln)?;
             if denominator == 0.0 {
                 return Err(Error::new("ZeroDivisionError", "division by zero"));
             }
@@ -187,6 +226,10 @@ pub(super) fn call(
             ),
         ));
     };
+    if operation == "log2" {
+        let result = logarithm(ctx, value, f64::log2)?;
+        return Ok(ctx.alloc(Value::Float(result)));
+    }
     if operation == "fsum" {
         return fsum(ctx, value);
     }
@@ -246,6 +289,9 @@ pub(super) fn call(
     }
     if operation == "isnan" {
         return Ok(builtins::boolean(as_double(ctx, value)?.is_nan()));
+    }
+    if operation == "frexp" {
+        return frexp(ctx, value);
     }
     if operation == "modf" {
         return modf(ctx, value);
@@ -310,6 +356,101 @@ pub(super) fn call(
     ))))
 }
 
+/// Read tuple storage directly, including for tuple subclasses. Other points
+/// must be fully consumed and kept alive before any coordinate is converted.
+fn point_coordinates(ctx: &mut Context, point: Id) -> Result<Vec<Id>> {
+    if let Some(items) = ctx.tuple_items(point)? {
+        return Ok(items);
+    }
+    let snapshot = ctx.collect_iterable(point, true)?;
+    Ok(ctx.tuple_items(snapshot)?.expect("collected a tuple"))
+}
+
+/// Compute the Euclidean norm of absolute coordinates using CPython's compensated
+/// sum of squares and its correction for rounding the square root.
+fn vector_norm(coordinates: &[f64]) -> f64 {
+    let max = coordinates.iter().copied().fold(0.0, f64::max);
+    if max.is_infinite() {
+        return max;
+    }
+    if coordinates.iter().any(|x| x.is_nan()) {
+        return f64::NAN;
+    }
+    if coordinates.len() <= 1 || max == 0.0 {
+        return max;
+    }
+
+    let mut exponent = 0;
+    // SAFETY: frexp writes one exponent to the supplied C int.
+    unsafe { c_frexp(max, &mut exponent) };
+    // Scaling each coordinate with ldexp also works when a subnormal maximum
+    // would require a scale factor too large to represent as a double.
+    let mut sum = 1.0;
+    let mut product_errors = 0.0;
+    let mut sum_errors = 0.0;
+    let mut add_product = |x: f64, y: f64| {
+        let product = x * y;
+        product_errors += x.mul_add(y, -product);
+        let next = sum + product;
+        sum_errors += (sum - next) + product;
+        sum = next;
+        (sum - 1.0) + (product_errors + sum_errors)
+    };
+    let mut squared_norm = 0.0;
+    for &x in coordinates {
+        let scaled = ldexp(x, -exponent);
+        squared_norm = add_product(scaled, scaled);
+    }
+    let h = squared_norm.sqrt();
+    let residual = add_product(-h, h);
+    ldexp(h + residual / (2.0 * h), exponent)
+}
+
+fn prod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 2 {
+        let kind = if args.is_empty() { "keyword " } else { "" };
+        return Err(Error::new(
+            "TypeError",
+            format!("prod() takes at most 2 {kind}arguments ({count} given)"),
+        ));
+    }
+    let &[values] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "prod() takes exactly 1 positional argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let mut product = match kwargs.first() {
+        None => ctx.int(1),
+        Some((key, start)) if key == "start" => *start,
+        Some((key, _)) => {
+            return Err(crate::dynamic::calls::unexpected_keyword_error(
+                "prod",
+                key,
+                &["start"],
+            ));
+        }
+    };
+
+    let iterator = ctx.iterator(values)?;
+    ctx.heap.keep(iterator);
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(product);
+    let mut limit = ctx.heap.streaming_collection_limit();
+    while let Some(item) = ctx.next_item(iterator)? {
+        ctx.heap.keep(item);
+        product = ctx.binary("*", product, item)?;
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(product);
+        ctx.collect_streaming_garbage(&mut limit);
+    }
+    Ok(product)
+}
+
 fn isclose(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [Some(a), Some(b), rel_tol, abs_tol] =
         builtins::bind_two_positional("isclose", args, kwargs, ["a", "b", "rel_tol", "abs_tol"])?
@@ -337,7 +478,7 @@ fn isclose(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
 
 /// Take the log of an int's stored value, including those too large for a double.
 /// Other numbers go through the same real conversion as the unary math functions.
-fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
+fn logarithm(ctx: &mut Context, value: Id, log: fn(f64) -> f64) -> Result<f64> {
     match ctx.heap.get(ctx.scalar_value(value)) {
         Value::Bool(true) => return Ok(0.0),
         Value::Bool(false) => return Err(Error::new("ValueError", "expected a positive input")),
@@ -347,7 +488,7 @@ fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
                 return Err(Error::new("ValueError", "expected a positive input"));
             }
             if let Ok(x) = crate::floats::int_to_float(integer) {
-                return Ok(x.ln());
+                return Ok(log(x));
             }
             // CPython's loghelper uses a rounded mantissa and a separate exponent
             // on overflow. Keep one sticky bit so the cast rounds ties correctly.
@@ -361,7 +502,7 @@ fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
                 mantissa = 0.5;
                 exponent += 1;
             }
-            return Ok(mantissa.ln() + std::f64::consts::LN_2 * exponent as f64);
+            return Ok(log(mantissa) + log(2.0) * exponent as f64);
         }
         _ => {}
     }
@@ -375,7 +516,15 @@ fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
             ),
         ));
     }
-    Ok(x.ln())
+    Ok(log(x))
+}
+
+/// Add non-finite inputs in sequence so the target quiets signaling NaNs and
+/// selects their payloads using the same operation as CPython.
+#[cold]
+#[inline(never)]
+fn fsum_add_special(sum: f64, value: f64) -> f64 {
+    sum + value
 }
 
 /// Accumulate non-overlapping partial sums, as in CPython's math_fsum.
@@ -385,7 +534,7 @@ fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
     let mark = ctx.heap.temporary_mark();
     let mut limit = ctx.heap.streaming_collection_limit();
     let mut partials = SmallVec::<[f64; 32]>::new();
-    let mut last_nan = None;
+    let mut special_sum = 0.0_f64;
     let mut inf_sum = 0.0_f64;
 
     while let Some(item) = ctx.next_item(iterator)? {
@@ -395,12 +544,10 @@ fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
         ctx.collect_streaming_garbage(&mut limit);
 
         if !x.is_finite() {
-            if x.is_nan() {
-                // Quiet a signaling NaN while preserving its sign and payload.
-                last_nan = Some(x + 0.0);
-            } else {
+            if x.is_infinite() {
                 inf_sum += x;
             }
+            special_sum = fsum_add_special(special_sum, x);
             partials.clear();
             continue;
         }
@@ -428,7 +575,6 @@ fn fsum(ctx: &mut Context, values: Id) -> Result<Id> {
     if inf_sum.is_nan() {
         return Err(Error::new("ValueError", "-inf + inf in fsum"));
     }
-    let special_sum = last_nan.unwrap_or(inf_sum);
     if special_sum != 0.0 {
         return Ok(ctx.alloc(Value::Float(special_sum)));
     }
@@ -475,9 +621,6 @@ pub(super) fn as_double(ctx: &mut Context, value: Id) -> Result<f64> {
 
 /// Scale by a power of two with a single rounding, including for subnormal results.
 fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
-    unsafe extern "C" {
-        safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
-    }
     let exponent = ctx
         .as_int(exponent)
         .map_err(|_| Error::new("TypeError", "Expected an int as second argument to ldexp."))?;
@@ -497,6 +640,28 @@ fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
         return Err(Error::new("OverflowError", "math range error"));
     }
     Ok(result)
+}
+
+unsafe extern "C" {
+    safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
+    #[link_name = "frexp"]
+    fn c_frexp(x: f64, exponent: *mut std::ffi::c_int) -> f64;
+}
+
+/// Split a binary float into its signed mantissa and base-two exponent.
+fn frexp(ctx: &mut Context, value: Id) -> Result<Id> {
+    let x = as_double(ctx, value)?;
+    let mut exponent = 0;
+    let mantissa = if x.is_finite() && x != 0.0 {
+        // SAFETY: frexp writes a single C int to the supplied exponent.
+        unsafe { c_frexp(x, &mut exponent) }
+    } else {
+        // CPython preserves the input bits and returns exponent zero for these cases.
+        x
+    };
+    let mantissa = ctx.alloc(Value::Float(mantissa));
+    let exponent = ctx.int(i64::from(exponent));
+    Ok(ctx.alloc(Value::Tuple(vec![mantissa, exponent])))
 }
 
 /// Split at the integer toward zero, preserving the sign and payload of either nonfinite case.

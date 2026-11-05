@@ -127,6 +127,7 @@ impl RawWriter<'_> {
             owner: Some(bytes),
             lease: None,
             anonymous: true,
+            restricted: false,
             layout: None,
             readonly: false,
             hash: None,

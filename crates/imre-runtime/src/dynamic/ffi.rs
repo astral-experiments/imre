@@ -893,6 +893,50 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     // SAFETY: non-null text points to a static source constant with exactly len bytes.
     let bundled_text =
         (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
+    register_source(
+        ctx,
+        name,
+        file,
+        ModuleInitializer::Native(code),
+        bundled_text,
+    );
+}
+
+/// Register a bundled Python module whose loader compiles its source on request.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_bundled_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+) {
+    // SAFETY: the compiler supplies static UTF-8 source and module names.
+    let (ctx, name, file, bytes) = unsafe {
+        (
+            &mut *ctx,
+            cstr(name),
+            cstr(file),
+            std::slice::from_raw_parts(text, len as usize),
+        )
+    };
+    let source = std::str::from_utf8(bytes).expect("compiler-emitted Python is UTF-8");
+    register_source(
+        ctx,
+        name,
+        file,
+        ModuleInitializer::Source(source),
+        Some(bytes),
+    );
+}
+
+fn register_source(
+    ctx: &mut Context,
+    name: &str,
+    file: &str,
+    code: ModuleInitializer,
+    bundled_text: Option<&'static [u8]>,
+) {
     ctx.sources
         .entry(name.to_owned())
         .or_default()
@@ -2074,19 +2118,48 @@ impl Context {
         }
     }
 
+    /// Release temporary operands while their return value or raised exception stays live.
+    pub(super) fn release_with_result(&mut self, mark: usize, result: Result<Id>) -> Result<Id> {
+        let collect = self.heap.discard_truth_operands(mark, self.modules);
+        match &result {
+            Ok(value) => self.heap.keep(*value),
+            Err(error) => {
+                for root in error.roots() {
+                    self.heap.keep(root);
+                }
+            }
+        }
+        if collect {
+            self.collect_unreachable();
+        }
+        result
+    }
+
+    pub(super) fn finalizer_path_roots(&self) -> [Id; 2] {
+        use super::stdlib::datetime::isocalendar::MODULE_REF;
+        [
+            self.modules,
+            self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
+        ]
+    }
+
     /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
     fn can_skip_finalizer_sweep(&self) -> bool {
-        use super::stdlib::datetime::isocalendar::MODULE_REF;
+        if self.heap.full_collection_active() {
+            return false;
+        }
+        let globals = self.finalizer_path_roots();
+        let input = super::stdlib::io::rooted_input_chain(self);
         // Include the three owners retained by sys.__stdin__.
-        self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
-            && !self.heap.full_collection_active()
+        (self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
             && (!self.heap.has_weak_values
-                || self.heap.weak_values_kept_by(
-                    self.modules,
-                    self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
-                ))
-            && super::stdlib::io::rooted_input_chain(self)
-                .is_some_and(|input| self.heap.finalizers_kept_by(&input))
+                || self.heap.weak_values_kept_by(globals[0], globals[1]))
+            && input
+                .as_ref()
+                .is_some_and(|chain| self.heap.finalizers_kept_by(chain)))
+            || self
+                .heap
+                .cached_finalizers_kept(globals, input.as_ref(), true)
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
@@ -2118,12 +2191,8 @@ impl Context {
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);
         }
-        let reference = self
-            .builtins
-            .get(super::stdlib::datetime::isocalendar::MODULE_REF)
-            .copied()
-            .unwrap_or(NONE);
-        self.heap.learn_weak_roots(self.modules, reference);
+        let [modules, reference] = self.finalizer_path_roots();
+        self.heap.learn_weak_roots(modules, reference);
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.

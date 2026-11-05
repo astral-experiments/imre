@@ -1,6 +1,6 @@
 import gc
 from _thread import allocate_lock, start_new_thread
-from gc import get_threshold, set_threshold
+from gc import get_threshold, is_tracked, set_threshold
 from weakref import ref
 
 
@@ -18,6 +18,23 @@ def enable_on_worker(isenabled, enable, done):
     if not isenabled():
         enable()
         done.release()
+
+
+def check_tracking():
+    assert not is_tracked(7) and gc.is_tracked([])
+    atomic = tuple(range(2))
+    container = ([],)
+    assert is_tracked(atomic) and is_tracked(container)
+    gc.collect()
+    assert not is_tracked(atomic) and is_tracked(container)
+
+    for args, kwargs in [((), {}), ((1, 2), {}), ((), {"obj": 1})]:
+        try:
+            is_tracked(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError((args, kwargs))
 
 
 def check_thresholds():
@@ -118,6 +135,7 @@ def current():
     try:
         assert gc.disable() is None and gc.disable() is None
         assert gc.isenabled() is False
+        check_tracking()
         delayed = cycle(events)
         node = Node()
         immediate = ref(node, events.append)

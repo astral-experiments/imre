@@ -1,6 +1,28 @@
 use super::*;
 use crate::dynamic::complex::Complex;
 
+/// Format the receiver's stored binary64 using Python's hexadecimal spelling.
+pub(super) fn hex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let receiver = noargs_method_receiver(ctx, "float", "hex", args, kwargs)?;
+    let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+        unreachable!("validated float receiver")
+    };
+    if !value.is_finite() {
+        return Ok(ctx.text(crate::floats::render(value)));
+    }
+    let sign = if value.is_sign_negative() { "-" } else { "" };
+    if value == 0.0 {
+        return Ok(ctx.text(format!("{sign}0x0.0p+0")));
+    }
+    let bits = value.to_bits();
+    let biased_exponent = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1 << 52) - 1);
+    // Subnormals use the minimum normal exponent with no implicit leading one.
+    let leading = u8::from(biased_exponent != 0);
+    let exponent = biased_exponent.max(1) - 1023;
+    Ok(ctx.text(format!("{sign}0x{leading}.{fraction:013x}p{exponent:+}")))
+}
+
 /// Parse the string payload, then let a float subclass construct its result.
 pub(super) fn fromhex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (&class, args) = args
@@ -166,38 +188,94 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             )));
         }
     };
-    if let Some(number) = from_numeric(ctx, value)? {
+    if let Some(number) = from_numeric_slots(ctx, value)? {
         return Ok(number);
     }
-    let parsed = if let Ok(text) = ctx.str_value(value) {
-        crate::floats::parse(text)
-    } else if let Value::Bytes(bytes) | Value::ByteArray(bytes) = ctx.heap.get(value) {
-        crate::floats::parse_bytes(bytes)
-    } else {
-        return Err(type_error(format!(
-            "float() argument must be a string or a real number, not '{}'",
-            ctx.type_name(value)
-        )));
-    };
-    let number = parsed.ok_or_else(|| {
-        Error::new(
-            "ValueError",
-            format!("could not convert string to float: {}", ctx.repr(value)),
-        )
-    })?;
+    let number = parse_input(ctx, value)?;
     Ok(ctx.alloc(Value::Float(number)))
 }
 
-/// Return the float supplied by the numeric protocol, preserving callback results and errors.
+/// Read native strings directly, then request a contiguous buffer from other inputs.
+fn parse_input(ctx: &mut Context, value: Id) -> Result<f64> {
+    let parsed = match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Str(text) => crate::floats::parse(text),
+        Value::SurrogateStr(_) => None,
+        Value::Bytes(bytes) | Value::ByteArray(bytes) => crate::floats::parse_bytes(bytes),
+        _ => {
+            let invalid_input = |ctx: &Context| {
+                let name = ctx.type_name(value);
+                type_error(format!(
+                    "float() argument must be a string or a real number, not '{}'",
+                    &name[..name.floor_char_boundary(200)]
+                ))
+            };
+            if let Some(method) = ctx.buffer_slot(value, "__buffer__").flatten() {
+                // Only acquisition errors are replaced. Format invalid input while the
+                // export is live, so exceptions raised by __repr__ survive release.
+                let view = ctx
+                    .acquire_python_buffer(value, method, 0)
+                    .and_then(|view| ctx.view_bytes(view).map(|_| view))
+                    .map_err(|_| invalid_input(ctx))?;
+                return ctx.with_python_buffer_export(value, view, |ctx| {
+                    let parsed = crate::floats::parse_bytes(ctx.view_bytes(view)?);
+                    parsed_number(ctx, value, parsed)
+                });
+            }
+            let bytes = ctx
+                .native_buffer_bytes(value)
+                .map_err(|_| invalid_input(ctx))?;
+            let parsed = crate::floats::parse_bytes(bytes);
+            return ctx.with_native_bytes_export(value, |ctx, _| parsed_number(ctx, value, parsed));
+        }
+    };
+    parsed_number(ctx, value, parsed)
+}
+
+fn parsed_number(ctx: &mut Context, value: Id, parsed: Option<f64>) -> Result<f64> {
+    if let Some(number) = parsed {
+        return Ok(number);
+    }
+    let repr = super::call(ctx, "repr", &[value], &[])?;
+    let prefix = ctx.text("could not convert string to float: ");
+    let message = ctx.concat_strings(prefix, repr)?;
+    Err(ctx.exception("ValueError", &[message]))
+}
+
+/// Read the stored double of any float before consulting other numeric objects' slots.
 pub(in crate::dynamic) fn from_numeric(ctx: &mut Context, value: Id) -> Result<Option<Id>> {
+    let scalar = ctx.scalar_value(value);
+    if matches!(ctx.heap.get(scalar), Value::Float(_)) {
+        return Ok(Some(scalar));
+    }
+    from_numeric_slots(ctx, value)
+}
+
+/// float() and explicit complex components honor a float subclass's __float__ override.
+pub(in crate::dynamic) fn from_numeric_slots(ctx: &mut Context, value: Id) -> Result<Option<Id>> {
     if matches!(ctx.heap.get(value), Value::Float(_)) {
         return Ok(Some(value));
     }
     if let Some(method) = ctx.bound_slot(value, "__float__")? {
         let result = ctx.call(method, Vec::new(), Vec::new())?;
         let scalar = ctx.scalar_value(result);
-        if matches!(ctx.heap.get(scalar), Value::Float(_)) {
-            return Ok(Some(scalar));
+        if let Value::Float(number) = *ctx.heap.get(scalar) {
+            if result != scalar {
+                ctx.heap.reserve_temporaries(1)?;
+                ctx.heap.keep(result);
+                let owner = ctx.type_name(value);
+                let returned = ctx.type_name(result);
+                ctx.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::DeprecationWarning,
+                    &format!(
+                        "{}.__float__ returned non-float (type {}).  The ability to return an instance of a strict subclass of float is deprecated, and may be removed in a future version of Python.",
+                        &owner[..owner.floor_char_boundary(50)],
+                        &returned[..returned.floor_char_boundary(50)],
+                    ),
+                    1,
+                )?;
+                return Ok(Some(ctx.alloc(Value::Float(number))));
+            }
+            return Ok(Some(result));
         }
         return Err(type_error(format!(
             "{}.__float__ returned non-float (type {})",

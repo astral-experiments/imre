@@ -244,6 +244,7 @@ pub(in crate::dynamic) fn decode_named(
                 owner: Some(owner),
                 lease: None,
                 anonymous: true,
+                restricted: false,
                 layout: None,
                 readonly: true,
                 hash: None,

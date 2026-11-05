@@ -112,6 +112,11 @@ const MEMBERS: &[Member] = &[
         "($self, value, [start, [stop]])",
     ),
     Member::new(
+        "insert",
+        "Insert value before index.",
+        "($self, index, value, /)",
+    ),
+    Member::new(
         "pop",
         "Remove and return the rightmost element.",
         "($self, /)",
@@ -1048,6 +1053,20 @@ pub(super) fn method(
     }
     if name == "index" {
         return index(ctx, storage, rest);
+    }
+    if name == "insert" {
+        let [index, item] = rest else {
+            return Err(Error::new(
+                "TypeError",
+                format!("insert expected 2 arguments, got {}", rest.len()),
+            ));
+        };
+        let index = ctx.index_integer(*index)?;
+        let Value::Deque(ring) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        ring.insert(&index, *item)?;
+        return Ok(NONE);
     }
     if name == "rotate" {
         let count = match rest {

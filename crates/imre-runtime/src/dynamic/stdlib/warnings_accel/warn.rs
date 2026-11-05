@@ -157,5 +157,5 @@ fn caller(ctx: &Context, level: isize, prefixes: &[Id]) -> Option<(Location, Id)
             })
             .nth((steps - 1) as usize)?
     };
-    Some((frame.0.clone(), frame.1))
+    Some(frame)
 }

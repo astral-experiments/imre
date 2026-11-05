@@ -7456,6 +7456,30 @@ impl Emitter<'_, '_> {
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
+            Builtin::FloatLog2 => Value {
+                ty: Type::Float,
+                operand: self.instruction(format!(
+                    "call double @llvm.log2.f64(double {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::FloatIsInteger => {
+                let value = &args[0].value.operand;
+                let truncated =
+                    self.instruction(format!("call double @llvm.trunc.f64(double {value})"));
+                let whole = self.instruction(format!("fcmp oeq double {value}, {truncated}"));
+                // Infinities also compare equal to their truncation.
+                let magnitude =
+                    self.instruction(format!("call double @llvm.fabs.f64(double {value})"));
+                let finite =
+                    self.instruction(format!("fcmp olt double {magnitude}, 0x7FF0000000000000"));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("and i1 {finite}, {whole}")),
+                    small_integer: false,
+                }
+            }
             Builtin::IntSignAsFloat => {
                 let order = self.instruction(format!(
                     "call i32 @compare_int(i64 {}, i64 {})",
@@ -10734,6 +10758,7 @@ declare ptr @imre_popen_selector_class(i32)
 declare void @imre_popen_set_selector(ptr)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
+declare double @llvm.log2.f64(double)
 declare double @llvm.fabs.f64(double)
 declare double @llvm.copysign.f64(double, double)
 declare double @llvm.trunc.f64(double)
@@ -10853,6 +10878,7 @@ declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
 declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)
 declare ptr @imre_calendar_datetime(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare ptr @imre_calendar_date(i64, i64, i64)
+declare ptr @imre_datetime_fromisoformat(ptr)
 declare ptr @imre_calendar_combine(ptr, ptr, i64)
 declare ptr @imre_calendar_replace(ptr, i64, i64, i64, i64, i64, i64, i64, i64, i64, i1)
 declare ptr @imre_calendar_astimezone(ptr, ptr)

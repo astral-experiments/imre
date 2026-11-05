@@ -1,4 +1,5 @@
 import sys
+from inspect import iscoroutinefunction
 from unittest import TestCase
 from unittest.mock import DEFAULT, InvalidSpecError, Mock, call, patch, sentinel
 
@@ -307,5 +308,43 @@ class GroupTests:
 
 GroupTests().test_call()
 assert sys.exit is original_exit and Group.first is first_descriptor and Group.second == 2
+
+
+def lookup(parcel, /, *, depot):
+    return (parcel, depot)
+
+
+with patch('__main__.lookup', autospec=True, return_value="queued") as replacement:
+    with check.assertRaises(TypeError):
+        main_module.lookup("A17")
+    replacement.assert_not_called()
+    assert main_module.lookup("A17", depot="west") == "queued"
+    replacement.assert_called_once_with("A17", depot="west")
+assert lookup("A17", depot="west") == ("A17", "west")
+
+class Pause:
+    def __await__(self):
+        yield "paused"
+
+
+@patch('__main__.lookup', autospec=True, return_value="queued")
+async def dispatch(replacement):
+    assert main_module.lookup is replacement
+    await Pause()
+    return main_module.lookup("A17", depot="west")
+
+
+original_lookup = lookup
+assert iscoroutinefunction(dispatch)
+pending = dispatch()
+assert main_module.lookup is original_lookup
+assert pending.send(None) == "paused"
+installed = main_module.lookup
+assert installed is not original_lookup
+with check.assertRaises(StopIteration) as completed:
+    pending.send(None)
+assert completed.exception.value == "queued"
+installed.assert_called_once_with("A17", depot="west")
+assert main_module.lookup is original_lookup
 
 print("patch restored")

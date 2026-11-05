@@ -337,12 +337,30 @@ fn unpack_from(
     Ok(unpacked_tuple(ctx, fields))
 }
 
+fn uninitialized() -> Error {
+    Error::new("RuntimeError", "Struct object is not initialized")
+}
+
+/// Render the stored format even when a subclass overrides the format property.
+pub(in crate::dynamic) fn repr(ctx: &Context, receiver: Id) -> Result<String> {
+    let Value::Struct { format, layout } = ctx.heap.get(ctx.scalar_value(receiver)) else {
+        unreachable!("validated Struct repr receiver")
+    };
+    layout.as_ref().ok_or_else(uninitialized)?;
+    let name = ctx.type_name(receiver).rsplit('.').next().unwrap();
+    let quoted = crate::objects::exceptions::string_repr(format);
+    Ok(format!("{name}({quoted})"))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "__repr__" {
+        return super::super::builtins::call(ctx, "struct.Struct.__repr__", args, kwargs);
+    }
     let Some((&receiver, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
@@ -368,9 +386,7 @@ pub(super) fn method(
     if name == "size" {
         return Ok(ctx.int(layout.as_ref().map_or(-1, |layout| layout.size as i64)));
     }
-    let layout = layout
-        .as_ref()
-        .ok_or_else(|| Error::new("RuntimeError", "Struct object is not initialized"))?;
+    let layout = layout.as_ref().ok_or_else(uninitialized)?;
     if name == "format" {
         return Ok(ctx.text(format.to_owned()));
     }

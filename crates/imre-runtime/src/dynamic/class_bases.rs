@@ -167,10 +167,26 @@ impl Context {
             self.heap.weak_edge_removed(old_mro);
             finalizers |= self.class_attr(owner, "__del__").is_some();
         }
+        // A successful assignment reattaches every direct base, including retained bases.
+        self.heap.reattach_class(class);
         if finalizers {
             self.register_class_finalizers();
         }
         Ok(())
+    }
+
+    pub(super) fn type_subclasses(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let class =
+            super::builtins::noargs_method_receiver(self, "type", "__subclasses__", args, kwargs)?;
+        if !matches!(self.heap.get(class), Value::Class { .. }) {
+            // The weak class registry does not track the edges between static native types.
+            return Err(Error::new(
+                "NotImplementedError",
+                "__subclasses__ is only supported for heap-defined classes",
+            ));
+        }
+        let children = self.heap.immediate_subclasses(class);
+        Ok(self.alloc(Value::List(children)))
     }
 
     fn class_bases_tuple(&self, class: Id) -> Option<Vec<Id>> {

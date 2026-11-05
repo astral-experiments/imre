@@ -137,6 +137,11 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
 pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) -> Result<()> {
     let low = ctx.module("_socket")?;
     ctx.bind(scope, "_socket", low);
+    #[cfg(unix)]
+    {
+        let fromfd = ctx.builtin("socket.fromfd");
+        ctx.bind(scope, "fromfd", fromfd);
+    }
     let getaddrinfo = ctx.builtin("socket.getaddrinfo");
     ctx.bind(scope, "getaddrinfo", getaddrinfo);
     for name in IMPORTED_CONSTANTS
@@ -1155,7 +1160,36 @@ fn new_socket(ctx: &mut Context, socket: crate::ObjectOwner) -> Result<Id> {
     {
         native::set_timeout(&socket, Some(timeout))?;
     }
-    Ok(ctx.alloc(Value::Socket(socket)))
+    ctx.heap.alloc_descriptor_owner(Value::Socket(socket))
+}
+
+/// Duplicate before converting the socket parameters, just as the public Python wrapper does.
+#[cfg(unix)]
+fn fromfd(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+
+    let [fd, family, kind, proto] = super::python_arguments(
+        "fromfd",
+        ["fd", "family", "type", "proto"],
+        4,
+        1,
+        args,
+        kwargs,
+    )?;
+    let raw = crate::objects::os::dup(ctx.index_c_long(fd.unwrap())? as i32)?;
+    // SAFETY: dup returned a new non-inheritable descriptor. Keep it owned across
+    // the fallible __index__ calls and kernel checks in adopt.
+    let copy = unsafe { OwnedFd::from_raw_fd(raw) };
+    let family = super::index_c_int(ctx, family.unwrap())?;
+    let kind = super::index_c_int(ctx, kind.unwrap())?;
+    let proto = proto
+        .map(|value| super::index_c_int(ctx, value))
+        .transpose()?
+        .unwrap_or(0);
+    let socket = native::adopt(copy.as_raw_fd(), family, kind, proto)?;
+    // The socket now owns the copy, including if applying the default timeout fails.
+    let _ = copy.into_raw_fd();
+    new_socket(ctx, socket)
 }
 
 pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -1216,6 +1250,8 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match name {
+        #[cfg(unix)]
+        "fromfd" => return fromfd(ctx, args, kwargs),
         "socket" => {
             let keys = ["family", "type", "proto", "fileno"];
             check_args(name, args, kwargs, keys.len(), &keys)?;
@@ -1338,6 +1374,41 @@ pub(super) fn call(
     if method == "getsockopt" {
         return getsockopt(ctx, &s, args, kwargs);
     }
+    if method == "sendto" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "sendto() takes no keyword arguments",
+            ));
+        }
+        let (data, flags, peer) = match *args {
+            [data, peer] => (data, None, peer),
+            [data, flags, peer] => (data, Some(flags), peer),
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("sendto() takes 2 or 3 arguments ({} given)", args.len()),
+                ));
+            }
+        };
+        ctx.check_buffer_exporter(data)?;
+        ctx.native_buffer_bytes(data)?;
+        let count = ctx.with_buffer_export(data, |ctx| {
+            let flags = flags
+                .map(|id| ctx.index_c_int(id))
+                .transpose()?
+                .unwrap_or(0);
+            let addr = address(ctx, native::family(&s), peer, method)?;
+            super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
+            Ok(native::send_to(
+                &s,
+                ctx.native_buffer_bytes(data)?,
+                flags,
+                &addr,
+            )?)
+        })?;
+        return Ok(ctx.int(count as i64));
+    }
     if method == "recvfrom_into" {
         return recvfrom_into(ctx, &s, args, kwargs);
     }
@@ -1418,7 +1489,7 @@ pub(super) fn call(
     let max = match method {
         "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
         "recv" | "recvfrom" | "send" | "sendall" => 2,
-        "setsockopt" | "__exit__" | "recv_into" | "sendto" => 3,
+        "setsockopt" | "__exit__" | "recv_into" => 3,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
@@ -1430,7 +1501,11 @@ pub(super) fn call(
         "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
             return endpoint_method(ctx, method, &s, args);
         }
-        "dup" => return Ok(ctx.alloc(Value::Socket(native::dup(&s)?))),
+        "dup" => {
+            return ctx
+                .heap
+                .alloc_descriptor_owner(Value::Socket(native::dup(&s)?));
+        }
         "get_inheritable" => {
             let enabled = crate::objects::os::INHERITABLE.enabled(native::fd(&s))?;
             return Ok(if enabled { super::TRUE } else { super::FALSE });
@@ -1501,35 +1576,6 @@ pub(super) fn call(
             let data = ctx.alloc(Value::Bytes(data));
             let peer = pack_socket_name(ctx, peer)?;
             return Ok(ctx.alloc(Value::Tuple(vec![data, peer])));
-        }
-        "sendto" => {
-            let (data, flags, peer) = match *args {
-                [data, peer] => (data, None, peer),
-                [data, flags, peer] => (data, Some(flags), peer),
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("sendto() takes 2 or 3 arguments ({} given)", args.len()),
-                    ));
-                }
-            };
-            ctx.check_buffer_exporter(data)?;
-            ctx.native_buffer_bytes(data)?;
-            let count = ctx.with_buffer_export(data, |ctx| {
-                let flags = flags
-                    .map(|id| ctx.index_c_int(id))
-                    .transpose()?
-                    .unwrap_or(0);
-                let addr = address(ctx, native::family(&s), peer, method)?;
-                super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
-                Ok(native::send_to(
-                    &s,
-                    ctx.native_buffer_bytes(data)?,
-                    flags,
-                    &addr,
-                )?)
-            })?;
-            return Ok(ctx.int(count as i64));
         }
         "recv" => {
             let n = usize::try_from(ctx.as_integer(argument(args, 0)?)?)

@@ -33,6 +33,7 @@ pub(crate) use bytes::{
 pub(crate) mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
+pub(crate) use calendar::iso;
 mod chainmap;
 mod charmaps;
 mod codecs;
@@ -117,7 +118,7 @@ pub(crate) mod stdio;
 use sorted_split_fields::SortedSplitFields;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
-pub(crate) use stdlib::{format_fixed_float, format_index, replace_text};
+pub(crate) use stdlib::{format_fixed_float, replace_text};
 mod string_enums;
 mod structs;
 pub(crate) mod tempdirs;
@@ -129,8 +130,8 @@ pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, url
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
     ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_isidentifier, python_islower, python_isspace, python_istitle, python_isupper,
-    split_parts,
+    python_isidentifier, python_islower, python_isprintable, python_isspace, python_istitle,
+    python_isupper, split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};

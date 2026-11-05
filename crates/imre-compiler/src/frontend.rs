@@ -2745,6 +2745,7 @@ impl<'a> Checker<'a> {
         match attribute.attr.as_str() {
             "real" | "imag" => Some("float components"),
             "fromhex" => Some("float.fromhex"),
+            "hex" => Some("float.hex"),
             _ => None,
         }
     }
@@ -6269,6 +6270,13 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if matches!(op, ast::Operator::Add | ast::Operator::Mult)
+            && [left.ty, right.ty]
+                .into_iter()
+                .any(|ty| matches!(ty, Type::Class(id) if self.decimal_class(id)))
+        {
+            return Err(self.scoped_builtin_error("Decimal arithmetic", node));
+        }
         let optional_str = |ty| self.types.payload(ty) == Some(Type::Str);
         if op == ast::Operator::Add
             && (optional_str(left.ty) || optional_str(right.ty))
@@ -6457,6 +6465,53 @@ impl<'a> Checker<'a> {
         self.object_builtin_error(name, node)
     }
 
+    /// Checks the logarithm domain once before lowering the unboxed operation.
+    fn checked_float_log2(&mut self, value: Expr) -> Expr {
+        let slot = self.hidden(Type::Float);
+        let input = self.local(slot);
+        let invalid = pipelines::compare(
+            Compare::LessEqual,
+            input.clone(),
+            Expr {
+                ty: Type::Float,
+                kind: ExprKind::Float(0.0),
+            },
+        );
+        let prefix = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Str("expected a positive input, got ".to_string()),
+        };
+        let spelling = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::Str, vec![input.clone()]),
+        };
+        let message = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Binary(Binary::Concat, Box::new(prefix), Box::new(spelling)),
+        };
+        let error = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("ValueError").unwrap(),
+                message: Some(Box::new(message)),
+            },
+        };
+        Expr {
+            ty: Type::Float,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(slot, value),
+                    Statement::If(invalid, vec![Statement::Raise(Some(error))], vec![]),
+                ],
+                value: Box::new(Expr {
+                    ty: Type::Float,
+                    kind: ExprKind::Builtin(Builtin::FloatLog2, vec![input]),
+                }),
+                clear: vec![slot],
+            },
+        }
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
         let error = self.object_export_error(name, node);
@@ -6479,31 +6534,33 @@ impl<'a> Checker<'a> {
     }
 
     fn boxed_descriptor(&self, expression: &ast::Expr) -> Option<&'static str> {
+        use ty_python_semantic::types::KnownClass;
+
         if let ast::Expr::Attribute(attribute) = expression
             && attribute.attr.as_str() == "__hash__"
-            && self.graph.session.is_known_class(
-                self.module,
-                &attribute.value,
-                ty_python_semantic::types::KnownClass::Str,
-            )
+            && self
+                .graph
+                .session
+                .is_known_class(self.module, &attribute.value, KnownClass::Str)
         {
             return Some("str.__hash__");
         }
         if let ast::Expr::Attribute(attribute) = expression
-            && let Some(method) = match attribute.attr.as_str() {
-                "partition" => Some("bytes.partition"),
-                "rjust" => Some("bytes.rjust"),
+            && let Some((method, class, ty)) = match attribute.attr.as_str() {
+                "isprintable" => Some(("str.isprintable", KnownClass::Str, Type::Str)),
+                "partition" => Some(("bytes.partition", KnownClass::Bytes, Type::Bytes)),
+                "rjust" => Some(("bytes.rjust", KnownClass::Bytes, Type::Bytes)),
                 _ => None,
             }
-            && (self.graph.session.is_known_class(
-                self.module,
-                &attribute.value,
-                ty_python_semantic::types::KnownClass::Bytes,
-            ) || self
+            && (self
                 .graph
                 .session
-                .scalar_type(self.module, &attribute.value)
-                == Some(Type::Bytes))
+                .is_known_class(self.module, &attribute.value, class)
+                || self
+                    .graph
+                    .session
+                    .scalar_type(self.module, &attribute.value)
+                    == Some(ty))
         {
             return Some(method);
         }
@@ -8902,6 +8959,19 @@ impl<'a> Checker<'a> {
         {
             return Err(self.scoped_builtin_error("__import__", call));
         }
+        if self.unshadowed_builtin(&call.func, "getattr")
+            && call.arguments.keywords.is_empty()
+            && let [owner, ast::Expr::StringLiteral(key)]
+            | [owner, ast::Expr::StringLiteral(key), _] = call.arguments.args.as_ref()
+            && self.resolve(owner)
+                == Some(Binding::IntrinsicModule(
+                    crate::modules::IntrinsicModule::Time,
+                ))
+            && let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export))) =
+                crate::modules::IntrinsicModule::Time.symbol(key.value.to_str())
+        {
+            return Err(self.scoped_builtin_error(export, call));
+        }
         if let Some(method) = self.boxed_descriptor(&call.func) {
             return Err(self.scoped_builtin_error(method, call));
         }
@@ -8995,10 +9065,10 @@ impl<'a> Checker<'a> {
             return Err(self.object_builtin_error("fromhex", call));
         }
         if let ast::Expr::Attribute(method) = &*call.func
-            && method.attr.as_str() == "fromhex"
+            && matches!(method.attr.as_str(), "fromhex" | "hex")
             && self.unshadowed_builtin(&method.value, "float")
         {
-            return Err(self.scoped_builtin_error("float.fromhex", call));
+            return Err(self.scoped_builtin_error(&format!("float.{}", method.attr), call));
         }
         if receiver.is_none()
             && let ast::Expr::Attribute(method) = call.func.as_ref()
@@ -9811,6 +9881,29 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
             ))) => return self.base85_encode(call, name),
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.log2")))
+                if call.arguments.keywords.is_empty()
+                    && let [arg] = call.arguments.args.as_ref()
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "math",
+                        "log2",
+                    ) =>
+            {
+                let value = self
+                    .expr(arg)
+                    .map_err(|_| self.scoped_builtin_error(name, call))?;
+                if value.ty == Type::Float {
+                    return Ok(self.checked_float_log2(value));
+                }
+                return Err(self.scoped_builtin_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.prod"))) => {
+                return self
+                    .integer_product(call)
+                    .map_err(|_| self.scoped_builtin_error(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
@@ -9864,7 +9957,6 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
-            Some(Binding::Intrinsic(Intrinsic::MathProd)) => return self.integer_product(call),
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Combinatorial(op))) => {
@@ -10208,9 +10300,6 @@ impl<'a> Checker<'a> {
         {
             return self.environ_method(attribute, call, mapping == Intrinsic::EnvironBytes);
         }
-        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
-            self.calendar_class_attribute(attr)?;
-        }
         if let ast::Expr::Attribute(attr) = call.func.as_ref()
             && self.resolve(&attr.value)
                 == Some(Binding::Intrinsic(Intrinsic::Calendar(
@@ -10218,10 +10307,14 @@ impl<'a> Checker<'a> {
                 )))
         {
             match attr.attr.as_str() {
+                "fromisoformat" => return self.datetime_fromisoformat(call),
                 "now" => return self.calendar_now(call),
                 "combine" => return self.calendar_combine(call),
                 _ => {}
             }
+        }
+        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
+            self.calendar_class_attribute(attr)?;
         }
         if let Some(class) = self.class_reference(&call.func) {
             let result = self.construct(call, class);
@@ -10676,6 +10769,15 @@ impl<'a> Checker<'a> {
                 return self.codec_writer_method(receiver, attribute, call);
             }
             let method = attribute.attr.as_str();
+            if receiver.ty == Type::Float && method == "hex" {
+                return Err(self.scoped_builtin_error("float.hex", call));
+            }
+            if receiver.ty == Type::Float && method == "is_integer" && call.arguments.is_empty() {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::FloatIsInteger, vec![receiver]),
+                });
+            }
             if (method == "to_bytes"
                 || (method == "bit_length"
                     && call.arguments.args.is_empty()

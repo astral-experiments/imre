@@ -84,9 +84,6 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "functools" if matches!(function, "cmp_to_key" | "reduce") => {
-            Some(("_functools", function))
-        }
         "codecs"
             if matches!(
                 function,
@@ -125,13 +122,21 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(
             function,
-            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold"
+            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked"
         ) =>
         {
             Some((module, function))
         }
         "binascii" if matches!(function, "a2b_qp" | "b2a_qp" | "crc32") => Some((module, function)),
         "zlib" if function == "compressobj" => Some((module, function)),
+        "_lzma"
+            if matches!(
+                function,
+                "is_check_supported" | "_encode_filter_properties" | "_decode_filter_properties"
+            ) =>
+        {
+            Some((module, function))
+        }
         "lzma" if function == "decompress" => Some((module, function)),
         "zlib"
             if matches!(
@@ -276,13 +281,16 @@ impl Context {
             && let Value::Native(kind) = self.heap.get(class)
             && matches!(
                 kind.as_str(),
-                stdlib::datetime::TZINFO | "datetime.timezone"
+                stdlib::datetime::TZINFO
+                    | "datetime.timezone"
+                    | value::LZMA_COMPRESS_TYPE
+                    | value::LZMA_DECOMPRESS_TYPE
             )
         {
-            let parent = if kind == stdlib::datetime::TZINFO {
-                "object"
-            } else {
+            let parent = if kind == "datetime.timezone" {
                 stdlib::datetime::TZINFO
+            } else {
+                "object"
             };
             return self
                 .builtins
@@ -367,6 +375,9 @@ impl Context {
             }
             Value::Native(kind) if kind == "type" && name == "__prepare__" => {
                 self.builtins.get("type.__prepare__").copied()
+            }
+            Value::Native(kind) if kind == "type" && name == "__subclasses__" => {
+                self.builtins.get("type.__subclasses__").copied()
             }
             Value::Native(kind) if kind == "type" && name == "mro" => {
                 self.builtins.get("type.mro").copied()
@@ -995,6 +1006,16 @@ impl Context {
             stdlib::datetime::validate_classmethod_receiver(self, "dict", "fromkeys", owner)?;
             return Ok(self.bind_native_classmethod(value, owner));
         }
+        if matches!(self.heap.get(value), Value::Native(name) if name == "functools.partial.__class_getitem__")
+        {
+            stdlib::datetime::validate_classmethod_receiver(
+                self,
+                stdlib::functools::PARTIAL_CLASS,
+                "__class_getitem__",
+                owner,
+            )?;
+            return Ok(self.bind_native_classmethod(value, owner));
+        }
         if matches!(self.heap.get(value), Value::Native(name) if name == "float.fromhex") {
             stdlib::datetime::validate_classmethod_receiver(self, "float", "fromhex", owner)?;
         }
@@ -1438,6 +1459,11 @@ impl Context {
                 _ => unreachable!("unknown exception group member"),
             });
         }
+        if owner == value::LZMA_DECOMPRESS_TYPE
+            && matches!(self.heap.get(receiver), Value::LzmaDecompressor(_))
+        {
+            return stdlib::lzma::decompressor_attr(self, receiver, field);
+        }
         if owner == "super" {
             return self.super_field(receiver, field);
         }
@@ -1591,6 +1617,8 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | value::LZMA_COMPRESS_TYPE
+                            | value::LZMA_DECOMPRESS_TYPE
                             | value::ZLIB_COMPRESS_TYPE
                             | "socket.socket"
                             | "struct.Struct"
@@ -1776,6 +1804,8 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | (value::LZMA_COMPRESS_TYPE, Value::LzmaCompressor(_))
+            | (value::LZMA_DECOMPRESS_TYPE, Value::LzmaDecompressor(_))
             | (value::ZLIB_COMPRESS_TYPE, Value::ZlibCompressor(_))
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
@@ -2153,6 +2183,11 @@ impl Context {
                 Value::BufferedRandom(..) | Value::File(_)
             )
         {
+            if let Some(value) =
+                self.dictionary_field(self.heap.get(obj).native_file_dict(), name)?
+            {
+                return Ok(value);
+            }
             // A direct call reports the defining IOBase descriptor in argument errors.
             let callable = self.builtin("_IOBase.writelines");
             return Ok(self.alloc(Value::Method {
@@ -2192,6 +2227,33 @@ impl Context {
             }
             return Ok(self.alloc(Value::MappingProxy(dictionary)));
         }
+        if let Value::Native(owner) = self.heap.get(obj)
+            && matches!(
+                owner.as_str(),
+                value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
+            )
+        {
+            if let Some(member) = self.class_attr(obj, name) {
+                return Ok(member);
+            }
+            match name {
+                "__name__" | "__qualname__" => {
+                    return Ok(self.text(owner.rsplit('.').next().unwrap().to_owned()));
+                }
+                "__base__" => return Ok(self.builtin("object")),
+                "__bases__" | "__mro__" => return Ok(self.builtin_hierarchy_tuple(obj, name)),
+                _ => {}
+            }
+        }
+        if matches!(
+            self.heap.get(obj),
+            Value::LzmaCompressor(_) | Value::LzmaDecompressor(_)
+        ) {
+            let class = self.exact_type(obj)?;
+            if let Some(member) = self.class_attr(class, name) {
+                return self.bind_attribute(member, obj, class);
+            }
+        }
         if name == "__new__" {
             let class = self.heap.get(obj).instance_class().unwrap_or(obj);
             if self.nonconstructible_heap_type(class).is_some() {
@@ -2217,14 +2279,20 @@ impl Context {
             let class = self.exact_type(obj)?;
             return self.bind_attribute(descriptor, obj, class);
         }
-        if matches!(
-            self.heap.get(obj),
-            Value::File(_) | Value::BufferedRandom(..)
-        ) || (matches!(name, "__repr__" | "truncate")
-            && matches!(self.heap.get(obj), Value::TextFile(_)))
-        {
+        if self.heap.get(obj).native_io_class_name().is_some() {
             let class = self.exact_type(obj)?;
-            if let Some(member) = self.class_attr(class, name)
+            let member = self.class_attr(class, name);
+            if name != "__class__"
+                && !member.is_some_and(|member| self.readable_data_descriptor(member))
+                && let Some(value) =
+                    self.dictionary_field(self.heap.get(obj).native_file_dict(), name)?
+            {
+                return Ok(value);
+            }
+            // Standard text streams implement most properties directly on their native handle.
+            if (!matches!(self.heap.get(obj), Value::TextFile(_))
+                || matches!(name, "__dict__" | "__repr__" | "truncate"))
+                && let Some(member) = member
                 && matches!(
                     self.heap.get(member),
                     Value::IoMethod { .. } | Value::GetSetDescriptor { .. }
@@ -2976,26 +3044,6 @@ impl Context {
                     "__text_signature__" if symbol == "posix.urandom" => {
                         return Ok(self.text("($module, size, /)"));
                     }
-                    "__doc__" if symbol == "functools.cmp_to_key" => {
-                        return Ok(self.text("Convert a cmp= function into a key= function.\n\n  mycmp\n    Function that compares two objects."));
-                    }
-                    "__text_signature__" if symbol == "functools.cmp_to_key" => {
-                        return Ok(self.text("($module, /, mycmp)"));
-                    }
-                    "__doc__" if symbol == "functools.reduce" => {
-                        return Ok(self.text(concat!(
-                            "Apply a function of two arguments cumulatively to the items of an iterable, from left to right.\n\n",
-                            "This effectively reduces the iterable to a single value.  If initial is present,\n",
-                            "it is placed before the items of the iterable in the calculation, and serves as\n",
-                            "a default when the iterable is empty.\n\n",
-                            "For example, reduce(lambda x, y: x+y, [1, 2, 3, 4, 5])\n",
-                            "calculates ((((1 + 2) + 3) + 4) + 5)."
-                        )));
-                    }
-                    "__text_signature__" if symbol == "functools.reduce" => {
-                        return Ok(self
-                            .text("($module, function, iterable, /, initial=<unrepresentable>)"));
-                    }
                     "__doc__"
                         if let Some(function) = super::lowlevel_threads::function_name(symbol) =>
                     {
@@ -3053,6 +3101,9 @@ impl Context {
                     {
                         return Ok(self.text("($module, /)"));
                     }
+                    "__text_signature__" if symbol == "gc.is_tracked" => {
+                        return Ok(self.text("($module, obj, /)"));
+                    }
                     "__text_signature__" if symbol == "gc.set_threshold" => return Ok(NONE),
                     "__doc__" if module == "gc" => {
                         let doc = match function {
@@ -3062,6 +3113,9 @@ impl Context {
                                 "Returns true if automatic garbage collection is enabled."
                             }
                             "get_threshold" => "Return the current collection thresholds.",
+                            "is_tracked" => {
+                                "Returns true if the object is tracked by the garbage collector.\n\nSimple atomic objects will return false."
+                            }
                             "set_threshold" => {
                                 "set_threshold(threshold0, [threshold1, [threshold2]])\nSet the collection thresholds (the collection frequency).\n\nSetting 'threshold0' to zero disables collection."
                             }
@@ -3474,6 +3528,23 @@ impl Context {
                             return Ok(self.text(text));
                         }
                         let value = match name {
+                            "__doc__" if method == "functools.cmp_to_key" => Some(
+                                "Convert a cmp= function into a key= function.\n\n  mycmp\n    Function that compares two objects.",
+                            ),
+                            "__text_signature__" if method == "functools.cmp_to_key" => {
+                                Some("($module, /, mycmp)")
+                            }
+                            "__doc__" if method == "functools.reduce" => Some(concat!(
+                                "Apply a function of two arguments cumulatively to the items of an iterable, from left to right.\n\n",
+                                "This effectively reduces the iterable to a single value.  If initial is present,\n",
+                                "it is placed before the items of the iterable in the calculation, and serves as\n",
+                                "a default when the iterable is empty.\n\n",
+                                "For example, reduce(lambda x, y: x+y, [1, 2, 3, 4, 5])\n",
+                                "calculates ((((1 + 2) + 3) + 4) + 5)."
+                            )),
+                            "__text_signature__" if method == "functools.reduce" => {
+                                Some("($module, function, iterable, /, initial=<unrepresentable>)")
+                            }
                             "__doc__" if method == "_locale.localeconv" => {
                                 Some("Returns numeric and monetary locale-specific parameters.")
                             }
@@ -3694,14 +3765,17 @@ impl Context {
                     | "_ssl.MemoryBIO"
                     | stdlib::hashlib::md5::CLASS
                     | stdlib::datetime::isocalendar::CLASS
-            ) || HashState::is_provider_class(owner)
+            ) || matches!(self.heap.get(get), Value::IoMethod { .. })
+                || HashState::is_provider_class(owner)
                 || Self::dict_view_owner(owner).is_some()
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
             {
                 match name {
                     "__objclass__" => {
-                        if let Value::HeapTypeMethod { owner, .. } = *self.heap.get(get) {
+                        if let Value::HeapTypeMethod { owner, .. } | Value::IoMethod { owner, .. } =
+                            *self.heap.get(get)
+                        {
                             return Ok(owner);
                         }
                         return Ok(self.builtin(owner));
@@ -3710,7 +3784,18 @@ impl Context {
                     "__doc__" if Self::dict_view_owner(owner).is_some() => {
                         return Ok(self.text("dictionary that this view refers to"));
                     }
-                    "__doc__" if owner == stdlib::datetime::isocalendar::CLASS => return Ok(NONE),
+                    "__doc__"
+                        if owner == stdlib::datetime::isocalendar::CLASS
+                            || matches!(
+                                self.heap.get(get),
+                                Value::IoMethod {
+                                    name: "__dict__",
+                                    ..
+                                }
+                            ) =>
+                    {
+                        return Ok(NONE);
+                    }
                     "__doc__" if owner == super::deque::CLASS => {
                         return Ok(self.text("maximum size of a deque or None if unbounded"));
                     }
@@ -3740,6 +3825,7 @@ impl Context {
                                     | stdlib::hashlib::md5::CLASS
                                     | stdlib::datetime::isocalendar::CLASS
                             )
+                            || matches!(self.heap.get(get), Value::IoMethod { .. })
                             || HashState::is_provider_class(owner)
                             || Self::dict_view_owner(owner).is_some() =>
                     {
@@ -4141,7 +4227,7 @@ impl Context {
             Value::Native(ref class)
                 if matches!(
                     class.as_str(),
-                    "int" | "float" | "function" | "cell" | "type"
+                    "int" | "float" | "bytes" | "function" | "cell" | "type"
                 ) && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
@@ -4204,13 +4290,8 @@ impl Context {
             {
                 return self.lookup_attr(buffer, "name");
             }
-            Value::TextFile(_) if name == "mode" => return Ok(self.text("w")),
-            Value::TextFile(ref file)
-                if name == "encoding"
-                    && let Some(encoding) = file.encoding() =>
-            {
-                return Ok(self.text(encoding.as_str()));
-            }
+            Value::TextFile(ref file) if name == "encoding" => return Ok(file.encoding),
+            Value::TextFile(ref file) if name == "errors" => return Ok(file.errors),
             Value::TextFile(ref file) if name == "_finalizing" => {
                 return Ok(builtins::boolean(file.finalizing));
             }
@@ -4517,7 +4598,15 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if matches!(name, "__bases__" | "__mro__") && builtins::is_exported_type(class) =>
+                if name == "__base__"
+                    && matches!(class.as_str(), defaultdict::CLASS | "NoneType") =>
+            {
+                return Ok(self.builtin(Self::native_base(class).unwrap_or("object")));
+            }
+            Value::Native(ref class)
+                if matches!(name, "__bases__" | "__mro__")
+                    && (builtins::is_exported_type(class)
+                        || matches!(class.as_str(), defaultdict::CLASS | "NoneType")) =>
             {
                 return Ok(self.builtin_hierarchy_tuple(obj, name));
             }
@@ -4643,6 +4732,9 @@ impl Context {
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
                 if let Some(method) = self.class_attr(obj, name) {
+                    if class == stdlib::functools::PARTIAL_CLASS && name == "__class_getitem__" {
+                        return Ok(self.bind_native_classmethod(method, obj));
+                    }
                     return Ok(method);
                 }
             }
@@ -4707,8 +4799,19 @@ impl Context {
                     if let Some(value) = self.scope_name(scope, name) {
                         return Ok(value);
                     }
+                    let bind_to_module =
+                        module == "functools" && matches!(name, "cmp_to_key" | "reduce");
                     match stdlib::attribute(self, &module.to_owned(), name) {
                         Ok(value) => {
+                            let value = if bind_to_module {
+                                self.alloc(Value::Method {
+                                    callable: value,
+                                    receiver: obj,
+                                    explicit: false,
+                                })
+                            } else {
+                                value
+                            };
                             self.bind(scope, name, value);
                             return Ok(value);
                         }
@@ -4866,9 +4969,13 @@ impl Context {
             let prepare = self.builtin("type.__prepare__");
             return Ok(self.bind_native_classmethod(prepare, owner));
         }
-        if name == "mro" && self.is_type_object(obj) {
+        if matches!(name, "mro" | "__subclasses__") && self.is_type_object(obj) {
             let owner = self.builtin("type");
-            let descriptor = self.builtin("type.mro");
+            let descriptor = self.builtin(if name == "mro" {
+                "type.mro"
+            } else {
+                "type.__subclasses__"
+            });
             let receiver = if obj == owner { NONE } else { obj };
             return self.bind_attribute(descriptor, receiver, owner);
         }
@@ -4950,6 +5057,7 @@ impl Context {
                 }
                 Value::List(_) => return Ok(self.builtin("list.__new__")),
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::Bytes(_) => return Ok(self.builtin("bytes.__new__")),
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::Cell(_) => return Ok(self.builtin("cell.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
@@ -5165,7 +5273,7 @@ impl Context {
             return self.update_base_local_attribute(obj, name, None);
         }
         let exception_member = self.exception_member(obj, name);
-        let member = self.writable_attribute_member(obj, name);
+        let member = self.writable_attribute_member(obj, name)?;
         if member.is_none()
             && self.exposes_defaultdict_factory(obj, name)
             && self.replace_defaultdict_factory(obj, NONE)
@@ -5279,6 +5387,10 @@ impl Context {
         }
         self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
+            ref file if file.native_io_class_name().is_some() => {
+                let dictionary = self.native_file_dictionary(obj);
+                self.update_dictionary_field(obj, dictionary, name, None)
+            }
             Value::Partial { dictionary, .. } => {
                 if matches!(name, "func" | "args" | "keywords") {
                     return Err(Error::new("AttributeError", "readonly attribute"));
@@ -5512,16 +5624,20 @@ impl Context {
         })
     }
 
-    fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
-        if name == "_finalizing" && matches!(self.heap.get(obj), Value::TextFile(_)) {
-            let owner = self.builtin("_io.TextIOWrapper");
-            return self.own_class_attr(owner, name);
+    fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
+        if matches!(self.heap.get(obj), Value::LzmaDecompressor(_)) {
+            let class = self.builtin(value::LZMA_DECOMPRESS_TYPE);
+            return Ok(self.own_class_attr(class, name));
+        }
+        if self.heap.get(obj).native_io_class_name().is_some() {
+            let class = self.exact_type(obj)?;
+            return Ok(self.class_attr(class, name));
         }
         if name == "cr_origin" && matches!(self.heap.get(obj), Value::Coroutine { .. }) {
-            return Some(self.readonly_member("coroutine", "cr_origin"));
+            return Ok(Some(self.readonly_member("coroutine", "cr_origin")));
         }
         if name == "mapping" && matches!(self.heap.get(obj), Value::DictView { .. }) {
-            return self.dict_view_mapping_member(obj);
+            return Ok(self.dict_view_mapping_member(obj));
         }
         if matches!(name, "numerator" | "denominator" | "real" | "imag")
             && matches!(
@@ -5529,7 +5645,7 @@ impl Context {
                 Value::Int(_) | Value::Bool(_) | Value::Float(_)
             )
         {
-            return self.builtin_numeric_member(obj, name);
+            return Ok(self.builtin_numeric_member(obj, name));
         }
         if let Value::NamedTuple {
             class: Some(owner), ..
@@ -5543,7 +5659,7 @@ impl Context {
                 None
             };
             if member.is_some() {
-                return member;
+                return Ok(member);
             }
         }
         if matches!(
@@ -5554,19 +5670,21 @@ impl Context {
             }
         ) && let Some(member) = stdlib::flags::member(self, name)
         {
-            return Some(member);
+            return Ok(Some(member));
         }
         if matches!(self.heap.get(obj), Value::TypeVar(_)) {
             let owner = self.builtin("typing.TypeVar");
-            return self.own_class_attr(owner, name);
+            return Ok(self.own_class_attr(owner, name));
         }
-        let member = self.slot(obj, name)?;
+        let Some(member) = self.slot(obj, name) else {
+            return Ok(None);
+        };
         if let Value::Instance { class, .. } = *self.heap.get(obj)
             && self.instance_layout(class, name).active_slot
         {
-            return None;
+            return Ok(None);
         }
-        Some(member)
+        Ok(Some(member))
     }
 
     /// An inline Python slot can shadow object's class descriptor.
@@ -5633,7 +5751,7 @@ impl Context {
                 let proxy = self.class_dictionary(scope);
                 Some(self.mapping_proxy_target(proxy))
             }
-            _ => None,
+            ref value => value.native_file_dict(),
         };
         Ok(dictionary
             .filter(|&dictionary| {
@@ -6225,7 +6343,7 @@ impl Context {
             return self.set_function_attr(obj, name, value);
         }
         let exception_member = self.exception_member(obj, name);
-        let member = self.writable_attribute_member(obj, name);
+        let member = self.writable_attribute_member(obj, name)?;
         if let Some(descriptor) = member.or(exception_member)
             && self.data_descriptor(descriptor)
         {
@@ -6388,6 +6506,10 @@ impl Context {
             return self.assign_instance_class(obj, Some(value));
         }
         self.check_instance_field(obj, name)?;
+        if self.heap.get(obj).native_io_class_name().is_some() && name != "__class__" {
+            let dictionary = self.native_file_dictionary(obj);
+            return self.update_dictionary_field(obj, dictionary, name, Some(value));
+        }
         if let Value::Partial { dictionary, .. } = *self.heap.get(obj)
             && name != "__class__"
         {
@@ -7136,6 +7258,9 @@ impl Context {
             Value::Native(name) if name == "type.__new__" => self.type_new(&args, &kwargs),
             Value::Native(name) if name == "type.__prepare__" => Ok(self.dict(Vec::new())),
             Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
+            Value::Native(name) if name == "type.__subclasses__" => {
+                self.type_subclasses(&args, &kwargs)
+            }
             Value::Native(ref name)
                 if let Some((owner, "__new__")) = name.rsplit_once('.')
                     && let Some(owner) = stdlib::itertools::cursor_type(owner) =>

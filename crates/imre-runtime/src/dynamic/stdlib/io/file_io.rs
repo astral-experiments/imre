@@ -572,7 +572,7 @@ pub(in crate::dynamic) fn open(
     let file = files::BinaryFile::open(path, filename, mode, writer_capacity)
         .and_then(files::BinaryFile::into_value);
     match file {
-        Ok(file) => ctx.heap.alloc_file_writer(file),
+        Ok(file) => ctx.heap.alloc_descriptor_owner(file),
         Err(error) => Err(ctx.with_open_filename(error, raw_arg)?),
     }
 }
@@ -655,7 +655,7 @@ fn close_on_error(ctx: &mut Context, layer: Id, error: Error) -> Error {
 
 fn allocate_buffer(ctx: &mut Context, buffer: super::BufferedFd) -> Result<Id> {
     let value = files::BinaryFile::Descriptor(buffer).into_value()?;
-    ctx.heap.alloc_file_writer(value)
+    ctx.heap.alloc_descriptor_owner(value)
 }
 
 impl Context {
@@ -719,7 +719,7 @@ pub(in crate::dynamic) fn popen_pipe(
     let handle = state(ctx, raw).expect("initialized FileIO");
     let buffer = super::BufferedFd::pipe(raw, handle, reading, pipe);
     ctx.heap
-        .alloc_file_writer(files::BinaryFile::Descriptor(buffer).into_value()?)
+        .alloc_descriptor_owner(files::BinaryFile::Descriptor(buffer).into_value()?)
 }
 
 /// Validate an fd returned by a Python opener, which must be an actual integer.

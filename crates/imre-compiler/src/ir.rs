@@ -193,6 +193,7 @@ pub(crate) enum CalendarOp {
     Date,
     DateTime,
     Combine,
+    FromIsoFormat,
     Replace { timezone_supplied: bool },
     Astimezone,
     Delta,
@@ -1145,6 +1146,9 @@ pub(crate) enum Builtin {
         minimum: bool,
     },
     IntBitLength,
+    FloatIsInteger,
+    /// Base-two logarithm after checking the Python domain in the caller.
+    FloatLog2,
     IntSignAsFloat,
     Bool,
     Str,

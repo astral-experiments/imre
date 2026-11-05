@@ -70,6 +70,16 @@ def _bless_my_loader(module_globals):
     return spec_loader
 
 
+def decode_source(source_bytes):
+    """Decode Python source using its declared encoding and universal newlines."""
+    import _io
+    import tokenize
+
+    encoding, _ = tokenize.detect_encoding(_io.BytesIO(source_bytes).readline)
+    decoder = _io.IncrementalNewlineDecoder(None, True)
+    return decoder.decode(source_bytes.decode(encoding))
+
+
 def _cache_path(path):
     path = _fspath(path)
     if isinstance(path, bytes):
@@ -92,13 +102,13 @@ def cache_from_source(path, debug_override=None, *, optimization=None):
         raise TypeError(f"sequence item 2: expected str instance, {type(tag).__name__} found")
     if optimization is None:
         optimization = sys.flags.optimize or ""
-    return _cache_name(path, tag, str(optimization), sys.pycache_prefix)
+    return _cache_name(path, tag, str(optimization), BYTECODE_SUFFIXES, sys, _path_join)
 
 
 def source_from_cache(path):
     if sys.implementation.cache_tag is None:
         raise NotImplementedError("sys.implementation.cache_tag is None")
-    return _source_name(_cache_path(path), sys.pycache_prefix)
+    return _source_name(_cache_path(path), sys.pycache_prefix, SOURCE_SUFFIXES, _path_join)
 
 
 class _LoaderBasics:
@@ -165,6 +175,14 @@ class FileLoader:
 
 
 class SourceFileLoader(FileLoader, _LoaderBasics):
+    def get_source(self, fullname):
+        path = self.get_filename(fullname)
+        try:
+            data = self.get_data(path)
+        except OSError as exc:
+            raise ImportError("source not available through get_data()", name=fullname) from exc
+        return decode_source(data)
+
     def path_stats(self, path):
         return _path_stats(path)
 

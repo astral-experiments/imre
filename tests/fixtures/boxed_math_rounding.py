@@ -242,8 +242,15 @@ def current():
         assert op(before) is obj.marker
         assert type(op(after)) is int and op(after) == big
     integer = int.__new__(Integral, 5)
-    real = Real()
+    real = Real(-1.25)
     assert ceil(integer) is integer and floor(real) is real
+    assert float.__floor__(real) == -2
+    try:
+        float.__floor__(FloatOnly())
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("float.__floor__ accepted a non-float receiver")
 
 
 if __name__ == "__main__":

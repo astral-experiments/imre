@@ -9,7 +9,7 @@ use crate::objects::{Calendar, CalendarNumber};
 pub(in crate::dynamic) mod comparison;
 mod fromutc;
 mod iso_datetime;
-mod iso_time;
+
 pub(in crate::dynamic) mod isocalendar;
 mod reduction;
 pub(in crate::dynamic) mod render;
@@ -1510,22 +1510,9 @@ fn date_strptime(
         ctx.heap.keep(parser);
         ctx.call(parser, vec![class, text, format], vec![])
     });
-    // Release the callable before its module, preserving the result or exception across finalizers.
-    for mark in [parser_mark, module_mark] {
-        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
-        match &result {
-            Ok(value) => ctx.heap.keep(*value),
-            Err(error) => {
-                for value in error.roots() {
-                    ctx.heap.keep(value);
-                }
-            }
-        }
-        if collect {
-            ctx.collect_unreachable();
-        }
-    }
-    result
+    // CPython's datetime classmethods release the callable before its module.
+    let result = ctx.release_with_result(parser_mark, result);
+    ctx.release_with_result(module_mark, result)
 }
 
 fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -1549,8 +1536,10 @@ fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
             "fromisoformat: argument must be str",
         ));
     };
-    let Some(([mut hour, minute, second, micros], offset)) =
-        ctx.str_value(storage).ok().and_then(iso_time::parse)
+    let Some(([mut hour, minute, second, micros], offset)) = ctx
+        .str_value(storage)
+        .ok()
+        .and_then(crate::objects::iso::parse_time)
     else {
         let repr = crate::dynamic::builtins::call(ctx, "repr", &[input], &[])?;
         return Err(Error::new(

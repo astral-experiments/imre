@@ -126,6 +126,27 @@ BYTEARRAY8       = b'\x96'  # push bytearray
 NEXT_BUFFER      = b'\x97'  # push next out-of-band buffer
 READONLY_BUFFER  = b'\x98'  # make top of stack readonly
 
+class _BytesFrame:
+    """Read an immutable frame without registering a second I/O finalizer."""
+
+    def __init__(self, data):
+        self.view = memoryview(data)
+        self.pos = 0
+
+    def read(self, size=-1):
+        start = self.pos
+        length = len(self.view)
+        self.pos = length if size < 0 else min(start + size, length)
+        if start == 0 and self.pos == length:
+            return self.view.obj
+        # BytesIO returns fresh partial reads, even for a single byte.
+        return self.view[start:self.pos].tobytes()
+
+    def readline(self):
+        newline = self.view.obj.find(b'\n', self.pos)
+        return self.read(-1 if newline < 0 else newline + 1 - self.pos)
+
+
 class _Unframer:
     def __init__(self, file_read, file_readline):
         self.file_read = file_read
@@ -171,7 +192,7 @@ class _Unframer:
         frame = self.file_read(frame_size)
         if len(frame) != frame_size:
             raise UnpicklingError("pickle data was truncated")
-        self.current_frame = io.BytesIO(frame)
+        self.current_frame = _BytesFrame(frame) if type(frame) is bytes else io.BytesIO(frame)
 
 
 def _getattribute(obj, dotted_path):

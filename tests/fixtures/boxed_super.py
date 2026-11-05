@@ -146,8 +146,17 @@ def check_mro():
     from os import terminal_size
     from types import ModuleType
     assert bool.mro() == type.mro(bool) == [bool, int, object]
+    none_type = type(None)
+    assert none_type.__base__ is object and none_type.__bases__ == (object,)
+    assert none_type.__mro__ == (none_type, object)
     assert terminal_size.mro() == [terminal_size, tuple, object]
     assert type.mro(defaultdict) == [defaultdict, dict, object]
+    assert defaultdict.__base__ is dict and defaultdict.__bases__ == (dict,)
+    assert defaultdict.__mro__ == (defaultdict, dict, object)
+    mapping = defaultdict()
+    assert type(mapping).__mro__ is defaultdict.__mro__
+    assert type(mapping).__bases__ is defaultdict.__bases__
+    assert not any(hasattr(mapping, name) for name in ("__base__", "__bases__", "__mro__"))
     assert timezone.mro() == [timezone, tzinfo, object]
     assert D.mro.__self__ is D and not hasattr(super(D, D()), "mro")
 

@@ -34,6 +34,18 @@ REJECTED = {
             "print(convert(Decimal('1.25')))\n"
         ),
     }, "invalid-argument-type"),
+    "clock_lookup_preserves_typed_call": ({
+        "main.py": "import time\n" + HELPER + "f('wrong')\nprint(getattr(time, 'monotonic_ns')())\n",
+    }, "expected int, got str"),
+    "unused_strptime_preserves_typed_call": ({
+        "main.py": "from time import strptime\n" + HELPER + "f('wrong')\n",
+    }, "expected int, got str"),
+    "unused_is_tracked_preserves_typed_call": ({
+        "main.py": "from gc import is_tracked\n" + HELPER + "f('wrong')\n",
+    }, "expected int, got str"),
+    "later_is_tracked_preserves_missing_argument": ({
+        "main.py": "from gc import is_tracked\n" + HELPER + "f()\nprint(is_tracked([]))\n",
+    }, "missing required argument"),
     "unused_isclose_preserves_typed_call": ({
         "main.py": (
             "from math import isclose\n"
@@ -1887,11 +1899,14 @@ def main() -> None:
             (mock_setup, "def helper() -> object:\n    return patch.object(Owner, 'value', 1)\n"),
             ("from math import atan2\n", "def helper() -> float:\n    return atan2(1.0, -1.0)\n"),
             ("from math import exp\n", "def helper() -> float:\n    return exp(1.0)\n"),
+            ("from math import frexp\n", "def helper() -> float:\n    return frexp(6.0)[0]\n"),
             ("from math import fsum\n", "def helper() -> float:\n    return fsum([1.0, 2.0])\n"),
             ("from math import isfinite\n", "def helper() -> bool:\n    return isfinite(1.0)\n"),
             ("from math import sin\n", "def helper() -> float:\n    return sin(1.0)\n"),
             ("from math import sqrt\n", "def helper() -> float:\n    return sqrt(4.0)\n"),
             ("from math import tan\n", "def helper() -> float:\n    return tan(1.0)\n"),
+            ("from random import expovariate\n", "def helper() -> float:\n    return expovariate(0.5)\n"),
+            ("from sys import float_repr_style\n", "def helper() -> str:\n    return float_repr_style\n"),
             ("from socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
             ("from _socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
         ):

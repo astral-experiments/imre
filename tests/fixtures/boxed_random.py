@@ -104,9 +104,17 @@ def current():
         raise AssertionError("empty integer interval accepted")
 
     assert randbytes is random.randbytes
+    assert randbytes.__self__ is random._inst
+    assert randbytes.__func__ is random.Random.randbytes
     for size in (0, 1, 4, 5, 35):
         value = randbytes(n=size)
         assert type(value) is bytes and len(value) == size
+
+    generator = random.Random(42)
+    reference = random.Random(42)
+    for size in (0, 1, 4, 5, 35):
+        expected = reference.getrandbits(size * 8).to_bytes(size, "little")
+        assert generator.randbytes(n=size) == expected
 
     class Length:
         def __mul__(self, other):
@@ -117,6 +125,21 @@ def current():
             return 3
 
     assert randbytes(Length()) == bytes(3)
+
+    class Draw:
+        def to_bytes(self, length, byteorder):
+            assert length is size_arg and byteorder == "little"
+            return self
+
+    class CustomRandom(random.Random):
+        def getrandbits(self, width):
+            assert width == 0
+            return result
+
+    size_arg = Length()
+    result = Draw()
+    assert CustomRandom().randbytes(size_arg) is result
+
     events = []
     try:
         randrange(Index(3), Index(6), Index(-2))
@@ -192,3 +215,53 @@ def current():
     j = events[1][1]
     assert 0 <= j <= 2
     assert events == ["len", ("get", j), ("get", 2), ("set", 2, 2), ("set", j, 3)]
+
+    from math import log
+    from random import expovariate
+
+    saved_random = random.Random.random
+    random.seed(551)
+    local = random.Random(551)
+    local_expo = local.expovariate
+    assert expovariate.__func__ is local_expo.__func__ is random.Random.expovariate
+    replay = random.Random(101)
+    assert expovariate.__func__(replay, 2.0) == random.Random(101).expovariate(2.0)
+    assert not hasattr(draw, "__func__") and not hasattr(local.getrandbits, "__func__")
+    random.Random.random = lambda self: 0.0
+    try:
+        assert repr(expovariate()) == repr(local_expo()) == "-0.0"
+        assert draw() == saved_random(local)
+    finally:
+        random.Random.random = saved_random
+
+    assert expovariate is random.expovariate
+    random.seed(seed)
+    reference = random.Random(seed)
+    assert expovariate() == -log(1.0 - reference.random())
+    assert random.random() == reference.random()
+    assert random.Random(seed).expovariate(lambd=-2) == -log(1.0 - random.Random(seed).random()) / -2
+
+    class Fixed(random.Random):
+        def random(self):
+            draws.append(1)
+            return 0.25
+
+    class Duck:
+        random = Fixed.random
+
+    draws = []
+    source = Fixed()
+    assert source.expovariate() == -log(0.75)
+    assert random.Random.expovariate(self=Duck(), lambd=2) == -log(0.75) / 2
+    assert len(draws) == 2
+    for call, error, count in (
+        (lambda: source.expovariate(1, lambd=2), TypeError, 2),
+        (lambda: source.expovariate(0), ZeroDivisionError, 3),
+        (lambda: source.expovariate(None), TypeError, 4),
+    ):
+        try:
+            call()
+        except (TypeError, ZeroDivisionError) as caught:
+            assert type(caught) is error and len(draws) == count
+        else:
+            raise AssertionError("invalid exponential rate accepted")

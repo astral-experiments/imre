@@ -263,6 +263,22 @@ pub(crate) fn python_isidentifier(text: &str) -> bool {
     chars.next().is_some_and(|ch| in_ranges(ch, START)) && chars.all(|ch| in_ranges(ch, CONTINUE))
 }
 
+/// Matches CPython 3.14's printable characters using its Unicode 16 repertoire.
+pub(crate) fn python_isprintable(text: &str) -> bool {
+    use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
+
+    const NONPRINTABLE: GeneralCategoryGroup =
+        GeneralCategoryGroup::Other.union(GeneralCategoryGroup::Separator);
+    text.chars().all(|ch| {
+        if ch.is_ascii() {
+            (' '..='~').contains(&ch)
+        } else {
+            !NONPRINTABLE.contains(GeneralCategory::for_char(ch))
+                && !crate::integer_text::newer_printable(ch)
+        }
+    })
+}
+
 pub(crate) fn python_isdigit(text: &str) -> bool {
     if text.is_ascii() {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());

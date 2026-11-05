@@ -189,11 +189,13 @@ def current():
 
     field = WireField(">H")
     assert field.size == 1
+    assert repr(field) == "WireField('>H')"
     pack_field = field.pack
     payload = bytearray(b"\x00\x01abcd")
     rows = field.iter_unpack(payload)
     assert next(rows) == (1,)
     field.__init__("B")
+    assert repr(field) == "WireField('B')"
     assert rows.__length_hint__() == 4
     assert list(rows) == [(97,), (98,), (99,), (100,)]
     payload.append(0)
@@ -211,6 +213,7 @@ def current():
     fmt = b"<4s4H2LH"
     values = (b"PK\x05\x06", 0, 0, 1, 1, 55, 99, 0)
     record = struct.Struct(fmt)
+    assert repr(record) == "Struct('<4s4H2LH')"
     data = struct.pack(fmt, *values)
     assert struct.calcsize(fmt) == record.size == len(data) == 22
     assert record.unpack(data) == struct.unpack(fmt, data) == values

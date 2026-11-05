@@ -49,7 +49,7 @@ pub(super) use socket::{
 };
 pub(super) mod io;
 mod json;
-mod lzma;
+pub(super) mod lzma;
 mod marshal;
 mod math;
 pub(super) use math::fraction_hash;
@@ -457,9 +457,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         (
             "math",
-            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "atan2" | "cos" | "exp"
-            | "fma" | "fsum" | "gcd" | "isclose" | "isfinite" | "isinf" | "isnan" | "isqrt" | "lcm"
-            | "ldexp" | "log" | "sin" | "sqrt" | "tan",
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acosh" | "atan2" | "cos" | "dist"
+            | "exp" | "fma" | "frexp" | "fsum" | "gcd" | "hypot" | "isclose" | "isfinite" | "isinf"
+            | "isnan" | "isqrt" | "lcm" | "ldexp" | "log" | "log2" | "prod" | "sin" | "sqrt"
+            | "tan",
         ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
@@ -487,9 +488,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_locale", "LC_TIME") => ctx.int(libc::LC_TIME.into()),
         ("_locale", "LC_MESSAGES") => ctx.int(libc::LC_MESSAGES.into()),
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
-        ("gc", "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold") => {
-            ctx.builtin(&format!("gc.{name}"))
-        }
+        (
+            "gc",
+            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked",
+        ) => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
@@ -643,6 +645,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         #[cfg(target_os = "linux")]
         ("time", "CLOCK_REALTIME") => ctx.int(i64::from(libc::CLOCK_REALTIME)),
+        ("time", "_STRUCT_TM_ITEMS") => ctx.int(11),
         ("time", "struct_time") => ctx.builtin("time.struct_time"),
         ("time", name) if time::is_function(name) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
@@ -865,11 +868,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "calcsize" | "iter_unpack" | "pack" | "pack_into" | "unpack" | "unpack_from",
         )
         | ("base64", "b16encode" | "urlsafe_b64encode" | "urlsafe_b64decode")
-        | (
-            "random",
-            "seed" | "getrandbits" | "random" | "choice" | "choices" | "shuffle" | "randint"
-            | "randbytes",
-        )
+        | ("random", "choice" | "choices" | "shuffle" | "randint")
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -1061,6 +1060,29 @@ pub(super) fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+enum CacheFilename {
+    Text(String),
+    Object(Id),
+}
+
+/// Keep a reflected addition's result for the provider's normal join protocol.
+fn cache_filename(ctx: &mut Context, suffixes: Id, mut stem: String) -> Result<CacheFilename> {
+    let suffix = if let Value::List(entries) = ctx.heap.get(suffixes)
+        && let Some(&first) = entries.first()
+    {
+        first
+    } else {
+        let zero = ctx.int(0);
+        ctx.get_item(suffixes, zero)?
+    };
+    if let Value::Str(text) = ctx.heap.get(suffix) {
+        stem.push_str(text);
+        return Ok(CacheFilename::Text(stem));
+    }
+    let base = ctx.text(stem);
+    ctx.binary("+", base, suffix).map(CacheFilename::Object)
 }
 
 pub(super) fn call(
@@ -1694,9 +1716,6 @@ pub(super) fn call(
     if name == "random.randint" {
         return random::randint(ctx, args, kwargs);
     }
-    if name == "random.randbytes" {
-        return random::randbytes(ctx, args, kwargs);
-    }
     if name == "random.randrange" {
         return random::randrange(ctx, args, kwargs);
     }
@@ -1859,6 +1878,23 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("zlib.Compress.") {
         return zlib::compressor(ctx, method, args, kwargs);
+    }
+    if let Some(member) = name.strip_prefix("_lzma.") {
+        match member {
+            "LZMACompressor" => return lzma::compressor(ctx, "new", args, kwargs),
+            "LZMADecompressor" => return lzma::decompressor(ctx, "new", args, kwargs),
+            "is_check_supported" => return lzma::is_check_supported(ctx, args, kwargs),
+            "_encode_filter_properties" | "_decode_filter_properties" => {
+                return lzma::properties(ctx, member, args, kwargs);
+            }
+            _ => {}
+        }
+        if let Some(method) = member.strip_prefix("LZMACompressor.") {
+            return lzma::compressor(ctx, method, args, kwargs);
+        }
+        if let Some(method) = member.strip_prefix("LZMADecompressor.") {
+            return lzma::decompressor(ctx, method, args, kwargs);
+        }
     }
     if name == "lzma.decompress" {
         return lzma::call(ctx, "decompress", args, kwargs);
@@ -2255,24 +2291,63 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_importlib.") {
         match (method, args, kwargs) {
-            ("cache_name", [path, tag, optimization, prefix], []) => {
-                let prefix = (*prefix != NONE)
-                    .then(|| ctx.str_value(*prefix))
-                    .transpose()?;
-                let path = crate::objects::cache_paths::cache_name(
+            ("cache_name", [path, tag, optimization, suffixes, sys, join], []) => {
+                use crate::objects::cache_paths;
+                if matches!(
+                    ctx.heap.get(ctx.scalar_value(*optimization)),
+                    Value::SurrogateStr(_)
+                ) {
+                    let quoted = ctx.object_repr(*optimization)?;
+                    return Err(Error::new(
+                        "ValueError",
+                        format!("{} is not alphanumeric", ctx.str_value(quoted)?),
+                    ));
+                }
+                let (head, stem) = cache_paths::cache_stem(
                     ctx.str_value(*path)?,
                     ctx.str_value(*tag)?,
                     ctx.str_value(*optimization)?,
-                    prefix,
                 )?;
-                return Ok(ctx.text(path.to_string()));
+                let head_end = head.len();
+                let filename = cache_filename(ctx, *suffixes, stem)?;
+                let prefix = ctx.lookup_attr(*sys, "pycache_prefix")?;
+                // The suffix may execute Python; borrow the immutable path again after it returns.
+                let head = &ctx.str_value(*path)?[..head_end];
+                match filename {
+                    CacheFilename::Text(name) => {
+                        let prefix = (prefix != NONE)
+                            .then(|| ctx.str_value(prefix))
+                            .transpose()?;
+                        let result = cache_paths::cache_location(head, &name, prefix)?;
+                        return Ok(ctx.text(result.to_string()));
+                    }
+                    CacheFilename::Object(name) => {
+                        let (first, second) = if prefix == NONE {
+                            (ctx.text(head.to_owned()), ctx.text(cache_paths::PYCACHE))
+                        } else {
+                            (prefix, ctx.text(cache_paths::cache_relative_head(head)?))
+                        };
+                        return ctx.call(*join, vec![first, second, name], Vec::new());
+                    }
+                }
             }
-            ("source_name", [path, prefix], []) => {
+            ("source_name", [path, prefix, suffixes, join], []) => {
+                use crate::objects::cache_paths;
                 let prefix = (*prefix != NONE)
                     .then(|| ctx.str_value(*prefix))
                     .transpose()?;
-                let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
-                return Ok(ctx.text(path.to_string()));
+                let (dir, base) = cache_paths::source_parts(ctx.str_value(*path)?, prefix)?;
+                let (dir, base) = (dir.to_owned(), base.to_owned());
+                match cache_filename(ctx, *suffixes, base)? {
+                    CacheFilename::Text(name) => {
+                        let result = cache_paths::source_location(&dir, &name);
+                        return Ok(ctx.text(result.to_string()));
+                    }
+                    CacheFilename::Object(name) => {
+                        let head = ctx.text(dir);
+                        return ctx.call(*join, vec![head, name], Vec::new());
+                    }
+                }
             }
             ("warn_legacy_load", [source_globals], []) => {
                 ctx.warn_legacy_load(*source_globals)?;
@@ -2714,6 +2789,10 @@ pub(super) fn call(
         ctx.heap.set_gc_thresholds(&values[..args.len()]);
         return Ok(NONE);
     }
+    if name == "gc.is_tracked" {
+        let obj = builtins::one_positional_arg(name, args, kwargs)?;
+        return Ok(builtins::boolean(ctx.heap.is_gc_tracked(obj)));
+    }
     if name == "gc.collect" {
         let generation = if args.is_empty() && kwargs.is_empty() {
             2
@@ -2748,6 +2827,23 @@ pub(super) fn call(
             ));
         }
         return Ok(functools::placeholder(ctx));
+    }
+    if name == "functools.partial.__class_getitem__" {
+        let Some((&owner, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "descriptor '__class_getitem__' of 'functools.partial' object needs an argument",
+            ));
+        };
+        datetime::validate_classmethod_receiver(
+            ctx,
+            functools::PARTIAL_CLASS,
+            "__class_getitem__",
+            owner,
+        )?;
+        let qualified = format!("{}.__class_getitem__", ctx.class_qualname(owner));
+        let index = builtins::one_positional_arg(&qualified, rest, kwargs)?;
+        return Ok(super::typing::builtin_alias(ctx, owner, index));
     }
     if name == "functools.partial.__reduce__" {
         let receiver = builtins::noargs_method_receiver(
@@ -2949,13 +3045,13 @@ pub(super) fn call(
     );
     let (max_args, keywords): (usize, &[&str]) = match name {
         "functools.cmp_to_key" => {
-            let comparator = functools::key_argument("cmp_to_key", "mycmp", args, kwargs)?;
+            let comparator = functools::key_argument("cmp_to_key", "mycmp", &args[1..], kwargs)?;
             return Ok(ctx.alloc(Value::KeyWrapper {
                 comparator,
                 object: None,
             }));
         }
-        "functools.reduce" => return functools::reduce(ctx, args, kwargs),
+        "functools.reduce" => return functools::reduce(ctx, &args[1..], kwargs),
         "functools._cache_wrapper" => (3, &[]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),

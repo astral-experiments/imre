@@ -58,6 +58,7 @@ impl Context {
             owner: Some(owner),
             lease: None,
             anonymous: true,
+            restricted: false,
             layout: None,
             readonly,
             hash: None,

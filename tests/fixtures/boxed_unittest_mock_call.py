@@ -103,3 +103,64 @@ key.__hash__.return_value = "invalid"
 with check.assertRaises(TypeError):
     hash(key)
 assert key.__hash__.call_count == 3
+
+# Normal protocol dispatch goes through the same child exposed on the mock.
+basket = mock.MagicMock()
+assert len(basket) == 0
+assert bool(basket)
+basket.__radd__.return_value = 9
+assert 5 + basket == 9
+assert basket.mock_calls == [call.__len__(), call.__bool__(), call.__radd__(5)]
+assert basket.method_calls == []
+basket.mock_add_spec(["__len__"])
+basket.__len__.return_value = 0
+assert not basket
+assert not hasattr(basket, "__radd__")
+del basket.__len__
+assert not hasattr(basket, "__len__")
+basket.mock_add_spec(["__len__"])
+assert len(basket) == 0
+
+for factory in (Mock, mock.MagicMock):
+    client = factory()
+    client("open")
+    client.send(7)
+    history = client.mock_calls
+    arguments = client.call_args_list
+    del client.mock_calls
+    del client.call_args_list
+    client("close")
+    assert client.mock_calls is history and history == [call("open"), call.send(7), call("close")]
+    assert client.call_args_list is arguments and arguments == [call("open"), call("close")]
+    del client.method_calls
+    assert not hasattr(client, "method_calls")
+
+service = Mock()
+send = service.send
+send("first")
+del service.send
+assert not hasattr(service, "send")
+with TestCase().assertRaises(AttributeError):
+    del service.send
+service.reset_mock()
+send.assert_called_once_with("first")
+assert not hasattr(service, "send")
+service.send = Mock(return_value="queued")
+assert service.send("next") == "queued"
+del service.unavailable
+mock.seal(service)
+assert service.send("last") == "queued" and not hasattr(service, "unavailable")
+
+for options, message in [
+    ({}, "'assert_delivery' is not a valid assertion. Use a spec for the mock if 'assert_delivery' is meant to be an attribute."),
+    ({"unsafe": True}, "assert_delivery"),
+    ({"spec_set": ["assert_delivery"]}, "assert_delivery"),
+]:
+    delivery = Mock(assert_delivery="configured", **options)
+    del delivery.assert_delivery
+    with TestCase().assertRaises(AttributeError) as caught:
+        delivery.assert_delivery
+    assert str(caught.exception) == message
+    with TestCase().assertRaises(AttributeError) as caught:
+        del delivery.assert_delivery
+    assert str(caught.exception) == "assert_delivery"

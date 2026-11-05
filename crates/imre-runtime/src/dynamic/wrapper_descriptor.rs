@@ -52,7 +52,7 @@ impl BuiltinDescriptor {
             });
         }
         if let Some((stdlib::functools::PARTIAL_CLASS, attr)) = symbol.rsplit_once('.')
-            && let Some(&name) = ["__reduce__", "__setstate__"]
+            && let Some(&name) = ["__class_getitem__", "__reduce__", "__setstate__"]
                 .iter()
                 .find(|&&name| name == attr)
         {
@@ -115,6 +115,16 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
+            Some((value::LZMA_COMPRESS_TYPE, attr)) => Some((
+                value::LZMA_COMPRESS_TYPE,
+                attr,
+                value::LZMA_COMPRESS_METHODS,
+            )),
+            Some((value::LZMA_DECOMPRESS_TYPE, attr)) => Some((
+                value::LZMA_DECOMPRESS_TYPE,
+                attr,
+                value::LZMA_DECOMPRESS_METHODS,
+            )),
             Some((value::ZLIB_DECOMPRESS_TYPE, attr)) => Some((
                 value::ZLIB_DECOMPRESS_TYPE,
                 attr,
@@ -173,7 +183,7 @@ impl BuiltinDescriptor {
                 };
                 Some(("mappingproxy", attr, members))
             }
-            Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
+            Some(("type", attr)) => Some(("type", attr, &["mro", "__subclasses__"][..])),
             Some(("int", attr)) => Some(("int", attr, builtins::real_methods("int"))),
             Some(("float", "as_integer_ratio")) => {
                 Some(("float", "as_integer_ratio", &["as_integer_ratio"][..]))
@@ -237,6 +247,7 @@ impl BuiltinDescriptor {
                     || (name == "__length_hint__"
                         && (owner == value::STRUCT_UNPACK_ITERATOR
                             || deque::iterator_class(owner).is_some()))
+                    || (owner == "type" && name == "__subclasses__")
                     || (owner == "list" && name == "__getitem__")
                     || (matches!(owner, "set" | "frozenset") && name == "__contains__")
                     || (owner == defaultdict::CLASS && name == "__missing__")
@@ -245,6 +256,7 @@ impl BuiltinDescriptor {
                         "__copy__"
                             | "__deepcopy__"
                             | "__reversed__"
+                            | "__floor__"
                             | "__round__"
                             | "__trunc__"
                             | "__getinitargs__"
@@ -300,6 +312,7 @@ impl BuiltinDescriptor {
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
             "str.isidentifier" => ("str", "isidentifier"),
+            "str.isprintable" => ("str", "isprintable"),
             "str.lower" => ("str", "lower"),
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
@@ -390,6 +403,7 @@ impl BuiltinDescriptor {
                     | "isdigit"
                     | "isidentifier"
                     | "islower"
+                    | "isprintable"
                     | "istitle"
                     | "center"
                     | "ljust"
@@ -410,6 +424,7 @@ impl BuiltinDescriptor {
                 | ("int", "from_bytes")
                 | ("float", "fromhex")
                 | ("dict", "fromkeys")
+                | (stdlib::functools::PARTIAL_CLASS, "__class_getitem__")
                 | ("typing.Generic", "__init_subclass__")
         ) {
             "classmethod_descriptor"
@@ -459,6 +474,8 @@ impl BuiltinDescriptor {
             "list_iterator"
             | "tuple_iterator"
             | "memory_iterator"
+            | value::LZMA_COMPRESS_TYPE
+            | value::LZMA_DECOMPRESS_TYPE
             | value::STRUCT_UNPACK_ITERATOR
             | "generator"
             | "async_generator"
@@ -601,6 +618,8 @@ impl BuiltinDescriptor {
                     ctx.text(format!("Return self{op}value."))
                 }
             }
+            "__doc__" if self.name == "__class_getitem__" => ctx.text("See PEP 585"),
+            "__text_signature__" if self.name == "__class_getitem__" => ctx.text("($type, object, /)"),
             "__doc__" if self.owner == "typing.Generic" => ctx.text("Function to initialize subclasses."),
             "__text_signature__" if self.owner == "typing.Generic" => NONE,
             "__name__" => ctx.text(self.name),
@@ -610,7 +629,7 @@ impl BuiltinDescriptor {
                 {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" || self.class() == "classmethod_descriptor" => ctx.class_qualname(receiver),
-                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => self.owner.rsplit('.').next()?,
+                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE | value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE) => self.owner.rsplit('.').next()?,
                         _ if matches!(self.owner, "builtin_function_or_method" | "method") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
@@ -818,6 +837,9 @@ impl BuiltinDescriptor {
                     ("isidentifier", "__doc__") => {
                         "Return True if the string is a valid Python identifier, False otherwise.\n\nCall keyword.iskeyword(s) to test whether string s is a reserved identifier,\nsuch as \"def\" or \"class\"."
                     }
+                    ("isprintable", "__doc__") => {
+                        "Return True if all characters in the string are printable, False otherwise.\n\nA character is printable if repr() may use it in its output."
+                    }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
@@ -864,18 +886,21 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "lower" | "title"
+                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "isprintable" | "istitle" | "lower" | "title"
                         | "swapcase",
                         _,
                     ) => "($self, /)",
                     ("mro", "__doc__") => "Return a type's method resolution order.",
-                    ("mro", _) => "($self, /)",
+                    ("__subclasses__", "__doc__") => "Return a list of immediate subclasses.",
+                    ("mro" | "__subclasses__", _) => "($self, /)",
                     ("__getitem__", "__doc__") if self.owner == "list" => "Return self[index].",
                     ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
                     ("join", "__doc__") => "Concatenate any number of strings.\n\nThe string whose method is called is inserted in between each given string.\nThe result is returned as a new string.\n\nExample: '.'.join(['ab', 'pq', 'rs']) -> 'ab.pq.rs'",
                     ("join", _) => "($self, iterable, /)",
                     ("from_bytes", "__doc__") => "Return the integer represented by the given array of bytes.\n\n  bytes\n    Holds the array of bytes to convert.  The argument must either\n    support the buffer protocol or be an iterable object producing bytes.\n    Bytes and bytearray are examples of built-in objects that support the\n    buffer protocol.\n  byteorder\n    The byte order used to represent the integer.  If byteorder is 'big',\n    the most significant byte is at the beginning of the byte array.  If\n    byteorder is 'little', the most significant byte is at the end of the\n    byte array.  To request the native byte order of the host system, use\n    sys.byteorder as the byte order value.  Default is to use 'big'.\n  signed\n    Indicates whether two's complement is used to represent the integer.",
                     ("from_bytes", _) => "($type, /, bytes, byteorder='big', *, signed=False)",
+                    ("hex", "__doc__") if self.owner == "float" => "Return a hexadecimal representation of a floating-point number.\n\n>>> (-0.1).hex()\n'-0x1.999999999999ap-4'\n>>> 3.14159.hex()\n'0x1.921f9f01b866ep+1'",
+                    ("hex", _) if self.owner == "float" => "($self, /)",
                     ("fromhex", "__doc__") => "Create a floating-point number from a hexadecimal string.\n\n>>> float.fromhex('0x1.ffffp10')\n2047.984375\n>>> float.fromhex('-0x1p-1074')\n-5e-324",
                     ("fromhex", _) => "($type, string, /)",
                     ("fromkeys", "__doc__") => "Create a new dictionary with keys from iterable and values set to value.",
@@ -889,11 +914,13 @@ impl BuiltinDescriptor {
                     ("__round__", _) => "($self, ndigits=None, /)",
                     ("__trunc__", "__doc__") if self.owner == "int" => "Truncating an Integral returns itself.",
                     ("__trunc__", "__doc__") => "Return the Integral closest to x between 0 and x.",
-                    ("__trunc__", _) => "($self, /)",
+                    ("__floor__", "__doc__") => "Return the floor as an Integral.",
+                    ("__floor__" | "__trunc__", _) => "($self, /)",
                     ("as_integer_ratio", "__doc__") => {
                         "Return a pair of integers, whose ratio is exactly equal to the original float.\n\nThe ratio is in lowest terms and has a positive denominator.  Raise\nOverflowError on infinities and a ValueError on NaNs.\n\n>>> (10.0).as_integer_ratio()\n(10, 1)\n>>> (0.0).as_integer_ratio()\n(0, 1)\n>>> (-.25).as_integer_ratio()\n(-1, 4)"
                     }
-                    ("as_integer_ratio", _) => "($self, /)",
+                    ("is_integer", "__doc__") => "Return True if the float is an integer.",
+                    ("as_integer_ratio" | "is_integer", _) => "($self, /)",
                     ("append", _) => "($self, object, /)",
                     _ => "($self, index=-1, /)",
                 };

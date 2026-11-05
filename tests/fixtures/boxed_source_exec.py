@@ -1109,6 +1109,16 @@ def exec_caller_namespaces():
     exec("result = n", globals={"n": 8}, locals=separate, closure=None)
     assert separate == {"result": 8}
 
+    outer = {"__doc__": "outer"}
+    exec(
+        '"""  Measure time.\n\tRead the clock.\n"""\n'
+        'before = __doc__\n__doc__ = "updated"',
+        outer,
+        separate,
+    )
+    assert separate["before"] == "Measure time.\nRead the clock.\n"
+    assert separate["__doc__"] == "updated" and outer["__doc__"] == "outer"
+
 
 def source_set_displays():
     events = []
