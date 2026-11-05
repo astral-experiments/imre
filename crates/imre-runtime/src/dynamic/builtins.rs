@@ -1928,7 +1928,7 @@ pub(super) fn call(
                     get,
                     owner,
                     name: field,
-                    ..
+                    set,
                 } = *ctx.heap.get(descriptor)
                 else {
                     return Err(type_error("expected a getset descriptor"));
@@ -1937,6 +1937,9 @@ pub(super) fn call(
                 {
                     ctx.check_heap_method_receiver(class, field, values[0])?;
                     true
+                } else if let Value::IoMethod { owner: class, .. } = *ctx.heap.get(get) {
+                    super::stdlib::io::receiver_class(ctx, values[0])
+                        .is_some_and(|receiver| ctx.direct_subclass(receiver, class))
                 } else if matches!(owner, "int" | "float")
                     || Context::dict_view_owner(owner).is_some()
                 {
@@ -1955,6 +1958,9 @@ pub(super) fn call(
                         "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
                         ctx.type_name(values[0])
                     )));
+                }
+                if let Some(set) = set {
+                    return ctx.call(set, values.to_vec(), Vec::new());
                 }
                 Err(Error::new(
                     "AttributeError",

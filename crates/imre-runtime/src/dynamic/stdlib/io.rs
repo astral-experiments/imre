@@ -114,9 +114,13 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
         }
         .into_value()?,
     );
+    let mode = ctx.text("mode");
+    let write = ctx.text("w");
+    let dictionary = ctx.dict(vec![(mode, write)]);
     Ok(
         ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
             file,
+            dictionary,
             buffer: Some(buffer),
             finalizing: false,
             line_buffering: stderr || crate::stdio_settings().stdout_line_buffered,
@@ -382,6 +386,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         "_IOBase",
         object,
         &[
+            "__dict__",
             "closed",
             "__del__",
             "__iter__",
@@ -586,7 +591,7 @@ fn class(
             })
         } else if matches!(
             name,
-            "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
+            "__dict__" | "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
         ) || descriptor_owner == "_io.FileIO"
             && matches!(name, "mode" | "closefd" | "_blksize")
             || matches!(
@@ -836,6 +841,15 @@ pub(super) fn lines(
     }
 }
 
+pub(in super::super) fn receiver_class(ctx: &Context, receiver: Id) -> Option<Id> {
+    match ctx.heap.get(receiver) {
+        Value::Instance { class, .. } => Some(*class),
+        value => value
+            .native_io_class_name()
+            .and_then(|name| ctx.builtins.get(name).copied()),
+    }
+}
+
 /// Call an inherited I/O method with its bound receiver or an explicit class-level receiver.
 pub(in super::super) fn call(
     ctx: &mut Context,
@@ -853,7 +867,7 @@ pub(in super::super) fn call(
     let text = owner_kind == Some("TextIOBase");
     let bytes_io = owner_kind == Some("BytesIO");
     let base_fileno = owner_kind == Some("IOBase") && name == "fileno";
-    let descriptor = if base_fileno {
+    let descriptor = if base_fileno || name == "__dict__" {
         Some("_IOBase")
     } else if raw {
         Some("_RawIOBase")
@@ -908,12 +922,7 @@ pub(in super::super) fn call(
         }
         return Ok(ctx.instance(class, None));
     }
-    let receiver_class = match ctx.heap.get(receiver) {
-        Value::Instance { class, .. } => Some(*class),
-        value => value
-            .native_io_class_name()
-            .and_then(|name| ctx.builtins.get(name).copied()),
-    };
+    let receiver_class = receiver_class(ctx, receiver);
     let Some(receiver_class) = receiver_class.filter(|&class| ctx.direct_subclass(class, owner))
     else {
         let actual = ctx.type_name(receiver);
@@ -944,6 +953,12 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
+    if name == "__dict__" {
+        return Ok(match ctx.heap.get(receiver) {
+            Value::Instance { .. } => ctx.instance_dictionary(receiver, receiver_class),
+            _ => ctx.native_file_dictionary(receiver),
+        });
+    }
     if owner_kind == Some("TextIOWrapper") && name == "__repr__" {
         if !kwargs.is_empty() {
             return Err(Error::new(

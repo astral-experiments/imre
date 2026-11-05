@@ -178,7 +178,10 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     } else {
         let owner = crate::Shared::try_new(RefCell::new(FileState::buffered_random(file)?))
             .map_err(|_| crate::Error::allocation())?;
-        ctx.alloc(Value::BufferedRandom(owner, name))
+        ctx.alloc(Value::BufferedRandom(
+            super::super::value::BoxedFile::new(owner),
+            name,
+        ))
     };
     if binary {
         return Ok(buffer);

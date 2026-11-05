@@ -961,7 +961,31 @@ pub(super) struct BoxedGzipDecoder {
 }
 
 #[derive(Clone)]
+pub(super) struct BoxedFile<T> {
+    file: T,
+    dictionary: Option<Id>,
+}
+
+impl<T> BoxedFile<T> {
+    pub(super) fn new(file: T) -> Self {
+        Self {
+            file,
+            dictionary: None,
+        }
+    }
+}
+
+impl<T> std::ops::Deref for BoxedFile<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.file
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct BoxedTextFile {
+    pub(super) dictionary: Id,
     pub(super) file: crate::objects::TextFile,
     pub(super) finalizing: bool,
     pub(super) line_buffering: bool,
@@ -1417,7 +1441,7 @@ pub(super) enum Value {
         child: Option<crate::objects::BoxedPopen>,
         reported: bool,
     },
-    File(crate::shared::Shared<super::stdlib::BinaryFile>),
+    File(BoxedFile<crate::Shared<super::stdlib::BinaryFile>>),
     TextFile(BoxedTextFile),
     GzipDecoder(crate::Shared<BoxedGzipDecoder>),
     ZlibDecompressor {
@@ -1438,7 +1462,7 @@ pub(super) enum Value {
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     BufferedRandom(
-        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        BoxedFile<crate::Shared<std::cell::RefCell<crate::objects::FileState>>>,
         Id,
     ),
     RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
@@ -1471,7 +1495,31 @@ pub(super) struct CachedCall {
     pub hash: i64,
 }
 
+impl Context {
+    pub(super) fn native_file_dictionary(&mut self, obj: Id) -> Id {
+        if let Some(dictionary) = self.heap.get(obj).native_file_dict() {
+            return dictionary;
+        }
+        let dictionary = self.dict(Vec::new());
+        match self.heap.get_mut(obj) {
+            Value::File(file) => file.dictionary = Some(dictionary),
+            Value::BufferedRandom(file, _) => file.dictionary = Some(dictionary),
+            _ => unreachable!("native file without an instance dictionary"),
+        }
+        dictionary
+    }
+}
+
 impl Value {
+    pub(super) fn native_file_dict(&self) -> Option<Id> {
+        match self {
+            Self::TextFile(file) => Some(file.dictionary),
+            Self::File(file) => file.dictionary,
+            Self::BufferedRandom(file, _) => file.dictionary,
+            _ => None,
+        }
+    }
+
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
         match self {
@@ -2193,6 +2241,7 @@ impl Value {
                 visit.extend(m.cached_regs.get().copied());
             }
             Self::File(file) => {
+                visit.extend(file.dictionary);
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
                 } else if let Some((path, _)) = file.path_metadata() {
@@ -2246,8 +2295,14 @@ impl Value {
                 visit.extend(*dictionary);
                 state.borrow().children(visit);
             }
-            Self::TextFile(file) => visit.extend(file.buffer),
-            Self::BufferedRandom(_, name) => visit.push(*name),
+            Self::TextFile(file) => {
+                visit.push(file.dictionary);
+                visit.extend(file.buffer);
+            }
+            Self::BufferedRandom(file, name) => {
+                visit.extend(file.dictionary);
+                visit.push(*name);
+            }
         }
     }
 }
