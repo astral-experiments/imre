@@ -182,16 +182,17 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 13 suites, 684 of 821 originals have paired passes.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 14 suites, 896 of 1,032 originals have paired passes.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
 | `binascii` | 32 | 93 | 76 passed, 17 skipped | 32 passed, 8 failures, 36 errors, 17 skipped |
 | `colorsys` | 7 | 7 | 7 passed | 7 passed. [Public revision](https://github.com/astral-experiments/imre/commit/46bd6bc7dd58da8cfb9f17c56c923cdb549ce265). |
-| `float` | 44 | 54 | 53 passed, 1 skipped | 44 passed, 6 errors, 1 failure, 3 skipped. The complete suite retained all 43 earlier pairs and added `GeneralFloatCases.test_float_floor`. [#5520](https://github.com/astral-experiments/imre/pull/5520). |
+| `float` | 45 | 54 | 53 passed, 1 skipped | 45 passed, 5 errors, 1 failure, 3 skipped. Both native runs retained all 44 prior pairs and added `FormatTestCase.test_format`. [Public merge #5566](https://github.com/astral-experiments/imre/commit/5677b8b34aaccde6bc52e020bd1484990c328344). |
 | `getpass` | 24 | 24 | 24 passed | 24 passed. The prompt stream flushes before reading and again after input. On Unix, `getpass` falls back to standard input when it cannot open the controlling terminal. [#5510](https://github.com/astral-experiments/imre/pull/5510). |
 | `graphlib` | 17 | 17 | 17 passed | 17 passed. [Public change](https://github.com/astral-experiments/imre/pull/5469). |
 | `http.client` | 131 | 144 | 139 passed, 5 skipped | 131 passed, 9 errors, 4 skipped |
+| `ipaddress` | 211 | 211 | 211 passed | All 211 originals passed at both native optimization levels. [Public merge #5560](https://github.com/astral-experiments/imre/commit/56314e43d8fe671b05f2b0be1a22139fa45a3755). |
 | `lzma` | 118 | 121 | 120 passed, 1 skipped | 118 passed, 2 errors, 1 skipped. Both native runs retained all 117 prior passes and added `FileTestCase.test_issue44439`. [Public change](https://github.com/astral-experiments/imre/pull/5489). |
 | `optparse` | 151 | 154 | 154 passed | 151 passed, 2 skipped, 1 failure. The upstream `Tools/i18n/pygettext.py` found no messages at the module’s virtual source path. [Public revision](https://github.com/astral-experiments/imre/commit/276f0cbe28c37627fa4d0859dfe439303a208d74). |
 | `pyexpat` | 33 | 60 | 47 passed, 13 skipped | 33 passed, 13 errors, 14 skipped |
