@@ -10,7 +10,7 @@ pub(in crate::objects) struct Sequence {
 }
 
 impl Sequence {
-    pub(super) fn new(owner: OwnedWord) -> Self {
+    fn new(owner: OwnedWord) -> Self {
         Self {
             owner: RefCell::new(Some(owner)),
             index: Cell::new(0),
@@ -24,34 +24,7 @@ impl Sequence {
             let Some(owner) = owner.as_ref() else {
                 return Ok(None);
             };
-            // SAFETY: the constructor roots a list or homogeneous tuple of this exact
-            // kind. Copy or acquire the element before releasing any storage borrow.
-            unsafe {
-                match owner.kind.raw() {
-                    4 => (&*(owner.word as *const List))
-                        .0
-                        .with(|values| values.get(index).map(|n| WordKind::new(2).acquire(n.0))),
-                    5 => object(owner.word as *const Object).0.with(|storage| {
-                        let values = storage.sequence_storage();
-                        if let Some(rows) = values.rows() {
-                            return (index < rows.len())
-                                .then(|| rows.owned_row(index))
-                                .transpose();
-                        }
-                        let values = values.resolved()?;
-                        Ok(values.values.get(index).map(|&v| values.kind.acquire(v)))
-                    })?,
-                    6 => {
-                        let tuple = owner.word as *const usize;
-                        let layout = records::descriptor(tuple);
-                        (index < layout.length).then(|| {
-                            let kind = WordKind::new(*layout.kinds.add(index));
-                            kind.acquire(kind.read_record_field(tuple.add(index)))
-                        })
-                    }
-                    _ => unreachable!(),
-                }
-            }
+            Self::item_at(owner, index)?
         };
         if item.is_some() {
             self.index.set(index + 1);
@@ -59,6 +32,37 @@ impl Sequence {
             self.owner.take();
         }
         Ok(item)
+    }
+
+    pub(super) fn item_at(owner: &OwnedWord, index: usize) -> Result<Option<OwnedWord>, Error> {
+        // SAFETY: the constructor roots a list or homogeneous tuple of this exact
+        // kind. Copy or acquire the element before releasing any storage borrow.
+        Ok(unsafe {
+            match owner.kind.raw() {
+                4 => (&*(owner.word as *const List))
+                    .0
+                    .with(|values| values.get(index).map(|n| WordKind::new(2).acquire(n.0))),
+                5 => object(owner.word as *const Object).0.with(|storage| {
+                    let values = storage.sequence_storage();
+                    if let Some(rows) = values.rows() {
+                        return (index < rows.len())
+                            .then(|| rows.owned_row(index))
+                            .transpose();
+                    }
+                    let values = values.resolved()?;
+                    Ok(values.values.get(index).map(|&v| values.kind.acquire(v)))
+                })?,
+                6 => {
+                    let tuple = owner.word as *const usize;
+                    let layout = records::descriptor(tuple);
+                    (index < layout.length).then(|| {
+                        let kind = WordKind::new(*layout.kinds.add(index));
+                        kind.acquire(kind.read_record_field(tuple.add(index)))
+                    })
+                }
+                _ => unreachable!(),
+            }
+        })
     }
 }
 
