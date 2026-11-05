@@ -1,6 +1,8 @@
 //! Keep single-character iteration results as code points when their only uses
 //! are comparisons and `ord`. Copying or moving a local preserves its value.
 
+mod indexed;
+
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, IterNextKind, Module, Statement, Type};
 
 #[derive(Default)]
@@ -48,15 +50,14 @@ pub(crate) fn specialize(module: &mut Module) {
 
 fn specialize_function(function: &mut Function) {
     let mut producers = Vec::new();
-    ir::walk_statements(&function.body, &mut |stmt| {
-        if let Statement::IterNext {
+    ir::rewrite_statements(&mut function.body, &mut |stmt| match stmt {
+        Statement::IterNext {
             kind: IterNextKind::String,
             key,
             ..
-        } = stmt
-        {
-            producers.push(*key);
-        }
+        } => producers.push(*key),
+        Statement::For { .. } => indexed::specialize(stmt, &mut function.locals),
+        _ => {}
     });
     if producers.is_empty() {
         return;

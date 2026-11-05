@@ -755,6 +755,7 @@ impl Session {
         overloads: &[Vec<CheckedDiagnostic>],
         calls: FallbackCalls,
         runtime_provider: Option<usize>,
+        checked_modules: Option<&[crate::modules::SourceModule]>,
     ) -> Result<(), String> {
         let checks = match calls {
             FallbackCalls::All | FallbackCalls::DecoratorFactories => FileChecks::FallbackCalls,
@@ -764,13 +765,14 @@ impl Session {
         self.set_fallback_rules(
             checks != FileChecks::FallbackReturns,
             matches!(calls, FallbackCalls::DecoratorFactories),
+            checked_modules.is_some(),
         );
         let provider = runtime_provider.map(|index| self.files[index]);
-        self.errors(skipped, overloads, checks, provider)?;
+        self.errors(skipped, overloads, checks, provider, checked_modules)?;
         if let FallbackCalls::Entry(entry) = calls {
             // Only the entry gained a new statement order. Imported modules retain
             // the argument-checking policy they had before the guard.
-            self.set_fallback_rules(true, false);
+            self.set_fallback_rules(true, false, checked_modules.is_some());
             let checked = CheckedFile::new(
                 &self.db,
                 self.files[entry],
@@ -778,6 +780,7 @@ impl Session {
                 overloads[entry].as_slice(),
                 FileChecks::FallbackCalls,
                 provider,
+                checked_modules.is_some_and(|modules| !modules[entry].bundled),
             );
             let errors = file_errors(&self.db, checked);
             if !errors.is_empty() {
@@ -787,7 +790,12 @@ impl Session {
         Ok(())
     }
 
-    fn set_fallback_rules(&mut self, scoped_builtin: bool, check_callees: bool) {
+    fn set_fallback_rules(
+        &mut self,
+        scoped_builtin: bool,
+        check_callees: bool,
+        checked_file: bool,
+    ) {
         let mut rules = RuleSelection::default();
         let arguments = if scoped_builtin {
             CALL_ARGUMENT_RULES
@@ -799,6 +807,7 @@ impl Session {
             .into_iter()
             .chain(arguments.iter().copied())
             .chain(callee)
+            .chain(checked_file.then_some("invalid-assignment"))
         {
             rules.enable(
                 default_lint_registry()
@@ -822,7 +831,7 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(skipped, overloads, FileChecks::Full, None)
+        self.errors(skipped, overloads, FileChecks::Full, None, None)
     }
 
     fn errors(
@@ -831,6 +840,7 @@ impl Session {
         overloads: &[Vec<CheckedDiagnostic>],
         checks: FileChecks,
         runtime_provider: Option<File>,
+        checked_modules: Option<&[crate::modules::SourceModule]>,
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -844,6 +854,7 @@ impl Session {
                     overloads.get(index).map_or(&[][..], Vec::as_slice),
                     checks,
                     runtime_provider,
+                    checked_modules.is_some_and(|modules| !modules[index].bundled),
                 );
                 file_errors(&self.db, checked)
             })
@@ -868,6 +879,8 @@ struct CheckedFile<'db> {
     checks: FileChecks,
     #[returns(copy)]
     runtime_provider: Option<File>,
+    #[returns(copy)]
+    scalar_initializers: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -1076,6 +1089,9 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .iter()
         .filter(|diagnostic| {
             diagnostic.severity() >= Severity::Error
+                && (checks == FileChecks::Full || diagnostic.id().as_str() != "invalid-assignment"
+                    || checked.scalar_initializers(db) && diagnostic.primary_span().and_then(|span| span.range())
+                            .is_some_and(|range| scalar_initializer(db, file, range)))
                 && !diagnostic
                     .primary_span()
                     .and_then(|span| span.range())
@@ -1114,6 +1130,86 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                 .to_string()
         })
         .collect()
+}
+
+/// Literal initializers of scalar names are independent of the operation that required boxing.
+fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::{KnownClass, Type, UnionType};
+
+    let file = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
+    let nodes = covering_node(parsed.syntax().into(), range);
+    let mut ancestors = nodes.ancestors();
+    let Some(assignment) = ancestors.find_map(|node| match node {
+        AnyNodeRef::StmtAnnAssign(assignment) => Some(assignment),
+        _ => None,
+    }) else {
+        return false;
+    };
+    if !assignment.target.is_name_expr()
+        || !assignment.value.as_deref().is_some_and(|value| {
+            value.range() == range
+                && matches!(
+                    value,
+                    Expr::NumberLiteral(_)
+                        | Expr::BooleanLiteral(_)
+                        | Expr::StringLiteral(_)
+                        | Expr::BytesLiteral(_)
+                )
+        })
+    {
+        return false;
+    }
+    // A metaclass can interpret annotated class attributes as schema fields.
+    if ancestors
+        .find(|node| {
+            matches!(
+                node,
+                AnyNodeRef::StmtFunctionDef(_) | AnyNodeRef::StmtClassDef(_)
+            )
+        })
+        .is_some_and(|node| matches!(node, AnyNodeRef::StmtClassDef(_)))
+    {
+        return false;
+    }
+    let model = SemanticModel::new(db, file);
+    let Some(mut declared) = assignment.annotation.inferred_type(&model) else {
+        return false;
+    };
+    let env = model.program_environment();
+    let mut seen = std::collections::HashSet::new();
+    while let Type::TypeAlias(alias) = declared {
+        // The expanded value alone can be a scalar recovered from a malformed cycle.
+        // Follow the declaration's inferred RHS before accepting its expanded value.
+        use ty_python_core::definition::DefinitionKind;
+        use ty_python_semantic::types::{KnownInstanceType, TypeDefinition};
+
+        let object = Type::KnownInstance(KnownInstanceType::TypeAliasType(alias));
+        let Some(TypeDefinition::TypeAlias(definition)) = object.definition(db, &env) else {
+            return false;
+        };
+        if !seen.insert(definition) {
+            return false;
+        }
+        let DefinitionKind::TypeAlias(node) = definition.kind(db) else {
+            return false;
+        };
+        let parsed = ruff_db::parsed::parsed_module(db, definition.python_file(db)).load(db);
+        let model = SemanticModel::new(db, definition.program_file(db));
+        let Some(rhs) = node.node(&parsed).value.inferred_type(&model) else {
+            return false;
+        };
+        if !matches!(rhs, Type::TypeAlias(_)) && rhs != alias.value_type(db) {
+            return false;
+        }
+        declared = rhs;
+    }
+    let scalar = |class: KnownClass| class.to_instance(db, &env);
+    [KnownClass::Int, KnownClass::Bool, KnownClass::Float, KnownClass::Str, KnownClass::Bytes]
+        .into_iter().any(|class| declared == scalar(class))
+        // ty widens a float annotation to float | int.
+        || declared == UnionType::from_two_elements(db, &env, scalar(KnownClass::Float), scalar(KnownClass::Int))
 }
 
 /// Leave argument conversion to Python for vendored code and its compiler-supplied adapter.
@@ -1462,7 +1558,7 @@ impl AnalysisCache {
             cached.update(fresh, inputs)?;
             return cached
                 .session
-                .errors(skipped, overloads, FileChecks::Full, None);
+                .errors(skipped, overloads, FileChecks::Full, None, None);
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
@@ -1830,7 +1926,7 @@ mod diagnostic_mode_tests {
             .unwrap();
         FILE_CHECKS.with_borrow_mut(|checks| *checks = Some(Vec::new()));
         session
-            .check_fallback_contracts(None, &[vec![]], FallbackCalls::All, None)
+            .check_fallback_contracts(None, &[vec![]], FallbackCalls::All, None, None)
             .unwrap();
         let visits = FILE_CHECKS.with_borrow_mut(Option::take).unwrap();
         assert!(visits.is_empty());
@@ -1902,12 +1998,12 @@ mod diagnostic_mode_tests {
         let whole = TextRange::new(0.into(), 40.into());
         assert!(
             session
-                .errors(Some(&[vec![whole]]), &[], FileChecks::Full, None)
+                .errors(Some(&[vec![whole]]), &[], FileChecks::Full, None, None)
                 .is_ok()
         );
         assert_eq!(
             session
-                .errors(None, &[], FileChecks::Full, None)
+                .errors(None, &[], FileChecks::Full, None, None)
                 .unwrap_err(),
             message
         );
