@@ -2,7 +2,7 @@ import _socket
 import errno
 import os
 import socket
-from socket import socketpair
+from socket import fromfd, socketpair
 
 
 left, right = socketpair()
@@ -55,6 +55,17 @@ with right, left.dup() as copy:
         assert copy.recv(1) == b"x"
     finally:
         os.close(old_fd)
+
+left, right = socketpair()
+with left, right:
+    left.settimeout(1)
+    with fromfd(left.fileno(), left.family, left.type) as copy:
+        assert copy.fileno() != left.fileno() and not copy.get_inheritable()
+        assert copy.gettimeout() == socket.getdefaulttimeout()
+        left.close()
+        right.sendall(b"x")
+        right.shutdown(socket.SHUT_WR)
+        assert copy.recv(1) == b"x" and copy.recv(1) == b""
 
 previous = socket.getdefaulttimeout()
 try:

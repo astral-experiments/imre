@@ -2164,6 +2164,8 @@ impl IntrinsicModule {
             (Self::Socket, "_GLOBAL_DEFAULT_TIMEOUT") => {
                 Intrinsic::ScopedObjectExport("socket._GLOBAL_DEFAULT_TIMEOUT")
             }
+            #[cfg(unix)]
+            (Self::Socket, "fromfd") => Intrinsic::ScopedObjectExport("socket.fromfd"),
             (Self::Socket, "create_connection") => {
                 Intrinsic::ObjectRuntimeExport("socket.create_connection")
             }

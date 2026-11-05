@@ -137,6 +137,11 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
 pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) -> Result<()> {
     let low = ctx.module("_socket")?;
     ctx.bind(scope, "_socket", low);
+    #[cfg(unix)]
+    {
+        let fromfd = ctx.builtin("socket.fromfd");
+        ctx.bind(scope, "fromfd", fromfd);
+    }
     let getaddrinfo = ctx.builtin("socket.getaddrinfo");
     ctx.bind(scope, "getaddrinfo", getaddrinfo);
     for name in IMPORTED_CONSTANTS
@@ -1158,6 +1163,35 @@ fn new_socket(ctx: &mut Context, socket: crate::ObjectOwner) -> Result<Id> {
     ctx.heap.alloc_descriptor_owner(Value::Socket(socket))
 }
 
+/// Duplicate before converting the socket parameters, just as the public Python wrapper does.
+#[cfg(unix)]
+fn fromfd(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+
+    let [fd, family, kind, proto] = super::python_arguments(
+        "fromfd",
+        ["fd", "family", "type", "proto"],
+        4,
+        1,
+        args,
+        kwargs,
+    )?;
+    let raw = crate::objects::os::dup(ctx.index_c_long(fd.unwrap())? as i32)?;
+    // SAFETY: dup returned a new non-inheritable descriptor. Keep it owned across
+    // the fallible __index__ calls and kernel checks in adopt.
+    let copy = unsafe { OwnedFd::from_raw_fd(raw) };
+    let family = super::index_c_int(ctx, family.unwrap())?;
+    let kind = super::index_c_int(ctx, kind.unwrap())?;
+    let proto = proto
+        .map(|value| super::index_c_int(ctx, value))
+        .transpose()?
+        .unwrap_or(0);
+    let socket = native::adopt(copy.as_raw_fd(), family, kind, proto)?;
+    // The socket now owns the copy, including if applying the default timeout fails.
+    let _ = copy.into_raw_fd();
+    new_socket(ctx, socket)
+}
+
 pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let arg = super::super::builtins::one_positional_arg("_socket.close", args, kwargs)?;
     // CPython converts through C long before casting to its POSIX socket descriptor.
@@ -1216,6 +1250,8 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match name {
+        #[cfg(unix)]
+        "fromfd" => return fromfd(ctx, args, kwargs),
         "socket" => {
             let keys = ["family", "type", "proto", "fileno"];
             check_args(name, args, kwargs, keys.len(), &keys)?;
