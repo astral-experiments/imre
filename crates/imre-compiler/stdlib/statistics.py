@@ -42,11 +42,7 @@ def mean(data):
             count += 1
         else:
             if count:
-                # Binary float denominators are powers of two. Combine their
-                # partial sums exactly and round only the final mean.
-                denominator = max(partials)
-                numerator = sum(n * (denominator // d) for d, n in partials.items())
-                return float(Fraction(numerator, denominator * count))
+                return _binary_float_mean(partials, count)
 
         if data and type(value) is int:
             return _mean_from_integer(data, value, count, partials)
@@ -85,7 +81,10 @@ def _mean_from_integer(data, value, count, partials):
         count += 1
     else:
         if not partials:
-            return _convert(Fraction(integer_sum, count), int)
+            quotient, remainder = divmod(integer_sum, count)
+            if remainder:
+                return integer_sum / count
+            return quotient
         partials[1] = partials.get(1, 0) + integer_sum
         return _binary_float_mean(partials, count)
 
@@ -99,7 +98,8 @@ def _binary_float_mean(partials, count):
     """Combine power-of-two denominators exactly and round only the mean."""
     denominator = max(partials)
     numerator = sum(n * (denominator // d) for d, n in partials.items())
-    return float(Fraction(numerator, denominator * count))
+    # Integer true division rounds the exact ratio to binary64 directly.
+    return numerator / (denominator * count)
 
 
 def _sum(data, count=0, integer_sum=0):
