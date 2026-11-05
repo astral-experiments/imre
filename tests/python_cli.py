@@ -101,6 +101,7 @@ def check_installed_site(imre, root, run):
         "print(importlib.import_module(sys.argv[1]).Element('root').tag)\n"
         "sorter = importlib.import_module(sys.argv[3]).TopologicalSorter\n"
         "assert importlib.import_module(sys.argv[4]).mean([2, 3, 4]) == 3\n"
+        "assert importlib.import_module(sys.argv[5]).unescape('&lt;&amp;&gt;') == '<&>'\n"
         "assert list(sorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
         "    with tar.extractfile('payload') as member:\n"
@@ -108,7 +109,7 @@ def check_installed_site(imre, root, run):
     )
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
-    bare = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", timeout=300)
+    bare = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", "html", timeout=300)
     assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
     opaque = run(
         launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
@@ -125,7 +126,7 @@ def check_installed_site(imre, root, run):
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported
     archive.write_bytes(exported.stdout)
-    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", timeout=300)
+    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", "html", timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
     words = run(
         launcher, "-IB", "-c",
@@ -3879,6 +3880,7 @@ for name in ("md4", "ripemd160"):
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
             "boxed_email_addresses.py",
+            "boxed_html.py",
             "boxed_http_message.py",
             "boxed_time.py",
             "boxed_timeit.py",

@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 147 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 148 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -61,6 +61,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `hashlib` | Yes | SHAKE-128 and SHAKE-256 extendable-output digests. MD5, SHA-1, SHA-2 and SHA-3 (224, 256, 384 and 512) construction, incremental updates, copy, digest and hexdigest. [BLAKE2b and BLAKE2s](../tests/fixtures/bytes/hashlib_blake2.py) support keyed hashing, configurable digest sizes and tree parameters. [Evidence](../benchmarks/cpython_stdlib/full/hashlib/README.md) | [0 / 82](../benchmarks/cpython_stdlib/full/hashlib/) | 2 | 0 |
 | `heapq` | Rejected | Runtime-imported min and max heaps and stable top-N selection by key. [Evidence](../tests/fixtures/boxed_heapq.py) | [— / 69 (0 assessed)](../benchmarks/cpython_stdlib/full/heapq/) | — | — |
 | `hmac` | Yes | No API example recorded. | — | — | — |
+| `html` | Yes | HTML escaping, named HTML5 entities and numeric character references. [Evidence](../tests/fixtures/boxed_html.py) | — | — | — |
 | `http` | Yes | Look up `HTTPStatus(404).phrase` or serve a request with `HTTPServer` and a `BaseHTTPRequestHandler` subclass. [Evidence](../benchmarks/cpython_stdlib/full/http/README.md) | [0 / 346](../benchmarks/cpython_stdlib/full/http/) | 1 | 27 |
 | `importlib` | Yes | Construct and mutate `machinery.ModuleSpec`, convert paths with `util.cache_from_source` and `util.source_from_cache` using a configured cache tag, and read `metadata.version` from unpacked `.dist-info` directories in the configured import roots. [Version lookup](../tests/fixtures/module_values/distribution_version/) [Evidence](../benchmarks/cpython_stdlib/full/importlib/README.md) | [0 / 1,346](../benchmarks/cpython_stdlib/full/importlib/) | 10 | 72 |
 | `inspect` | Yes | `cleandoc(doc=text)` for strings. `getattr_static` for selected owners and literal attribute names. [Evidence](../benchmarks/cpython_stdlib/full/inspect/README.md) | [0 / 362](../benchmarks/cpython_stdlib/full/inspect/) | 1 | 1 |
@@ -161,7 +162,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `getpass` |
 | `glob` |
 | `graphlib` |
-| `html` |
 | `imaplib` |
 | `mailbox` |
 | `mmap` |

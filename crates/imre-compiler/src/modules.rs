@@ -120,6 +120,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
         "_strptime" => bundled_source!("_strptime.py"),
         "calendar" => bundled_source!("calendar.py"),
+        "html" => bundled_source!("html/__init__.py"),
+        "html.entities" => bundled_source!("html/entities.py"),
         // CPython 3.14.5's file wrapper and shared stream reader. See licenses/CPython.txt.
         "lzma" => bundled_source!("lzma.py"),
         "compression" => bundled_source!("compression/__init__.py"),
@@ -5361,6 +5363,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 name,
                 "token"
+                    | "html"
                     | "http.client"
                     | "fractions"
                     | "quopri"
@@ -5380,11 +5383,11 @@ impl<'a> Loader<'a> {
             } else {
                 source
             };
-            let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-                Some((self.load_module(parent)?, child))
-            } else {
-                None
-            };
+            let parent = self.package_parent(name)?;
+            // Initializing the package may already have imported this child.
+            if let Some(&id) = self.by_name.get(name) {
+                return Ok(id);
+            }
             // ty resolves this immutable source at its Python import path in the
             // in-memory project. It is part of the compiler, not a disk input.
             let path = self.root.join(filename);
@@ -5416,6 +5419,21 @@ impl<'a> Loader<'a> {
         result
     }
 
+    /// Resolve the containing package, including one that is importing this child itself.
+    fn package_parent<'n>(&mut self, name: &'n str) -> Result<Option<(ModuleId, &'n str)>, String> {
+        let Some((parent, child)) = name.rsplit_once('.') else {
+            return Ok(None);
+        };
+        let id = match self.by_name.get(parent).copied() {
+            Some(id) if self.loading.contains(&id) && self.modules[id].is_package => id,
+            _ => self.load_module(parent)?,
+        };
+        if !self.modules[id].is_package {
+            return Err(format!("{parent:?} is not a package"));
+        }
+        Ok(Some((id, child)))
+    }
+
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
@@ -5438,18 +5456,7 @@ impl<'a> Loader<'a> {
                 "standard-library imports and shadowing are unsupported: {first:?}"
             ));
         }
-        let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-            let id = match self.by_name.get(parent).copied() {
-                Some(id) if self.loading.contains(&id) && self.modules[id].is_package => id,
-                _ => self.load_module(parent)?,
-            };
-            if !self.modules[id].is_package {
-                return Err(format!("{parent:?} is not a package"));
-            }
-            Some((id, child))
-        } else {
-            None
-        };
+        let parent = self.package_parent(name)?;
         // Parent initialization can have loaded this child while exposing re-exports.
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
