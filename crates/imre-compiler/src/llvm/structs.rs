@@ -269,6 +269,14 @@ impl Emitter<'_, '_> {
         let (stride, upper, modulus) = (word(stride), word(bound), word(modulus));
         let (list, row_value) = (self.borrow_slot(*list_slot), self.borrow_slot(*row_slot));
         let (at, stop) = (self.borrow_slot(*index), self.borrow_slot(stop));
+        self.output.local_helper(
+            "imre_modular_write_stride",
+            include_str!("modular_write_stride.ll"),
+        );
+        let stride = self.instruction(format!(
+            "call i64 @imre_modular_write_stride(i64 {stride}, i64 {}, i64 {modulus})",
+            stop.operand
+        ));
         let layout = self.output.record_layout(row.ty);
         let last_index = self.entry_alloca("i64");
         let last = self.instruction(format!("call i64 @imre_struct_set_modular(ptr {}, ptr @{layout}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {stride}, i64 {upper}, i64 {modulus}, ptr {last_index})",list.operand,row_value.operand,current.operand,stop.operand,at.operand));
