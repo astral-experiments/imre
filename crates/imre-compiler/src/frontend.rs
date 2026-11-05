@@ -6457,6 +6457,53 @@ impl<'a> Checker<'a> {
         self.object_builtin_error(name, node)
     }
 
+    /// Checks the logarithm domain once before lowering the unboxed operation.
+    fn checked_float_log2(&mut self, value: Expr) -> Expr {
+        let slot = self.hidden(Type::Float);
+        let input = self.local(slot);
+        let invalid = pipelines::compare(
+            Compare::LessEqual,
+            input.clone(),
+            Expr {
+                ty: Type::Float,
+                kind: ExprKind::Float(0.0),
+            },
+        );
+        let prefix = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Str("expected a positive input, got ".to_string()),
+        };
+        let spelling = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::Str, vec![input.clone()]),
+        };
+        let message = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Binary(Binary::Concat, Box::new(prefix), Box::new(spelling)),
+        };
+        let error = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("ValueError").unwrap(),
+                message: Some(Box::new(message)),
+            },
+        };
+        Expr {
+            ty: Type::Float,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(slot, value),
+                    Statement::If(invalid, vec![Statement::Raise(Some(error))], vec![]),
+                ],
+                value: Box::new(Expr {
+                    ty: Type::Float,
+                    kind: ExprKind::Builtin(Builtin::FloatLog2, vec![input]),
+                }),
+                clear: vec![slot],
+            },
+        }
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
         let error = self.object_export_error(name, node);
@@ -9813,6 +9860,24 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
             ))) => return self.base85_encode(call, name),
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.log2")))
+                if call.arguments.keywords.is_empty()
+                    && let [arg] = call.arguments.args.as_ref()
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "math",
+                        "log2",
+                    ) =>
+            {
+                let value = self
+                    .expr(arg)
+                    .map_err(|_| self.scoped_builtin_error(name, call))?;
+                if value.ty == Type::Float {
+                    return Ok(self.checked_float_log2(value));
+                }
+                return Err(self.scoped_builtin_error(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
