@@ -511,6 +511,7 @@ impl Context {
                             | "__reduce_ex__"
                             | "__prepare__"
                             | "mro"
+                            | "__subclasses__"
                     )
                     && !(exception_method && builtins::is_exception(kind))
                 {

@@ -2705,7 +2705,7 @@ pub(super) struct Heap {
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
     finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
-    // Weak class handles, compacted before the collector recycles their slots.
+    // Weak handles in direct-base attachment order, pruned before recycling class slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
     pub(super) discarded_shutdown_write: Option<bool>,
@@ -2834,28 +2834,9 @@ impl Heap {
             return;
         }
         let mut children: HashMap<Id, Vec<Id>> = HashMap::new();
-        for (index, slot) in self.slots.iter().enumerate() {
-            let Some(Value::Class {
-                scope, ancestors, ..
-            }) = slot.value.as_ref()
-            else {
-                continue;
-            };
-            let Value::Scope(data) = self.get(*scope) else {
-                unreachable!()
-            };
-            let bases = match &data.class_namespace {
-                Some(ns) => {
-                    let Value::Tuple(bases) = self.get(ns.bases) else {
-                        continue;
-                    };
-                    bases.as_slice()
-                }
-                // Native AST classes store their single base first in the lineage.
-                None => ancestors.get(..1).unwrap_or_default(),
-            };
-            for &base in bases {
-                children.entry(base).or_default().push(index as Id);
+        for &child in &self.classes {
+            for &base in self.immediate_bases(child) {
+                children.entry(base).or_default().push(child);
             }
         }
         let mut pending = vec![class];
@@ -4066,6 +4047,39 @@ impl Heap {
         self.clear_marks();
         self.slots[storage as usize].may_have_buffer_views = live != 0;
         Ok(live)
+    }
+
+    fn immediate_bases(&self, class: Id) -> &[Id] {
+        let Value::Class {
+            scope, ancestors, ..
+        } = self.get(class)
+        else {
+            unreachable!("class registry entry")
+        };
+        let Value::Scope(data) = self.get(*scope) else {
+            unreachable!()
+        };
+        let Some(ns) = &data.class_namespace else {
+            // Synthetic AST classes store their single direct base first in the lineage.
+            return ancestors.get(..1).unwrap_or_default();
+        };
+        match self.get(ns.bases) {
+            Value::Tuple(bases) => bases,
+            _ => &[],
+        }
+    }
+
+    pub(super) fn immediate_subclasses(&self, class: Id) -> Vec<Id> {
+        self.classes
+            .iter()
+            .copied()
+            .filter(|&child| self.immediate_bases(child).contains(&class))
+            .collect()
+    }
+
+    pub(super) fn reattach_class(&mut self, class: Id) {
+        self.classes.retain(|&child| child != class);
+        self.classes.push(class);
     }
 
     /// Every live descendant, including unbound local classes, with parents before children.

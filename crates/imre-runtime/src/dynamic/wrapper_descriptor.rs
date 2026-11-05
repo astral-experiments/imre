@@ -183,7 +183,7 @@ impl BuiltinDescriptor {
                 };
                 Some(("mappingproxy", attr, members))
             }
-            Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
+            Some(("type", attr)) => Some(("type", attr, &["mro", "__subclasses__"][..])),
             Some(("int", attr)) => Some(("int", attr, builtins::real_methods("int"))),
             Some(("float", "as_integer_ratio")) => {
                 Some(("float", "as_integer_ratio", &["as_integer_ratio"][..]))
@@ -247,6 +247,7 @@ impl BuiltinDescriptor {
                     || (name == "__length_hint__"
                         && (owner == value::STRUCT_UNPACK_ITERATOR
                             || deque::iterator_class(owner).is_some()))
+                    || (owner == "type" && name == "__subclasses__")
                     || (owner == "list" && name == "__getitem__")
                     || (matches!(owner, "set" | "frozenset") && name == "__contains__")
                     || (owner == defaultdict::CLASS && name == "__missing__")
@@ -889,7 +890,8 @@ impl BuiltinDescriptor {
                         _,
                     ) => "($self, /)",
                     ("mro", "__doc__") => "Return a type's method resolution order.",
-                    ("mro", _) => "($self, /)",
+                    ("__subclasses__", "__doc__") => "Return a list of immediate subclasses.",
+                    ("mro" | "__subclasses__", _) => "($self, /)",
                     ("__getitem__", "__doc__") if self.owner == "list" => "Return self[index].",
                     ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
                     ("join", "__doc__") => "Concatenate any number of strings.\n\nThe string whose method is called is inserted in between each given string.\nThe result is returned as a new string.\n\nExample: '.'.join(['ab', 'pq', 'rs']) -> 'ab.pq.rs'",

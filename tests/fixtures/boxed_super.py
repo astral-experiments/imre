@@ -148,6 +148,12 @@ def check_mro():
     assert bool.mro() == type.mro(bool) == [bool, int, object]
     assert terminal_size.mro() == [terminal_size, tuple, object]
     assert type.mro(defaultdict) == [defaultdict, dict, object]
+    assert defaultdict.__base__ is dict and defaultdict.__bases__ == (dict,)
+    assert defaultdict.__mro__ == (defaultdict, dict, object)
+    mapping = defaultdict()
+    assert type(mapping).__mro__ is defaultdict.__mro__
+    assert type(mapping).__bases__ is defaultdict.__bases__
+    assert not any(hasattr(mapping, name) for name in ("__base__", "__bases__", "__mro__"))
     assert timezone.mro() == [timezone, tzinfo, object]
     assert D.mro.__self__ is D and not hasattr(super(D, D()), "mro")
 
