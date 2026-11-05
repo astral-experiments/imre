@@ -104,3 +104,65 @@ fn search_keeps_proven_paths_when_the_node_budget_runs_out() {
     items.remove(0);
     assert!(!paths.valid(&heap, globals));
 }
+
+#[test]
+fn weak_dict_key_and_frame_held_target_must_both_survive() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let registry = ctx.dict(Vec::new());
+    let mark = ctx.heap.temporary_mark();
+    let scope = ctx.scope("sample", None);
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+
+    let class = ctx.builtin("object");
+    let target = ctx.instance(class, None);
+    ctx.bind(scope, "result", target);
+    let callback = ctx.builtin("print");
+    let reference = ctx
+        .heap
+        .new_weak_reference(target, callback, weakref::Kind::Reference, None)
+        .unwrap();
+    ctx.put_item(registry, reference, NONE).unwrap();
+    ctx.heap.release_temporaries_since(0);
+
+    ctx.heap.learn_weak_roots(registry, NONE);
+    assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
+    for _ in 0..=super::SEARCH_BACKOFF {
+        ctx.heap.learn_weak_roots(registry, NONE);
+    }
+    assert!(ctx.heap.weak_values_kept_by(registry, NONE));
+
+    ctx.delete_item(registry, reference).unwrap();
+    assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
+    ctx.put_item(registry, NONE, NONE).unwrap();
+    assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
+    ctx.delete_item(registry, NONE).unwrap();
+    ctx.put_item(registry, reference, NONE).unwrap();
+    assert!(ctx.heap.weak_values_kept_by(registry, NONE));
+
+    ctx.heap.leave(NONE, false);
+    assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
+    assert_eq!(
+        ctx.heap.collect([registry].into_iter()),
+        Some(vec![(callback, reference)])
+    );
+}
+
+#[test]
+fn late_dictionary_values_keep_the_full_ordinary_search_budget() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let class = ctx.builtin("object");
+    let target = ctx.instance(class, None);
+    let reference = ctx
+        .heap
+        .new_weak_reference(target, NONE, weakref::Kind::Reference, None)
+        .unwrap();
+    let mut entries: Vec<_> = (0..36_000).map(|n| (ctx.int(n), NONE)).collect();
+    entries.push((ctx.int(-1), target));
+    entries.push((ctx.int(-2), reference));
+    let registry = ctx.dict(entries);
+    ctx.heap.release_temporaries_since(0);
+
+    ctx.heap.learn_weak_roots(registry, NONE);
+    assert!(ctx.heap.cached_weak_roots([registry, NONE]));
+}
