@@ -293,6 +293,12 @@ class GzipFile(io.BufferedIOBase):
                 self.myfileobj = None
                 owned.close()
 
+    def __del__(self):
+        if self.mode == WRITE and not self.closed:
+            import warnings
+            warnings.warn("unclosed GzipFile", ResourceWarning, source=self, stacklevel=2)
+        super().__del__()
+
 
 def compress(data, compresslevel=9, *, mtime=0):
     """Compress data into a single gzip member, with a reproducible timestamp by default."""
