@@ -1338,6 +1338,41 @@ pub(super) fn call(
     if method == "getsockopt" {
         return getsockopt(ctx, &s, args, kwargs);
     }
+    if method == "sendto" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "sendto() takes no keyword arguments",
+            ));
+        }
+        let (data, flags, peer) = match *args {
+            [data, peer] => (data, None, peer),
+            [data, flags, peer] => (data, Some(flags), peer),
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("sendto() takes 2 or 3 arguments ({} given)", args.len()),
+                ));
+            }
+        };
+        ctx.check_buffer_exporter(data)?;
+        ctx.native_buffer_bytes(data)?;
+        let count = ctx.with_buffer_export(data, |ctx| {
+            let flags = flags
+                .map(|id| ctx.index_c_int(id))
+                .transpose()?
+                .unwrap_or(0);
+            let addr = address(ctx, native::family(&s), peer, method)?;
+            super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
+            Ok(native::send_to(
+                &s,
+                ctx.native_buffer_bytes(data)?,
+                flags,
+                &addr,
+            )?)
+        })?;
+        return Ok(ctx.int(count as i64));
+    }
     if method == "recvfrom_into" {
         return recvfrom_into(ctx, &s, args, kwargs);
     }
@@ -1418,7 +1453,7 @@ pub(super) fn call(
     let max = match method {
         "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
         "recv" | "recvfrom" | "send" | "sendall" => 2,
-        "setsockopt" | "__exit__" | "recv_into" | "sendto" => 3,
+        "setsockopt" | "__exit__" | "recv_into" => 3,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
@@ -1501,35 +1536,6 @@ pub(super) fn call(
             let data = ctx.alloc(Value::Bytes(data));
             let peer = pack_socket_name(ctx, peer)?;
             return Ok(ctx.alloc(Value::Tuple(vec![data, peer])));
-        }
-        "sendto" => {
-            let (data, flags, peer) = match *args {
-                [data, peer] => (data, None, peer),
-                [data, flags, peer] => (data, Some(flags), peer),
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("sendto() takes 2 or 3 arguments ({} given)", args.len()),
-                    ));
-                }
-            };
-            ctx.check_buffer_exporter(data)?;
-            ctx.native_buffer_bytes(data)?;
-            let count = ctx.with_buffer_export(data, |ctx| {
-                let flags = flags
-                    .map(|id| ctx.index_c_int(id))
-                    .transpose()?
-                    .unwrap_or(0);
-                let addr = address(ctx, native::family(&s), peer, method)?;
-                super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
-                Ok(native::send_to(
-                    &s,
-                    ctx.native_buffer_bytes(data)?,
-                    flags,
-                    &addr,
-                )?)
-            })?;
-            return Ok(ctx.int(count as i64));
         }
         "recv" => {
             let n = usize::try_from(ctx.as_integer(argument(args, 0)?)?)

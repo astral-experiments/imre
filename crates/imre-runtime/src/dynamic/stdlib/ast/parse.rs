@@ -277,9 +277,14 @@ impl Parser<'_> {
             Stmt::Expr(v) => ("Expr", vec![self.expr(*v.value)?]),
             Stmt::Pass(_) => ("Pass", vec![]),
             Stmt::Import(v) if !v.is_lazy => ("Import", vec![self.aliases(&v.names)]),
-            // Absolute future directives need feature validation before conversion.
+            // Other absolute future imports can require feature validation or change the grammar.
             Stmt::ImportFrom(v)
-                if !v.is_lazy && (v.level != 0 || v.module.as_deref() != Some("__future__")) =>
+                if !v.is_lazy
+                    && (v.level != 0
+                        || v.module.as_deref() != Some("__future__")
+                        || v.names
+                            .iter()
+                            .all(|name| name.name.as_str() == "annotations")) =>
             {
                 let module = v
                     .module
@@ -289,6 +294,15 @@ impl Parser<'_> {
                 let level = self.ctx.int(i64::from(v.level));
                 ("ImportFrom", vec![module, names, level])
             }
+            Stmt::AnnAssign(v) => (
+                "AnnAssign",
+                vec![
+                    self.expr(*v.target)?,
+                    self.expr(*v.annotation)?,
+                    self.optional(v.value)?,
+                    self.ctx.int(i64::from(v.simple)),
+                ],
+            ),
             Stmt::Assign(v) => (
                 "Assign",
                 vec![self.exprs(v.targets)?, self.expr(*v.value)?, NONE],
@@ -784,6 +798,10 @@ impl Parser<'_> {
         }
         let range = e.range();
         let (kind, fields) = match e {
+            Expr::Named(v) if !self.literal => (
+                "NamedExpr",
+                vec![self.expr(*v.target)?, self.expr(*v.value)?],
+            ),
             Expr::Name(v) => (
                 "Name",
                 vec![self.ctx.text(v.id.as_str()), self.context(v.ctx)?],

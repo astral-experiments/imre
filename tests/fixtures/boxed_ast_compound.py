@@ -70,3 +70,13 @@ render = lambda val: 'prefix ' f'{val = !s:>{width}}' ' suffix'
         pass
     else:
         raise AssertionError("four nested replacement fields should be rejected")
+
+    # Record both annotation forms and the assignment expression's Store target.
+    source = """\
+from __future__ import annotations as hints
+café: list[int] = (count := 1)
+(local): T
+item.field: T = value
+items[0]: T
+"""
+    print(record(ast.parse(source)))

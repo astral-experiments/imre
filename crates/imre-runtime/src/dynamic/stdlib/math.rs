@@ -251,6 +251,9 @@ pub(super) fn call(
     if operation == "isnan" {
         return Ok(builtins::boolean(as_double(ctx, value)?.is_nan()));
     }
+    if operation == "frexp" {
+        return frexp(ctx, value);
+    }
     if operation == "modf" {
         return modf(ctx, value);
     }
@@ -506,6 +509,27 @@ fn scale_by_power_of_two(ctx: &Context, x: f64, exponent: Id) -> Result<f64> {
         return Err(Error::new("OverflowError", "math range error"));
     }
     Ok(result)
+}
+
+unsafe extern "C" {
+    #[link_name = "frexp"]
+    fn c_frexp(x: f64, exponent: *mut std::ffi::c_int) -> f64;
+}
+
+/// Split a binary float into its signed mantissa and base-two exponent.
+fn frexp(ctx: &mut Context, value: Id) -> Result<Id> {
+    let x = as_double(ctx, value)?;
+    let mut exponent = 0;
+    let mantissa = if x.is_finite() && x != 0.0 {
+        // SAFETY: frexp writes a single C int to the supplied exponent.
+        unsafe { c_frexp(x, &mut exponent) }
+    } else {
+        // CPython preserves the input bits and returns exponent zero for these cases.
+        x
+    };
+    let mantissa = ctx.alloc(Value::Float(mantissa));
+    let exponent = ctx.int(i64::from(exponent));
+    Ok(ctx.alloc(Value::Tuple(vec![mantissa, exponent])))
 }
 
 /// Split at the integer toward zero, preserving the sign and payload of either nonfinite case.
