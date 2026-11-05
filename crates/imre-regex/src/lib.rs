@@ -107,6 +107,7 @@ pub struct ByteRuns<'a> {
 }
 
 impl<'a> ByteRuns<'a> {
+    /// Prepare the class for a subject of the given byte length.
     pub fn new(members: &'a [u8; 256], len: usize) -> Self {
         let ranges = if len >= 256 {
             small_ranges(members)
@@ -116,6 +117,7 @@ impl<'a> ByteRuns<'a> {
         Self { members, ranges }
     }
 
+    /// Find the first maximal run starting at or after the byte offset.
     pub fn next(&self, bytes: &[u8], offset: usize) -> Option<std::ops::Range<usize>> {
         let remaining = &bytes[offset..];
         let skip = self.prefix::<false>(remaining);
@@ -2348,6 +2350,48 @@ fn parse_class(
 mod tests {
     use super::translate;
     use regex::Regex;
+
+    #[test]
+    fn byte_class_blocks_preserve_boundaries() {
+        use super::ByteRuns;
+
+        let cases: &[&[(u8, u8)]] = &[
+            &[],
+            &[(0, 255)],
+            &[(255, 255)],
+            &[(0, 31), (125, 129), (240, 255)],
+            &[(0, 1), (3, 7), (33, 65), (240, 255)],
+        ];
+        for &ranges in cases {
+            let mut members = [0; 256];
+            for &(first, last) in ranges {
+                members[usize::from(first)..=usize::from(last)].fill(17);
+            }
+            let (inside, outside): (Vec<_>, _) =
+                (0..=255u8).partition(|&b| members[usize::from(b)] != 0);
+            let mut bytes = Vec::new();
+            for len in [1, 7, 8, 9, 31, 32, 33, 39, 40, 41, 63, 64, 65, 255] {
+                for pool in [&outside, &inside] {
+                    bytes.extend(pool.iter().copied().cycle().take(len));
+                }
+            }
+            let runs = ByteRuns::new(&members, bytes.len());
+            for offset in 0..=bytes.len() {
+                let expected = bytes[offset..]
+                    .iter()
+                    .position(|&b| members[usize::from(b)] != 0)
+                    .map(|skip| {
+                        let start = offset + skip;
+                        let len = bytes[start..]
+                            .iter()
+                            .take_while(|&&b| members[usize::from(b)] != 0)
+                            .count();
+                        start..start + len
+                    });
+                assert_eq!(runs.next(&bytes, offset), expected);
+            }
+        }
+    }
 
     #[test]
     fn escape_errors_observe_source_order_and_token_boundaries() {
