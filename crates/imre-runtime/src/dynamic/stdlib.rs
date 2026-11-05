@@ -38,6 +38,8 @@ pub(super) mod locale;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) mod pwd;
 pub(super) mod tempfile;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod termios;
 pub(super) mod time;
 mod tokenize;
 mod unicodedata;
@@ -1656,6 +1658,10 @@ pub(super) fn call(
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(function @ ("getpwall" | "getpwnam" | "getpwuid")) = name.strip_prefix("pwd.") {
         return pwd::call(ctx, function, args, kwargs);
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("tcgetattr" | "tcsetattr")) = name.strip_prefix("termios.") {
+        return termios::call(ctx, function, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "fcntl.fcntl" {

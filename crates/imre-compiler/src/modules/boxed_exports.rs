@@ -394,6 +394,20 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::Numbers => exports!("numbers", "Complex", "Integral", "Rational", "Real"),
         M::Pickle => exports!("pickle", "UnpicklingError", "_loads", "dumps", "loads"),
         M::PosixPath => exports!("posixpath", "expanduser", "ismount", "split"),
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        M::Termios => match name {
+            "tcgetattr" => "termios.tcgetattr",
+            "tcsetattr" => "termios.tcsetattr",
+            "error" => "termios.error",
+            #[cfg(target_os = "macos")]
+            "TCSASOFT" => "termios.TCSASOFT",
+            _ => {
+                imre_ast::providers::termios::CONSTANTS
+                    .iter()
+                    .find(|(member, _, _)| *member == name)?
+                    .1
+            }
+        },
         M::Pwd => exports!("pwd", "getpwall", "getpwnam", "getpwuid", "struct_passwd"),
         M::Re => exports!(
             "re", "Scanner", "escape", "findall", "finditer", "split", "subn"

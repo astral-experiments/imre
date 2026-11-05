@@ -974,6 +974,8 @@ impl std::ops::Deref for BoxedTextFile {
 #[derive(Clone, Copy)]
 pub(super) enum NativeModuleState {
     LocaleError(Id),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    TermiosError(Id),
     IsoCalendarDate(Id),
     SslError(Id),
     PickleWriter {
@@ -988,6 +990,8 @@ impl NativeModuleState {
             Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => {
                 visit.push(class)
             }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            Self::TermiosError(class) => visit.push(class),
             Self::PickleWriter {
                 pickling_error,
                 dispatch_table,

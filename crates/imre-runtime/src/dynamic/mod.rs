@@ -3749,6 +3749,8 @@ impl Context {
             "grp" => stdlib::grp::install(self, scope),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "pwd" => stdlib::pwd::install(self, scope),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            "termios" if source.is_none() => stdlib::termios::install(self, module, scope)?,
             "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [

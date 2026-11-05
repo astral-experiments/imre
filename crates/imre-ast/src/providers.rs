@@ -1,5 +1,8 @@
 //! Names supplied by the boxed runtime without a filesystem module.
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod termios;
+
 /// Functions installed in the boxed builtins namespace.
 pub const BUILTIN_FUNCTIONS: &[&str] = &[
     "len",
@@ -66,6 +69,11 @@ pub fn provider(name: &str) -> Option<Provider> {
     is_builtin(name).then_some(Provider::Builtin)
 }
 
+/// Native extension modules that are searched after the application path.
+pub fn is_native_fallback(name: &str) -> bool {
+    cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
+}
+
 fn is_builtin(name: &str) -> bool {
     matches!(
         name,
@@ -110,6 +118,7 @@ fn is_builtin(name: &str) -> bool {
             | "_warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal" | "zipimport"))
         || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
+        || is_native_fallback(name)
         || has_lazy_attributes(name)
 }
 
