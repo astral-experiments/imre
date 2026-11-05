@@ -246,6 +246,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "cell"
             | "int"
             | "str"
+            | "bytes"
             | "super"
             | "type"
             | super::thread_local::CLASS
