@@ -174,6 +174,17 @@ def current():
     assert list(accumulate([Reflected(5)], initial=Sibling(2))) == [2, 7]
     assert list(accumulate([Reflected(5)], initial=2)) == [2, -7]
 
+    class Declines(int):
+        def __add__(self, other):
+            return NotImplemented
+
+    try:
+        list(accumulate([Declines(1), Declines(2)]))
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("declined addition was retried on the underlying integers")
+
     class Double(accumulate):
         def __next__(self):
             return 2 * super().__next__()

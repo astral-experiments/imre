@@ -4741,9 +4741,17 @@ impl Context {
             ));
         }
         let (left, right) = (self.scalar_value(a), self.scalar_value(b));
-        if matches!(op, "*" | "/" | "//" | "%")
-            && (matches!(self.heap.get(left), Value::Complex(_))
-                || matches!(self.heap.get(right), Value::Complex(_)))
+        // Integer subclasses already had both numeric slots tried above. Unwrapping
+        // them here would turn a declined addition back into a successful builtin sum.
+        let declined_integer_sum = op == "+"
+            && (left != a || right != b)
+            && [left, right]
+                .into_iter()
+                .all(|id| matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)));
+        if declined_integer_sum
+            || (matches!(op, "*" | "/" | "//" | "%")
+                && (matches!(self.heap.get(left), Value::Complex(_))
+                    || matches!(self.heap.get(right), Value::Complex(_))))
         {
             return Err(Error::new(
                 "TypeError",
