@@ -84,3 +84,10 @@ covering(1031, 1040, 799, 1026)
 orbit(1030, 1024, 94, 512)
 orbit(1040, 1032, 1014, 172)
 orbit(1031, 1024, 94, 511)
+
+# Negative strides include partial and complete orbits, a zero residue, and
+# products that must return to Python integer arithmetic.
+covering(8192, 8192, 4100, -127)
+covering(8192, 8192, 8200, -8193)
+covering(8192, 8192, 4200, -8192)
+covering(256, 267, 173, -(1 << 62))
