@@ -306,7 +306,8 @@ impl Array {
                         .ok_or_else(|| {
                             Error::new("ValueError", "chr() arg not in range(0x110000)")
                         })?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 )
             }
         })

@@ -792,6 +792,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
+        Value::Array(_) if super::array::has_method(attr) => "array.array",
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) | Value::NamedTuple { .. }
             if matches!(
@@ -2804,7 +2805,7 @@ pub(super) fn call(
                     b.strip_suffix(b"\n").map(|s| Value::Bytes(s.to_vec()))
                 }
                 Value::Str(s) if !s.is_empty() => {
-                    s.strip_suffix('\n').map(|s| Value::Str(s.to_owned()))
+                    s.strip_suffix('\n').map(|s| Value::Str(s.into()))
                 }
                 Value::SurrogateStr(s) if !s.is_empty() => s
                     .strip_suffix(&[u32::from('\n')])

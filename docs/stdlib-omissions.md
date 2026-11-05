@@ -59,11 +59,10 @@ The frozen Linux registry records a stock pass for each occurrence below. The ar
 
 ### `gzip`
 
-Pinned CPython 3.14.5 passed all 75 originals. Public Imre passed the same 73 at O0 and O3. Both originals below raised `AttributeError` on `GzipFile._buffer` at each native level. Each remains in the denominator with zero paired passes. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/d98bff09b641e12474f15a7e4ef28b288477d7ad)
+Pinned CPython passed all 75 originals. Public Imre passed 74 at O0 and O3, including `test_decompress_limited`, which checks the read-ahead bound after a one-byte read. The remaining original reaches into CPython’s private compressed-input buffer. It stays in the 75-test denominator with zero paired passes. [Public fix](https://github.com/astral-experiments/imre/pull/5627).
 
 | Original CPython test | Occurrence | Reason for omission | Public behavior in scope |
 | --- | ---: | --- | --- |
-| [`test.test_gzip.TestGzip.test_decompress_limited`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_gzip.py#L718-L728) | 1 | After reading one byte from a member containing two million zeros, the assertion uses `decomp._buffer.raw.tell()` to measure read-ahead. Imre stores its buffered reader in `_reader`. | On stock, O0 and O3, `read(1)` returned one zero byte and the public position was 1. Both decoders had produced 131,072 bytes, within the original limit of `1 + io.DEFAULT_BUFFER_SIZE` (131,073). The raw position stayed there until the next read crossed the buffer boundary. |
 | [`test.test_gzip.TestGzip.test_prepend_error`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_gzip.py#L821-L826) | 1 | The test writes and reopens a valid gzip file, then requires `f._buffer.raw._fp.prepend()` to return without raising before the first read. CPython’s private helper moves its cursor back by the length of its default argument, `b''`, which leaves the cursor at zero. Imre retains unread input in its decoder. [CPython helper](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/gzip.py#L83-L114) | FontTools decoded the same SVG document across two gzip members separated by zero padding on stock, O0 and O3. A truncated trailer raised `EOFError`. A bad checksum or invalid next-member header raised `BadGzipFile` on the same read as stock, with shorter messages on Imre. |
 
 ### `importlib`

@@ -5312,6 +5312,30 @@ impl Emitter<'_, '_> {
                     self.call(name, returns, &values)
                 }
             }
+            Builtin::RegexRunCount { members, split } => {
+                let mut matching = members
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, member)| **member != 0);
+                let singleton = match (matching.next(), matching.next()) {
+                    (Some((byte, _)), None) => byte as i32,
+                    _ => -1,
+                };
+                let table = self.byte_array(members.clone());
+                self.output.local_helper(
+                    "count_ascii_regex_runs",
+                    include_str!("llvm/count_ascii_regex_runs.ll"),
+                );
+                let subject = &args[0].value.operand;
+                let operand = self.checked_instruction(format!(
+                    "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split})"
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::RegexCollect { program, split } => {
                 let text = &args[0].value.operand;
                 let bytes = args[0].value.ty == Type::Bytes;
@@ -10695,7 +10719,7 @@ declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
 declare i64 @imre_struct_sparse_indexed_count(ptr, ptr, i64, i64, i64, i64) nounwind
 declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
-declare ptr @imre_struct_row(ptr, i64) nounwind
+declare ptr @imre_struct_row(ptr, i64) nounwind willreturn memory(read)
 declare ptr @imre_struct_row_checked(ptr, i64)
 declare i32 @imre_struct_append(ptr, ptr, ptr)
 declare i32 @imre_struct_list_contains(ptr, ptr) nounwind

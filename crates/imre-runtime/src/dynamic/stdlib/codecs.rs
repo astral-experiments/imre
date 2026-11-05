@@ -124,7 +124,9 @@ pub(super) fn error_registry(
             .handlers
             .try_reserve(1)
             .map_err(|_| crate::Error::allocation())?;
-        ctx.codec_entries.handlers.insert(name, callback);
+        ctx.codec_entries
+            .handlers
+            .insert(name.to_string(), callback);
         Ok(NONE)
     } else {
         handler(ctx, &name)
@@ -318,7 +320,8 @@ pub(super) fn lookup(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
     let spelling = match ctx.heap.get(storage) {
         Value::Str(text) => text.clone(),
         _ => String::from_utf8(ctx.encode_utf8_codepoints(storage, false, "strict")?)
-            .expect("strict UTF-8 encoding"),
+            .expect("strict UTF-8 encoding")
+            .into(),
     };
     lookup_name(ctx, &spelling)
 }

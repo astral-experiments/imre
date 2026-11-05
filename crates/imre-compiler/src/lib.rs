@@ -449,6 +449,7 @@ fn object_fallback<const SPLIT: bool, T>(
                     .modules
                     .iter()
                     .position(|module| module.is_bundled("socketserver")),
+                checked_file.then_some(&graph.modules),
             )?;
         }
         Ok(())

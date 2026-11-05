@@ -1102,7 +1102,7 @@ pub(super) enum Value {
     },
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
-    Str(String),
+    Str(crate::Str),
     /// Python code points for text containing at least one surrogate.
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
@@ -2572,10 +2572,18 @@ impl SlotShape {
         matches!(self, Self::ScalarLeaf | Self::AsciiStr)
     }
 
+    fn text(value: &str) -> Self {
+        if value.is_ascii() {
+            Self::AsciiStr
+        } else {
+            Self::ScalarLeaf
+        }
+    }
+
     /// Record whether a newly occupied slot holds an exact scalar without strong children.
     fn occupied(value: &Value) -> Self {
-        if matches!(value, Value::Str(text) if text.is_ascii()) {
-            Self::AsciiStr
+        if let Value::Str(text) = value {
+            Self::text(text)
         } else if value.scalar_leaf() {
             Self::ScalarLeaf
         } else {
@@ -2685,6 +2693,7 @@ pub(super) struct MarkQueue<'a> {
 enum MarkMode<'a> {
     All,
     SkipScalarLeaves,
+    CycleEdges,
     Ordered(&'a mut GcOrder),
 }
 
@@ -2693,10 +2702,16 @@ impl MarkQueue<'_> {
         let trace = &self.traces[id as usize];
         if trace.get() == UNMARKED {
             match &mut self.mode {
+                MarkMode::CycleEdges if self.slot_shapes[id as usize].is_scalar_leaf() => {}
                 MarkMode::Ordered(order) => {
                     trace.set(END);
-                    if self.slots[id as usize].gc_next.get() == UNMARKED {
-                        order.push(id as usize, self.slots);
+                    let index = id as usize;
+                    let slot = &self.slots[index];
+                    let shape = self.slot_shapes[index];
+                    if slot.gc_next.get() == UNMARKED
+                        && (!shape.is_scalar_leaf() || slot.has_gc_header)
+                    {
+                        order.push(index, self.slots);
                     }
                 }
                 // A complete reachability trace needs no pending visit for an exact scalar.
@@ -3219,11 +3234,16 @@ impl Heap {
         permanent::small_integer_id(value)
     }
 
-    pub fn alloc(&mut self, value: Value) -> Id {
-        if let Value::Str(text) = &value
-            && let Some(owner) = crate::objects::short_string(text)
-        {
+    pub(super) fn owned_text(&mut self, text: crate::Str) -> Id {
+        if let Some(owner) = crate::objects::short_string(&text) {
             return self.intern_literal(owner, true);
+        }
+        self.fill_slot(SlotShape::text(&text), false, true, || Value::Str(text))
+    }
+
+    pub fn alloc(&mut self, value: Value) -> Id {
+        if let Value::Str(text) = value {
+            return self.owned_text(text);
         }
         if let Value::Int(integer) = &value
             && let Some(id) = integer.as_small().and_then(Self::cached_integer)
@@ -3344,15 +3364,25 @@ impl Heap {
     }
 
     fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
-        let trace = trace && self.allocation_traces.is_tracing();
         let has_gc_header = value.has_gc_header(self);
         let shape = SlotShape::occupied(&value);
+        self.fill_slot(shape, has_gc_header, trace, || value)
+    }
+
+    fn fill_slot(
+        &mut self,
+        shape: SlotShape,
+        has_gc_header: bool,
+        trace: bool,
+        value: impl FnOnce() -> Value,
+    ) -> Id {
+        let trace = trace && self.allocation_traces.is_tracing();
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
             self.slot_shapes[index] = shape;
-            self.slots[index].value = Some(value);
+            self.slots[index].value = Some(value());
             self.slots[index].may_have_buffer_views = false;
             self.slots[index].generation = 0;
             index
@@ -3366,10 +3396,14 @@ impl Heap {
             }
             self.slot_shapes.push(shape);
             self.traces.push(Cell::new(UNMARKED));
-            self.slots.push(Slot::new(value));
+            self.slots.push(Slot::new(value()));
             self.slots.len() - 1
         };
-        self.gc_order.push(index, &self.slots);
+        // Only objects with children or a Python GC header participate in
+        // traversal order. Exact untracked scalars remain live through tracing.
+        if !shape.is_scalar_leaf() || has_gc_header {
+            self.gc_order.push(index, &self.slots);
+        }
         self.slots[index].untracked_tuple.set(false);
         self.slots[index].has_gc_header = has_gc_header;
         if has_gc_header {
@@ -3403,7 +3437,7 @@ impl Heap {
             self.keep(id);
             return id;
         }
-        let id = self.alloc_slot_with_trace(Value::Str(owner.to_string()), !static_character);
+        let id = self.alloc_slot_with_trace(Value::Str((*owner).clone()), !static_character);
         self.interned
             .insert(owner, InternedString { id, literal: true });
         id
@@ -3443,14 +3477,14 @@ impl Heap {
             .map_err(|_| crate::Error::memory_error())?;
         value.push_str(text);
         if !intern {
-            return Ok(self.alloc(Value::Str(value)));
+            return Ok(self.alloc(Value::Str(value.into())));
         }
         let owner = crate::objects::try_literal_string(text)?;
         let owner = crate::sys::try_intern_owner(&owner).ok_or_else(crate::Error::memory_error)?;
         self.interned
             .try_reserve(1)
             .map_err(|_| crate::Error::memory_error())?;
-        let id = self.alloc_slot(Value::Str(value));
+        let id = self.alloc_slot(Value::Str(value.into()));
         self.interned
             .insert(owner, InternedString { id, literal: true });
         Ok(id)
@@ -3467,7 +3501,7 @@ impl Heap {
         let mut value = String::new();
         value.try_reserve_exact(text.len()).ok()?;
         value.push_str(text);
-        let id = self.alloc(Value::Str(value));
+        let id = self.alloc(Value::Str(value.into()));
         Some(if intern {
             self.intern(id, std::iter::empty())
         } else {
@@ -3525,19 +3559,32 @@ impl Heap {
         target: Id,
     ) -> Option<(&Value, &mut Value)> {
         let target_id = target as usize;
+        if source != target && self.slot_shapes.get(target_id)?.is_scalar_leaf() {
+            self.slots.get(source as usize)?.value.as_ref()?;
+            self.prepare_slot_write(target_id);
+        }
         let [source, target] = self
             .slots
             .get_disjoint_mut([source as usize, target_id])
             .ok()?;
         let source = source.value.as_ref()?;
         let target = target.value.as_mut()?;
-        self.slot_shapes[target_id] = SlotShape::Other;
         Some((source, target))
     }
 
+    fn prepare_slot_write(&mut self, index: usize) {
+        if !self.slot_shapes[index].is_scalar_leaf() {
+            return;
+        }
+        if index >= FIRST_DYNAMIC_SLOT && self.slots[index].gc_prev.get() == UNMARKED {
+            self.gc_order.push(index, &self.slots);
+        }
+        self.slot_shapes[index] = SlotShape::Other;
+    }
+
     pub fn get_mut(&mut self, id: Id) -> &mut Value {
-        // The mutable borrow can replace the value with a different variant.
-        self.slot_shapes[id as usize] = SlotShape::Other;
+        // A mutable borrow can replace an untracked scalar with a container.
+        self.prepare_slot_write(id as usize);
         self.slots[id as usize]
             .value
             .as_mut()
@@ -4760,11 +4807,11 @@ impl Heap {
         self.sweep()
     }
 
-    /// Keep cycle scratch proportional to the garbage when most occupied slots are reachable.
+    /// Keep cycle scratch proportional to the garbage using only containers with outgoing edges.
     fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
         let mut slots = smallvec::SmallVec::new();
         for (id, trace) in self.traces.iter().enumerate() {
-            if trace.get() == UNMARKED && self.slot_shapes[id] != SlotShape::Vacant {
+            if trace.get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
                 if slots.len() == 256 {
                     return None;
                 }
@@ -4803,11 +4850,17 @@ impl Heap {
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
     ) {
-        self.identify_indexed_cycles(cycles, &slot_at, index_of);
-        // Peeling leaves both cycles and their unreachable descendants. Every
-        // strong child of a member is therefore already live or itself a member.
-        for index in cycles.members() {
-            self.traces[slot_at(index as usize)].set(END);
+        let (_, cyclic) = self.identify_indexed_cycles(cycles, &slot_at, index_of);
+        if cyclic {
+            for index in cycles.members() {
+                let id = slot_at(index as usize);
+                self.traces[id].set(END);
+                // Every nonleaf descendant is already a member. Scalar children
+                // have no incoming-count slot in the compact candidate graph.
+                self.unreachable_children(self.get(id as Id), MarkMode::All, |child| {
+                    self.traces[child].set(END);
+                });
+            }
         }
     }
 
@@ -4838,13 +4891,18 @@ impl Heap {
 
     /// Visit each distinct strong child outside the live graph. The queue skips live
     /// slots automatically; restore its scratch marks before visiting another owner.
-    fn unreachable_children(&self, value: &Value, mut visit: impl FnMut(usize)) {
+    fn unreachable_children(
+        &self,
+        value: &Value,
+        mode: MarkMode<'_>,
+        mut visit: impl FnMut(usize),
+    ) {
         let mut children = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
             slot_shapes: &self.slot_shapes,
             next: END,
-            mode: MarkMode::All,
+            mode,
         };
         value.children(&mut children);
         while let Some(id) = children.pop() {
@@ -4916,7 +4974,26 @@ impl Heap {
     /// dead objects that refcounting alone would release from the Python GC count.
     /// The incoming counts must start at zero.
     fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
-        self.identify_indexed_cycles(cycles, std::convert::identity, std::convert::identity)
+        let (finalizer, cyclic) =
+            self.identify_indexed_cycles(cycles, std::convert::identity, std::convert::identity);
+        // Scalars have no outgoing edges and cannot take part in a cycle.
+        // Only the scalars retained by a surviving cycle join its isolate.
+        if cyclic {
+            for id in 0..cycles.incoming.len() {
+                if cycles.incoming[id] != 0 && self.slot_shapes[id] == SlotShape::Other {
+                    self.unreachable_children(
+                        self.slots[id].value.as_ref().unwrap(),
+                        MarkMode::All,
+                        |child| {
+                            if self.slot_shapes[child].is_scalar_leaf() {
+                                cycles.incoming[child] = 1;
+                            }
+                        },
+                    );
+                }
+            }
+        }
+        finalizer
     }
 
     fn identify_indexed_cycles(
@@ -4924,7 +5001,7 @@ impl Heap {
         cycles: &mut CycleSet,
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
-    ) -> Option<Id> {
+    ) -> (Option<Id>, bool) {
         let mut first_finalizer = None;
         let CycleSet {
             incoming,
@@ -4934,38 +5011,48 @@ impl Heap {
         unowned.clear();
         for index in 0..incoming.len() {
             let id = slot_at(index);
-            if self.traces[id].get() == UNMARKED && self.slot_shapes[id] != SlotShape::Vacant {
+            if self.traces[id].get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
                 let value = self.slots[id]
                     .value
                     .as_ref()
                     .expect("occupied cycle candidate");
-                // Count the candidate itself so that zero denotes a vacant or reachable slot.
-                incoming[index] += 1;
-                self.unreachable_children(value, |child| incoming[index_of(child)] += 1);
+                unowned.push(index);
+                self.unreachable_children(value, MarkMode::CycleEdges, |child| {
+                    incoming[index_of(child)] += 1
+                });
             }
         }
-        for (id, count) in incoming.iter_mut().enumerate() {
-            if *count != 0 {
-                *count -= 1;
-                if *count == 0 {
-                    unowned.push(id);
-                }
-            }
+        let mut remaining = unowned.len();
+        unowned.retain(|&index| incoming[index] == 0);
+        // With no edges there is nothing to peel. Preserve the queue's LIFO
+        // finalizer order, including when the compact candidate set is empty.
+        if unowned.len() == remaining {
+            first_finalizer = unowned.iter().rev().find_map(|&index| {
+                let id = slot_at(index);
+                (self.slots[id].finalization == Finalization::Pending).then_some(id as Id)
+            });
+            unowned.clear();
+            return (first_finalizer, false);
         }
         while let Some(index) = unowned.pop() {
+            remaining -= 1;
             let id = slot_at(index);
             if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
                 first_finalizer = Some(id as Id);
             }
-            self.unreachable_children(self.slots[id].value.as_ref().unwrap(), |child| {
-                let child = index_of(child);
-                incoming[child] -= 1;
-                if incoming[child] == 0 {
-                    unowned.push(child);
-                }
-            });
+            self.unreachable_children(
+                self.slots[id].value.as_ref().unwrap(),
+                MarkMode::CycleEdges,
+                |child| {
+                    let child = index_of(child);
+                    incoming[child] -= 1;
+                    if incoming[child] == 0 {
+                        unowned.push(child);
+                    }
+                },
+            );
         }
-        first_finalizer
+        (first_finalizer, remaining != 0)
     }
 
     /// Age participating slots before Python callbacks can allocate into a recycled slot.
@@ -5299,14 +5386,19 @@ impl Heap {
             if self.traces[id].replace(UNMARKED) == UNMARKED
                 && self.slot_shapes[id] != SlotShape::Vacant
             {
-                self.slot_shapes[id] = SlotShape::Vacant;
-                self.gc_order.remove(id, &self.slots);
+                let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
+                if self.slots[id].gc_prev.get() != UNMARKED {
+                    self.gc_order.remove(id, &self.slots);
+                }
+                // Only compound values can own a recorded Python hash.
+                if !shape.is_scalar_leaf() {
+                    self.immutable_hashes.remove(&(id as Id));
+                }
                 let slot = &mut self.slots[id];
                 if slot.has_gc_header {
                     self.gc_schedule.freed();
                 }
                 slot.value = None;
-                self.immutable_hashes.remove(&(id as Id));
                 slot.gc_next.set(self.free_head);
                 self.free_head = id;
                 self.free_count += 1;
@@ -5414,16 +5506,16 @@ mod tests {
     fn ascii_offsets_require_an_unchanged_string() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
-        let text = heap.alloc(Value::Str("cat".repeat(200)));
+        let text = heap.alloc(Value::Str("cat".repeat(200).into()));
         assert!(heap.is_ascii_str(text));
         heap.release_temporaries_since(mark);
         heap.collect(std::iter::empty());
-        let next = heap.alloc(Value::Str("猫".repeat(200)));
+        let next = heap.alloc(Value::Str("猫".repeat(200).into()));
         assert_eq!(next, text);
         assert!(!heap.is_ascii_str(next));
-        let writable = heap.alloc(Value::Str("dog".repeat(200)));
+        let writable = heap.alloc(Value::Str("dog".repeat(200).into()));
         assert!(heap.is_ascii_str(writable));
-        *heap.get_mut(writable) = Value::Str("café".repeat(200));
+        *heap.get_mut(writable) = Value::Str("café".repeat(200).into());
         assert!(!heap.is_ascii_str(writable));
     }
 
@@ -5440,6 +5532,31 @@ mod tests {
         assert!(heap.slots[child as usize].value.is_some());
         heap.collect(std::iter::empty());
         assert!(heap.slots[child as usize].value.is_none());
+    }
+
+    #[test]
+    fn prompt_collection_keeps_scalar_children_of_a_cycle() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let cycle = heap.alloc(Value::Str("initially a scalar".into()));
+        let mut children = vec![cycle];
+        for index in 0..300 {
+            children.push(heap.alloc(Value::Str(format!("field-{index}").into())));
+        }
+        let leaf = children[1];
+        let (_, target) = heap.source_and_target(leaf, cycle).unwrap();
+        *target = Value::List(children);
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        assert!(matches!(heap.get(leaf), Value::Str(text) if text == "field-0"));
+
+        let Value::List(children) = heap.get_mut(cycle) else {
+            unreachable!();
+        };
+        children.clear();
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[leaf as usize].value.is_none());
+        assert!(heap.slots[cycle as usize].value.is_none());
     }
 
     #[test]

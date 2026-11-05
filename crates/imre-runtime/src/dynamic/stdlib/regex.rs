@@ -1304,6 +1304,7 @@ fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) ->
         (Value::Bytes(pattern), Value::Bytes(_)) => imre_regex::plain_run(pattern)?,
         _ => return None,
     };
+    let mark = ctx.heap.temporary_mark();
     let mut fields = Vec::new();
     let mut cursor = 0;
     loop {
@@ -1324,8 +1325,8 @@ fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) ->
         } else {
             match ctx.heap.get(subject) {
                 Value::Str(s) => {
-                    let part = s[span].to_owned();
-                    ctx.alloc(Value::Str(part))
+                    let part = crate::Str::new(&s[span]);
+                    ctx.heap.owned_text(part)
                 }
                 Value::Bytes(b) => {
                     let part = b[span].to_vec();
@@ -1338,7 +1339,9 @@ fn plain_collection(ctx: &mut Context, pattern: Id, subject: Id, split: bool) ->
         let Some(run) = next else { break };
         cursor = run.end;
     }
-    Some(ctx.alloc(Value::List(fields)))
+    let result = ctx.alloc(Value::List(fields));
+    ctx.heap.keep_call_result(mark, result);
+    Some(result)
 }
 
 fn omitted_or_zero(ctx: &Context, value: Option<Id>) -> bool {
@@ -1616,7 +1619,9 @@ fn group_value(data: &[u8], bytes: bool) -> Value {
         Value::Bytes(data.to_vec())
     } else {
         Value::Str(
-            String::from_utf8(data.to_vec()).expect("text regex captures end at UTF-8 boundaries"),
+            std::str::from_utf8(data)
+                .expect("text regex captures end at UTF-8 boundaries")
+                .into(),
         )
     }
 }

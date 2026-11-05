@@ -6,17 +6,27 @@ def scan(text: str) -> None:
     print(split(r"[ ,;]+", text))
     print(findall(r"(?:x|y)+", text))
     print(split(r"x+", text))
+    print(len(findall(r"[A-Za-z_]+", text)))
+    print(len(split(r"[ ,;]+", text)))
+    print(len(findall(r"x+", text)))
+    print(len(findall(r"xy|x", text)))
+    print(len(findall(r"([a-z]+):([0-9]+)", text)))
 
 
 def unicode_runs(text: str) -> None:
     print(findall(r"(\w+)", text))
     print(findall(r"(é+)", text))
+    print(len(findall(r"(\w+)", text)))
+    print(len(split(r"\d+", text)))
     print(findall(r"[^,]+", text))
     print(split(r"\d+", text))
     print(split(r"[\x7f-\u0080\U0010ffff]+", text))
 
 
 def byte_runs(data: bytes) -> None:
+    print(len(findall(br"[a-z_]+", data)))
+    print(len(split(br"\xff+", data)))
+    print(len(split(br"[\x80-\xff]+", data)))
     print(findall(rb"[a-z_]+", data))
     print(findall(rb"([^\x80-\xfe]+)", data))
     print(split(rb"[\x00\xff]+", data))
@@ -30,7 +40,7 @@ def byte_identity(data: bytes) -> None:
     print(first[0] is again[0])
 
 
-for value in ["", "xx", ",;,", " alpha__beta,,x", "éx,y🐍z;", "x\x00y"]:
+for value in ["", "xx", ",;,", " alpha__beta,,x", "a:74 z:2", "éx,y🐍z;", "x\x00y"]:
     scan(value)
 
 text = "a complete field"

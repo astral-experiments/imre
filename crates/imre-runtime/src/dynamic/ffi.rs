@@ -765,7 +765,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     Box::into_raw(Box::new(new_context(config, args)))
 }
 
-pub(super) fn new_context<S: Into<String>>(
+pub(super) fn new_context<S: Into<crate::Str>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
@@ -776,7 +776,7 @@ pub(super) fn new_context<S: Into<String>>(
     new_context_with_heap(config, args, heap)
 }
 
-pub(super) fn new_context_with_heap<S: Into<String>>(
+pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
     heap: Heap,
