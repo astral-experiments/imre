@@ -6479,31 +6479,33 @@ impl<'a> Checker<'a> {
     }
 
     fn boxed_descriptor(&self, expression: &ast::Expr) -> Option<&'static str> {
+        use ty_python_semantic::types::KnownClass;
+
         if let ast::Expr::Attribute(attribute) = expression
             && attribute.attr.as_str() == "__hash__"
-            && self.graph.session.is_known_class(
-                self.module,
-                &attribute.value,
-                ty_python_semantic::types::KnownClass::Str,
-            )
+            && self
+                .graph
+                .session
+                .is_known_class(self.module, &attribute.value, KnownClass::Str)
         {
             return Some("str.__hash__");
         }
         if let ast::Expr::Attribute(attribute) = expression
-            && let Some(method) = match attribute.attr.as_str() {
-                "partition" => Some("bytes.partition"),
-                "rjust" => Some("bytes.rjust"),
+            && let Some((method, class, ty)) = match attribute.attr.as_str() {
+                "isprintable" => Some(("str.isprintable", KnownClass::Str, Type::Str)),
+                "partition" => Some(("bytes.partition", KnownClass::Bytes, Type::Bytes)),
+                "rjust" => Some(("bytes.rjust", KnownClass::Bytes, Type::Bytes)),
                 _ => None,
             }
-            && (self.graph.session.is_known_class(
-                self.module,
-                &attribute.value,
-                ty_python_semantic::types::KnownClass::Bytes,
-            ) || self
+            && (self
                 .graph
                 .session
-                .scalar_type(self.module, &attribute.value)
-                == Some(Type::Bytes))
+                .is_known_class(self.module, &attribute.value, class)
+                || self
+                    .graph
+                    .session
+                    .scalar_type(self.module, &attribute.value)
+                    == Some(ty))
         {
             return Some(method);
         }
