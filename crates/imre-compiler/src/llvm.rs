@@ -5317,9 +5317,12 @@ impl Emitter<'_, '_> {
                 let text = &args[0].value.operand;
                 let split = u32::from(*split);
                 let call = if members.len() == 256 {
-                    format!(
-                        "call ptr @imre_regex_collect_runs(ptr {text}, ptr @{name}, i32 {split})"
-                    )
+                    let collect = if args[0].value.ty == Type::Bytes {
+                        "imre_regex_collect_bytes_runs"
+                    } else {
+                        "imre_regex_collect_runs"
+                    };
+                    format!("call ptr @{collect}(ptr {text}, ptr @{name}, i32 {split})")
                 } else {
                     format!(
                         "call ptr @imre_regex_collect_unicode_runs(ptr {text}, ptr @{name}, i64 {}, i32 {split})",
@@ -10981,6 +10984,7 @@ declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_search_text(ptr, ptr, i1, i1)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_collect_runs(ptr, ptr, i32)
+declare ptr @imre_regex_collect_bytes_runs(ptr, ptr, i32)
 declare ptr @imre_regex_collect_unicode_runs(ptr, ptr, i64, i32)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)

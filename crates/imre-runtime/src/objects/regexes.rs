@@ -372,25 +372,26 @@ pub unsafe extern "C" fn imre_regex_literal(data: *const u8, len: usize) -> *con
     handle(Storage::RegexPattern(Box::new(pattern)))
 }
 
-/// Materialize each match or the fields between matches in a fresh string list.
+/// Emit the match spans or the gaps before, between and after them.
 fn collect_runs(
-    source: &StrOwner,
+    len: usize,
+    kind: u32,
     split: bool,
     runs: impl Iterator<Item = std::ops::Range<usize>>,
+    mut push: impl FnMut(&mut super::Words, std::ops::Range<usize>),
 ) -> *const Object {
-    let mut parts = super::Words::new(3);
+    let mut parts = super::Words::new(kind);
     let mut cursor = 0;
     for span in runs {
-        let field = if split {
-            cursor..span.start
+        if split {
+            push(&mut parts, cursor..span.start);
+            cursor = span.end;
         } else {
-            span.clone()
-        };
-        super::text::push_part(&mut parts, source, &source[field]);
-        cursor = span.end;
+            push(&mut parts, span);
+        }
     }
     if split {
-        super::text::push_part(&mut parts, source, &source[cursor..]);
+        push(&mut parts, cursor..len);
     }
     crate::ObjectOwner::into_raw(parts.into_object())
 }
@@ -413,9 +414,18 @@ pub unsafe extern "C" fn imre_regex_collect_runs(
             &*members,
         )
     };
-    let bytes = source.as_bytes();
+    let runs = byte_runs(source.as_bytes(), members);
+    collect_runs(source.len(), 3, split != 0, runs, |parts, span| {
+        super::text::push_part(parts, &source, &source[span]);
+    })
+}
+
+fn byte_runs<'a>(
+    bytes: &'a [u8],
+    members: &'a [u8; 256],
+) -> impl Iterator<Item = std::ops::Range<usize>> + 'a {
     let mut end = 0;
-    let runs = std::iter::from_fn(|| {
+    std::iter::from_fn(move || {
         let skip = bytes[end..]
             .iter()
             .position(|&b| members[usize::from(b)] != 0)?;
@@ -425,8 +435,50 @@ pub unsafe extern "C" fn imre_regex_collect_runs(
             end += 1;
         }
         Some(start..end)
-    });
-    collect_runs(&source, split != 0, runs)
+    })
+}
+
+/// Collect binary regex matches or split fields into an owned list of bytes.
+///
+/// # Safety
+/// The caller roots the bytes subject and supplies its 256-entry membership table.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_collect_bytes_runs(
+    value: *const crate::Bytes,
+    members: *const [u8; 256],
+    split: u32,
+) -> *const Object {
+    // SAFETY: both pointers remain live for the whole call.
+    let (source, members) = unsafe {
+        (
+            std::mem::ManuallyDrop::new(crate::BytesOwner::from_raw(value)),
+            &*members,
+        )
+    };
+    collect_runs(
+        source.len(),
+        8,
+        split != 0,
+        byte_runs(&source, members),
+        |parts, span| {
+            parts
+                .values
+                .try_reserve(1)
+                .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+            let field = &source[span];
+            let bytes = if field.len() == source.len() {
+                crate::BytesOwner::clone(&source)
+            } else {
+                let mut bytes = super::bytes::allocate(field.len())
+                    .unwrap_or_else(|_| fail("MemoryError", "bytes allocation failed"));
+                bytes.extend_from_slice(field);
+                crate::BytesOwner::new(bytes)
+            };
+            parts
+                .values
+                .push(crate::BytesOwner::into_raw(bytes) as usize);
+        },
+    )
 }
 
 /// Collect a greedy Unicode class using sorted membership change points.
@@ -465,7 +517,9 @@ pub unsafe extern "C" fn imre_regex_collect_unicode_runs(
             .map_or(source.len(), |(i, _)| i);
         Some(start..end)
     });
-    collect_runs(&source, split != 0, runs)
+    collect_runs(source.len(), 3, split != 0, runs, |parts, span| {
+        super::text::push_part(parts, &source, &source[span]);
+    })
 }
 
 /// Return the original Python spelling even when the native engine expanded an escape.

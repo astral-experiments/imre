@@ -387,25 +387,6 @@ fn build_regex(
     Matcher::new(regex, hir, !bytes, assertions)
 }
 
-/// Preserve byte literals outside ASCII in the regex parser's text input.
-fn byte_pattern(bytes: &[u8]) -> String {
-    let mut source = String::with_capacity(bytes.len());
-    let mut escaped = false;
-    for &b in bytes {
-        if b.is_ascii() {
-            source.push(char::from(b));
-            escaped = b == b'\\' && !escaped;
-        } else {
-            if !escaped {
-                source.push('\\');
-            }
-            write!(source, "x{b:02x}").unwrap();
-            escaped = false;
-        }
-    }
-    source
-}
-
 /// Only Python's redundant positive Unicode mode can fall back to the raw engine.
 fn raw_unicode_compatible(source: &str, ascii: bool, boundaries: &[usize]) -> bool {
     use regex_syntax::ast::{Ast, Flag, parse::Parser};
@@ -1077,7 +1058,7 @@ fn valid_prefix(id: Id, prefix: &[u8], flags: i64, bytes: bool, inline_verbose: 
 // The raw regex backend accepts extra syntax such as Unicode property escapes.
 fn valid_translated_prefix(prefix: &[u8], flags: i64, bytes: bool) -> bool {
     let spelling = if bytes {
-        byte_pattern(prefix)
+        imre_regex::byte_pattern(prefix)
     } else {
         std::str::from_utf8(prefix).unwrap().to_owned()
     };
@@ -1107,7 +1088,7 @@ fn prepare(
     let repeated = repeated_literal_capture(spelling, flags, bytes);
     let spelling = repeated.as_deref().unwrap_or(spelling);
     let source = if bytes {
-        byte_pattern(spelling)
+        imre_regex::byte_pattern(spelling)
     } else {
         std::str::from_utf8(spelling)
             .expect("text pattern")
