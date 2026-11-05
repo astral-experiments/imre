@@ -161,6 +161,7 @@ enum Instruction {
         scope: annotations::AnnotationScope,
     },
     ModuleAnnotations(Option<Rc<Program>>),
+    ModuleDoc(ruff_text_size::TextRange, String),
     MarkAnnotation(usize),
     StringAnnotation(String, ast::Expr),
     ClassAnnotator(Rc<Program>),
@@ -1340,6 +1341,10 @@ impl Program {
                     strings.visit_expr(&stmt.target);
                     strings.visit_expr(&stmt.value);
                 }
+                Instruction::ModuleDoc(range, text) => {
+                    let id = strings.text(text.as_str().into())?;
+                    strings.constant(*range, id)?;
+                }
                 Instruction::Assign(targets, e) => {
                     for target in targets {
                         strings.visit_expr(target);
@@ -2099,20 +2104,30 @@ impl Program {
         lines: &[usize],
         function: bool,
     ) -> Result<()> {
+        let class = self.class_attributes.is_some();
+        if !function && !class && imre_ast::annotations::has_variable_annotation(&body) {
+            self.instructions
+                .push((self.first_line, Instruction::ModuleAnnotations(None)));
+        }
         if !self.interactive
             && let Some(ast::Stmt::Expr(first)) = body.first()
             && let ast::Expr::StringLiteral(doc) = first.value.as_ref()
         {
             if self.strip_docstrings {
                 body.remove(0);
-            } else if function || self.class_attributes.is_some() {
+            } else if function || class {
                 if function {
                     self.scope_flags |= code_flags::HAS_DOCSTRING;
                 }
                 self.doc = Some(doc.range());
+            } else {
+                let line = lines.partition_point(|n| *n <= first.start().to_usize()) as u32;
+                let text = imre_ast::strings::clean_doc(doc.value.to_str());
+                self.instructions
+                    .push((line, Instruction::ModuleDoc(doc.range(), text)));
+                body.remove(0);
             }
         }
-        let class = self.class_attributes.is_some();
         self.postponed_annotations = class
             && self.string_annotations()
             && imre_ast::annotations::has_variable_annotation(&body);
@@ -2120,12 +2135,6 @@ impl Program {
             class && imre_ast::class_cell::needed(&body, self.string_annotations());
         self.needs_dict_cell =
             class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
-        let module_annotations =
-            !function && !class && imre_ast::annotations::has_variable_annotation(&body);
-        if module_annotations {
-            self.instructions
-                .push((self.first_line, Instruction::ModuleAnnotations(None)));
-        }
         self.lower_block(body, lines, function, None, class)?;
         if !self.deferred_annotations.is_empty() {
             let entries = std::mem::take(&mut self.deferred_annotations);
@@ -5288,6 +5297,9 @@ impl Context {
                     self.module_annotation_name(scope, "__annotations__")?
                 };
                 self.put_item(annotations, key, spelling)?;
+            }
+            Instruction::ModuleDoc(range, _) => {
+                self.bind_source_name(scope, "__doc__", code.literals[range])?;
             }
             Instruction::ModuleAnnotations(provider) => {
                 self.start_module_annotations(code, owner, scope, provider.as_ref())?;
