@@ -109,9 +109,7 @@ impl WordKind {
                 0 | 1 | 10 => {}
                 2 => {
                     if word & 1 == 0 {
-                        crate::shared::Shared::increment_strong_count(
-                            word as *const num_bigint::BigInt,
-                        );
+                        crate::imre_int_retain(word);
                     }
                 }
                 3 | 11 => StrOwner::increment_strong_count(word as *const Str),

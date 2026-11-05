@@ -1048,7 +1048,7 @@ mod tests {
 
     #[test]
     fn integer_list_slices_own_selected_values_after_source_mutation() {
-        let big = Shared::new(BigInt::from(1_u8) << 400_u32);
+        let big = crate::wide_owner(BigInt::from(1_u8) << 400_u32);
         let weak = Shared::downgrade(&big);
         // SAFETY: source and slice are distinct owned lists. Every selected
         // BigInt gains an independent reference, as does each successful read.

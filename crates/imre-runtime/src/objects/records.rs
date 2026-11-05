@@ -1128,7 +1128,7 @@ mod tests {
         assert_eq!(layout(kinds.len()).size(), 16 + kinds.len() * 8);
         let text = StrOwner::new(Str::from("partial owned field"));
         let weak_text = StrOwner::downgrade(&text);
-        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let integer = crate::wide_owner(BigInt::from(1_u128 << 120));
         let weak_integer = Shared::downgrade(&integer);
         // SAFETY: metadata outlives all allocated records, every word has the
         // declared kind, and the parent/child ownership graph is acyclic.

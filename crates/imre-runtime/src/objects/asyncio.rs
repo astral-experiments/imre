@@ -810,7 +810,7 @@ mod tests {
 
     #[test]
     fn failed_integer_gather_append_releases_partial_output() {
-        let integer = Shared::new(num_bigint::BigInt::from(1_u8) << 100_u32);
+        let integer = crate::wide_owner(num_bigint::BigInt::from(1_u8) << 100_u32);
         // SAFETY: the fresh integer list acquires a reference to the rooted BigInt.
         unsafe {
             let output = crate::imre_list_new();
