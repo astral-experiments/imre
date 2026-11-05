@@ -549,10 +549,11 @@ impl Binary {
         count: usize,
         set: bool,
     ) -> (usize, usize) {
-        if set
-            && self.changed == 1
-            && let Some(progress) = self.fill_scattered_orbit(at, step, n, count)
-        {
+        if set && self.changed == 1 {
+            if let Some(progress) = self.fill_scattered_orbit(at, step, n, count) {
+                return progress;
+            }
+        } else if let Some(progress) = self.merge_ranked_prefix(at, step, n, count, set) {
             return progress;
         }
         let mut added = 0;
@@ -919,6 +920,33 @@ mod page_tests {
         assert!(sparse.put(62, &[1, 3]).is_ok());
         let run = sparse.span(60, 128, &default);
         assert_eq!((run.len, run.index_mask), (4, usize::MAX));
+    }
+
+    #[test]
+    fn ranked_writes_merge_with_existing_tags() {
+        let n: usize = 8193;
+        let at = n - 7;
+        let count = n / 2;
+        for step in [67, n - 67] {
+            for set in [false, true] {
+                let mut binary = Binary::empty(&[7], n.div_ceil(BLOCK)).unwrap();
+                let mut expected = vec![false; binary.bits.len() * BLOCK];
+                for i in (0..expected.len()).step_by(5) {
+                    assert!(binary.insert(i));
+                    expected[i] = true;
+                }
+                let mut last = at;
+                for _ in 0..count {
+                    last = (last + step) % n;
+                    expected[last] = set;
+                }
+                assert_eq!(binary.set_modular(at, step, n, count, set), (count, last));
+                assert_eq!(binary.changed, expected.iter().filter(|bit| **bit).count());
+                for (i, bit) in expected.into_iter().enumerate() {
+                    assert_eq!(binary.contains(i), bit);
+                }
+            }
+        }
     }
 
     #[test]

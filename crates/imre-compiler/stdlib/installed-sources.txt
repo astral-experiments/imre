@@ -2,12 +2,13 @@ _pydatetime.py
 _pydecimal.py
 getpass.py
 graphlib.py
-html/__init__.py
-html/entities.py
+shlex.py
 statistics.py
 tarfile.py
 timeit.py
 xml/__init__.py
+xml/etree/__init__.py
 xml/etree/ElementPath.py
 xml/etree/ElementTree.py
-xml/etree/__init__.py
+html/__init__.py
+html/entities.py

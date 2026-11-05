@@ -130,7 +130,7 @@ pub(super) fn call(
     };
     let target = unwrap_method_and_partial(ctx, target);
     if let Value::Function { code, .. } = ctx.heap.get(target)
-        && ctx.code_object(*code).coroutine
+        && ctx.code_object(*code).is_coroutine()
     {
         return Ok(TRUE);
     }

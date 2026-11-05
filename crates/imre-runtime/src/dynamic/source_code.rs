@@ -106,7 +106,7 @@ impl FunctionKind {
     fn prelinked(code: &value::CodeObject) -> Self {
         if code.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
             Self::AsyncGenerator
-        } else if code.coroutine {
+        } else if code.is_coroutine() {
             Self::Coroutine
         } else {
             Self::Generator
@@ -3412,7 +3412,6 @@ impl Context {
             filename,
             first_line: program.first_line,
             module_definition: !program.nested_global && program.name == program.qualname,
-            coroutine: program.kind == FunctionKind::Coroutine,
             flags: program.scope_flags
                 | match program.kind {
                     FunctionKind::Generator | FunctionKind::GeneratorLambda => {
@@ -4141,7 +4140,7 @@ impl Context {
                 "generator.send requires a generator",
             ));
         };
-        let coroutine = self.code_object(code).coroutine;
+        let coroutine = self.code_object(code).is_coroutine();
         let kind = if coroutine { "coroutine" } else { "generator" };
         if running {
             return Err(Error::new(
