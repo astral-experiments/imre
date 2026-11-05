@@ -89,6 +89,20 @@ def current():
         (1.7976931348623157e308, (((1 << 53) - 1) << 971, 1)),
     ):
         assert value.as_integer_ratio() == ratio
+    for value, expected in ((0.0, True), (-0.0, True), (1.5, False), (5e-324, False),
+                            (float(2**1023), True), (nan, False), (float("inf"), False)):
+        assert value.is_integer() is expected
+        assert float.is_integer(Weight(value)) is expected
+    assert type(float.is_integer).__name__ == "method_descriptor"
+    assert float.is_integer.__text_signature__ == "($self, /)"
+    assert float.is_integer.__doc__ == "Return True if the float is an integer."
+    for args, kwargs in (((), {}), ((1,), {}), ((1.0, 2), {}), ((1.0,), {"x": 2})):
+        try:
+            float.is_integer(*args, **kwargs)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("accepted invalid is_integer arguments")
     assert Weight(-1.5).as_integer_ratio() == (-3, 2)
     assert float.as_integer_ratio(Weight(0.5)) == (1, 2)
     for args, kwargs, kind in (((), {}, TypeError), ((1,), {}, TypeError),

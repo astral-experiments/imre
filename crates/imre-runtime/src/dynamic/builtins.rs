@@ -457,7 +457,14 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__round__",
             "__trunc__",
         ],
-        "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
+        "float" => &[
+            "__abs__",
+            "__float__",
+            "__int__",
+            "__round__",
+            "__trunc__",
+            "is_integer",
+        ],
         _ => &[],
     }
 }
@@ -1873,6 +1880,13 @@ pub(super) fn call(
             "int" | "float" if method == "__trunc__" => {
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 integer::truncate_real(ctx, receiver)
+            }
+            "float" if method == "is_integer" => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let Value::Float(value) = ctx.heap.get(ctx.scalar_value(receiver)) else {
+                    unreachable!("validated float receiver")
+                };
+                Ok(boolean(value.is_finite() && value.trunc() == *value))
             }
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {

@@ -893,7 +893,8 @@ impl BuiltinDescriptor {
                     ("as_integer_ratio", "__doc__") => {
                         "Return a pair of integers, whose ratio is exactly equal to the original float.\n\nThe ratio is in lowest terms and has a positive denominator.  Raise\nOverflowError on infinities and a ValueError on NaNs.\n\n>>> (10.0).as_integer_ratio()\n(10, 1)\n>>> (0.0).as_integer_ratio()\n(0, 1)\n>>> (-.25).as_integer_ratio()\n(-1, 4)"
                     }
-                    ("as_integer_ratio", _) => "($self, /)",
+                    ("is_integer", "__doc__") => "Return True if the float is an integer.",
+                    ("as_integer_ratio" | "is_integer", _) => "($self, /)",
                     ("append", _) => "($self, object, /)",
                     _ => "($self, index=-1, /)",
                 };
