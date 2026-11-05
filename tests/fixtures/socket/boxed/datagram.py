@@ -12,6 +12,18 @@ def check(family, host):
         receiver.bind((host, 0))
         source = sender.getsockname()
         target = receiver.getsockname()
+        args = (b"extra", 0, target, 4)
+        for kwargs, expected in (
+            ({}, "sendto() takes 2 or 3 arguments (4 given)"),
+            ({"flags": 0}, "sendto() takes no keyword arguments"),
+        ):
+            try:
+                sender.sendto(*args, **kwargs)
+            except TypeError as exc:
+                assert str(exc) == expected
+            else:
+                raise AssertionError("accepted invalid sendto arguments")
+
         assert sender.sendto(memoryview(b"first"), target) == 5
         assert sender.sendto(b"", 0, target) == 0
         assert sender.sendto(bytearray(b"discard"), target) == 7
