@@ -1157,6 +1157,23 @@ impl Function<'_, '_> {
                 return;
             }
         };
+        if !owned
+            && let [left, right] = elements.as_slice()
+            && !left.is_starred_expr()
+            && !right.is_starred_expr()
+        {
+            self.max_live = self.max_live.max(2);
+            self.checked(&format!(
+                "call i64 @imre_dyn_unpack_pair(ptr %ctx, i64 {value}, ptr %live)"
+            ));
+            // Target expressions may make calls that reuse the scratch slots.
+            let first = self.value("load i64, ptr %live");
+            let second_slot = self.value("getelementptr i64, ptr %live, i64 1");
+            let second = self.value(&format!("load i64, ptr {second_slot}"));
+            self.assign(left, &first);
+            self.assign(right, &second);
+            return;
+        }
         let count = self.integer(elements.len());
         let star = elements
             .iter()

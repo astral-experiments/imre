@@ -426,15 +426,7 @@ impl Context {
                     }
                     Some(star)
                 };
-                // Read-only targets can index the immutable tuple throughout assignment.
-                if op == "unpack_read"
-                    && star.is_none()
-                    && matches!(self.heap.get(a), Value::Tuple(items) if items.len() == count)
-                {
-                    return Ok(a);
-                }
-                let items = self.unpack_items(a, count, star)?;
-                Ok(self.alloc(Value::List(items)))
+                self.unpack_sequence(a, count, star, op == "unpack_read")
             }
             "unpack_take" => {
                 let index = usize::try_from(self.as_integer(b)?).expect("compiled unpack index");
@@ -1164,6 +1156,31 @@ fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> 
             NONE
         }
     }
+}
+
+/// Snapshot a fixed pair before either read-only unpacking target is assigned.
+///
+/// # Safety
+/// Generated code supplies the active context and two writable handle slots.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
+    ctx: *mut Context,
+    value: Id,
+    items: *mut [Id; 2],
+) -> Id {
+    // SAFETY: the emitter allocates both slots in the active native frame.
+    let (ctx, items) = unsafe { (&mut *ctx, &mut *items) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.unpack_sequence(value, 2, None, true).map(|sequence| {
+        let (Value::Tuple(values) | Value::List(values)) = ctx.heap.get(sequence) else {
+            unreachable!("validated unpacking sequence")
+        };
+        items.copy_from_slice(values);
+        sequence
+    });
+    finish(ctx, result)
 }
 
 /// Construct a fresh sequence using the permanent handles in a linked literal.
