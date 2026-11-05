@@ -5319,18 +5319,24 @@ impl Emitter<'_, '_> {
                     "regex_run_count_word",
                     include_str!("llvm/regex_run_count_word.ll"),
                 );
-                let call = if members.len() == 256 {
+                let call = if let Ok(members) = <&[u8; 256]>::try_from(members.as_slice()) {
                     let mut matching = members.iter().enumerate().filter(|(_, flag)| **flag != 0);
                     let singleton = match (matching.next(), matching.next()) {
                         (Some((byte, _)), None) => byte as i32,
                         _ => -1,
                     };
+                    // A range fits in two bytes. A negative descriptor selects the lookup loop.
+                    let ranges = imre_regex::small_ranges(members).map_or(-1, |ranges| {
+                        ranges.into_iter().rev().fold(0i64, |bits, (lo, width)| {
+                            (bits << 16) | (i64::from(width) << 8) | i64::from(lo)
+                        })
+                    });
                     self.output.local_helper(
                         "count_ascii_regex_runs",
                         include_str!("llvm/count_ascii_regex_runs.ll"),
                     );
                     format!(
-                        "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split})"
+                        "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split}, i64 {ranges})"
                     )
                 } else {
                     self.output.local_helper(
