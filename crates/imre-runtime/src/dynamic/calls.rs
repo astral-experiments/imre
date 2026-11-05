@@ -2170,6 +2170,23 @@ impl Context {
             return self.retain_builtin_method_receiver(receiver, symbol);
         }
         let name = symbol.strip_prefix("str.").expect("compiled string method");
+        self.builtin_method_target(receiver, name)
+    }
+
+    /// Keep exact container and regular-expression receivers without allocating a bound method.
+    pub(super) fn builtin_method_target(&mut self, receiver: Id, name: &str) -> Result<(Id, Id)> {
+        let value = self.heap.get(receiver);
+        if matches!(
+            value,
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::RegexPattern(_)
+                | Value::RegexMatch(_)
+                | Value::RegexScanner { .. }
+        ) && let Some(symbol) = builtins::method_name(value, name)
+        {
+            return self.retain_builtin_method_receiver(receiver, &symbol);
+        }
         Ok((self.lookup_method(receiver, name)?, NONE))
     }
 
