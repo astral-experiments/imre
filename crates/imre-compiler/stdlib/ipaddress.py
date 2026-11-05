@@ -1660,12 +1660,21 @@ class _BaseV6:
         """
         if not ip_str:
             raise AddressValueError('Address cannot be empty')
-        if len(ip_str) > 45:
+        length = len(ip_str)
+        if length > 45:
             shorten = ip_str
             if len(shorten) > 100:
                 shorten = f'{ip_str[:45]}({len(ip_str)-90} chars elided){ip_str[-45:]}'
             raise AddressValueError(f"At most 45 characters expected in "
                                     f"{shorten!r}")
+
+        if (length == 39 and cls is IPv6Address and type(ip_str) is str
+                and ip_str[4::5] == ':::::::'):
+            # Full-width hextets form a single hexadecimal integer once the
+            # separators are removed. Keep malformed digits on the diagnostic path.
+            digits = ip_str.replace(':', '')
+            if len(digits) == 32 and cls._HEX_DIGITS.issuperset(digits):
+                return int(digits, 16)
 
         # We want to allow more parts than the max to be 'split'
         # to preserve the correct error message when there are
