@@ -8345,7 +8345,7 @@ impl Context {
                 || self
                     .class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
-                || ["__call__", "__getattr__", "__getattribute__"]
+                || ["__getattr__", "__getattribute__"]
                     .iter()
                     .any(|name| self.slot(winner, name).is_some()))
         {
@@ -8598,6 +8598,7 @@ impl Context {
             && Some(meta) != typed_dict_meta
             && self.builtins.get("abc.ABCMeta") != Some(&meta)
             && (prepared.is_some()
+                || self.slot(meta, "__call__").is_some()
                 || self.class_attr(meta, "__new__").is_some()
                 || self.class_attr(meta, "__init__").is_some())
         {
