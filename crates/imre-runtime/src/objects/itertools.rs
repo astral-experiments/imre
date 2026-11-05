@@ -428,17 +428,21 @@ pub unsafe extern "C" fn imre_accumulate_cursor(
 ) -> *const Object {
     let initial_pending = initial_kind != 0;
     let source = if mode == 3 {
-        // SAFETY: mode 3 borrows a native integer list and an optional integer seed.
-        AccumulateSource::Integers {
-            list: Some(unsafe { crate::ListOwner::acquire_word(source) }),
-            index: 0,
-            total: initial_pending.then(|| unsafe { (*Int::borrow(initial)).clone() }),
+        // SAFETY: mode 3 borrows a native integer list and any supplied integer seed.
+        unsafe {
+            AccumulateSource::Integers {
+                list: Some(crate::ListOwner::acquire_word(source)),
+                index: 0,
+                total: initial_pending.then(|| (*Int::borrow(initial)).clone()),
+            }
         }
     } else {
-        // SAFETY: the checked source and seed use their supplied concrete representations.
-        AccumulateSource::Sequence {
-            source: sources::Sequence::new(unsafe { WordKind::new(mode + 1).acquire(source) }),
-            total: initial_pending.then(|| unsafe { WordKind::new(initial_kind).acquire(initial) }),
+        // SAFETY: the checked sequence and seed use the supplied concrete representations.
+        unsafe {
+            AccumulateSource::Sequence {
+                source: sources::Sequence::new(WordKind::new(mode + 1).acquire(source)),
+                total: initial_pending.then(|| WordKind::new(initial_kind).acquire(initial)),
+            }
         }
     };
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
