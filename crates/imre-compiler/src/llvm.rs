@@ -10695,7 +10695,7 @@ declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
 declare i64 @imre_struct_sparse_indexed_count(ptr, ptr, i64, i64, i64, i64) nounwind
 declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
-declare ptr @imre_struct_row(ptr, i64) nounwind
+declare ptr @imre_struct_row(ptr, i64) nounwind willreturn memory(read)
 declare ptr @imre_struct_row_checked(ptr, i64)
 declare i32 @imre_struct_append(ptr, ptr, ptr)
 declare i32 @imre_struct_list_contains(ptr, ptr) nounwind
