@@ -3825,7 +3825,7 @@ impl Heap {
         *frame = None;
         *scope = NONE;
         iterators.clear();
-        self.disarm_generator_finalizer(id);
+        self.disarm_finalizer(id);
     }
 
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
@@ -4203,8 +4203,8 @@ impl Heap {
         }
     }
 
-    /// Running generators have a live frame. Rearm cleanup only if they suspend again.
-    pub(super) fn disarm_generator_finalizer(&mut self, id: Id) {
+    /// Remove cleanup that a live generator or a closed directory iterator no longer needs.
+    pub(super) fn disarm_finalizer(&mut self, id: Id) {
         if self.slots[id as usize].finalization == Finalization::Pending {
             self.take_finalizer(id, false);
         }
