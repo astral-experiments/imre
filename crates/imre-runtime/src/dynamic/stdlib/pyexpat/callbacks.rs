@@ -9,7 +9,7 @@ use std::slice;
 
 #[derive(Default, PartialEq)]
 struct Listeners {
-    enabled: [bool; 8],
+    enabled: [bool; HANDLERS.len()],
     mute_text: bool,
 }
 
@@ -41,7 +41,7 @@ struct Feed<'a> {
     exception: Option<CallbackError>,
 }
 
-const HANDLERS: [&str; 8] = [
+const HANDLERS: [&str; 9] = [
     "StartElementHandler",
     "EndElementHandler",
     "CharacterDataHandler",
@@ -50,6 +50,7 @@ const HANDLERS: [&str; 8] = [
     "CommentHandler",
     "ProcessingInstructionHandler",
     "DefaultHandlerExpand",
+    "_start_doctype_decl_handler",
 ];
 
 impl Feed<'_> {
@@ -83,7 +84,7 @@ impl Feed<'_> {
     }
 
     fn handler_flags(&mut self) -> Result<Listeners> {
-        let mut flags = [false; 8];
+        let mut flags = [false; HANDLERS.len()];
         for (flag, name) in flags.iter_mut().zip(HANDLERS) {
             *flag = self.ctx.lookup_attr(self.owner, name)? != NONE;
         }
@@ -94,8 +95,19 @@ impl Feed<'_> {
     }
 
     fn handlers(&self) -> Handlers {
-        let [start, end, text, ns_start, ns_end, comment, pi, default] = self.installed.enabled;
+        let [
+            start,
+            end,
+            text,
+            ns_start,
+            ns_end,
+            comment,
+            pi,
+            default,
+            doctype,
+        ] = self.installed.enabled;
         Handlers {
+            start_doctype: doctype.then_some(start_doctype),
             start_element: start.then_some(start_element),
             end_element: end.then_some(end_element),
             text: if self.installed.mute_text {
@@ -359,6 +371,23 @@ fn event(user: *mut c_void, handler: &str, args: impl FnOnce(&mut Feed<'_>) -> R
         feed.flush()?;
         let args = args(feed)?;
         feed.call(handler, args)
+    });
+}
+
+unsafe extern "C" fn start_doctype(
+    user: *mut c_void,
+    name: *const c_char,
+    system_id: *const c_char,
+    public_id: *const c_char,
+    has_internal_subset: c_int,
+) {
+    event(user, "StartDoctypeDeclHandler", |feed| {
+        Ok(vec![
+            feed.name(name)?,
+            feed.name(system_id)?,
+            feed.name(public_id)?,
+            feed.ctx.int(i64::from(has_internal_subset)),
+        ])
     });
 }
 
