@@ -27,7 +27,12 @@ impl Site {
         Self {
             range: function.range,
             cmp_input: cmp_input && cmp_keys::can_specialize(function),
-            value_read: reads_function_value(following, function.name.as_str()),
+            value_read: reads_function_value(
+                following,
+                |expr| matches!(expr, ast::Expr::Name(n) if n.id == function.name.as_str()),
+                None,
+                |_| true,
+            ),
             later_writes: if function.is_async {
                 narrowing::assigned_names(following)
             } else {
@@ -59,26 +64,41 @@ pub(super) struct Binding {
 
 /// A direct call can target a lifted helper. Every other read of the name
 /// must see the same callable object for this execution of its definition.
-fn reads_function_value(body: &[ast::Stmt], name: &str) -> bool {
-    struct Read<'n>(&'n str, bool);
-    impl<'a> Visitor<'a> for Read<'_> {
+/// Skip one defining store and the callee of each supported call.
+pub(super) fn reads_function_value(
+    body: &[ast::Stmt],
+    identifies: impl Fn(&ast::Expr) -> bool,
+    binding: Option<TextRange>,
+    accepts: impl Fn(&ast::ExprCall) -> bool,
+) -> bool {
+    struct Read<N, F> {
+        identifies: N,
+        binding: Option<TextRange>,
+        accepts: F,
+        observed: bool,
+    }
+    impl<'a, N: Fn(&ast::Expr) -> bool, F: Fn(&ast::ExprCall) -> bool> Visitor<'a> for Read<N, F> {
         fn visit_expr(&mut self, expr: &'a ast::Expr) {
-            if self.1 {
+            if self.observed || Some(expr.range()) == self.binding {
                 return;
             }
             match expr {
-                ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(n) if n.id == self.0) =>
-                {
-                    self.visit_arguments(&call.arguments);
+                ast::Expr::Call(call) if (self.identifies)(&call.func) && (self.accepts)(call) => {
+                    self.visit_arguments(&call.arguments)
                 }
-                ast::Expr::Name(n) if n.id == self.0 => self.1 = true,
+                _ if (self.identifies)(expr) => self.observed = true,
                 _ => walk_expr(self, expr),
             }
         }
     }
-    let mut read = Read(name, false);
+    let mut read = Read {
+        identifies,
+        binding,
+        accepts,
+        observed: false,
+    };
     read.visit_body(body);
-    read.1
+    read.observed
 }
 
 /// Admit independent call-site layouts when every read has a supported operation.
