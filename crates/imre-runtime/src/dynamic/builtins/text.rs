@@ -725,10 +725,29 @@ pub(super) fn builtin_format(
     value: Id,
     spec: Option<Id>,
 ) -> Result<Id> {
-    let spec = spec
-        .map(|spec| ctx.str_value(spec))
-        .transpose()?
-        .unwrap_or("");
+    let scalar_tail;
+    let mut surrogate_fill = None;
+    let spec = match spec {
+        Some(id)
+            if owner == "str"
+                && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(id))
+                && let [fill, rest @ ..] = points.as_slice()
+                && char::from_u32(*fill).is_none()
+                && let Some(tail) = rest
+                    .iter()
+                    .copied()
+                    .map(char::from_u32)
+                    .collect::<Option<String>>()
+                && matches!(crate::format_grammar::alignment(&tail), (None, Some(_), _)) =>
+        {
+            // Keep the Python fill code point when only the alignment and its tail fit in UTF-8.
+            surrogate_fill = Some(*fill);
+            scalar_tail = tail;
+            scalar_tail.as_str()
+        }
+        Some(id) => ctx.str_value(id)?,
+        None => "",
+    };
     if spec.is_empty() {
         if let Value::Int(number) = ctx.heap.get(value) {
             let text = super::super::operators::rendered_integer(number)?;
@@ -742,16 +761,35 @@ pub(super) fn builtin_format(
             ctx.type_name(value)
         )));
     }
-    if let Some(storage) = ctx.string_storage(value)
-        && let Some(width) = crate::objects::format_index(spec.strip_suffix('s').unwrap_or(spec))?
-    {
-        if width == 0 {
-            // An unpadded empty str subclass formats to its base string.
-            return Ok(if ctx.truth(storage)? { value } else { storage });
+    if let Some(storage) = ctx.string_storage(value) {
+        let field = crate::format_grammar::FormatPrefix::parse(spec, '<', true)
+            .map_err(|e| Error::new("ValueError", e))?;
+        let precision = field.string_precision(
+            surrogate_fill.is_none().then_some(spec),
+            ctx.type_name(value),
+        )?;
+        let alignment = match field.align {
+            Some('>') => "rjust",
+            Some('^') => "format-center",
+            _ => "ljust",
+        };
+        let width = field.width;
+        let fill = surrogate_fill.unwrap_or(u32::from(field.fill));
+        let mut text = storage;
+        if let Some(limit) = precision
+            && limit < ctx.instance_len(storage)?.unwrap()
+        {
+            let stop = ctx.int(limit as i64);
+            let slice = ctx.alloc(Value::Slice([NONE, stop, NONE]));
+            text = ctx.get_item(storage, slice)?;
         }
-        let fill = if spec.starts_with('0') { '0' } else { ' ' };
-        let padded = justify_string(ctx, storage, width, u32::from(fill), "ljust")?;
-        return Ok(if padded == storage { value } else { padded });
+        let padded = justify_string(ctx, text, width, fill, alignment)?;
+        // An unchanged nonempty string subclass keeps its identity.
+        return Ok(if padded == storage && ctx.truth(storage)? {
+            value
+        } else {
+            padded
+        });
     }
     if let Some(field) = FixedFloatSpec::parse(spec)? {
         let number = float_operand(ctx, value)?
@@ -2010,6 +2048,7 @@ fn justify_string(
     let left = match name {
         "ljust" => 0,
         "rjust" => margin,
+        "format-center" => margin / 2,
         // CPython assigns the extra character on the left only for an odd target width.
         _ => margin / 2 + (margin & width & 1),
     };

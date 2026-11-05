@@ -1,5 +1,6 @@
 from _string import formatter_field_name_split, formatter_parser
 from string import Formatter
+from sys import maxsize
 
 
 class Tagged(Formatter):
@@ -25,18 +26,45 @@ def current():
     assert format("é", "٣s") == "é  "
     assert format("\ud800", "04") == "\ud800000"
     assert format("x", "０３") == "x  "
+    assert format("ab", "^5") == " ab  "
+    assert format("é🦀x", "◇^6.2s") == "◇◇é🦀◇◇"
+    assert format("x", ">03s") == "00x"
+    assert format("x", ".>03s") == "..x"
+    assert format("abc", "2.0s") == "  "
+    for invalid in ("=5s", "5.", "02f"):
+        try:
+            format("x", invalid)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(invalid)
+    assert format("\ud800x", "<3.1") == "\ud800  "
     value = Text("abc")
     assert format(value, "0") is value and format(value, "3s") is value
     assert type(format(value, "4")) is str
     empty = Text("")
     for spec in ("s", "0", "0s", "０"):
         assert type(format(empty, spec)) is str and format(value, spec) is value
-    try:
-        format("x", "9" * 80)
-    except ValueError as error:
-        assert str(error) == "Too many decimal digits in format string"
-    else:
-        raise AssertionError("overflowing string width")
+    for suffix in ("", "."):
+        try:
+            format("x", "9" * 80 + suffix)
+        except ValueError as error:
+            assert str(error) == "Too many decimal digits in format string"
+        else:
+            raise AssertionError("overflowing string width")
+
+    assert format("abcdef", "*>7.2,s") == "*****ab"
+    for spec, message in [
+        ("+" + str(maxsize + 1) + "f", "Too many decimal digits in format string"),
+        ("+" + str(maxsize) + "f", "Unknown format code 'f' for object of type 'str'"),
+        ("#4s", "Alternate form (#) not allowed in string format specifier"),
+    ]:
+        try:
+            format("abcdef", spec)
+        except ValueError as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError(spec)
 
     class Field:
         def __format__(self, spec):
