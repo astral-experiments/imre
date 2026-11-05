@@ -2183,6 +2183,7 @@ impl Context {
             value,
             Value::Array(_)
                 | Value::List(_)
+                | Value::Set { .. }
                 | Value::Tuple(_)
                 | Value::RegexPattern(_)
                 | Value::RegexMatch(_)
