@@ -16,6 +16,7 @@ pub const STR_METHODS: &[&str] = &[
     "__repr__",
     "__rmod__",
     "capitalize",
+    "casefold",
     "center",
     "count",
     "encode",

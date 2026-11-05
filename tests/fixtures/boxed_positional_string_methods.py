@@ -39,6 +39,12 @@ def current():
     assert "ab".maketrans("a", "z") == {97: 122}
     assert "a,,b".split(sep=",") == ["a", "", "b"]
     assert "ab".replace(*("a", "z")) == "zb"
+    fold = str.casefold
+    word = "ΣςStraße\ud800"
+    bound = word.casefold
+    assert bound.__self__ is word
+    assert bound() == fold(word) == "σσstrasse\ud800"
+    assert sorted(["Straße", "STRASSE", "A"], key=fold) == ["A", "Straße", "STRASSE"]
     saved = "kept".upper
     assert saved.__self__ == "kept" and saved() == "KEPT"
     try:
