@@ -3840,6 +3840,7 @@ for name in ("md4", "ripemd160"):
             "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
+            "boxed_timeit.py",
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
