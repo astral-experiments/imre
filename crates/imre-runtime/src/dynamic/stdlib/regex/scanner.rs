@@ -184,6 +184,8 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         assertions: Vec::new(),
         regex,
         full: OnceCell::new(),
+        captures: OnceCell::new(),
+        full_captures: OnceCell::new(),
         close_order: OnceCell::new(),
         split_retry: OnceCell::new(),
     }))))
