@@ -109,8 +109,8 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 6, 2026, Imre has a paired pass for **12,416 of 16,202 tests (76.6%)** across the 44 standard library module families tracked below.
-The paired pass rate is 75.4% (10,044 of 13,327) for the original 25 families and 82.5% (2,372 of 2,875) for the 19 additional families.
+As of November 6, 2026, Imre has a paired pass for **12,418 of 16,202 tests (76.6%)** across the 44 standard library module families tracked below.
+The paired pass rate is 75.4% (10,046 of 13,327) for the original 25 families and 82.5% (2,372 of 2,875) for the 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -119,7 +119,7 @@ At either optimization level, a test can exercise typed native code, boxed nativ
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
 It passed **15,161**, skipped 1,023, and reported 7 errors.
-Across the Imre revisions tested, **12,367 of those 15,161 stock Linux passes (81.6%)** also passed at both native optimization levels, leaving 1,278 more paired passes to reach 90%.
+Across the Imre revisions tested, **12,369 of those 15,161 stock Linux passes (81.6%)** also passed at both native optimization levels, leaving 1,276 more paired passes to reach 90%.
 The remaining 49 paired tests passed in separate stock runs. In this Linux run, CPython skipped 42 of them and reported errors for seven.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
@@ -145,11 +145,11 @@ The remaining 49 paired tests passed in separate stock runs. In this Linux run, 
 | `subprocess` | 302 | 353 | 3 | Both original empty-environment cases passed on stock and on public Imre at O0 and O3. They exercise child execution when the supplied environment has no PATH. |
 | `tempfile` | 110 | 118 | 2 | All three runs registered the same 118 original parents. CPython passed 112 and skipped six. Public Imre passed 110 and skipped eight at both levels. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
-| `threading` | 95 | 228 | 1 | The earlier whole suite qualified 91 of 92 apparent successes, including four signal tests and two shutdown tests. One test accepted an unrelated child compiler failure. Three `AtexitTests` originals and `ThreadTests.test_locals_at_exit` added four pairs. All 16 native children across two public revisions matched the stdout of the four stock children. The installed O0 replay ran O0 children. A separate O0 control launched O3 children and received no credit. The common-revision audit already counted all four. [Common revision](https://github.com/astral-experiments/imre/commit/b9dfd225b1f91796c594ac4caf4a84ef3f389f75) · [Public replay](https://github.com/astral-experiments/imre/commit/c047d423c21207a400beb165da196bd8b451117c). |
+| `threading` | 97 | 228 | 1 | An earlier whole-suite run qualified 91 passes. Four subsequent shutdown and atexit cases matched their stock child output. Restoring the module’s public names added `test__all__`. The main-thread shutdown test was already passing on public. Each isolated child printed the two expected lines and exited successfully. These two results bring the cumulative ledger to 97. Two earlier passes, `test_repr_stopped` and `test_leak_without_join`, passed when prelinked and errored when loaded from disk on the same public revision. The one omission accepted an unrelated child compilation failure. [Public module and shutdown runs](https://github.com/astral-experiments/imre/commit/20ef45d4fd1f160df1de920bbb7da031ce2f558a) · [Earlier shutdown replay](https://github.com/astral-experiments/imre/commit/c047d423c21207a400beb165da196bd8b451117c). |
 | `typing` | 710 | 712 | 2 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. Upstream-defined CPython-only guards skipped two tests on Imre. Both passed on stock and have [individual omission decisions](docs/stdlib-omissions.md#typing). |
 | `unittest` | 872 | 1,090 | 0 | Stock and public Imre at O0 and O3 passed 46 of 48 `test_break` cases. Two skipped with SIGINT set to `SIG_IGN`. The 34 new interrupt cases include tests that the first SIGINT asks registered results to stop and a second invokes the previous handler. The 35th new pair, `testCatchBreakInstallsHandler`, checks that command-line catch-break mode installs the handler. [Prior ledger](https://github.com/astral-experiments/imre/pull/5550) · [#5569](https://github.com/astral-experiments/imre/pull/5569). |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **10,044** | **13,327** | **41** | **3 complete suites match stock on `main`** |
+| **Total** | **10,046** | **13,327** | **41** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
