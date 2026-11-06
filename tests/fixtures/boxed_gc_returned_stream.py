@@ -32,5 +32,33 @@ def check_returned_stream():
     buffer.close()
 
 
+def check_replaced_dictionary_edges():
+    finalized = []
+
+    class Resource:
+        def __init__(self, label):
+            self.label = label
+
+        def __del__(self):
+            finalized.append(self.label)
+
+    class Holder:
+        def method(self):
+            pass
+
+    holder = Holder()
+    holder.resource = Resource("first")
+    assert holder.__dict__["resource"] is holder.resource
+    method = holder.method
+    del holder
+    method()
+    method.__self__.resource = Resource("second")
+    assert finalized == ["first"]
+    method.__self__.__dict__ = {}
+    assert finalized == ["first", "second"]
+
+
+
 check_returned_stream()
+check_replaced_dictionary_edges()
 print("returned stream cleanup ok")

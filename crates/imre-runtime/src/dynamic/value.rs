@@ -4462,10 +4462,21 @@ impl Heap {
                     .iter()
                     .take(*budget)
                     .any(|&input| keeps(heap, input, owner, budget)),
-                Value::Instance { fields, .. } => fields
-                    .values()
+                Value::Dict(entries) => entries
+                    .iter()
                     .take(*budget)
-                    .any(|&value| keeps(heap, value, owner, budget)),
+                    .any(|&(_, value)| keeps(heap, value, owner, budget)),
+                Value::Instance {
+                    fields, dictionary, ..
+                } => {
+                    super::stdlib::io::text_descriptor_chain(heap, root)
+                        .is_some_and(|chain| chain.contains(&owner))
+                        || dictionary
+                            .iter()
+                            .chain(fields.values())
+                            .take(*budget)
+                            .any(|&value| keeps(heap, value, owner, budget))
+                }
                 Value::Generator {
                     iterators,
                     protected,
