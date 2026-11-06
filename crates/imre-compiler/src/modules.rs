@@ -155,6 +155,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "__future__" => bundled_source!("__future__.py"),
         "__hello__" => bundled_source!("__hello__.py"),
         "ast" => bundled_source!("ast.py"),
+        "_ast_unparse" => bundled_source!("_ast_unparse.py"),
         "stat" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             let modes = stat_mode_source()?;
@@ -1506,6 +1507,7 @@ impl IntrinsicModule {
             (Self::Numbers, "Rational") => Intrinsic::ScopedObjectExport("numbers.Rational"),
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
+            (Self::Ast, "unparse") => Intrinsic::ObjectRuntimeExport("ast.unparse"),
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
             (Self::Ast, "iter_child_nodes") => {
                 Intrinsic::ObjectRuntimeExport("ast.iter_child_nodes")

@@ -3709,6 +3709,7 @@ for name in ("md4", "ripemd160"):
             "boxed_ast_compound.py",
             "boxed_ast_encoded_source.py",
             "boxed_ast_visitors.py",
+            "boxed_ast_unparse.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_inspect_getmembers.py",
