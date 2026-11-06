@@ -186,6 +186,7 @@ pub(crate) struct Context {
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
     signal_handlers: Vec<Id>,
+    reporting_wakeup_errors: bool,
     typing: typing::Registry,
     builtins: HashMap<String, Id>,
     /// Last observed binding position for each name bucket, validated against the current scope.
@@ -3446,6 +3447,7 @@ impl Context {
                 "minor",
                 "makedev",
                 "mknod",
+                "pidfd_open",
                 "timerfd_create",
                 "timerfd_gettime",
                 "timerfd_gettime_ns",
@@ -3455,6 +3457,8 @@ impl Context {
                 let function = self.builtin(&format!("posix.{name}"));
                 self.bind(scope, name, function);
             }
+            let nonblock = self.int(i64::from(libc::PIDFD_NONBLOCK));
+            self.bind(scope, "PIDFD_NONBLOCK", nonblock);
             for (name, flag) in [
                 ("TFD_CLOEXEC", libc::TFD_CLOEXEC),
                 ("TFD_NONBLOCK", libc::TFD_NONBLOCK),

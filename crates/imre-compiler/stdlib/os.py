@@ -58,6 +58,7 @@ if sys.platform == "linux":
         timerfd_create, timerfd_gettime, timerfd_gettime_ns, timerfd_settime, timerfd_settime_ns,
     )
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
+    from posix import PIDFD_NONBLOCK, pidfd_open
 
 if sys.platform == "linux":
     try:

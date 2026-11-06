@@ -823,6 +823,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         classes: HashMap::new(),
         enum_scopes: HashMap::new(),
         signal_handlers: Vec::new(),
+        reporting_wakeup_errors: false,
         typing: super::typing::Registry::default(),
         builtins: HashMap::new(),
         scope_name_slots: Default::default(),
@@ -992,6 +993,8 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         eprintln!("Fatal Python error: init_import_site: Failed to import the site module");
         eprintln!("Python runtime state: initialized");
         stdlib::traceback::report_chain(&mut ctx, error);
+        #[cfg(unix)]
+        crate::signals::finalize();
         return 1;
     }
     let mut interrupted = result
@@ -1046,6 +1049,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     };
     super::thread_worker::shutdown(&mut ctx);
     atexit::run(&mut ctx);
+    #[cfg(unix)]
+    if crate::signals::is_main() {
+        crate::signals::disable_wakeup();
+    }
     // Exit callbacks run before Python enters its finalization phase.
     ctx.finalizing
         .store(true, std::sync::atomic::Ordering::Release);
@@ -1071,6 +1078,8 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     }
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::disable();
+    #[cfg(unix)]
+    crate::signals::finalize();
     if status == 0 && ctx.heap.has_pending_callback_write() {
         use std::io::Write;
 

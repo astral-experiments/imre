@@ -857,6 +857,11 @@ impl Context {
         if left == right {
             return Ok(true);
         }
+        if let (Value::Int(a), Value::Int(b)) = (self.heap.get(left), self.heap.get(right))
+            && let (Some(a), Some(b)) = (a.as_small(), b.as_small())
+        {
+            return Ok(a == b);
+        }
         let roots = self.heap.temporary_mark();
         self.heap.keep(left);
         self.heap.keep(right);

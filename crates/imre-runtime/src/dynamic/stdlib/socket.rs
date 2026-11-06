@@ -1026,14 +1026,15 @@ fn receive_size(ctx: &mut Context, value: Id) -> Result<isize> {
     })
 }
 
-fn recvfrom_into(
+fn receive_into(
     ctx: &mut Context,
+    method: &str,
     socket: &crate::objects::Object,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     const FIELDS: [&str; 3] = ["buffer", "nbytes", "flags"];
-    let required = super::required_args("recvfrom_into", args, kwargs, &FIELDS)?;
+    let required = super::required_args(method, args, kwargs, &FIELDS)?;
     let buffer = required(0)?;
     let optional = |index: usize| {
         args.get(index).copied().or_else(|| {
@@ -1045,7 +1046,7 @@ fn recvfrom_into(
     };
     let (count, peer) = ctx.with_writable_byte_span(
         buffer,
-        "recvfrom_into() argument 1",
+        &format!("{method}() argument 1"),
         |ctx, storage, span| {
             let nbytes = optional(1)
                 .map(|value| receive_size(ctx, value))
@@ -1057,28 +1058,33 @@ fn recvfrom_into(
                 .unwrap_or(0);
             // PyArg converts its recognized inputs before diagnosing leftover keywords.
             if !kwargs.is_empty() {
-                super::super::builtins::bind_builtin_arguments(
-                    "recvfrom_into",
-                    args,
-                    kwargs,
-                    FIELDS,
-                    1,
-                )?;
+                super::super::builtins::bind_builtin_arguments(method, args, kwargs, FIELDS, 1)?;
             }
-            let nbytes = usize::try_from(nbytes)
-                .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom_into"))?;
+            let nbytes = usize::try_from(nbytes).map_err(|_| {
+                Error::new("ValueError", format!("negative buffersize in {method}"))
+            })?;
             let bytes = &mut ctx.writable_storage_bytes(storage)?[span];
             let size = if nbytes == 0 { bytes.len() } else { nbytes };
             let target = bytes.get_mut(..size).ok_or_else(|| {
-                Error::new(
-                    "ValueError",
-                    "nbytes is greater than the length of the buffer",
-                )
+                let message = if method == "recv_into" {
+                    "buffer too small for requested bytes"
+                } else {
+                    "nbytes is greater than the length of the buffer"
+                };
+                Error::new("ValueError", message)
             })?;
-            Ok(native::recv_from_into(socket, target, flags)?)
+            if method == "recv_into" {
+                Ok((native::recv_into(socket, target, flags)?, None))
+            } else {
+                let (count, peer) = native::recv_from_into(socket, target, flags)?;
+                Ok((count, Some(peer)))
+            }
         },
     )?;
     let count = ctx.int(count as i64);
+    let Some(peer) = peer else {
+        return Ok(count);
+    };
     let peer = pack_socket_name(ctx, peer)?;
     Ok(ctx.alloc(Value::Tuple(vec![count, peer])))
 }
@@ -1415,8 +1421,8 @@ pub(super) fn call(
         })?;
         return Ok(ctx.int(count as i64));
     }
-    if method == "recvfrom_into" {
-        return recvfrom_into(ctx, &s, args, kwargs);
+    if matches!(method, "recv_into" | "recvfrom_into") {
+        return receive_into(ctx, method, &s, args, kwargs);
     }
     if method == "makefile" {
         check_args(
@@ -1495,7 +1501,7 @@ pub(super) fn call(
     let max = match method {
         "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
         "recv" | "recvfrom" | "send" | "sendall" => 2,
-        "setsockopt" | "__exit__" | "recv_into" => 3,
+        "setsockopt" | "__exit__" => 3,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
@@ -1545,30 +1551,6 @@ pub(super) fn call(
             integer(ctx, argument(args, 2)?)?,
         )?,
         "shutdown" => native::shutdown(&s, integer(ctx, argument(args, 0)?)?)?,
-        "recv_into" => {
-            let buf = argument(args, 0)?;
-            let n = args
-                .get(1)
-                .map(|&id| ctx.as_integer(id))
-                .transpose()?
-                .unwrap_or(0);
-            let n = usize::try_from(n)
-                .map_err(|_| Error::new("ValueError", "negative buffersize in recv_into"))?;
-            let flags = int_option(ctx, args, kwargs, 2, "flags", 0)?;
-            let Some((storage, range)) = ctx.writable_byte_span(buf)? else {
-                return Err(Error::new(
-                    "TypeError",
-                    "recv_into() requires a writable bytes-like object",
-                ));
-            };
-            let bytes = &mut ctx.writable_storage_bytes(storage)?[range];
-            let n = if n == 0 { bytes.len() } else { n };
-            let target = bytes
-                .get_mut(..n)
-                .ok_or_else(|| Error::new("ValueError", "buffer too small for requested bytes"))?;
-            let count = native::recv_into(&s, target, flags)?;
-            return Ok(ctx.int(count as i64));
-        }
         "recvfrom" => {
             let n = receive_size(ctx, argument(args, 0)?)?;
             let flags = args

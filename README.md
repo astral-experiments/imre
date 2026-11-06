@@ -109,8 +109,8 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 6, 2026, Imre has a paired pass for **12,446 of 16,202 tests (76.8%)** across the 44 standard library module families tracked below.
-The paired pass rate is 75.6% (10,069 of 13,327) for the original 25 families and 82.7% (2,377 of 2,875) for the 19 additional families.
+As of November 6, 2026, Imre has a paired pass for **12,450 of 16,202 tests (76.8%)** across the 44 standard library module families tracked below.
+The paired pass rate is 75.6% (10,070 of 13,327) for the original 25 families and 82.8% (2,380 of 2,875) for the 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -119,7 +119,7 @@ At either optimization level, a test can exercise typed native code, boxed nativ
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
 It passed **15,161**, skipped 1,023, and reported 7 errors.
-Across the 44 families, **12,394 of the 15,161 stock Linux passes (81.7%)** have paired passes, leaving **1,251** more to reach 90%. The other 52 paired tests passed in separate stock runs. This runner skipped 45 of them and reported errors for seven. Of the two new `math` pairs, it passed `testSumProd` and skipped `test_sumprod_stress` because the CPU resource was disabled.
+Across the 44 families, **12,398 of the 15,161 stock Linux passes (81.8%)** have paired passes, leaving **1,247** more to reach 90%. The other 52 paired tests passed in separate stock runs. This runner skipped 45 of them and reported errors for seven. Of the two new `math` pairs, it passed `testSumProd` and skipped `test_sumprod_stress` because the CPU resource was disabled.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
@@ -140,7 +140,7 @@ Across the 44 families, **12,394 of the 15,161 stock Linux passes (81.7%)** have
 | `pathlib` | 974 | 1,369 | 1 | Four more `glob` and `rglob` tests passed with recursive symlinks after complete discovery of all 1,369 originals. All three owners exited cleanly, and filesystem observations confirmed the links and teardown in all twelve fixtures. |
 | `re` | 147 | 165 | 7 | Seven CPython compiler and bytecode checks have explicit omissions. The 147 paired originals include focused and complete runs. |
 | `shutil` | 172 | 223 | 0 | A whole-suite Linux coverage measurement paired 158 of the host’s 160 stock passes at O0 and O3. Of those 158, 140 were already counted and 18 were new. Stock skipped 14 previously paired `copy_file_range` tests that passed at both native levels. Both native runs skipped the bzip2 and Zstandard unpack tests. The separate low-file-descriptor `copytree` candidate paired the same 158 tests. [Tested public revision](https://github.com/astral-experiments/imre/commit/af2d9fc74ef99c453a76948aeb42927712c47b87). |
-| `socket` | 85 | 746 | 0 | All 746 originals ran on stock, the parent and the merge. Of 681 stock passes, 84 paired on the parent and 85 on the merge at O0 and O3. Eighty of the 85 were in the earlier 81. Of the five newly observed pairs, only `TestQuickackFlag.test_set_quickack` changed in #5741. The earlier ledger also listed `GeneralModuleTests.testCloseException`. It errored on both revisions because `socket._LOCALHOST` was missing. The earlier ledger has no verified O0/O3 result for that test, so this row counts the 85 confirmed pairs. [Public merge #5741](https://github.com/astral-experiments/imre/pull/5741). |
+| `socket` | 86 | 746 | 0 | Across all 746 originals, #5779 raised the paired count from 85 to 86. `GeneralModuleTests.testCloseException`, previously withheld for lack of native evidence, passed at O0 and O3 once `socket._LOCALHOST` was available. The other 745 outcomes matched the parent. Of the five pairs newly measured at #5741 (85 of 681 stock passes), only `TestQuickackFlag.test_set_quickack` improved on that merge. [#5741](https://github.com/astral-experiments/imre/pull/5741) · [#5779](https://github.com/astral-experiments/imre/pull/5779). |
 | `subprocess` | 302 | 353 | 3 | Both original empty-environment cases passed on stock and on public Imre at O0 and O3. They exercise child execution when the supplied environment has no PATH. |
 | `tempfile` | 110 | 118 | 2 | All three runs registered the same 118 original parents. CPython passed 112 and skipped six. Public Imre passed 110 and skipped eight at both levels. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
@@ -148,7 +148,7 @@ Across the 44 families, **12,394 of the 15,161 stock Linux passes (81.7%)** have
 | `typing` | 710 | 712 | 2 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. Upstream-defined CPython-only guards skipped two tests on Imre. Both passed on stock and have [individual omission decisions](docs/stdlib-omissions.md#typing). |
 | `unittest` | 872 | 1,090 | 0 | Stock and public Imre at O0 and O3 passed 46 of 48 `test_break` cases. Two skipped with SIGINT set to `SIG_IGN`. The 34 new interrupt cases include tests that the first SIGINT asks registered results to stop and a second invokes the previous handler. The 35th new pair, `testCatchBreakInstallsHandler`, checks that command-line catch-break mode installs the handler. [Prior ledger](https://github.com/astral-experiments/imre/pull/5550) · [#5569](https://github.com/astral-experiments/imre/pull/5569). |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **10,069** | **13,327** | **41** | **4 complete suites match stock on `main`** |
+| **Total** | **10,070** | **13,327** | **41** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -168,7 +168,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `gzip` | 74 | 75 | 1 | Stock passed all 75 originals. Both native builds retained the prior 73 passes and now pass `test_decompress_limited`, which checks read-ahead after a one-byte read. The remaining original calls CPython’s private prepend helper. [Gzip fix](https://github.com/astral-experiments/imre/pull/5627) · [Omission decision](docs/stdlib-omissions.md#gzip). |
 | `inspect` | 281 | 362 | 0 | In an earlier run, stock passed all 86 selected originals. At each native level, four passed, 35 errored, five failed and 42 skipped. Those four pairs cover retrieving decimal module source, identifying coroutines, looking up documentation and inspecting a mock signature. In a focused group of 18 signature tests, both native levels passed 16 on #5602, up from 15. `TestSignatureObject.test_signature_on_class` passed with all seven subtests. [Earlier revision](https://github.com/astral-experiments/imre/commit/06930175ef7ef249a0e31b174c515a298529422b) · [#5602](https://github.com/astral-experiments/imre/commit/dbd1756c976a333009c2f85877ad6271591581a7). |
 | `math` | 63 | 89 | 0 | At O0 and O3 the intact suite passed 63 of 89 originals, with 22 errors, one failure and three skips at each level. All 61 earlier pairs held. `testSumProd` and `test_sumprod_stress` changed from error to pass. [Public merge #5719](https://github.com/astral-experiments/imre/commit/61c407af4a233321c5c2cef8b0267d75fcfb46c9). |
-| `ssl` | 50 | 195 | 0 | Stock passed 178 of 195 originals and skipped 17. Both native levels passed 50 in the complete public suite, including `test.test_ssl.SSLErrorTests.test_lib_reason` (occurrence 1). |
+| `ssl` | 53 | 195 | 0 | The complete module ran all 195 originals directly. Stock passed 178 and skipped 17. At O0 and O3, #5763 passed 53 versus 50 on its first parent. The gains were `BasicSocketTests.test_openssl111_deprecations`, `ContextTests.test__create_stdlib_context` and `ContextTests.test_constructor`. The ordinary regrtest stopped before discovery at `faulthandler.register`. [Public merge #5763](https://github.com/astral-experiments/imre/pull/5763). |
 | `struct` | 34 | 43 | 0 | Stock passed all 43 tests. Both native builds passed 34, skipped six, failed one and errored on two. The full run retained all 33 earlier passes and confirmed `StructTest.test_repr`. [Earlier 33](https://github.com/astral-experiments/imre/commit/dbeabb7cf3753ccd9de8bf53e7b5d78382d75542) · [Public revision](https://github.com/astral-experiments/imre/commit/29e1ce351ccc3cfc398c24db8d5f0fe4d5ff43f2). |
 | `tokenize` | 129 | 130 | 0 | The original `test_random_files` passed on stock and at both public native levels. Each run opened the same ten shipped source files and completed all ten file subtests, reading 501,523 bytes. The remaining original invokes the CLI on Latin-1 source, which the compiler rejected before parsing. [Public run](https://github.com/astral-experiments/imre/commit/9faed4f24231cca67a147ca070e7fd79a71bba51). |
 | `tomllib` | 17 | 17 | 0 | All 17 originals passed on stock and public O0/O3 through both the package entry point and the three explicit upstream test modules. |
@@ -178,14 +178,15 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | `zipfile` | 300 | 383 | 0 | The whole-suite runs retained all 295 earlier paired passes and added three Deflate and two LZMA cases. Each native build passed 300, skipped 70 and errored on eight. Five originals did not register. Stock passed 376 and skipped two in the same configuration, and passed 381 with its optional dependencies installed. [Public revision](https://github.com/astral-experiments/imre/commit/c95eddb638efaec3872351016d2503007a82d920) |
 | `zoneinfo` | 228 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). |
-| **Measured total (19 of 19 families)** | **2,377** | **2,875** | **12** |  |
+| **Measured total (19 of 19 families)** | **2,380** | **2,875** | **12** |  |
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 24 suites, 1,693 of 2,679 originals have paired passes.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 25 suites, 1,754 of 2,751 originals have paired passes.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
+| `abc` | 61 | 72 | 72 passed | With CPython’s `_py_abc.py` on the import path, both native levels improved from 59 to 61 passes. The two gains were the C and Python occurrences of `TestLegacyAPI.test_abstractproperty_basics`. Three originals failed and eight errored at each level (exit 1). The runner counted four additional subtest failures. [Public fix](https://github.com/astral-experiments/imre/commit/09e41b4a61c52eb8d8f6339b94bc179c8a8b5462). |
 | `binascii` | 32 | 93 | 76 passed, 17 skipped | 32 passed, 8 failures, 36 errors, 17 skipped |
 | `bisect` | 23 | 46 | 46 passed | 23 passed, 23 errors. All 23 pure-Python tests passed, including `TestBisectPython.test_lookups_with_key_function`. The 23 errors came from tests that require the missing `_bisect` accelerator. [Casefold fix](https://github.com/astral-experiments/imre/pull/5618). |
 | `calendar` | 77 | 79 | 77 passed, 2 skipped | 77 passed, 2 skipped. Stock and both native levels passed all 15 command-line tests and skipped the same two tests because the `en_US` locale was unavailable. [Tested revision](https://github.com/astral-experiments/imre/commit/4239d6db737b792352157b9a71ec526db5f12ec5). |

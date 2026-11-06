@@ -664,14 +664,13 @@ impl Function<'_, '_> {
         } else {
             format!("{qualname}.<locals>.")
         };
-        let doc = match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _)
-                if self.output.keep_docstrings =>
-            {
-                self.source.docstring(&qualname, stmts)
-            }
+        let statements = match &body {
+            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => Some(*stmts),
             _ => None,
         };
+        let doc = statements
+            .filter(|_| self.output.keep_docstrings)
+            .and_then(|stmts| self.source.docstring(&qualname, stmts));
         let flags = match &body {
             Body::Namespace(..) => None,
             _ => {
@@ -926,6 +925,12 @@ impl Function<'_, '_> {
                     let name = arg.parameter.name.as_str();
                     if let Some(ty) = arg.parameter.annotation.as_deref().and_then(scalar) {
                         signature["types"][name] = json!(ty);
+                        if ty == "float"
+                            && statements
+                                .is_some_and(|body| crate::frontend::only_compares_zero(body, name))
+                        {
+                            signature["integer_sign_parameters"][name] = json!(true);
+                        }
                     }
                     signature[group].as_array_mut().unwrap().push(json!(name));
                     if let Some(default) = &arg.default {
