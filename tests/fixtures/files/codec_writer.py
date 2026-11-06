@@ -30,10 +30,14 @@ def run():
     saved = first.getvalue()
     print(saved)
     print(first.tell())
-    try:
-        writer.write("partial☃☃")
-    except UnicodeEncodeError as exc:
-        print(str(exc))
+    for _ in range(2):
+        try:
+            writer.write("partial☃☃")
+        except UnicodeEncodeError as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("writer accepted an unencodable character")
+        assert first.getvalue() == saved
     print(first.getvalue())
     other.write("Ё☃€")
     print(second.getvalue())

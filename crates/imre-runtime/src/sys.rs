@@ -382,15 +382,15 @@ pub extern "C" fn imre_os_name() -> *const Str {
 /// # Safety
 /// The caller roots the UTF-8 string throughout the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, text: *const Str) -> usize {
+pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, source: *const Str) -> usize {
     // SAFETY: the caller roots the string until the stream write finishes.
-    let text = unsafe { &*text };
+    let text = unsafe { &*source };
     let result = if stderr != 0 {
         write_stderr(text, false).map_err(errno_error)
     } else {
         write_stdout_with(text, false, || {
             // SAFETY: the caller roots this exact string throughout the write.
-            Ok(unsafe { StrOwner::acquire_word(text as *const Str as usize) })
+            Ok(unsafe { StrOwner::acquire_word(source as usize) })
         })
     };
     match result {
