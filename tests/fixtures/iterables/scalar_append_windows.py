@@ -45,6 +45,13 @@ def main() -> None:
         run([2, 3], words, text)
         run([1 << 91, 2], prefix(64, 1), text)
 
+    words = prefix(64, 1)
+    fill([100, 100, 100], words, "abcabc")
+    print(words)
+    words[-1] = -20
+    run([100, 100, 100], words, "abcz")
+    print(words)
+
 
 if __name__ == "__main__":
     main()
