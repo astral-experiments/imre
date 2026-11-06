@@ -189,7 +189,7 @@ impl Context {
         Ok(self.alloc(Value::List(children)))
     }
 
-    fn class_bases_tuple(&self, class: Id) -> Option<Vec<Id>> {
+    pub(super) fn class_bases_tuple(&self, class: Id) -> Option<Vec<Id>> {
         let Value::Class { scope, .. } = self.heap.get(class) else {
             return None;
         };

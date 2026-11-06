@@ -21,7 +21,7 @@ from annotationlib import annotations_to_string as _annotation_strings, type_rep
 from functools import lru_cache
 from _typing import _idfunc
 from types import GenericAlias
-from typing import Any, Callable, Generic, Protocol, TypeVar, Union
+from typing import Any, Callable, Generic, Protocol, TypeVar, Union, _GenericAlias
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
@@ -224,6 +224,44 @@ def _collect_type_parameters(args, *, enforce_default_ordering: bool = True):
                 if x not in parameters:
                     parameters.append(x)
     return tuple(parameters)
+
+
+def _generic_init_subclass(cls, *args, **kwargs):
+    super(Generic, cls).__init_subclass__(*args, **kwargs)
+    tvars = []
+    if '__orig_bases__' in cls.__dict__:
+        error = Generic in cls.__orig_bases__
+    else:
+        error = (Generic in cls.__bases__ and
+                    cls.__name__ != 'Protocol' and
+                    type(cls) != _TypedDictMeta)
+    if error:
+        raise TypeError("Cannot inherit from plain Generic")
+    if '__orig_bases__' in cls.__dict__:
+        tvars = _collect_type_parameters(cls.__orig_bases__)
+        # Look for Generic[T1, ..., Tn].
+        # If found, tvars must be a subset of it.
+        # If not found, tvars is it.
+        # Also check for and reject plain Generic,
+        # and reject multiple Generic[...].
+        gvars = None
+        for base in cls.__orig_bases__:
+            if (isinstance(base, _GenericAlias) and
+                    base.__origin__ is Generic):
+                if gvars is not None:
+                    raise TypeError(
+                        "Cannot inherit from Generic[...] multiple times.")
+                gvars = base.__parameters__
+        if gvars is not None:
+            tvarset = set(tvars)
+            gvarset = set(gvars)
+            if not tvarset <= gvarset:
+                s_vars = ', '.join(str(t) for t in tvars if t not in gvarset)
+                s_args = ', '.join(str(g) for g in gvars)
+                raise TypeError(f"Some type variables ({s_vars}) are"
+                                f" not listed in Generic[{s_args}]")
+            tvars = gvars
+    cls.__parameters__ = tuple(tvars)
 
 
 def _caller(depth=1, default='__main__'):

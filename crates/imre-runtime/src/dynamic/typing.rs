@@ -1201,8 +1201,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
 }
 
 fn generic_init_subclass(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let generic = named_class(ctx, "typing", "Generic");
-    let Some((&cls, args)) = args.split_first() else {
+    let Some(&cls) = args.first() else {
         return Err(Error::new(
             "TypeError",
             "descriptor '__init_subclass__' of 'typing.Generic' object needs an argument",
@@ -1214,64 +1213,10 @@ fn generic_init_subclass(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         "__init_subclass__",
         cls,
     )?;
-    let next = ctx.super_attribute(generic, cls, cls, "__init_subclass__")?;
-    ctx.call(next, args.to_vec(), kwargs.to_vec())?;
-
-    if ctx.own_class_attr(cls, "__orig_bases__").is_none() {
-        let bases = ctx.lookup_attr(cls, "__bases__")?;
-        if ctx.items(bases)?.contains(&generic)
-            && ctx.class_name(cls) != "Protocol"
-            && Some(ctx.exact_type(cls)?) != ctx.module_value("typing", "_TypedDictMeta")
-        {
-            return Err(Error::new("TypeError", "Cannot inherit from plain Generic"));
-        }
-        let empty = ctx.heap.packed_tuple(Vec::new(), false);
-        ctx.set_attr(cls, "__parameters__", empty)?;
-        return Ok(NONE);
-    }
-    let bases = ctx.lookup_attr(cls, "__orig_bases__")?;
-    let raw = ctx.items(bases)?;
-    if raw.contains(&generic) {
-        return Err(Error::new("TypeError", "Cannot inherit from plain Generic"));
-    }
-    let parameters = collect_type_parameters(ctx, bases, true)?;
-    let mut explicit = None;
-    for id in raw {
-        if let Value::GenericAlias(a) = ctx.heap.get(id)
-            && a.origin == generic
-            && explicit.replace(a.parameters).is_some()
-        {
-            return Err(Error::new(
-                "TypeError",
-                "Cannot inherit from Generic[...] multiple times.",
-            ));
-        }
-    }
-    let params = if let Some(params) = explicit {
-        let declared = ctx.items(params)?;
-        let missing = ctx
-            .items(parameters)?
-            .iter()
-            .filter(|v| !declared.contains(v))
-            .map(|&v| ctx.display(v))
-            .collect::<Vec<_>>();
-        if !missing.is_empty() {
-            let args = declared.iter().map(|&v| ctx.display(v)).collect::<Vec<_>>();
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "Some type variables ({}) are not listed in Generic[{}]",
-                    missing.join(", "),
-                    args.join(", ")
-                ),
-            ));
-        }
-        params
-    } else {
-        parameters
-    };
-    ctx.set_attr(cls, "__parameters__", params)?;
-    Ok(NONE)
+    let typing = ctx.module("typing")?;
+    ctx.heap.keep(typing);
+    let helper = ctx.lookup_attr(typing, "_generic_init_subclass")?;
+    ctx.call(helper, args.to_vec(), kwargs.to_vec())
 }
 
 /// Members physically stored on a TypeVar and returned unbound by class lookup.
