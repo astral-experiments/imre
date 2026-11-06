@@ -144,6 +144,10 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
         let fromfd = ctx.builtin("socket.fromfd");
         ctx.bind(scope, "fromfd", fromfd);
     }
+    for &(name, host) in imre_ast::providers::SOCKET_LOOPBACK_HOSTS {
+        let value = ctx.text(host);
+        ctx.bind(scope, name, value);
+    }
     let getaddrinfo = ctx.builtin("socket.getaddrinfo");
     ctx.bind(scope, "getaddrinfo", getaddrinfo);
     for name in IMPORTED_CONSTANTS

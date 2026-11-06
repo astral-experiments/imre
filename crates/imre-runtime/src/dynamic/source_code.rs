@@ -6590,10 +6590,11 @@ impl Context {
                 if let Some(value) = sole_star {
                     self.extend_source_items(&mut args, value, Some(f))?;
                 }
-                if let Some(mapping) = mapping {
-                    kwargs = self.keyword_args(mapping)?;
-                }
-                let result = self.call_in_scope(scope, f, args, kwargs)?;
+                let result = if let Some(mapping) = mapping {
+                    self.call_with_keyword_dict(scope, f, args, mapping)?
+                } else {
+                    self.call_in_scope(scope, f, args, kwargs)?
+                };
                 self.finish_call_operands(mark, result);
                 self.check_call_return(result)
             }

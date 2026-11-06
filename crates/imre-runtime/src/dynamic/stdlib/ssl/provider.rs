@@ -589,7 +589,8 @@ impl Context {
             (api.SSL_CTX_set_default_passwd_cb)(handle.as_ptr(), reject_password);
         }
         if !protocol.is_fixed()
-            // SAFETY: the context owns this live SSL_CTX. The arguments match SSL_CTX_set_min_proto_version.
+            // SAFETY: the live context belongs to this provider. The version and null
+            // pointer are the arguments to SSL_CTX_set_min_proto_version.
             && unsafe {
                 (api.SSL_CTX_ctrl)(
                     handle.as_ptr(),

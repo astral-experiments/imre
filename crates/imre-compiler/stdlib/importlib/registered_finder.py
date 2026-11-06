@@ -11,9 +11,11 @@ def _installed_source_spec(fullname, registry_path, target):
     # A compiled package can have children in the installed archive. Only search
     # those children from their own virtual parent, preserving application shadows.
     parts = fullname.split('.')
-    if fullname not in ('_pydatetime', '_pydecimal', 'cmd', 'getpass', 'graphlib', 'shlex', 'statistics', 'tarfile', 'timeit', 'wave') and parts[0] not in ('html', 'xml'):
-        return None
     if not all(part.isidentifier() for part in parts):
+        return None
+    member = '/'.join(parts)
+    if (member + '.py' not in _installed_source_members
+            and member + '/__init__.py' not in _installed_source_members):
         return None
     parent = parts[:-1]
     if registry_path != _path_join('<imre stdlib>', *parent):

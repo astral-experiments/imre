@@ -1,6 +1,7 @@
 """Load Python modules from registered code or filesystem source."""
 
 import _imp
+import _io
 import marshal
 import sys
 
@@ -75,7 +76,6 @@ def _bless_my_loader(module_globals):
 
 def decode_source(source_bytes):
     """Decode Python source using its declared encoding and universal newlines."""
-    import _io
     import tokenize
 
     encoding, _ = tokenize.detect_encoding(_io.BytesIO(source_bytes).readline)
@@ -168,7 +168,11 @@ class FileLoader:
         return self.path
 
     def get_data(self, path):
-        with open(path, "rb") as file:
+        if isinstance(self, SourceFileLoader):
+            file = _io.open_code(str(path))
+        else:
+            file = open(path, "rb")
+        with file:
             return file.read()
 
     @_check_name
@@ -208,9 +212,13 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
 
     def get_code(self, fullname):
         path = self.get_filename(fullname)
-        code = _registered_code(self.name, path)
-        if code is not None:
-            return code
+        if isinstance(path, str):
+            code = _registered_code(self.name, path)
+            if code is not None:
+                return code
+        else:
+            # Validate the source path but keep the original object for loader hooks.
+            _cache_path(path)
         source = self.get_data(path)
         return self.source_to_code(source, path)
 

@@ -14,7 +14,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .last_modified_time(DateTime::default())
         .unix_permissions(0o644);
     println!("cargo:rerun-if-changed=stdlib/installed-sources.txt");
-    for name in include_str!("stdlib/installed-sources.txt").lines() {
+    println!("cargo:rerun-if-changed=stdlib/runtime-only-sources.txt");
+    // Only installed-sources.txt participates in checked file-entry admission.
+    let members: Vec<_> = include_str!("stdlib/installed-sources.txt")
+        .lines()
+        .chain(include_str!("stdlib/runtime-only-sources.txt").lines())
+        .collect();
+    std::fs::write(out.join("imre-stdlib-members.txt"), members.join("\n"))?;
+    for name in members {
         let path = match name {
             "shlex.py" => {
                 PathBuf::from("../../benchmarks/cpython_stdlib/full/shlex/upstream/Lib/shlex.py")
