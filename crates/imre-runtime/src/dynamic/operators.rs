@@ -4463,6 +4463,14 @@ impl Context {
         {
             return Ok(builtins::boolean(left.cmp(right).is_eq() == (op == "==")));
         }
+        if matches!(a, FALSE | TRUE) && matches!(b, FALSE | TRUE) {
+            match op {
+                "&" => return Ok(builtins::boolean(a == TRUE && b == TRUE)),
+                "|" => return Ok(builtins::boolean(a == TRUE || b == TRUE)),
+                "^" => return Ok(builtins::boolean(a != b)),
+                _ => {}
+            }
+        }
         if !inplace && op == "|" {
             let weak_proxy = |id| matches!(self.heap.get(id), Value::Weak(wr) if wr.kind != weakref::Kind::Reference);
             if matches!(self.heap.get(a), Value::MappingProxy(_))
