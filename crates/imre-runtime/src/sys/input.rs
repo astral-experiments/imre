@@ -1,7 +1,7 @@
 //! Keep the incremental decoder and unread text with the process's standard input.
 use super::encoding;
+use crate::Result;
 use crate::objects::{Codec, errno_error};
-use crate::{Error, Kind, Result};
 use std::io::{self, Read};
 use std::sync::{LazyLock, Mutex};
 
@@ -88,18 +88,14 @@ impl Input {
         loop {
             let remaining = &self.text[self.offset..];
             if let Some(newline) = remaining.find('\n') {
-                line.push_str(&remaining[..newline]);
+                line.push_str(&remaining[..=newline]);
                 self.offset += newline + 1;
                 return Ok(line);
             }
             line.push_str(remaining);
             self.offset = self.text.len();
             if self.eof {
-                return if line.is_empty() {
-                    Err(Error::new(Kind::EOFError, "EOF when reading a line"))
-                } else {
-                    Ok(line)
-                };
+                return Ok(line);
             }
             self.fill(reader, settings)?;
         }
@@ -107,8 +103,6 @@ impl Input {
 }
 
 pub(crate) fn read_input_line() -> Result<String> {
-    // A preceding print must be visible before waiting for the next input line.
-    crate::flush_stdout().map_err(errno_error)?;
     let mut input = INPUT.lock().unwrap_or_else(|poison| poison.into_inner());
     input.line(&mut io::stdin().lock())
 }

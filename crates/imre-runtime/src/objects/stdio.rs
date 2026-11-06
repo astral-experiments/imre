@@ -117,6 +117,101 @@ fn target() -> Option<Binding> {
     }
 }
 
+/// Checked code reads the process decoder and can retain native text files as
+/// output bindings. Arbitrary Python stream objects belong to the boxed evaluator.
+enum InputStream {
+    ProcessInput,
+    Output(ObjectOwner),
+}
+
+struct NativeInput;
+
+impl crate::input::Backend for NativeInput {
+    type Stream = InputStream;
+    type Prompt = crate::StrOwner;
+    type Line = String;
+    type Error = Error;
+
+    fn stream(&mut self, name: crate::input::StreamName) -> Result<Self::Stream, Error> {
+        use crate::input::StreamName;
+        Ok(match name {
+            StreamName::Stdin => InputStream::ProcessInput,
+            StreamName::Stdout => match binding() {
+                Binding::Original => InputStream::Output(original(false)),
+                Binding::File(file) => InputStream::Output(file),
+                Binding::None | Binding::Missing => {
+                    return Err(Error::new(Kind::RuntimeError, "lost sys.stdout"));
+                }
+            },
+            StreamName::Stderr => InputStream::Output(original(true)),
+        })
+    }
+
+    fn flush_ignoring_errors(&mut self, stream: &InputStream) {
+        let InputStream::Output(file) = stream else {
+            unreachable!("input flushes only its output streams");
+        };
+        // SAFETY: the captured native text file stays owned across this call.
+        let _ = unsafe { file.0.with_mut(|storage| storage.file_mut().flush()) };
+    }
+
+    fn write_prompt(&mut self, stream: &InputStream, prompt: crate::StrOwner) -> Result<(), Error> {
+        let InputStream::Output(file) = stream else {
+            unreachable!("input writes its prompt to stdout");
+        };
+        // SAFETY: the destination and the exact native string are owned.
+        unsafe {
+            file.0
+                .with_mut(|s| s.file_mut().write_with(&prompt, || Ok(prompt.clone())))
+        }
+    }
+
+    fn read_line(&mut self, stream: &InputStream) -> Result<String, Error> {
+        debug_assert!(matches!(stream, InputStream::ProcessInput));
+        crate::sys::read_input_line()
+    }
+
+    fn last_unit(&self, line: &String) -> Result<Option<u32>, Error> {
+        Ok(line.as_bytes().last().copied().map(u32::from))
+    }
+
+    fn trim_linefeed(&mut self, mut line: String) -> Result<String, Error> {
+        line.pop();
+        Ok(line)
+    }
+
+    fn eof(&self) -> Error {
+        Error::new(Kind::EOFError, "EOF when reading a line")
+    }
+}
+
+pub(crate) fn input(prompt: Option<crate::StrOwner>) -> Result<String, Error> {
+    crate::input::read(&mut NativeInput, prompt)
+}
+
+/// A typed input call can run an ordinary checked __str__ between selection
+/// and writing. Only stdout can be rebound in this representation; the process
+/// input decoder and the permanently owned original stderr stay in place.
+pub(crate) fn select_input_output() -> Result<ObjectOwner, Error> {
+    let streams = crate::input::prepare(&mut NativeInput, None)?;
+    let InputStream::Output(file) = streams.stdout else {
+        unreachable!("stdout is a native text file");
+    };
+    Ok(file)
+}
+
+pub(crate) fn input_with_output(
+    file: ObjectOwner,
+    prompt: crate::StrOwner,
+) -> Result<String, Error> {
+    crate::input::finish(
+        &mut NativeInput,
+        &InputStream::ProcessInput,
+        &InputStream::Output(file),
+        Some(prompt),
+    )
+}
+
 /// Print to the current binding, retaining a direct string for encoding errors.
 pub(crate) fn write_line(
     text: &str,

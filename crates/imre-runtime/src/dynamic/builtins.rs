@@ -26,6 +26,102 @@ pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
 };
 
+/// Drop the temporary bound method before a caller uses its result.
+fn call_stream_method(ctx: &mut Context, stream: Id, name: &str) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    let result = ctx
+        .lookup_attr(stream, name)
+        .and_then(|method| ctx.call(method, Vec::new(), Vec::new()));
+    ctx.release_with_result(mark, result)
+}
+
+/// The contiguous stream roots are ordered so stdin is released first.
+struct BoxedInput<'a>(&'a mut Context, std::ops::Range<usize>);
+
+impl BoxedInput<'_> {
+    /// input ignores a failing fileno call, but propagates errors converting its result.
+    fn descriptor(&mut self, stream: Id) -> Result<Option<i64>> {
+        let mark = self.0.heap.temporary_mark();
+        let Ok(fd) = call_stream_method(self.0, stream, "fileno") else {
+            self.0.discard_temporaries(mark, None);
+            return Ok(None);
+        };
+        let converted = self.0.index_c_long(fd);
+        let number = converted.as_ref().ok().copied();
+        // Keep a conversion exception alive while releasing the Python descriptor.
+        self.0.release_with_result(mark, converted.map(|_| NONE))?;
+        Ok(number)
+    }
+}
+
+impl crate::input::Backend for BoxedInput<'_> {
+    type Stream = Id;
+    type Prompt = Id;
+    type Line = Id;
+    type Error = Error;
+
+    fn stream(&mut self, name: crate::input::StreamName) -> Result<Id> {
+        let Self(ctx, stream_roots) = self;
+        let name = name.as_str();
+        let stream = ctx
+            .sys_binding(name)?
+            .filter(|&stream| stream != NONE)
+            .ok_or_else(|| Error::new("RuntimeError", format!("lost sys.{name}")))?;
+        ctx.heap.keep_at(stream_roots.start, stream);
+        stream_roots.end += 1;
+        Ok(stream)
+    }
+
+    fn audit(&mut self, prompt: Option<&Id>) -> Result<()> {
+        super::stdlib::audit::event(self.0, "builtins.input", &[prompt.copied().unwrap_or(NONE)])
+    }
+
+    fn check_descriptors(&mut self, stdin: &Id, stdout: &Id) -> Result<()> {
+        // CPython inspects stdout.fileno only after stdin identifies the process terminal.
+        if self.descriptor(*stdin)? == Some(0) && crate::objects::os::isatty(0) {
+            self.descriptor(*stdout)?;
+        }
+        Ok(())
+    }
+
+    fn flush_ignoring_errors(&mut self, stream: &Id) {
+        let mark = self.0.heap.temporary_mark();
+        let _ = call_stream_method(self.0, *stream, "flush");
+        self.0.discard_temporaries(mark, None);
+    }
+
+    fn write_prompt(&mut self, stream: &Id, prompt: Id) -> Result<()> {
+        print::write(self.0, *stream, prompt)
+    }
+
+    fn read_line(&mut self, stream: &Id) -> Result<Id> {
+        call_stream_method(self.0, *stream, "readline")
+    }
+
+    fn last_unit(&self, line: &Id) -> Result<Option<u32>> {
+        match self.0.heap.get(self.0.scalar_value(*line)) {
+            Value::Bytes(bytes) => Ok(bytes.last().copied().map(u32::from)),
+            Value::Str(text) => Ok(text.chars().next_back().map(u32::from)),
+            Value::SurrogateStr(units) => Ok(units.last().copied()),
+            _ => Err(type_error("object.readline() returned non-string")),
+        }
+    }
+
+    fn trim_linefeed(&mut self, line: Id) -> Result<Id> {
+        let stripped = match self.0.heap.get(self.0.scalar_value(line)) {
+            Value::Bytes(bytes) => Value::Bytes(bytes[..bytes.len() - 1].to_vec()),
+            Value::Str(text) => Value::Str((&text[..text.len() - 1]).into()),
+            Value::SurrogateStr(units) => Value::SurrogateStr(units[..units.len() - 1].to_vec()),
+            _ => unreachable!("last_unit checked the line type"),
+        };
+        Ok(self.0.alloc(stripped))
+    }
+
+    fn eof(&self) -> Error {
+        Error::new("EOFError", "EOF when reading a line")
+    }
+}
+
 pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
     use crate::objects::exceptions::Kind;
     match name {
@@ -2836,38 +2932,31 @@ pub(super) fn call(
             Ok(boolean(!stop_value))
         }
         "input" => {
-            positional(name, kwargs)?;
-            arity(name, args, 0, 0)?;
-            crate::flush_stdout().map_err(crate::objects::errno_error)?;
-            let sys = match ctx.threads.system_module {
-                Some(sys) => sys,
-                None => ctx.module("sys")?,
-            };
-            let stdin = match ctx.lookup_attr(sys, "stdin") {
-                Ok(NONE) => return Err(Error::new("RuntimeError", "lost sys.stdin")),
-                Err(error) if ctx.is_attribute_error(&error) => {
-                    return Err(Error::new("RuntimeError", "lost sys.stdin"));
-                }
-                result => result?,
-            };
-            let readline = ctx.lookup_attr(stdin, "readline")?;
-            let line = ctx.call(readline, Vec::new(), Vec::new())?;
-            let stripped = match ctx.heap.get(ctx.scalar_value(line)) {
-                Value::Bytes(b) if !b.is_empty() => {
-                    b.strip_suffix(b"\n").map(|s| Value::Bytes(s.to_vec()))
-                }
-                Value::Str(s) if !s.is_empty() => {
-                    s.strip_suffix('\n').map(|s| Value::Str(s.into()))
-                }
-                Value::SurrogateStr(s) if !s.is_empty() => s
-                    .strip_suffix(&[u32::from('\n')])
-                    .map(|s| Value::SurrogateStr(s.to_vec())),
-                Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) => {
-                    return Err(Error::new("EOFError", "EOF when reading a line"));
-                }
-                _ => return Err(type_error("object.readline() returned non-string")),
-            };
-            Ok(stripped.map_or(line, |value| ctx.alloc(value)))
+            if !kwargs.is_empty() {
+                return Err(type_error("input() takes no keyword arguments"));
+            }
+            if args.len() > 1 {
+                return Err(type_error(format!(
+                    "input expected at most 1 argument, got {}",
+                    args.len()
+                )));
+            }
+            let mark = ctx.heap.temporary_mark();
+            let prompt = args.first().copied();
+            ctx.heap.reserve_temporaries(3 + args.len())?;
+            if let Some(prompt) = prompt {
+                ctx.heap.keep(prompt);
+            }
+            let start = ctx.heap.temporary_mark();
+            let mut backend = BoxedInput(ctx, start..start);
+            let mut result = crate::input::read(&mut backend, prompt);
+            let BoxedInput(ctx, stream_roots) = backend;
+            // Drop the consumed line and other work before the captured streams.
+            // Each stream's finalizer may observe the others, even on an error.
+            for root in (mark..=stream_roots.end).rev() {
+                result = ctx.release_with_result(root, result);
+            }
+            result
         }
         "print" => print::call(ctx, args, kwargs),
         "NoneType" | "NotImplementedType" | "ellipsis" => {

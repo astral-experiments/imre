@@ -717,6 +717,147 @@ impl Checker<'_> {
         })
     }
 
+    /// Evaluate the prompt before selecting stdout, then run its Python string conversion.
+    pub(super) fn input_prompt(
+        &mut self,
+        prompt: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let mut scope = calls::ArgumentScope::default();
+        let prompt = scope.hold(self, prompt);
+        let output = scope.hold(
+            self,
+            Expr {
+                ty: Type::TextIO,
+                kind: ExprKind::Builtin(Builtin::InputSelectStdout, vec![]),
+            },
+        );
+        let prompt = if matches!(prompt.ty, Type::StrLiteral(_)) {
+            literals::view(prompt, Type::Str)
+        } else {
+            prompt
+        };
+        let text = self.checked_string(prompt, call)?;
+        Ok(scope.finish(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::InputFinish, vec![output, text]),
+        }))
+    }
+
+    /// Render one checked value with builtin str, independent of a local binding named str.
+    pub(super) fn checked_string(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        let ty = value.ty;
+        if matches!(ty, Type::Calendar(_)) {
+            return Ok(calendar::format_builtin("str", vec![value]));
+        }
+        if let Some(text) = self.patch_builtin("str", &value) {
+            return Ok(text);
+        }
+        if self.types.payload(ty) == Some(Type::Str) {
+            return Ok(self.optional_text(value));
+        }
+        if ty.is_path() || ty == Type::PathInfo {
+            let op = if ty == Type::PathInfo {
+                ir::PathOperation::InfoRepr
+            } else {
+                ir::PathOperation::Text
+            };
+            return Ok(paths::operation(op, Type::Str, vec![value]));
+        }
+        if ty == Type::LogRecord {
+            return Ok(logging_records::op(
+                ir::LogRecordOperation::Repr,
+                Type::Str,
+                vec![value],
+            ));
+        }
+        if let Some(text) = self.mock_call_repr(&value, at)? {
+            return Ok(text);
+        }
+        let op = match ty {
+            Type::Enum(_) => Builtin::EnumString,
+            Type::StrEnum(_) | Type::IntEnum(_) => Builtin::StrEnumValue,
+            Type::BuiltinClass
+            | Type::PlainObject
+            | Type::StrDescriptor(_)
+            | Type::Placeholder(_) => Builtin::Repr,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::Str
+            | Type::Bytes
+            | Type::None
+            | Type::ObjectValue
+            | Type::Exception
+            | Type::NamedException(_)
+            | Type::ImportException
+            | Type::TimeoutExpired => Builtin::Str,
+            _ => {
+                return self.structured_display("str", &value, at)?.ok_or_else(|| {
+                    error(
+                        self.source,
+                        at,
+                        "unknown function or unsupported builtin arguments",
+                    )
+                });
+            }
+        };
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(op, vec![value]),
+        })
+    }
+
+    /// Preserve the checked representation and field checks of lists, tuples and records.
+    pub(super) fn structured_display(
+        &mut self,
+        name: &str,
+        value: &Expr,
+        at: &impl Ranged,
+    ) -> Result<Option<Expr>, String> {
+        let ty = value.ty;
+        if !dataclass_values::repr_supported(ty, self.types) {
+            return Ok(None);
+        }
+        let list = self.types.element(ty).is_some();
+        if name == "repr" || (name == "str" && list) {
+            if !dataclass_values::can_format(ty, self.types, self.classes) {
+                return Err(error(
+                    self.source,
+                    at,
+                    "generated repr cannot format resource or callable fields",
+                ));
+            }
+            return Ok(Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Repr, vec![value.clone()]),
+            }));
+        }
+        if matches!(
+            ty,
+            Type::Class(_)
+                | Type::Hash
+                | Type::SysImplementation
+                | Type::CompletedProcess(..)
+                | Type::Context
+                | Type::ContextMissing
+                | Type::ContextVar(_)
+                | Type::ContextToken(_)
+                | Type::ForwardRef(_)
+                | Type::ModuleSpec(_)
+                | Type::SimpleNamespace(_)
+                | Type::Dict(_)
+                | Type::Tuple(_)
+                | Type::VarTuple(_)
+                | Type::StringIterable
+        ) || self.types.payload(ty) == Some(Type::Int)
+            || (name == "print" && list)
+        {
+            return self.record_text(value.clone(), at).map(Some);
+        }
+        Ok(None)
+    }
+
     /// Decimal integer fields keep their full precision. Fixed-point and
     /// percentage fields use Python's checked integer-to-float conversion.
     pub(super) fn formatted_scalar(

@@ -37,6 +37,7 @@ mod extensions;
 mod fault_handler;
 mod floats;
 mod format_grammar;
+mod input;
 mod shared;
 #[cfg(unix)]
 mod signals;
@@ -1600,16 +1601,46 @@ fn parse_decimal_int_with_limit(original: &str, limit: u32) -> Result<Option<Int
         .map_err(|_| Error::allocation())
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_input() -> *const Str {
+fn finish_input(line: Result<String>) -> *const Str {
     finish(
-        sys::read_input_line().and_then(|line| {
+        line.and_then(|line| {
             StrOwner::try_new(Str::from(line))
                 .map(StrOwner::into_raw)
                 .map_err(|_| Error::allocation())
         }),
         std::ptr::null(),
     )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_input() -> *const Str {
+    finish_input(objects::stdio::input(None))
+}
+
+/// Return an owned TextIO to the compiler's temporary scope before str(prompt).
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_input_select_stdout() -> *const objects::Object {
+    finish(
+        objects::stdio::select_input_output().map(ObjectOwner::into_raw),
+        std::ptr::null(),
+    )
+}
+
+/// # Safety
+/// The caller keeps the selected native stdout and converted string alive.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_input_finish(
+    output: *const objects::Object,
+    prompt: *const Str,
+) -> *const Str {
+    // SAFETY: both borrowed words have the native layouts declared above.
+    let (file, prompt) = unsafe {
+        (
+            ObjectOwner::acquire_word(output as usize),
+            StrOwner::acquire_word(prompt as usize),
+        )
+    };
+    finish_input(objects::stdio::input_with_output(file, prompt))
 }
 
 #[unsafe(no_mangle)]

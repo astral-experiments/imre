@@ -13,18 +13,24 @@ fn separator(ctx: &mut Context, name: &str, value: Option<Id>, default: &str) ->
     }
 }
 
-fn write(ctx: &mut Context, file: Id, value: Id) -> Result<()> {
+pub(super) fn write(ctx: &mut Context, file: Id, value: Id) -> Result<()> {
     // PyFile_WriteObject obtains the writer before invoking the value's __str__.
+    let before_writer = ctx.heap.temporary_mark();
     let writer = ctx.lookup_attr(file, "write")?;
     ctx.heap.keep(writer);
-    let string = text::construct(ctx, "str", &[value], &[])?;
-    ctx.call(writer, vec![string], Vec::new())?;
+    let before_string = ctx.heap.temporary_mark();
+    let result = text::construct(ctx, "str", &[value], &[])
+        .and_then(|string| ctx.call(writer, vec![string], Vec::new()));
+    // PyFile_WriteObject drops the rendered string, the writer, then the ignored result.
+    let result = ctx.release_with_result(before_string, result);
+    ctx.release_with_result(before_writer, result)?;
+    ctx.discard_temporaries(before_writer, None);
     Ok(())
 }
 
 pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [sep, end, file, flush] = bind("print", &[], kwargs, ["sep", "end", "file", "flush"])?;
-    let flush = ctx.optional_truth(flush, false)?;
+    let [sep, end, file, flush_arg] = bind("print", &[], kwargs, ["sep", "end", "file", "flush"])?;
+    let should_flush = ctx.optional_truth(flush_arg, false)?;
     let file = match file.filter(|&file| file != NONE) {
         Some(file) => file,
         None => match ctx.sys_binding("stdout")? {
@@ -44,9 +50,10 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         write(ctx, file, value)?;
     }
     write(ctx, file, end)?;
-    if flush {
-        let method = ctx.lookup_attr(file, "flush")?;
-        ctx.call(method, Vec::new(), Vec::new())?;
+    if should_flush {
+        let mark = ctx.heap.temporary_mark();
+        super::call_stream_method(ctx, file, "flush")?;
+        ctx.discard_temporaries(mark, None);
     }
     Ok(NONE)
 }
