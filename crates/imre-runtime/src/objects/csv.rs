@@ -55,9 +55,9 @@ impl Lines {
 }
 
 pub(crate) struct Dialect {
-    delimiter: char,
-    quote: Option<char>,
-    escape: Option<char>,
+    delimiter: u32,
+    quote: Option<u32>,
+    escape: Option<u32>,
     doublequote: bool,
     skip_space: bool,
     strict: bool,
@@ -66,9 +66,9 @@ pub(crate) struct Dialect {
 impl Dialect {
     pub(crate) fn new(delimiter: u32, quote: u32, escape: u32, flags: u32) -> Self {
         Self {
-            delimiter: char::from_u32(delimiter).unwrap(),
-            quote: char::from_u32(quote),
-            escape: char::from_u32(escape),
+            delimiter,
+            quote: (quote != u32::MAX).then_some(quote),
+            escape: (escape != u32::MAX).then_some(escape),
             doublequote: flags & 1 != 0,
             skip_space: flags & 2 != 0,
             strict: flags & 4 != 0,
@@ -82,12 +82,13 @@ impl Dialect {
             ("quotechar", self.quote),
         ];
         for (name, value) in chars {
-            if matches!(value, Some('\r' | '\n'))
-                || name != "delimiter" && self.skip_space && value == Some(' ')
+            let scalar = value.and_then(char::from_u32);
+            if matches!(scalar, Some('\r' | '\n'))
+                || name != "delimiter" && self.skip_space && scalar == Some(' ')
             {
                 return Err(Error::new(Kind::ValueError, format!("bad {name} value")));
             }
-            if value.is_some_and(|ch| terminator.contains(ch)) {
+            if scalar.is_some_and(|ch| terminator.contains(ch)) {
                 return Err(Error::new(
                     Kind::ValueError,
                     format!("bad {name} or lineterminator value"),
@@ -133,6 +134,18 @@ pub(crate) enum Field {
     Surrogates(Vec<u32>),
 }
 
+/// A strict quote error may contain code points that cannot be stored in a native string.
+pub(crate) enum LineError {
+    Native(Error),
+    ExpectedDelimiter(Vec<u32>),
+}
+
+impl From<Error> for LineError {
+    fn from(error: Error) -> Self {
+        Self::Native(error)
+    }
+}
+
 /// One logical record. Both native object representations consume the same parser.
 pub(crate) struct Row<F> {
     save_field: F,
@@ -160,7 +173,7 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
         dialect: &Dialect,
         line: impl Iterator<Item = u32>,
         limit: i64,
-    ) -> Result<bool> {
+    ) -> std::result::Result<bool, LineError> {
         self.limit = limit;
         for ch in line {
             self.token(dialect, Some(ch))?;
@@ -223,7 +236,11 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
     }
 
     /// None is the iterator's end-of-line marker, which need not be a newline.
-    fn token(&mut self, dialect: &Dialect, token: Option<u32>) -> Result<()> {
+    fn token(
+        &mut self,
+        dialect: &Dialect,
+        token: Option<u32>,
+    ) -> std::result::Result<(), LineError> {
         use State::*;
         let newline = token == Some(u32::from('\n')) || token == Some(u32::from('\r'));
         if self.state == Record {
@@ -248,31 +265,28 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
                 if newline {
                     self.save()?;
                     self.state = TrailingNewline;
-                } else if self.state == FieldStart && token == dialect.quote.map(u32::from) {
+                } else if self.state == FieldStart && token == dialect.quote {
                     self.quoted = true;
                     self.state = Quoted;
-                } else if self.state == AfterQuote && token == dialect.quote.map(u32::from) {
+                } else if self.state == AfterQuote && token == dialect.quote {
                     self.add(ch)?;
                     self.state = Quoted;
-                } else if self.state != AfterQuote && token == dialect.escape.map(u32::from) {
+                } else if self.state != AfterQuote && token == dialect.escape {
                     self.state = EscapeField;
                 } else if self.state == FieldStart
                     && dialect.skip_space
                     && token == Some(u32::from(' '))
                 {
                     // Leading delimiter spaces are skipped too.
-                } else if token == Some(u32::from(dialect.delimiter)) {
+                } else if token == Some(dialect.delimiter) {
                     self.save()?;
                     self.state = FieldStart;
                 } else if self.state == AfterQuote && dialect.strict {
-                    return Err(Error::new(
-                        Kind::CsvError,
-                        format!(
-                            "'{}' expected after '{}'",
-                            dialect.delimiter,
-                            dialect.quote.unwrap()
-                        ),
-                    ));
+                    let mut message = vec![u32::from('\''), dialect.delimiter];
+                    message.extend("' expected after '".chars().map(u32::from));
+                    message.push(dialect.quote.expect("after a closing quote"));
+                    message.push(u32::from('\''));
+                    return Err(LineError::ExpectedDelimiter(message));
                 } else {
                     self.add(ch)?;
                     if self.state != AfterEscapeNewline {
@@ -282,9 +296,9 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
             }
             Quoted => {
                 if let Some(ch) = token {
-                    if Some(ch) == dialect.escape.map(u32::from) {
+                    if Some(ch) == dialect.escape {
                         self.state = EscapeQuoted;
-                    } else if Some(ch) == dialect.quote.map(u32::from) {
+                    } else if Some(ch) == dialect.quote {
                         self.state = if dialect.doublequote {
                             AfterQuote
                         } else {
@@ -312,7 +326,7 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
                     return Err(Error::new(
                         Kind::CsvError,
                         "new-line character seen in unquoted field - do you need to open the file with newline=''?",
-                    ));
+                    ).into());
                 }
             }
             Record => unreachable!(),
@@ -348,7 +362,22 @@ impl Reader {
                 break;
             };
             self.line_num += 1;
-            if row.line(&self.dialect, line.chars().map(u32::from), 131_072)? {
+            let complete = row
+                .line(&self.dialect, line.chars().map(u32::from), 131_072)
+                .map_err(|err| match err {
+                    LineError::Native(err) => err,
+                    LineError::ExpectedDelimiter(points) => {
+                        let message: String = points
+                            .into_iter()
+                            .map(|point| {
+                                char::from_u32(point)
+                                    .expect("typed CSV dialect uses scalar characters")
+                            })
+                            .collect();
+                        Error::new(Kind::CsvError, message)
+                    }
+                })?;
+            if complete {
                 break;
             }
         }
