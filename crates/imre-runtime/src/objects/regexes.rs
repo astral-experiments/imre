@@ -221,7 +221,7 @@ impl Pattern {
     }
 
     /// Hide the matcher's synthetic final-newline group and restore Python's visible endpoint.
-    fn visible_spans(&mut self, text_len: usize) -> Spans {
+    fn visible_spans(&mut self, text_len: usize, char_start: Option<usize>) -> Spans {
         let mut visible = self.slots.len();
         if let Some(slot) = self.final_newline_slot {
             if let Some(start) = self.slots[slot] {
@@ -229,7 +229,7 @@ impl Pattern {
             }
             visible = slot;
         }
-        Spans::new(&self.slots[..visible], text_len)
+        Spans::new(&self.slots[..visible], text_len, char_start)
     }
 
     fn search(&mut self, text: &str) -> bool {
@@ -286,23 +286,41 @@ enum Spans {
         slots: [u16; 10],
         ascii_prefix: Cell<u16>,
     },
+    Scanned {
+        len: u8,
+        slots: [u16; 10],
+        char_start: u16,
+    },
+    // The final word holds the optional character position of group zero.
     Long(Box<[Option<NonMaxUsize>]>),
 }
 
 impl Spans {
-    fn new(slots: &[Option<NonMaxUsize>], text_len: usize) -> Self {
+    fn new(slots: &[Option<NonMaxUsize>], text_len: usize, char_start: Option<usize>) -> Self {
         if slots.len() <= 10 && text_len < usize::from(u16::MAX) {
             let mut short = [u16::MAX; 10];
             for (dst, slot) in short.iter_mut().zip(slots) {
                 *dst = slot.map_or(u16::MAX, |s| s.get() as u16);
             }
-            Self::Short {
-                len: slots.len() as u8,
-                slots: short,
-                ascii_prefix: Cell::new(0),
+            let len = slots.len() as u8;
+            if let Some(start) = char_start {
+                Self::Scanned {
+                    len,
+                    slots: short,
+                    char_start: start as u16,
+                }
+            } else {
+                Self::Short {
+                    len,
+                    slots: short,
+                    ascii_prefix: Cell::new(0),
+                }
             }
         } else {
-            Self::Long(slots.into())
+            let mut snapshot = Vec::with_capacity(slots.len() + 1);
+            snapshot.extend_from_slice(slots);
+            snapshot.push(char_start.and_then(NonMaxUsize::new));
+            Self::Long(snapshot.into_boxed_slice())
         }
     }
 
@@ -310,7 +328,7 @@ impl Spans {
     fn get(&self, index: usize) -> Option<Option<(usize, usize)>> {
         let at = index.checked_mul(2)?;
         match self {
-            Self::Short { len, slots, .. } => {
+            Self::Short { len, slots, .. } | Self::Scanned { len, slots, .. } => {
                 if at >= usize::from(*len) {
                     return None;
                 }
@@ -322,13 +340,14 @@ impl Spans {
             Self::Long(slots) => Some(
                 slots
                     .get(at)?
-                    .zip(slots[at + 1])
+                    .zip(*slots.get(at + 1)?)
                     .map(|(a, b)| (a.get(), b.get())),
             ),
         }
     }
 
-    /// Successive bounds can count the ASCII portion of a short input once.
+    /// Convert engine offsets from a forward scanner's character position.
+    /// A standalone short match tracks the ASCII prefix across repeated bounds.
     fn char_offset(&self, text: &str, byte: usize) -> usize {
         if let Self::Short { ascii_prefix, .. } = self {
             let seen = ascii_prefix.get();
@@ -342,6 +361,18 @@ impl Spans {
                 }
                 ascii_prefix.set(u16::MAX);
             }
+        }
+        let char_start = match self {
+            Self::Scanned { char_start, .. } => Some(usize::from(*char_start)),
+            Self::Long(slots) => slots.last().copied().flatten().map(NonMaxUsize::get),
+            Self::Short { .. } => None,
+        };
+        if let Some(index) = char_start {
+            let (start, _) = self.get(0).flatten().expect("a match owns group zero");
+            if byte >= start {
+                return index + text[start..byte].chars().count();
+            }
+            return index - text[byte..start].chars().count();
         }
         text[..byte].chars().count()
     }
@@ -861,7 +892,7 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
             if !found {
                 return ptr::null();
             }
-            let spans = compiled.visible_spans((&*text).len());
+            let spans = compiled.visible_spans((&*text).len(), None);
             handle(Storage::RegexMatch(Match {
                 pattern: crate::ObjectOwner::acquire_word(pattern as usize),
                 text: crate::StrOwner::acquire_word(text as usize),
@@ -877,6 +908,7 @@ pub(super) struct FindIter {
     pattern: crate::ObjectOwner,
     text: StrOwner,
     offset: Option<usize>,
+    char_offset: usize,
 }
 
 impl FindIter {
@@ -894,10 +926,12 @@ impl FindIter {
                     &input,
                     &mut compiled.slots,
                 )?;
-                let spans = compiled.visible_spans(self.text.len());
                 let start = compiled.slots[0].unwrap().get();
+                let char_start = self.char_offset + self.text[offset..start].chars().count();
+                let spans = compiled.visible_spans(self.text.len(), Some(char_start));
                 let end = compiled.slots[1].unwrap().get();
                 debug_assert!(start < end);
+                self.char_offset = char_start + self.text[start..end].chars().count();
                 self.offset = (end < self.text.len()).then_some(end);
                 let found = handle(Storage::RegexMatch(Match {
                     pattern: crate::ObjectOwner::clone(&self.pattern),
@@ -929,6 +963,7 @@ pub unsafe extern "C" fn imre_regex_finditer(
         // SAFETY: the original text is live through this acquisition.
         text: unsafe { crate::StrOwner::acquire_word(text as usize) },
         offset: Some(0),
+        char_offset: 0,
     }))
 }
 
