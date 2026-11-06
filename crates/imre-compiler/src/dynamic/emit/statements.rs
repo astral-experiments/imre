@@ -876,7 +876,7 @@ impl Function<'_, '_> {
                 if lock_only {
                     signature["thread_worker_locks"] = json!(names);
                 }
-            } else if let Some(names) = worker::captured_locks(stmts, params) {
+            } else if let Some(names) = imre_ast::captured_thread_locks(stmts, params) {
                 signature["thread_captured_locks"] = json!(names);
             } else if let Some(field) = worker::bound_lock_field(stmts, params) {
                 signature["thread_bound_lock_field"] = json!(field);

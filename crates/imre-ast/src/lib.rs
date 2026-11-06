@@ -129,6 +129,41 @@ pub fn direct_method<'a>(
     .then_some(field)
 }
 
+/// Certify a final lock acquire with at most one unconditional release before it.
+/// No cell can be read after a potentially blocking operation.
+pub fn captured_thread_locks<'a>(
+    stmts: &'a [ast::Stmt],
+    params: &ast::Parameters,
+) -> Option<Vec<&'a str>> {
+    fn receiver<'a>(stmt: &'a ast::Stmt, method: &str) -> Option<&'a str> {
+        let ast::Stmt::Expr(expr) = stmt else {
+            return None;
+        };
+        let ast::Expr::Call(call) = &*expr.value else {
+            return None;
+        };
+        let ast::Expr::Attribute(attr) = &*call.func else {
+            return None;
+        };
+        let ast::Expr::Name(name) = &*attr.value else {
+            return None;
+        };
+        (attr.attr.as_str() == method && call.arguments.is_empty()).then(|| name.id.as_str())
+    }
+    if params.iter().next().is_some() {
+        return None;
+    }
+    match stmts {
+        [last] => Some(vec![receiver(last, "acquire")?]),
+        [first, last] => {
+            let first = receiver(first, "release")?;
+            let last = receiver(last, "acquire")?;
+            (first != last).then(|| vec![first, last])
+        }
+        _ => None,
+    }
+}
+
 /// Python locates attribute loads and optimized method calls at the attribute name.
 pub fn expression_position(
     expr: &ast::Expr,
