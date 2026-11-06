@@ -23,6 +23,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fstrings"
 
 # Literal whitespace is data, while expression/code indentation remains checked.
 ACCEPTED = {
+    "continuation_padding": 'def message() -> str:\n    \t# This comment does not start a statement.\n    return (\n\tf"{4}"\n    )\nprint(message())\n',
+    "blank_line_padding": 'if True:\n\t\f\n    print(f"{4}")\n',
     "shadowed_ascii": 'def ascii(value: str) -> str:\n    return "shadow: " + value\nprint(ascii("é"))\nprint(f"{\'é\'!a}")\n',
     "ascii_conversion": 'print(f"{1!a}")\n',
     "repr_conversion": 'print(f"{1!r}:{True!r}:{None!r}")\n',
