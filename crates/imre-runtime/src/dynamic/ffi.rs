@@ -27,12 +27,11 @@ impl Context {
         scope: Id,
     ) -> Result<Id> {
         let args = self.items(arguments)?;
-        let kwargs = if keywords == NONE {
-            Vec::new()
+        let result = if keywords == NONE {
+            self.call_in_scope(scope, callable, args, Vec::new())?
         } else {
-            self.keyword_args(keywords)?
+            self.call_with_keyword_dict(scope, callable, args, keywords)?
         };
-        let result = self.call_in_scope(scope, callable, args, kwargs)?;
         if !self
             .heap
             .discard_scalar_call(mark, result, arguments, callable)
