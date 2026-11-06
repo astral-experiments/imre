@@ -1173,13 +1173,13 @@ pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.unpack_sequence(value, 2, None, true).map(|sequence| {
+    let result = ctx.unpack_sequence(value, 2, None, true);
+    if let Ok(sequence) = result {
         let (Value::Tuple(values) | Value::List(values)) = ctx.heap.get(sequence) else {
             unreachable!("validated unpacking sequence")
         };
         items.copy_from_slice(values);
-        sequence
-    });
+    }
     finish(ctx, result)
 }
 
