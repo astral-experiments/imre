@@ -8066,6 +8066,9 @@ impl Context {
                         keywords,
                     ));
                 }
+                // Defaults belong to the function. Validate the arguments supplied by the caller
+                // and report binding errors first, including missing keyword-only arguments.
+                let supplied_types = self.check_supplied_types(local, &sig["types"], &name);
                 let mut missing = Vec::new();
                 for (index, n) in pos.iter().enumerate() {
                     if !self.scope_data(local).names.contains_key(n) {
@@ -8107,17 +8110,7 @@ impl Context {
                 if !missing.is_empty() {
                     return Err(missing_arguments_error(&name, "keyword-only", &missing));
                 }
-                if let Some(types) = sig["types"].as_object() {
-                    for (param, expected) in types {
-                        if let Some(&id) = self.scope_data(local).names.get(param) {
-                            self.require_scalar(
-                                id,
-                                expected.as_str().unwrap_or_default(),
-                                &format!("{name} argument {param:?}"),
-                            )?;
-                        }
-                    }
-                }
+                supplied_types?;
                 let Value::Scope(frame) = self.heap.get_mut(local) else {
                     unreachable!()
                 };
@@ -8176,6 +8169,22 @@ impl Context {
             }
         }
         self.call(callable, args, kwargs)
+    }
+
+    /// Check scalar annotations on values that were explicitly bound by this call.
+    fn check_supplied_types(&self, local: Id, types: &serde_json::Value, name: &str) -> Result<()> {
+        if let Some(types) = types.as_object() {
+            for (param, expected) in types {
+                if let Some(&id) = self.scope_data(local).names.get(param) {
+                    self.require_scalar(
+                        id,
+                        expected.as_str().unwrap_or_default(),
+                        &format!("{name} argument {param:?}"),
+                    )?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn require_scalar(&self, value: Id, expected: &str, context: &str) -> Result<()> {

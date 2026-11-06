@@ -1219,6 +1219,7 @@ pub(crate) enum Builtin {
         minimum: bool,
     },
     IntBitLength,
+    IntHash,
     FloatIsInteger,
     FloatAcos,
     FloatAsin,

@@ -1,4 +1,4 @@
-//! Bounded pure integer callees whose comparison result can stay unboxed.
+//! Bounded integer expression graphs for comparisons and adjacent assignments.
 
 mod assignments;
 
@@ -35,10 +35,9 @@ struct Node {
     interval: Interval,
 }
 
-/// Every intermediate fits signed i64 after all incoming integer tags pass.
-/// These values never escape as Python integers: only the final Bool is exposed.
-/// A difference of small inputs can use the full i64 range except MIN, allowing
-/// its absolute value without allocating the otherwise necessary heap integer.
+/// A comparison can use the full signed i64 interval, including the difference
+/// of two tagged inputs. Assignment regions additionally prove that each node
+/// fits in the tagged range before they publish the results as Python integers.
 #[derive(Clone)]
 pub(super) struct Summary {
     nodes: Vec<Node>,

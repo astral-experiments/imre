@@ -7684,6 +7684,7 @@ impl Emitter<'_, '_> {
                 _ => unreachable!("int conversion was checked"),
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
+            Builtin::IntHash => self.call("imre_int_hash", Type::Int, &[&args[0].value]),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::Sumprod if returns == Type::Int => {
                 self.output.local_helper(
@@ -10576,6 +10577,7 @@ declare void @imre_float_box_release(i64)
 declare ptr @imre_float_str(double)
 declare void @imre_print_float(double)
 declare i64 @imre_int_bit_length(i64)
+declare i64 @imre_int_hash(i64)
 declare double @imre_int_float(i64)
 declare i64 @imre_sumprod_int_lists(ptr, ptr)
 declare double @imre_sumprod_float_lists(ptr, ptr)

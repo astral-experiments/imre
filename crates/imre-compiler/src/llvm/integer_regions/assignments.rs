@@ -122,9 +122,18 @@ impl Assignments {
 impl Emitter<'_, '_> {
     /// Evaluate adjacent assignments in native registers when all input tags and ranges match.
     pub(in crate::llvm) fn integer_assignments(&mut self, statements: &[Statement]) -> usize {
-        let Some(group) = Assignments::analyze(statements, |slot| self.owns_slot(slot)) else {
+        let Some(group) = Assignments::analyze(statements, |slot| {
+            self.locals[slot] == Type::Int && self.owns_slot(slot)
+        }) else {
             return 0;
         };
+        if group
+            .inputs
+            .iter()
+            .any(|input| self.locals[input.slot] != Type::Int)
+        {
+            return 0;
+        }
         let mut parameters = Vec::with_capacity(group.inputs.len());
         let mut tags: Option<String> = None;
         let mut ranges: Option<String> = None;
