@@ -130,3 +130,9 @@ logging.addLevelName(0x10ffff, "LAST")
 logging.addLevelName(1 << 100, "BIG")
 from_level("LAST")
 from_level("BIG")
+
+# Exercise long ASCII runs, deletion, and a late expanding replacement.
+text = "aZb\x00\x7f" * 256
+print(text.translate({97: None, 0: None, 127: None}) == "Zb" * 256)
+print(("a" * 1024).translate({97: ""}) == "")
+print((("ab" * 256) + "Z").translate({97: "_", 90: "🛠"}) == "_b" * 256 + "🛠")

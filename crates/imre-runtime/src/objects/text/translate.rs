@@ -67,13 +67,58 @@ fn replacement(table: &Mapping, ch: char) -> Result<Piece<&str>> {
     }
 }
 
+/// Write the one-byte ASCII replacements directly into the reserved output.
+/// Return the remaining input when a replacement needs the general UTF-8 writer.
+fn ascii_prefix<'s, 'a, E: From<Error>>(
+    source: &'s str,
+    output: &mut Str,
+    lookup: &impl Fn(char) -> std::result::Result<Piece<&'a str>, E>,
+) -> std::result::Result<&'s str, E> {
+    const UNSEEN: u8 = u8::MAX;
+    const DELETE: u8 = 128;
+    let mut table = [UNSEEN; 256];
+    let mut written = 0;
+    let mut consumed = 0;
+    // SAFETY: the caller reserves the whole ASCII source in an empty heap string.
+    // Every included output byte is initialized below with a single ASCII replacement.
+    let bytes = unsafe { output.spare_capacity_mut() };
+    for byte in source.bytes() {
+        let slot = &mut table[usize::from(byte)];
+        if *slot == UNSEEN {
+            *slot = match lookup(char::from(byte))? {
+                Piece::Delete | Piece::Text("") => DELETE,
+                Piece::Character(ch) if ch.is_ascii() => ch as u8,
+                Piece::Text(text) if text.len() == 1 => text.as_bytes()[0],
+                _ => break,
+            };
+        }
+        if *slot != DELETE {
+            bytes[written].write(*slot);
+            written += 1;
+        }
+        consumed += 1;
+    }
+    // SAFETY: the initialized prefix consists entirely of ASCII bytes.
+    unsafe { output.set_len(written) };
+    Ok(&source[consumed..])
+}
+
 /// Borrowed, callback-free lookups may reuse ASCII replacements even in mixed Unicode text.
 pub(crate) fn borrowed_text<'a, E: From<Error>>(
     source: &str,
     lookup: impl Fn(char) -> std::result::Result<Piece<&'a str>, E>,
 ) -> std::result::Result<Str, E> {
+    let mut output = Str::try_with_capacity(source.len()).map_err(|_| Error::memory_error())?;
+    let source = if source.len() >= 256 && source.is_ascii() {
+        ascii_prefix(source, &mut output, &lookup)?
+    } else {
+        source
+    };
+    if source.is_empty() {
+        return Ok(output);
+    }
     let mut ascii = [None; 128];
-    write_translation(source, |ch| {
+    write_translation(source, output, |ch| {
         if !ch.is_ascii() {
             return lookup(ch);
         }
@@ -93,7 +138,8 @@ pub(crate) fn text<T: AsRef<str>, E: From<Error>>(
     let mut fast = source.is_ascii();
     let mut ascii = [None; 128];
     let mut deleting = false;
-    write_translation(source, |ch| {
+    let output = Str::try_with_capacity(source.len()).map_err(|_| Error::memory_error())?;
+    write_translation(source, output, |ch| {
         if fast {
             // CPython caches one-byte ASCII replacements and deletions. A longer
             // replacement switches paths and queries this ordinal again.
@@ -131,9 +177,9 @@ pub(crate) fn text<T: AsRef<str>, E: From<Error>>(
 /// Append each replacement while keeping output growth fallible.
 fn write_translation<T: AsRef<str>, E: From<Error>>(
     source: &str,
+    mut result: Str,
     mut lookup: impl FnMut(char) -> std::result::Result<Piece<T>, E>,
 ) -> std::result::Result<Str, E> {
-    let mut result = Str::try_with_capacity(source.len()).map_err(|_| Error::memory_error())?;
     for ch in source.chars() {
         let piece = lookup(ch)?;
         let mut utf8 = [0; 4];
