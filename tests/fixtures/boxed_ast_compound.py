@@ -70,6 +70,23 @@ def outer[T](value: T):
 lookups = ({k: v for k, v in pairs}, {name for name in names})
 render = lambda val: 'prefix ' f'{val = !s:>{width}}' ' suffix'
 """
+    patterns = ast.parse("""\
+match café:
+    case {"x": [first, *tail], **rest} if first:
+        pass
+    case Space.Point(-2 | 3, y=None, z=True) as point:
+        pass
+    case (Color.red, False, *_) | [Color.blue, True, *_]:
+        pass
+    case {}:
+        pass
+    case _:
+        pass
+""")
+    print(record(patterns))
+    assert all(isinstance(case, ast.match_case) for case in patterns.body[0].cases)
+    assert all(isinstance(case.pattern, ast.pattern) for case in patterns.body[0].cases)
+
     tree = ast.parse(source)
     print(record(tree))
     assert ast.parse("a and b", mode="eval").body.op is ast.parse("c and d", mode="eval").body.op
