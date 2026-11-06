@@ -2281,10 +2281,14 @@ impl Context {
         }
     }
 
-    /// Release discarded operands and root their result before any weak callbacks or finalizers run.
-    pub(super) fn discard_temporaries(&mut self, mark: usize, result: Option<Id>) {
+    /// Root the surviving results before an operand release runs weak callbacks or finalizers.
+    pub(super) fn discard_temporaries(
+        &mut self,
+        mark: usize,
+        results: impl IntoIterator<Item = Id>,
+    ) {
         let collect = self.release_operand_roots(mark);
-        if let Some(result) = result {
+        for result in results {
             self.heap.keep(result);
         }
         if collect {

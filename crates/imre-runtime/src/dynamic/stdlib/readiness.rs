@@ -583,7 +583,7 @@ mod tests {
         }));
         heap.alloc(Value::Selector(Rc::clone(&selector)));
         heap.release_temporaries_since(mark);
-        let unowned = || heap.generator_loop_is_unowned(source, iterator, std::iter::empty());
+        let mut unowned = || heap.generator_loop_is_unowned(source, iterator, std::iter::empty());
 
         assert!(unowned());
         let mut borrowed = selector.borrow_mut();

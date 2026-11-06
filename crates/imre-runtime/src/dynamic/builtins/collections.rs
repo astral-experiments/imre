@@ -1492,7 +1492,11 @@ pub(super) fn builtin_slot(
     }
     let storage = ctx.scalar_value(object);
     let set_op = set_operator(method);
-    if matches!(method, "__add__" | "__iadd__" | "__contains__" | "__pow__") || set_op.is_some() {
+    let comparison = super::super::operators::comparison_op(method);
+    if matches!(method, "__add__" | "__iadd__" | "__contains__" | "__pow__")
+        || set_op.is_some()
+        || comparison.is_some()
+    {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1532,6 +1536,13 @@ pub(super) fn builtin_slot(
             return Ok(boolean(ctx.contains(*value, object)?));
         }
         if owner == "int" {
+            if let Some(op) = comparison {
+                if !ctx.builtin_slot_accepts(*value, "int") {
+                    return Ok(NOT_IMPLEMENTED);
+                }
+                // Compare the two integer payloads without calling subclass overrides.
+                return ctx.binary(op, storage, ctx.scalar_value(*value));
+            }
             return integer::add(ctx, storage, *value);
         }
         if method == "__add__" {

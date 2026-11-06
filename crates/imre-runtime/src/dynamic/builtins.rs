@@ -597,11 +597,16 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
         "int" => &[
             "__abs__",
             "__bool__",
+            "__eq__",
             "__float__",
+            "__ge__",
             "__getnewargs__",
+            "__gt__",
             "__hash__",
             "__int__",
+            "__le__",
             "__lt__",
+            "__ne__",
             "__pow__",
             "__round__",
             "__trunc__",
@@ -1897,32 +1902,6 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
-            "object" | "int" if method == "__lt__" => {
-                let Some((&receiver, rest)) = args.split_first() else {
-                    return Err(type_error(format!(
-                        "descriptor '__lt__' of '{owner}' object needs an argument"
-                    )));
-                };
-                if owner == "int" && !ctx.builtin_slot_accepts(receiver, "int") {
-                    return Err(type_error(format!(
-                        "descriptor '__lt__' requires a 'int' object but received a '{}'",
-                        ctx.type_name(receiver)
-                    )));
-                }
-                positional(name, kwargs)?;
-                let [other] = rest else {
-                    return Err(type_error(format!(
-                        "expected 1 argument, got {}",
-                        rest.len()
-                    )));
-                };
-                if owner == "object" || !ctx.builtin_slot_accepts(*other, "int") {
-                    return Ok(NOT_IMPLEMENTED);
-                }
-                Ok(boolean(
-                    ctx.as_int(receiver)?.cmp(&ctx.as_int(*other)?).is_lt(),
-                ))
-            }
             "super" if method == "__new__" => ctx.super_new(args, kwargs),
             "super" if method == "__init__" => ctx.super_init(args, kwargs),
             "int" | "float" | "str" | "bytes" if method == "__new__" => {
@@ -2175,7 +2154,7 @@ pub(super) fn call(
                 if matches!(
                     method,
                     "__add__" | "__bool__" | "__hash__" | "__index__" | "__pow__"
-                ) =>
+                ) || super::operators::comparison_op(method).is_some() =>
             {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }

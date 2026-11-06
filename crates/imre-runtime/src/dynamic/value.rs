@@ -2824,6 +2824,9 @@ pub(super) struct Heap {
     traces: Vec<Cell<usize>>,
     // Marking and sweeping consult this compact table before reading the much larger slots.
     slot_shapes: Vec<SlotShape>,
+    /// Generator allocation epoch when each ordinary container's directly stored edges were checked.
+    /// A mutable borrow invalidates the observation before returning access to the slot.
+    container_epochs: Vec<u32>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
@@ -2867,6 +2870,10 @@ pub(super) struct Heap {
     finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 64],
     // A recently allocated iterator may be the only holder of an unreferenced generator.
     last_generator_iterator: Option<Id>,
+    /// Advances on generator allocation so older unchanged containers can be ruled out as owners.
+    generator_epoch: u32,
+    latest_generator: Option<Id>,
+    latest_generator_loop: Option<Id>,
     // Weak handles in direct-base attachment order, pruned before recycling class slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
@@ -3035,6 +3042,7 @@ impl Heap {
         }
         let mut heap = Self {
             traces: vec![Cell::new(END); slots.len()],
+            container_epochs: Vec::new(),
             slot_shapes: slots
                 .iter()
                 .map(|slot| {
@@ -3077,6 +3085,9 @@ impl Heap {
             finalizer_bindings: Cell::new([None; 2]),
             finalizer_operands: std::array::from_fn(|_| Cell::new(None)),
             last_generator_iterator: None,
+            generator_epoch: 0,
+            latest_generator: None,
+            latest_generator_loop: None,
             classes: Vec::new(),
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
@@ -3408,6 +3419,20 @@ impl Heap {
         self.alloc_slot_with_trace(value, true)
     }
 
+    /// Record the birth of a generator before existing containers can refer to its slot.
+    pub(super) fn record_generator_birth(&mut self, generator: Id) {
+        if self.container_epochs.is_empty() {
+            return;
+        }
+        self.generator_epoch += 1;
+        if self.generator_epoch == u32::MAX {
+            self.container_epochs.fill(u32::MAX);
+            self.generator_epoch = 1;
+        }
+        self.latest_generator = Some(generator);
+        self.latest_generator_loop = None;
+    }
+
     fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
         let has_gc_header = value.has_gc_header(self);
         let shape = SlotShape::occupied(&value);
@@ -3461,6 +3486,7 @@ impl Heap {
             && matches!(self.get(*source), Value::Generator { .. })
         {
             self.last_generator_iterator = Some(id);
+            self.latest_generator_loop = (self.latest_generator == Some(*source)).then_some(id);
         }
 
         if trace {
@@ -3620,11 +3646,21 @@ impl Heap {
             .ok()?;
         let source = source.value.as_ref()?;
         let target = target.value.as_mut()?;
+        if let Some(epoch) = self.container_epochs.get_mut(target_id)
+            && *epoch != u32::MAX
+        {
+            *epoch = u32::MAX;
+        }
         Some((source, target))
     }
 
     fn prepare_slot_write(&mut self, index: usize) {
         if !self.slot_shapes[index].is_scalar_leaf() {
+            if let Some(epoch) = self.container_epochs.get_mut(index)
+                && *epoch != u32::MAX
+            {
+                *epoch = u32::MAX;
+            }
             return;
         }
         if index >= FIRST_DYNAMIC_SLOT && self.slots[index].gc_prev.get() == UNMARKED {
@@ -3727,6 +3763,11 @@ impl Heap {
     /// Insert a root below newer temporaries so they can be released before it.
     pub(super) fn keep_at(&mut self, mark: usize, value: Id) {
         self.frames.last_mut().unwrap().live.insert(mark, value);
+    }
+
+    /// Access a reserved operand slot below the current expression's temporaries.
+    pub(super) fn temporary_root(&mut self, index: usize) -> &mut Id {
+        &mut self.frames.last_mut().unwrap().live[index]
     }
 
     /// Mark temporary roots that must survive the next iteration of a native loop.
@@ -4583,7 +4624,7 @@ impl Heap {
 
     /// Prove that only the loop iterator can hold the generator and nothing holds the iterator.
     pub(super) fn generator_loop_is_unowned(
-        &self,
+        &mut self,
         generator: Id,
         iterator: Id,
         globals: impl Iterator<Item = Id>,
@@ -4593,15 +4634,53 @@ impl Heap {
             found: false,
         };
         self.mark_roots(globals, &mut incoming);
+        if incoming.found {
+            return false;
+        }
+        // Most programs never need this ownership census. Grow the cache only at a census.
+        let new_slots = self.slots.len() - self.container_epochs.len();
+        if self.container_epochs.try_reserve(new_slots).is_err() {
+            return false;
+        }
+        self.container_epochs.resize(self.slots.len(), u32::MAX);
+        // The matching loop was allocated after its generator. Neither handle can occur in
+        // a directly stored edge that has been unchanged since an earlier generator allocation.
+        let born = if self.latest_generator == Some(generator)
+            && self.latest_generator_loop == Some(iterator)
+        {
+            self.generator_epoch
+        } else {
+            0
+        };
         for (id, &shape) in self.slot_shapes.iter().enumerate() {
             if incoming.found {
                 return false;
             }
-            if shape == SlotShape::Other
-                && id != iterator as usize
-                && self.get(id as Id).try_children(&mut incoming).is_err()
-            {
+            let epoch = self.container_epochs[id];
+            if shape != SlotShape::Other || id == iterator as usize || epoch < born {
+                continue;
+            }
+            let value = self.get(id as Id);
+            if value.try_children(&mut incoming).is_err() {
                 return false;
+            }
+            // Only children stored directly in the slot are stable between mutable borrows.
+            if epoch == u32::MAX
+                && matches!(
+                    value,
+                    Value::List(_)
+                        | Value::Tuple(_)
+                        | Value::Dict(_)
+                        | Value::Instance {
+                            property: None,
+                            weak_reference: None,
+                            itertools: None,
+                            memory_stream: None,
+                            ..
+                        }
+                )
+            {
+                self.container_epochs[id] = self.generator_epoch;
             }
         }
         !incoming.found
@@ -5561,6 +5640,17 @@ impl Heap {
                 }
                 // Only compound values can own a recorded Python hash.
                 if !shape.is_scalar_leaf() {
+                    if let Some(epoch) = self.container_epochs.get_mut(id)
+                        && *epoch != u32::MAX
+                    {
+                        *epoch = u32::MAX;
+                    }
+                    if self.latest_generator == Some(id as Id) {
+                        self.latest_generator = None;
+                        self.latest_generator_loop = None;
+                    } else if self.latest_generator_loop == Some(id as Id) {
+                        self.latest_generator_loop = None;
+                    }
                     self.immutable_hashes.remove(&(id as Id));
                 }
                 let slot = &mut self.slots[id];
@@ -5591,6 +5681,59 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mutable_container_access_invalidates_an_older_generator_owner_check() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let container = heap.alloc(Value::List(Vec::new()));
+        let new_loop = |heap: &mut Heap| {
+            let generator = heap.alloc(Value::Generator {
+                owner: FrameOwner::Module(NONE),
+                frame: None,
+                name: NONE,
+                qualname: NONE,
+                lineno: 0,
+                code: NONE,
+                scope: NONE,
+                iterators: Vec::new(),
+                protected: Vec::new(),
+                offset: Some(0),
+                running: false,
+            });
+            heap.record_generator_birth(generator);
+            let iterator = heap.alloc(Value::LoopIterator {
+                source: generator,
+                peeked: None,
+            });
+            (generator, iterator)
+        };
+        let (first, first_iterator) = new_loop(&mut heap);
+        heap.release_temporaries_since(mark);
+        assert!(heap.generator_loop_is_unowned(first, first_iterator, std::iter::empty()));
+        let (second, second_iterator) = new_loop(&mut heap);
+        heap.release_temporaries_since(mark);
+        assert!(heap.generator_loop_is_unowned(second, second_iterator, std::iter::empty()));
+        assert_eq!(heap.latest_generator_loop, Some(second_iterator));
+        assert!(heap.container_epochs[container as usize] < heap.generator_epoch);
+        let (_, Value::List(items)) = heap.source_and_target(first, container).unwrap() else {
+            unreachable!();
+        };
+        items.push(second_iterator);
+        assert!(!heap.generator_loop_is_unowned(second, second_iterator, std::iter::empty()));
+        let Value::List(items) = heap.get_mut(container) else {
+            unreachable!()
+        };
+        items.clear();
+        assert!(heap.generator_loop_is_unowned(second, second_iterator, std::iter::empty()));
+        let (third, third_iterator) = new_loop(&mut heap);
+        heap.release_temporaries_since(mark);
+        let Value::List(items) = heap.get_mut(container) else {
+            unreachable!()
+        };
+        items.push(third);
+        assert!(!heap.generator_loop_is_unowned(third, third_iterator, std::iter::empty()));
+    }
 
     #[test]
     fn small_integer_identity_survives_collection() {
