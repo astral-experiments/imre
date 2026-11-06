@@ -398,8 +398,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     .replace("_get_supported_file_loaders()", "_file_loader_defaults(location)");
                 [
                     include_str!("../../stdlib/importlib/source_loader.py"),
-                    section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
-                    section("def _unpack_uint32(", "def _unpack_uint16("),
+                    section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _unpack_uint16("),
                     section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
                     section("def _get_cached(", "def _calc_mode("),
                     section("def _classify_pyc(", "def _validate_timestamp_pyc("),

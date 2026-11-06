@@ -258,7 +258,16 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "heapq.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/heapq/upstream/Lib/heapq.py"),
         )),
-        "importlib" => bundled_source!("importlib/__init__.py"),
+        "importlib" => Some((
+            "importlib/__init__.py",
+            concat!(
+                include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/__init__.py"
+                ),
+                "\n",
+                include_str!("../stdlib/importlib/native_specs.py"),
+            ),
+        )),
         "os" => bundled_source!("os.py"),
         "genericpath" => bundled_source!("genericpath.py"),
         "posixpath" => bundled_source!("posixpath.py"),
@@ -1012,6 +1021,8 @@ pub(crate) enum Intrinsic {
     UnicodeNormalize {
         check: bool,
     },
+    /// Available in an object program, without requesting one when the export is used.
+    ObjectOnlyExport(&'static str),
     ObjectRuntimeExport(&'static str),
     /// Bind the object provider when this export is used, after checking typed calls.
     ScopedObjectExport(&'static str),
@@ -1586,6 +1597,7 @@ impl IntrinsicModule {
             (Self::Importlib, "invalidate_caches") => {
                 Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
             }
+            (Self::Importlib, "reload") => Intrinsic::ObjectOnlyExport("importlib.reload"),
             (Self::ImportlibLoaderAbc, "Loader") => {
                 Intrinsic::ObjectRuntimeExport("importlib._abc.Loader")
             }

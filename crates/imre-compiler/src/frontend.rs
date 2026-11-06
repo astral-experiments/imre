@@ -6829,7 +6829,7 @@ impl<'a> Checker<'a> {
                 Intrinsic::Chdir => {
                     return Err(self.scoped_builtin_error("posix.chdir", expression));
                 }
-                Intrinsic::TracebackFormatter(name) => {
+                Intrinsic::TracebackFormatter(name) | Intrinsic::ObjectOnlyExport(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
                 // Calls and specialized class attributes have already been handled.
@@ -9864,7 +9864,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
-            Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
+            Some(Binding::Intrinsic(
+                Intrinsic::TracebackFormatter(name) | Intrinsic::ObjectOnlyExport(name),
+            )) => {
                 return Err(self.object_export_error(name, call));
             }
             Some(Binding::Intrinsic(
