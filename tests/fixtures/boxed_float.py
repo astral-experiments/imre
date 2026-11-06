@@ -1,4 +1,13 @@
 def current():
+    class Price(float):
+        def __ceil__(self):
+            return "custom ceil"
+
+    price = Price(-1.25)
+    assert price.__ceil__() == "custom ceil" and float.__ceil__(price) == -1
+    assert type(float.__ceil__) is type(float.__floor__)
+    assert float.__ceil__.__get__(0.25, float)() == 1
+
     print(f'{2.675:.2f}', f'{-0.0:+.0%}', f'{True: .1f}', f'{-3:.2%}')
     print(f'{float("inf"):+f}', f'{float("nan"):.2%}')
     assert f"{2.5:03.0f}" == "002" and f"{3.5:03.0f}" == "004"

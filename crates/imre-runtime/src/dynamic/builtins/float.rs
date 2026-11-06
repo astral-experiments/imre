@@ -1,6 +1,22 @@
 use super::*;
 use crate::dynamic::complex::Complex;
 
+/// Apply a native integral method to the stored float without calling subtype hooks.
+pub(in crate::dynamic) fn round_float_to_integer(
+    ctx: &mut Context,
+    value: f64,
+    method: &str,
+) -> Result<Id> {
+    let rounded = match method {
+        "__ceil__" => value.ceil(),
+        "__floor__" => value.floor(),
+        "__trunc__" => value,
+        _ => unreachable!("float integral method"),
+    };
+    let integer = crate::floats::float_to_integer(rounded)?;
+    Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
+}
+
 /// Format the receiver's stored binary64 using Python's hexadecimal spelling.
 pub(super) fn hex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let receiver = noargs_method_receiver(ctx, "float", "hex", args, kwargs)?;
