@@ -109,6 +109,31 @@ def mapping_conversion():
         collections.defaultdict = defaultdict
 
 
+def signature_docstrings():
+    from inspect import Signature
+
+    class Unrenderable(Signature):
+        def __str__(self):
+            raise ValueError("cannot render")
+
+    class Text(str):
+        def replace(self, old, new):
+            raise ValueError("cannot strip")
+
+    class Unstrippable(Signature):
+        def __str__(self):
+            return Text("(value: int) -> None")
+
+    for signature in (Unrenderable(), Unstrippable()):
+        @dataclass
+        class Request:
+            __signature__ = signature
+            value: int
+
+        assert Request.__doc__ == "Request"
+        assert Request(4).value == 4
+
+
 def abstract_refresh():
     import abc
     import inspect
@@ -308,4 +333,5 @@ def current():
 
     replacement()
     mapping_conversion()
+    signature_docstrings()
     print("boxed dataclasses")
