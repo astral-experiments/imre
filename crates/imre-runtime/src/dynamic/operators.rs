@@ -3032,6 +3032,13 @@ impl Context {
         result
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if let Value::List(items) | Value::Tuple(items) = self.heap.get(obj)
+            && let Value::Int(index) = self.heap.get(key)
+            && let Some(index) = index.as_small().and_then(|i| usize::try_from(i).ok())
+            && let Some(&item) = items.get(index)
+        {
+            return Ok(item);
+        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
             return self.memoryview_get(obj, key);
         }
