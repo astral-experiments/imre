@@ -282,6 +282,10 @@ pub(super) fn entries(reader: &mut (impl Read + Seek), mode: DirectoryMode) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DIRECTORY_MODE: DirectoryMode = DirectoryMode::ZipFile {
+        empty_unicode_path: || Ok(()),
+    };
     use std::io::Cursor;
 
     // No payload or local file header is present. A directory listing must
@@ -320,7 +324,9 @@ mod tests {
             ],
             b"archive comment",
         );
-        let found = entries(&mut Cursor::new(fixture), || Ok(())).ok().unwrap();
+        let found = entries(&mut Cursor::new(fixture), DIRECTORY_MODE)
+            .ok()
+            .unwrap();
         assert_eq!(
             found
                 .iter()
@@ -338,7 +344,9 @@ mod tests {
         extra.extend(checksum.sum().to_le_bytes());
         extra.extend("é".as_bytes());
         let fixture = index(&[(b"a", 0, &extra), (b"b", 0, &extra)], b"");
-        let found = entries(&mut Cursor::new(fixture), || Ok(())).ok().unwrap();
+        let found = entries(&mut Cursor::new(fixture), DIRECTORY_MODE)
+            .ok()
+            .unwrap();
         assert_eq!(
             found
                 .iter()
@@ -352,7 +360,7 @@ mod tests {
         assert!(
             entries(
                 &mut Cursor::new(index(&[(b"a", 0, &extra)], b"")),
-                || Ok(())
+                DIRECTORY_MODE
             )
             .is_err()
         );
