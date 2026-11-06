@@ -5520,7 +5520,13 @@ impl Context {
                     Value::Calendar { value, .. } => value.class() != "timezone",
                     _ => false,
                 });
-        if inplace.is_empty() && (self.same_sequence_family(a, b) || native_order) {
+        // An int (including bool) or an exact float can compare an integer
+        // operand itself. Only a strict subtype gets to try its slot first.
+        let compares_integer = self.builtin_slot_accepts(b, "int")
+            && (self.builtin_slot_accepts(a, "int") || matches!(self.heap.get(a), Value::Float(_)));
+        if inplace.is_empty()
+            && (self.same_sequence_family(a, b) || compares_integer || native_order)
+        {
             let ac = self.exact_type(a)?;
             let bc = self.exact_type(b)?;
             // The proper subtype's reflected slot has priority, even when it is inherited.

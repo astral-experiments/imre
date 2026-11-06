@@ -25,6 +25,12 @@ use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use ruff_text_size::{Ranged, TextSize};
 
+/// A pattern that neither inspects nor captures its operand.
+pub fn wildcard_pattern(pattern: &ast::Pattern) -> bool {
+    matches!(pattern, ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none())
+        || matches!(pattern, ast::Pattern::MatchStar(p) if p.name.is_none())
+}
+
 /// Wildcard imports can only publish names in a module body, including its conditional suites.
 pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<ruff_text_size::TextRange> {
     #[derive(Default)]
@@ -434,6 +440,19 @@ impl Transformer for Mangler<'_> {
     fn visit_parameter(&self, parameter: &mut ast::Parameter) {
         self.rename(&mut parameter.name.id);
         transformer::walk_parameter(self, parameter);
+    }
+
+    fn visit_pattern(&self, pattern: &mut ast::Pattern) {
+        let binding = match pattern {
+            ast::Pattern::MatchAs(p) => p.name.as_mut(),
+            ast::Pattern::MatchStar(p) => p.name.as_mut(),
+            ast::Pattern::MatchMapping(p) => p.rest.as_mut(),
+            _ => None,
+        };
+        if let Some(name) = binding {
+            self.definition(name);
+        }
+        transformer::walk_pattern(self, pattern);
     }
 
     fn visit_except_handler(&self, handler: &mut ast::ExceptHandler) {
