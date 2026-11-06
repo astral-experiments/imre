@@ -4948,7 +4948,10 @@ impl<'a> Loader<'a> {
                             || module == IntrinsicModule::EmailHeaderValueParser
                             || matches!(
                                 (module, binding),
-                                (IntrinsicModule::Socket, Binding::Intrinsic(Intrinsic::StringConstant(_)))
+                                (
+                                    IntrinsicModule::Socket,
+                                    Binding::Intrinsic(Intrinsic::StringConstant(_))
+                                )
                             )
                         {
                             self.checked_builtin_imports.push((id, alias.range()));
