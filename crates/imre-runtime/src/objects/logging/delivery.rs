@@ -17,15 +17,11 @@ pub unsafe extern "C" fn imre_text_output_write(
     let text = unsafe { &*source };
     // SAFETY: the caller roots the stream, and these sealed writes cannot reenter it.
     let result = unsafe {
+        let input = || Ok(StrOwner::acquire_word(source as usize));
         object(stream).0.with_mut(|s| match s {
-            Storage::CodecWriter(writer) => writer
-                .write(text, || {
-                    // The codec retains the exact input only when constructing an encoding error.
-                    Ok(StrOwner::acquire_word(source as usize))
-                })
-                .map(|()| 0),
+            Storage::CodecWriter(writer) => writer.write(text, input).map(|()| 0),
             Storage::File(file) => file
-                .write(text)
+                .write_with(text, input)
                 .map(|()| Int::from_usize(text.chars().count()).into_raw()),
             _ => unreachable!("checked text output stream"),
         })
