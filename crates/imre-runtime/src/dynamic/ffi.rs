@@ -2252,7 +2252,7 @@ impl Context {
             globals,
             stdin.as_ref(),
             Some(self.heap.temporary_mark()),
-            Some(generator),
+            &[generator],
         ) {
             return false;
         }
@@ -2344,6 +2344,19 @@ impl Context {
         if self.can_skip_finalizer_sweep(mark) {
             self.heap.keep_call_result(mark, result);
         } else if self.heap.discard_operands(mark, result, self.modules) {
+            // The return value is now rooted in the caller, including its live stream layers.
+            let stream = super::stdlib::io::text_descriptor_chain(&self.heap, result);
+            if !self.heap.full_collection_active()
+                && let Some(chain) = stream
+                && self.heap.cached_finalizers_kept_except(
+                    self.finalizer_path_roots(),
+                    super::stdlib::io::rooted_input_chain(self).as_ref(),
+                    Some(self.heap.temporary_mark()),
+                    &chain,
+                )
+            {
+                return;
+            }
             self.collect_unreachable();
         }
     }
