@@ -1,4 +1,7 @@
 //! A socket closes its descriptor on explicit close or drop, unless detached.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod message;
+
 use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, c_int, errno_error};
@@ -1715,7 +1718,7 @@ pub unsafe extern "C" fn imre_socket_recv(s: &Object, size: usize, flags: usize)
 }
 
 /// Allocate initialized syscall output without touching every page of a large receive.
-fn zeroed_receive_buffer(size: usize) -> Result<Vec<u8>> {
+pub(crate) fn zeroed_receive_buffer(size: usize) -> Result<Vec<u8>> {
     if size == 0 {
         return Ok(Vec::new());
     }

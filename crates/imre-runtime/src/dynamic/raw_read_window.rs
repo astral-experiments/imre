@@ -174,3 +174,63 @@ impl Context {
         Ok(storage_len(storage).map(|_| (storage, start..start + len)))
     }
 }
+
+/// Vectors over pinned Python buffers, including overlapping slices of the same storage.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) struct IoVectors {
+    vectors: Vec<libc::iovec>,
+    bases: std::collections::HashMap<Id, (*mut u8, usize)>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl IoVectors {
+    pub(super) fn new(count: usize) -> Result<Self> {
+        let mut vectors = Vec::new();
+        let mut bases = std::collections::HashMap::new();
+        vectors
+            .try_reserve_exact(count)
+            .map_err(|_| crate::Error::memory_error())?;
+        bases
+            .try_reserve(count)
+            .map_err(|_| crate::Error::memory_error())?;
+        Ok(Self { vectors, bases })
+    }
+
+    /// Reacquire each backing pointer once after any Python callback; retain allocations on retry.
+    pub(super) fn resolve(
+        &mut self,
+        ctx: &mut Context,
+        spans: &[(Id, Range<usize>)],
+        writable: bool,
+    ) -> Result<&mut [libc::iovec]> {
+        use std::collections::hash_map::Entry;
+        self.vectors.clear();
+        self.bases.clear();
+        for (storage, range) in spans {
+            let (base, length) = match self.bases.entry(*storage) {
+                Entry::Occupied(entry) => *entry.get(),
+                Entry::Vacant(entry) => {
+                    let backing = if !writable {
+                        let bytes = ctx.owner_bytes(*storage)?;
+                        (bytes.as_ptr().cast_mut(), bytes.len())
+                    } else {
+                        let bytes = ctx.writable_storage_bytes(*storage)?;
+                        (bytes.as_mut_ptr(), bytes.len())
+                    };
+                    *entry.insert(backing)
+                }
+            };
+            if range.end > length {
+                return Err(Error::new(
+                    "BufferError",
+                    "underlying buffer has changed size",
+                ));
+            }
+            self.vectors.push(libc::iovec {
+                iov_base: base.wrapping_add(range.start).cast(),
+                iov_len: range.len(),
+            });
+        }
+        Ok(&mut self.vectors)
+    }
+}

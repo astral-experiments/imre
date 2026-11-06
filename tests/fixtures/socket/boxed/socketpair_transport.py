@@ -1,4 +1,5 @@
 import _socket
+import array
 import errno
 import os
 import socket
@@ -32,6 +33,32 @@ with left, right:
     else:
         raise AssertionError("read descriptor flags after close")
 assert right.fileno() == -1
+
+# Transfer two data ranges and retain the received file after the sender closes its copy.
+left, right = socketpair()
+with left, right:
+    with open(__file__, "rb") as source:
+        descriptors = array.array("i", [source.fileno()])
+        assert left.sendmsg([b"he", b"llo"], [
+            (socket.SOL_SOCKET, socket.SCM_RIGHTS, descriptors)
+        ]) == 5
+    target = bytearray(b"-------")
+    count, control, flags, _ = right.recvmsg_into(
+        [memoryview(target)[1:3], memoryview(target)[3:6]],
+        socket.CMSG_SPACE(descriptors.itemsize),
+    )
+    assert count == 5 and target == b"-hello-" and flags == 0
+    [(level, kind, data)] = control
+    assert (level, kind) == (socket.SOL_SOCKET, socket.SCM_RIGHTS)
+    received = array.array("i")
+    received.frombytes(data)
+    [fd] = received
+    try:
+        assert os.read(fd, 6) == b"import"
+    finally:
+        os.close(fd)
+    right.sendmsg([b"O", b"K"])
+    assert left.recvmsg(2)[:3] == (b"OK", [], 0)
 
 left, right = socketpair(family=socket.AF_UNIX, type=socket.SOCK_DGRAM)
 with left, right:

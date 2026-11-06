@@ -893,7 +893,6 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "listen"
                     | "accept"
                     | "connect"
-                    | "connect_ex"
                     | "getsockname"
                     | "getpeername"
                     | "detach"
@@ -920,7 +919,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "getblocking"
                     | "__enter__"
                     | "__exit__"
-            ) =>
+            ) || super::stdlib::SOCKET_CLASS_METHODS.contains(&attr) =>
         {
             "socket.socket"
         }
