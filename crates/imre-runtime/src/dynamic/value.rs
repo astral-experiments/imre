@@ -4137,8 +4137,56 @@ impl Heap {
             mode: MarkMode::SkipScalarLeaves,
         };
         self.mark_roots(globals, &mut pending);
+        #[cfg(target_arch = "x86_64")]
+        self.mark_prefetched(&mut pending);
+        #[cfg(not(target_arch = "x86_64"))]
         while let Some(id) = pending.pop() {
             self.get(id).children(&mut pending);
+        }
+    }
+
+    /// Trace a batch at a time so the next heap slots and container storage can
+    /// reach the cache before their children are visited. Strong reachability
+    /// is independent of the order in which the queue is drained.
+    #[cfg(target_arch = "x86_64")]
+    fn mark_prefetched(&self, pending: &mut MarkQueue<'_>) {
+        use std::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
+
+        let mut batch = [NONE; 16];
+        while pending.next != END {
+            let mut len = 0;
+            while let Some(id) = pending.pop() {
+                // SAFETY: SSE is available on x86-64 and the address belongs to a live slot.
+                unsafe {
+                    _mm_prefetch(
+                        std::ptr::from_ref(&self.slots[id as usize]).cast(),
+                        _MM_HINT_T0,
+                    );
+                }
+                batch[len] = id;
+                len += 1;
+                if len == batch.len() {
+                    break;
+                }
+            }
+            for &id in &batch[..len] {
+                let address = match self.get(id) {
+                    Value::Instance { fields, .. } => std::ptr::from_ref(fields.as_ref()).cast(),
+                    Value::Dict(entries) if !entries.is_empty() => entries.as_ptr().cast(),
+                    Value::List(items) | Value::Tuple(items) => {
+                        let Some(last) = items.last() else { continue };
+                        std::ptr::from_ref(last).cast()
+                    }
+                    _ => continue,
+                };
+                // SAFETY: each address points into storage owned by a live container.
+                unsafe {
+                    _mm_prefetch(address, _MM_HINT_T0);
+                }
+            }
+            for &id in &batch[..len] {
+                self.get(id).children(pending);
+            }
         }
     }
 
