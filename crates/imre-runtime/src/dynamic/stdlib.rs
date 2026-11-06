@@ -12,6 +12,7 @@ pub(super) mod ast;
 mod asyncgen_hooks;
 pub(super) mod audit;
 mod binascii;
+pub(super) mod bz2;
 pub(super) mod codecs;
 mod contextvars;
 mod csv;
@@ -1893,6 +1894,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("zlib.Compress.") {
         return zlib::compressor(ctx, method, args, kwargs);
+    }
+    if let Some(member) = name.strip_prefix("_bz2.") {
+        return bz2::call(ctx, member, args, kwargs);
     }
     if let Some(member) = name.strip_prefix("_lzma.") {
         match member {

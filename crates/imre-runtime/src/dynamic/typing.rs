@@ -3297,6 +3297,8 @@ impl Context {
                             | "NoneType"
                             | "NotImplementedType"
                             | "ellipsis"
+                            | super::value::BZ2_COMPRESS_TYPE
+                            | super::value::BZ2_DECOMPRESS_TYPE
                             | super::value::LZMA_COMPRESS_TYPE
                             | super::value::LZMA_DECOMPRESS_TYPE
                             | super::value::REGEX_PATTERN_TYPE
