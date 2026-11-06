@@ -308,6 +308,37 @@ def awaited_conditions():
     assert events == ['middle', 'compare', 'truth', 'truth']
 
 
+    # A short-circuit in the fall-through arm can select the final result
+    # directly. The other arm materializes its result before the enclosing and.
+    async def tail(flag):
+        return (None if flag else ((await Pause()) and 'inner')) and 'outer'
+
+    async def head(flag):
+        return (((await Pause()) and 'inner') if flag else None) and 'outer'
+
+    for build, flag, expected, count in [(tail, False, verdict, 1), (head, True, 'outer', 2)]:
+        events.clear()
+        task = build(flag)
+        assert task.send(None) == 'paused'
+        result = completed_send(task, verdict)
+        assert result is expected or result == expected
+        assert events == ['truth'] * count
+
+    async def skipped(flag):
+        return (None if flag else (verdict and 'inner')) and await Pause()
+
+    events.clear()
+    assert completed_send(skipped(False), None) is verdict
+    assert events == ['truth']
+
+
+    # Long unparenthesized binary expressions use the same native stack budget as the
+    # ordinary evaluator. The await at the left edge is discovered once during lowering.
+    scope = {}
+    exec("async def one(): return 1\nasync def long_sum(): return await one()" + " + 0" * 12000, scope)
+    assert completed_send(scope['long_sum'](), None) == 1
+
+
 def awaited_receiver():
     events = []
 
