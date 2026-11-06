@@ -6,6 +6,7 @@ use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::ops::ControlFlow;
 use std::sync::{Arc, Weak};
 
 use super::Context;
@@ -1811,6 +1812,9 @@ impl Value {
 
     fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut impl VisitReferences) {
         for (key, value) in bindings {
+            if visit.finished() {
+                break;
+            }
             visit.extend([*key, *value]);
         }
     }
@@ -1957,6 +1961,9 @@ impl Value {
             Self::Dict(entries) => {
                 visit.extend(entries.ordered_nodes().iter().map(|&(key, _)| key));
                 for (key, value) in entries {
+                    if visit.finished() {
+                        break;
+                    }
                     visit.push(*value);
                     visit.push(*key);
                 }
@@ -2020,6 +2027,9 @@ impl Value {
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {
+                    if visit.finished() {
+                        break;
+                    }
                     visit.extend([*value, *key]);
                 }
             }
@@ -2259,6 +2269,9 @@ impl Value {
                 visit.extend(dictionary);
                 if let Some(values) = member_values {
                     for (&member, &value) in values.iter() {
+                        if visit.finished() {
+                            break;
+                        }
                         visit.extend([member, value]);
                     }
                 }
@@ -2788,6 +2801,10 @@ enum MarkMode<'a> {
 pub(super) trait VisitReferences {
     fn push(&mut self, id: Id);
 
+    fn finished(&self) -> bool {
+        false
+    }
+
     fn extend<T: std::borrow::Borrow<Id>>(&mut self, ids: impl IntoIterator<Item = T>) {
         for id in ids {
             self.push(*id.borrow());
@@ -2803,6 +2820,46 @@ struct FindReferences {
 impl VisitReferences for FindReferences {
     fn push(&mut self, id: Id) {
         self.found |= self.targets.contains(&id);
+    }
+}
+
+const MAX_FINALIZER_EDGE_SCAN: usize = 64;
+
+struct CycleEdgeScan<F> {
+    visit: F,
+    remaining: usize,
+}
+
+impl<F> CycleEdgeScan<F> {
+    fn new(visit: F) -> Self {
+        Self {
+            visit,
+            remaining: MAX_FINALIZER_EDGE_SCAN,
+        }
+    }
+}
+
+impl<F: FnMut(Id) -> ControlFlow<()>> VisitReferences for CycleEdgeScan<F> {
+    fn finished(&self) -> bool {
+        self.remaining == 0
+    }
+
+    fn push(&mut self, id: Id) {
+        if !self.finished() {
+            self.remaining -= 1;
+            if (self.visit)(id).is_break() {
+                self.remaining = 0;
+            }
+        }
+    }
+
+    fn extend<T: std::borrow::Borrow<Id>>(&mut self, ids: impl IntoIterator<Item = T>) {
+        for id in ids.into_iter().take(self.remaining) {
+            self.push(*id.borrow());
+            if self.finished() {
+                break;
+            }
+        }
     }
 }
 
@@ -2892,6 +2949,9 @@ enum FinalizerBindingSlot {
     Namespace(usize),
 }
 
+/// A pending owner followed by incoming strong edges until a slot repeats.
+type FinalizerCyclePath = smallvec::SmallVec<[Id; 17]>;
+
 /// Native frames hold temporaries until the next Python statement. A caller's
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
@@ -2932,6 +2992,8 @@ pub(super) struct Heap {
     weak: HashMap<Id, Vec<Id>>,
     weak_roots: weak_roots::RootPaths,
     finalizer_roots: weak_roots::RootPaths,
+    finalizer_cycle_paths: Vec<FinalizerCyclePath>,
+    finalizer_cycle_retry: u8,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
     // Detached workers compare against the original stderr without keeping it alive.
@@ -3156,6 +3218,8 @@ impl Heap {
             weak: HashMap::new(),
             weak_roots: Default::default(),
             finalizer_roots: Default::default(),
+            finalizer_cycle_paths: Vec::new(),
+            finalizer_cycle_retry: 0,
             borrowed_hooks: Vec::new(),
             default_stderr: None,
             has_weak_values: false,
@@ -4796,6 +4860,81 @@ impl Heap {
         })
     }
 
+    fn finalizers_retained_by_cycles(&self) -> smallvec::SmallVec<[Id; 8]> {
+        self.finalizer_cycle_paths
+            .iter()
+            .filter_map(|path| {
+                let owner = path[0];
+                (self.is_pending_finalizer(owner)
+                    && path.windows(2).all(|edge| {
+                        let child = edge[0];
+                        let parent = edge[1];
+                        let Some(value) = self.slots[parent as usize].value.as_ref() else {
+                            return false;
+                        };
+                        let mut found = false;
+                        let mut references = CycleEdgeScan::new(|id| {
+                            if id == child {
+                                found = true;
+                                ControlFlow::Break(())
+                            } else {
+                                ControlFlow::Continue(())
+                            }
+                        });
+                        value.try_children(&mut references).is_ok() && found
+                    }))
+                .then_some(owner)
+            })
+            .collect()
+    }
+
+    /// Follow retained edges backwards to find a cycle that keeps the owner alive.
+    fn find_finalizer_cycle_paths(&self, cycles: &mut CycleSet) -> Option<Vec<FinalizerCyclePath>> {
+        let CycleSet {
+            incoming,
+            work: predecessor,
+            ..
+        } = cycles;
+        predecessor.resize(incoming.len(), END);
+        for (id, &count) in incoming.iter().enumerate() {
+            if count != 0 && self.slot_shapes[id] == SlotShape::Other {
+                let mut references = CycleEdgeScan::new(|child| {
+                    let child = child as usize;
+                    if incoming[child] != 0 {
+                        predecessor[child] = id;
+                    }
+                    ControlFlow::Continue(())
+                });
+                let _ = self.get(id as Id).try_children(&mut references);
+            }
+        }
+        let mut paths = Vec::new();
+        for &owner in &self.ordinary_finalizers {
+            if incoming[owner as usize] == 0 {
+                continue;
+            }
+            let mut path: FinalizerCyclePath = smallvec::smallvec![owner];
+            while path.len() < path.inline_size() {
+                let parent = predecessor[*path.last().unwrap() as usize];
+                if parent == END {
+                    break;
+                }
+                let parent = parent as Id;
+                let closes_cycle = path.contains(&parent);
+                path.push(parent);
+                if closes_cycle {
+                    paths.try_reserve(1).ok()?;
+                    paths.push(path);
+                    break;
+                }
+            }
+            if paths.len() == 8 {
+                break;
+            }
+        }
+        Some(paths)
+    }
+
     pub(super) fn acyclic_finalizer(
         &mut self,
         globals: [Id; 2],
@@ -4852,6 +4991,10 @@ impl Heap {
         {
             return Ok(None);
         }
+        let cyclic = self.finalizers_retained_by_cycles();
+        if !cyclic.is_empty() && self.cached_finalizers_kept_except(globals, stdin, None, &cyclic) {
+            return Ok(None);
+        }
         // If the roots keep every pending finalizer alive, no finalizer can run.
         // Keep the visited links until the search ends so resetting a partial
         // trace costs only the slots it touched, even after a large heap peak.
@@ -4880,14 +5023,26 @@ impl Heap {
                 self.get(id).children(&mut pending);
             }
         }
-        let next = if remaining == 0 {
-            Ok(None)
-        } else {
-            CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
-        };
         while let Some(id) = pending.pop() {
             self.traces[id as usize].set(UNMARKED);
         }
+        let next = if remaining == 0 {
+            Ok(None)
+        } else {
+            CycleSet::new(self.slots.len()).map(|mut cycles| {
+                let next = self.identify_cycles(&mut cycles);
+                if next.is_none() {
+                    if self.finalizer_cycle_retry == 0
+                        && let Some(paths) = self.find_finalizer_cycle_paths(&mut cycles)
+                    {
+                        self.finalizer_cycle_paths = paths;
+                    }
+                    self.finalizer_cycle_retry =
+                        self.finalizer_cycle_retry.checked_sub(1).unwrap_or(63);
+                }
+                next
+            })
+        };
         while visited != END {
             visited = self.traces[visited].replace(UNMARKED);
         }
@@ -5779,6 +5934,42 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finalizer_cycle_paths_recheck_all_edges() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        let first = heap.alloc(Value::List(Vec::new()));
+        let second = heap.alloc(Value::List(vec![first, owner]));
+        *heap.get_mut(first) = Value::List(vec![second]);
+        heap.register_finalizer(owner);
+
+        let mut cycles = CycleSet::new(heap.slot_count()).unwrap();
+        assert_eq!(heap.identify_cycles(&mut cycles), None);
+        heap.finalizer_cycle_paths = heap.find_finalizer_cycle_paths(&mut cycles).unwrap();
+        assert_eq!(&heap.finalizers_retained_by_cycles()[..], &[owner]);
+
+        let mut wide = vec![first, owner];
+        wide.resize(MAX_FINALIZER_EDGE_SCAN + 2, NONE);
+        *heap.get_mut(second) = Value::List(wide);
+        assert!(heap.finalizers_retained_by_cycles().is_empty());
+        let mut cycles = CycleSet::new(heap.slot_count()).unwrap();
+        assert_eq!(heap.identify_cycles(&mut cycles), None);
+        assert!(
+            heap.find_finalizer_cycle_paths(&mut cycles)
+                .unwrap()
+                .is_empty()
+        );
+
+        *heap.get_mut(second) = Value::List(vec![first, owner]);
+        assert_eq!(&heap.finalizers_retained_by_cycles()[..], &[owner]);
+
+        *heap.get_mut(second) = Value::List(vec![first]);
+        assert!(heap.finalizers_retained_by_cycles().is_empty());
+
+        *heap.get_mut(second) = Value::List(vec![owner]);
+        assert!(heap.finalizers_retained_by_cycles().is_empty());
+    }
 
     #[test]
     fn mutable_container_access_invalidates_an_older_generator_owner_check() {
