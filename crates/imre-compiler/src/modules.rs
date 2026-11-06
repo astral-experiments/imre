@@ -896,6 +896,7 @@ pub(crate) enum Intrinsic {
     IntConstant(i64),
     WallTime,
     MathAcos,
+    MathErfc,
     TimeSleep,
     WarningFilter {
         simple: bool,
@@ -2281,6 +2282,7 @@ impl IntrinsicModule {
             (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "atanh") => Intrinsic::ScopedObjectExport("math.atanh"),
             (Self::Math, "cosh") => Intrinsic::ScopedObjectExport("math.cosh"),
+            (Self::Math, "erfc") => Intrinsic::MathErfc,
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
             (Self::Math, "fma") => Intrinsic::ScopedObjectExport("math.fma"),
             (Self::Math, "frexp") => Intrinsic::ScopedObjectExport("math.frexp"),
