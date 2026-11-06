@@ -279,6 +279,7 @@ pub(super) fn call(
         "atanh" => Some(|x| atanh(x)),
         "cos" => Some(f64::cos),
         "cosh" => Some(f64::cosh),
+        "erfc" => Some(|x| erfc(x)),
         "exp" => Some(f64::exp),
         "sin" => Some(f64::sin),
         "sinh" => Some(f64::sinh),
@@ -823,6 +824,7 @@ fn ieee_remainder(x: f64, y: f64) -> Result<f64> {
 
 unsafe extern "C" {
     safe fn atanh(x: f64) -> f64;
+    safe fn erfc(x: f64) -> f64;
     safe fn remainder(x: f64, y: f64) -> f64;
     safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;
     #[link_name = "nextafter"]

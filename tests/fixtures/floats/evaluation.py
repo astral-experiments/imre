@@ -1,4 +1,4 @@
-from math import acos, log2
+from math import acos, erfc, log2
 
 
 def integer(label: str, value: int) -> int:
@@ -85,3 +85,6 @@ try:
     acos(2)
 except ValueError as error:
     print(str(error))
+
+assert erfc(-0.0) == 1.0
+assert 0.0 < erfc(8) < 1e-28

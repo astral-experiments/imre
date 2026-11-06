@@ -3356,6 +3356,7 @@ impl Context {
                 "asinh",
                 "atanh",
                 "cosh",
+                "erfc",
                 "nextafter",
                 "remainder",
                 "sinh",
