@@ -134,8 +134,8 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
     }
 }
 
-/// Compute the principal arc cosine with Python's domain error for real inputs.
-pub(crate) fn acos(value: f64) -> Result<f64> {
+/// Validate the common domain of asin and acos, allowing NaN through to libm.
+fn asin_acos_argument(value: f64) -> Result<f64> {
     if value.abs() > 1.0 {
         return Err(Error::new(
             Kind::ValueError,
@@ -145,12 +145,25 @@ pub(crate) fn acos(value: f64) -> Result<f64> {
             ),
         ));
     }
-    Ok(value.acos())
+    Ok(value)
+}
+
+pub(crate) fn acos(value: f64) -> Result<f64> {
+    asin_acos_argument(value).map(f64::acos)
+}
+
+pub(crate) fn asin(value: f64) -> Result<f64> {
+    asin_acos_argument(value).map(f64::asin)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_acos(value: f64) -> f64 {
     finish(acos(value), 0.0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_asin(value: f64) -> f64 {
+    finish(asin(value), 0.0)
 }
 
 #[unsafe(no_mangle)]

@@ -3353,6 +3353,7 @@ impl Context {
         } else if name == "math" {
             // Re-executing the native loader preserves this module's attribute edits.
             for name in [
+                "asin",
                 "asinh",
                 "atanh",
                 "cosh",

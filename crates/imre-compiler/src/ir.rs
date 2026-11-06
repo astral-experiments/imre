@@ -1216,6 +1216,7 @@ pub(crate) enum Builtin {
     IntBitLength,
     FloatIsInteger,
     FloatAcos,
+    FloatAsin,
     FloatErfc,
     /// Base-two logarithm after checking the Python domain in the caller.
     FloatLog2,
