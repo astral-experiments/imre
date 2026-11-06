@@ -925,10 +925,10 @@ fn read_into(fd: RawFd, buf: &mut [u8]) -> Result<Option<usize>> {
     transfer(|| unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) })
 }
 
-/// A signal handler can raise, close or reinitialize this FileIO before the retry.
+/// Retry the same descriptor number even when a signal handler reinitializes this FileIO.
 fn read_interruptible(ctx: &mut Context, raw: &RawFile, buf: &mut [u8]) -> Result<Option<usize>> {
+    let fd = raw.live_fd().unwrap_or(-1);
     loop {
-        let fd = raw.live_fd().unwrap_or(-1);
         // SAFETY: the destination is an owned buffer, with no borrowed Python storage.
         let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
         if n >= 0 {
