@@ -5334,7 +5334,16 @@ impl Context {
             if !compatible {
                 return Ok(None);
             }
-        } else if self.slot(a, name).is_some() {
+        } else if let Some(slot) = self.slot(a, name) {
+            // A class may bind int.__gt__ as __lt__. The descriptor selects the operation.
+            if let Value::Native(symbol) = self.heap.get(slot)
+                && let Some((kind, member)) = symbol.split_once('.')
+                && matches!(kind, "int" | "float")
+                && let Some(op) = comparison_op(member)
+                && self.builtin_slot_accepts(a, kind)
+            {
+                return self.real_compare_slot(op, self.scalar_value(a), b);
+            }
             return self.operator_slot(a, name, b);
         } else if matches!(
             self.heap.get(a),

@@ -303,6 +303,11 @@ def current():
         def __eq__(self, other):
             return "reflected"
 
+    class ReverseOrder(int):
+        __lt__ = int.__gt__
+
+    assert ReverseOrder(2) < 1 and not ReverseOrder(1) < 2
+
     item = IntegerItem(1 << 100)
     peer = Reflected(1 << 100)
     assert (item == peer) == "reflected"
