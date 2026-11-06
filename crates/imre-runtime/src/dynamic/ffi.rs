@@ -2232,8 +2232,36 @@ impl Context {
         if self.heap.leave(result, returning)
             && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
         {
+            if self.finalize_unowned_generator_loop()
+                && self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+            {
+                return;
+            }
             self.collect_unreachable();
         }
+    }
+
+    /// Close an isolated generator before paying for a complete collection at frame exit.
+    fn finalize_unowned_generator_loop(&mut self) -> bool {
+        let Some((generator, iterator)) = self.heap.pending_generator_loop() else {
+            return false;
+        };
+        let globals = self.finalizer_path_roots();
+        let stdin = super::stdlib::io::rooted_input_chain(self);
+        if !self.heap.cached_finalizers_kept_except(
+            globals,
+            stdin.as_ref(),
+            Some(self.heap.temporary_mark()),
+            Some(generator),
+        ) {
+            return false;
+        }
+        let (heap, roots) = self.heap_and_roots();
+        if !heap.generator_loop_is_unowned(generator, iterator, roots) {
+            return false;
+        }
+        self.dispatch_finalizer(generator);
+        true
     }
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.

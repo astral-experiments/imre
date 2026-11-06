@@ -296,7 +296,10 @@ pub(in crate::dynamic) fn decompressor(
 
 impl Decompressor {
     /// Keeps bytes reachable from the decompressor alive across boxed collections.
-    pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
+    pub(in crate::dynamic) fn children(
+        &self,
+        visit: &mut impl crate::dynamic::value::VisitReferences,
+    ) {
         for tail in [&self.unused_data, &self.unconsumed_tail] {
             if let Tail::Published(id) = tail {
                 visit.push(*id);

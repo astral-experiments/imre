@@ -36,7 +36,7 @@ impl FunctionFields {
         }
     }
 
-    pub fn children(self, visit: &mut super::value::MarkQueue<'_>) {
+    pub fn children(self, visit: &mut impl super::value::VisitReferences) {
         visit.push(self.name);
         visit.push(self.qualname);
         visit.push(self.module);
