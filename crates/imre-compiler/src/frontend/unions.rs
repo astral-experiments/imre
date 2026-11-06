@@ -695,6 +695,12 @@ impl Checker<'_> {
         members
     }
 
+    pub(super) fn may_be_instance(&self, ty: Type, class: InstanceType) -> bool {
+        self.instance_members(ty)
+            .into_iter()
+            .any(|member| self.instance_member_matches(member, &[class]) != Some(false))
+    }
+
     /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {

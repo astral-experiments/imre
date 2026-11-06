@@ -47,7 +47,9 @@ REJECTED = {
     "join_wrong_element": 'print(",".join([1]))\n',
     "join_keyword": 'print(",".join(iterable=["x"]))\n',
     "replace_wrong_type": 'print("x".replace("x", 1))\n',
-    "replace_count": 'print("x".replace("x", "y", 1))\n',
+    "replace_wrong_old_type": 'print("x".replace(1, "y"))\n',
+    "replace_nested_wrong_type": 'print("x".replace("x", "x".replace("x", 1)))\n',
+    "replace_wrong_after_optional": 'def bad(old: str | None) -> str:\n    return "x".replace(old, 1)\n',
 }
 
 ERRORS = {
