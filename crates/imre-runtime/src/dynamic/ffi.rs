@@ -232,7 +232,7 @@ impl Context {
             )),
             "match_sequence_length" => builtins::call(self, "len", &[a], &[]),
             "builtin" => {
-                let name = copy_label(self.str_value(a)?)?;
+                let name = self.copy_name(a)?;
                 Ok(self.builtin(&name))
             }
             "annotation_scope" => Ok(self
@@ -242,7 +242,7 @@ impl Context {
             "lookup_annotation_global"
             | "lookup_class_annotation"
             | "lookup_class_annotation_global" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op != "lookup_annotation_global" {
                     if let Some(&cell) = self.scope_data(a).closure.cells.get("__classdict__") {
                         let Value::Cell(Some(mapping)) = *self.heap.get(cell) else {
@@ -264,7 +264,7 @@ impl Context {
                 self.lookup(scope, &name)
             }
             "lookup" | "lookup_class_local" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op == "lookup_class_local" {
                     return self.lookup_class_local(a, &name);
                 }
@@ -276,7 +276,7 @@ impl Context {
                 } else {
                     a
                 };
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 let replaced = self.store_source_name(scope, &name, c)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
                     Ok(flag(replaced))
@@ -296,7 +296,7 @@ impl Context {
                 Ok(NONE)
             }
             "delname" | "clearname" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 let released = self.replacing_finalizer(a, &name, NONE);
                 let scope = self.binding_scope(a, &name);
                 if self.remove_binding(scope, &name, b)? {
@@ -310,7 +310,7 @@ impl Context {
             }
             "comprehension_scope" => self.comprehension_scope(a, b),
             "import" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 self.module(&name)
             }
             "fromlist" => self.prepare_fromlist(a, b),
@@ -319,7 +319,7 @@ impl Context {
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op == "method" {
                     self.lookup_method(a, &name)
                 } else {
@@ -327,12 +327,12 @@ impl Context {
                 }
             }
             "setattr" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 self.set_attr(a, &name, c)?;
                 Ok(c)
             }
             "delattr" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 self.delete_attr(a, &name)?;
                 Ok(NONE)
             }
@@ -656,12 +656,7 @@ impl Context {
                         error = result.clone();
                         error.tracing().instance = Some(normalized);
                     }
-                    let active = self.heap.active_exception();
-                    if active != NONE
-                        && error.trace.as_ref().and_then(|trace| trace.instance) != Some(active)
-                    {
-                        error.context = active;
-                    }
+                    self.chain_raised_instance(&mut error);
                 }
                 Err(error)
             }
@@ -823,6 +818,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         classes: HashMap::new(),
         enum_scopes: HashMap::new(),
         signal_handlers: Vec::new(),
+        reporting_wakeup_errors: false,
         typing: super::typing::Registry::default(),
         builtins: HashMap::new(),
         scope_name_slots: Default::default(),
@@ -992,6 +988,8 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         eprintln!("Fatal Python error: init_import_site: Failed to import the site module");
         eprintln!("Python runtime state: initialized");
         stdlib::traceback::report_chain(&mut ctx, error);
+        #[cfg(unix)]
+        crate::signals::finalize();
         return 1;
     }
     let mut interrupted = result
@@ -1046,6 +1044,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     };
     super::thread_worker::shutdown(&mut ctx);
     atexit::run(&mut ctx);
+    #[cfg(unix)]
+    if crate::signals::is_main() {
+        crate::signals::disable_wakeup();
+    }
     // Exit callbacks run before Python enters its finalization phase.
     ctx.finalizing
         .store(true, std::sync::atomic::Ordering::Release);
@@ -1071,6 +1073,8 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     }
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::disable();
+    #[cfg(unix)]
+    crate::signals::finalize();
     if status == 0 && ctx.heap.has_pending_callback_write() {
         use std::io::Write;
 
@@ -2350,12 +2354,16 @@ impl Context {
             // The return value is now rooted in the caller, including its live stream layers.
             let stream = super::stdlib::io::text_descriptor_chain(&self.heap, result);
             if !self.heap.full_collection_active()
-                && let Some(chain) = stream
+                && (stream.is_some()
+                    || self.heap.is_pending_finalizer(result)
+                    || matches!(self.heap.get(result), Value::File(_)))
                 && self.heap.cached_finalizers_kept_except(
                     self.finalizer_path_roots(),
                     super::stdlib::io::rooted_input_chain(self).as_ref(),
                     Some(self.heap.temporary_mark()),
-                    &chain,
+                    stream
+                        .as_ref()
+                        .map_or(std::slice::from_ref(&result), |chain| chain.as_slice()),
                 )
             {
                 return;

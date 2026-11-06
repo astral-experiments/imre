@@ -871,7 +871,8 @@ pub(in super::super) fn call(
     let text = owner_kind == Some("TextIOBase");
     let bytes_io = owner_kind == Some("BytesIO");
     let base_fileno = owner_kind == Some("IOBase") && name == "fileno";
-    let descriptor = if base_fileno || name == "__dict__" {
+    let base_enter = owner_kind == Some("IOBase") && name == "__enter__";
+    let descriptor = if base_fileno || base_enter || name == "__dict__" {
         Some("_IOBase")
     } else if raw {
         Some("_RawIOBase")
@@ -957,6 +958,29 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
+    if base_enter {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_IOBase.__enter__() takes no keyword arguments",
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "_IOBase.__enter__() takes no arguments ({} given)",
+                    rest.len()
+                ),
+            ));
+        }
+        if let Some(closed) = ctx.optional_attr(receiver, "closed")?
+            && ctx.truth(closed)?
+        {
+            return Err(Error::new("ValueError", "I/O operation on closed file."));
+        }
+        return Ok(receiver);
+    }
     if name == "__dict__" {
         return Ok(match ctx.heap.get(receiver) {
             Value::Instance { .. } => ctx.instance_dictionary(receiver, receiver_class),
@@ -1134,11 +1158,8 @@ pub(in super::super) fn call(
             ctx.set_attr(receiver, "__IOBase_closed", TRUE)?;
             result.map(|_| NONE)
         }
-        "flush" | "__enter__" if closed => {
-            Err(Error::new("ValueError", "I/O operation on closed file."))
-        }
+        "flush" if closed => Err(Error::new("ValueError", "I/O operation on closed file.")),
         "flush" => Ok(NONE),
-        "__enter__" => Ok(receiver),
         "__exit__" => {
             let close = ctx.lookup_attr(receiver, "close")?;
             ctx.call(close, Vec::new(), Vec::new())

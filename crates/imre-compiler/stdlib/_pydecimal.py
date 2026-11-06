@@ -3830,6 +3830,18 @@ class Decimal(object):
         if context is None:
             context = getcontext()
 
+        # Bare fixed point preserves the coefficient's scale, including trailing zeros.
+        if (type(self) is Decimal and type(specifier) is str and specifier == 'f'
+                and type(context) is Context and _localeconv is None and not self._is_special):
+            sign = '-' if self._sign else ''
+            digits = self._int
+            if self._exp >= 0:
+                return sign + (digits if digits == '0' else digits + '0' * self._exp)
+            point = len(digits) + self._exp
+            if point > 0:
+                return sign + digits[:point] + '.' + digits[point:]
+            return sign + '0.' + '0' * -point + digits
+
         spec = _parse_format_specifier(specifier, _localeconv=_localeconv)
 
         # special values don't care about the type or precision

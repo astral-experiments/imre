@@ -25,6 +25,23 @@ LOCALE_FORMAT = (
 )
 
 REJECTED = {
+    "unused_reload_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from importlib import reload\n"
+            "from scores import take\n"
+            "def unused() -> int: return take('x')\n"
+            "print(take(7))\n"
+        ),
+    }, "expected int, got str"),
+    "reload_needs_a_module_object": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "import importlib, scores\n"
+            "def unused() -> None: importlib.reload(scores)\n"
+            "print(scores.take(7))\n"
+        ),
+    }, "importlib.reload requires native Python object operations"),
     "decimal_float_preserves_typed_call": ({
         "main.py": (
             "from decimal import Decimal\n"
@@ -1183,6 +1200,28 @@ ACCEPTED = {
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
     },
+    "reload_source_plugin": {
+        "main.py": (
+            "from importlib import *\n"
+            "import importlib\n"
+            "assert importlib.__all__ == ['__import__', 'import_module', 'invalidate_caches', 'reload']\n"
+            "assert '__import__' in globals() and 'sys' not in globals()\n"
+            "from sys import modules\n"
+            "name = '.'.join(('plugins', 'report'))\n"
+            "plugin = import_module(name)\n"
+            "render = plugin.render\n"
+            "assert render('first') == ('first', 1)\n"
+            "assert import_module('.report', 'plugins') is plugin\n"
+            "assert reload(plugin) is plugin is modules[name]\n"
+            "assert plugin.render is not render\n"
+            "print(plugin.render('new'), render('saved'))\n"
+        ),
+        "plugins/__init__.py": "",
+        "plugins/report.py": (
+            "generation = globals().get('generation', 0) + 1\n"
+            "def render(label):\n    return label, generation\n"
+        ),
+    },
     "boxed_unittest_lazy_import": {
         "main.py": (
             "import sys\nimport unittest\n\n"
@@ -1413,6 +1452,13 @@ ACCEPTED = {
         "data/__init__.py": "",
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
+    },
+    "source_loader_external_code": {
+        "main.py": (FIXTURES.parent / "source_loader_external_code.py").read_text(),
+        "local_body.py": "value = 41\n",
+    },
+    "bundled_source_loader_data": {
+        "main.py": (FIXTURES.parent / "bundled_source_loader_data.py").read_text(),
     },
     "source_loader_compile_override": {
         "main.py": (
@@ -1730,11 +1776,11 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
-                    "boxed_unittest_lazy_import",
+                    "boxed_unittest_lazy_import", "bundled_source_loader_data",
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
-                    "warn_named_helper", "zip_source_spec",
+                    "source_loader_external_code", "warn_named_helper", "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))

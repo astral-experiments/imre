@@ -91,7 +91,7 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
         unreachable!()
     };
     data.closure.cleared = true;
-    data.closure.declared = names;
+    data.closure.declared = names.into();
     let Value::PythonFrame { scope, .. } = ctx.heap.get_mut(frame) else {
         unreachable!()
     };
@@ -217,7 +217,7 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
             if cell.is_some()
                 || data.closure.declared.contains(name)
                 || data.closure.cells.contains_key(name)
-                || data.names.contains_key(name)
+                || data.names.contains_key(name.as_str())
             {
                 return match op {
                     Access::Read => Ok(match cell {

@@ -305,9 +305,13 @@ impl Context {
             };
             return Ok(self.int(hint as i64));
         }
-        if matches!(self.heap.get(value), Value::Iterator { .. }) {
-            let length = i64::try_from(self.iterator_remaining(value)?.len())
-                .map_err(|_| size_overflow())?;
+        if let Value::Iterator { kind, .. } = *self.heap.get(value) {
+            let remaining = self.iterator_remaining(value)?;
+            let count = match (kind, &remaining) {
+                ("str_ascii_iterator", super::super::IteratorSlice::Text(text)) => text.len(),
+                _ => remaining.len(),
+            };
+            let length = i64::try_from(count).map_err(|_| size_overflow())?;
             return Ok(self.int(length));
         }
         if matches!(self.heap.get(value), Value::StructUnpackIterator { .. }) {

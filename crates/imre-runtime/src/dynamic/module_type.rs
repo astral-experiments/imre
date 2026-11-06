@@ -255,6 +255,7 @@ impl Context {
     pub(super) fn allocate_module(&mut self, class: Id) -> Id {
         let scope = self.scope("", None);
         self.builtin("module.__init__");
+        self.builtin("module.__repr__");
         self.alloc(Value::Module {
             name: String::new(),
             scope,
@@ -263,6 +264,11 @@ impl Context {
             constructor: Some(class),
             module_state: None,
         })
+    }
+
+    /// Use the bootstrap's module repr for created modules, honoring their live spec.
+    pub(super) fn module_base_repr(&mut self, module: Id) -> Result<Id> {
+        self.meta_call(NONE, "_module_repr", vec![module])
     }
 
     /// Apply ModuleType's native slots, including explicit base initialization by subclasses.
@@ -300,6 +306,17 @@ impl Context {
                 return self.module_get_attribute(receiver, scope, &attr, Some(key));
             }
             if name == "__repr__" {
+                if self.bootstrap_globals != NONE
+                    && matches!(
+                        self.heap.get(receiver),
+                        Value::Module {
+                            constructor: Some(_),
+                            ..
+                        }
+                    )
+                {
+                    return self.module_base_repr(receiver);
+                }
                 let repr = self.checked_format(receiver, true)?;
                 return Ok(self.text(repr));
             }

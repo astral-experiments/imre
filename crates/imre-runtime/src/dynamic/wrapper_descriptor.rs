@@ -10,6 +10,13 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some(owner) = super::builtins::exception_init_descriptor(symbol) {
+            return Some(Self {
+                owner,
+                name: "__init__",
+                method: false,
+            });
+        }
         if let Some((owner, attr)) = symbol.rsplit_once('.')
             && let Some(owner) = stdlib::itertools::cursor_type(owner)
             && let Some(name) = stdlib::itertools::slots(owner).find(|&slot| slot == attr)
@@ -115,15 +122,26 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
+            Some((value::BZ2_COMPRESS_TYPE, attr)) => Some((
+                value::BZ2_COMPRESS_TYPE,
+                attr,
+                value::CODEC_COMPRESS_METHODS,
+            )),
+            Some((value::BZ2_DECOMPRESS_TYPE, attr)) => Some((
+                value::BZ2_DECOMPRESS_TYPE,
+                attr,
+                value::CODEC_DECOMPRESS_METHODS,
+            )),
+
             Some((value::LZMA_COMPRESS_TYPE, attr)) => Some((
                 value::LZMA_COMPRESS_TYPE,
                 attr,
-                value::LZMA_COMPRESS_METHODS,
+                value::CODEC_COMPRESS_METHODS,
             )),
             Some((value::LZMA_DECOMPRESS_TYPE, attr)) => Some((
                 value::LZMA_DECOMPRESS_TYPE,
                 attr,
-                value::LZMA_DECOMPRESS_METHODS,
+                value::CODEC_DECOMPRESS_METHODS,
             )),
             Some((value::ZLIB_DECOMPRESS_TYPE, attr)) => Some((
                 value::ZLIB_DECOMPRESS_TYPE,
@@ -256,6 +274,7 @@ impl BuiltinDescriptor {
                         "__copy__"
                             | "__deepcopy__"
                             | "__reversed__"
+                            | "__ceil__"
                             | "__floor__"
                             | "__round__"
                             | "__trunc__"
@@ -461,6 +480,9 @@ impl BuiltinDescriptor {
             return Ok(descriptor);
         }
         let accepts = match self.owner {
+            owner if self.name == "__init__" && builtins::is_exception(owner) => {
+                ctx.instance_of(receiver, ctx.builtins[owner])
+            }
             class if crate::objects::HashState::is_provider_class(class) => {
                 ctx.type_name(receiver) == class
             }
@@ -476,6 +498,8 @@ impl BuiltinDescriptor {
             "list_iterator"
             | "tuple_iterator"
             | "memory_iterator"
+            | value::BZ2_COMPRESS_TYPE
+            | value::BZ2_DECOMPRESS_TYPE
             | value::LZMA_COMPRESS_TYPE
             | value::LZMA_DECOMPRESS_TYPE
             | value::STRUCT_UNPACK_ITERATOR
@@ -631,7 +655,7 @@ impl BuiltinDescriptor {
                 {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" || self.class() == "classmethod_descriptor" => ctx.class_qualname(receiver),
-                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE | value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE) => self.owner.rsplit('.').next()?,
+                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE | value::BZ2_COMPRESS_TYPE | value::BZ2_DECOMPRESS_TYPE | value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE) => self.owner.rsplit('.').next()?,
                         _ if matches!(self.owner, "builtin_function_or_method" | "method") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
@@ -667,7 +691,7 @@ impl BuiltinDescriptor {
                     "($self, /)"
                 })
             }
-            "__doc__" | "__text_signature__" if matches!(self.owner, "int" | "mappingproxy" | "str")
+            "__doc__" | "__text_signature__" if matches!(self.owner, "int" | "float" | "mappingproxy" | "str")
                 && let Some(op) = super::operators::comparison_op(self.name) =>
             {
                 if name == "__doc__" {
@@ -917,8 +941,9 @@ impl BuiltinDescriptor {
                     ("__round__", _) => "($self, ndigits=None, /)",
                     ("__trunc__", "__doc__") if self.owner == "int" => "Truncating an Integral returns itself.",
                     ("__trunc__", "__doc__") => "Return the Integral closest to x between 0 and x.",
+                    ("__ceil__", "__doc__") => "Return the ceiling as an Integral.",
                     ("__floor__", "__doc__") => "Return the floor as an Integral.",
-                    ("__floor__" | "__trunc__", _) => "($self, /)",
+                    ("__ceil__" | "__floor__" | "__trunc__", _) => "($self, /)",
                     ("as_integer_ratio", "__doc__") => {
                         "Return a pair of integers, whose ratio is exactly equal to the original float.\n\nThe ratio is in lowest terms and has a positive denominator.  Raise\nOverflowError on infinities and a ValueError on NaNs.\n\n>>> (10.0).as_integer_ratio()\n(10, 1)\n>>> (0.0).as_integer_ratio()\n(0, 1)\n>>> (-.25).as_integer_ratio()\n(-1, 4)"
                     }

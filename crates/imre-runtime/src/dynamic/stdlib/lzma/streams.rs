@@ -177,28 +177,6 @@ fn encoder(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<St
     .map_err(codec_error)
 }
 
-// Acquire the data before converting any later argument via Python's __index__.
-// While the export is held, callbacks can modify its bytes but cannot resize it.
-pub(super) fn with_input<T>(
-    ctx: &mut Context,
-    data: Id,
-    consume: impl FnOnce(&mut Context, Id) -> Result<T>,
-) -> Result<T> {
-    if matches!(
-        ctx.heap.get(ctx.scalar_value(data)),
-        Value::Bytes(_) | Value::ByteArray(_)
-    ) && ctx.buffer_slot(data, "__buffer__") == Some(None)
-    {
-        return ctx.with_native_bytes_export(data, consume);
-    }
-    if let Some(method) = ctx.python_buffer_method(data, true)? {
-        ctx.with_contiguous_python_buffer(data, method, 0, consume)
-    } else {
-        ctx.native_buffer_bytes(data)?;
-        ctx.with_buffer_export(data, |ctx| consume(ctx, data))
-    }
-}
-
 fn compress(stream: &mut Stream, mut input: &[u8], action: Action) -> Result<Vec<u8>> {
     let mut output = Vec::new();
     loop {
@@ -266,7 +244,7 @@ pub(in crate::dynamic) fn compressor(
                     ),
                 ));
             };
-            with_input(ctx, *data, |ctx, view| {
+            ctx.with_read_buffer(*data, |ctx, view| {
                 let input = ctx.native_buffer_bytes(view)?;
                 let mut writer = handle.borrow_mut();
                 let stream = writer
@@ -444,7 +422,7 @@ pub(in crate::dynamic) fn decompressor(
     let [data, limit] =
         builtins::bind_builtin_arguments(name, args, kwargs, ["data", "max_length"], 1)?;
     let data = data.expect("data is required");
-    let output = with_input(ctx, data, |ctx, view| {
+    let output = ctx.with_read_buffer(data, |ctx, view| {
         let limit = limit
             .map(|id| os::ssize_t(ctx, id))
             .transpose()?

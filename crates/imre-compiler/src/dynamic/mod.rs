@@ -1413,6 +1413,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "fractions",
     "functools",
     "genericpath",
+    "bz2",
     "gzip",
     "hashlib",
     "itertools",

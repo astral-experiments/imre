@@ -133,13 +133,13 @@ pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
-    count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
-    ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_isidentifier, python_islower, python_isprintable, python_isspace, python_istitle,
-    python_isupper, split_parts,
+    count_codepoints, count_text, east_asian_width, expand_tabs, find_codepoints, find_text,
+    normalize_unicode, ord_byte, ord_char, partition_text, python_alnum, python_isalpha,
+    python_isdigit, python_isidentifier, python_islower, python_isprintable, python_isspace,
+    python_istitle, python_isupper, split_parts,
 };
 mod typing;
-pub(crate) use text::{chr_scalar, short_string};
+pub(crate) use text::{chr_scalar, short_string, ucd_character};
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
@@ -1463,19 +1463,32 @@ pub unsafe extern "C" fn imre_str_field_spans(value: *const Str, output: *mut us
     // SAFETY: the source is rooted for this scan.
     let source = unsafe { &*value };
     let mut count = 0;
-    for part in source
-        .split(python_whitespace)
-        .filter(|part| !part.is_empty())
-    {
+    let mut visit = |field: &[u8]| {
+        if field.is_empty() {
+            return;
+        }
         if count < fields as usize {
-            let start = part.as_ptr() as usize - source.as_ptr() as usize;
+            let start = field.as_ptr() as usize - source.as_ptr() as usize;
             // SAFETY: the caller provides two words for each requested span.
             unsafe {
                 output.add(1 + 2 * count).write(start);
-                output.add(2 + 2 * count).write(part.len());
+                output.add(2 + 2 * count).write(field.len());
             }
         }
         count += 1;
+    };
+    if source.is_ascii() {
+        // Python includes the ASCII information separators and vertical tab.
+        for field in source
+            .as_bytes()
+            .split(|byte| matches!(byte, 9..=13 | 28..=32))
+        {
+            visit(field);
+        }
+    } else {
+        for field in source.split(python_whitespace) {
+            visit(field.as_bytes());
+        }
     }
     if count > MAX_LIST_LEN {
         fail("MemoryError", "sequence allocation failed");

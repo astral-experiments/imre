@@ -198,6 +198,9 @@ impl Emitter<'_, '_> {
                 args[1].value.operand,
                 u32::from(copy),
             )),
+            TextOperation::EastAsianWidth => self.checked_instruction(format!(
+                "call ptr @imre_unicode_east_asian_width(ptr {source})"
+            )),
             TextOperation::Normalize => self.checked_instruction(format!(
                 "call ptr @imre_unicode_normalize(ptr {source}, ptr {})",
                 args[1].value.operand,

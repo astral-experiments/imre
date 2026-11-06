@@ -41,3 +41,11 @@ try:
     assert spec.cached is not None
 finally:
     sys.implementation.cache_tag = tag
+
+# A registry origin belongs to the live spec even when the module has another filename.
+spec = spec_from_loader('demo.plugin', loader, origin='registry:v1', is_package=False)
+module = module_from_spec(spec)
+module.__file__ = 'stale.py'
+assert repr(module) == "<module 'demo.plugin' (registry:v1)>"
+spec.origin = 'registry:v2'
+assert str([module]) == "[<module 'demo.plugin' (registry:v2)>]"

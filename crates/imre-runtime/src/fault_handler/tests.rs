@@ -4,7 +4,7 @@ use std::os::fd::AsRawFd;
 use std::sync::mpsc;
 use std::thread;
 
-use super::{dump_traceback, frame};
+use super::{dump_traceback, frame, truncate};
 
 fn trace_file() -> File {
     rustix::fs::memfd_create(c"fault-trace", rustix::fs::MemfdFlags::CLOEXEC)
@@ -15,6 +15,22 @@ fn trace_file() -> File {
 fn trace(mut file: File) -> String {
     file.rewind().unwrap();
     io::read_to_string(file).unwrap()
+}
+
+#[test]
+fn sparse_publication_does_not_resurrect_returned_frames() {
+    frame(0, "server.py", "old_request", 11);
+    frame(1, "server.py", "old_caller", 17);
+    truncate(0);
+    frame(2, "server.py", "new_leaf", 29);
+
+    let output = trace_file();
+    dump_traceback(output.as_raw_fd(), false);
+    assert_eq!(
+        trace(output),
+        "Stack (most recent call first):\n  File \"server.py\", line 29 in new_leaf\n  ...\n"
+    );
+    truncate(0);
 }
 
 #[test]

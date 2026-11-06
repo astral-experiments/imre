@@ -258,7 +258,16 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "heapq.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/heapq/upstream/Lib/heapq.py"),
         )),
-        "importlib" => bundled_source!("importlib/__init__.py"),
+        "importlib" => Some((
+            "importlib/__init__.py",
+            concat!(
+                include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/__init__.py"
+                ),
+                "\n",
+                include_str!("../stdlib/importlib/native_specs.py"),
+            ),
+        )),
         "os" => bundled_source!("os.py"),
         "genericpath" => bundled_source!("genericpath.py"),
         "posixpath" => bundled_source!("posixpath.py"),
@@ -983,6 +992,7 @@ pub(crate) enum Intrinsic {
     CalendarUtc,
     TextIO,
     BinaryIO,
+    Optional,
     Union,
     Literal,
     Callable,
@@ -1009,9 +1019,12 @@ pub(crate) enum Intrinsic {
     Sha1,
     Sha256,
     NamedHash(&'static str),
+    UnicodeEastAsianWidth,
     UnicodeNormalize {
         check: bool,
     },
+    /// Available in an object program, without requesting one when the export is used.
+    ObjectOnlyExport(&'static str),
     ObjectRuntimeExport(&'static str),
     /// Bind the object provider when this export is used, after checking typed calls.
     ScopedObjectExport(&'static str),
@@ -1593,6 +1606,7 @@ impl IntrinsicModule {
             (Self::Importlib, "invalidate_caches") => {
                 Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
             }
+            (Self::Importlib, "reload") => Intrinsic::ObjectOnlyExport("importlib.reload"),
             (Self::ImportlibLoaderAbc, "Loader") => {
                 Intrinsic::ObjectRuntimeExport("importlib._abc.Loader")
             }
@@ -2021,6 +2035,7 @@ impl IntrinsicModule {
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
+            (Self::Typing, "Optional") => Intrinsic::Optional,
             (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Typing, "Literal") => Intrinsic::Literal,
             (Self::Typing, "Self") => Intrinsic::SelfType,
@@ -2072,6 +2087,10 @@ impl IntrinsicModule {
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
+            (Self::UnicodeData, "unidata_version") => {
+                Intrinsic::StringConstant(imre_ast::UNICODE_DATA_VERSION)
+            }
+            (Self::UnicodeData, "east_asian_width") => Intrinsic::UnicodeEastAsianWidth,
             (Self::UnicodeData, "decomposition") => {
                 Intrinsic::ObjectRuntimeExport("unicodedata.decomposition")
             }

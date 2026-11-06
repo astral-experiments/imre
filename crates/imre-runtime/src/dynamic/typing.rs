@@ -1894,7 +1894,10 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
         unreachable!()
     };
     let frame = frame.as_mut();
-    frame.closure.declared.extend(frame.names.keys().cloned());
+    frame
+        .closure
+        .declared
+        .extend(frame.names.keys().map(|name| name.as_str().to_owned()));
     frame.closure.declared_complete = true;
     let declared = ctx.alloc(Value::Tuple(params.clone()));
     ctx.bind(scope, ".type_params", declared);
@@ -3297,6 +3300,8 @@ impl Context {
                             | "NoneType"
                             | "NotImplementedType"
                             | "ellipsis"
+                            | super::value::BZ2_COMPRESS_TYPE
+                            | super::value::BZ2_DECOMPRESS_TYPE
                             | super::value::LZMA_COMPRESS_TYPE
                             | super::value::LZMA_DECOMPRESS_TYPE
                             | super::value::REGEX_PATTERN_TYPE
