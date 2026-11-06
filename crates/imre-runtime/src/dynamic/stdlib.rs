@@ -2192,16 +2192,19 @@ pub(super) fn call(
                 "invalid chain allocation arguments",
             ));
         };
-        if !kwargs.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "chain allocation takes no keyword arguments",
-            ));
-        }
         let valid = matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
             if *class == *base || ancestors.contains(base));
         if !valid {
             return Err(Error::new("TypeError", "expected a chain subclass"));
+        }
+        // A subclass initializer may consume extra keywords after allocation.
+        if !kwargs.is_empty()
+            && ctx.class_attr(*class, "__init__").is_none_or(|init| {
+                Some(init) == ctx.class_attr(*base, "__init__")
+                    || Some(&init) == ctx.builtins.get("object.__init__")
+            })
+        {
+            return Err(Error::new("TypeError", "chain() takes no keyword arguments"));
         }
         let result = ctx.instance(*class, None);
         if let Value::Instance { fields, .. } = ctx.heap.get_mut(result) {
@@ -2212,21 +2215,6 @@ pub(super) fn call(
     }
     if name == "_imre_itertools._chain_next" {
         return itertools::chain_next(ctx, args, kwargs);
-    }
-    if name == "_imre_itertools._chain_set" {
-        if let [receiver, active, value] = args
-            && kwargs.is_empty()
-            && let Value::Instance { fields, .. } = ctx.heap.get_mut(*receiver)
-        {
-            let key = if *active == TRUE {
-                "_active"
-            } else {
-                "_sources"
-            };
-            fields.insert(key.to_owned(), *value);
-            return Ok(NONE);
-        }
-        return Err(Error::new("TypeError", "invalid chain state arguments"));
     }
     if let Some(class) = super::deque::iterator_class(name) {
         return super::deque::construct_iterator(ctx, class, args);
