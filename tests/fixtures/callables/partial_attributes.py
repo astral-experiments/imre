@@ -1,3 +1,4 @@
+from _functools import _PlaceholderType, partial as native_partial
 from functools import Placeholder, partial
 from typing import Callable
 
@@ -37,6 +38,8 @@ def choose(flag: bool) -> int:
 
 
 def main() -> None:
+    assert _PlaceholderType() is Placeholder
+    assert native_partial(combine, Placeholder, 2)(4, 5) == 425
     first = partial(combine, Placeholder, 2)
     print(first.args[0] is Placeholder)
     print(first.args[1])

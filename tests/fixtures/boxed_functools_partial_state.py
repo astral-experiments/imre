@@ -4,6 +4,11 @@ import pickle
 
 
 def current():
+    from _functools import Placeholder, _PlaceholderType, partial as native_partial
+
+    assert native_partial is functools.partial
+    assert Placeholder is functools.Placeholder and type(Placeholder) is _PlaceholderType
+
     def capture(*args, **keywords):
         return args, keywords
 

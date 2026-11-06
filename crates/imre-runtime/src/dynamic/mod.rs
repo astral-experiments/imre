@@ -4162,6 +4162,12 @@ impl Context {
             "operator" | "_operator" if source.is_none() => {
                 stdlib::operator::install(self, module, scope, name);
             }
+            "_functools" => {
+                for name in ["partial", "Placeholder", "_PlaceholderType"] {
+                    let value = stdlib::attribute(self, "functools", name)?;
+                    self.bind(scope, name, value);
+                }
+            }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),
             "faulthandler" => stdlib::faulthandler::install(self, scope),

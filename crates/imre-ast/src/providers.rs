@@ -84,6 +84,7 @@ fn is_builtin(name: &str) -> bool {
         "_blake2"
             | "_frozen_importlib"
             | "_frozen_importlib_external"
+            | "_functools"
             | "_json"
             | "_lzma"
             | "_socket"
