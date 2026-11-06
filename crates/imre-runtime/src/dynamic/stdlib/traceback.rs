@@ -40,7 +40,7 @@ impl<'a> FrameLine<'a> {
         let code = ctx.code_object(code);
         let file = ctx.str_value(code.filename)?;
         // Only native code has the original embedded source at this position.
-        let embedded_source = if !code.body.is_native() {
+        let embedded_source = if !matches!(code.body, crate::dynamic::value::Body::Native(_)) {
             None
         } else if file == "<string>" {
             ctx.config["command_source"].as_str()

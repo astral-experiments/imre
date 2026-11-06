@@ -534,6 +534,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "registered_path_spec"
             | "import_module"
             | "namespace_locations"
+            | "get_source_data"
             | "get_code"
             | "loader_fields"
             | "path_stats"
@@ -2281,7 +2282,7 @@ pub(super) fn call(
                 "_mark_generator expects a code object",
             ));
         };
-        if original.body.is_native() {
+        if matches!(original.body, super::value::Body::Native(_)) {
             return Err(Error::new(
                 "NotImplementedError",
                 "cannot mark this native generator function",
@@ -2437,6 +2438,10 @@ pub(super) fn call(
             ("namespace_locations", [name, path], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
                 return ctx.namespace_locations(&name, *path);
+            }
+            ("get_source_data", [loader, filename], []) => {
+                let data = ctx.registered_source_data(*loader, *filename);
+                return Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes.to_vec()))));
             }
             ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
             ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),

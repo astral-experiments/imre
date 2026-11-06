@@ -533,13 +533,16 @@ impl Context {
                         member = raw;
                     } else {
                         // Some object slots are interned on demand outside its class dictionary.
-                        let inherited = self.base_lineage(class, true).into_iter().skip(1).any(
-                            |base| {
-                                self.own_class_attr(base, name) == Some(raw)
-                                    || (Some(&base) == self.builtins.get("object")
-                                        && self.builtins.get(&format!("object.{name}")) == Some(&raw))
-                            },
-                        );
+                        let inherited =
+                            self.base_lineage(class, true)
+                                .into_iter()
+                                .skip(1)
+                                .any(|base| {
+                                    self.own_class_attr(base, name) == Some(raw)
+                                        || (Some(&base) == self.builtins.get("object")
+                                            && self.builtins.get(&format!("object.{name}"))
+                                                == Some(&raw))
+                                });
                         if inherited {
                             continue;
                         }

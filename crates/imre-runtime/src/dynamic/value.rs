@@ -44,20 +44,11 @@ impl CodeObject {
 #[derive(Clone)]
 pub(super) enum Body {
     Native(Code),
-    /// Frozen importlib repr, retaining its Python implementation for observable lookups.
-    FrozenModuleRepr(Code),
     Source(std::rc::Rc<super::source_code::Program>),
     PendingGenerator {
         source: &'static str,
         body_line: u32,
     },
-}
-
-impl Body {
-    /// Whether the body enters through the compiler's native function ABI.
-    pub(super) fn is_native(&self) -> bool {
-        matches!(self, Self::Native(_) | Self::FrozenModuleRepr(_))
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -964,7 +955,7 @@ pub(super) struct Scope {
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
-    pub names: indexmap::IndexMap<String, Id>,
+    pub names: indexmap::IndexMap<crate::Str, Id>,
     pub closure: ClosureScope,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
@@ -2922,6 +2913,8 @@ pub(super) struct Heap {
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
+    // Weak loader identities; the source bytes belong to the executable.
+    pub(super) loader_sources: HashMap<Id, (String, &'static [u8])>,
     frames: Vec<Frame>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
@@ -3145,6 +3138,7 @@ impl Heap {
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
+            loader_sources: HashMap::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
@@ -5698,6 +5692,8 @@ impl Heap {
         self.interned
             .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
         let callbacks = self.clear_weak_targets(None, None);
+        self.loader_sources
+            .retain(|&loader, _| self.traces[loader as usize].get() != UNMARKED);
         self.abc_registrations.retain(|&[owner, member]| {
             self.traces[owner as usize].get() != UNMARKED
                 && self.traces[member as usize].get() != UNMARKED

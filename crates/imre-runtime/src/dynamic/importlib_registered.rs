@@ -94,7 +94,9 @@ impl Context {
         let (origin, loader) = if let Some(file) = origin {
             let file = self.text(file.to_string_lossy());
             let factory = self.lookup_attr(external, "SourceFileLoader")?;
-            (file, self.call(factory, vec![name, file], vec![])?)
+            let loader = self.call(factory, vec![name, file], vec![])?;
+            self.bind_loader_source(loader, name, file)?;
+            (file, loader)
         } else {
             (NONE, NONE)
         };

@@ -1600,9 +1600,7 @@ impl Context {
                 // Delegated generators resume their children on the native stack.
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
                     match self.code_object(code).body {
-                        value::Body::Native(_) | value::Body::FrozenModuleRepr(_) => {
-                            self.next_generator_item(id)
-                        }
+                        value::Body::Native(_) => self.next_generator_item(id),
                         value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
                             self.resume_source(id, NONE)
                         }
@@ -2318,7 +2316,7 @@ impl Context {
             .class_namespace
             .as_ref()
             .and_then(|ns| ns.annotation_dict_cell);
-        let names: indexmap::IndexMap<String, Id> = self
+        let names: indexmap::IndexMap<crate::Str, Id> = self
             .dict_entries(body)
             .expect("class body dictionary")
             .iter()
@@ -2326,13 +2324,13 @@ impl Context {
                 self.str_value(key)
                     .ok()
                     .filter(|&name| annotation_cell.is_none() || name != "__classdictcell__")
-                    .map(|name| (name.to_owned(), value))
+                    .map(|name| (crate::Str::new(name), value))
             })
             .collect();
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.class_body = Some(names.keys().cloned().collect());
+        frame.class_body = Some(names.keys().map(|name| name.as_str().to_owned()).collect());
         frame.names = names;
         frame.namespace = None;
         frame.class_namespace.as_mut().unwrap().dictionary = None;
@@ -2415,7 +2413,7 @@ impl Context {
 
     /// Bind a parameter in a fresh function scope using checked name and table storage.
     fn bind_argument(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
-        let name = copy_label(name)?;
+        let name = crate::Str::try_new(name).map_err(|_| Error::new("MemoryError", ""))?;
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("function call scope")
         };
@@ -2462,7 +2460,7 @@ impl Context {
             if let Some(order) = &mut s.class_body {
                 order.push(name.to_owned());
             }
-            s.names.insert(name.to_owned(), value);
+            s.names.insert(crate::Str::new(name), value);
             None
         };
         let dictionary = s
@@ -2959,20 +2957,16 @@ impl Context {
         value
     }
     fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let (entry, module_repr) = match &self.code_object(code).body {
-            value::Body::Native(entry) => (*entry, false),
-            value::Body::FrozenModuleRepr(entry) => (*entry, true),
+        let entry = match &self.code_object(code).body {
+            value::Body::Native(entry) => *entry,
             value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
                 return self.call_source(code, scope, owner);
             }
         };
         self.heap.enter(scope, code, owner);
-        let result = if module_repr && let Some(rendered) = self.plain_module_repr(scope) {
-            self.text(rendered)
-        } else {
-            // SAFETY: the compiler-generated body returns before this context can move.
-            unsafe { entry(self, scope) }
-        };
+        // SAFETY: a compiler-generated initializer or function uses this ABI and
+        // returns before this Context can move or outlive the native module.
+        let result = unsafe { entry(self, scope) };
         if matches!(owner, FrameOwner::Module(_)) && self.pending.is_none() {
             self.register_decimal_class(code, entry, scope);
         }
@@ -4395,12 +4389,12 @@ impl Context {
                     })
                 }
                 importlib::SourceBody::Namespace => Ok(NONE),
-                importlib::SourceBody::Zip(loader) => self.initialize_source(
+                importlib::SourceBody::Zip(_) => self.initialize_source(
                     module,
                     scope,
                     name_id,
                     origin.expect("ZIP source has a filename"),
-                    loader,
+                    body,
                 ),
                 importlib::SourceBody::Registered(_)
                     if let Some(origin) = origin
@@ -4413,13 +4407,13 @@ impl Context {
                                 && self.sources.contains_key("importlib")
                                 && path.is_absolute())) =>
                 {
-                    self.initialize_source(module, scope, name_id, origin, NONE)
+                    self.initialize_source(module, scope, name_id, origin, body)
                 }
                 importlib::SourceBody::Registered(entry) => self
                     .module_code(entry, &path)
                     .and_then(|code| self.execute(code, scope, FrameOwner::Module(name_id))),
                 importlib::SourceBody::Filesystem => match origin {
-                    Some(file) => self.initialize_source(module, scope, name_id, file, NONE),
+                    Some(file) => self.initialize_source(module, scope, name_id, file, body),
                     // Namespace packages have no initializer.
                     None => Ok(NONE),
                 },

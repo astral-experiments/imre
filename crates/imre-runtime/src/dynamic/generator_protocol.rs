@@ -1,5 +1,5 @@
 use super::source_code::{DelegateOutcome, GeneratorInput};
-use super::value::{FrameOwner, Location};
+use super::value::{Body, FrameOwner, Location};
 use super::{Context, Error, Id, NONE, Result, Value};
 
 pub(super) const ANEXT_METHODS: &[&str] = &[
@@ -430,7 +430,7 @@ impl Context {
             self.heap.discard_generator_frame(id);
             return Err(error);
         }
-        if self.code_object(code).body.is_native() {
+        if matches!(self.code_object(code).body, Body::Native(_)) {
             self.heap.discard_generator_frame(id);
             return Err(self.frame_error(error, code));
         }
@@ -474,7 +474,7 @@ impl Context {
         if offset.is_none() {
             return Ok(NONE);
         }
-        if offset == Some(0) || self.code_object(code).body.is_native() {
+        if offset == Some(0) || matches!(self.code_object(code).body, Body::Native(_)) {
             self.heap.discard_generator_frame(id);
             return Ok(NONE);
         }

@@ -3867,7 +3867,7 @@ impl Context {
         let mut local = scope;
         loop {
             let frame = self.scope_data(local);
-            names.extend(frame.names.keys().cloned());
+            names.extend(frame.names.keys().map(|name| name.as_str().to_owned()));
             let mut cells: Vec<_> = frame.closure.cells.keys().cloned().collect();
             cells.sort_unstable();
             names.extend(cells);
@@ -4071,7 +4071,7 @@ impl Context {
         let kind = match &definition.body {
             Body::Source(program) => program.kind,
             Body::PendingGenerator { .. } => FunctionKind::prelinked(definition),
-            Body::Native(_) | Body::FrozenModuleRepr(_) => unreachable!("source function"),
+            Body::Native(_) => unreachable!("source function"),
         };
         if kind != FunctionKind::Plain {
             let frame = self.new_generator(code, scope, owner);
@@ -4225,7 +4225,7 @@ impl Context {
                 format!("can't send non-None value to a just-started {kind}"),
             ));
         }
-        let next = if self.code_object(code).body.is_native() {
+        let next = if matches!(self.code_object(code).body, Body::Native(_)) {
             self.next_result(generator)?
         } else {
             stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
@@ -5285,7 +5285,7 @@ impl Context {
                 } else if thrown.is_none()
                     && code.kind != FunctionKind::Plain
                     && let Value::Generator { code, .. } = self.heap.get(iter)
-                    && !self.code_object(*code).body.is_native()
+                    && !matches!(self.code_object(*code).body, Body::Native(_))
                 {
                     return Ok(Some(Step::Advance(
                         iter,

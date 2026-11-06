@@ -2,6 +2,20 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a string; the optional doc argument can have any type.";
 
+/// Return an ordinary module's representation, or zero to continue in the frozen Python body.
+///
+/// # Safety
+/// The generated function supplies its active context and bound Python frame.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_plain_module_repr(context: *mut Context, frame: Id) -> Id {
+    // SAFETY: the compiler passes the live interpreter for the duration of the call.
+    let ctx = unsafe { &mut *context };
+    match ctx.plain_module_repr(frame) {
+        Some(rendered) => ctx.text(rendered),
+        None => 0,
+    }
+}
+
 impl Context {
     /// Copy live exports from a module in their original order. A failing lookup
     /// leaves earlier bindings visible, just like successive assignments.
@@ -272,7 +286,7 @@ impl Context {
     }
 
     /// Render ordinary module fields when every lookup in the frozen helper is inert.
-    pub(super) fn plain_module_repr(&self, frame: Id) -> Option<String> {
+    fn plain_module_repr(&self, frame: Id) -> Option<String> {
         // Attribute loads and the missing-file handler can themselves enter Python calls.
         self.check_call_depth(4).ok()?;
         let module = self.scope_name(frame, "module")?;
