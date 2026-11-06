@@ -587,8 +587,8 @@ impl Operands for BoxedSumprod<'_> {
         }
     }
 
-    fn integer(&mut self, value: std::os::raw::c_long) -> Id {
-        self.ctx.int(value.into())
+    fn integer(&mut self, value: i64) -> Id {
+        self.ctx.int(value)
     }
 
     fn float(&mut self, value: f64) -> Id {

@@ -24,7 +24,7 @@ pub(crate) trait Operands {
 
     fn next(&mut self, side: Side) -> Result<Option<Self::Value>, Self::Error>;
     fn number<'a>(&'a self, value: &'a Self::Value) -> Number<'a>;
-    fn integer(&mut self, value: c_long) -> Self::Value;
+    fn integer(&mut self, value: i64) -> Self::Value;
     fn float(&mut self, value: f64) -> Self::Value;
     fn multiply(
         &mut self,
@@ -102,7 +102,8 @@ impl Prefix {
         let term = match *self {
             Self::Integers(subtotal) => {
                 *self = Self::Floats(None);
-                subtotal.map(|sum| ops.integer(sum))
+                #[allow(clippy::useless_conversion, reason = "C long is 32-bit on Windows")]
+                subtotal.map(|sum| ops.integer(sum.into()))
             }
             Self::Floats(subtotal) => {
                 *self = Self::Generic;
