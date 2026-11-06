@@ -5270,8 +5270,8 @@ impl Context {
     fn builtin_compare_slot(
         &mut self,
         name: &str,
-        a: Id,
-        b: Id,
+        mut a: Id,
+        mut b: Id,
         native_order: bool,
     ) -> Result<Option<Id>> {
         if native_order {
@@ -5300,8 +5300,19 @@ impl Context {
             if !compatible {
                 return Ok(None);
             }
-        } else if self.slot(a, name).is_some() {
-            return self.operator_slot(a, name, b);
+        } else if let Some(slot) = self.slot(a, name) {
+            // The inherited int descriptor compares the stored integers, including on subclasses.
+            if !matches!(self.heap.get(slot), Value::Native(symbol)
+                if symbol.strip_prefix("int.") == Some(name))
+                || !self.builtin_slot_accepts(a, "int")
+            {
+                return self.operator_slot(a, name, b);
+            }
+            if !self.builtin_slot_accepts(b, "int") {
+                return Ok(None);
+            }
+            a = self.scalar_value(a);
+            b = self.scalar_value(b);
         }
         let value = match name {
             "__eq__" | "__ne__" => {
@@ -5522,7 +5533,8 @@ impl Context {
                 });
         // An int (including bool) or an exact float can compare an integer
         // operand itself. Only a strict subtype gets to try its slot first.
-        let compares_integer = self.builtin_slot_accepts(b, "int")
+        let compares_integer = inplace.is_empty()
+            && self.builtin_slot_accepts(b, "int")
             && (self.builtin_slot_accepts(a, "int") || matches!(self.heap.get(a), Value::Float(_)));
         if inplace.is_empty()
             && (self.same_sequence_family(a, b) || compares_integer || native_order)
