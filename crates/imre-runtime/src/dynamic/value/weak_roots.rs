@@ -174,13 +174,19 @@ impl RootPaths {
             dict_keys,
             ..Self::default()
         };
+        let global_roots = globals
+            .into_iter()
+            .enumerate()
+            .map(|(i, id)| (id, Root::Global(i)));
         if from_frames && !wanted.is_empty() {
             let roots = heap
                 .frames
                 .iter()
                 .enumerate()
                 .rev()
-                .map(|(i, frame)| (frame.scope, Root::Frame(i)));
+                .map(|(i, frame)| (frame.scope, Root::Frame(i)))
+                // Visit directly held globals before descending into large frame-local containers.
+                .chain(global_roots.clone());
             paths.search(
                 heap,
                 roots,
@@ -191,13 +197,9 @@ impl RootPaths {
             )?;
         }
         if !wanted.is_empty() && nodes_left != 0 && edges_left != 0 {
-            let roots = globals
-                .into_iter()
-                .enumerate()
-                .map(|(i, id)| (id, Root::Global(i)));
             paths.search(
                 heap,
-                roots,
+                global_roots,
                 &mut wanted,
                 &mut nodes_left,
                 &mut edges_left,

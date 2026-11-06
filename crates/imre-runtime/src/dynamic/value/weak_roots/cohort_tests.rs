@@ -200,6 +200,44 @@ fn weak_dict_key_and_frame_held_target_must_both_survive() {
 }
 
 #[test]
+fn wide_frame_contents_do_not_hide_direct_global_roots() {
+    use super::{MAX_NODES, RootPaths};
+
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let target = ctx.alloc(Value::List(Vec::new()));
+    let reference = ctx.alloc(Value::List(Vec::new()));
+    let registry = ctx.alloc(Value::List(vec![target]));
+    let globals = [registry, reference];
+    let items = (0..MAX_NODES)
+        .map(|_| ctx.alloc(Value::List(Vec::new())))
+        .collect();
+    let wide = ctx.alloc(Value::List(items));
+    let scope = ctx.scope("caller", None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    frame.names.insert("wide".into(), wide);
+    ctx.heap.release_temporaries_since(0);
+
+    let paths = RootPaths::discover(
+        &ctx.heap,
+        globals,
+        [target, reference].into_iter(),
+        true,
+        false,
+    )
+    .unwrap();
+    assert!(paths.contains(target) && paths.contains(reference));
+    assert!(paths.valid(&ctx.heap, globals));
+    let Value::List(items) = ctx.heap.get_mut(registry) else {
+        unreachable!()
+    };
+    items.clear();
+    assert!(!paths.valid(&ctx.heap, globals));
+}
+
+#[test]
 fn late_dictionary_values_keep_the_full_ordinary_search_budget() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let class = ctx.builtin("object");
