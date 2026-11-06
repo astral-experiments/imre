@@ -3,6 +3,10 @@
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod termios;
 
+/// Loopback addresses defined by the public socket module.
+pub const SOCKET_LOOPBACK_HOSTS: &[(&str, &str)] =
+    &[("_LOCALHOST", "127.0.0.1"), ("_LOCALHOST_V6", "::1")];
+
 /// Functions installed in the boxed builtins namespace.
 pub const BUILTIN_FUNCTIONS: &[&str] = &[
     "len",

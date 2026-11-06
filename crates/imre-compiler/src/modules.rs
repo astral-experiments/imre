@@ -1403,6 +1403,13 @@ impl IntrinsicModule {
         if self == Self::NtPath {
             return Some(Binding::ConditionalValue);
         }
+        if self == Self::Socket
+            && let Some(&(_, value)) = imre_ast::providers::SOCKET_LOOPBACK_HOSTS
+                .iter()
+                .find(|&&(attr, _)| attr == name)
+        {
+            return Some(Binding::Intrinsic(Intrinsic::StringConstant(value)));
+        }
         if matches!(self, Self::Lzma | Self::LzmaNative)
             && let Some(&(_, value)) = imre_ast::lzma::INTEGER_CONSTANTS
                 .iter()
@@ -4939,6 +4946,10 @@ impl<'a> Loader<'a> {
                             == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
                             || binding == Binding::IntrinsicModule(IntrinsicModule::ReConstants)
                             || module == IntrinsicModule::EmailHeaderValueParser
+                            || matches!(
+                                (module, binding),
+                                (IntrinsicModule::Socket, Binding::Intrinsic(Intrinsic::StringConstant(_)))
+                            )
                         {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }

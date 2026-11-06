@@ -1,6 +1,7 @@
 import errno
 import os
 import socket
+from socket import _LOCALHOST
 
 
 def last_owner() -> int:
@@ -23,7 +24,7 @@ def accept_into(listener: socket.socket, clients: dict[int, socket.socket]) -> t
 
 def duplicated_connection() -> None:
     with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
+        listener.bind((_LOCALHOST, 0))
         listener.listen()
         with socket.socket() as original:
             original.connect(listener.getsockname())
