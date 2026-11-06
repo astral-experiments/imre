@@ -265,6 +265,21 @@ def current():
     else:
         raise AssertionError("str.__hash__ accepted an integer")
 
+    class Invoice(int):
+        def __hash__(self):
+            return 303
+
+    invoice = Invoice(1 << 130)
+    assert hash(invoice) == invoice.__hash__() == 303
+    assert int.__hash__(invoice) == hash(1 << 130)
+    assert int.__dict__["__hash__"].__get__(invoice, Invoice)() == hash(1 << 130)
+    try:
+        int.__hash__(1.0)
+    except TypeError as error:
+        assert str(error) == "descriptor '__hash__' requires a 'int' object but received a 'float'"
+    else:
+        raise AssertionError("int hash accepted a float")
+
     class Number(int):
         def __radd__(self, other):
             return "reflected"

@@ -1559,6 +1559,7 @@ pub(super) fn builtin_slot(
         "__repr__"
             | "__str__"
             | "__index__"
+            | "__hash__"
             | "__bool__"
             | "__abs__"
             | "__int__"
@@ -1613,6 +1614,10 @@ pub(super) fn builtin_slot(
             }
             let number = crate::floats::int_to_float(&ctx.as_int(storage)?)?;
             return Ok(ctx.alloc(Value::Float(number)));
+        }
+        if method == "__hash__" {
+            let hash = ctx.dictionary_hash(storage)?;
+            return Ok(ctx.int(hash));
         }
         if method == "__index__" {
             return Ok(integer::exact_value(ctx, object));
