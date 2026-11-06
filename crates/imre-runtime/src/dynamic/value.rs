@@ -2704,6 +2704,8 @@ enum MarkMode<'a> {
 }
 
 impl MarkQueue<'_> {
+    // An already-marked edge needs only the caller-side trace check.
+    #[inline(always)]
     pub(super) fn push(&mut self, id: Id) {
         let trace = &self.traces[id as usize];
         if trace.get() == UNMARKED {
