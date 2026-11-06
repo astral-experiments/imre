@@ -504,22 +504,45 @@ impl Context {
         })))
     }
 
-    /// Return the registered body for this loader, or None to read the source through get_data.
-    pub(super) fn registered_code(&mut self, name: Id, path: Id) -> Result<Id> {
-        let name = self.str_value(name)?;
-        let filename = self.str_value(path)?;
-        if let Some(source) = self
-            .sources
-            .get(name)
-            .and_then(|sources| sources.iter().find(|s| s.path == Path::new(filename)))
-        {
+    fn registered_file(&self, name: &str, filename: &str) -> Option<&super::SourceModule> {
+        self.sources
+            .get(name)?
+            .iter()
+            .find(|source| source.path == Path::new(filename))
+    }
+
+    /// Bind the issued loader to its initializer, including modules compiled without source text.
+    pub(super) fn bind_loader_source(&mut self, loader: Id, name: Id, origin: Id) -> Result<()> {
+        let filename = self.str_value(origin)?;
+        if let Some(source) = self.registered_file(self.str_value(name)?, filename) {
+            let source = super::SourceModule {
+                path: filename.into(),
+                ..*source
+            };
+            self.heap.loader_sources.insert(loader, source);
+        }
+        Ok(())
+    }
+
+    fn loader_source(&self, loader: Id, filename: Id) -> Option<&super::SourceModule> {
+        let source = self.heap.loader_sources.get(&loader)?;
+        (source.path.to_str()? == self.str_value(filename).ok()?).then_some(source)
+    }
+
+    pub(super) fn registered_source_data(&self, loader: Id, filename: Id) -> Option<&'static [u8]> {
+        self.loader_source(loader, filename)?.bundled_text
+    }
+
+    /// Return the issued loader's body, or None to compile through its normal file hooks.
+    pub(super) fn registered_code(&mut self, loader: Id, path: Id) -> Result<Id> {
+        if let Some(source) = self.loader_source(loader, path) {
             let (entry, path) = (source.code, source.path.clone());
             return self.module_code(entry, &path);
         }
         Ok(NONE)
     }
 
-    fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {
+    fn file_spec(&mut self, name: Id, origin: Id, locations: Id, body: SourceBody) -> Result<Id> {
         let make = if self.bootstrap_file_spec != NONE
             && matches!(
                 self.str_value(name)?,
@@ -530,7 +553,13 @@ impl Context {
             let importlib = self.module("importlib")?;
             self.lookup_attr(importlib, "_file_spec")?
         };
-        self.call(make, vec![name, origin, locations, loader], vec![])
+        let spec = self.call(make, vec![name, origin, locations, body.loader()], vec![])?;
+        if matches!(body, SourceBody::Registered(_))
+            && let Some(loader) = self.raw_instance_field(spec, "loader")
+        {
+            self.bind_loader_source(loader, name, origin)?;
+        }
+        Ok(spec)
     }
 
     fn location_list(&mut self, locations: &[PathBuf]) -> Id {
@@ -571,10 +600,10 @@ impl Context {
         scope: Id,
         name: Id,
         origin: Id,
-        loader: Id,
+        body: SourceBody,
     ) -> Result<Id> {
         let locations = self.scope_name(scope, "__path__").unwrap_or(NONE);
-        let spec = self.file_spec(name, origin, locations, loader)?;
+        let spec = self.file_spec(name, origin, locations, body)?;
         let loader = self.lookup_attr(spec, "loader")?;
         self.bind(scope, "__spec__", spec);
         self.bind(scope, "__loader__", loader);
@@ -692,6 +721,6 @@ impl Context {
         } else {
             self.location_list(&locations)
         };
-        self.file_spec(name, origin, locations, body.loader())
+        self.file_spec(name, origin, locations, body)
     }
 }

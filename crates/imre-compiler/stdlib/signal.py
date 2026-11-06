@@ -1,7 +1,7 @@
 """POSIX signal numbers, handlers, and pending signals."""
 
 import _signal
-from _signal import NSIG, alarm, default_int_handler
+from _signal import NSIG, alarm, default_int_handler, set_wakeup_fd, siginterrupt
 from _imre_signal import make_signals as _make_signals
 from enum import IntEnum as _IntEnum
 

@@ -230,17 +230,11 @@ enum Instruction {
 }
 
 struct SourceCase {
-    pattern: SourcePattern,
+    pattern: ast::Pattern,
+    captures: Vec<String>,
     line_offset: u32,
     guard: Option<(u32, Box<ast::Expr>)>,
     body: usize,
-}
-
-enum SourcePattern {
-    Singleton(Id),
-    Value(Box<ast::Expr>),
-    Class(Box<ast::Expr>),
-    Wildcard,
 }
 
 struct Definition {
@@ -1308,11 +1302,9 @@ impl Program {
                 Instruction::Match { subject, cases, .. } => {
                     strings.visit_expr(subject);
                     for case in cases {
-                        match &case.pattern {
-                            SourcePattern::Value(expr) | SourcePattern::Class(expr) => {
-                                strings.visit_expr(expr)
-                            }
-                            SourcePattern::Singleton(_) | SourcePattern::Wildcard => {}
+                        strings.visit_pattern(&case.pattern);
+                        for name in &case.captures {
+                            strings.heap.code_name(name);
                         }
                         if let Some((_, guard)) = &case.guard {
                             strings.visit_expr(guard);
@@ -2851,34 +2843,27 @@ impl Program {
                     };
                     for case in s.cases {
                         let case_line = line_offset(case.pattern.start());
-                        let pattern = match case.pattern {
-                            ast::Pattern::MatchSingleton(p) => {
-                                SourcePattern::Singleton(match p.value {
-                                    ast::Singleton::None => NONE,
-                                    ast::Singleton::False => FALSE,
-                                    ast::Singleton::True => TRUE,
-                                })
-                            }
-                            ast::Pattern::MatchValue(p) => SourcePattern::Value(p.value),
-                            ast::Pattern::MatchClass(p)
-                                if p.arguments.patterns.is_empty()
-                                    && p.arguments.keywords.is_empty() =>
-                            {
-                                SourcePattern::Class(p.cls)
-                            }
-                            ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none() => {
-                                if case.guard.is_none() && cases.len() + 1 < count {
-                                    return Err(Error::new(
-                                        "SyntaxError",
-                                        "wildcard makes remaining patterns unreachable",
-                                    ));
+                        if case.guard.is_none()
+                            && cases.len() + 1 < count
+                            && let Some(irrefutable) = case.pattern.irrefutable_pattern()
+                        {
+                            let reason = match irrefutable.kind {
+                                ast::IrrefutablePatternKind::Name(name) => {
+                                    let name = ast::Identifier::new(name, irrefutable.range);
+                                    format!("name capture '{}'", self.definition_spelling(&name))
                                 }
-                                SourcePattern::Wildcard
-                            }
-                            _ => return Err(unsupported("match pattern")),
-                        };
+                                ast::IrrefutablePatternKind::Wildcard => "wildcard".to_owned(),
+                            };
+                            return Err(Error::new(
+                                "SyntaxError",
+                                format!("{reason} makes remaining patterns unreachable"),
+                            ));
+                        }
+                        let mut captures = indexmap::IndexMap::new();
+                        self.validate_pattern(&case.pattern, &mut captures)?;
                         cases.push(SourceCase {
-                            pattern,
+                            pattern: case.pattern,
+                            captures: captures.into_values().collect(),
                             line_offset: case_line,
                             guard: case.guard.map(|expr| (line_offset(expr.start()), expr)),
                             body: self.instructions.len(),
@@ -2942,6 +2927,47 @@ impl Program {
                 }
             };
             self.instructions.push((line, op));
+        }
+        Ok(())
+    }
+
+    /// Check the executable subset and record captures in binding order.
+    fn validate_pattern(
+        &mut self,
+        pattern: &ast::Pattern,
+        captures: &mut indexmap::IndexMap<String, String>,
+    ) -> Result<()> {
+        match pattern {
+            ast::Pattern::MatchSingleton(_) | ast::Pattern::MatchValue(_) => {}
+            ast::Pattern::MatchClass(p)
+                if p.arguments.patterns.is_empty() && p.arguments.keywords.is_empty() => {}
+            ast::Pattern::MatchSequence(p) => {
+                for child in &p.patterns {
+                    self.validate_pattern(child, captures)?;
+                }
+            }
+            ast::Pattern::MatchAs(p) => {
+                if let Some(inner) = &p.pattern {
+                    self.validate_pattern(inner, captures)?;
+                }
+                if let Some(name) = &p.name {
+                    let spelling = self.definition_spelling(name);
+                    if spelling == "__debug__" {
+                        return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+                    }
+                    if captures
+                        .insert(spelling.to_owned(), name.to_string())
+                        .is_some()
+                    {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            format!("multiple assignments to name '{spelling}' in pattern"),
+                        ));
+                    }
+                    self.locals.insert(name.to_string());
+                }
+            }
+            _ => return Err(unsupported("match pattern")),
         }
         Ok(())
     }
@@ -3841,7 +3867,7 @@ impl Context {
         let mut local = scope;
         loop {
             let frame = self.scope_data(local);
-            names.extend(frame.names.keys().cloned());
+            names.extend(frame.names.keys().map(|name| name.as_str().to_owned()));
             let mut cells: Vec<_> = frame.closure.cells.keys().cloned().collect();
             cells.sort_unstable();
             names.extend(cells);
@@ -4157,6 +4183,16 @@ impl Context {
     }
 
     pub(super) fn generator_send(&mut self, generator: Id, sent: Id) -> Result<Id> {
+        self.send_generator_frame(generator, generator, sent)
+    }
+
+    /// Send a value into a frame while keeping its public generator or coroutine alive.
+    pub(super) fn send_generator_frame(
+        &mut self,
+        generator: Id,
+        finalizer: Id,
+        sent: Id,
+    ) -> Result<Id> {
         let Value::Generator {
             code,
             running,
@@ -4189,30 +4225,33 @@ impl Context {
                 format!("can't send non-None value to a just-started {kind}"),
             ));
         }
-        let next = if sent == NONE || matches!(self.code_object(code).body, Body::Native(_)) {
+        let next = if matches!(self.code_object(code).body, Body::Native(_)) {
             self.next_result(generator)?
         } else {
             stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                self.resume_source(generator, sent)
+                self.resume_source_input(generator, finalizer, GeneratorInput::Send(sent))
             })?
         };
         next.ok_or_else(|| self.exception("StopIteration", &[]))
     }
 
     pub(super) fn resume_source(&mut self, id: Id, sent: Id) -> Result<Option<Id>> {
-        self.resume_source_input(id, GeneratorInput::Send(sent))
+        self.resume_source_input(id, id, GeneratorInput::Send(sent))
     }
 
     pub(super) fn resume_source_input(
         &mut self,
         mut id: Id,
+        finalizer: Id,
         mut input: GeneratorInput,
     ) -> Result<Option<Id>> {
+        let initial = id;
         let mut parents = Vec::new();
         let mut advanced = None;
         loop {
             let step = self.resume_source_frame(
                 id,
+                if id == initial { finalizer } else { id },
                 advanced.take(),
                 std::mem::replace(&mut input, GeneratorInput::Send(NONE)),
                 !parents.is_empty(),
@@ -4272,6 +4311,7 @@ impl Context {
     fn resume_source_frame(
         &mut self,
         id: Id,
+        finalizer: Id,
         advanced: Option<Result<DelegateOutcome>>,
         input: GeneratorInput,
         nested_resume: bool,
@@ -4282,7 +4322,7 @@ impl Context {
                 GeneratorInput::Throw { error, args } => args.len() + error.roots().count(),
             };
             self.heap.reserve_temporaries(1 + input_roots)?;
-            self.heap.keep(id);
+            self.heap.keep(finalizer);
             match &input {
                 GeneratorInput::Send(value) => self.heap.keep(*value),
                 GeneratorInput::Throw { error, args } => {
@@ -4317,7 +4357,7 @@ impl Context {
         let (code, frame_scope) = (*code, *scope);
         let mut active = std::mem::take(iterators);
         let mut blocks = std::mem::take(protected);
-        self.heap.disarm_finalizer(id);
+        self.heap.disarm_finalizer(finalizer);
         let result = self
             .prepare_generator(code)
             .and_then(|()| {
@@ -4365,7 +4405,7 @@ impl Context {
                 *iterators = active;
                 *protected = blocks;
                 if needs_finalizer && !async_generator {
-                    self.heap.register_finalizer(id);
+                    self.heap.register_finalizer(finalizer);
                 }
                 return Ok(step);
             }
@@ -4375,7 +4415,7 @@ impl Context {
         *scope = NONE;
         *frame = None;
         *owner = FrameOwner::Module(NONE);
-        self.heap.disarm_finalizer(id);
+        self.heap.disarm_finalizer(finalizer);
         if self.heap.tracks_finalizers()
             && (!active.is_empty()
                 || !self.scope_data(frame_scope).closure.cells.is_empty()
@@ -4942,43 +4982,41 @@ impl Context {
                 let match_line = code.instructions[*ip - 1].0;
                 let mark = self.heap.temporary_mark();
                 let subject = eval(self, subject)?;
-                self.heap.release_temporaries_since(mark);
-                self.heap.keep(subject);
+                self.discard_temporaries(mark, Some(subject));
                 let subject_mark = self.heap.temporary_mark();
                 let mut target = *end;
                 // CPython compiles a single trailing wildcard as the default suite.
                 let default = cases
                     .last()
-                    .is_some_and(|case| matches!(case.pattern, SourcePattern::Wildcard));
+                    .is_some_and(|case| imre_ast::wildcard_pattern(&case.pattern));
                 let subject_cases = cases.len() - usize::from(default);
                 for (index, case) in cases.iter().enumerate() {
                     self.heap.set_statement_line(match_line + case.line_offset);
-                    let matched = match &case.pattern {
-                        SourcePattern::Singleton(value) => subject == *value,
-                        SourcePattern::Value(expr) => {
-                            let pattern = eval(self, expr)?;
-                            let comparison = self.binary("==", subject, pattern)?;
-                            self.truth(comparison)?
-                        }
-                        SourcePattern::Class(expr) => {
-                            let class = eval(self, expr)?;
-                            self.class_pattern_matches(subject, class)?
-                        }
-                        SourcePattern::Wildcard => true,
-                    };
-                    // Only later cases need the subject while a guard executes.
+                    // Keep a separate subject only if a later case still needs it.
                     let live = if index + 1 < subject_cases {
                         subject_mark
                     } else {
                         mark
                     };
-                    self.heap.release_temporaries_since(live);
+                    let operand = if index < subject_cases { subject } else { NONE };
+                    self.heap.reserve_temporaries(case.captures.len() + 1)?;
+                    let captures = std::iter::repeat_n(NONE, case.captures.len());
+                    self.discard_temporaries(live, captures.chain([operand]));
+                    let mut slots = live..live + case.captures.len();
+                    let matched =
+                        self.match_source_pattern(code, scope, &case.pattern, operand, &mut slots)?;
+                    if matched {
+                        // A failed guard retains bindings from a successful pattern.
+                        for (slot, name) in case.captures.iter().enumerate() {
+                            let value = *self.heap.temporary_root(live + slot);
+                            self.bind_source_name(scope, name, value)?;
+                        }
+                    }
+                    self.discard_truth(live);
                     if matched {
                         if let Some((offset, guard)) = &case.guard {
                             self.heap.set_statement_line(match_line + *offset);
-                            let accept = self.source_condition(code, scope, guard)?;
-                            self.heap.release_temporaries_since(live);
-                            if !accept {
+                            if !self.source_condition(code, scope, guard)? {
                                 continue;
                             }
                         }
@@ -4986,7 +5024,7 @@ impl Context {
                         break;
                     }
                 }
-                self.heap.release_temporaries_since(mark);
+                self.discard_truth(mark);
                 *ip = target;
             }
             Instruction::Unless(e, destination) => {
@@ -5807,6 +5845,79 @@ impl Context {
         unreachable!("comparison has at least one operator")
     }
 
+    fn match_source_pattern(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        pattern: &ast::Pattern,
+        subject: Id,
+        slots: &mut std::ops::Range<usize>,
+    ) -> Result<bool> {
+        match pattern {
+            ast::Pattern::MatchSingleton(p) => {
+                let singleton = match p.value {
+                    ast::Singleton::None => NONE,
+                    ast::Singleton::False => FALSE,
+                    ast::Singleton::True => TRUE,
+                };
+                Ok(subject == singleton)
+            }
+            ast::Pattern::MatchValue(p) => {
+                let operand = self.heap.temporary_mark() - 1;
+                let value = self.source_expr(code, scope, &p.value)?;
+                let comparison = self.binary("==", subject, value);
+                let comparison = self.release_with_result(operand, comparison)?;
+                self.truth(comparison)
+            }
+            ast::Pattern::MatchClass(p) => {
+                let class = self.source_expr(code, scope, &p.cls)?;
+                self.class_pattern_matches(subject, class)
+            }
+            ast::Pattern::MatchSequence(p) => {
+                let patterns = &p.patterns;
+                let operand = self.heap.temporary_mark() - 1;
+                if !self
+                    .pattern_flags(subject)
+                    .has(collection_pattern::PatternFlags::SEQUENCE)
+                    || self.sequence_len(subject)? != patterns.len()
+                {
+                    return Ok(false);
+                }
+                if patterns.iter().all(imre_ast::wildcard_pattern) {
+                    return Ok(true);
+                }
+                let items = self.unpack_items(subject, patterns.len(), None)?;
+                // Unpacking consumes this subject. Keep the next subpattern's operand on top.
+                self.discard_temporaries(operand, items.iter().rev().copied());
+                for (pattern, item) in patterns.iter().zip(items) {
+                    let operand = self.heap.temporary_mark() - 1;
+                    let matched = self.match_source_pattern(code, scope, pattern, item, slots)?;
+                    self.discard_truth(operand);
+                    if !matched {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            ast::Pattern::MatchAs(p) => {
+                if let Some(inner) = &p.pattern {
+                    // The alias retains the subject while its inner pattern consumes a copy.
+                    self.heap.keep(subject);
+                    if !self.match_source_pattern(code, scope, inner, subject, slots)? {
+                        return Ok(false);
+                    }
+                }
+                if p.name.is_some() {
+                    // Validation records captures in the same left-to-right, inner-before-alias order.
+                    let slot = slots.next().expect("validated capture");
+                    *self.heap.temporary_root(slot) = subject;
+                }
+                Ok(true)
+            }
+            _ => unreachable!("validated runtime source pattern"),
+        }
+    }
+
     /// Evaluate a branch condition without testing a short-circuited operand twice.
     fn source_condition(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<bool> {
         if let ast::Expr::UnaryOp(op) = expr
@@ -6436,10 +6547,11 @@ impl Context {
                 if let Some(value) = sole_star {
                     self.extend_source_items(&mut args, value, Some(f))?;
                 }
-                if let Some(mapping) = mapping {
-                    kwargs = self.keyword_args(mapping)?;
-                }
-                let result = self.call_in_scope(scope, f, args, kwargs)?;
+                let result = if let Some(mapping) = mapping {
+                    self.call_with_keyword_dict(scope, f, args, mapping)?
+                } else {
+                    self.call_in_scope(scope, f, args, kwargs)?
+                };
                 self.finish_call_operands(mark, result);
                 self.check_call_return(result)
             }

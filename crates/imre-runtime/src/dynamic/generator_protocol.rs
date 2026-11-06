@@ -53,8 +53,16 @@ impl Context {
         generator
     }
 
+    pub(super) fn generator_name_frame(&self, obj: Id) -> Option<Id> {
+        match *self.heap.get(obj) {
+            Value::Generator { .. } => Some(obj),
+            Value::Coroutine { frame, .. } => Some(frame),
+            _ => None,
+        }
+    }
+
     pub(super) fn set_generator_name(&mut self, obj: Id, field: &str, value: Id) -> Result<()> {
-        if !matches!(self.heap.get(self.scalar_value(value)), Value::Str(_)) {
+        if self.string_storage(value).is_none() {
             return Err(Error::new(
                 "TypeError",
                 format!("{field} must be set to a string object"),
@@ -257,10 +265,10 @@ impl Context {
         self.check_call_depth(0)?;
         self.call_depth += 1;
         let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || match method {
-            "__next__" => self.generator_send(frame, NONE),
-            "send" => self.generator_send(frame, args[1]),
-            "throw" => self.generator_throw(frame, &args[1..]),
-            "close" => self.generator_close(frame),
+            "__next__" => self.send_generator_frame(frame, coroutine, NONE),
+            "send" => self.send_generator_frame(frame, coroutine, args[1]),
+            "throw" => self.throw_into_generator_frame(frame, coroutine, &args[1..]),
+            "close" => self.close_generator_frame(frame, coroutine),
             _ => unreachable!("known coroutine method"),
         });
         self.call_depth -= 1;
@@ -370,6 +378,11 @@ impl Context {
     }
 
     pub(super) fn generator_throw(&mut self, id: Id, args: &[Id]) -> Result<Id> {
+        self.throw_into_generator_frame(id, id, args)
+    }
+
+    /// Throw into a frame on behalf of its public generator or coroutine.
+    fn throw_into_generator_frame(&mut self, id: Id, finalizer: Id, args: &[Id]) -> Result<Id> {
         let mut error = self.generator_exception(args)?;
         let Value::Generator {
             code,
@@ -423,6 +436,7 @@ impl Context {
         }
         self.resume_source_input(
             id,
+            finalizer,
             GeneratorInput::Throw {
                 error,
                 args: super::copy_ids(args)?,
@@ -432,6 +446,11 @@ impl Context {
     }
 
     pub(super) fn generator_close(&mut self, id: Id) -> Result<Id> {
+        self.close_generator_frame(id, id)
+    }
+
+    /// Close a suspended frame on behalf of its public generator or coroutine.
+    pub(super) fn close_generator_frame(&mut self, id: Id, finalizer: Id) -> Result<Id> {
         let Value::Generator {
             code,
             offset,
@@ -462,6 +481,7 @@ impl Context {
         let exit = self.exception("GeneratorExit", &[]);
         match self.resume_source_input(
             id,
+            finalizer,
             GeneratorInput::Throw {
                 error: exit,
                 args: Vec::new(),

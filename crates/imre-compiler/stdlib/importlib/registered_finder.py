@@ -11,9 +11,11 @@ def _installed_source_spec(fullname, registry_path, target):
     # A compiled package can have children in the installed archive. Only search
     # those children from their own virtual parent, preserving application shadows.
     parts = fullname.split('.')
-    if fullname not in ('_pydatetime', '_pydecimal', 'cmd', 'getpass', 'graphlib', 'shlex', 'statistics', 'tarfile', 'timeit', 'wave') and parts[0] not in ('html', 'xml'):
-        return None
     if not all(part.isidentifier() for part in parts):
+        return None
+    member = '/'.join(parts)
+    if (member + '.py' not in _installed_source_members
+            and member + '/__init__.py' not in _installed_source_members):
         return None
     parent = parts[:-1]
     if registry_path != _path_join('<imre stdlib>', *parent):
@@ -42,6 +44,10 @@ class _RegisteredFileFinder(FileFinder):
             return registered
         on_disk = super().find_spec(fullname, target)
         if on_disk is not None and on_disk.loader is not None:
+            # Keep the issued loader when FileFinder selects the same compiled source file.
+            if (registered is not None and type(on_disk.loader) is SourceFileLoader
+                    and type(on_disk.origin) is str and on_disk.origin == registered.origin):
+                return registered
             return on_disk
         return registered if registered is not None else on_disk
 
@@ -51,6 +57,6 @@ _file_path_hook = FileFinder.path_hook(*_file_loader_defaults())
 
 def _registered_path_hook(path):
     registry_path = registered_path(path)
-    if registry_path is not None:
-        return _RegisteredFileFinder(path, registry_path)
-    return _file_path_hook(path)
+    if registry_path is None:
+        raise ImportError('not a registered module path', path=path)
+    return _RegisteredFileFinder(path, registry_path)

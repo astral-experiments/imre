@@ -105,7 +105,12 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         #[cfg(unix)]
         "_signal" if matches!(function, "sigpending" | "valid_signals") => Some((module, function)),
         #[cfg(unix)]
-        "_signal" if matches!(function, "default_int_handler" | "getsignal" | "signal") => {
+        "_signal"
+            if matches!(
+                function,
+                "default_int_handler" | "getsignal" | "set_wakeup_fd" | "siginterrupt" | "signal"
+            ) =>
+        {
             Some((module, function))
         }
         "_contextvars" if function == "copy_context" => Some((module, function)),
@@ -243,24 +248,6 @@ fn non_callable_error(name: &str) -> Error {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
-        if let Some(symbol) = builtins::base_exception_method(name) {
-            if matches!(self.heap.get(class), Value::Native(kind) if builtins::is_exception(kind)) {
-                return self.builtins.get(symbol).copied();
-            }
-            if let Some(mro) = self.published_mro(class) {
-                return mro.iter().find_map(|&base| self.own_class_attr(base, name));
-            }
-        }
-        if (super::exception_group::METHODS.contains(&name)
-            || matches!(name, "message" | "exceptions"))
-            && let Some(mro) = self.published_mro(class)
-            && self
-                .builtins
-                .get("BaseExceptionGroup")
-                .is_some_and(|base| mro.contains(base))
-        {
-            return mro.iter().find_map(|&base| self.own_class_attr(base, name));
-        }
         if name == "__hash__" {
             if matches!(self.heap.get(class), Value::Native(_)) {
                 return self.own_class_attr(class, name);
@@ -283,6 +270,8 @@ impl Context {
                 kind.as_str(),
                 stdlib::datetime::TZINFO
                     | "datetime.timezone"
+                    | value::BZ2_COMPRESS_TYPE
+                    | value::BZ2_DECOMPRESS_TYPE
                     | value::LZMA_COMPRESS_TYPE
                     | value::LZMA_DECOMPRESS_TYPE
             )
@@ -321,6 +310,9 @@ impl Context {
         class: Id,
         mut lookup: impl FnMut(Id) -> Option<T>,
     ) -> Option<T> {
+        if let Some(mro) = self.published_mro(class) {
+            return mro.iter().copied().find_map(lookup);
+        }
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return lookup(class).or_else(|| {
                 if let Value::Native(kind) = self.heap.get(class)
@@ -339,9 +331,15 @@ impl Context {
                         .filter_map(|name| self.builtins.get(name))
                         .find_map(|&base| lookup(base));
                 }
+                if let Value::Native(name) = self.heap.get(class)
+                    && let Some(kind) = builtins::exception_kind(name)
+                {
+                    return builtins::exception_ancestors(kind)
+                        .filter_map(|name| self.builtins.get(name))
+                        .find_map(|&base| lookup(base));
+                }
                 let base = match self.heap.get(class) {
                     Value::Native(name) if name == "datetime.datetime" => "datetime.date",
-                    Value::Native(name) if name == "ExceptionGroup" => "BaseExceptionGroup",
                     _ => return None,
                 };
                 self.builtins.get(base).and_then(|&base| lookup(base))
@@ -418,30 +416,27 @@ impl Context {
             {
                 Some(NONE)
             }
-            Value::Native(kind) if builtins::is_exception(kind) => match name {
-                name if kind == "BaseExceptionGroup"
-                    && (super::exception_group::METHODS.contains(&name)
-                        || matches!(name, "message" | "exceptions")) =>
-                {
-                    self.builtins
-                        .get(&format!("BaseExceptionGroup.{name}"))
-                        .copied()
+            Value::Native(kind) if let Some(exception) = builtins::exception_kind(kind) => {
+                match name {
+                    name if kind == "BaseExceptionGroup"
+                        && (super::exception_group::METHODS.contains(&name)
+                            || matches!(name, "message" | "exceptions")) =>
+                    {
+                        self.builtins
+                            .get(&format!("BaseExceptionGroup.{name}"))
+                            .copied()
+                    }
+                    name if kind == "BaseException"
+                        && let Some(symbol) = builtins::base_exception_method(name) =>
+                    {
+                        self.builtins.get(symbol).copied()
+                    }
+                    name if builtins::declares_exception_constructor(exception, name) => {
+                        self.builtins.get(&format!("{kind}.{name}")).copied()
+                    }
+                    _ => None,
                 }
-                name if kind == "BaseException"
-                    && let Some(symbol) = builtins::base_exception_method(name) =>
-                {
-                    self.builtins.get(symbol).copied()
-                }
-                "__new__" => self
-                    .builtins
-                    .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
-                    .copied(),
-                "__init__" => self
-                    .builtins
-                    .get(builtins::exception_initializer(kind))
-                    .copied(),
-                _ => None,
-            },
+            }
             Value::Native(kind)
                 if matches!(
                     kind.as_str(),
@@ -757,6 +752,18 @@ impl Context {
         input: Id,
         operation: MappingOperation,
     ) -> Result<Id> {
+        // A fresh keyword dictionary can copy a dense table of exact names in one pass.
+        if matches!(operation, MappingOperation::Keywords(_))
+            && matches!(self.heap.get(target), Value::Dict(entries) if entries.is_empty())
+            && let Value::Dict(entries) = self.heap.get(input)
+            && entries
+                .iter()
+                .all(|&(key, _)| matches!(self.heap.get(key), Value::Str(_)))
+            && let Some(copy) = entries.clone_dense()?
+        {
+            *self.heap.get_mut(target) = Value::Dict(copy);
+            return Ok(target);
+        }
         let mapping =
             self.for_each_mapping_item(input, target, operation, |ctx, key, value, hash| {
                 ctx.set_dictionary_key(target, key, value, hash, true)
@@ -1100,11 +1107,6 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
-                            | "BaseException.__init__"
-                            | "ImportError.__init__"
-                            | "OSError.__init__"
-                            | "StopIteration.__init__"
-                            | "SystemExit.__init__"
                             | "module.__init__"
                             | "module.__dir__"
                             | "module.__repr__"
@@ -1459,6 +1461,11 @@ impl Context {
                 _ => unreachable!("unknown exception group member"),
             });
         }
+        if owner == value::BZ2_DECOMPRESS_TYPE
+            && let Value::Bz2Decompressor(state) = self.heap.get(receiver)
+        {
+            return stdlib::bz2::field(&state.borrow(), field);
+        }
         if owner == value::LZMA_DECOMPRESS_TYPE
             && matches!(self.heap.get(receiver), Value::LzmaDecompressor(_))
         {
@@ -1618,6 +1625,8 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | value::BZ2_COMPRESS_TYPE
+                            | value::BZ2_DECOMPRESS_TYPE
                             | value::LZMA_COMPRESS_TYPE
                             | value::LZMA_DECOMPRESS_TYPE
                             | value::ZLIB_COMPRESS_TYPE
@@ -1807,6 +1816,8 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | (value::BZ2_COMPRESS_TYPE, Value::Bz2Compressor(_))
+            | (value::BZ2_DECOMPRESS_TYPE, Value::Bz2Decompressor(_))
             | (value::LZMA_COMPRESS_TYPE, Value::LzmaCompressor(_))
             | (value::LZMA_DECOMPRESS_TYPE, Value::LzmaDecompressor(_))
             | (value::ZLIB_COMPRESS_TYPE, Value::ZlibCompressor(_))
@@ -2277,7 +2288,10 @@ impl Context {
         if let Value::Native(owner) = self.heap.get(obj)
             && matches!(
                 owner.as_str(),
-                value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
+                value::BZ2_COMPRESS_TYPE
+                    | value::BZ2_DECOMPRESS_TYPE
+                    | value::LZMA_COMPRESS_TYPE
+                    | value::LZMA_DECOMPRESS_TYPE
             )
         {
             if let Some(member) = self.class_attr(obj, name) {
@@ -2294,7 +2308,10 @@ impl Context {
         }
         if matches!(
             self.heap.get(obj),
-            Value::LzmaCompressor(_) | Value::LzmaDecompressor(_)
+            Value::Bz2Compressor(_)
+                | Value::Bz2Decompressor(_)
+                | Value::LzmaCompressor(_)
+                | Value::LzmaDecompressor(_)
         ) {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name) {
@@ -2968,6 +2985,18 @@ impl Context {
                     "__text_signature__" if symbol == "_signal.getsignal" => {
                         return Ok(self.text("($module, signalnum, /)"));
                     }
+                    "__text_signature__" if symbol == "_signal.set_wakeup_fd" => {
+                        return Ok(self.text("($module, fd, /, *, warn_on_full_buffer=True)"));
+                    }
+                    "__doc__" if symbol == "_signal.set_wakeup_fd" => {
+                        return Ok(self.text("Sets the fd to be written to (with the signal number) when a signal comes in.\n\nA library can use this to wakeup select or poll.\nThe previous fd or -1 is returned.\n\nThe fd must be non-blocking."));
+                    }
+                    "__text_signature__" if symbol == "_signal.siginterrupt" => {
+                        return Ok(self.text("($module, signalnum, flag, /)"));
+                    }
+                    "__doc__" if symbol == "_signal.siginterrupt" => {
+                        return Ok(self.text("Change system call restart behaviour.\n\nIf flag is False, system calls will be restarted when interrupted by\nsignal sig, else system calls will be interrupted."));
+                    }
                     "__doc__" if symbol == "_signal.default_int_handler" => {
                         return Ok(self.text("The default handler for SIGINT installed by Python.\n\nIt raises KeyboardInterrupt."));
                     }
@@ -3220,6 +3249,12 @@ impl Context {
                     "__text_signature__" if symbol == "posix.getpgid" => {
                         return Ok(self.text("($module, /, pid)"));
                     }
+                    "__doc__" if symbol == "posix.pidfd_open" => {
+                        return Ok(self.text("Return a file descriptor referring to the process *pid*.\n\nThe descriptor can be used to perform process management without races and\nsignals."));
+                    }
+                    "__text_signature__" if symbol == "posix.pidfd_open" => {
+                        return Ok(self.text("($module, /, pid, flags=0)"));
+                    }
                     "__doc__" if symbol == "posix.setpgid" => {
                         return Ok(self.text("Call the system call setpgid(pid, pgrp)."));
                     }
@@ -3434,6 +3469,9 @@ impl Context {
                 }
             }
             Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
+            Value::Coroutine { frame, .. } if matches!(name, "__name__" | "__qualname__") => {
+                return self.default_get_attr(frame, name);
+            }
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
                 return Ok(self.readonly_member("coroutine", "cr_origin"));
             }
@@ -4870,7 +4908,11 @@ impl Context {
             Value::Native(ref class)
                 if matches!(
                     class.as_str(),
-                    "list_iterator" | "tuple_iterator" | "enumerate"
+                    "list_iterator"
+                        | "tuple_iterator"
+                        | "str_ascii_iterator"
+                        | "str_iterator"
+                        | "enumerate"
                 ) && matches!(name, "__iter__" | "__next__") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
@@ -5342,9 +5384,9 @@ impl Context {
             return result;
         }
         if matches!(name, "__name__" | "__qualname__")
-            && matches!(self.heap.get(obj), Value::Generator { .. })
+            && let Some(frame) = self.generator_name_frame(obj)
         {
-            return self.set_generator_name(obj, name, NONE);
+            return self.set_generator_name(frame, name, NONE);
         }
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
@@ -5722,8 +5764,11 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
-        if matches!(self.heap.get(obj), Value::LzmaDecompressor(_)) {
-            let class = self.builtin(value::LZMA_DECOMPRESS_TYPE);
+        if matches!(
+            self.heap.get(obj),
+            Value::LzmaDecompressor(_) | Value::Bz2Decompressor(_)
+        ) {
+            let class = self.exact_type(obj)?;
             return Ok(self.own_class_attr(class, name));
         }
         if self.heap.get(obj).native_io_class_name().is_some() {
@@ -6296,9 +6341,9 @@ impl Context {
             return result;
         }
         if matches!(name, "__name__" | "__qualname__")
-            && matches!(self.heap.get(obj), Value::Generator { .. })
+            && let Some(frame) = self.generator_name_frame(obj)
         {
-            return self.set_generator_name(obj, name, value);
+            return self.set_generator_name(frame, name, value);
         }
         if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
             return result;
@@ -7188,11 +7233,51 @@ impl Context {
         Ok(())
     }
 
+    /// Bind the call's private keyword dictionary directly when every key belongs in **kwargs.
+    pub(super) fn call_with_keyword_dict(
+        &mut self,
+        scope: Id,
+        callable: Id,
+        args: Vec<Id>,
+        mapping: Id,
+    ) -> Result<Id> {
+        if let Value::Function { code, .. } = *self.heap.get(callable)
+            && self.code_object(code).parameters != NONE
+        {
+            let sig = self.parsed_parameters(code)?;
+            if sig.kwargs.is_some() && sig.positional.is_empty() && sig.keyword_only.is_empty() {
+                let Value::Dict(entries) = self.heap.get(mapping) else {
+                    return Err(Error::new("TypeError", "expected keyword dict"));
+                };
+                if entries
+                    .iter()
+                    .any(|&(key, _)| self.string_storage(key).is_none())
+                {
+                    return Err(Error::new("TypeError", "keywords must be strings"));
+                }
+                return self.call_bound_keywords(callable, args, Vec::new(), Some(mapping));
+            }
+        }
+        let kwargs = self.keyword_args(mapping)?;
+        self.call_in_scope(scope, callable, args, kwargs)
+    }
+
     pub(super) fn call(
         &mut self,
         callable: Id,
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        self.call_bound_keywords(callable, args, kwargs, None)
+    }
+
+    /// Invoke the callable with named arguments or an already bound variadic keyword dictionary.
+    fn call_bound_keywords(
+        &mut self,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+        variadic: Option<Id>,
     ) -> Result<Id> {
         if let Value::FractionHash(function) = *self.heap.get(callable) {
             return stdlib::fraction_hash(self, function, args, kwargs);
@@ -7436,17 +7521,13 @@ impl Context {
                 if builtins::is_builtin(&name)
                     || builtins::constructor_owner(&name)
                         .is_some_and(|owner| !HashState::is_provider_class(owner))
+                    || builtins::exception_init_descriptor(&name).is_some()
                     || matches!(
                         name.as_str(),
                         "builtin_function_or_method.__reduce__"
                             | "method.__reduce__"
                             | "type.__init__"
-                            | "BaseException.__init__"
                             | "BaseException.add_note"
-                            | "ImportError.__init__"
-                            | "OSError.__init__"
-                            | "StopIteration.__init__"
-                            | "SystemExit.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
                             | "float.fromhex"
@@ -7480,6 +7561,8 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "list_iterator"
+                                | "str_ascii_iterator"
+                                | "str_iterator"
                                 | "tuple_iterator"
                                 | "map"
                                 | "filter"
@@ -7951,7 +8034,7 @@ impl Context {
                 ..
             } => {
                 let parameters = self.code_object(code).parameters;
-                let name = copy_label(self.str_value(fields.qualname)?)?;
+                let name = self.copy_name(fields.qualname)?;
                 if parameters == NONE {
                     if let Some((key, _)) = kwargs.first() {
                         return Err(Error::new(
@@ -7980,56 +8063,27 @@ impl Context {
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 let local = self.alloc(Value::Scope(local));
                 let sig = self.parsed_parameters(code)?;
-                let names = |key: &str| -> Result<Vec<String>> {
-                    let mut names = Vec::new();
-                    for name in sig[key].as_array().into_iter().flatten() {
-                        if let Some(name) = name.as_str() {
-                            names
-                                .try_reserve(1)
-                                .map_err(|_| Error::new("MemoryError", ""))?;
-                            names.push(copy_label(name)?);
-                        }
-                    }
-                    Ok(names)
-                };
-                let locals = names("scope_locals")?;
-                let nonlocals = names("scope_nonlocals")?;
                 let Value::Scope(frame) = self.heap.get_mut(local) else {
                     unreachable!()
                 };
-                frame
-                    .closure
-                    .declared
-                    .try_reserve(locals.len())
-                    .map_err(|_| Error::new("MemoryError", ""))?;
+                frame.closure.declared = sig.locals.clone();
                 frame
                     .closure
                     .nonlocals
-                    .try_reserve(nonlocals.len())
+                    .try_reserve(sig.nonlocals.len())
                     .map_err(|_| Error::new("MemoryError", ""))?;
-                frame.closure.declared.extend(locals);
-                frame.closure.declared_complete =
-                    sig["scope_locals_complete"].as_bool().unwrap_or(false);
-                frame.closure.nonlocals.extend(nonlocals);
-                let posonly = names("posonly")?;
-                let positional = names("positional")?;
-                let mut pos = Vec::new();
-                let count = posonly
-                    .len()
-                    .checked_add(positional.len())
-                    .ok_or_else(|| Error::new("MemoryError", ""))?;
-                pos.try_reserve_exact(count)
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                for name in &posonly {
-                    pos.push(copy_label(name)?);
+                frame.closure.declared_complete = sig.locals_complete;
+                for name in &sig.nonlocals {
+                    frame.closure.nonlocals.insert(copy_label(name)?);
                 }
-                pos.extend(positional);
-                let kwonly = names("kwonly")?;
+                let pos = &sig.positional;
+                let posonly = &pos[..sig.positional_only];
+                let kwonly = &sig.keyword_only;
                 for (n, &v) in pos.iter().zip(&args) {
                     self.bind_argument(local, n, v)?;
                 }
                 let given = args.len();
-                if let Some(n) = sig["varargs"].as_str() {
+                if let Some(n) = sig.varargs.as_deref() {
                     let extra = if pos.is_empty() {
                         args
                     } else {
@@ -8042,14 +8096,14 @@ impl Context {
                 let mut keywords = kwargs.into_iter();
                 while let Some((n, v)) = keywords.next() {
                     if !posonly.contains(&n) && (pos.contains(&n) || kwonly.contains(&n)) {
-                        if self.scope_data(local).names.contains_key(&n) {
+                        if self.scope_data(local).names.contains_key(n.as_str()) {
                             return Err(Error::new(
                                 "TypeError",
                                 format!("{name}() got multiple values for argument '{n}'"),
                             ));
                         }
                         self.bind_argument(local, &n, v)?;
-                    } else if sig["kwargs"].is_string() {
+                    } else if sig.kwargs.is_some() {
                         let k = self.text(n);
                         extra.push((k, v));
                     } else {
@@ -8072,14 +8126,14 @@ impl Context {
                         }
                         let candidates: Vec<_> = pos[posonly.len()..]
                             .iter()
-                            .chain(&kwonly)
+                            .chain(kwonly)
                             .map(String::as_str)
                             .collect();
                         return Err(unexpected_keyword_error(&name, &n, &candidates));
                     }
                 }
-                if let Some(n) = sig["kwargs"].as_str() {
-                    let v = self.dict(extra);
+                if let Some(n) = sig.kwargs.as_deref() {
+                    let v = variadic.unwrap_or_else(|| self.dict(extra));
                     self.bind_argument(local, n, v)?;
                 }
                 let default_values = if defaults == NONE {
@@ -8087,9 +8141,12 @@ impl Context {
                 } else {
                     self.items(defaults)?
                 };
-                if given > pos.len() && !sig["varargs"].is_string() {
+                if given > pos.len() && sig.varargs.is_none() {
                     let bound = &self.scope_data(local).names;
-                    let keywords = kwonly.iter().filter(|n| bound.contains_key(*n)).count();
+                    let keywords = kwonly
+                        .iter()
+                        .filter(|n| bound.contains_key(n.as_str()))
+                        .count();
                     return Err(excess_positional_error(
                         &name,
                         pos.len(),
@@ -8100,10 +8157,10 @@ impl Context {
                 }
                 // Defaults belong to the function. Validate the arguments supplied by the caller
                 // and report binding errors first, including missing keyword-only arguments.
-                let supplied_types = self.check_supplied_types(local, &sig["types"], &name);
+                let supplied_types = self.check_supplied_types(local, &sig, &name);
                 let mut missing = Vec::new();
                 for (index, n) in pos.iter().enumerate() {
-                    if !self.scope_data(local).names.contains_key(n) {
+                    if !self.scope_data(local).names.contains_key(n.as_str()) {
                         let offset = index + default_values.len();
                         if let Some(&val) = offset
                             .checked_sub(pos.len())
@@ -8121,8 +8178,8 @@ impl Context {
                 if !missing.is_empty() {
                     return Err(missing_arguments_error(&name, "positional", &missing));
                 }
-                for n in &kwonly {
-                    if !self.scope_data(local).names.contains_key(n) {
+                for n in kwonly {
+                    if !self.scope_data(local).names.contains_key(n.as_str()) {
                         let val = self.dict_entries(kwdefaults).and_then(|entries| {
                             entries.iter().find_map(|&(key, value)| {
                                 matches!(self.heap.get(key), Value::Str(text) if text == n)
@@ -8146,8 +8203,8 @@ impl Context {
                 let Value::Scope(frame) = self.heap.get_mut(local) else {
                     unreachable!()
                 };
-                frame.first_argument = pos.into_iter().next();
-                if sig["class_cell"] == true {
+                frame.first_argument = pos.first().map(|name| copy_label(name)).transpose()?;
+                if sig.class_cell {
                     frame.class_cell = class_cell;
                 }
                 self.check_call_depth(0)?;
@@ -8157,8 +8214,13 @@ impl Context {
                 });
                 self.call_depth -= 1;
                 let value = result?;
-                if let Some(expected) = sig["return_type"].as_str() {
-                    self.require_scalar(value, expected, format_args!("{name} return value"))?;
+                if let Some(expected) = sig.return_type.as_deref() {
+                    self.require_scalar(
+                        value,
+                        expected,
+                        false,
+                        format_args!("{name} return value"),
+                    )?;
                 }
                 Ok(value)
             }
@@ -8204,13 +8266,14 @@ impl Context {
     }
 
     /// Check scalar annotations on values that were explicitly bound by this call.
-    fn check_supplied_types(&self, local: Id, types: &serde_json::Value, name: &str) -> Result<()> {
-        if let Some(types) = types.as_object() {
+    fn check_supplied_types(&self, local: Id, sig: &CallParameters, name: &str) -> Result<()> {
+        if let Some(types) = sig.types.as_object() {
             for (param, expected) in types {
-                if let Some(&id) = self.scope_data(local).names.get(param) {
+                if let Some(&id) = self.scope_data(local).names.get(param.as_str()) {
                     self.require_scalar(
                         id,
                         expected.as_str().unwrap_or_default(),
+                        sig.integer_sign_parameters[param] == true,
                         format_args!("{name} argument {param:?}"),
                     )?;
                 }
@@ -8223,17 +8286,22 @@ impl Context {
         &self,
         value: Id,
         expected: &str,
+        integer_sign: bool,
         context: std::fmt::Arguments<'_>,
     ) -> Result<()> {
-        if matches!(
-            (expected, self.heap.get(value)),
-            ("None", Value::None)
-                | ("int", Value::Int(_))
-                | ("float", Value::Float(_))
-                | ("bytes", Value::Bytes(_))
-                | ("str", Value::Str(_) | Value::SurrogateStr(_))
-                | ("bool", Value::Bool(_))
-        ) {
+        let boxed = self.heap.get(value);
+        // A boxed comparison can read the integer's sign from the original object.
+        if (integer_sign && matches!((expected, boxed), ("float", Value::Int(_))))
+            || matches!(
+                (expected, boxed),
+                ("None", Value::None)
+                    | ("int", Value::Int(_))
+                    | ("float", Value::Float(_))
+                    | ("bytes", Value::Bytes(_))
+                    | ("str", Value::Str(_) | Value::SurrogateStr(_))
+                    | ("bool", Value::Bool(_))
+            )
+        {
             Ok(())
         } else {
             Err(Error::new(
@@ -8282,7 +8350,7 @@ impl Context {
             let members = body
                 .into_iter()
                 .map(|name| {
-                    let value = class_scope.names[&name];
+                    let value = class_scope.names[name.as_str()];
                     (name, value)
                 })
                 .collect();
@@ -8903,10 +8971,7 @@ impl Context {
             .and_then(|namespace| namespace.slot_names.as_deref())
             .is_some_and(|slots| slots.iter().any(|slot| slot == "__doc__"));
         if !has_doc_slot {
-            class_scope
-                .names
-                .entry("__doc__".to_owned())
-                .or_insert(NONE);
+            class_scope.names.entry("__doc__".into()).or_insert(NONE);
         }
         if let Some(body) = exposed_body {
             // type.__new__ replaces the body namespace with the finished type's dictionary.

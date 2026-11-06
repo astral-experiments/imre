@@ -3,6 +3,10 @@
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod termios;
 
+/// Loopback addresses defined by the public socket module.
+pub const SOCKET_LOOPBACK_HOSTS: &[(&str, &str)] =
+    &[("_LOCALHOST", "127.0.0.1"), ("_LOCALHOST_V6", "::1")];
+
 /// Functions installed in the boxed builtins namespace.
 pub const BUILTIN_FUNCTIONS: &[&str] = &[
     "len",
@@ -71,7 +75,7 @@ pub fn provider(name: &str) -> Option<Provider> {
 
 /// Native extension modules that are searched after the application path.
 pub fn is_native_fallback(name: &str) -> bool {
-    cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
+    name == "_bz2" || cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
 }
 
 fn is_builtin(name: &str) -> bool {

@@ -396,6 +396,13 @@ pub extern "C" fn imre_os_close(fd: usize) {
     finish(c_int(fd).and_then(close), ());
 }
 
+/// Open a caller-owned process descriptor with the kernel's close-on-exec guarantee.
+#[cfg(target_os = "linux")]
+pub(crate) fn pidfd_open(pid: libc::pid_t, flags: u32) -> Result<libc::c_int> {
+    // SAFETY: pidfd_open takes only integer arguments and returns an fd or -1.
+    checked(unsafe { libc::syscall(libc::SYS_pidfd_open, pid, flags) } as libc::c_int)
+}
+
 /// Return the process group selected by the kernel for this PID.
 #[cfg(unix)]
 pub(crate) fn getpgid(pid: libc::pid_t) -> Result<libc::pid_t> {

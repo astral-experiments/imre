@@ -1,6 +1,7 @@
 import errno
 import os
 import posix
+import select
 import subprocess
 
 
@@ -10,6 +11,27 @@ class Index:
 
     def __index__(self):
         return self.value
+
+
+def pidfd():
+    assert os.pidfd_open is posix.pidfd_open
+    with subprocess.Popen(["/bin/cat"], stdin=subprocess.PIPE) as child:
+        try:
+            fd = os.pidfd_open(pid=Index(child.pid), flags=Index(0))
+        except OSError as error:
+            if error.errno in (errno.ENOSYS, errno.EPERM, errno.EACCES):
+                return
+            raise
+        try:
+            assert os.get_blocking(fd) and not os.get_inheritable(fd)
+            poller = select.poll()
+            poller.register(fd, select.POLLIN)
+            assert poller.poll(0) == []
+            child.stdin.close()
+            assert poller.poll(5000)[0][1] & select.POLLIN
+            assert child.wait() == 0
+        finally:
+            os.close(fd)
 
 
 def current():

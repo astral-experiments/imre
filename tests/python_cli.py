@@ -3169,6 +3169,10 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        (root / "sign_parameters.py").write_bytes(
+            (fixtures / "floats" / "sign_parameters.py").read_bytes()
+        )
+        compare("-B", "-m", "sign_parameters")
 
         served = root / "served"
         served.mkdir()
@@ -3691,7 +3695,10 @@ for name in ("md4", "ripemd160"):
             "-B", "-c", "from unittest.mock import Mock\nm = Mock(['close'])\nm.close()\nassert not hasattr(m, 'read')\n",
             extra=mock_compile_flags, native_timeout=300,
         )
-        for name in ("boxed_unittest_mock_open.py", "boxed_unittest_autospec_function.py", "boxed_unittest_autospec.py"):
+        for name in (
+            "boxed_unittest_mock_open.py", "boxed_unittest_autospec_function.py",
+            "boxed_unittest_autospec.py", "unittest_mock_callable_spec.py",
+        ):
             fixture = fixtures / name
             for import_flags in ((), ("--runtime-imports",)):
                 compare(
@@ -4205,6 +4212,7 @@ for name in ("md4", "ripemd160"):
             "boxed_binascii.py",
             "boxed_zlib.py",
             "boxed_gzip_decompress.py",
+            "boxed_bz2.py",
             "boxed_lzma.py",
             "boxed_hashlib_names.py",
             "bytes/hashlib_md5_provider.py",
@@ -4411,6 +4419,9 @@ else:
             compare("-B", "-c", imports + "arithmetic.current()",
                     extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_os_waitpid.py").read_bytes())
+            child = run(imre, "-IB", "-c", imports + "arithmetic.pidfd()")
+            assert (child.returncode, child.stdout, child.stderr) == (0, b"", b""), child
             plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             compare("-IB", str(fixtures / "epoll_descriptors.py"))

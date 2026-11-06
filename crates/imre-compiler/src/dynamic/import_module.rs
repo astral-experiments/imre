@@ -242,6 +242,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "pathlib._os" => bundled_source!("pathlib/_os.py"),
         "pathlib.types" => bundled_source!("pathlib/types.py"),
         "glob" => bundled_source!("glob.py"),
+        "bz2" => bundled_source!("bz2.py"),
         "gzip" => bundled_source!("gzip.py"),
         "ntpath" => bundled_source!("ntpath.py"),
         "shlex" => Some((
@@ -369,8 +370,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
                 [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
-                    section("class ModuleSpec:", "def _spec_from_module("),
-                    section("def _init_module_attrs(", "def _module_repr_from_spec("),
+                    section("def _module_repr(module):", "def _spec_from_module("),
+                    section("def _init_module_attrs(", "def _exec(spec, module):"),
                     section("def _call_with_frames_removed(", "def _requires_builtin("),
                     section("def _resolve_name(", "def _find_spec("),
                     section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
@@ -396,10 +397,15 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 // Preserve FileFinder’s package, loader and cache ordering for filesystem entries.
                 let spec = section("_POPULATE = object()", "def _bless_my_loader(")
                     .replace("_get_supported_file_loaders()", "_file_loader_defaults(location)");
+                let members: Vec<_> = include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt"))
+                    .lines()
+                    .collect();
+                let members = serde_json::to_string(&members)
+                    .expect("stdlib source paths serialize as strings");
+                let installed_sources = format!("_installed_source_members = {members}");
                 [
                     include_str!("../../stdlib/importlib/source_loader.py"),
-                    section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
-                    section("def _unpack_uint32(", "def _unpack_uint16("),
+                    section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _unpack_uint16("),
                     section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
                     section("def _get_cached(", "def _calc_mode("),
                     section("def _classify_pyc(", "def _validate_timestamp_pyc("),
@@ -410,6 +416,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",
                                  "_warn_import(globals(), 'sys.path_hooks is empty', 1224, _is_frozen)"),
                     section("class FileFinder:", "class AppleFrameworkLoader("),
+                    &installed_sources,
                     include_str!("../../stdlib/importlib/registered_finder.py"),
                     section("def _set_bootstrap_module(", "def _install("),
                 ].join("\n")

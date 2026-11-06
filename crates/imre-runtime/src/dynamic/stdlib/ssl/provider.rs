@@ -588,8 +588,9 @@ impl Context {
         unsafe {
             (api.SSL_CTX_set_default_passwd_cb)(handle.as_ptr(), reject_password);
         }
-        // SAFETY: arguments implement the SSL_CTX_set_min_proto_version macro.
         if !protocol.is_fixed()
+            // SAFETY: the live context belongs to this provider. The version and null
+            // pointer are the arguments to SSL_CTX_set_min_proto_version.
             && unsafe {
                 (api.SSL_CTX_ctrl)(
                     handle.as_ptr(),

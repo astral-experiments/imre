@@ -100,6 +100,7 @@ enum IteratorSlice<'a> {
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
     ReversedBytes(&'a [u8]),
+    Text(&'a str),
     ReversedText(&'a str),
     Codepoints(&'a [u32]),
     ReversedCodepoints(&'a [u32]),
@@ -111,7 +112,7 @@ impl IteratorSlice<'_> {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) | Self::ReversedBytes(bytes) => bytes.len(),
-            Self::ReversedText(text) => text.chars().count(),
+            Self::Text(text) | Self::ReversedText(text) => text.chars().count(),
             Self::Codepoints(points) | Self::ReversedCodepoints(points) => points.len(),
             Self::Array(array, offset) => array.len().saturating_sub(*offset),
         }
@@ -120,7 +121,7 @@ impl IteratorSlice<'_> {
     /// Test the byte boundary directly so each character step stays constant time.
     fn is_empty(&self) -> bool {
         match self {
-            Self::ReversedText(text) => text.is_empty(),
+            Self::Text(text) | Self::ReversedText(text) => text.is_empty(),
             _ => self.len() == 0,
         }
     }
@@ -186,6 +187,7 @@ pub(crate) struct Context {
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
     signal_handlers: Vec<Id>,
+    reporting_wakeup_errors: bool,
     typing: typing::Registry,
     builtins: HashMap<String, Id>,
     /// Last observed binding position for each name bucket, validated against the current scope.
@@ -219,6 +221,80 @@ fn copy_ids<T: Copy>(values: &[T]) -> Result<Vec<T>> {
     Ok(copied)
 }
 
+/// Immutable parameter lists used to bind calls to the same code object.
+#[derive(Debug)]
+struct CallParameters {
+    positional: Vec<String>,
+    positional_only: usize,
+    keyword_only: Vec<String>,
+    locals: value::DeclaredLocals,
+    nonlocals: Vec<String>,
+    locals_complete: bool,
+    class_cell: bool,
+    varargs: Option<String>,
+    kwargs: Option<String>,
+    return_type: Option<String>,
+    types: serde_json::Value,
+    integer_sign_parameters: serde_json::Value,
+}
+
+impl CallParameters {
+    /// Decode both compiled and runtime-created function metadata once per definition.
+    fn from_metadata(mut metadata: serde_json::Value) -> Result<Self> {
+        let names = |key: &str| -> Result<Vec<String>> {
+            let mut result = Vec::new();
+            for name in metadata[key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str())
+            {
+                result
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                result.push(copy_label(name)?);
+            }
+            Ok(result)
+        };
+        let mut positional = names("posonly")?;
+        let positional_only = positional.len();
+        let rest = names("positional")?;
+        positional
+            .try_reserve(rest.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        positional.extend(rest);
+        let local_names = names("scope_locals")?;
+        let mut locals = std::collections::HashSet::new();
+        locals
+            .try_reserve(local_names.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        locals.extend(local_names);
+        Ok(Self {
+            positional,
+            positional_only,
+            keyword_only: names("kwonly")?,
+            locals: locals.into(),
+            nonlocals: names("scope_nonlocals")?,
+            locals_complete: metadata["scope_locals_complete"].as_bool().unwrap_or(false),
+            class_cell: metadata["class_cell"] == true,
+            varargs: metadata["varargs"].as_str().map(copy_label).transpose()?,
+            kwargs: metadata["kwargs"].as_str().map(copy_label).transpose()?,
+            return_type: metadata["return_type"]
+                .as_str()
+                .map(copy_label)
+                .transpose()?,
+            types: metadata
+                .get_mut("types")
+                .map(serde_json::Value::take)
+                .unwrap_or_default(),
+            integer_sign_parameters: metadata
+                .get_mut("integer_sign_parameters")
+                .map(serde_json::Value::take)
+                .unwrap_or_default(),
+        })
+    }
+}
+
 impl Context {
     fn code_object(&self, id: Id) -> &value::CodeObject {
         let Value::Code(code) = self.heap.get(id) else {
@@ -228,13 +304,14 @@ impl Context {
     }
 
     /// Decode a function's parameter metadata on its first call.
-    fn parsed_parameters(&self, code: Id) -> Result<std::rc::Rc<serde_json::Value>> {
+    fn parsed_parameters(&self, code: Id) -> Result<std::rc::Rc<CallParameters>> {
         let code = self.code_object(code);
         if let Some(parameters) = code.parsed_parameters.get() {
             return Ok(std::rc::Rc::clone(parameters));
         }
         let parameters = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|error| Error::new("SystemError", error.to_string()))?;
+        let parameters = CallParameters::from_metadata(parameters)?;
         Ok(std::rc::Rc::clone(
             code.parsed_parameters
                 .get_or_init(|| std::rc::Rc::new(parameters)),
@@ -356,6 +433,8 @@ impl Context {
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
+            | (value::BZ2_COMPRESS_TYPE, Value::Bz2Compressor(_))
+            | (value::BZ2_DECOMPRESS_TYPE, Value::Bz2Decompressor(_))
             | (value::REGEX_MATCH_TYPE, Value::RegexMatch(_))
             | (thread_local::CLASS, Value::ThreadLocal(_)) => true,
             _ => false,
@@ -462,6 +541,28 @@ impl Context {
             ));
         }
         Ok(view)
+    }
+
+    // Acquire the data before converting any later argument via Python's __index__.
+    // While the export is held, callbacks can modify its bytes but cannot resize it.
+    fn with_read_buffer<T>(
+        &mut self,
+        data: Id,
+        consume: impl FnOnce(&mut Context, Id) -> Result<T>,
+    ) -> Result<T> {
+        if matches!(
+            self.heap.get(self.scalar_value(data)),
+            Value::Bytes(_) | Value::ByteArray(_)
+        ) && self.buffer_slot(data, "__buffer__") == Some(None)
+        {
+            return self.with_native_bytes_export(data, consume);
+        }
+        if let Some(method) = self.python_buffer_method(data, true)? {
+            self.with_contiguous_python_buffer(data, method, 0, consume)
+        } else {
+            self.native_buffer_bytes(data)?;
+            self.with_buffer_export(data, |ctx| consume(ctx, data))
+        }
     }
 
     /// Consume a contiguous view returned by a Python buffer provider.
@@ -859,6 +960,11 @@ impl Context {
             _ => unreachable!("string storage"),
         }
     }
+    /// Copy a name across a mutable context operation, keeping short strings inline.
+    fn copy_name(&self, id: Id) -> Result<crate::Str> {
+        crate::Str::try_new(self.str_value(id)?).map_err(|_| Error::new("MemoryError", ""))
+    }
+
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(self.scalar_value(id)) {
             Value::Int(n) => Ok(n.clone()),
@@ -966,6 +1072,14 @@ impl Context {
             Value::Array(_) => (id, "array.arrayiterator"),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) | Value::NamedTuple { .. } => (id, "tuple_iterator"),
+            Value::Str(ref text) => {
+                let kind = if self.heap.is_ascii_str(id) || text.is_ascii() {
+                    "str_ascii_iterator"
+                } else {
+                    "str_iterator"
+                };
+                (id, kind)
+            }
             Value::SurrogateStr(_) => (id, "str_iterator"),
             Value::Range(ref range) => {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
@@ -1115,6 +1229,7 @@ impl Context {
             Value::SurrogateStr(points) => IteratorSlice::Codepoints(&points[*offset..]),
             Value::Array(array) => IteratorSlice::Array(array, *offset),
             Value::Str(text) if *reverse => IteratorSlice::ReversedText(&text[..*offset]),
+            Value::Str(text) => IteratorSlice::Text(&text[*offset..]),
             Value::Bytes(bytes) if *reverse => IteratorSlice::ReversedBytes(&bytes[..*offset]),
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
@@ -1567,6 +1682,10 @@ impl Context {
             IteratorSlice::ReversedCodepoints(points) => {
                 (self.text_codepoints(vec![points[points.len() - 1]]), 1)
             }
+            IteratorSlice::Text(text) => {
+                let width = text.chars().next().expect("nonempty iterator").len_utf8();
+                (self.text(crate::Str::new(&text[..width])), width)
+            }
             IteratorSlice::ReversedText(text) => {
                 let ch = text.chars().next_back().expect("nonempty iterator");
                 (self.text(ch.to_string()), ch.len_utf8())
@@ -1579,7 +1698,7 @@ impl Context {
             if *reverse {
                 *offset -= width;
             } else {
-                *offset += 1;
+                *offset += width;
             }
         }
         Ok(Some(item))
@@ -1816,6 +1935,9 @@ impl Context {
                 items
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
+                // The Rust vector is invisible to the collector during the next Python call.
+                self.heap.reserve_temporaries(1)?;
+                self.heap.keep(item);
                 items.push(item);
             }
             return Ok(items);
@@ -1909,6 +2031,7 @@ impl Context {
                     | IteratorSlice::ReversedBytes(_)
                     | IteratorSlice::Codepoints(_)
                     | IteratorSlice::ReversedCodepoints(_)
+                    | IteratorSlice::Text(_)
                     | IteratorSlice::ReversedText(_) => {
                         while let Some(item) = self.next_item(id)? {
                             values.push(item);
@@ -1968,7 +2091,7 @@ impl Context {
             unreachable!()
         };
         frame.comprehension = Some(kind);
-        frame.closure.declared = targets;
+        frame.closure.declared = targets.into();
         frame.closure.declared_complete = true;
         scope
     }
@@ -2223,7 +2346,7 @@ impl Context {
             .class_namespace
             .as_ref()
             .and_then(|ns| ns.annotation_dict_cell);
-        let names: indexmap::IndexMap<String, Id> = self
+        let names: indexmap::IndexMap<crate::Str, Id> = self
             .dict_entries(body)
             .expect("class body dictionary")
             .iter()
@@ -2231,13 +2354,13 @@ impl Context {
                 self.str_value(key)
                     .ok()
                     .filter(|&name| annotation_cell.is_none() || name != "__classdictcell__")
-                    .map(|name| (name.to_owned(), value))
+                    .map(|name| (crate::Str::new(name), value))
             })
             .collect();
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.class_body = Some(names.keys().cloned().collect());
+        frame.class_body = Some(names.keys().map(|name| name.as_str().to_owned()).collect());
         frame.names = names;
         frame.namespace = None;
         frame.class_namespace.as_mut().unwrap().dictionary = None;
@@ -2320,7 +2443,7 @@ impl Context {
 
     /// Bind a parameter in a fresh function scope using checked name and table storage.
     fn bind_argument(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
-        let name = copy_label(name)?;
+        let name = crate::Str::try_new(name).map_err(|_| Error::new("MemoryError", ""))?;
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("function call scope")
         };
@@ -2367,7 +2490,7 @@ impl Context {
             if let Some(order) = &mut s.class_body {
                 order.push(name.to_owned());
             }
-            s.names.insert(name.to_owned(), value);
+            s.names.insert(crate::Str::new(name), value);
             None
         };
         let dictionary = s
@@ -2578,23 +2701,43 @@ impl Context {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
             self.builtins.insert("object.__class__".into(), descriptor);
         }
-        if matches!(
-            name,
-            value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
-        ) {
+        let codec_members = match name {
+            value::BZ2_COMPRESS_TYPE => Some((
+                value::BZ2_COMPRESS_TYPE,
+                value::CODEC_COMPRESS_METHODS,
+                &[][..],
+            )),
+            value::BZ2_DECOMPRESS_TYPE => Some((
+                value::BZ2_DECOMPRESS_TYPE,
+                value::CODEC_DECOMPRESS_METHODS,
+                value::BZ2_DECOMPRESS_FIELDS,
+            )),
+            value::LZMA_COMPRESS_TYPE => Some((
+                value::LZMA_COMPRESS_TYPE,
+                value::CODEC_COMPRESS_METHODS,
+                &[][..],
+            )),
+            value::LZMA_DECOMPRESS_TYPE => Some((
+                value::LZMA_DECOMPRESS_TYPE,
+                value::CODEC_DECOMPRESS_METHODS,
+                value::LZMA_DECOMPRESS_FIELDS,
+            )),
+            _ => None,
+        };
+        if let Some((owner, methods, fields)) = codec_members {
+            let (module, _) = owner.split_once('.').expect("qualified codec type");
             let mut entries = vec![(
                 self.heap.code_name("__module__"),
-                self.heap.code_name("_lzma"),
+                self.heap.code_name(module),
             )];
-            let methods = if name == value::LZMA_DECOMPRESS_TYPE {
-                for &field in value::LZMA_DECOMPRESS_FIELDS {
-                    let member = self.readonly_member(value::LZMA_DECOMPRESS_TYPE, field);
-                    entries.push((self.heap.code_name(field), member));
-                }
-                value::LZMA_DECOMPRESS_METHODS
-            } else {
-                value::LZMA_COMPRESS_METHODS
-            };
+            if module == "_bz2" {
+                let new = self.builtin(&format!("{owner}.__new__"));
+                entries.push((self.heap.code_name("__new__"), new));
+            }
+            for &field in fields {
+                let member = self.readonly_member(owner, field);
+                entries.push((self.heap.code_name(field), member));
+            }
             for &method in methods {
                 let member = self.builtin(&format!("{name}.{method}"));
                 entries.push((self.heap.code_name(method), member));
@@ -2716,21 +2859,29 @@ impl Context {
         } else {
             typing::install_alias_class(self, name, value);
         }
-        if builtins::is_exception(name) {
-            self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
-            self.builtin(builtins::exception_initializer(name));
-            self.builtin("BaseException.add_note");
-            self.builtin("BaseException.with_traceback");
-        }
-        if matches!(name, "BaseExceptionGroup" | "ExceptionGroup") {
-            self.readonly_member("BaseExceptionGroup", "message");
-            self.readonly_member("BaseExceptionGroup", "exceptions");
+        if let Some(kind) = builtins::exception_kind(name) {
+            for base in builtins::exception_ancestors(kind) {
+                self.builtin(base);
+            }
+            for slot in ["__new__", "__init__"] {
+                if builtins::declares_exception_constructor(kind, slot) {
+                    self.builtin(&format!("{name}.{slot}"));
+                }
+            }
+            if name == "BaseException" {
+                self.builtin("BaseException.add_note");
+                self.builtin("BaseException.with_traceback");
+            }
+            if name == "BaseExceptionGroup" {
+                self.readonly_member("BaseExceptionGroup", "message");
+                self.readonly_member("BaseExceptionGroup", "exceptions");
+            }
         }
         if let Some(symbol) = object_size::descriptor(name) {
             self.builtin(symbol);
         }
         let methods = match name {
-            "BaseExceptionGroup" | "ExceptionGroup" => {
+            "BaseExceptionGroup" => {
                 for method in exception_group::METHODS {
                     self.builtin(&format!("BaseExceptionGroup.{method}"));
                 }
@@ -3453,6 +3604,7 @@ impl Context {
                 "minor",
                 "makedev",
                 "mknod",
+                "pidfd_open",
                 "timerfd_create",
                 "timerfd_gettime",
                 "timerfd_gettime_ns",
@@ -3462,6 +3614,8 @@ impl Context {
                 let function = self.builtin(&format!("posix.{name}"));
                 self.bind(scope, name, function);
             }
+            let nonblock = self.int(i64::from(libc::PIDFD_NONBLOCK));
+            self.bind(scope, "PIDFD_NONBLOCK", nonblock);
             for (name, flag) in [
                 ("TFD_CLOEXEC", libc::TFD_CLOEXEC),
                 ("TFD_NONBLOCK", libc::TFD_NONBLOCK),
@@ -3616,7 +3770,6 @@ impl Context {
                     "_predicate_state",
                     "_chain_allocate",
                     "_chain_next",
-                    "_chain_set",
                     "_tee_allocate",
                     "_tee_next",
                 ] {
@@ -3933,6 +4086,12 @@ impl Context {
             "pwd" => stdlib::pwd::install(self, scope),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "termios" if source.is_none() => stdlib::termios::install(self, module, scope)?,
+            "_bz2" if source.is_none() => {
+                for name in ["BZ2Compressor", "BZ2Decompressor"] {
+                    let class = self.builtin(&format!("_bz2.{name}"));
+                    self.bind(scope, name, class);
+                }
+            }
             "_lzma" if source.is_none() => {
                 for name in [
                     "is_check_supported",
@@ -4261,12 +4420,12 @@ impl Context {
                     })
                 }
                 importlib::SourceBody::Namespace => Ok(NONE),
-                importlib::SourceBody::Zip(loader) => self.initialize_source(
+                importlib::SourceBody::Zip(_) => self.initialize_source(
                     module,
                     scope,
                     name_id,
                     origin.expect("ZIP source has a filename"),
-                    loader,
+                    body,
                 ),
                 importlib::SourceBody::Registered(_)
                     if let Some(origin) = origin
@@ -4279,13 +4438,13 @@ impl Context {
                                 && self.sources.contains_key("importlib")
                                 && path.is_absolute())) =>
                 {
-                    self.initialize_source(module, scope, name_id, origin, NONE)
+                    self.initialize_source(module, scope, name_id, origin, body)
                 }
                 importlib::SourceBody::Registered(entry) => self
                     .module_code(entry, &path)
                     .and_then(|code| self.execute(code, scope, FrameOwner::Module(name_id))),
                 importlib::SourceBody::Filesystem => match origin {
-                    Some(file) => self.initialize_source(module, scope, name_id, file, NONE),
+                    Some(file) => self.initialize_source(module, scope, name_id, file, body),
                     // Namespace packages have no initializer.
                     None => Ok(NONE),
                 },

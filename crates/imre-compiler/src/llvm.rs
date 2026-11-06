@@ -9074,11 +9074,7 @@ impl Emitter<'_, '_> {
                         args[0].value.operand, args[1].value.operand
                     ));
                 } else if matches!(args[1].ownership, Ownership::Owned)
-                    && matches!(args[0].value.ty, Type::List(_))
-                    && matches!(
-                        args[1].value.ty,
-                        Type::Tuple(_) | Type::List(_) | Type::ListInt | Type::Calendar(_)
-                    )
+                    && self.append_takes_owner(args[0].value.ty, args[1].value.ty)
                 {
                     let item = &args[1].value;
                     let word = self.word(item);
@@ -9868,6 +9864,20 @@ impl Emitter<'_, '_> {
             "call i32 @append_private_bytes(ptr %byte_window{window}, ptr {}, i64 {}, i64 {b}, i64 {count})",
             output.operand, a.operand
         ));
+    }
+
+    /// Ordinary word lists take ownership on success. Inline rows copy their fields instead.
+    fn append_takes_owner(&self, list: Type, item: Type) -> bool {
+        matches!(list, Type::List(_))
+            && match item {
+                Type::Tuple(_) | Type::List(_) | Type::ListInt | Type::Calendar(_) => true,
+                Type::Class(class) => {
+                    self.module.types.element(list) == Some(item)
+                        && !self.module.types.is_value_struct(item)
+                        && self.module.types.concrete_subclasses(class).is_empty()
+                }
+                _ => false,
+            }
     }
 
     fn append(&mut self, list: &Value, value: &Value) {
@@ -11059,6 +11069,7 @@ declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
 declare ptr @imre_str_zfill(ptr, i64, i32)
+declare ptr @imre_unicode_east_asian_width(ptr)
 declare ptr @imre_unicode_normalize(ptr, ptr)
 declare ptr @imre_str_case_map(ptr, i32)
 declare ptr @imre_str_lower(ptr)

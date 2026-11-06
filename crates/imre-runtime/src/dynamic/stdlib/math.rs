@@ -397,14 +397,7 @@ pub(super) fn call(
             number
         }
     };
-    let rounded = match operation {
-        "floor" => number.floor(),
-        "ceil" => number.ceil(),
-        _ => number,
-    };
-    Ok(ctx.alloc(Value::Int(crate::Int::new(
-        crate::floats::float_to_integer(rounded)?,
-    ))))
+    builtins::round_float_to_integer(ctx, number, slot)
 }
 
 /// Read tuple storage directly, including for tuple subclasses. Other points

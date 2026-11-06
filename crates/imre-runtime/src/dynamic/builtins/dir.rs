@@ -146,6 +146,10 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::Dict(_)
         | Value::Int(_)
         | Value::MappingProxy(_)
+        | Value::Property(_)
+        | Value::SlotMember { .. }
+        | Value::ReadOnlyMember(_, _)
+        | Value::TupleGetterDoc
         | Value::Tuple(_)
         | Value::List(_)
         | Value::Set { .. }
@@ -485,6 +489,8 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     | "function"
                     | "classmethod"
                     | "staticmethod"
+                    | "property"
+                    | "member_descriptor"
                     | "method"
                     | "dict"
                     | "list"
@@ -531,6 +537,31 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__get__",
                         "__isabstractmethod__",
                         "__wrapped__",
+                    ],
+                ),
+                "property" => (
+                    &["getter", "setter", "deleter"],
+                    &[
+                        "__delete__",
+                        "__get__",
+                        "__isabstractmethod__",
+                        "__name__",
+                        "__set__",
+                        "__set_name__",
+                        "fdel",
+                        "fget",
+                        "fset",
+                    ],
+                ),
+                "member_descriptor" => (
+                    &[],
+                    &[
+                        "__delete__",
+                        "__get__",
+                        "__name__",
+                        "__objclass__",
+                        "__qualname__",
+                        "__set__",
                     ],
                 ),
                 "method" => (&[], &["__call__", "__func__", "__get__", "__self__"]),

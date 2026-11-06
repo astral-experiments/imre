@@ -30,6 +30,23 @@ pub(super) fn output_newlines(text: &str, replacement: &str) -> Result<String> {
     Ok(result)
 }
 
+// open() rejects embedded NULs when converting its string arguments, before
+// opening the file. Other invalid newlines and codec names are checked later.
+fn check_open_strings(
+    encoding: Option<&str>,
+    errors: Option<&str>,
+    newline: Option<&str>,
+) -> Result<()> {
+    if [encoding, errors, newline]
+        .into_iter()
+        .flatten()
+        .any(|option| option.contains('\0'))
+    {
+        return Err(Error::new(Kind::ValueError, "embedded null character"));
+    }
+    Ok(())
+}
+
 fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
     if let Some(value) = newline
         && !matches!(value, "" | "\n" | "\r" | "\r\n")
@@ -59,13 +76,7 @@ fn open_text_output(
     errors: Option<StrOwner>,
     newline: Option<&str>,
 ) -> Result<*const Object> {
-    if [encoding, errors.as_deref().map(Str::as_str), newline]
-        .into_iter()
-        .flatten()
-        .any(|option| option.contains('\0'))
-    {
-        return Err(Error::new(Kind::ValueError, "embedded null character"));
-    }
+    check_open_strings(encoding, errors.as_deref().map(Str::as_str), newline)?;
     let mode = match mode {
         "w" | "wt" | "tw" => 1,
         "a" | "at" | "ta" => 2,
@@ -121,6 +132,7 @@ pub(super) fn read(
     errors: Option<&str>,
     newline: Option<&str>,
 ) -> Result<Str> {
+    check_open_strings(encoding, errors, newline)?;
     with_path_file(path, 0, true, |file| {
         let codec = options(encoding, newline)?;
         let data = file.input()?.read_bytes(None)?;
@@ -184,6 +196,7 @@ pub unsafe extern "C" fn imre_path_write_text_options(
     // SAFETY: no language callback can mutate the rooted path during file I/O.
     let result = unsafe {
         path.0.with(|storage| {
+            check_open_strings(encoding, errors, newline)?;
             with_path_file(storage.path(), 1, true, |file| {
                 let codec = options(encoding, newline)?;
                 let converted;

@@ -31,6 +31,29 @@ def check_returned_stream():
     assert not buffer.closed
     buffer.close()
 
+    binary = return_stream(open(os.devnull, "rb"), Argument())
+    assert references[-1]() is None
+    descriptor = binary.fileno()
+    assert binary.read() == b""
+    del binary
+    try:
+        os.fstat(descriptor)
+    except OSError:
+        pass
+    else:
+        raise AssertionError("discarded file descriptor is still open")
+
+    directory = os.path.dirname(os.path.abspath(__file__))
+    with return_stream(os.scandir(directory), Argument()) as entries:
+        assert next(entries).name
+        assert references[-1]() is None
+
+    owner = return_stream(Argument(), Argument())
+    assert references[-1]() is None
+    assert events == ["finalized", "weak"] * 5
+    del owner
+    assert events[-1] == "finalized"
+
 
 def check_replaced_dictionary_edges():
     finalized = []
