@@ -25,6 +25,23 @@ LOCALE_FORMAT = (
 )
 
 REJECTED = {
+    "unused_reload_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from importlib import reload\n"
+            "from scores import take\n"
+            "def unused() -> int: return take('x')\n"
+            "print(take(7))\n"
+        ),
+    }, "expected int, got str"),
+    "reload_needs_a_module_object": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "import importlib, scores\n"
+            "def unused() -> None: importlib.reload(scores)\n"
+            "print(scores.take(7))\n"
+        ),
+    }, "importlib.reload requires native Python object operations"),
     "decimal_float_preserves_typed_call": ({
         "main.py": (
             "from decimal import Decimal\n"
@@ -1182,6 +1199,28 @@ ACCEPTED = {
         "orchard/__init__.py": "print('package init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
+    },
+    "reload_source_plugin": {
+        "main.py": (
+            "from importlib import *\n"
+            "import importlib\n"
+            "assert importlib.__all__ == ['__import__', 'import_module', 'invalidate_caches', 'reload']\n"
+            "assert '__import__' in globals() and 'sys' not in globals()\n"
+            "from sys import modules\n"
+            "name = '.'.join(('plugins', 'report'))\n"
+            "plugin = import_module(name)\n"
+            "render = plugin.render\n"
+            "assert render('first') == ('first', 1)\n"
+            "assert import_module('.report', 'plugins') is plugin\n"
+            "assert reload(plugin) is plugin is modules[name]\n"
+            "assert plugin.render is not render\n"
+            "print(plugin.render('new'), render('saved'))\n"
+        ),
+        "plugins/__init__.py": "",
+        "plugins/report.py": (
+            "generation = globals().get('generation', 0) + 1\n"
+            "def render(label):\n    return label, generation\n"
+        ),
     },
     "boxed_unittest_lazy_import": {
         "main.py": (
