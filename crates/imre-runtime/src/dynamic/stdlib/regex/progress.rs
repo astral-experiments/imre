@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use regex_automata::nfa::thompson::{BuildError, Builder, NFA, State, Transition, pikevm};
 use regex_automata::util::captures::{Captures, GroupInfo};
 use regex_automata::util::primitives::StateID;
-use regex_automata::{Input, PatternID, meta::Regex};
+use regex_automata::{Anchored, Input, PatternID, meta::Regex};
 use regex_syntax::hir::{Capture, Hir, HirKind, Repetition};
 
 pub(super) enum Matcher {
@@ -25,6 +25,7 @@ pub(super) struct GuardedMatcher {
 }
 
 pub(super) struct AssertedMatcher {
+    candidate: Regex,
     nfa: NFA,
     groups: GroupInfo,
     slots: Vec<AssertionSlot>,
@@ -38,7 +39,7 @@ pub(super) enum AssertionSlot {
 }
 
 impl AssertedMatcher {
-    fn new(nfa: NFA, guards: &[(String, Guard)]) -> Result<Self, String> {
+    fn new(candidate: Regex, nfa: NFA, guards: &[(String, Guard)]) -> Result<Self, String> {
         let guards: HashMap<_, _> = guards
             .iter()
             .map(|(name, re)| (name.as_str(), re))
@@ -69,7 +70,25 @@ impl AssertedMatcher {
             }
         }
         let groups = GroupInfo::new([names]).map_err(|err| err.to_string())?;
-        Ok(Self { nfa, slots, groups })
+        Ok(Self {
+            candidate,
+            nfa,
+            slots,
+            groups,
+        })
+    }
+
+    /// An assertion-free match gives the earliest possible start for the guarded search.
+    fn search(&self, mut input: Input<'_>, captures: &mut Captures, nonempty: bool) -> bool {
+        if !nonempty && input.get_anchored() == Anchored::No && !input.is_done() {
+            let Some(candidate) = self.candidate.find(input.clone()) else {
+                captures.clear();
+                return false;
+            };
+            // Keep the whole haystack so lookbehind can inspect bytes before this start.
+            input.set_start(candidate.start());
+        }
+        super::split::search_nfa(&self.nfa, &self.slots, input, captures, nonempty)
     }
 }
 
@@ -105,7 +124,7 @@ impl Matcher {
         };
         if !assertions.is_empty() {
             return Ok(Self::Asserted(Box::new(AssertedMatcher::new(
-                nfa, assertions,
+                regex, nfa, assertions,
             )?)));
         }
         let vm = pikevm::PikeVM::new_from_nfa(nfa).map_err(|err| err.to_string())?;
@@ -153,9 +172,7 @@ impl Matcher {
         nonempty: bool,
     ) -> Result<Option<bool>, String> {
         let found = match self {
-            Self::Asserted(matcher) => {
-                super::split::search_nfa(&matcher.nfa, &matcher.slots, input, captures, nonempty)
-            }
+            Self::Asserted(matcher) => matcher.search(input, captures, nonempty),
             Self::Lookahead(matcher) => {
                 matcher.captures(input, nonempty, captures)?;
                 captures.is_match()
