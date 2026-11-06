@@ -2829,21 +2829,29 @@ impl Context {
         } else {
             typing::install_alias_class(self, name, value);
         }
-        if builtins::is_exception(name) {
-            self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
-            self.builtin(builtins::exception_initializer(name));
-            self.builtin("BaseException.add_note");
-            self.builtin("BaseException.with_traceback");
-        }
-        if matches!(name, "BaseExceptionGroup" | "ExceptionGroup") {
-            self.readonly_member("BaseExceptionGroup", "message");
-            self.readonly_member("BaseExceptionGroup", "exceptions");
+        if let Some(kind) = builtins::exception_kind(name) {
+            for base in builtins::exception_ancestors(kind) {
+                self.builtin(base);
+            }
+            for slot in ["__new__", "__init__"] {
+                if builtins::declares_exception_constructor(kind, slot) {
+                    self.builtin(&format!("{name}.{slot}"));
+                }
+            }
+            if name == "BaseException" {
+                self.builtin("BaseException.add_note");
+                self.builtin("BaseException.with_traceback");
+            }
+            if name == "BaseExceptionGroup" {
+                self.readonly_member("BaseExceptionGroup", "message");
+                self.readonly_member("BaseExceptionGroup", "exceptions");
+            }
         }
         if let Some(symbol) = object_size::descriptor(name) {
             self.builtin(symbol);
         }
         let methods = match name {
-            "BaseExceptionGroup" | "ExceptionGroup" => {
+            "BaseExceptionGroup" => {
                 for method in exception_group::METHODS {
                     self.builtin(&format!("BaseExceptionGroup.{method}"));
                 }

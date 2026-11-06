@@ -248,24 +248,6 @@ fn non_callable_error(name: &str) -> Error {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
-        if let Some(symbol) = builtins::base_exception_method(name) {
-            if matches!(self.heap.get(class), Value::Native(kind) if builtins::is_exception(kind)) {
-                return self.builtins.get(symbol).copied();
-            }
-            if let Some(mro) = self.published_mro(class) {
-                return mro.iter().find_map(|&base| self.own_class_attr(base, name));
-            }
-        }
-        if (super::exception_group::METHODS.contains(&name)
-            || matches!(name, "message" | "exceptions"))
-            && let Some(mro) = self.published_mro(class)
-            && self
-                .builtins
-                .get("BaseExceptionGroup")
-                .is_some_and(|base| mro.contains(base))
-        {
-            return mro.iter().find_map(|&base| self.own_class_attr(base, name));
-        }
         if name == "__hash__" {
             if matches!(self.heap.get(class), Value::Native(_)) {
                 return self.own_class_attr(class, name);
@@ -328,6 +310,9 @@ impl Context {
         class: Id,
         mut lookup: impl FnMut(Id) -> Option<T>,
     ) -> Option<T> {
+        if let Some(mro) = self.published_mro(class) {
+            return mro.iter().copied().find_map(lookup);
+        }
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return lookup(class).or_else(|| {
                 if let Value::Native(kind) = self.heap.get(class)
@@ -346,9 +331,15 @@ impl Context {
                         .filter_map(|name| self.builtins.get(name))
                         .find_map(|&base| lookup(base));
                 }
+                if let Value::Native(name) = self.heap.get(class)
+                    && let Some(kind) = builtins::exception_kind(name)
+                {
+                    return builtins::exception_ancestors(kind)
+                        .filter_map(|name| self.builtins.get(name))
+                        .find_map(|&base| lookup(base));
+                }
                 let base = match self.heap.get(class) {
                     Value::Native(name) if name == "datetime.datetime" => "datetime.date",
-                    Value::Native(name) if name == "ExceptionGroup" => "BaseExceptionGroup",
                     _ => return None,
                 };
                 self.builtins.get(base).and_then(|&base| lookup(base))
@@ -425,7 +416,7 @@ impl Context {
             {
                 Some(NONE)
             }
-            Value::Native(kind) if builtins::is_exception(kind) => match name {
+            Value::Native(kind) if let Some(exception) = builtins::exception_kind(kind) => match name {
                 name if kind == "BaseExceptionGroup"
                     && (super::exception_group::METHODS.contains(&name)
                         || matches!(name, "message" | "exceptions")) =>
@@ -439,14 +430,9 @@ impl Context {
                 {
                     self.builtins.get(symbol).copied()
                 }
-                "__new__" => self
-                    .builtins
-                    .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
-                    .copied(),
-                "__init__" => self
-                    .builtins
-                    .get(builtins::exception_initializer(kind))
-                    .copied(),
+                name if builtins::declares_exception_constructor(exception, name) => {
+                    self.builtins.get(&format!("{kind}.{name}")).copied()
+                }
                 _ => None,
             },
             Value::Native(kind)
@@ -1119,11 +1105,6 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
-                            | "BaseException.__init__"
-                            | "ImportError.__init__"
-                            | "OSError.__init__"
-                            | "StopIteration.__init__"
-                            | "SystemExit.__init__"
                             | "module.__init__"
                             | "module.__dir__"
                             | "module.__repr__"
@@ -7534,17 +7515,13 @@ impl Context {
                 if builtins::is_builtin(&name)
                     || builtins::constructor_owner(&name)
                         .is_some_and(|owner| !HashState::is_provider_class(owner))
+                    || builtins::exception_init_descriptor(&name).is_some()
                     || matches!(
                         name.as_str(),
                         "builtin_function_or_method.__reduce__"
                             | "method.__reduce__"
                             | "type.__init__"
-                            | "BaseException.__init__"
                             | "BaseException.add_note"
-                            | "ImportError.__init__"
-                            | "OSError.__init__"
-                            | "StopIteration.__init__"
-                            | "SystemExit.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
                             | "float.fromhex"

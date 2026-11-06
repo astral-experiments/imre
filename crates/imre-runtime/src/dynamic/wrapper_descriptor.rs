@@ -10,6 +10,13 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some(owner) = super::builtins::exception_init_descriptor(symbol) {
+            return Some(Self {
+                owner,
+                name: "__init__",
+                method: false,
+            });
+        }
         if let Some((owner, attr)) = symbol.rsplit_once('.')
             && let Some(owner) = stdlib::itertools::cursor_type(owner)
             && let Some(name) = stdlib::itertools::slots(owner).find(|&slot| slot == attr)
@@ -473,6 +480,9 @@ impl BuiltinDescriptor {
             return Ok(descriptor);
         }
         let accepts = match self.owner {
+            owner if self.name == "__init__" && builtins::is_exception(owner) => {
+                ctx.instance_of(receiver, ctx.builtins[owner])
+            }
             class if crate::objects::HashState::is_provider_class(class) => {
                 ctx.type_name(receiver) == class
             }

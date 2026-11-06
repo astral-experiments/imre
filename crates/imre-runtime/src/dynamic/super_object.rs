@@ -493,9 +493,10 @@ impl Context {
         name: &str,
     ) -> Result<Option<Id>> {
         if owner != NONE {
-            let exception_method = builtins::base_exception_method(name).is_some()
+            let exception_method = matches!(name, "__new__" | "__init__")
+                || builtins::base_exception_method(name).is_some()
                 || super::exception_group::METHODS.contains(&name);
-            let lineage = self.base_lineage(owner, exception_method);
+            let lineage = self.base_lineage(owner, true);
             let after = lineage.iter().skip_while(|&&class| class != start).skip(1);
             let instance = if owner == receiver { NONE } else { receiver };
             for &class in after {
@@ -520,20 +521,28 @@ impl Context {
                         Err(error) if error.kind == "AttributeError" => continue,
                         Err(error) => return Err(error),
                     };
-                    if let Value::Method {
-                        callable,
-                        receiver: bound,
-                        ..
-                    } = *self.heap.get(member)
-                        && bound == class
-                        && self.class_attr(class, name) == Some(callable)
-                    {
-                        // Lookup may have installed the raw descriptor on this native class.
-                        // An inherited descriptor must wait for its own position in the MRO.
-                        if self.own_class_attr(class, name) != Some(callable) {
+                    // A lazy native lookup can install a slot or return an inherited one.
+                    // Use the same raw declarations as ordinary lookup before binding the result.
+                    let raw = match *self.heap.get(member) {
+                        Value::Method {
+                            callable, receiver, ..
+                        } if receiver == class => callable,
+                        _ => member,
+                    };
+                    if self.own_class_attr(class, name) == Some(raw) {
+                        member = raw;
+                    } else {
+                        // Some object slots are interned on demand outside its class dictionary.
+                        let inherited = self.base_lineage(class, true).into_iter().skip(1).any(
+                            |base| {
+                                self.own_class_attr(base, name) == Some(raw)
+                                    || (Some(&base) == self.builtins.get("object")
+                                        && self.builtins.get(&format!("object.{name}")) == Some(&raw))
+                            },
+                        );
+                        if inherited {
                             continue;
                         }
-                        member = callable;
                     }
                     return self.bind_attribute(member, instance, owner).map(Some);
                 }
