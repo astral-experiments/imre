@@ -358,10 +358,22 @@ impl Reader {
         Ok(Some(count))
     }
 
-    fn read_raw(&self, ctx: &mut Context, amount: usize) -> Result<Option<Vec<u8>>> {
+    fn read_raw(
+        &self,
+        ctx: &mut Context,
+        amount: usize,
+        reserved: Option<Vec<u8>>,
+    ) -> Result<Option<Vec<u8>>> {
         self.reset();
         let mark = ctx.heap.temporary_mark();
-        let buffer = ctx.alloc(Value::ByteArray(super::zeroed_bytes(amount as i64)?));
+        let data = match reserved {
+            Some(mut data) => {
+                data.resize(amount, 0);
+                data
+            }
+            None => super::zeroed_bytes(amount as i64)?,
+        };
+        let buffer = ctx.alloc(Value::ByteArray(data));
         let Some(n) = self.raw_into(ctx, buffer, 0, amount)? else {
             ctx.heap.release_temporaries_since(mark);
             return Ok(None);
@@ -473,6 +485,29 @@ impl Reader {
 
     fn bounded(&self, ctx: &mut Context, name: &str, n: usize) -> Result<Id> {
         let mut out = Vec::new();
+        let mut first_raw = None;
+        if name == "read" {
+            if n > crate::MAX_BYTES_LEN {
+                return Err(Error::new("OverflowError", "byte string is too large"));
+            }
+            // Reserve before consuming read-ahead or flushing a buffered write.
+            let reserve = |data: &mut Vec<u8>, size| {
+                data.try_reserve_exact(size)
+                    .map_err(|_| crate::Error::memory_error())
+            };
+            reserve(&mut out, n)?;
+            let remaining = n.saturating_sub(self.unread());
+            let direct = remaining - remaining % self.size;
+            if direct != 0 {
+                // Reuse the reservation for a full direct read. Otherwise release
+                // it before reserving the raw window, leaving room for the prefix.
+                if direct < n {
+                    out = Vec::new();
+                    reserve(&mut out, direct)?;
+                }
+                first_raw = Some(std::mem::take(&mut out));
+            }
+        }
         match name {
             "peek" => {
                 self.sync_update(ctx)?;
@@ -486,7 +521,7 @@ impl Reader {
             }
             "read1" if self.unread() == 0 && n != 0 => {
                 self.sync_update(ctx)?;
-                out = self.read_raw(ctx, n)?.unwrap_or_default();
+                out = self.read_raw(ctx, n, None)?.unwrap_or_default();
             }
             _ => {
                 let line = name == "readline";
@@ -505,7 +540,7 @@ impl Reader {
                     let remaining = n - out.len();
                     if !line && remaining >= self.size {
                         let amount = remaining - remaining % self.size;
-                        match self.read_raw(ctx, amount)? {
+                        match self.read_raw(ctx, amount, first_raw.take())? {
                             Some(bytes) if !bytes.is_empty() => {
                                 append(&mut out, &bytes)?;
                                 continue;
@@ -523,6 +558,9 @@ impl Reader {
                     }
                 }
             }
+        }
+        if name == "read" && out.len() < n {
+            crate::compact_bytes(&mut out);
         }
         Ok(ctx.alloc(Value::Bytes(out)))
     }
