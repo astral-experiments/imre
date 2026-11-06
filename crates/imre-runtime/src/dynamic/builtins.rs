@@ -223,13 +223,23 @@ pub(super) fn declares_exception_constructor(kind: imre_ast::exceptions::Kind, s
     match slot {
         "__init__" => matches!(
             kind,
-            BaseException | BaseExceptionGroup | AttributeError | ImportError | NameError | OSError
-                | StopIteration | SyntaxError | SystemExit | UnicodeDecodeError | UnicodeEncodeError
+            BaseException
+                | BaseExceptionGroup
+                | AttributeError
+                | ImportError
+                | NameError
+                | OSError
+                | StopIteration
+                | SyntaxError
+                | SystemExit
+                | UnicodeDecodeError
+                | UnicodeEncodeError
         ),
         "__new__" => match kind {
-            KeyError | ExceptionGroup | SystemExit | NameError | UnboundLocalError | AttributeError
-            | ImportError | ModuleNotFoundError | StopIteration | SyntaxError | IndentationError
-            | TabError | BinasciiIncomplete | BinasciiError | LzmaError | ZlibError => false,
+            KeyError | ExceptionGroup | SystemExit | NameError | UnboundLocalError
+            | AttributeError | ImportError | ModuleNotFoundError | StopIteration | SyntaxError
+            | IndentationError | TabError | BinasciiIncomplete | BinasciiError | LzmaError
+            | ZlibError => false,
             OSError => true,
             _ => !kind.matches(OSError),
         },
