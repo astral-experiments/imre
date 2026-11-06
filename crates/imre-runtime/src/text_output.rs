@@ -2,9 +2,11 @@
 
 use std::io::{self, Write};
 
+pub(crate) const MAX_DEFAULT_BUFFER_SIZE: usize = 8 * 1024 * 1024;
+
 /// Bound the descriptor's preferred block size as CPython does for buffered files.
 pub(crate) fn binary_capacity(block_size: i128) -> usize {
-    block_size.clamp(128 * 1024, 8 * 1024 * 1024) as usize
+    block_size.clamp(128 * 1024, MAX_DEFAULT_BUFFER_SIZE as i128) as usize
 }
 
 /// TextIOWrapper groups small encoded writes and forwards a large write separately.
