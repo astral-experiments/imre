@@ -1,8 +1,9 @@
 //! Native list adapters for the shared sum-of-products reducer.
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Object, object};
-use crate::sumprod::{Number, Operands, Side, reduce};
+use crate::sumprod::{LENGTH_MISMATCH, Number, Operands, Side, reduce};
 use crate::{Int, List, integer_binary};
+use num_bigint::{BigInt, Sign};
 
 enum Scalar {
     Int(Int),
@@ -64,6 +65,35 @@ impl<I: Iterator<Item = Scalar>> Operands for Lists<I> {
     }
 }
 
+/// Sum exact integer products in place, promoting only when a partial sum or operand is wide.
+fn int_products(left: &[Int], right: &[Int]) -> Result<Int> {
+    let mut subtotal = 0_i128;
+    let mut wide = BigInt::default();
+    for (left, right) in left.iter().zip(right) {
+        if let (Some(x), Some(y)) = (left.as_small(), right.as_small()) {
+            let product = i128::from(x) * i128::from(y);
+            if let Some(sum) = subtotal.checked_add(product) {
+                subtotal = sum;
+            } else {
+                wide += subtotal;
+                subtotal = product;
+            }
+        } else {
+            wide += left.big().as_ref() * right.big().as_ref();
+        }
+    }
+    if left.len() != right.len() {
+        return Err(Error::new(Kind::ValueError, LENGTH_MISMATCH));
+    }
+    if wide.sign() == Sign::NoSign
+        && let Ok(sum) = i64::try_from(subtotal)
+    {
+        return Ok(Int::from(sum));
+    }
+    wide += subtotal;
+    Ok(Int::new(wide))
+}
+
 /// Reduce two native lists of exact integers.
 ///
 /// # Safety
@@ -74,21 +104,9 @@ pub unsafe extern "C" fn imre_sumprod_int_lists(left: *const List, right: *const
     // SAFETY: both lists stay rooted and the reduction uses only exact integers.
     let result = unsafe {
         let (left, right) = (&*left, &*right);
-        left.0.with_pair(&right.0, |a, b| {
-            let ints = |x: &Int| Scalar::Int(x.clone());
-            reduce(&mut Lists {
-                left: a.iter().map(ints),
-                right: b.iter().map(ints),
-            })
-        })
+        left.0.with_pair(&right.0, |a, b| int_products(a, b))
     };
-    finish(
-        result.map(|total| match total {
-            Scalar::Int(i) => i.into_raw(),
-            _ => unreachable!("sum of integer products is an integer"),
-        }),
-        1,
-    )
+    finish(result.map(Int::into_raw), 1)
 }
 
 /// Both pointers must be rooted lists of exact floats throughout the reduction.

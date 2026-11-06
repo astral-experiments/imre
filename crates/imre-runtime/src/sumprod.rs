@@ -3,6 +3,8 @@
 use crate::Int;
 use std::ffi::c_long;
 
+pub(crate) const LENGTH_MISMATCH: &str = "Inputs are not the same length";
+
 pub(crate) enum Side {
     Left,
     Right,
@@ -50,7 +52,7 @@ pub(crate) fn reduce<O: Operands>(ops: &mut O) -> Result<O::Value, O::Error> {
                 prefix.flush(ops, &mut total)?;
                 return Ok(total);
             }
-            _ => return Err(ops.value_error("Inputs are not the same length")),
+            _ => return Err(ops.value_error(LENGTH_MISMATCH)),
         }
         ops.end_pair(&total);
     }
