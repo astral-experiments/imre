@@ -703,6 +703,17 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "doctest_qualified_exception": {
+        "events_module.py": (
+            '"""\n>>> raise Problem("sample event")\nTraceback (most recent call last):\n'
+            '...\nevents_module.Problem: sample event\n"""\n'
+            "class Problem(Exception): pass\n"
+        ),
+        "main.py": (
+            "import doctest\nimport events_module\n"
+            "for case in doctest.DocTestSuite(events_module):\n    case.debug()\n    print(case.id())\n"
+        ),
+    },
     "locale_typed_char_max": {"main.py": LOCALE_CHAR_MAX.format(argument="1")},
     "locale_formats_typed_char_max": {"main.py": LOCALE_FORMAT.format(argument="1")},
     "generator_local_argument_binding": {

@@ -7472,6 +7472,9 @@ impl Emitter<'_, '_> {
             Builtin::ExceptionRepr => {
                 self.call("imre_exception_repr", Type::Str, &[&args[0].value])
             }
+            Builtin::ExceptionName => {
+                self.call("imre_exception_name", Type::Str, &[&args[0].value])
+            }
             Builtin::ExceptionMessage => {
                 self.call("imre_exception_message", Type::Str, &[&args[0].value])
             }
@@ -10639,6 +10642,7 @@ declare void @imre_union_retain(i64)
 declare void @imre_union_release(i64)
 declare i32 @imre_union_truthy(i64)
 declare ptr @imre_exception_message(ptr)
+declare ptr @imre_exception_name(ptr)
 declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)

@@ -1,7 +1,7 @@
 """Discover interactive examples and compare their output in native programs."""
 
 from collections.abc import Iterator
-from _imre_doctest import ascii_output, execute
+from _imre_doctest import ascii_output, exception_name, execute
 import unittest
 
 DONT_ACCEPT_TRUE_FOR_1 = 1
@@ -232,9 +232,17 @@ def _optionflags(example: Example, flags: int = 0) -> int:
     return flags
 
 
+def _example_location(test: DocTest, example: Example) -> str:
+    if test.filename:
+        base = test.lineno
+        line = "?" if base is None else str(base + example.lineno + 1)
+        return f'File "{test.filename}", line {line}, in {test.name}'
+    return f"Line {example.lineno + 1}, in {test.name}"
+
+
 def _check_example(test: DocTest, example: Example, got: str, error: str,
                    failures: list[str], debug: bool) -> None:
-    _check_output(f"{test.name}, line {example.lineno + 1}", example, got, error,
+    _check_output(test, example, got, error,
                   failures, debug, OutputChecker(), _optionflags(example))
 
 
@@ -242,51 +250,74 @@ def _strip_exception_details(message: str) -> str:
     return message.partition("\n")[0].partition(":")[0].split(".")[-1]
 
 
-def _check_output(location: str, example: Example, got: str, error: str,
+def _check_output(test: DocTest, example: Example, got: str, error: str,
                   failures: list[str], debug: bool, checker: OutputChecker, flags: int,
-                  quiet: bool = False) -> bool:
-    want = example.want
+                  quiet: bool = False, exc_info: object = None) -> bool:
+    expected = example.exc_msg
     if error:
-        expected = example.exc_msg
         if expected is not None:
             if checker.check_output(expected, error, flags):
                 return True
-            if flags & 32 and checker.check_output(
+            if flags & IGNORE_EXCEPTION_DETAIL and checker.check_output(
                 _strip_exception_details(expected), _strip_exception_details(error), flags
             ):
                 return True
-        got = error
-    elif checker.check_output(want, got, flags):
+    elif checker.check_output(example.want, got, flags):
         return True
     if quiet:
         return False
-    message = f"{location}\nFailed example:\n{example.source}"
-    if error and example.exc_msg is None:
+    message = f"{_example_location(test, example)}\nFailed example:\n{example.source}"
+    if error and expected is None:
         message += "Exception raised:\n" + error
+        if debug:
+            unexpected = UnexpectedException(message)
+            _set_exception_info(unexpected, test, example, exc_info)
+            raise unexpected
     else:
-        message += f"Expected:\n{want}Got:\n{got}"
-    if debug:
-        if error and example.exc_msg is None:
-            raise UnexpectedException(message)
-        raise DocTestFailure(message)
+        message += f"Expected:\n{example.want}Got:\n{error or got}"
+        if debug:
+            mismatch = DocTestFailure(message)
+            _set_failure_output(mismatch, test, example, got, exc_info)
+            raise mismatch
     failures.append(message)
     return False
 
 
-def _exception_line(error: Exception) -> str:
-    name = repr(error).partition("(")[0]
+def _exception_line(error: BaseException) -> str:
     message = str(error)
+    name = exception_name(error)
     if message:
         return name + ": " + message + "\n"
     return name + "\n"
 
 
-class DocTestCase(unittest.TestCase):
+class _DocTestCase(unittest.TestCase):
     _dt_test: DocTest
+    _dt_globs: dict[str, object]
 
     def __init__(self, test: DocTest) -> None:
         super().__init__()
         self._dt_test = test
+        self._dt_globs = {}
+
+    def setUp(self) -> None:
+        test = self._dt_test
+        self._dt_globs = test.globs.copy()
+        _call_hook(self, test, True)
+
+    def tearDown(self) -> None:
+        self._tear_down(False)
+
+    def _tear_down(self, restore_on_error: bool) -> None:
+        test = self._dt_test
+        restore = restore_on_error
+        try:
+            _call_hook(self, test, False)
+            restore = True
+        finally:
+            if restore:
+                test.globs.clear()
+                test.globs.update(self._dt_globs)
 
     def id(self) -> str:
         return self._dt_test.name
@@ -295,11 +326,9 @@ class DocTestCase(unittest.TestCase):
         return 1
 
     def runTest(self) -> None:
-        for example in self._dt_test.examples:
-            if not _optionflags(example) & SKIP:
-                execute(self._dt_test, False)
-                return
-        raise unittest.SkipTest("all examples were skipped")
+        _execute_case(self, False)
 
     def debug(self) -> None:
-        execute(self._dt_test, True)
+        self.setUp()
+        _execute_case(self, True)
+        self.tearDown()

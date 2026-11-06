@@ -132,6 +132,7 @@ impl Builtin {
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionArgs
+            | Self::ExceptionName
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
@@ -1263,6 +1264,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_json_decoder_decode"
                 | "imre_exception_args"
                 | "imre_exception_message"
+                | "imre_exception_name"
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
