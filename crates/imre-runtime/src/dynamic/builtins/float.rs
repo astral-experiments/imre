@@ -235,9 +235,13 @@ fn parsed_number(ctx: &mut Context, value: Id, parsed: Option<f64>) -> Result<f6
     if let Some(number) = parsed {
         return Ok(number);
     }
-    let repr = super::call(ctx, "repr", &[value], &[])?;
-    let prefix = ctx.text("could not convert string to float: ");
-    let message = ctx.concat_strings(prefix, repr)?;
+    let message = if let Value::Str(text) = ctx.heap.get(value) {
+        ctx.text(crate::floats::invalid_string_message(text))
+    } else {
+        let repr = super::call(ctx, "repr", &[value], &[])?;
+        let prefix = ctx.text(crate::floats::INVALID_STRING_PREFIX);
+        ctx.concat_strings(prefix, repr)?
+    };
     Err(ctx.exception("ValueError", &[message]))
 }
 
