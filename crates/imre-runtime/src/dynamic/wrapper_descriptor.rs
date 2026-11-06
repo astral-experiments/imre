@@ -667,7 +667,7 @@ impl BuiltinDescriptor {
                     "($self, /)"
                 })
             }
-            "__doc__" | "__text_signature__" if matches!(self.owner, "int" | "mappingproxy" | "str")
+            "__doc__" | "__text_signature__" if matches!(self.owner, "int" | "float" | "mappingproxy" | "str")
                 && let Some(op) = super::operators::comparison_op(self.name) =>
             {
                 if name == "__doc__" {

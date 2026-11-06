@@ -1535,14 +1535,12 @@ pub(super) fn builtin_slot(
         if method == "__contains__" {
             return Ok(boolean(ctx.contains(*value, object)?));
         }
+        if let Some(op) = comparison {
+            return Ok(ctx
+                .real_compare_slot(op, storage, *value)?
+                .unwrap_or(NOT_IMPLEMENTED));
+        }
         if owner == "int" {
-            if let Some(op) = comparison {
-                if !ctx.builtin_slot_accepts(*value, "int") {
-                    return Ok(NOT_IMPLEMENTED);
-                }
-                // Compare the two integer payloads without calling subclass overrides.
-                return ctx.binary(op, storage, ctx.scalar_value(*value));
-            }
             return integer::add(ctx, storage, *value);
         }
         if method == "__add__" {
