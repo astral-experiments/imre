@@ -1928,6 +1928,9 @@ impl Context {
                 items
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
+                // The Rust vector is invisible to the collector during the next Python call.
+                self.heap.reserve_temporaries(1)?;
+                self.heap.keep(item);
                 items.push(item);
             }
             return Ok(items);
