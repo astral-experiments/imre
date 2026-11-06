@@ -11,6 +11,7 @@ import operator
 import os
 import posixpath
 import sys
+from _imre_posixpath import normalized_parts as _native_parts
 from errno import *
 from glob import _StringGlobber, _no_recurse_symlinks
 from itertools import chain
@@ -44,6 +45,7 @@ class UnsupportedOperation(NotImplementedError):
     """An exception that is raised when an unsupported operation is attempted.
     """
     pass
+
 
 
 class _PathParents(Sequence):
@@ -295,7 +297,10 @@ class PurePath:
             elif len(drv_parts) == 6:
                 # e.g. //?/unc/server/share
                 root = sep
-        return drv, root, [x for x in rel.split(sep) if x and x != '.']
+        parts = _native_parts(rel, sep)
+        if parts is None:
+            parts = [x for x in rel.split(sep) if x and x != '.']
+        return drv, root, parts
 
     @classmethod
     def _parse_pattern(cls, pattern):
@@ -314,7 +319,9 @@ class PurePath:
         altsep = cls.parser.altsep
         if altsep:
             rel = rel.replace(altsep, sep)
-        parts = [x for x in rel.split(sep) if x and x != '.']
+        parts = _native_parts(rel, sep)
+        if parts is None:
+            parts = [x for x in rel.split(sep) if x and x != '.']
         if not parts:
             raise ValueError(f"Unacceptable pattern: {str(pattern)!r}")
         elif rel.endswith(sep):

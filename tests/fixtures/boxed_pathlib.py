@@ -33,6 +33,29 @@ def current():
     assert bytes(PurePosixPath("a/b")) == b"a/b"
     assert bytes(PureWindowsPath("a/b")) == b"a\\b"
 
+    assert PurePosixPath("a//./b/../c").parts == ("a", "b", "..", "c")
+    assert PureWindowsPath(r"C:\a\.\b\..").parts == ("C:\\", "a", "b", "..")
+    assert PurePosixPath("α/\udcff/./β").parts == ("α", "\udcff", "β")
+
+    class Spelling(str):
+        def split(self, separator):
+            assert separator == "|"
+            return ["", ".", "custom", ".."]
+
+    class Parser:
+        sep = "|"
+        altsep = None
+
+        @staticmethod
+        def splitroot(path):
+            return "", "", Spelling(path)
+
+    class CustomPath(PurePosixPath):
+        parser = Parser
+
+    assert CustomPath("original").parts == ("custom", "..")
+    assert CustomPath._parse_pattern("original") == ["custom", ".."]
+
     path = PurePosixPath("parent")
     assert not path.joinpath("child").is_absolute()
     assert path.joinpath("/child").is_absolute()
