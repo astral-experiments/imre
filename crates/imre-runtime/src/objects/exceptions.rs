@@ -2656,6 +2656,8 @@ pub(crate) fn status_after_flush(
     stdout: io::Result<()>,
     stderr: io::Result<()>,
 ) -> i32 {
+    #[cfg(unix)]
+    crate::signals::finalize();
     if let Err(error) = stdout {
         let broken_pipe = error.kind() == io::ErrorKind::BrokenPipe;
         let error = super::files::errno_error(error);

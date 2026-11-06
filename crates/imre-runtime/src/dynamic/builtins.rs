@@ -613,9 +613,15 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
         ],
         "float" => &[
             "__abs__",
+            "__eq__",
             "__floor__",
             "__float__",
+            "__ge__",
+            "__gt__",
             "__int__",
+            "__le__",
+            "__lt__",
+            "__ne__",
             "__round__",
             "__trunc__",
             "hex",
@@ -2008,7 +2014,10 @@ pub(super) fn call(
             "module" => ctx.module_method(method, args, kwargs),
             "float" if method == "fromhex" => float::fromhex(ctx, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
-            "int" | "float" if matches!(method, "__abs__" | "__int__" | "__float__") => {
+            "int" | "float"
+                if matches!(method, "__abs__" | "__int__" | "__float__")
+                    || super::operators::comparison_op(method).is_some() =>
+            {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "int" | "float" if method == "__round__" => {
@@ -2154,7 +2163,7 @@ pub(super) fn call(
                 if matches!(
                     method,
                     "__add__" | "__bool__" | "__hash__" | "__index__" | "__pow__"
-                ) || super::operators::comparison_op(method).is_some() =>
+                ) =>
             {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }

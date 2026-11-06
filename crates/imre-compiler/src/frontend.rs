@@ -108,6 +108,7 @@ mod regex;
 mod sequences;
 mod shutil;
 mod sign_parameters;
+pub(crate) use sign_parameters::only_compares_zero;
 mod single_dispatch;
 mod socket;
 mod stdlib;
@@ -1610,7 +1611,7 @@ fn signature(
             default,
             sign_only: ty == Type::Float
                 && parameter.annotation().is_some()
-                && sign_parameters::only_compares_zero(function, parameter.name().as_str()),
+                && only_compares_zero(&function.body, parameter.name().as_str()),
         });
     }
     if let Some(pack) = function.parameters.vararg.as_deref() {
@@ -2144,6 +2145,12 @@ fn annotation_with_aliases(
                 .map(nested)
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(types.callable(parameters, nested(returns)?))
+        }
+        ast::Expr::Subscript(value)
+            if graph.resolve_type(module, &value.value)
+                == Some(Binding::Intrinsic(Intrinsic::Optional)) =>
+        {
+            Ok(types.optional(nested(&value.slice)?))
         }
         ast::Expr::Subscript(value)
             if matches!(

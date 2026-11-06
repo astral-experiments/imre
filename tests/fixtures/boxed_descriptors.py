@@ -320,6 +320,67 @@ def current():
     left = Declines(1)
     assert (left == left) is True and (left == Declines(1)) is False
 
+    class FloatItem(float):
+        __eq__ = float.__eq__
+        __le__ = float.__le__
+        __lt__ = float.__lt__
+
+    calls = []
+
+    class ReflectedFloat(FloatItem):
+        def __gt__(self, other):
+            calls.append(other)
+            return "reflected float"
+
+    real = FloatItem(2**53)
+    peer = ReflectedFloat(real)
+    assert (real < peer) == "reflected float" and calls == [real]
+    assert float.__lt__(real, peer) is False and len(calls) == 1
+    assert float.__lt__(real, 2**53 + 1) is True
+    assert float.__eq__(real, 2**53 + 1) is False
+    assert float.__lt__(float("inf"), 1 << 4000) is False
+    assert float.__eq__(-0.0, 0) is True
+    assert float.__eq__(real, 2 + 0j) is NotImplemented
+
+    boundary_calls = []
+
+    class EdgeInteger(int):
+        def __eq__(self, other):
+            boundary_calls.append(("eq", type(other), other))
+            return "matched"
+
+        def __gt__(self, other):
+            boundary_calls.append(("gt", type(other), other))
+            return []
+
+    edge = EdgeInteger(2**53 + 1)
+    assert float.__eq__(real, edge) is True
+    assert (real == edge) is True
+    assert float.__le__(2**48 + 0.5, EdgeInteger(2**48)) is False
+    assert float.__eq__(2**48 + 0.5, EdgeInteger(2**48)) is False
+    assert boundary_calls == [("eq", int, 2**53), ("eq", int, 2**53), ("gt", int, 2**48)]
+
+    class ForeignComparison:
+        __lt__ = float.__eq__
+
+    foreign = ForeignComparison()
+    try:
+        foreign < 0.0
+    except TypeError as exc:
+        assert str(exc) == "descriptor '__eq__' requires a 'float' object but received a 'ForeignComparison'"
+    else:
+        raise AssertionError("float comparison accepted a foreign receiver")
+
+    class FloatEquality(float):
+        def __eq__(self, other):
+            return "float equality"
+
+    assert (1 + 0j == FloatEquality(1)) is True
+    assert (FloatEquality(1) == 1 + 0j) == "float equality"
+    nan = FloatItem("nan")
+    assert float.__eq__(nan, nan) is False and nan != nan
+    assert float.__le__.__get__(nan, FloatItem)(nan) is False
+
     index = int.__index__
     assert type(index) is type(add) and index.__objclass__ is int
     assert index is Number.__index__ is bool.__index__
