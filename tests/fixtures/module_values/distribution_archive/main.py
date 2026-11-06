@@ -2,10 +2,19 @@ import os
 import sys
 from importlib.metadata import distribution, distributions, entry_points
 from pathlib import Path
+from zipfile import ZipFile
+from zipimport import zipimporter
 
 archive = 'installed.whl'
 Path(archive).write_bytes(Path(__file__).with_name('packages.whl').read_bytes())
 unsupported = str(Path(__file__).with_name('unsupported.zip'))
+assert zipimporter(unsupported).get_data('unsupported') == b''
+try:
+    ZipFile(unsupported)
+except NotImplementedError as error:
+    assert str(error) == 'zip file version 9.9'
+else:
+    raise AssertionError('ZipFile accepted a future extraction version')
 sys.path[:0] = [__file__, unsupported, archive]
 dist = distribution('demo.tools')
 assert dist.version == '2.9'

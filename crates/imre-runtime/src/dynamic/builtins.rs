@@ -170,6 +170,56 @@ pub(super) fn is_builtin_function(name: &str) -> bool {
     BUILTIN_FUNCTIONS.contains(&name)
 }
 
+/// Return the CPython docstring shared by a built-in type and its instances.
+pub(super) fn type_doc(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "str" => {
+            r#"str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'."#
+        }
+        "int" => {
+            r#"int([x]) -> integer
+int(x, base=10) -> integer
+
+Convert a number or string to an integer, or return 0 if no arguments
+are given.  If x is a number, return x.__int__().  For floating-point
+numbers, this truncates towards zero.
+
+If x is not a number or if base is given, then x must be a string,
+bytes, or bytearray instance representing an integer literal in the
+given base.  The literal can be preceded by '+' or '-' and be surrounded
+by whitespace.  The base defaults to 10.  Valid bases are 0 and 2-36.
+Base 0 means to interpret the base from the string as an integer literal.
+>>> int('0b100', base=0)
+4"#
+        }
+        "bool" => {
+            r#"Returns True when the argument is true, False otherwise.
+The builtins True and False are the only two instances of the class bool.
+The class bool is a subclass of the class int, and cannot be subclassed."#
+        }
+        "tuple" => {
+            r#"Built-in immutable sequence.
+
+If no argument is given, the constructor returns an empty tuple.
+If iterable is specified the tuple is initialized from iterable's items.
+
+If the argument is a tuple, the return value is the same object."#
+        }
+        "frozenset" => r#"Build an immutable unordered collection of unique elements."#,
+        "_abc_data" => r#"Internal state held by ABC machinery."#,
+        _ => return None,
+    })
+}
+
 /// Documentation for bare native functions, from CPython's Python/bltinmodule.c.
 pub(super) fn function_doc(name: &str) -> Option<&'static str> {
     match name {

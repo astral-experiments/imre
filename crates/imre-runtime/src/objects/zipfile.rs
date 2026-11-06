@@ -16,6 +16,15 @@ mod source;
 pub(in crate::objects) use member::Member;
 use source::Source;
 
+/// The ZIP importer indexes readable members regardless of their declared extraction version.
+#[derive(Clone, Copy)]
+pub(super) enum DirectoryMode {
+    ZipFile {
+        empty_unicode_path: fn() -> Result<()>,
+    },
+    ZipImport,
+}
+
 pub(super) struct Info {
     filename: StrOwner,
     original: StrOwner,
@@ -131,16 +140,21 @@ fn store(storage: Storage) -> Result<ObjectOwner> {
 impl Archive {
     /// Open a filesystem archive for CRC-checked metadata member reads.
     pub(crate) fn open_path(path: &str) -> Result<Self> {
-        Self::open_with(
-            Source::open(path)?,
-            Some(StrOwner::new(path.into())),
-            || Ok(()),
+        Self::open_path_with(
+            path,
+            DirectoryMode::ZipFile {
+                empty_unicode_path: || Ok(()),
+            },
         )
+    }
+
+    fn open_path_with(path: &str, mode: DirectoryMode) -> Result<Self> {
+        Self::open_with(Source::open(path)?, Some(StrOwner::new(path.into())), mode)
     }
 
     /// Retain the central directory after closing the descriptor used to index it.
     pub(crate) fn index_import(path: &str) -> Result<Self> {
-        let mut archive = Self::open_path(path)?;
+        let mut archive = Self::open_path_with(path, DirectoryMode::ZipImport)?;
         archive.source = None;
         Ok(archive)
     }
@@ -178,15 +192,17 @@ impl Archive {
     }
 
     fn open(source: Source, filename: Option<StrOwner>) -> Result<Self> {
-        Self::open_with(source, filename, warn_empty_unicode_path)
+        Self::open_with(
+            source,
+            filename,
+            DirectoryMode::ZipFile {
+                empty_unicode_path: warn_empty_unicode_path,
+            },
+        )
     }
 
-    fn open_with(
-        source: Source,
-        filename: Option<StrOwner>,
-        empty_unicode_path: fn() -> Result<()>,
-    ) -> Result<Self> {
-        let entries = source.directory(empty_unicode_path)?;
+    fn open_with(source: Source, filename: Option<StrOwner>, mode: DirectoryMode) -> Result<Self> {
+        let entries = source.directory(mode)?;
         let mut list = Words::new(5);
         let mut by_name = HashMap::new();
         list.values

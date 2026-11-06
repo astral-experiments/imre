@@ -5019,6 +5019,15 @@ impl Context {
     }
 
     fn builtin_attribute(&mut self, obj: Id, name: &str, lookup: AttributeLookup) -> Result<Id> {
+        if name == "__doc__" {
+            let owner = match self.heap.get(obj) {
+                Value::Native(symbol) => Some(symbol.as_str()),
+                _ => self.builtin_type_name(obj),
+            };
+            if let Some(doc) = owner.and_then(builtins::type_doc) {
+                return Ok(self.text(doc));
+            }
+        }
         if name == "__prepare__" && self.is_type_object(obj) {
             let type_class = self.builtin("type");
             let owner = if self.direct_subclass(obj, type_class) {

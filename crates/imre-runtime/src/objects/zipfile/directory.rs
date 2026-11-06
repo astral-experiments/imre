@@ -9,7 +9,7 @@ use super::super::{
     exceptions::{Error, Kind, Result},
     files,
 };
-use super::Info;
+use super::{DirectoryMode, Info};
 
 const END: &[u8; 4] = b"PK\x05\x06";
 const END64: &[u8; 4] = b"PK\x06\x06";
@@ -148,12 +148,7 @@ pub(super) fn name(raw: &[u8], utf8: bool) -> Result<Str> {
 }
 
 /// ZIP64 may replace sentinel sizes/offsets, and Info-ZIP may override the display name.
-fn parse_extra(
-    raw: &[u8],
-    mut extra: &[u8],
-    info: &mut Info,
-    empty_unicode_path: fn() -> Result<()>,
-) -> Result<()> {
+fn parse_extra(raw: &[u8], mut extra: &[u8], info: &mut Info, mode: DirectoryMode) -> Result<()> {
     while extra.len() >= 4 {
         let tag = u16_at(extra, 0);
         let len = usize::from(u16_at(extra, 2));
@@ -185,7 +180,9 @@ fn parse_extra(
                     bad("Corrupt unicode path extra field (0x7075): invalid utf-8 bytes")
                 })?;
                 if text.is_empty() {
-                    empty_unicode_path()?;
+                    if let DirectoryMode::ZipFile { empty_unicode_path } = mode {
+                        empty_unicode_path()?;
+                    }
                 } else {
                     info.filename = StrOwner::try_new(
                         Str::try_new(text.split('\0').next().unwrap())
@@ -200,10 +197,7 @@ fn parse_extra(
     Ok(())
 }
 
-pub(super) fn entries(
-    reader: &mut (impl Read + Seek),
-    empty_unicode_path: fn() -> Result<()>,
-) -> Result<Vec<Info>> {
+pub(super) fn entries(reader: &mut (impl Read + Seek), mode: DirectoryMode) -> Result<Vec<Info>> {
     let (start, mut remaining, prefix) = find_directory(reader)?;
     reader
         .seek(SeekFrom::Start(start))
@@ -234,7 +228,7 @@ pub(super) fn entries(
         let original = StrOwner::try_new(name(raw, flags & (1 << 11) != 0)?)
             .map_err(|_| Error::allocation())?;
         let version = header[6];
-        if version > 63 {
+        if version > 63 && matches!(mode, DirectoryMode::ZipFile { .. }) {
             return Err(Error::new(
                 Kind::NotImplementedError,
                 format!("zip file version {:.1}", f32::from(version) / 10.0),
@@ -263,7 +257,7 @@ pub(super) fn entries(
             raw,
             &buf[raw.len()..(name_len + extra_len).min(n)],
             &mut info,
-            empty_unicode_path,
+            mode,
         )?;
         info.offset = i128::from(info.local_offset) + prefix;
         entries.try_reserve(1).map_err(|_| Error::allocation())?;
@@ -288,6 +282,10 @@ pub(super) fn entries(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DIRECTORY_MODE: DirectoryMode = DirectoryMode::ZipFile {
+        empty_unicode_path: || Ok(()),
+    };
     use std::io::Cursor;
 
     // No payload or local file header is present. A directory listing must
@@ -326,7 +324,9 @@ mod tests {
             ],
             b"archive comment",
         );
-        let found = entries(&mut Cursor::new(fixture), || Ok(())).ok().unwrap();
+        let found = entries(&mut Cursor::new(fixture), DIRECTORY_MODE)
+            .ok()
+            .unwrap();
         assert_eq!(
             found
                 .iter()
@@ -344,7 +344,9 @@ mod tests {
         extra.extend(checksum.sum().to_le_bytes());
         extra.extend("é".as_bytes());
         let fixture = index(&[(b"a", 0, &extra), (b"b", 0, &extra)], b"");
-        let found = entries(&mut Cursor::new(fixture), || Ok(())).ok().unwrap();
+        let found = entries(&mut Cursor::new(fixture), DIRECTORY_MODE)
+            .ok()
+            .unwrap();
         assert_eq!(
             found
                 .iter()
@@ -358,7 +360,7 @@ mod tests {
         assert!(
             entries(
                 &mut Cursor::new(index(&[(b"a", 0, &extra)], b"")),
-                || Ok(())
+                DIRECTORY_MODE
             )
             .is_err()
         );

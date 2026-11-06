@@ -78,6 +78,17 @@ fn stat_mode_source() -> Option<&'static str> {
 
 /// Register a bundled Python file under its path in the standard library.
 macro_rules! bundled_source {
+    ($path:literal, from $package:literal) => {
+        Some((
+            $path,
+            include_str!(concat!(
+                "../../../benchmarks/cpython_stdlib/full/",
+                $package,
+                "/upstream/Lib/",
+                $path
+            )),
+        ))
+    };
     ($path:literal) => {
         Some((
             $path,
@@ -502,17 +513,30 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "string.templatelib" => bundled_source!("string/templatelib.py"),
         "email" => bundled_source!("email/__init__.py"),
-        "email.parser" => bundled_source!("email/parser.py"),
-        "email.feedparser" => bundled_source!("email/feedparser.py"),
+        "email._encoded_words" => bundled_source!("email/_encoded_words.py", from "email"),
+        "email._header_value_parser" => {
+            bundled_source!("email/_header_value_parser.py", from "email")
+        }
+        "email._parseaddr" => bundled_source!("email/_parseaddr.py", from "email"),
         "email._policybase" => bundled_source!("email/_policybase.py"),
+        "email.base64mime" => bundled_source!("email/base64mime.py"),
+        "email.charset" => bundled_source!("email/charset.py"),
+        "email.contentmanager" => bundled_source!("email/contentmanager.py"),
+        "email.encoders" => bundled_source!("email/encoders.py"),
+        "email.errors" => bundled_source!("email/errors.py", from "email"),
+        "email.feedparser" => bundled_source!("email/feedparser.py"),
+        "email.generator" => bundled_source!("email/generator.py"),
+        "email.header" => bundled_source!("email/header.py"),
+        "email.headerregistry" => bundled_source!("email/headerregistry.py"),
+        "email.iterators" => bundled_source!("email/iterators.py"),
         "email.message" => Some((
             "email/message.py",
-            concat!(
-                include_str!("../stdlib/email/parser_message.py"),
-                "\n",
-                include_str!("../stdlib/email/boxed_message.py"),
-            ),
+            include_str!("../stdlib/email/boxed_message.py"),
         )),
+        "email.parser" => bundled_source!("email/parser.py"),
+        "email.policy" => bundled_source!("email/policy.py"),
+        "email.quoprimime" => bundled_source!("email/quoprimime.py"),
+        "email.utils" => bundled_source!("email/utils.py", from "email"),
         "http" => bundled_source!("http/__init__.py"),
         "http.client" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();

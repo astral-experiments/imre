@@ -481,7 +481,9 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         ),
         M::Resource => exports!(
             "resource",
+            "RLIMIT_AS",
             "RLIMIT_CORE",
+            "RLIMIT_FSIZE",
             "RLIMIT_NOFILE",
             "RLIMIT_NPROC",
             "RLIMIT_STACK",

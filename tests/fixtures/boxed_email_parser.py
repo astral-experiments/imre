@@ -31,3 +31,21 @@ def current():
     parser.feed("er\r\nbody")
     msg = parser.close()
     print([type(defect).__name__ for defect in msg.defects], msg.get_payload())
+
+    from email import policy
+    from email.parser import BytesParser
+
+    wire = (
+        b"Subject: =?utf-8?q?caf=C3=A9?=\r\n"
+        b'Content-Type: multipart/mixed; boundary="parts"\r\n\r\n'
+        b"--parts\r\nContent-Type: text/plain\r\n\r\nhello\r\n"
+        b"--parts\r\nContent-Type: application/octet-stream\r\n"
+        b"Content-Disposition: attachment; filename*=utf-8''caf%C3%A9.bin\r\n"
+        b"Content-Transfer-Encoding: base64\r\n\r\nAP8=\r\n--parts--\r\n"
+    )
+    message = BytesParser(policy=policy.default).parsebytes(wire)
+    assert str(message["Subject"]) == "café"
+    body, attachment = message.iter_parts()
+    assert body.get_content() == "hello"
+    assert attachment.get_filename() == "café.bin"
+    assert attachment.get_payload(decode=True) == b"\x00\xff"

@@ -666,6 +666,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(target_os = "linux")]
         ("resource", "RLIMIT_CORE") => ctx.int(i64::from(libc::RLIMIT_CORE)),
         #[cfg(target_os = "linux")]
+        ("resource", "RLIMIT_AS") => ctx.int(i64::from(libc::RLIMIT_AS)),
+        #[cfg(target_os = "linux")]
+        ("resource", "RLIMIT_FSIZE") => ctx.int(i64::from(libc::RLIMIT_FSIZE)),
+        #[cfg(target_os = "linux")]
         ("resource", "RLIMIT_NOFILE") => ctx.int(i64::from(libc::RLIMIT_NOFILE)),
         #[cfg(target_os = "linux")]
         ("resource", "RLIMIT_NPROC") => ctx.int(i64::from(libc::RLIMIT_NPROC)),
