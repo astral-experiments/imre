@@ -24,7 +24,8 @@ enum Origin {
 #[derive(Default)]
 pub(super) struct RootPaths {
     anchors: Vec<(Root, Id)>,
-    nodes: HashSet<Id>,
+    // Kept sorted between searches for membership checks at collection points.
+    nodes: Vec<Id>,
     edges: Vec<(Id, usize, Id)>,
     retry: u8,
     // Dictionary slots must be interpreted the same way during discovery and validation.
@@ -135,6 +136,10 @@ impl<'a> Links<'a> {
 }
 
 impl RootPaths {
+    fn contains(&self, id: Id) -> bool {
+        self.nodes.binary_search(&id).is_ok()
+    }
+
     /// Check roots before edges, and parents before children, so a stale slot is never dereferenced.
     fn valid(&self, heap: &Heap, globals: [Id; 2]) -> bool {
         !self.nodes.is_empty()
@@ -283,12 +288,15 @@ impl RootPaths {
                 *needed = true;
             }
         }
+        // The tree contains each ID once. Only paths kept by an earlier
+        // search can duplicate one of the IDs being appended here.
+        let known = self.nodes.len();
         for (&id, &(origin, keep)) in &tree {
-            if !keep || self.nodes.contains(&id) {
+            if !keep || self.nodes[..known].binary_search(&id).is_ok() {
                 continue;
             }
             self.nodes.try_reserve(1).ok()?;
-            self.nodes.insert(id);
+            self.nodes.push(id);
             match origin {
                 Origin::Edge { parent, slot } => {
                     let (&parent, _) = tree.get_index(parent)?;
@@ -301,6 +309,7 @@ impl RootPaths {
                 }
             }
         }
+        self.nodes.sort_unstable();
         Some(())
     }
 
@@ -318,8 +327,8 @@ impl Heap {
     pub(super) fn cached_weak_roots(&self, globals: [Id; 2]) -> bool {
         self.weak_roots.valid(self, globals)
             && self.weak.iter().all(|(target, refs)| {
-                self.weak_roots.nodes.contains(target)
-                    && refs.iter().all(|id| self.weak_roots.nodes.contains(id))
+                self.weak_roots.contains(*target)
+                    && refs.iter().all(|id| self.weak_roots.contains(*id))
             })
     }
 
@@ -353,7 +362,7 @@ impl Heap {
             // Only spend a later search budget on keys after an ordinary path was insufficient.
             let retry_with_keys = !dict_keys
                 && self.weak.values().flatten().any(|&id| {
-                    !paths.nodes.contains(&id)
+                    !paths.contains(id)
                         && self
                             .get(id)
                             .weak_reference()
@@ -430,7 +439,7 @@ impl Heap {
     ) -> bool {
         let paths_valid = self.finalizer_roots.valid(self, globals);
         let kept = |owner: &Id| {
-            (paths_valid && self.finalizer_roots.nodes.contains(owner))
+            (paths_valid && self.finalizer_roots.contains(*owner))
                 || stdin.is_some_and(|input| input.contains(owner))
                 || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
                 || self.bound_in_active_frame(*owner)
