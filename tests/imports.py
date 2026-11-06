@@ -1436,6 +1436,9 @@ ACCEPTED = {
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
     },
+    "bundled_source_loader_data": {
+        "main.py": (FIXTURES.parent / "bundled_source_loader_data.py").read_text(),
+    },
     "source_loader_compile_override": {
         "main.py": (
             "from importlib.machinery import SourceFileLoader\n"
@@ -1752,7 +1755,7 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
-                    "boxed_unittest_lazy_import",
+                    "boxed_unittest_lazy_import", "bundled_source_loader_data",
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
