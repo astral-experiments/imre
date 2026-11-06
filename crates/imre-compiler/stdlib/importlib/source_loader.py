@@ -15,7 +15,6 @@ from _imre_importlib import (
     warn_loader_deprecation as _warn_loader_deprecation,
     warn_import as _warn_import,
 )
-from os import fspath as _fspath, sep
 
 
 _MS_WINDOWS = sys.platform == "win32"
@@ -25,7 +24,8 @@ if _MS_WINDOWS:
 else:
     import posix as _os
     path_separators = "/"
-path_sep = path_separators[0]
+_fspath = _os.fspath
+path_sep = sep = path_separators[0]
 path_sep_tuple = tuple(path_separators)
 
 SOURCE_SUFFIXES = [".py", ".pyw"] if _MS_WINDOWS else [".py"]
