@@ -118,28 +118,38 @@ impl KeyLookup {
                 return ControlFlow::Break(dense);
             }
         }
-        for bucket in &mut self.slots {
-            let position = index.slots[bucket];
-            if position == EMPTY {
-                return ControlFlow::Break(None);
-            }
-            if position == DUMMY {
-                continue;
-            }
-            let dense = entries.dense(position).expect("live dictionary slot");
-            let resident = entries[dense].0;
-            if resident == self.key {
-                return ControlFlow::Break(Some(dense));
-            }
-            if index.hashes[dense] == self.hash {
-                return ControlFlow::Continue((position, resident));
-            }
+        match index.next_candidate(entries, &mut self.slots, self.hash, Some(self.key)) {
+            Some((_, dense)) if entries[dense].0 == self.key => ControlFlow::Break(Some(dense)),
+            Some((position, dense)) => ControlFlow::Continue((position, entries[dense].0)),
+            None => ControlFlow::Break(None),
         }
-        unreachable!("the dictionary probe always yields a bucket")
     }
 }
 
 impl Index {
+    /// Resume a probe at the next identical key or matching stored hash.
+    fn next_candidate(
+        &self,
+        entries: &Entries,
+        slots: &mut Probe,
+        hash: i64,
+        key: Option<Id>,
+    ) -> Option<(usize, usize)> {
+        for bucket in slots {
+            let position = self.slots[bucket];
+            if position == EMPTY {
+                return None;
+            }
+            if position != DUMMY {
+                let dense = entries.dense(position).expect("live dictionary slot");
+                if self.hashes[dense] == hash || key == Some(entries[dense].0) {
+                    return Some((position, dense));
+                }
+            }
+        }
+        unreachable!("the dictionary probe always yields a bucket")
+    }
+
     fn new(hashes: Vec<i64>, positions: Option<&[usize]>, size: usize) -> Result<Self> {
         let mut index = Self {
             slots: Vec::new(),
@@ -223,6 +233,36 @@ impl Entries {
             }
         }
         unreachable!("the dictionary probe always yields a bucket")
+    }
+
+    /// Probe an unboxed ordinal. Defer before a resident key could run Python equality.
+    pub(in super::super) fn lookup_ordinal(
+        &self,
+        ctx: &Context,
+        ch: char,
+    ) -> ControlFlow<(), Option<Id>> {
+        let Some(index) = &self.index else {
+            return if self.is_empty() {
+                ControlFlow::Continue(None)
+            } else {
+                ControlFlow::Break(())
+            };
+        };
+        // Every Unicode ordinal is its own Python integer hash.
+        let ordinal = i64::from(u32::from(ch));
+        let mut probe = Probe::new(ordinal, index.slots.len());
+        while let Some((_, dense)) = index.next_candidate(self, &mut probe, ordinal, None) {
+            let (key, value) = self[dense];
+            let equal = match ctx.heap.get(key) {
+                Value::Int(integer) => integer.to_i64() == Some(ordinal),
+                Value::Bool(bit) => i64::from(*bit) == ordinal,
+                _ => return ControlFlow::Break(()),
+            };
+            if equal {
+                return ControlFlow::Continue(Some(value));
+            }
+        }
+        ControlFlow::Continue(None)
     }
 
     /// Ordered iterators track node mutations separately from the size of the base dict.
