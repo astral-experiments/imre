@@ -343,6 +343,7 @@ fn emit_program(
     let mut extension_modules = std::collections::BTreeSet::new();
     let mut function_link_types = HashSet::new();
     let mut declared_caches = HashSet::new();
+    let mut uses_regex_positions = false;
     let mut uses_sys_argv = false;
     let mut uses_orig_argv = false;
     let mut uses_linecache = false;
@@ -355,6 +356,10 @@ fn emit_program(
                 return;
             };
             match builtin {
+                Builtin::RegexCapture {
+                    operation: RegexCapture::Start | RegexCapture::End,
+                    ..
+                } => uses_regex_positions = true,
                 Builtin::ExtensionImport(name) => {
                     extension_modules.insert(name.clone());
                 }
@@ -424,6 +429,8 @@ fn emit_program(
         async_invoke_frames: BTreeMap::new(),
         function_link_types,
         json_schema_roots: Vec::new(),
+        module_reads_regex_positions: uses_regex_positions,
+        uses_regex_positions: false,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -680,6 +687,8 @@ struct Emitter<'a, 'module> {
     async_invoke_frames: BTreeMap<usize, (String, Type)>,
     function_link_types: HashSet<Type>,
     json_schema_roots: Vec<Type>,
+    module_reads_regex_positions: bool,
+    uses_regex_positions: bool,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -729,6 +738,41 @@ struct Emitter<'a, 'module> {
     uses_cache_paths: bool,
     changes_stdout: bool,
     has_extensions: bool,
+}
+
+/// A function can use byte cursors when every match or cursor stays in locals
+/// and its only observable uses read capture text or participation.
+fn regex_positions_may_escape(module: &crate::ir::Module, function: &Function) -> bool {
+    let cursor = |ty| module.types.cursor_element(ty) == Some(Type::RegexMatch);
+    if !function.locals.iter().copied().any(cursor) {
+        return true;
+    }
+    let tracked = |ty| ty == Type::RegexMatch || cursor(ty);
+    let mut values = 0;
+    let mut consumed = 0;
+    crate::ir::walk_expressions(&function.body, &mut |value| {
+        values += usize::from(tracked(value.ty));
+        if let ExprKind::Builtin(
+            Builtin::RegexGroupDict
+            | Builtin::RegexCapture {
+                operation: RegexCapture::Group | RegexCapture::Absent,
+                ..
+            },
+            args,
+        ) = &value.kind
+        {
+            consumed += usize::from(args[0].ty == Type::RegexMatch);
+        }
+    });
+    crate::ir::walk_statements(&function.body, &mut |stmt| {
+        if let Statement::Assign(slot, value) = stmt
+            && tracked(value.ty)
+            && function.locals[*slot] == value.ty
+        {
+            consumed += 1;
+        }
+    });
+    values != consumed
 }
 
 impl Emitter<'_, '_> {
@@ -2045,6 +2089,8 @@ impl Emitter<'_, '_> {
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
     ) -> Result<String, String> {
+        self.uses_regex_positions =
+            self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
         self.entry_allocas.clear();
         self.mapping_words = 0;
         self.locals = function.locals.clone();
@@ -5458,7 +5504,11 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::RegexFindIter => self.call(
-                "imre_regex_finditer",
+                if self.uses_regex_positions {
+                    "imre_regex_finditer_positions"
+                } else {
+                    "imre_regex_finditer"
+                },
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
@@ -7606,7 +7656,10 @@ impl Emitter<'_, '_> {
             }
             Builtin::FloatAcos => self.call("imre_float_acos", Type::Float, &[&args[0].value]),
             Builtin::FloatAsin => self.call("imre_float_asin", Type::Float, &[&args[0].value]),
+            Builtin::FloatAtan => self.call("atan", Type::Float, &[&args[0].value]),
             Builtin::FloatErfc => self.call("erfc", Type::Float, &[&args[0].value]),
+            Builtin::FloatLog10 => self.call("imre_float_log10", Type::Float, &[&args[0].value]),
+            Builtin::IntLog10 => self.call("imre_int_log10", Type::Float, &[&args[0].value]),
             Builtin::FloatLog2 => Value {
                 ty: Type::Float,
                 operand: self.instruction(format!(
@@ -10445,6 +10498,9 @@ declare double @imre_sumprod_float_lists(ptr, ptr)
 declare ptr @imre_sumprod_number_lists(ptr, ptr)
 declare double @imre_float_acos(double)
 declare double @imre_float_asin(double)
+declare double @atan(double)
+declare double @imre_float_log10(double)
+declare double @imre_int_log10(i64)
 declare double @erfc(double)
 declare i64 @imre_float_int(double)
 declare double @imre_float_parse(ptr)
@@ -11242,6 +11298,7 @@ declare void @imre_log_set_level(ptr, i64)
 declare ptr @imre_regex_group(ptr, i64, i32)
 declare ptr @imre_regex_groupdict(ptr)
 declare ptr @imre_regex_finditer(ptr, ptr)
+declare ptr @imre_regex_finditer_positions(ptr, ptr)
 declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)

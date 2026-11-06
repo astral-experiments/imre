@@ -114,7 +114,7 @@ The paired pass rate is 75.4% (10,046 of 13,327) for the original 25 families an
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
-in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover all 53 explicitly omitted originals.
+in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover 53 originals in these 44 families and [eight supplemental Decimal originals](docs/stdlib-omissions.md#decimal).
 At either optimization level, a test can exercise typed native code, boxed native code that calls the runtime, or Python source loaded during execution. [Compiler design](docs/design.md#boxed-compilation)
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.

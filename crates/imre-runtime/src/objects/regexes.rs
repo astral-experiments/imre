@@ -221,7 +221,11 @@ impl Pattern {
     }
 
     /// Hide the matcher's synthetic final-newline group and restore Python's visible endpoint.
-    fn visible_spans(&mut self, text_len: usize) -> Spans {
+    fn visible_spans<const POSITIONED: bool>(
+        &mut self,
+        text_len: usize,
+        char_start: usize,
+    ) -> Spans {
         let mut visible = self.slots.len();
         if let Some(slot) = self.final_newline_slot {
             if let Some(start) = self.slots[slot] {
@@ -229,7 +233,7 @@ impl Pattern {
             }
             visible = slot;
         }
-        Spans::new(&self.slots[..visible], text_len)
+        Spans::new::<POSITIONED>(&self.slots[..visible], text_len, char_start)
     }
 
     fn search(&mut self, text: &str) -> bool {
@@ -284,23 +288,34 @@ enum Spans {
     Short {
         len: u8,
         slots: [u16; 10],
-        ascii_prefix: Cell<u16>,
+        // An odd length counts the iterator's character position as well as the paired slots.
+        position: Cell<u16>,
     },
+    // Iterator matches append their character position after the paired capture slots.
     Long(Box<[Option<NonMaxUsize>]>),
 }
 
 impl Spans {
-    fn new(slots: &[Option<NonMaxUsize>], text_len: usize) -> Self {
+    fn new<const POSITIONED: bool>(
+        slots: &[Option<NonMaxUsize>],
+        text_len: usize,
+        char_start: usize,
+    ) -> Self {
         if slots.len() <= 10 && text_len < usize::from(u16::MAX) {
             let mut short = [u16::MAX; 10];
             for (dst, slot) in short.iter_mut().zip(slots) {
                 *dst = slot.map_or(u16::MAX, |s| s.get() as u16);
             }
             Self::Short {
-                len: slots.len() as u8,
+                len: slots.len() as u8 + u8::from(POSITIONED),
                 slots: short,
-                ascii_prefix: Cell::new(0),
+                position: Cell::new(char_start as u16),
             }
+        } else if POSITIONED {
+            let mut snapshot = Vec::with_capacity(slots.len() + 1);
+            snapshot.extend_from_slice(slots);
+            snapshot.push(NonMaxUsize::new(char_start));
+            Self::Long(snapshot.into_boxed_slice())
         } else {
             Self::Long(slots.into())
         }
@@ -311,7 +326,7 @@ impl Spans {
         let at = index.checked_mul(2)?;
         match self {
             Self::Short { len, slots, .. } => {
-                if at >= usize::from(*len) {
+                if index >= usize::from(*len / 2) {
                     return None;
                 }
                 Some(
@@ -319,29 +334,44 @@ impl Spans {
                         .then(|| (usize::from(slots[at]), usize::from(slots[at + 1]))),
                 )
             }
-            Self::Long(slots) => Some(
-                slots
-                    .get(at)?
-                    .zip(slots[at + 1])
-                    .map(|(a, b)| (a.get(), b.get())),
-            ),
+            Self::Long(slots) => {
+                let [first, last] = *slots.as_chunks::<2>().0.get(index)?;
+                Some(first.zip(last).map(|(a, b)| (a.get(), b.get())))
+            }
         }
     }
 
-    /// Successive bounds can count the ASCII portion of a short input once.
+    /// Convert engine offsets from a forward scanner's character position.
+    /// A standalone short match tracks the ASCII prefix across repeated bounds.
     fn char_offset(&self, text: &str, byte: usize) -> usize {
-        if let Self::Short { ascii_prefix, .. } = self {
-            let seen = ascii_prefix.get();
+        if let Self::Short { len, position, .. } = self
+            && len & 1 == 0
+        {
+            let seen = position.get();
             if seen != u16::MAX {
                 if byte <= usize::from(seen) {
                     return byte;
                 }
                 if text.as_bytes()[usize::from(seen)..byte].is_ascii() {
-                    ascii_prefix.set(byte as u16);
+                    position.set(byte as u16);
                     return byte;
                 }
-                ascii_prefix.set(u16::MAX);
+                position.set(u16::MAX);
             }
+        }
+        let char_start = match self {
+            Self::Short { len, position, .. } if len & 1 != 0 => Some(usize::from(position.get())),
+            Self::Long(slots) if slots.len() & 1 != 0 => {
+                slots.last().copied().flatten().map(NonMaxUsize::get)
+            }
+            _ => None,
+        };
+        if let Some(index) = char_start {
+            let (start, _) = self.get(0).flatten().expect("a match owns group zero");
+            if byte >= start {
+                return index + text[start..byte].chars().count();
+            }
+            return index - text[byte..start].chars().count();
         }
         text[..byte].chars().count()
     }
@@ -861,7 +891,7 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
             if !found {
                 return ptr::null();
             }
-            let spans = compiled.visible_spans((&*text).len());
+            let spans = compiled.visible_spans::<false>((&*text).len(), 0);
             handle(Storage::RegexMatch(Match {
                 pattern: crate::ObjectOwner::acquire_word(pattern as usize),
                 text: crate::StrOwner::acquire_word(text as usize),
@@ -876,12 +906,20 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
 pub(super) struct FindIter {
     pattern: crate::ObjectOwner,
     text: StrOwner,
-    offset: Option<usize>,
+    offset: Option<NonMaxUsize>,
 }
 
+// A positioned cursor, including its character counter, fits an existing iterator payload.
+const _: () =
+    assert!(size_of::<(FindIter, usize)>() <= size_of::<super::mappings::MappingIterator>());
+
 impl FindIter {
-    pub(super) fn next(&mut self) -> Option<(super::OwnedWord, Option<super::OwnedWord>)> {
-        let offset = self.offset.take()?;
+    /// Advance a byte-only or positioned cursor selected by its storage tag.
+    pub(super) fn next<const POSITIONED: bool>(
+        &mut self,
+        char_offset: &mut usize,
+    ) -> Option<(super::OwnedWord, Option<super::OwnedWord>)> {
+        let offset = self.offset.take()?.get();
         // SAFETY: this cursor owns a distinct pattern; a search cannot reenter or mutate the cursor.
         unsafe {
             self.pattern.0.with_mut(|storage| {
@@ -894,11 +932,21 @@ impl FindIter {
                     &input,
                     &mut compiled.slots,
                 )?;
-                let spans = compiled.visible_spans(self.text.len());
                 let start = compiled.slots[0].unwrap().get();
-                let end = compiled.slots[1].unwrap().get();
-                debug_assert!(start < end);
-                self.offset = (end < self.text.len()).then_some(end);
+                let char_start = if POSITIONED {
+                    *char_offset + self.text[offset..start].chars().count()
+                } else {
+                    0
+                };
+                let spans = compiled.visible_spans::<POSITIONED>(self.text.len(), char_start);
+                let end = compiled.slots[1].unwrap();
+                debug_assert!(start < end.get());
+                if end.get() < self.text.len() {
+                    self.offset = Some(end);
+                    if POSITIONED {
+                        *char_offset = char_start + self.text[start..end.get()].chars().count();
+                    }
+                }
                 let found = handle(Storage::RegexMatch(Match {
                     pattern: crate::ObjectOwner::clone(&self.pattern),
                     text: StrOwner::clone(&self.text),
@@ -923,13 +971,37 @@ pub unsafe extern "C" fn imre_regex_finditer(
     pattern: *const Object,
     text: *const Str,
 ) -> *const Object {
-    handle(Storage::RegexIterator(FindIter {
-        // SAFETY: each input remains rooted until the cursor retains its own owners.
+    // SAFETY: both inputs are rooted by the caller.
+    handle(Storage::RegexIterator(unsafe {
+        retained_cursor(pattern, text)
+    }))
+}
+
+/// Advance the character coordinate together with the regex engine's byte cursor.
+///
+/// # Safety
+/// Both pointers must be rooted native objects of the indicated types.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_finditer_positions(
+    pattern: *const Object,
+    text: *const Str,
+) -> *const Object {
+    // SAFETY: both inputs are rooted by the caller.
+    handle(Storage::RegexPositionIterator(
+        unsafe { retained_cursor(pattern, text) },
+        0,
+    ))
+}
+
+/// Retain the pattern and subject before the caller releases its roots.
+unsafe fn retained_cursor(pattern: *const Object, text: *const Str) -> FindIter {
+    FindIter {
+        // SAFETY: each input remains rooted while the cursor acquires its owner.
         pattern: unsafe { crate::ObjectOwner::acquire_word(pattern as usize) },
         // SAFETY: the original text is live through this acquisition.
         text: unsafe { crate::StrOwner::acquire_word(text as usize) },
-        offset: Some(0),
-    }))
+        offset: NonMaxUsize::new(0),
+    }
 }
 
 impl Match {

@@ -68,7 +68,7 @@ fn replacement(table: &Mapping, ch: char) -> Result<Piece<&str>> {
 }
 
 /// Write the one-byte ASCII replacements directly into the reserved output.
-/// Return the remaining input when a replacement needs the general UTF-8 writer.
+/// Return the remaining input when a source character or replacement needs the UTF-8 writer.
 fn ascii_prefix<'s, 'a, E: From<Error>>(
     source: &'s str,
     output: &mut Str,
@@ -79,12 +79,15 @@ fn ascii_prefix<'s, 'a, E: From<Error>>(
     let mut table = [UNSEEN; 256];
     let mut written = 0;
     let mut consumed = 0;
-    // SAFETY: the caller reserves the whole ASCII source in an empty heap string.
+    // SAFETY: the caller reserves the full source length in an empty heap string.
     // Every included output byte is initialized below with a single ASCII replacement.
     let bytes = unsafe { output.spare_capacity_mut() };
     for byte in source.bytes() {
         let slot = &mut table[usize::from(byte)];
         if *slot == UNSEEN {
+            if !byte.is_ascii() {
+                break;
+            }
             *slot = match lookup(char::from(byte))? {
                 Piece::Delete | Piece::Text("") => DELETE,
                 Piece::Character(ch) if ch.is_ascii() => ch as u8,
@@ -92,10 +95,10 @@ fn ascii_prefix<'s, 'a, E: From<Error>>(
                 _ => break,
             };
         }
-        if *slot != DELETE {
-            bytes[written].write(*slot);
-            written += 1;
-        }
+        // Each preceding input byte contributes at most one output byte, so
+        // this position always fits. A deleted byte is outside the committed prefix.
+        unsafe { bytes.get_unchecked_mut(written) }.write(*slot);
+        written += usize::from(*slot != DELETE);
         consumed += 1;
     }
     // SAFETY: the initialized prefix consists entirely of ASCII bytes.
@@ -109,7 +112,7 @@ pub(crate) fn borrowed_text<'a, E: From<Error>>(
     lookup: impl Fn(char) -> std::result::Result<Piece<&'a str>, E>,
 ) -> std::result::Result<Str, E> {
     let mut output = Str::try_with_capacity(source.len()).map_err(|_| Error::memory_error())?;
-    let source = if source.len() >= 256 && source.is_ascii() {
+    let source = if source.len() >= 256 && source.as_bytes()[0].is_ascii() {
         ascii_prefix(source, &mut output, &lookup)?
     } else {
         source

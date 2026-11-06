@@ -173,7 +173,10 @@ pub(in crate::dynamic) struct Accumulator {
 }
 
 impl Cursor {
-    pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
+    pub(in crate::dynamic) fn children(
+        &self,
+        visit: &mut impl crate::dynamic::value::VisitReferences,
+    ) {
         match self {
             Self::Cycle(state) => {
                 visit.extend(state.source);

@@ -2232,8 +2232,36 @@ impl Context {
         if self.heap.leave(result, returning)
             && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
         {
+            if self.finalize_unowned_generator_loop()
+                && self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+            {
+                return;
+            }
             self.collect_unreachable();
         }
+    }
+
+    /// Close an isolated generator before paying for a complete collection at frame exit.
+    fn finalize_unowned_generator_loop(&mut self) -> bool {
+        let Some((generator, iterator)) = self.heap.pending_generator_loop() else {
+            return false;
+        };
+        let globals = self.finalizer_path_roots();
+        let stdin = super::stdlib::io::rooted_input_chain(self);
+        if !self.heap.cached_finalizers_kept_except(
+            globals,
+            stdin.as_ref(),
+            Some(self.heap.temporary_mark()),
+            &[generator],
+        ) {
+            return false;
+        }
+        let (heap, roots) = self.heap_and_roots();
+        if !heap.generator_loop_is_unowned(generator, iterator, roots) {
+            return false;
+        }
+        self.dispatch_finalizer(generator);
+        true
     }
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
@@ -2316,6 +2344,19 @@ impl Context {
         if self.can_skip_finalizer_sweep(mark) {
             self.heap.keep_call_result(mark, result);
         } else if self.heap.discard_operands(mark, result, self.modules) {
+            // The return value is now rooted in the caller, including its live stream layers.
+            let stream = super::stdlib::io::text_descriptor_chain(&self.heap, result);
+            if !self.heap.full_collection_active()
+                && let Some(chain) = stream
+                && self.heap.cached_finalizers_kept_except(
+                    self.finalizer_path_roots(),
+                    super::stdlib::io::rooted_input_chain(self).as_ref(),
+                    Some(self.heap.temporary_mark()),
+                    &chain,
+                )
+            {
+                return;
+            }
             self.collect_unreachable();
         }
     }

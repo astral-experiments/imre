@@ -405,10 +405,11 @@ impl Heap {
             .ordinary_finalizers
             .iter()
             .chain(&self.descriptor_owners)
-            .copied()
-            .filter(|id| {
-                !stdin.is_some_and(|input| input.contains(id))
-                    && !self.operand_keeps_finalizer(*id, 0)
+            .enumerate()
+            .filter_map(|(row, &id)| {
+                (!stdin.is_some_and(|input| input.contains(&id))
+                    && !self.operand_keeps_finalizer(id, 0, row))
+                .then_some(id)
             });
         let Some(paths) = RootPaths::discover(self, globals, endpoints, true, false) else {
             return false;
@@ -422,13 +423,15 @@ impl Heap {
     }
 
     /// Check published operands in the caller frames and the surviving prefix of the active frame.
-    fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+    fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize, row: usize) -> bool {
         let Some(active) = self.frames.len().checked_sub(1) else {
             return false;
         };
         const OPERANDS_PER_FRAME: usize = 8;
-        let position = &self.slots[owner as usize].finalizer_operand;
-        if let Some(index) = position.get().checked_sub(1) {
+        let position = self.finalizer_operands.get(row);
+        if let Some(index) = position.map(|position| position.get())
+            && index != u16::MAX
+        {
             let index = usize::from(index);
             let (frame, operand) = (index / OPERANDS_PER_FRAME, index % OPERANDS_PER_FRAME);
             // The operand and the path from it to the owner may have changed since the release.
@@ -477,7 +480,9 @@ impl Heap {
         if let Some((frame, slot, _)) = found {
             // There are at most eight candidate operands per frame. Deeper stacks still
             // use the ordinary scan when the packed position is outside the header's range.
-            position.set(u16::try_from(frame * OPERANDS_PER_FRAME + slot + 1).unwrap_or(0));
+            if let Some(position) = position {
+                position.set(u16::try_from(frame * OPERANDS_PER_FRAME + slot).unwrap_or(u16::MAX));
+            }
             return true;
         }
         false
@@ -491,17 +496,37 @@ impl Heap {
         stdin: Option<&[Id; 3]>,
         discard_from: Option<usize>,
     ) -> bool {
+        self.cached_finalizers_kept_except(globals, stdin, discard_from, &[])
+    }
+
+    /// Check all pending owners except those covered by a separate reachability proof.
+    pub(in crate::dynamic) fn cached_finalizers_kept_except(
+        &self,
+        globals: [Id; 2],
+        stdin: Option<&[Id; 3]>,
+        discard_from: Option<usize>,
+        except: &[Id],
+    ) -> bool {
         let paths_valid = self.finalizer_roots.valid(self, globals);
-        let kept = |owner: &Id| {
-            (paths_valid && self.finalizer_roots.contains(*owner))
-                || stdin.is_some_and(|input| input.contains(owner))
-                || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
-                || self.bound_in_active_frame(*owner)
+        let descriptors = if discard_from.is_some() {
+            &self.descriptor_owners[..]
+        } else {
+            &[]
         };
-        self.ordinary_finalizers.iter().all(&kept)
+        self.ordinary_finalizers
+            .iter()
+            .chain(descriptors)
+            .enumerate()
+            .all(|(row, owner)| {
+                except.contains(owner)
+                    || (paths_valid && self.finalizer_roots.contains(*owner))
+                    || stdin.is_some_and(|input| input.contains(owner))
+                    || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX), row)
+                    || self.bound_in_active_frame(*owner)
+            })
             && (discard_from.is_none()
-                || (self.descriptor_owners.iter().all(kept)
-                    && (!self.has_weak_values || self.weak_values_kept_by(globals[0], globals[1]))))
+                || !self.has_weak_values
+                || self.weak_values_kept_by(globals[0], globals[1]))
     }
 }
 

@@ -568,7 +568,9 @@ fn lower_graph(
                     (
                         "open",
                         Binding::Intrinsic(
-                            Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
+                            Intrinsic::BuiltinsOpen
+                                | Intrinsic::GzipOpen
+                                | Intrinsic::Fd(ir::FdOperation::Open)
                         )
                     ) | (
                         "filter",
@@ -10461,11 +10463,18 @@ impl<'a> Checker<'a> {
         {
             return self.json_encode(call, op);
         }
-        let gzip = matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(Intrinsic::GzipOpen))
-        );
-        if gzip || matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
+        let binding = self.resolve(&call.func);
+        let gzip = binding == Some(Binding::Intrinsic(Intrinsic::GzipOpen));
+        let imported_open = binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsOpen))
+            && match &*call.func {
+                ast::Expr::Name(name) => !self.names.contains_key(name.id.as_str()),
+                ast::Expr::Attribute(attr) => attr
+                    .value
+                    .as_name_expr()
+                    .is_some_and(|name| !self.names.contains_key(name.id.as_str())),
+                _ => false,
+            };
+        if gzip || imported_open || self.unshadowed_builtin(&call.func, "open") {
             return self.open(call, gzip);
         }
         if self.unshadowed_builtin(&call.func, "issubclass") {
@@ -12180,19 +12189,14 @@ impl<'a> Checker<'a> {
                 .command_startup
                 .as_ref()
                 .is_some_and(|(flags, _)| flags.has_warning_options)
-            && self.unshadowed_builtin(&call.func, "open")
         {
             return Err(self.object_builtin_error("open with startup warning filters", call));
         }
-        if !gzip
-            && self.unshadowed_builtin(&call.func, "open")
-            && args.find_argument_value("opener", 7).is_some()
-        {
+        if !gzip && args.find_argument_value("opener", 7).is_some() {
             return Err(self.object_builtin_error("open with opener", call));
         }
         // The typed BinaryIO ABI carries neither raw write results nor a buffer size.
         if !gzip
-            && self.unshadowed_builtin(&call.func, "open")
             && args.len() == 3
             && let Some(path) = args.find_argument_value("file", 0)
             && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
@@ -12206,7 +12210,6 @@ impl<'a> Checker<'a> {
         }
         let mut checked_path = None;
         if !gzip
-            && self.unshadowed_builtin(&call.func, "open")
             && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
             && paths::is_update_open(args, mode.value.to_str())
             && let Some(path) = args.find_argument_value("file", 0)

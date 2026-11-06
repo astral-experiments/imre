@@ -1140,7 +1140,16 @@ impl Mapping {
         let Tables::Int(table) = &self.tables else {
             return None;
         };
-        let key = Int::small(i64::from(u32::from(ch))).unwrap().into_raw();
+        let ordinal = i64::from(u32::from(ch));
+        if table.entries.len() <= 4 {
+            return table
+                .entries
+                .iter()
+                .flatten()
+                .find(|entry| entry.key.0.to_i64() == Some(ordinal))
+                .map(|entry| (self.value_kind, entry.value));
+        }
+        let key = Int::small(ordinal).unwrap().into_raw();
         // SAFETY: every Unicode ordinal is a tagged immediate of this table's key type.
         unsafe { table.lookup(key) }.map(|entry| (self.value_kind, entry.value))
     }
@@ -3289,7 +3298,7 @@ pub unsafe extern "C" fn imre_set_iter(value: *const Object) -> *const Object {
 }
 /// Pull one owned item (two owned words in dictionary-items mode). Release
 /// the Object storage borrow before a composed iterator can pull another cursor.
-#[inline]
+#[inline(always)]
 pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
     let mut adapter = None;
     // SAFETY: leaf cursor pulls cannot reenter. Only owners escape the borrow.
@@ -3308,7 +3317,8 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                     .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
             }),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
-            Storage::RegexIterator(iterator) => Ok(iterator.next()),
+            Storage::RegexIterator(iterator) => Ok(iterator.next::<false>(&mut 0)),
+            Storage::RegexPositionIterator(iterator, chars) => Ok(iterator.next::<true>(chars)),
             Storage::LineIterator(iterator) => iterator.next(),
             Storage::SplitFields(iterator) => iterator.next(),
             Storage::SortedSplitFields(iterator) => iterator.next(),
