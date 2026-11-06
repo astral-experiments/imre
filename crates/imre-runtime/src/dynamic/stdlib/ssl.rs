@@ -892,13 +892,16 @@ pub(super) fn call(
                 if socket::pending_tls_data(&transport)? {
                     return Ok(NONE);
                 }
-                return Ok(ctx.alloc(Value::TlsListener(transport)));
+                return ctx
+                    .heap
+                    .alloc_native_drop_observer(Value::TlsListener(transport));
             }
             // Provider calls cannot invoke Python. Release the handle borrow before VM allocation.
             let result = provider::Session::wrap(&handle.borrow(), transport, host, server);
             match result {
                 Ok(session) => {
-                    Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))
+                    let session = Value::TlsSession(Rc::new(RefCell::new(Some(session))));
+                    ctx.heap.alloc_native_drop_observer(session)
                 }
                 Err(error) => bio_failure(ctx, error),
             }

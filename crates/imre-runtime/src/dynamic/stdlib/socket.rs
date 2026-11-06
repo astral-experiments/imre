@@ -1456,7 +1456,9 @@ pub(super) fn call(
             let buffer = if !write && default_size {
                 // Keep the native socket buffer for the default read-only stream.
                 let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
-                ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?)
+                ctx.heap.alloc_native_drop_observer(
+                    super::BinaryFile::reader(reader, None).into_value()?,
+                )?
             } else {
                 let module = ctx.module("socket")?;
                 let Value::Module { scope, .. } = *ctx.heap.get(module) else {
