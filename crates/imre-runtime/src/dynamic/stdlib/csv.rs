@@ -2,7 +2,7 @@
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::dynamic::operators::surrogate_repr;
 use crate::objects::csv::{Dialect, Field, Row};
-use crate::objects::exceptions::{Kind, string_repr};
+use crate::objects::exceptions::Kind;
 
 fn character(ctx: &Context, id: Id) -> Result<u32> {
     if id == NONE {
@@ -67,10 +67,7 @@ pub(super) fn read_row(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
                 let value = crate::floats::parse(&text).ok_or_else(|| {
                     crate::Error::new(
                         Kind::ValueError,
-                        format!(
-                            "could not convert string to float: {}",
-                            string_repr(&text).as_str()
-                        ),
+                        crate::floats::invalid_string_message(&text),
                     )
                 })?;
                 Value::Float(value)
@@ -79,7 +76,8 @@ pub(super) fn read_row(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
                 return Err(crate::Error::new(
                     Kind::ValueError,
                     format!(
-                        "could not convert string to float: {}",
+                        "{}{}",
+                        crate::floats::INVALID_STRING_PREFIX,
                         surrogate_repr(&points)
                     ),
                 ));

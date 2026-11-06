@@ -16,6 +16,7 @@ use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 
 use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_text};
 use crate::integer_text::decimal_digit;
+use crate::objects::exceptions::string_repr;
 
 /// Returns a nullable-word owner. Bare float storage never calls this helper.
 #[unsafe(no_mangle)]
@@ -254,14 +255,21 @@ pub(crate) fn parse(source: &str) -> Option<f64> {
         .flatten()
 }
 
+pub(crate) const INVALID_STRING_PREFIX: &str = "could not convert string to float: ";
+
+/// Format a rejected exact string, preserving its original spelling and Python quoting.
+pub(crate) fn invalid_string_message(value: &str) -> String {
+    format!("{INVALID_STRING_PREFIX}{}", string_repr(value))
+}
+
 /// # Safety
 /// `value` is a rooted string handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_float_parse(value: *const Str) -> f64 {
     // SAFETY: the caller keeps this immutable string alive.
+    let value = unsafe { &*value };
     finish(
-        parse(unsafe { &*value })
-            .ok_or_else(|| Error::new(Kind::ValueError, "could not convert string to float")),
+        parse(value).ok_or_else(|| Error::new(Kind::ValueError, invalid_string_message(value))),
         0.0,
     )
 }

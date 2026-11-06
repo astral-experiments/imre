@@ -209,6 +209,7 @@ def generated() -> dict[str, str]:
         "1e",
         "0x1",
         "nan(1)",
+        "can't\nparse λ",
         "1\0",
         "1 2",
         "²",
@@ -217,7 +218,7 @@ def generated() -> dict[str, str]:
     parsing = (
         "texts = "
         + repr(text)
-        + "\nfor text in texts:\n    try:\n        print(float(text))\n    except ValueError:\n        print('invalid')\n"
+        + "\nfor text in texts:\n    try:\n        print(float(text))\n    except ValueError as error:\n        print(str(error))\n        print(repr(error.args))\n"
     )
     return {
         "arithmetic_matrix": matrix,
