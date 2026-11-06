@@ -3374,6 +3374,7 @@ impl Context {
                 "cosh",
                 "erfc",
                 "fabs",
+                "log10",
                 "nextafter",
                 "remainder",
                 "sinh",

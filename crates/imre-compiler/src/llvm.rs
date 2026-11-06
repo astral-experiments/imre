@@ -7619,6 +7619,8 @@ impl Emitter<'_, '_> {
             Builtin::FloatAsin => self.call("imre_float_asin", Type::Float, &[&args[0].value]),
             Builtin::FloatAtan => self.call("atan", Type::Float, &[&args[0].value]),
             Builtin::FloatErfc => self.call("erfc", Type::Float, &[&args[0].value]),
+            Builtin::FloatLog10 => self.call("imre_float_log10", Type::Float, &[&args[0].value]),
+            Builtin::IntLog10 => self.call("imre_int_log10", Type::Float, &[&args[0].value]),
             Builtin::FloatLog2 => Value {
                 ty: Type::Float,
                 operand: self.instruction(format!(
@@ -10458,6 +10460,8 @@ declare ptr @imre_sumprod_number_lists(ptr, ptr)
 declare double @imre_float_acos(double)
 declare double @imre_float_asin(double)
 declare double @atan(double)
+declare double @imre_float_log10(double)
+declare double @imre_int_log10(i64)
 declare double @erfc(double)
 declare i64 @imre_float_int(double)
 declare double @imre_float_parse(ptr)

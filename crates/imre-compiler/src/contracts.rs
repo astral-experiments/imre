@@ -548,6 +548,8 @@ impl Builtin {
             | Self::TomlDecode(_)
             | Self::FloatAcos
             | Self::FloatAsin
+            | Self::FloatLog10
+            | Self::IntLog10
             | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
@@ -970,8 +972,9 @@ impl Builtin {
             | Self::FloatAsin
             | Self::FloatAtan
             | Self::FloatErfc
-            | Self::FloatLog2 => signature(&[Type::Float], Type::Float),
-            Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
+            | Self::FloatLog2
+            | Self::FloatLog10 => signature(&[Type::Float], Type::Float),
+            Self::IntSignAsFloat | Self::IntLog10 => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
                 let table = if matches!(op, New) {
@@ -1543,6 +1546,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_sumprod_number_lists"
                 | "imre_float_acos"
                 | "imre_float_asin"
+                | "imre_float_log10"
+                | "imre_int_log10"
                 | "imre_float_int"
                 | "imre_float_parse"
                 | "imre_bytes_float"

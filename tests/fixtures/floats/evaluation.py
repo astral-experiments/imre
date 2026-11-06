@@ -1,4 +1,4 @@
-from math import acos, asin, atan, erfc, log2
+from math import acos, asin, atan, erfc, log2, log10
 
 
 def integer(label: str, value: int) -> int:
@@ -68,6 +68,9 @@ except ZeroDivisionError:
 print(floating("integer receiver", -0.0).is_integer())
 for value in (2.0, -3.5, 5e-324, 1e308, float("inf"), float("-inf"), float("nan")):
     print(value.is_integer())
+
+print(log10(floating("decimal logarithm receiver", 0.1)))
+assert log10(10**1000) == 1000.0
 
 print(log2(floating("logarithm receiver", 0.125)))
 print(log2(5e-324))

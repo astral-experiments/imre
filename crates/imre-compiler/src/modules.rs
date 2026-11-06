@@ -901,6 +901,7 @@ pub(crate) enum Intrinsic {
     MathAsin,
     MathAtan,
     MathErfc,
+    MathLog10,
     TimeSleep,
     WarningFilter {
         simple: bool,
@@ -1176,6 +1177,7 @@ impl Intrinsic {
             Self::MathAsin => Some(("math.asin", Builtin::FloatAsin)),
             Self::MathAtan => Some(("math.atan", Builtin::FloatAtan)),
             Self::MathErfc => Some(("math.erfc", Builtin::FloatErfc)),
+            Self::MathLog10 => Some(("math.log10", Builtin::FloatLog10)),
             _ => None,
         }
     }
@@ -2317,6 +2319,7 @@ impl IntrinsicModule {
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
+            (Self::Math, "log10") => Intrinsic::MathLog10,
             (Self::Math, "log2") => Intrinsic::ScopedObjectExport("math.log2"),
             (Self::Math, "ldexp") => Intrinsic::ScopedObjectExport("math.ldexp"),
             (Self::Math, "nextafter") => Intrinsic::ScopedObjectExport("math.nextafter"),
