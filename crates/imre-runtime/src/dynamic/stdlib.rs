@@ -538,9 +538,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current" | "shutdown") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
-        ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
+        ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
-        ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
+        ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         (
             "traceback",

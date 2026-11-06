@@ -3732,6 +3732,12 @@ impl Context {
                 self.bind(scope, "TIMEOUT_MAX", limit);
             }
             "threading" if source.is_none() => {
+                // The source module imports these aliases itself. The native fallback
+                // also stores them in the ordinary module dictionary.
+                let lock = self.builtin(thread_lock::CLASS);
+                self.bind(scope, "Lock", lock);
+                let local = self.builtin(thread_local::CLASS);
+                self.bind(scope, "local", local);
                 let thread = self.module("_thread")?;
                 let error = self.lookup_attr(thread, "error")?;
                 self.bind(scope, "ThreadError", error);
