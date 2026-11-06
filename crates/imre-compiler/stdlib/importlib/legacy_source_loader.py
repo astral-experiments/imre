@@ -12,8 +12,10 @@ from _imre_importlib import (
     warn_import as _warn_import,
 )
 from _imre_importlib import import_module as _native_import, warn_legacy_load as _warn_legacy_load
-from os import altsep, sep
 
+
+# The bootstrap runs before high-level filesystem modules are available.
+sep, altsep = ("\\", "/") if sys.platform == "win32" else ("/", None)
 
 _NEEDS_LOADING = object()
 _module_locks = {}
