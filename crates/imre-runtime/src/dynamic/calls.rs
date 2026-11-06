@@ -8158,7 +8158,7 @@ impl Context {
                 }
                 // Defaults belong to the function. Validate the arguments supplied by the caller
                 // and report binding errors first, including missing keyword-only arguments.
-                let supplied_types = self.check_supplied_types(local, &sig["types"], &name);
+                let supplied_types = self.check_supplied_types(local, &sig, &name);
                 let mut missing = Vec::new();
                 for (index, n) in pos.iter().enumerate() {
                     if !self.scope_data(local).names.contains_key(n) {
@@ -8216,7 +8216,7 @@ impl Context {
                 self.call_depth -= 1;
                 let value = result?;
                 if let Some(expected) = sig["return_type"].as_str() {
-                    self.require_scalar(value, expected, format_args!("{name} return value"))?;
+                    self.require_scalar(value, expected, false, format_args!("{name} return value"))?;
                 }
                 Ok(value)
             }
@@ -8262,13 +8262,14 @@ impl Context {
     }
 
     /// Check scalar annotations on values that were explicitly bound by this call.
-    fn check_supplied_types(&self, local: Id, types: &serde_json::Value, name: &str) -> Result<()> {
-        if let Some(types) = types.as_object() {
+    fn check_supplied_types(&self, local: Id, sig: &serde_json::Value, name: &str) -> Result<()> {
+        if let Some(types) = sig["types"].as_object() {
             for (param, expected) in types {
                 if let Some(&id) = self.scope_data(local).names.get(param) {
                     self.require_scalar(
                         id,
                         expected.as_str().unwrap_or_default(),
+                        sig["integer_sign_parameters"][param] == true,
                         format_args!("{name} argument {param:?}"),
                     )?;
                 }
@@ -8281,17 +8282,22 @@ impl Context {
         &self,
         value: Id,
         expected: &str,
+        integer_sign: bool,
         context: std::fmt::Arguments<'_>,
     ) -> Result<()> {
-        if matches!(
-            (expected, self.heap.get(value)),
-            ("None", Value::None)
-                | ("int", Value::Int(_))
-                | ("float", Value::Float(_))
-                | ("bytes", Value::Bytes(_))
-                | ("str", Value::Str(_) | Value::SurrogateStr(_))
-                | ("bool", Value::Bool(_))
-        ) {
+        let boxed = self.heap.get(value);
+        // A boxed comparison can read the integer's sign from the original object.
+        if (integer_sign && matches!((expected, boxed), ("float", Value::Int(_))))
+            || matches!(
+                (expected, boxed),
+                ("None", Value::None)
+                    | ("int", Value::Int(_))
+                    | ("float", Value::Float(_))
+                    | ("bytes", Value::Bytes(_))
+                    | ("str", Value::Str(_) | Value::SurrogateStr(_))
+                    | ("bool", Value::Bool(_))
+            )
+        {
             Ok(())
         } else {
             Err(Error::new(
