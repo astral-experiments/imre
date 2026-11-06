@@ -4,7 +4,7 @@ use std::ops::ControlFlow;
 
 use smallvec::SmallVec;
 
-use super::Entries;
+use super::{Entries, EntryColumn};
 use crate::dynamic::value::{Heap, NONE};
 use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 
@@ -26,13 +26,13 @@ enum HashFrame {
 #[derive(Clone)]
 pub(super) struct Index {
     slots: Vec<usize>,
-    hashes: Vec<i64>,
+    hashes: EntryColumn<i64>,
     generation: usize,
 }
 
 impl Index {
     pub(super) fn buffer_bytes(&self) -> usize {
-        self.slots.capacity() * size_of::<usize>() + self.hashes.capacity() * size_of::<i64>()
+        self.slots.capacity() * size_of::<usize>() + self.hashes.data.capacity() * size_of::<i64>()
     }
 }
 
@@ -150,25 +150,30 @@ impl Index {
         unreachable!("the dictionary probe always yields a bucket")
     }
 
-    fn new(hashes: Vec<i64>, positions: Option<&[usize]>, size: usize) -> Result<Self> {
+    fn new(
+        hashes: Vec<i64>,
+        positions: Option<&[usize]>,
+        first: usize,
+        size: usize,
+    ) -> Result<Self> {
         let mut index = Self {
             slots: Vec::new(),
-            hashes,
+            hashes: hashes.into(),
             generation: 0,
         };
-        index.rebuild(positions, size)?;
+        index.rebuild(positions, first, size)?;
         Ok(index)
     }
 
     /// Reserve the slots before replacing the probe layout so a refusal preserves lookups.
-    fn rebuild(&mut self, positions: Option<&[usize]>, size: usize) -> Result<()> {
+    fn rebuild(&mut self, positions: Option<&[usize]>, first: usize, size: usize) -> Result<()> {
         self.slots
             .try_reserve_exact(size.saturating_sub(self.slots.len()))
             .map_err(|_| crate::Error::memory_error())?;
         self.slots.clear();
         self.slots.resize(size, EMPTY);
         for dense in 0..self.hashes.len() {
-            let position = positions.map_or(dense, |p| p[dense]);
+            let position = positions.map_or(first + dense, |p| p[dense]);
             self.place(self.hashes[dense], position);
         }
         Ok(())
@@ -189,7 +194,7 @@ impl Index {
     }
 
     pub(super) fn compact(&mut self, size: usize) -> Result<()> {
-        self.rebuild(None, size)?;
+        self.rebuild(None, 0, size)?;
         self.generation += 1;
         Ok(())
     }
@@ -286,7 +291,11 @@ impl Entries {
             index.generation += 1;
             self.index = Some(index);
         }
-        old.values
+        let mut values = old.values;
+        if values.first != 0 {
+            values.compact();
+        }
+        values.data
     }
 
     /// Copy the ordered entries and their cached probes without calling Python hash slots.
@@ -301,12 +310,17 @@ impl Entries {
         }
 
         Ok(Self {
-            values: copy(&self.values)?,
-            positions: self.positions.as_deref().map(copy).transpose()?,
+            values: copy(&self.values)?.into(),
+            positions: self
+                .positions
+                .as_deref()
+                .map(copy)
+                .transpose()?
+                .map(Into::into),
             index: match &self.index {
                 Some(index) => Some(Index {
                     slots: copy(&index.slots)?,
-                    hashes: copy(&index.hashes)?,
+                    hashes: copy(&index.hashes)?.into(),
                     generation: index.generation,
                 }),
                 None => None,
@@ -321,7 +335,8 @@ impl Entries {
         if let Some(positions) = &self.positions {
             positions.binary_search(&position).ok()
         } else {
-            (position < self.values.len()).then_some(position)
+            let dense = position.checked_sub(self.contiguous_start())?;
+            (dense < self.len()).then_some(dense)
         }
     }
 
@@ -1094,7 +1109,12 @@ impl Context {
         }
         let entries = self.stored_entries_mut(dict);
         let size = (entries.usable + 1).next_power_of_two();
-        entries.index = Some(Index::new(hashes, entries.positions.as_deref(), size)?);
+        entries.index = Some(Index::new(
+            hashes,
+            entries.positions.as_deref(),
+            entries.contiguous_start(),
+            size,
+        )?);
         Ok(())
     }
 

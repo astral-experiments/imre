@@ -6,6 +6,91 @@ use std::ops::{Deref, DerefMut};
 
 use super::{Id, Result};
 
+/// A contiguous column of live dictionary entries with a reusable consumed prefix.
+#[derive(Clone)]
+struct EntryColumn<T> {
+    data: Vec<T>,
+    first: usize,
+}
+
+impl<T> From<Vec<T>> for EntryColumn<T> {
+    fn from(data: Vec<T>) -> Self {
+        Self { data, first: 0 }
+    }
+}
+
+impl<T> Deref for EntryColumn<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        &self.data[self.first..]
+    }
+}
+
+impl<T> DerefMut for EntryColumn<T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        &mut self.data[self.first..]
+    }
+}
+
+impl<T: Copy> EntryColumn<T> {
+    /// Move the surviving entries into the prefix in insertion order.
+    fn compact(&mut self) {
+        let len = self.len();
+        self.data.copy_within(self.first.., 0);
+        self.data.truncate(len);
+        self.first = 0;
+    }
+
+    /// Amortize prefix compaction and reuse allocated space if growth fails.
+    fn try_reserve(
+        &mut self,
+        extra: usize,
+    ) -> std::result::Result<(), std::collections::TryReserveError> {
+        if self.data.capacity() - self.data.len() >= extra {
+            return Ok(());
+        }
+        if self.first > 0 && self.first >= self.len() {
+            self.compact();
+        }
+        if let Err(error) = self.data.try_reserve(extra) {
+            if self.data.capacity() - self.len() < extra {
+                return Err(error);
+            }
+            self.compact();
+        }
+        Ok(())
+    }
+
+    /// Append after the caller has reserved all of the table's columns.
+    fn push(&mut self, value: T) {
+        self.data.push(value);
+    }
+
+    /// Shift the shorter side so either end can be removed in constant time.
+    fn remove(&mut self, index: usize) -> T {
+        let physical = self.first + index;
+        if index != 0 && index >= self.len() / 2 {
+            return self.data.remove(physical);
+        }
+        let value = self.data[physical];
+        if index != 0 {
+            self.data.copy_within(self.first..physical, self.first + 1);
+        }
+        self.first += 1;
+        if self.first == self.data.len() {
+            self.clear();
+        }
+        value
+    }
+
+    /// Retain the allocation when the table is emptied.
+    fn clear(&mut self) {
+        self.data.clear();
+        self.first = 0;
+    }
+}
+
 #[derive(Clone, Default)]
 struct Order {
     // Explicit dict descriptors can remove a value while the order node still owns its key.
@@ -17,9 +102,9 @@ struct Order {
 
 #[derive(Clone)]
 pub(super) struct Entries {
-    values: Vec<(Id, Id)>,
+    values: EntryColumn<(Id, Id)>,
     // Dense storage keeps one position per live key after a deletion.
-    positions: Option<Vec<usize>>,
+    positions: Option<EntryColumn<usize>>,
     index: Option<keys::Index>,
     order: Option<allocator_api2::boxed::Box<Order>>,
     next: usize,
@@ -35,7 +120,7 @@ impl From<Vec<(Id, Id)>> for Entries {
     fn from(values: Vec<(Id, Id)>) -> Self {
         let next = values.len();
         Self {
-            values,
+            values: values.into(),
             positions: None,
             index: None,
             order: None,
@@ -67,10 +152,10 @@ impl DerefMut for Entries {
 
 impl IntoIterator for Entries {
     type Item = (Id, Id);
-    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type IntoIter = std::iter::Skip<std::vec::IntoIter<Self::Item>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.values.into_iter()
+        self.values.data.into_iter().skip(self.values.first)
     }
 }
 
@@ -126,23 +211,34 @@ impl Entries {
         Ok(())
     }
 
-    pub(super) fn prepare_removal(&mut self) -> Result<&mut Vec<usize>> {
-        Ok(match &mut self.positions {
-            Some(positions) => positions,
-            vacant @ None => {
-                let mut positions = Vec::new();
-                positions
-                    .try_reserve_exact(self.next)
-                    .map_err(|_| crate::Error::memory_error())?;
-                positions.extend(0..self.next);
-                vacant.insert(positions)
-            }
-        })
+    /// First insertion position while the live entries form a contiguous suffix.
+    fn contiguous_start(&self) -> usize {
+        self.next - self.len()
+    }
+
+    /// Prepare insertion positions before an externally visible removal.
+    pub(super) fn prepare_removal(&mut self) -> Result<()> {
+        if self.positions.is_none() {
+            let mut positions = Vec::new();
+            positions
+                .try_reserve_exact(self.len())
+                .map_err(|_| crate::Error::memory_error())?;
+            positions.extend(self.contiguous_start()..self.next);
+            self.positions = Some(positions.into());
+        }
+        Ok(())
     }
 
     pub(super) fn remove(&mut self, index: usize) -> Result<(Id, Id)> {
-        let positions = self.prepare_removal()?;
-        let position = positions.remove(index);
+        let position = if index == 0 && self.positions.is_none() {
+            self.contiguous_start()
+        } else {
+            self.prepare_removal()?;
+            self.positions
+                .as_mut()
+                .expect("prepared positions")
+                .remove(index)
+        };
         if let Some(keys) = &mut self.index {
             keys.remove(index, position);
         }
@@ -154,11 +250,11 @@ impl Entries {
 
     /// Reserved table buffers excluding Python key and value referents.
     pub(super) fn table_bytes(&self) -> usize {
-        self.values.capacity() * size_of::<(Id, Id)>()
+        self.values.data.capacity() * size_of::<(Id, Id)>()
             + self
                 .positions
                 .as_ref()
-                .map_or(0, |p| p.capacity() * size_of::<usize>())
+                .map_or(0, |p| p.data.capacity() * size_of::<usize>())
             + self.index.as_ref().map_or(0, keys::Index::buffer_bytes)
     }
 
@@ -253,13 +349,13 @@ impl Entries {
     pub(super) fn before(&self, end: usize) -> Option<(usize, Id, Id)> {
         let index = match &self.positions {
             Some(positions) => positions.partition_point(|&pos| pos < end),
-            None => end.min(self.values.len()),
+            None => end.saturating_sub(self.contiguous_start()).min(self.len()),
         }
         .checked_sub(1)?;
-        let position = self
-            .positions
-            .as_ref()
-            .map_or(index, |positions| positions[index]);
+        let position = self.positions.as_ref().map_or_else(
+            || self.contiguous_start() + index,
+            |positions| positions[index],
+        );
         let (key, value) = self.values[index];
         Some((position, key, value))
     }
@@ -270,10 +366,49 @@ impl Entries {
             let index = positions.partition_point(|&p| p < position);
             (index, *positions.get(index)?)
         } else {
-            (position, position)
+            let first = self.contiguous_start();
+            let position = position.max(first);
+            (position - first, position)
         };
         self.values
             .get(index)
             .map(|&(key, value)| (position, key, value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Entries, EntryColumn};
+
+    #[test]
+    fn compaction_reuses_the_consumed_prefix() {
+        let mut column = EntryColumn::from((0..64).collect::<Vec<_>>());
+        let allocation = column.data.as_ptr();
+        for value in 0..40 {
+            assert_eq!(column.remove(0), value);
+        }
+        column.try_reserve(1).unwrap();
+        column.push(64);
+        assert_eq!(column.data.as_ptr(), allocation);
+        assert_eq!(column.first, 0);
+        assert_eq!(&*column, &(40..65).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn positions_and_clear_only_expose_surviving_entries() {
+        let mut entries = Entries::from(vec![(10, 20), (11, 21), (12, 22), (13, 23)]);
+        assert_eq!(entries.remove(0).unwrap(), (10, 20));
+        assert!(entries.positions.is_none());
+        assert_eq!(entries.at(0), Some((1, 11, 21)));
+        assert_eq!(entries.before(1), None);
+        assert_eq!(entries.remove(1).unwrap(), (12, 22));
+        assert_eq!(entries.at(0), Some((1, 11, 21)));
+        assert_eq!(entries.before(4), Some((3, 13, 23)));
+        assert_eq!(
+            entries.clone().into_iter().collect::<Vec<_>>(),
+            [(11, 21), (13, 23)]
+        );
+        assert_eq!(entries.clear(), [(11, 21), (13, 23)]);
+        assert!(entries.is_empty());
     }
 }
