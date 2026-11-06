@@ -713,6 +713,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             path_text(ctx, &layout(ctx)?.base_executable)?
         }
         ("sys", "executable" | "_base_executable") => ctx.text(ctx.helper_executable.clone()),
+        ("sys", "_imre_executable_suffix") => ctx.text(std::env::consts::EXE_SUFFIX),
         ("sys", "maxsize") => ctx.int(isize::MAX as i64),
         ("sys", "maxunicode") => ctx.int(0x10FFFF),
         ("sys", "platform") => ctx.text(if cfg!(target_os = "macos") {

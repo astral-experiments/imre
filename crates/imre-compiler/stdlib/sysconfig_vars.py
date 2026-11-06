@@ -29,6 +29,7 @@ def get_config_vars(*args):
             'Py_DEBUG': 0,
             'TZPATH': ('/usr/share/zoneinfo:/usr/lib/zoneinfo:/usr/share/lib/zoneinfo:/etc/zoneinfo'
                        if os.name == 'posix' else ''),
+            'EXE': sys._imre_executable_suffix,
             'EXT_SUFFIX': _imp.extension_suffixes()[0],
         }
     if args:
