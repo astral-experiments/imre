@@ -31,7 +31,8 @@ def mean(data):
     If ``data`` is empty, StatisticsError will be raised.
 
     """
-    if type(data) is list or type(data) is tuple:
+    kind = type(data)
+    if kind is list or kind is tuple:
         partials = {}
         count = 0
         for value in data:
@@ -46,6 +47,11 @@ def mean(data):
 
         if data and type(value) is int:
             return _mean_from_integer(data, value, count, partials)
+    elif kind is range and data:
+        # An arithmetic progression has the same mean as its endpoints.
+        twice_mean = data[0] + data[-1]
+        quotient, remainder = divmod(twice_mean, 2)
+        return twice_mean / 2 if remainder else quotient
 
     T, total, n = _sum(data)
     if n < 1:
