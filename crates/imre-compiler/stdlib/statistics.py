@@ -1,4 +1,4 @@
-"""Arithmetic mean from CPython 3.14.5 Lib/statistics.py."""
+"""Arithmetic mean and median from CPython 3.14.5 Lib/statistics.py."""
 # See licenses/CPython.txt for the Python Software Foundation license.
 
 import math
@@ -7,7 +7,7 @@ from fractions import Fraction
 from functools import reduce
 from itertools import chain, groupby, islice
 
-__all__ = ["StatisticsError", "mean"]
+__all__ = ["StatisticsError", "mean", "median"]
 
 
 class StatisticsError(ValueError):
@@ -51,6 +51,30 @@ def mean(data):
     if n < 1:
         raise StatisticsError('mean requires at least one data point')
     return _convert(total / n, T)
+
+
+def median(data):
+    """Return the median (middle value) of numeric data.
+
+    When the number of data points is odd, return the middle data point.
+    When the number of data points is even, the median is interpolated by
+    taking the average of the two middle values:
+
+    >>> median([1, 3, 5])
+    3
+    >>> median([1, 3, 5, 7])
+    4.0
+
+    """
+    data = sorted(data)
+    n = len(data)
+    if n == 0:
+        raise StatisticsError("no median for empty data")
+    if n % 2 == 1:
+        return data[n // 2]
+    else:
+        i = n // 2
+        return (data[i - 1] + data[i]) / 2
 
 
 def _mean_from_integer(data, value, count, partials):
