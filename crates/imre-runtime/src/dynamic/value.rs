@@ -2836,7 +2836,7 @@ pub(super) struct Heap {
     // Positions are hints. Each check reads the current binding and native stream edges.
     finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
     /// Last successful (owner, frame, operand) hints for finalizer reachability checks.
-    finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 4],
+    finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 64],
     // Weak handles in direct-base attachment order, pruned before recycling class slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
@@ -3045,7 +3045,7 @@ impl Heap {
             descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
-            finalizer_operands: Default::default(),
+            finalizer_operands: std::array::from_fn(|_| Cell::new(None)),
             classes: Vec::new(),
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
