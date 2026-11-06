@@ -1534,12 +1534,32 @@ class _Final:
 
 
 _cleanups = [_typing_runtime._clear_alias_caches]
+_caches = {}
 
 
-def _typing_cache(func):
-    cached = lru_cache(func)
+def _typing_cache(func, *, typed=False):
+    cached = lru_cache(typed=typed)(func)
     _cleanups.append(cached.cache_clear)
     return cached
+
+
+def _tp_cache(func=None, /, *, typed=False):
+    def decorator(func):
+        _caches[func] = _typing_cache(func, typed=typed)
+
+        @functools.wraps(func)
+        def inner(*args, **kwargs):
+            try:
+                return _caches[func](*args, **kwargs)
+            except TypeError:
+                pass
+            return func(*args, **kwargs)
+
+        return inner
+
+    if func is None:
+        return decorator
+    return decorator(func)
 
 
 class _NotIterable:
