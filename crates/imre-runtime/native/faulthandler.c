@@ -24,7 +24,7 @@ typedef struct {
     int truncated;
 } Text;
 typedef struct {
-    int present;
+    uint64_t revision;
     uint32_t line;
     Text file, name;
 } Frame;
@@ -32,6 +32,8 @@ typedef struct {
     atomic_uint busy;
     Frame *frames;
     pthread_t thread;
+    /* Both numbers belong to the slot and survive the exit of its owner. */
+    uint64_t revision, incarnation;
     pid_t pid;
     char name[32];
     size_t depth, capacity;
@@ -59,6 +61,11 @@ static unsigned next_generation;
 static atomic_ullong settings;
 static pthread_mutex_t config_lock = PTHREAD_MUTEX_INITIALIZER;
 static const char hex[] = "0123456789abcdef";
+
+/* Called under the slot gate. Zero marks an unavailable record after exhaustion. */
+static uint64_t next_revision(Slot *s) {
+    return s->revision == UINT64_MAX ? 0 : ++s->revision;
+}
 
 static void unlock(Slot *s) { atomic_store_explicit(&s->busy, 0, memory_order_release); }
 static int try_lock(Slot *s) {
@@ -101,7 +108,8 @@ static Slot *thread_slot(void) {
     for (size_t i = 0; i < MAX_THREADS; i++) {
         Slot *s = &slots[i];
         lock(s);
-        if (!s->frames && pthread_setspecific(key, s) == 0) {
+        if (!s->frames && s->revision != UINT64_MAX && pthread_setspecific(key, s) == 0) {
+            s->incarnation = next_revision(s);
             s->frames = frames;
             s->capacity = 1;
             s->thread = pthread_self();
@@ -154,14 +162,20 @@ void imre_fault_frame(size_t index, const char *file, size_t file_len,
     copy_text(&f->file, file, file_len);
     copy_text(&f->name, name, name_len);
     f->line = line;
-    f->present = 1;
+    f->revision = next_revision(s);
     unlock(s);
 }
 void imre_fault_line(size_t index, uint32_t line) {
     Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
     if (s) {
         lock(s);
-        if (index < s->depth && index < s->capacity) s->frames[index].line = line;
+        if (index < s->depth && index < s->capacity) {
+            Frame *f = &s->frames[index];
+            if (f->revision && f->line != line) {
+                f->line = line;
+                f->revision = next_revision(s);
+            }
+        }
         unlock(s);
     }
 }
@@ -169,7 +183,12 @@ void imre_fault_truncate(size_t depth) {
     Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
     if (s) {
         lock(s);
-        if (depth < s->depth) s->depth = depth;
+        if (depth < s->depth) {
+            /* A later sparse publication must not expose calls that have returned. */
+            size_t end = s->depth < s->capacity ? s->depth : s->capacity;
+            for (size_t i = depth; i < end; i++) s->frames[i].revision = 0;
+            s->depth = depth;
+        }
         unlock(s);
     }
 }
@@ -230,7 +249,7 @@ static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f) {
         unlock(s);
         return 0;
     }
-    size_t depth = s->depth;
+    uint64_t incarnation = s->incarnation;
     pthread_t thread = s->thread;
     char name[sizeof(s->name)];
     memcpy(name, s->name, sizeof(name));
@@ -238,20 +257,32 @@ static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f) {
     if (preceding) LIT(fd, "\n");
     if (all) thread_header(fd, thread, name, current);
     else LIT(fd, "Stack (most recent call first):\n");
+    /* The header write can block. Select the stack now, only for that owner. */
+    if (!try_lock(s)) goto unavailable;
+    int same_owner = s->frames && s->incarnation == incarnation;
+    size_t depth = s->depth;
+    uint64_t revision = s->revision;
+    unlock(s);
+    if (!same_owner) goto unavailable;
     if (!depth) LIT(fd, "  <no Python frame>\n");
     size_t count = depth > MAX_FRAMES ? MAX_FRAMES : depth;
     for (size_t i = 0; i < count; i++) {
         size_t index = depth-1-i;
-        if (!try_lock(s)) { LIT(fd, "  ...\n"); break; }
-        int valid = s->frames && pthread_equal(s->thread, thread) && index < s->depth &&
-                    index < s->capacity && s->frames[index].present;
+        if (!try_lock(s)) goto unavailable;
+        /* Only a record still present from the selected stack may be emitted. */
+        int valid = index < s->depth && index < s->capacity &&
+                    s->frames[index].revision && s->frames[index].revision <= revision;
         if (valid) *f = s->frames[index];
         unlock(s);
-        if (!valid) { LIT(fd, "  ...\n"); break; }
+        if (!valid) goto unavailable;
         LIT(fd, "  File \""); emit_text(fd, &f->file);
         LIT(fd, "\", line "); number(fd, f->line, 10, 0);
         LIT(fd, " in "); emit_text(fd, &f->name); LIT(fd, "\n");
     }
+    return current ? 2 : 1;
+
+unavailable:
+    LIT(fd, "  ...\n");
     return current ? 2 : 1;
 }
 void imre_fault_dump(int fd, int all_threads) {

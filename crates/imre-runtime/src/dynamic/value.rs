@@ -4253,24 +4253,30 @@ impl Heap {
 
     fn publish_fault_frames(&self, generation: u32) {
         let depth = self.python_depth();
-        for index in depth.saturating_sub(crate::fault_handler::MAX_FRAMES)..depth {
+        // Rebuild from the leaf. An interrupted refresh can expose a real prefix
+        // of this traceback, but cannot attach older records to the new calls.
+        crate::fault_handler::truncate(0);
+        for index in (depth.saturating_sub(crate::fault_handler::MAX_FRAMES)..depth).rev() {
             self.publish_fault_frame(index);
         }
-        crate::fault_handler::truncate(depth);
         self.fault_generation.set(Some(generation));
     }
 
     /// A new enable period needs all callers, including those already on the stack.
     fn fault_frames_current(&mut self) -> bool {
         let generation = crate::fault_handler::generation();
-        if generation == 0 {
-            let Some(workers) = self.fault_workers.get_mut() else {
-                return false;
-            };
-            if workers.strong_count() == 0 {
-                *self.fault_workers.get_mut() = None;
-                return false;
+        if generation == 0
+            && self
+                .fault_workers
+                .get_mut()
+                .as_ref()
+                .is_none_or(|workers| workers.strong_count() == 0)
+        {
+            *self.fault_workers.get_mut() = None;
+            if self.fault_generation.take().is_some() {
+                crate::fault_handler::truncate(0);
             }
+            return false;
         }
         if self.fault_generation.get() != Some(generation) {
             self.publish_fault_frames(generation);
