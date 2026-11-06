@@ -5130,10 +5130,15 @@ impl Heap {
     /// Keep cycle scratch proportional to the garbage using only containers with outgoing edges.
     fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
         let mut slots = smallvec::SmallVec::new();
+        // A sparse candidate graph avoids allocating and scanning counters for the whole heap.
+        let limit = slots.inline_size().max(self.slots.len() / 64);
         for (id, trace) in self.traces.iter().enumerate() {
             if trace.get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
-                if slots.len() == 256 {
+                if slots.len() == limit {
                     return None;
+                }
+                if slots.len() == slots.capacity() {
+                    slots.try_reserve(1).ok()?;
                 }
                 slots.push(id);
             }
@@ -6377,9 +6382,12 @@ mod reachability_tests {
     }
 
     #[test]
-    fn prompt_cycles_preserve_descendants_and_release_acyclic_peers_at_both_sizes() {
-        for garbage in [4, 256, 257] {
+    fn prompt_cycles_preserve_descendants_and_release_acyclic_peers() {
+        for (garbage, live) in [(4, 0), (256, 0), (257, 0), (300, 20_000), (400, 20_000)] {
             let mut heap = Heap::new();
+            for _ in 0..live {
+                heap.alloc(Value::List(Vec::new()));
+            }
             let mark = heap.temporary_mark();
             let dead: Vec<_> = (0..garbage)
                 .map(|_| heap.alloc(Value::List(Vec::new())))
