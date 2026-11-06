@@ -24,7 +24,11 @@ impl PendingText {
             let Some((destination, rest)) = remaining.split_at_mut_checked(part.len()) else {
                 return false;
             };
-            destination.write_copy_of_slice(part);
+            if let [byte] = part {
+                destination[0].write(*byte);
+            } else {
+                destination.write_copy_of_slice(part);
+            }
             remaining = rest;
         }
         let written = room - remaining.len();
