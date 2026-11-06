@@ -200,6 +200,32 @@ fn weak_dict_key_and_frame_held_target_must_both_survive() {
 }
 
 #[test]
+fn wide_siblings_leave_room_for_nested_roots_and_late_edges() {
+    use super::{MAX_NODES, RootPaths};
+
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let deep = ctx.alloc(Value::List(Vec::new()));
+    let nested = ctx.alloc(Value::List(vec![deep]));
+    let items: Vec<_> = (0..MAX_NODES)
+        .map(|_| ctx.alloc(Value::List(Vec::new())))
+        .collect();
+    let late = items[MAX_NODES / 4];
+    let wide = ctx.alloc(Value::List(items));
+    let root = ctx.alloc(Value::List(vec![wide, nested]));
+    let globals = [root, NONE];
+    let paths =
+        RootPaths::discover(&ctx.heap, globals, [deep, late].into_iter(), false, false).unwrap();
+    assert!(paths.contains(deep) && paths.contains(late));
+    assert!(paths.valid(&ctx.heap, globals));
+
+    let Value::List(items) = ctx.heap.get_mut(wide) else {
+        unreachable!()
+    };
+    items[MAX_NODES / 4] = NONE;
+    assert!(!paths.valid(&ctx.heap, globals));
+}
+
+#[test]
 fn wide_frame_contents_do_not_hide_direct_global_roots() {
     use super::{MAX_NODES, RootPaths};
 

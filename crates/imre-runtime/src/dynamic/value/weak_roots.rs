@@ -1,12 +1,13 @@
 use super::{Heap, Id, Value};
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 // Retain the small weak-only search when no finalizer paths have been learned.
 const MAX_WEAK_ENDPOINTS: usize = 16;
 const MAX_NODES: usize = 8192;
 const MAX_EDGES: usize = 65536;
+const CHILDREN_PER_VISIT: usize = 256;
 const SEARCH_BACKOFF: u8 = 63;
 
 #[derive(Clone, Copy)]
@@ -233,22 +234,32 @@ impl RootPaths {
             }
         }
         let mut front = 0;
+        let mut deferred = VecDeque::new();
         // An unrepresented owner can consume the search budget. Keep the paths already
         // found; the caller must still account for every current owner before skipping a trace.
-        'search: while !wanted.is_empty()
-            && front < tree.len()
-            && *edges_left != 0
-            && *nodes_left != 0
-        {
-            let (&parent, _) = tree.get_index(front)?;
-            let index = front;
-            front += 1;
+        'search: while !wanted.is_empty() && *edges_left != 0 && *nodes_left != 0 {
+            // Explore newly discovered nodes before resuming a wide container's remaining edges.
+            let (index, start) = if front < tree.len() {
+                let index = front;
+                front += 1;
+                (index, 0usize)
+            } else if let Some(next) = deferred.pop_front() {
+                next
+            } else {
+                break;
+            };
+            let (&parent, _) = tree.get_index(index)?;
             let value = heap.get(parent);
             if !follow_modules && matches!(value, Value::Module { .. }) {
                 continue;
             }
             let links = Links::from(value, self.dict_keys);
-            for slot in 0..links.len().min(*edges_left) {
+            let end = links.len().min(start.saturating_add(CHILDREN_PER_VISIT));
+            if end < links.len() {
+                deferred.try_reserve(1).ok()?;
+                deferred.push_back((index, end));
+            }
+            for slot in start..end.min(start.saturating_add(*edges_left)) {
                 *edges_left -= 1;
                 let Some(child) = links.get(slot) else {
                     continue;
