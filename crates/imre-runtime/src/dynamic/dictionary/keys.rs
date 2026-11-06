@@ -5,7 +5,7 @@ use std::ops::ControlFlow;
 use smallvec::SmallVec;
 
 use super::Entries;
-use crate::dynamic::value::NONE;
+use crate::dynamic::value::{Heap, NONE};
 use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 
 const EMPTY: usize = usize::MAX;
@@ -199,6 +199,32 @@ impl Index {
 }
 
 impl Entries {
+    /// Read an exact string key without invoking Python equality or creating an index.
+    pub(in super::super) fn named_item(&self, heap: &Heap, name: &str) -> Option<Id> {
+        let value = |&(key, item): &(Id, Id)| {
+            matches!(heap.get(key), Value::Str(text) if text == name).then_some(item)
+        };
+        let Some(index) = &self.index else {
+            return self.iter().find_map(value);
+        };
+        let hash = normalized(crate::python_hash::text(name));
+        for bucket in Probe::new(hash, index.slots.len()) {
+            let position = index.slots[bucket];
+            if position == EMPTY {
+                return None;
+            }
+            if position != DUMMY {
+                let dense = self.dense(position).expect("live dictionary slot");
+                if index.hashes[dense] == hash
+                    && let Some(item) = value(&self[dense])
+                {
+                    return Some(item);
+                }
+            }
+        }
+        unreachable!("the dictionary probe always yields a bucket")
+    }
+
     /// Ordered iterators track node mutations separately from the size of the base dict.
     pub(in super::super) fn order_state(&self) -> usize {
         self.order.as_ref().map_or(0, |order| order.revision)
