@@ -8,6 +8,12 @@ def abstractmethod(funcobj):
     return funcobj
 
 
+class abstractproperty(property):
+    """A deprecated property decorator that marks the descriptor as abstract."""
+
+    __isabstractmethod__ = True
+
+
 def update_abstractmethods(cls):
     """Recalculate a class's abstract methods after its definition changes."""
     if not hasattr(cls, '__abstractmethods__'):
