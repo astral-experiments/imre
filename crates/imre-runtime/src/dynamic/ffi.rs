@@ -2354,12 +2354,16 @@ impl Context {
             // The return value is now rooted in the caller, including its live stream layers.
             let stream = super::stdlib::io::text_descriptor_chain(&self.heap, result);
             if !self.heap.full_collection_active()
-                && let Some(chain) = stream
+                && (stream.is_some()
+                    || self.heap.is_pending_finalizer(result)
+                    || matches!(self.heap.get(result), Value::File(_)))
                 && self.heap.cached_finalizers_kept_except(
                     self.finalizer_path_roots(),
                     super::stdlib::io::rooted_input_chain(self).as_ref(),
                     Some(self.heap.temporary_mark()),
-                    &chain,
+                    stream
+                        .as_ref()
+                        .map_or(std::slice::from_ref(&result), |chain| chain.as_slice()),
                 )
             {
                 return;
