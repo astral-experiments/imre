@@ -182,11 +182,12 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 25 suites, 1,754 of 2,751 originals have paired passes.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 27 suites, 1,813 of 2,889 originals have paired passes.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
 | `abc` | 61 | 72 | 72 passed | With CPython’s `_py_abc.py` on the import path, both native levels improved from 59 to 61 passes. The two gains were the C and Python occurrences of `TestLegacyAPI.test_abstractproperty_basics`. Three originals failed and eight errored at each level (exit 1). The runner counted four additional subtest failures. [Public fix](https://github.com/astral-experiments/imre/commit/09e41b4a61c52eb8d8f6339b94bc179c8a8b5462). |
+| `asyncio.test_subprocess` | 45 | 81 | 81 passed on CPython 3.14.5 built against the same Linux headers with pidfd support | The independent replay of `8a7104c5` retained all 8 pairs from its first parent `95c1068c` and added 37. [#5789](https://github.com/astral-experiments/imre/pull/5789). |
 | `binascii` | 32 | 93 | 76 passed, 17 skipped | 32 passed, 8 failures, 36 errors, 17 skipped |
 | `bisect` | 23 | 46 | 46 passed | 23 passed, 23 errors. All 23 pure-Python tests passed, including `TestBisectPython.test_lookups_with_key_function`. The 23 errors came from tests that require the missing `_bisect` accelerator. [Casefold fix](https://github.com/astral-experiments/imre/pull/5618). |
 | `calendar` | 77 | 79 | 77 passed, 2 skipped | 77 passed, 2 skipped. Stock and both native levels passed all 15 command-line tests and skipped the same two tests because the `en_US` locale was unavailable. [Tested revision](https://github.com/astral-experiments/imre/commit/4239d6db737b792352157b9a71ec526db5f12ec5). |
@@ -208,9 +209,12 @@ We track these families separately to keep the original 16,202-test baseline com
 | `runpy` | 22 | 40 | 40 passed | All 40 originals ran on the parent and the merge at O0 and O3. Ten `RunPathTestCase` tests brought the paired count from 12 to 22. Each merge run had one failure and 17 errors. [Public merge #5758](https://github.com/astral-experiments/imre/commit/2a5b0e880d1067ae7f811e537fff17dcf5a07fa8). |
 | `selectors` | 70 | 121 | 78 passed, 43 skipped | 70 passed. Both native builds retained all 49 earlier paired passes and passed the 21 explicit `EpollSelectorTestCase` originals. [Public revision](https://github.com/astral-experiments/imre/commit/4c5cb58bf0bbcb1704a484e46b4ffd0be97ff02a) |
 | `shlex` | 18 | 19 | 19 passed | 18 passed, 1 skipped |
+| `signal` | 14 | 57 | 43 passed, 14 skipped on the supplied CPython 3.14.5 build | At `95c1068c`, each native run of `test_signal` recorded 14 passes, 34 skips, 2 failures and 7 errors (exit 1). Of the 43 stock passes, the replay retained all 6 pairs from first parent `9b40f5fb` and added 8. [#5788](https://github.com/astral-experiments/imre/pull/5788). |
 | `statistics` | 132 | 400 | 400 passed | All 114 earlier passes held. The 18 additions cover `median`, including its doctest. Each native run recorded 226 originals with errors, one failure and 21 skips. Twenty stock doctests did not register. [Public revision](https://github.com/astral-experiments/imre/commit/9fc3782e546c4217286e0c021ce396f5fe1635f1). |
 | `timeit` | 41 | 41 | 41 passed | 41 passed. [Public change](https://github.com/astral-experiments/imre/pull/5474). |
 | `zlib` | 57 | 76 | 74 passed, 2 skipped | 57 passed, 15 errors, 4 skipped |
+
+In a separate control for `asyncio.test_subprocess`, the supplied stock CPython build passed 42 tests and skipped the 39 pidfd cases. Both `95c1068c` and `8a7104c5` paired 8 of those 42 passes at O0 and O3. The table counts the 81-test replay with pidfd support once.
 
 The LZMA row reports the complete suite on #5489. In a later focused run, `CompressorDecompressorTestCase.test_pickle` passed on stock and on public Imre at O0 and O3. [Focused replay on #5501](https://github.com/astral-experiments/imre/pull/5501).
 
