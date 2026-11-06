@@ -2103,6 +2103,10 @@ impl IntrinsicModule {
                 Intrinsic::IntConstant(i64::from(libc::SO_ERROR))
             }
             #[cfg(target_os = "linux")]
+            (Self::Socket | Self::SocketNative, "TCP_QUICKACK") => {
+                Intrinsic::IntConstant(i64::from(libc::TCP_QUICKACK))
+            }
+            #[cfg(target_os = "linux")]
             (Self::Socket, "SOCK_NONBLOCK") => {
                 Intrinsic::ScopedObjectExport("socket.SOCK_NONBLOCK")
             }
