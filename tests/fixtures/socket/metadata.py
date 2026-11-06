@@ -2,6 +2,10 @@ import _socket
 import socket
 from socket import AF_INET6, SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET, has_ipv6
 
+assert socket._LOCALHOST == "127.0.0.1"
+assert socket._LOCALHOST_V6 == "::1"
+assert not hasattr(_socket, "_LOCALHOST")
+assert not hasattr(_socket, "_LOCALHOST_V6")
 assert socket.has_ipv6 is has_ipv6 is True
 assert socket.AF_INET6 == AF_INET6
 print(int(AF_INET6))

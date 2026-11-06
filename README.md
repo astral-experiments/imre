@@ -182,10 +182,11 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 24 suites, 1,693 of 2,679 originals have paired passes.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 25 suites, 1,754 of 2,751 originals have paired passes.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
+| `abc` | 61 | 72 | 72 passed | With CPython’s `_py_abc.py` on the import path, both native levels improved from 59 to 61 passes. The two gains were the C and Python occurrences of `TestLegacyAPI.test_abstractproperty_basics`. Three originals failed and eight errored at each level (exit 1). The runner counted four additional subtest failures. [Public fix](https://github.com/astral-experiments/imre/commit/09e41b4a61c52eb8d8f6339b94bc179c8a8b5462). |
 | `binascii` | 32 | 93 | 76 passed, 17 skipped | 32 passed, 8 failures, 36 errors, 17 skipped |
 | `bisect` | 23 | 46 | 46 passed | 23 passed, 23 errors. All 23 pure-Python tests passed, including `TestBisectPython.test_lookups_with_key_function`. The 23 errors came from tests that require the missing `_bisect` accelerator. [Casefold fix](https://github.com/astral-experiments/imre/pull/5618). |
 | `calendar` | 77 | 79 | 77 passed, 2 skipped | 77 passed, 2 skipped. Stock and both native levels passed all 15 command-line tests and skipped the same two tests because the `en_US` locale was unavailable. [Tested revision](https://github.com/astral-experiments/imre/commit/4239d6db737b792352157b9a71ec526db5f12ec5). |

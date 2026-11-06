@@ -7203,11 +7203,51 @@ impl Context {
         Ok(())
     }
 
+    /// Bind the call's private keyword dictionary directly when every key belongs in **kwargs.
+    pub(super) fn call_with_keyword_dict(
+        &mut self,
+        scope: Id,
+        callable: Id,
+        args: Vec<Id>,
+        mapping: Id,
+    ) -> Result<Id> {
+        if let Value::Function { code, .. } = *self.heap.get(callable)
+            && self.code_object(code).parameters != NONE
+        {
+            let sig = self.parsed_parameters(code)?;
+            if sig.kwargs.is_some() && sig.positional.is_empty() && sig.keyword_only.is_empty() {
+                let Value::Dict(entries) = self.heap.get(mapping) else {
+                    return Err(Error::new("TypeError", "expected keyword dict"));
+                };
+                if entries
+                    .iter()
+                    .any(|&(key, _)| self.string_storage(key).is_none())
+                {
+                    return Err(Error::new("TypeError", "keywords must be strings"));
+                }
+                return self.call_bound_keywords(callable, args, Vec::new(), Some(mapping));
+            }
+        }
+        let kwargs = self.keyword_args(mapping)?;
+        self.call_in_scope(scope, callable, args, kwargs)
+    }
+
     pub(super) fn call(
         &mut self,
         callable: Id,
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        self.call_bound_keywords(callable, args, kwargs, None)
+    }
+
+    /// Invoke the callable with named arguments or an already bound variadic keyword dictionary.
+    fn call_bound_keywords(
+        &mut self,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+        variadic: Option<Id>,
     ) -> Result<Id> {
         if let Value::FractionHash(function) = *self.heap.get(callable) {
             return stdlib::fraction_hash(self, function, args, kwargs);
@@ -8065,7 +8105,7 @@ impl Context {
                     }
                 }
                 if let Some(n) = sig.kwargs.as_deref() {
-                    let v = self.dict(extra);
+                    let v = variadic.unwrap_or_else(|| self.dict(extra));
                     self.bind_argument(local, n, v)?;
                 }
                 let default_values = if defaults == NONE {
