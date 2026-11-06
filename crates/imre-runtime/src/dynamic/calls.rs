@@ -3249,6 +3249,12 @@ impl Context {
                     "__text_signature__" if symbol == "posix.getpgid" => {
                         return Ok(self.text("($module, /, pid)"));
                     }
+                    "__doc__" if symbol == "posix.pidfd_open" => {
+                        return Ok(self.text("Return a file descriptor referring to the process *pid*.\n\nThe descriptor can be used to perform process management without races and\nsignals."));
+                    }
+                    "__text_signature__" if symbol == "posix.pidfd_open" => {
+                        return Ok(self.text("($module, /, pid, flags=0)"));
+                    }
                     "__doc__" if symbol == "posix.setpgid" => {
                         return Ok(self.text("Call the system call setpgid(pid, pgrp)."));
                     }

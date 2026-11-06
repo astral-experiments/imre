@@ -4415,6 +4415,9 @@ else:
             compare("-B", "-c", imports + "arithmetic.current()",
                     extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_os_waitpid.py").read_bytes())
+            child = run(imre, "-IB", "-c", imports + "arithmetic.pidfd()")
+            assert (child.returncode, child.stdout, child.stderr) == (0, b"", b""), child
             plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             compare("-IB", str(fixtures / "epoll_descriptors.py"))
