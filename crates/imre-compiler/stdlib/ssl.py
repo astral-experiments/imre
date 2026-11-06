@@ -509,15 +509,17 @@ class SSLContext:
                        cafile, capath, cadata)
         _check_context_result(result)
 
+    def _encode_hostname(self, hostname):
+        if hostname is None:
+            return None
+        if isinstance(hostname, str):
+            return hostname.encode("idna").decode("ascii")
+        return hostname.decode("ascii")
+
     def wrap_bio(self, incoming, outgoing, server_side=False, server_hostname=None, session=None):
-        if server_hostname is not None:
-            if isinstance(server_hostname, str):
-                if not server_hostname.isascii():
-                    raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the BIO")
-            else:
-                server_hostname = server_hostname.decode("ascii")
         return self.sslobject_class._create(incoming, outgoing, server_side=server_side,
-                                            server_hostname=server_hostname, session=session, context=self)
+                                            server_hostname=self._encode_hostname(server_hostname),
+                                            session=session, context=self)
 
     def wrap_socket(self, sock, server_side=False, do_handshake_on_connect=True,
                     suppress_ragged_eofs=True, server_hostname=None, session=None):
