@@ -1100,6 +1100,38 @@ mod tests {
         let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
         compile(&flat, &CompileOptions::default()).unwrap();
 
+        let clauses = "row is not None or ".repeat(64);
+        super::check(&format!(
+            "def f(row: int | None) -> bool:\n    return {clauses}False\n"
+        ))
+        .unwrap();
+        let wide_boolean = "flag or ".repeat(4096);
+        assert!(
+            super::check(&format!(
+                "def f(flag: bool):\n    return {wide_boolean}False\n"
+            ))
+            .unwrap_err()
+            .contains("syntax complexity limit")
+        );
+        let handlers = format!(
+            "handlers = {{{}}}\n",
+            "0: lambda first, second: second, ".repeat(128)
+        );
+        super::analysis::check_source_complexity(&handlers).unwrap();
+        let nested_defaults = format!(
+            "f = {}0{}\n",
+            "lambda a=0, b=".repeat(128),
+            ": b".repeat(128)
+        );
+        assert!(super::analysis::check_source_complexity(&nested_defaults).is_err());
+
+        let conditional = "1 if True or False else ".repeat(256);
+        assert!(
+            super::check(&format!("print({conditional}0)\n"))
+                .unwrap_err()
+                .contains("syntax complexity limit")
+        );
+
         let fields = "{1 + 2} ".repeat(256);
         super::check(&format!("print(f'{fields}')\n")).unwrap();
         for fields in [

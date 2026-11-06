@@ -1709,20 +1709,37 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
         operators: usize,
         child_depth: usize,
         longest_item: usize,
+        enclosing_operators: usize,
+        longest_boolean_operand: usize,
+        boolean_operators: usize,
+        open_lambda_parameters: usize,
         // Replacement fields are siblings in an f-string or template string.
         interpolated_string: bool,
-        // A comma in lambda parameters or a comprehension target does not
-        // separate independent expressions at this delimiter level.
+        // Commas in a comprehension target belong to one assignment target.
         keep_commas: bool,
     }
 
     impl Group {
         fn depth(&self) -> usize {
-            self.longest_item.max(self.operators + self.child_depth)
+            let operand = self.operators + self.child_depth;
+            // A Boolean expression has at most an outer "or" and an inner "and".
+            // Ruff stores the operands of each operator as siblings.
+            let boolean = if self.boolean_operators == 0 {
+                operand
+            } else {
+                2 + self.longest_boolean_operand.max(operand)
+            };
+            // ty tracks a flow branch at each short circuit, even for a flat AST.
+            self.longest_item
+                .max(self.enclosing_operators + boolean)
+                .max(self.boolean_operators)
         }
 
         fn next_item(&mut self) {
             self.longest_item = self.depth();
+            self.enclosing_operators = 0;
+            self.longest_boolean_operand = 0;
+            self.boolean_operators = 0;
             self.operators = 0;
             self.child_depth = 0;
         }
@@ -1774,11 +1791,28 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
                     group = parent;
                 }
             }
-            Comma if !group.keep_commas => group.next_item(),
-            Lambda | For => {
-                group.keep_commas = true;
+            Comma if !group.keep_commas && group.open_lambda_parameters == 0 => group.next_item(),
+            And | Or => {
+                let depth = group.operators + group.child_depth;
+                group.longest_boolean_operand = group.longest_boolean_operand.max(depth);
+                group.boolean_operators += 1;
+                group.operators = 0;
+                group.child_depth = 0;
+            }
+            // These expressions can enclose Boolean operands across the entire item.
+            Lambda => {
+                group.open_lambda_parameters += 1;
+                group.enclosing_operators += 1;
+            }
+            Colon if group.open_lambda_parameters > 0 => {
+                group.open_lambda_parameters -= 1;
                 group.operators += 1;
             }
+            For => {
+                group.keep_commas = true;
+                group.enclosing_operators += 1;
+            }
+            If | Else | Yield | ColonEqual => group.enclosing_operators += 1,
             Identifier | Int | Float | Complex | String | True | False | None | Ellipsis
             | FStringMiddle | TStringMiddle | Comment | NonLogicalNewline => continue,
             _ => group.operators += 1,
