@@ -337,7 +337,7 @@ impl IntListStorage {
     }
 
     #[inline(always)]
-    /// Every mutation, including one through an alias, ends the producer's width proof.
+    /// Every mutation, including one through an alias, ends the width proof.
     unsafe fn with_mut<R>(&self, write: impl FnOnce(&mut Vec<Int>) -> R) -> R {
         let flags = self.flags.get();
         if flags & ALL_I32_LIST_VALUES != 0 {
@@ -2606,6 +2606,9 @@ pub unsafe extern "C" fn imre_list_all_i32(
             all_tagged_i32(values)
         })
     };
+    if valid {
+        storage.flags.set(storage.flags.get() | ALL_I32_LIST_VALUES);
+    }
     u32::from(valid)
 }
 
@@ -3614,6 +3617,7 @@ mod tests {
             }
             assert_eq!(imre_list_all_i32(list, zero.0, one.0, one.0), 0);
             assert_eq!(imre_list_all_i32(list, zero.0, nine.0, one.0), 1);
+            assert_eq!(imre_list_all_i32(list, zero.0, one.0, one.0), 1);
             assert_eq!(imre_list_all_i32(list, nine.0, zero.0, negative.0), 1);
             assert_eq!(imre_list_all_i32(list, zero.0, zero.0, one.0), 0);
             assert_eq!(imre_list_all_i32(list, zero.0, nine.0, zero.0), 0);
