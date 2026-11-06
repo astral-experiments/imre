@@ -7,9 +7,17 @@ from _imre_dataclasses import (
     slotted_type as _slotted_type,
 )
 import abc
-import inspect
 import types
 from types import GenericAlias, MemberDescriptorType
+
+def __getattr__(name):
+    # Keep the module attribute available without loading inspect on every dataclasses import.
+    if name == "inspect":
+        global inspect
+        import inspect
+        return inspect
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "make_dataclass", "asdict", "astuple", "replace",
            "MISSING", "KW_ONLY", "InitVar", "FrozenInstanceError"]
@@ -504,6 +512,7 @@ def _decorate(cls, params):
         install('__setattr__', __setattr__)
         install('__delattr__', __delattr__)
     if not cls.__doc__:
+        from dataclasses import inspect
         try:
             text_sig = str(inspect.signature(cls, annotation_format=Format.FORWARDREF)).replace(' -> None', '')
         except (TypeError, ValueError):

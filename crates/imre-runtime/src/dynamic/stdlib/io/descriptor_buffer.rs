@@ -288,9 +288,10 @@ pub(super) fn initialize(
         .map(|n| ssize(ctx, n))
         .transpose()?
         .unwrap_or(super::DEFAULT_BUFFER_SIZE);
-    // A FileIO subclass still owns a native fd, but its Python methods must run.
+    // Use the raw stream's methods for overrides and the fallible byte buffer for large requests.
     if owner == "BufferedReader"
-        && native_handle(ctx, raw, methods).is_none()
+        && (native_handle(ctx, raw, methods).is_none()
+            || capacity > crate::text_output::MAX_DEFAULT_BUFFER_SIZE as i64)
         && (backing(ctx, receiver).is_none() || explicit_reader_raw(ctx, receiver).is_some())
     {
         return super::buffered_reader::initialize(ctx, receiver, raw, capacity);
@@ -612,7 +613,7 @@ impl BufferedFd {
         };
         let buffer = if reading {
             // std::io::BufReader cannot adopt fallibly reserved storage.
-            if capacity > crate::text_output::binary_capacity(i128::MAX) {
+            if capacity > crate::text_output::MAX_DEFAULT_BUFFER_SIZE {
                 return Err(Error::new(
                     "NotImplementedError",
                     "explicit BufferedReader buffers above 8 MiB are unsupported",

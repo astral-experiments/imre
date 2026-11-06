@@ -330,7 +330,7 @@ class SSLContext:
             _warnings.warn("ssl.PROTOCOL_TLS is deprecated", DeprecationWarning, stacklevel=2)
             ctx = _call(_imre_ssl.generic_context)
         elif protocol in _PROTOCOL_NAMES:
-            raise NotImplementedError("fixed-version SSL contexts are not supported")
+            ctx = _call(_imre_ssl.context, protocol)
         elif not -(1 << 31) <= protocol < (1 << 31):
             raise OverflowError("Python int too large to convert to C int")
         else:

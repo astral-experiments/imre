@@ -409,6 +409,22 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
         .ok_or_else(|| Error::new("UnicodeError", "filesystem path contains surrogate escapes"))
 }
 
+/// Materialize the target layout's format strings for Python's sysconfig expander.
+fn install_schemes(ctx: &mut Context) -> Result<Id> {
+    let layout = layout(ctx)?;
+    let mut schemes = Vec::new();
+    for &scheme in system::SCHEME_NAMES {
+        let mut paths = Vec::new();
+        for &name in system::PATH_NAMES {
+            if let Some(template) = layout.path(scheme, name, false) {
+                paths.push((ctx.text(name), ctx.text(template)));
+            }
+        }
+        schemes.push((ctx.text(scheme), ctx.dict(paths)));
+    }
+    Ok(ctx.dict(schemes))
+}
+
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
     #[cfg(target_os = "linux")]
     if module == "fcntl"
@@ -439,6 +455,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return Ok(ctx.int(i64::from(value)));
     }
     let id = match (module, name) {
+        ("sysconfig", "_INSTALL_SCHEMES") => return install_schemes(ctx),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "SIGINT") => ctx.int(i64::from(libc::SIGINT)),
         #[cfg(all(unix, not(target_os = "linux")))]
@@ -817,16 +834,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "getfilesystemencoding"
             | "getfilesystemencodeerrors",
         )
-        | (
-            "sysconfig",
-            "get_path"
-            | "get_paths"
-            | "get_path_names"
-            | "get_scheme_names"
-            | "get_platform"
-            | "get_default_scheme"
-            | "get_preferred_scheme",
-        )
+        | ("sysconfig", "_getuserbase" | "get_path_names" | "get_platform")
         | ("site", "getsitepackages")
         | ("os", "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
@@ -1151,7 +1159,10 @@ pub(super) fn call(
     #[cfg(unix)]
     if matches!(
         name,
-        "_signal.sigpending" | "_imre_signal.make_signals" | "_thread.interrupt_main"
+        "_signal.sigpending"
+            | "_signal.valid_signals"
+            | "_imre_signal.make_signals"
+            | "_thread.interrupt_main"
     ) {
         return signal::call(ctx, name, args, kwargs);
     }
@@ -3062,8 +3073,6 @@ pub(super) fn call(
         }
         "functools.reduce" => return functools::reduce(ctx, &args[1..], kwargs),
         "functools._cache_wrapper" => (3, &[]),
-        "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
-        "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "_json.scanstring" => return json::scanstring(ctx, args, kwargs),
         "_json.encode_basestring" | "_json.encode_basestring_ascii" => {
             return json::encode_basestring(ctx, name, args, kwargs);
@@ -3103,7 +3112,6 @@ pub(super) fn call(
         "traceback.format_exception" => return traceback::format(ctx, args, kwargs),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
-        | "sysconfig.get_preferred_scheme"
         | "site._get_path"
         | "os.confstr"
         | "struct.calcsize"
@@ -3226,50 +3234,12 @@ pub(super) fn call(
             )
         }
         "sysconfig.get_path_names" => tuple_text(ctx, system::PATH_NAMES),
-        "sysconfig.get_scheme_names" => tuple_text(ctx, system::SCHEME_NAMES),
-        "sysconfig.get_default_scheme" => ctx.text("posix_prefix"),
-        "sysconfig.get_preferred_scheme" => {
-            if ctx.str_value(argument(args, 0)?)? != "prefix" {
-                return Err(Error::new("KeyError", "unsupported installation scheme"));
+        "sysconfig._getuserbase" => match system::InterpreterLayout::user_base() {
+            Some(base) => {
+                ctx.text_codepoints(system::fsdecode(base.as_os_str().as_encoded_bytes()).collect())
             }
-            ctx.text("posix_prefix")
-        }
-        "sysconfig.get_path" | "sysconfig.get_paths" => {
-            let all = name.ends_with("_paths");
-            let index = usize::from(!all);
-            let scheme = option(args, index, kwargs, "scheme")?
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or("posix_prefix")
-                .to_owned();
-            if option(args, index + 1, kwargs, "vars")?.is_some_and(|id| id != NONE) {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "custom installation variables are unsupported",
-                ));
-            }
-            let expand = ctx.optional_truth(option(args, index + 2, kwargs, "expand")?, true)?;
-            let layout = layout(ctx)?;
-            let get = |name| {
-                layout.path(&scheme, name, expand).ok_or_else(|| {
-                    Error::new(
-                        "KeyError",
-                        format!("unknown installation scheme '{scheme}' or path '{name}'"),
-                    )
-                })
-            };
-            if all {
-                let mut paths = Vec::new();
-                for &name in system::PATH_NAMES {
-                    paths.push((ctx.text(name), ctx.text(get(name)?)));
-                }
-                ctx.dict(paths)
-            } else {
-                let name = option(args, 0, kwargs, "name")?
-                    .ok_or_else(|| Error::new("TypeError", "missing path name"))?;
-                ctx.text(get(ctx.str_value(name)?)?)
-            }
-        }
+            None => NONE,
+        },
         "sysconfig.get_platform" => ctx.text(system::sysconfig_platform().map_err(os_error)?),
         "site._get_path" => {
             let base = ctx.str_value(argument(args, 0)?)?;

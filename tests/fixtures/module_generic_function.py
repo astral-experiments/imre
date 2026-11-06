@@ -19,7 +19,28 @@ def identity[int](value: int, /) -> int:
     return value
 
 
+def make_converter(default):
+    from functools import wraps
+
+    def convert[T](value: T = default) -> T:
+        return value
+
+    @wraps(convert)
+    def logged(*args):
+        return convert(*args)
+
+    return logged
+
+
 value = []
 assert echo() is T
 assert echo(value) is value
 assert identity(value) is value
+
+first = make_converter("missing")
+second = make_converter(0)
+parameter, = first.__wrapped__.__type_params__
+assert first.__type_params__ is first.__wrapped__.__type_params__
+assert second.__type_params__[0] is not parameter
+assert first.__annotations__ == {"value": parameter, "return": parameter}
+assert first() == "missing" and first(42) == 42 and second() == 0

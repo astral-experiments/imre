@@ -373,17 +373,24 @@ impl Function<'_, '_> {
                             Body::GeneratorFunction(&v.body, code_flags::ASYNC_GENERATOR)
                         }
                     };
+                    // A method's lazy annotations also need its defining class namespace.
+                    let type_params =
+                        if self.class_locals.is_some() && !self.source.string_annotations {
+                            None
+                        } else {
+                            crate::dynamic::boxed_function_type_params(
+                                v,
+                                self.source.string_annotations,
+                                !self.prefix.is_empty(),
+                                Some(&self.source.private_names),
+                            )
+                        };
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         DefinitionName::Binding(&v.name),
                         Some(&v.parameters),
                         v.returns.as_deref(),
-                        crate::dynamic::function_type_params(
-                            v,
-                            self.source.string_annotations,
-                            !self.prefix.is_empty(),
-                            Some(&self.source.private_names),
-                        ),
+                        type_params,
                         body,
                     );
                     self.decorated(&v.name, &decorators, function);

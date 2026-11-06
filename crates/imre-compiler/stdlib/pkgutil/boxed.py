@@ -1,6 +1,7 @@
 """Discover filesystem modules and read package resources in runtime imports."""
 
 import importlib
+import os as _os
 import sys
 from importlib.util import resolve_name as _spec_name
 from os import fsdecode
@@ -18,6 +19,45 @@ class ModuleInfo(NamedTuple):
     module_finder: object
     name: str
     ispkg: bool
+
+
+# From CPython 3.14.5 Lib/pkgutil.py. See licenses/CPython.txt.
+def get_importer(path_item):
+    """Retrieve a finder for the given path item
+
+    The returned finder is cached in sys.path_importer_cache
+    if it was newly created by a path hook.
+
+    The cache (or part of it) can be cleared manually if a
+    rescan of sys.path_hooks is necessary.
+    """
+    path_item = _os.fsdecode(path_item)
+    try:
+        importer = sys.path_importer_cache[path_item]
+    except KeyError:
+        for path_hook in sys.path_hooks:
+            try:
+                importer = path_hook(path_item)
+                sys.path_importer_cache.setdefault(path_item, importer)
+                break
+            except ImportError:
+                pass
+        else:
+            importer = None
+    return importer
+
+
+def read_code(stream):
+    # This helper is needed in order for the PEP 302 emulation to
+    # correctly handle compiled files
+    import marshal
+
+    magic = stream.read(4)
+    if magic != importlib.util.MAGIC_NUMBER:
+        return None
+
+    stream.read(12) # Skip rest of the header
+    return marshal.load(stream)
 
 
 def get_data(package, resource):

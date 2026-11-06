@@ -1,4 +1,4 @@
-//! Signal numbers and pending signals from the host POSIX ABI.
+//! Signal numbers and sets from the host POSIX ABI.
 use super::{Context, Error, Id, Result, Value, builtins};
 use std::sync::OnceLock;
 
@@ -67,6 +67,8 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     ctx.bind(scope, "alarm", alarm);
     let pending = ctx.builtin("_signal.sigpending");
     ctx.bind(scope, "sigpending", pending);
+    let valid = ctx.builtin("_signal.valid_signals");
+    ctx.bind(scope, "valid_signals", valid);
 }
 
 fn bind_numbers(ctx: &mut Context, scope: Id) {
@@ -130,14 +132,16 @@ pub(super) fn call(
     if name == "_imre_signal.make_signals" {
         return make_signals(ctx);
     }
-    pending(ctx)
-}
-
-/// Inspect the calling thread's pending set, including blocked process-directed signals.
-fn pending(ctx: &mut Context) -> Result<Id> {
     let mut mask = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
-    // SAFETY: sigpending writes a sigset_t into caller-owned storage on success.
-    if unsafe { libc::sigpending(mask.as_mut_ptr()) } != 0 {
+    // SAFETY: both functions initialize the caller's writable sigset_t on success.
+    let status = unsafe {
+        match name {
+            "_signal.sigpending" => libc::sigpending(mask.as_mut_ptr()),
+            "_signal.valid_signals" => libc::sigfillset(mask.as_mut_ptr()),
+            _ => unreachable!(),
+        }
+    };
+    if status != 0 {
         return Err(super::os_error(std::io::Error::last_os_error()));
     }
     let set = ctx.alloc(Value::Set {
@@ -145,7 +149,7 @@ fn pending(ctx: &mut Context) -> Result<Id> {
         frozen: false,
     });
     for number in 1..crate::signals::nsig() {
-        // SAFETY: sigpending initialized mask, and the signal is in the host ABI range.
+        // SAFETY: the mask was initialized above, and the signal is in the host ABI range.
         if unsafe { libc::sigismember(mask.as_ptr(), number) } == 1 {
             let value = ctx.int(i64::from(number));
             builtins::set_add(ctx, set, value)?;

@@ -13,6 +13,16 @@ for member in (signal.SIGINT, signal.SIGALRM, signal.SIGTERM):
     assert member is signal.Signals(member.value)
     assert member == getattr(_signal, member.name)
 
+raw = _signal.valid_signals()
+valid = signal.valid_signals()
+assert valid == raw
+assert all(type(number) is int for number in raw)
+assert any(number is signal.SIGINT for number in valid)
+if hasattr(signal, "SIGRTMIN"):
+    assert set(range(signal.SIGRTMIN, signal.SIGRTMAX + 1)) <= valid
+valid.clear()
+assert signal.SIGINT in signal.valid_signals()
+
 assert signal.alarm is _signal.alarm
 assert signal.alarm(Delay()) == 0
 try:
