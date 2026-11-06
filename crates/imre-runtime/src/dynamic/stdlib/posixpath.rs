@@ -214,6 +214,33 @@ pub(super) fn call(
     if let Some(op) = name.strip_prefix("_imre_posixpath.realpath_") {
         return realpath_op(ctx, op, args);
     }
+    if name == "_imre_posixpath.normalized_parts" {
+        let [path, sep] = args else {
+            return Err(Error::new("TypeError", "expected a path and separator"));
+        };
+        let (Value::Str(text), Value::Str(separator)) = (ctx.heap.get(*path), ctx.heap.get(*sep))
+        else {
+            return Ok(NONE);
+        };
+        if separator.is_empty() {
+            return Ok(NONE);
+        }
+        let parts = if !text.contains(separator.as_str()) {
+            if text.is_empty() || text == "." {
+                Vec::new()
+            } else {
+                vec![*path]
+            }
+        } else {
+            let text = text.clone();
+            let separator = separator.clone();
+            text.split(separator.as_str())
+                .filter(|part| !part.is_empty() && *part != ".")
+                .map(|part| ctx.text(part))
+                .collect()
+        };
+        return Ok(ctx.alloc(Value::List(parts)));
+    }
     if name == "_imre_posixpath.relative_parts" {
         let [path, start] = args else {
             return Err(Error::new("TypeError", "expected two path arguments"));
