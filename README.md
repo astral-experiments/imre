@@ -183,7 +183,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 23 suites, 1,652 of 2,639 originals have paired passes.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 23 suites, 1,670 of 2,639 originals have paired passes.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
@@ -207,7 +207,7 @@ We track these families separately to keep the original 16,202-test baseline com
 | `quopri` | 11 | 11 | 11 passed | 11 passed. [Public revision](https://github.com/astral-experiments/imre/commit/8c4745e18f48eda34e0b2662493a630404ada941). |
 | `selectors` | 70 | 121 | 78 passed, 43 skipped | 70 passed. Both native builds retained all 49 earlier paired passes and passed the 21 explicit `EpollSelectorTestCase` originals. [Public revision](https://github.com/astral-experiments/imre/commit/4c5cb58bf0bbcb1704a484e46b4ffd0be97ff02a) |
 | `shlex` | 18 | 19 | 19 passed | 18 passed, 1 skipped |
-| `statistics` | 114 | 400 | 400 passed | 114 passed, including seven doctests. Both native builds recorded 243 errors, one failure and 21 skips. Another 21 stock doctests did not register. [Public revision](https://github.com/astral-experiments/imre/commit/62851e118a7096ab676b773294b377d843a78ac7). |
+| `statistics` | 132 | 400 | 400 passed | All 114 earlier passes held. The 18 additions cover `median`, including its doctest. Each native run recorded 226 originals with errors, one failure and 21 skips. Twenty stock doctests did not register. [Public revision](https://github.com/astral-experiments/imre/commit/9fc3782e546c4217286e0c021ce396f5fe1635f1). |
 | `timeit` | 41 | 41 | 41 passed | 41 passed. [Public change](https://github.com/astral-experiments/imre/pull/5474). |
 | `zlib` | 57 | 76 | 74 passed, 2 skipped | 57 passed, 15 errors, 4 skipped |
 
