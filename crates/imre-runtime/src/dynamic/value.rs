@@ -1889,7 +1889,7 @@ impl Value {
         )
     }
 
-    fn children(&self, visit: &mut MarkQueue<'_>) {
+    fn children(&self, visit: &mut impl VisitReferences) {
         self.try_children(visit)
             .expect("borrowed native state during collection");
     }
@@ -2769,17 +2769,19 @@ impl GcOrder {
 }
 
 /// The trace links are reserved with each heap slot, so marking needs no scratch allocation.
-pub(super) struct MarkQueue<'a> {
+pub(super) struct MarkQueue<'a, Mode> {
     slots: &'a [Slot],
     traces: &'a [Cell<usize>],
     slot_shapes: &'a [SlotShape],
     next: usize,
-    mode: MarkMode<'a>,
+    mode: Mode,
 }
+
+/// A complete reachability trace records exact scalar leaves without visiting them.
+struct StrongReachability;
 
 enum MarkMode<'a> {
     All,
-    SkipScalarLeaves,
     CycleEdges,
     Ordered(&'a mut GcOrder),
 }
@@ -2806,7 +2808,22 @@ impl VisitReferences for FindReferences {
     }
 }
 
-impl VisitReferences for MarkQueue<'_> {
+impl VisitReferences for MarkQueue<'_, StrongReachability> {
+    #[inline(always)]
+    fn push(&mut self, id: Id) {
+        let index = id as usize;
+        let trace = &self.traces[index];
+        if trace.get() == UNMARKED {
+            if self.slot_shapes[index].is_scalar_leaf() {
+                trace.set(END);
+            } else {
+                self.enqueue(index);
+            }
+        }
+    }
+}
+
+impl VisitReferences for MarkQueue<'_, MarkMode<'_>> {
     // An already-marked edge needs only the caller-side trace check.
     #[inline(always)]
     fn push(&mut self, id: Id) {
@@ -2825,20 +2842,18 @@ impl VisitReferences for MarkQueue<'_> {
                         order.push(index, self.slots);
                     }
                 }
-                // A complete reachability trace needs no pending visit for an exact scalar.
-                MarkMode::SkipScalarLeaves if self.slot_shapes[id as usize].is_scalar_leaf() => {
-                    trace.set(END);
-                }
-                _ => {
-                    trace.set(self.next);
-                    self.next = id as usize;
-                }
+                _ => self.enqueue(id as usize),
             }
         }
     }
 }
 
-impl MarkQueue<'_> {
+impl<Mode> MarkQueue<'_, Mode> {
+    fn enqueue(&mut self, index: usize) {
+        self.traces[index].set(self.next);
+        self.next = index;
+    }
+
     fn pop(&mut self) -> Option<Id> {
         let index = self.next;
         if index == END {
@@ -4300,7 +4315,7 @@ impl Heap {
             traces: &self.traces,
             slot_shapes: &self.slot_shapes,
             next: END,
-            mode: MarkMode::SkipScalarLeaves,
+            mode: StrongReachability,
         };
         self.mark_roots(globals, &mut pending);
         #[cfg(target_arch = "x86_64")]
@@ -4315,7 +4330,7 @@ impl Heap {
     /// reach the cache before their children are visited. Strong reachability
     /// is independent of the order in which the queue is drained.
     #[cfg(target_arch = "x86_64")]
-    fn mark_prefetched(&self, pending: &mut MarkQueue<'_>) {
+    fn mark_prefetched(&self, pending: &mut MarkQueue<'_, StrongReachability>) {
         use std::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
 
         let mut batch = [NONE; 16];
