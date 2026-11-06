@@ -369,8 +369,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
                 [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
-                    section("class ModuleSpec:", "def _spec_from_module("),
-                    section("def _init_module_attrs(", "def _module_repr_from_spec("),
+                    section("def _module_repr(module):", "def _spec_from_module("),
+                    section("def _init_module_attrs(", "def _exec(spec, module):"),
                     section("def _call_with_frames_removed(", "def _requires_builtin("),
                     section("def _resolve_name(", "def _find_spec("),
                     section("def _sanity_check(", "_ERR_MSG_PREFIX ="),

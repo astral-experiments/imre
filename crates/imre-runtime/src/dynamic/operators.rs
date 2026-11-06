@@ -129,6 +129,7 @@ enum FormatLookup {
     Repr,
     Str,
     MethodName,
+    ModuleRepr,
     DictViewList,
     TypingTuple(usize),
 }
@@ -1354,6 +1355,15 @@ impl Context {
     fn format_slot(&self, id: Id, name: &str) -> Option<(Id, Id)> {
         let class = match self.heap.get(id) {
             Value::Instance { class, .. } | Value::FrameLocalsProxy { class, .. } => *class,
+            Value::Module {
+                constructor: Some(class),
+                ..
+            } => {
+                // The native module slot uses the renderer's recursion guard.
+                let slot = self.class_attr(*class, name)?;
+                return (self.builtins.get("module.__repr__") != Some(&slot))
+                    .then_some((*class, slot));
+            }
             Value::Raised(error) => error.class()?,
             Value::Weak(wr) if name == "__repr__" => *self.builtins.get(wr.kind.class())?,
             Value::Partial { .. } if name == "__repr__" => {
@@ -1507,6 +1517,7 @@ impl Context {
             FormatLookup::Repr => self.repr_override(id),
             FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
             FormatLookup::MethodName => self.bound_method_name(id),
+            FormatLookup::ModuleRepr => self.module_base_repr(id).map(Some),
             FormatLookup::DictViewList => builtins::call(self, "list", &[id], &[]).map(Some),
             FormatLookup::TypingTuple(frames) => {
                 self.suspended_typing_frames += frames;
@@ -2269,6 +2280,21 @@ impl Context {
                             constructor: Some(_),
                             ..
                         } => {
+                            // The Python formatter can re-enter this module after a callback
+                            // changes its spec. Only enclosing containers are active here.
+                            if checked && ctx.bootstrap_globals != NONE {
+                                let text = element_repr(
+                                    &mut ctx,
+                                    id,
+                                    FormatLookup::ModuleRepr,
+                                    &mut work,
+                                    &active,
+                                    remaining_sequence_words,
+                                )?
+                                .expect("checked module repr");
+                                append_rendered_text(&mut output, ctx.str_value(text)?)?;
+                                continue;
+                            }
                             if !enter_ancestor(&mut ancestors, id)? {
                                 if checked {
                                     return Err(Error::new(
@@ -2287,9 +2313,8 @@ impl Context {
                             {
                                 push_frame(&mut work, Part::Value(file, true))?;
                                 push_frame(&mut work, Part::Text(" from "))?;
-                            } else if let Some(loader) = ctx
-                                .scope_name(*scope, "__loader__")
-                                .filter(|&id| id != NONE)
+                            } else if let Some(loader) =
+                                ctx.scope_name(*scope, "__loader__").filter(|&id| id != NONE)
                             {
                                 push_frame(&mut work, Part::Text(")"))?;
                                 push_frame(&mut work, Part::Value(loader, true))?;
