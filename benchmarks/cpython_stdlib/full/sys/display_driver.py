@@ -3,16 +3,16 @@ import builtins
 import sys
 
 
-def main() -> None:
+def main(requests) -> None:
     saved = sys.stdout
     while True:
-        command = input()
+        command = requests.readline().rstrip("\n")
         if command == "stop":
             return
         reply = "ok"
         try:
             if command == "display-int":
-                sys.__displayhook__(int(input()))
+                sys.__displayhook__(int(requests.readline()))
             elif command == "display-none":
                 sys.__displayhook__(None)
             elif command == "display-no-args":
@@ -40,4 +40,6 @@ def main() -> None:
         sys.stderr.flush()
 
 
-main()
+# The control pipe must stay readable after the test deletes sys.stdout.
+with open("/dev/stdin", encoding="utf-8") as requests:
+    main(requests)
