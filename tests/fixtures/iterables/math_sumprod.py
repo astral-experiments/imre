@@ -25,6 +25,9 @@ print(integers([huge + 1, -huge], [huge - 1, huge]))
 print(integers([], []))
 same = [huge, -3]
 print(integers(same, same) == huge * huge + 9)
+wide = [1 << 61] * 64
+print(integers(wide, wide) == 1 << 128)
+print(integers(wide + [-(1 << 61)] * 64, wide + wide) == 0)
 
 empty = float_total([], [])
 zero = float_total([0.0], [1.0])
