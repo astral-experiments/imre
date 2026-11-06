@@ -7556,6 +7556,7 @@ impl Context {
                 }
                 positional.extend(supplied);
                 let mut merged = self.keyword_args(keywords)?;
+                let bound_keyword_count = merged.len();
                 for (key, value) in kwargs {
                     if let Some((_, previous)) = merged.iter_mut().find(|(k, _)| k == &key) {
                         *previous = value;
@@ -7563,7 +7564,31 @@ impl Context {
                         merged.push((key, value));
                     }
                 }
-                self.call(function, positional, merged)
+                if bound_keyword_count == 0 {
+                    return self.call(function, positional, merged);
+                }
+                // partial_call owns its merged arguments while the callee can change
+                // the partial's state. An overridden keyword still uses its original key.
+                let mark = self.heap.temporary_mark();
+                self.heap.reserve_temporaries(
+                    1 + positional.len() + merged.len() + bound_keyword_count,
+                )?;
+                self.heap.keep(function);
+                for &id in &positional {
+                    self.heap.keep(id);
+                }
+                for &(_, id) in &merged {
+                    self.heap.keep(id);
+                }
+                for i in 0..bound_keyword_count {
+                    let key = self
+                        .dict_entries(keywords)
+                        .expect("partial keyword dictionary")[i]
+                        .0;
+                    self.heap.keep(key);
+                }
+                let result = self.call(function, positional, merged);
+                self.release_with_result(mark, result)
             }
             Value::Method {
                 callable, receiver, ..

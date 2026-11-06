@@ -77,4 +77,24 @@ def current():
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         restored = pickle.loads(pickle.dumps(cycle, protocol))
         assert restored.args[0] is restored
+    from _thread import allocate_lock
+    import gc
+    import weakref
+
+    lock = allocate_lock()
+    lock.acquire()
+    original = weakref.ref(lock)
+
+    class Timeout:
+        def __index__(self):
+            acquire.__setstate__((len, ((),), {}, None))
+            gc.collect()
+            original().release()
+            return 0
+
+    acquire = functools.partial(type(lock).acquire, lock, timeout=Timeout())
+    del lock
+    assert acquire()
+    gc.collect()
+    assert original() is None
     print("partial state restored")
