@@ -416,25 +416,27 @@ impl Context {
             {
                 Some(NONE)
             }
-            Value::Native(kind) if let Some(exception) = builtins::exception_kind(kind) => match name {
-                name if kind == "BaseExceptionGroup"
-                    && (super::exception_group::METHODS.contains(&name)
-                        || matches!(name, "message" | "exceptions")) =>
-                {
-                    self.builtins
-                        .get(&format!("BaseExceptionGroup.{name}"))
-                        .copied()
+            Value::Native(kind) if let Some(exception) = builtins::exception_kind(kind) => {
+                match name {
+                    name if kind == "BaseExceptionGroup"
+                        && (super::exception_group::METHODS.contains(&name)
+                            || matches!(name, "message" | "exceptions")) =>
+                    {
+                        self.builtins
+                            .get(&format!("BaseExceptionGroup.{name}"))
+                            .copied()
+                    }
+                    name if kind == "BaseException"
+                        && let Some(symbol) = builtins::base_exception_method(name) =>
+                    {
+                        self.builtins.get(symbol).copied()
+                    }
+                    name if builtins::declares_exception_constructor(exception, name) => {
+                        self.builtins.get(&format!("{kind}.{name}")).copied()
+                    }
+                    _ => None,
                 }
-                name if kind == "BaseException"
-                    && let Some(symbol) = builtins::base_exception_method(name) =>
-                {
-                    self.builtins.get(symbol).copied()
-                }
-                name if builtins::declares_exception_constructor(exception, name) => {
-                    self.builtins.get(&format!("{kind}.{name}")).copied()
-                }
-                _ => None,
-            },
+            }
             Value::Native(kind)
                 if matches!(
                     kind.as_str(),
