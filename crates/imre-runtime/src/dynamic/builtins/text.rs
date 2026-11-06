@@ -132,6 +132,9 @@ pub(super) fn construct(
             {
                 return Ok(tzname);
             }
+            // A descriptor can return a temporary callable. Its lifetime ends with
+            // the slot call, even when another Python callback immediately uses the text.
+            let before_slot = ctx.heap.temporary_mark();
             let string_hook = ctx.bound_slot(value, "__str__")?;
             if string_hook.is_none()
                 && let Value::Raised(error) = ctx.heap.get(value)
@@ -153,7 +156,8 @@ pub(super) fn construct(
                 None => ("__repr__", ctx.bound_slot(value, "__repr__")?),
             };
             if let Some(method) = method {
-                let result = ctx.call(method, Vec::new(), Vec::new())?;
+                let result = ctx.call(method, Vec::new(), Vec::new());
+                let result = ctx.release_with_result(before_slot, result)?;
                 if ctx.string_storage(result).is_none() {
                     return Err(type_error(format!(
                         "{name} returned non-string (type {})",

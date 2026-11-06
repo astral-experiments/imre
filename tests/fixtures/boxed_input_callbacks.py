@@ -34,6 +34,7 @@ def current():
         sys.stdin, sys.stderr = stdin, stderr
     print(line, list(data))
     check_stream_release()
+    check_renderer_release()
 
 
 def check_stream_release():
@@ -75,6 +76,47 @@ def check_stream_release():
         finally:
             sys.stdin, sys.stdout, sys.stderr = stdin, stdout, stderr
     assert data == b"AA", data
+
+
+def check_renderer_release():
+    data = bytearray()
+
+    class Renderer:
+        def __init__(self):
+            self.view = memoryview(data)
+
+        def __call__(self):
+            return "label"
+
+        def __del__(self):
+            self.view.release()
+
+    class Slot:
+        def __get__(self, instance, owner):
+            return Renderer()
+
+    class Prompt:
+        __str__ = Slot()
+
+    class Stream:
+        def write(self, text):
+            if text == "label":
+                data.append(65)
+
+        def flush(self):
+            pass
+
+        def readline(self):
+            return "ok\n"
+
+    stdin, stdout = sys.stdin, sys.stdout
+    try:
+        sys.stdin = sys.stdout = Stream()
+        assert input(Prompt()) == "ok"
+        print(Prompt(), end="")
+    finally:
+        sys.stdin, sys.stdout = stdin, stdout
+    assert data == b"AA"
 
 
 if __name__ == "__main__":
