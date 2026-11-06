@@ -769,7 +769,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "listdir") if cfg!(unix) => ctx.builtin("posix.listdir"),
-        ("os" | "posix" | "nt", "fspath") => ctx.builtin("posix.fspath"),
+        ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         #[cfg(target_os = "linux")]
         ("posix", "_spawn_exec") => ctx.builtin("posix._spawn_exec"),
         #[cfg(target_os = "linux")]

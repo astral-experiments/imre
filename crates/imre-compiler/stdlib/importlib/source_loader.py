@@ -24,7 +24,10 @@ if _MS_WINDOWS:
 else:
     import posix as _os
     path_separators = "/"
-_fspath = _os.fspath
+try:
+    _fspath = _os.fspath
+except AttributeError:
+    from os import fspath as _fspath
 path_sep = sep = path_separators[0]
 path_sep_tuple = tuple(path_separators)
 
