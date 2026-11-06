@@ -129,8 +129,25 @@ fn search_keeps_proven_paths_when_the_node_budget_runs_out() {
 
     assert_eq!(nodes_left, 0);
     assert_eq!(wanted, HashSet::from([second]));
-    assert!(paths.nodes.contains(&first));
-    assert!(!paths.nodes.contains(&second));
+    assert!(paths.contains(first));
+    assert!(!paths.contains(second));
+
+    // The two paths share a root across successive searches.
+    nodes_left = 3;
+    paths
+        .search(
+            &heap,
+            [(root, Root::Global(0))].into_iter(),
+            &mut wanted,
+            &mut nodes_left,
+            &mut edges_left,
+            true,
+        )
+        .unwrap();
+    assert!(wanted.is_empty());
+    assert!(paths.contains(first));
+    assert!(paths.contains(second));
+    assert_eq!(paths.nodes.len(), 3);
     assert!(paths.valid(&heap, globals));
     let Value::List(items) = heap.get_mut(root) else {
         unreachable!()
