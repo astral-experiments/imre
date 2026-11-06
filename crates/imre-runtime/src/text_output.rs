@@ -16,17 +16,21 @@ impl PendingText {
     /// Append a whole fragmented write only if it fits without allocation or a flush.
     pub(crate) fn try_append_parts<'a>(&mut self, parts: impl Iterator<Item = &'a [u8]>) -> bool {
         let initial = self.0.len();
-        let Some(mut room) = self.0.capacity().min(CHUNK_SIZE - 1).checked_sub(initial) else {
+        let Some(room) = self.0.capacity().min(CHUNK_SIZE - 1).checked_sub(initial) else {
             return false;
         };
+        let mut remaining = &mut self.0.spare_capacity_mut()[..room];
         for part in parts {
-            if part.len() > room {
-                self.0.truncate(initial);
+            let Some((destination, rest)) = remaining.split_at_mut_checked(part.len()) else {
                 return false;
-            }
-            room -= part.len();
-            self.0.extend_from_slice(part);
+            };
+            destination.write_copy_of_slice(part);
+            remaining = rest;
         }
+        let written = room - remaining.len();
+        // SAFETY: every fragment initialized its consecutive spare slots. Failed writes
+        // leave the original length visible and never publish a partial fragment.
+        unsafe { self.0.set_len(initial + written) };
         true
     }
 
