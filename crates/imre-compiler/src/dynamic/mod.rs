@@ -25,6 +25,7 @@ struct Imports {
     private_names: imre_ast::Names,
     uses_import_builtin: bool,
     uses_exec: bool,
+    uses_generic_class: bool,
     computed_import: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
@@ -339,6 +340,7 @@ impl<'a> Visitor<'a> for Imports {
                     }) =>
             {
                 self.runtime_imports = true;
+                self.uses_generic_class |= class.type_params.is_some();
             }
             Stmt::Assign(a) if a.targets.iter().any(|t| self.sys_path(t)) => {
                 self.runtime_imports = true;
@@ -843,6 +845,7 @@ pub(crate) fn compile(
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
+    let mut uses_generic_class = false;
     let mut computed_import = registered_imports.computed;
     let mut source_only_provider = None;
     let mut bundled_only = false;
@@ -870,6 +873,10 @@ pub(crate) fn compile(
             let mut imports = Imports::default();
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
+            }
+            // The implicit Generic base initializes its parameters through typing.
+            if uses_generic_class && !seen.contains("typing") {
+                imports.add(0, "typing");
             }
             // A runtime-selected decimal module in a standalone binary needs its private provider.
             if startup.is_none() && computed_import && !seen.contains("decimal") {
@@ -971,6 +978,7 @@ pub(crate) fn compile(
             return Ok(None);
         }
         uses_exec |= imports.uses_exec;
+        uses_generic_class |= imports.uses_generic_class;
         computed_import |= imports.computed_import;
         let mut names = imports.names;
         if owner == "importlib" {

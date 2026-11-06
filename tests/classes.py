@@ -63,7 +63,6 @@ INVALID_OBJECT_BASES = {
 REJECTED = {
     "nested_class_bad_return": "class Outer:\n    class Inner:\n        def label(self) -> str:\n            return 42\n",
     "nested_class_with_invalid_sibling": "class Outer:\n    class Inner: pass\n    x: int\n    x: str\n",
-    "nested_class_with_type_params": "class Outer[T]:\n    class Inner: pass\n",
     "nested_class_duplicate_name": "class Outer:\n    class Inner: pass\n    class Inner: pass\n",
     "nested_class_before_invalid_class": "class Outer:\n    class Inner: pass\nclass Bad:\n    x: int\n    x: str\n",
     "nested_class_after_invalid_class": "class Bad:\n    x: int\n    x: str\nclass Outer:\n    class Inner: pass\n",
@@ -328,7 +327,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "nested_generic_class.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
