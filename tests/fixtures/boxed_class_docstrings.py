@@ -57,6 +57,9 @@ class Replaced:
 
 
 def current():
+    for value in ("text", 42, True, (1,), frozenset({3})):
+        assert value.__doc__ == type(value).__doc__
+        assert isinstance(value.__doc__, str) and value.__doc__
     print(repr(__doc__), repr(Documented.__doc__), repr(Documented.captured))
     print(repr(Undocumented.__doc__), repr(Undocumented.captured))
     print(repr(Replaced.__doc__), Replaced().__doc__, isinstance(errno.__doc__, str))
