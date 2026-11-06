@@ -173,6 +173,7 @@ pub(crate) struct Context {
     codec_entries: stdlib::codecs::Registry,
     warning_state: Option<stdlib::warnings_accel::State>,
     frozen_override: i32,
+    pending_builtin_module_names: Option<Id>,
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
     import_missing: Id,
@@ -2365,9 +2366,15 @@ impl Context {
         }))
     }
 
-    /// Materialize once and keep that exact dict as the module's binding storage.
     fn module_globals(&mut self, scope: Id) -> Result<Id> {
         let scope = self.root_scope(scope);
+        let globals = self.module_globals_storage(scope)?;
+        self.materialize_builtin_module_names(scope);
+        Ok(globals)
+    }
+
+    /// Keep the live binding dictionary without exposing it to Python.
+    fn module_globals_storage(&mut self, scope: Id) -> Result<Id> {
         self.check_thread_reporting_namespace(scope)?;
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
@@ -4330,6 +4337,8 @@ impl Context {
                     self.bind(scope, original, stream);
                     if stderr && self.threads.system_module.is_none() {
                         self.threads.system_module = Some(module);
+                        // Optional providers may load host libraries when probed.
+                        self.pending_builtin_module_names = Some(scope);
                         self.heap.default_stderr = Some(stream);
                     }
                 }

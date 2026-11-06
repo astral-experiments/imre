@@ -1933,6 +1933,9 @@ impl IntrinsicModule {
             (Self::Sys, "intern") => Intrinsic::SysIntern { query: false },
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
+            (Self::Sys, "builtin_module_names") => {
+                Intrinsic::ScopedObjectExport("sys.builtin_module_names")
+            }
             (Self::Sys, "float_info") => Intrinsic::ScopedObjectExport("sys.float_info"),
             (Self::Sys, "float_repr_style") => {
                 Intrinsic::ScopedObjectExport("sys.float_repr_style")
