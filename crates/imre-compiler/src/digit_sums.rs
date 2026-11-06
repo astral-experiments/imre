@@ -114,17 +114,22 @@ fn fuse(
             }
         };
         let outputs = vec![
-            Statement::Clear(*list),
             Statement::Assign(*a, unpack(x.phase)),
             Statement::Assign(*b, unpack(y.phase)),
         ];
-        let fallback = body.drain(i..i + 3).collect();
+        // The list has no uses outside these two reductions. Only the fallback
+        // materializes it, so release its owner in that same scope.
+        let clear = vec![*list];
+        let fallback = Statement::Scope {
+            body: body.drain(i..i + 3).collect(),
+            clear,
+        };
         body.insert(
             i,
             Statement::Scope {
                 body: vec![
                     Statement::Assign(pack, attempt),
-                    Statement::If(success, outputs, fallback),
+                    Statement::If(success, outputs, vec![fallback]),
                 ],
                 clear: vec![pack],
             },
