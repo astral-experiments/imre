@@ -4,8 +4,8 @@
 use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
-pub(super) fn only_compares_zero(function: &ast::StmtFunctionDef, parameter: &str) -> bool {
-    if narrowing::assigned_names(&function.body).contains(parameter) {
+pub(crate) fn only_compares_zero(body: &[ast::Stmt], parameter: &str) -> bool {
+    if narrowing::assigned_names(body).contains(parameter) {
         return false;
     }
     let mut reads = Reads {
@@ -13,7 +13,7 @@ pub(super) fn only_compares_zero(function: &ast::StmtFunctionDef, parameter: &st
         compared: false,
         other: false,
     };
-    reads.visit_body(&function.body);
+    reads.visit_body(body);
     reads.compared && !reads.other
 }
 

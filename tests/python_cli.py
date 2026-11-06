@@ -3169,6 +3169,10 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        (root / "sign_parameters.py").write_bytes(
+            (fixtures / "floats" / "sign_parameters.py").read_bytes()
+        )
+        compare("-B", "-m", "sign_parameters")
 
         served = root / "served"
         served.mkdir()
