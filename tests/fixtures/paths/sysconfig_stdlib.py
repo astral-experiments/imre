@@ -22,6 +22,9 @@ if sys.implementation.name == "imre":
     assert stdlib == sys.base_prefix + "/lib/imre" + version
 variables = sysconfig.get_config_vars()
 assert sysconfig.get_config_vars() is variables
+if sys.platform in ("linux", "darwin"):
+    assert sysconfig.get_config_var("EXE") == ""
+    assert sysconfig.get_config_vars("EXE", "missing_imre_variable") == ["", None]
 assert sysconfig.get_config_var(name="py_version_short") == variables["py_version_short"]
 variables["imre_mutation_probe"] = 17
 assert sysconfig.get_config_vars("imre_mutation_probe", "missing_imre_variable", "imre_mutation_probe") == [17, None, 17]
