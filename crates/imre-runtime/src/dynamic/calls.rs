@@ -7238,10 +7238,7 @@ impl Context {
             && self.code_object(code).parameters != NONE
         {
             let sig = self.parsed_parameters(code)?;
-            if sig["kwargs"].is_string()
-                && sig["positional"].as_array().is_none_or(Vec::is_empty)
-                && sig["kwonly"].as_array().is_none_or(Vec::is_empty)
-            {
+            if sig.kwargs.is_some() && sig.positional.is_empty() && sig.keyword_only.is_empty() {
                 let Value::Dict(entries) = self.heap.get(mapping) else {
                     return Err(Error::new("TypeError", "expected keyword dict"));
                 };
@@ -8061,56 +8058,27 @@ impl Context {
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 let local = self.alloc(Value::Scope(local));
                 let sig = self.parsed_parameters(code)?;
-                let names = |key: &str| -> Result<Vec<String>> {
-                    let mut names = Vec::new();
-                    for name in sig[key].as_array().into_iter().flatten() {
-                        if let Some(name) = name.as_str() {
-                            names
-                                .try_reserve(1)
-                                .map_err(|_| Error::new("MemoryError", ""))?;
-                            names.push(copy_label(name)?);
-                        }
-                    }
-                    Ok(names)
-                };
-                let locals = names("scope_locals")?;
-                let nonlocals = names("scope_nonlocals")?;
                 let Value::Scope(frame) = self.heap.get_mut(local) else {
                     unreachable!()
                 };
-                frame
-                    .closure
-                    .declared
-                    .try_reserve(locals.len())
-                    .map_err(|_| Error::new("MemoryError", ""))?;
+                frame.closure.declared = sig.locals.clone();
                 frame
                     .closure
                     .nonlocals
-                    .try_reserve(nonlocals.len())
+                    .try_reserve(sig.nonlocals.len())
                     .map_err(|_| Error::new("MemoryError", ""))?;
-                frame.closure.declared.extend(locals);
-                frame.closure.declared_complete =
-                    sig["scope_locals_complete"].as_bool().unwrap_or(false);
-                frame.closure.nonlocals.extend(nonlocals);
-                let posonly = names("posonly")?;
-                let positional = names("positional")?;
-                let mut pos = Vec::new();
-                let count = posonly
-                    .len()
-                    .checked_add(positional.len())
-                    .ok_or_else(|| Error::new("MemoryError", ""))?;
-                pos.try_reserve_exact(count)
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                for name in &posonly {
-                    pos.push(copy_label(name)?);
+                frame.closure.declared_complete = sig.locals_complete;
+                for name in &sig.nonlocals {
+                    frame.closure.nonlocals.insert(copy_label(name)?);
                 }
-                pos.extend(positional);
-                let kwonly = names("kwonly")?;
+                let pos = &sig.positional;
+                let posonly = &pos[..sig.positional_only];
+                let kwonly = &sig.keyword_only;
                 for (n, &v) in pos.iter().zip(&args) {
                     self.bind_argument(local, n, v)?;
                 }
                 let given = args.len();
-                if let Some(n) = sig["varargs"].as_str() {
+                if let Some(n) = sig.varargs.as_deref() {
                     let extra = if pos.is_empty() {
                         args
                     } else {
@@ -8130,7 +8098,7 @@ impl Context {
                             ));
                         }
                         self.bind_argument(local, &n, v)?;
-                    } else if sig["kwargs"].is_string() {
+                    } else if sig.kwargs.is_some() {
                         let k = self.text(n);
                         extra.push((k, v));
                     } else {
@@ -8153,13 +8121,13 @@ impl Context {
                         }
                         let candidates: Vec<_> = pos[posonly.len()..]
                             .iter()
-                            .chain(&kwonly)
+                            .chain(kwonly)
                             .map(String::as_str)
                             .collect();
                         return Err(unexpected_keyword_error(&name, &n, &candidates));
                     }
                 }
-                if let Some(n) = sig["kwargs"].as_str() {
+                if let Some(n) = sig.kwargs.as_deref() {
                     let v = variadic.unwrap_or_else(|| self.dict(extra));
                     self.bind_argument(local, n, v)?;
                 }
@@ -8168,7 +8136,7 @@ impl Context {
                 } else {
                     self.items(defaults)?
                 };
-                if given > pos.len() && !sig["varargs"].is_string() {
+                if given > pos.len() && sig.varargs.is_none() {
                     let bound = &self.scope_data(local).names;
                     let keywords = kwonly.iter().filter(|n| bound.contains_key(*n)).count();
                     return Err(excess_positional_error(
@@ -8202,7 +8170,7 @@ impl Context {
                 if !missing.is_empty() {
                     return Err(missing_arguments_error(&name, "positional", &missing));
                 }
-                for n in &kwonly {
+                for n in kwonly {
                     if !self.scope_data(local).names.contains_key(n) {
                         let val = self.dict_entries(kwdefaults).and_then(|entries| {
                             entries.iter().find_map(|&(key, value)| {
@@ -8227,8 +8195,8 @@ impl Context {
                 let Value::Scope(frame) = self.heap.get_mut(local) else {
                     unreachable!()
                 };
-                frame.first_argument = pos.into_iter().next();
-                if sig["class_cell"] == true {
+                frame.first_argument = pos.first().map(|name| copy_label(name)).transpose()?;
+                if sig.class_cell {
                     frame.class_cell = class_cell;
                 }
                 self.check_call_depth(0)?;
@@ -8238,8 +8206,13 @@ impl Context {
                 });
                 self.call_depth -= 1;
                 let value = result?;
-                if let Some(expected) = sig["return_type"].as_str() {
-                    self.require_scalar(value, expected, false, format_args!("{name} return value"))?;
+                if let Some(expected) = sig.return_type.as_deref() {
+                    self.require_scalar(
+                        value,
+                        expected,
+                        false,
+                        format_args!("{name} return value"),
+                    )?;
                 }
                 Ok(value)
             }
@@ -8285,14 +8258,14 @@ impl Context {
     }
 
     /// Check scalar annotations on values that were explicitly bound by this call.
-    fn check_supplied_types(&self, local: Id, sig: &serde_json::Value, name: &str) -> Result<()> {
-        if let Some(types) = sig["types"].as_object() {
+    fn check_supplied_types(&self, local: Id, sig: &CallParameters, name: &str) -> Result<()> {
+        if let Some(types) = sig.types.as_object() {
             for (param, expected) in types {
                 if let Some(&id) = self.scope_data(local).names.get(param) {
                     self.require_scalar(
                         id,
                         expected.as_str().unwrap_or_default(),
-                        sig["integer_sign_parameters"][param] == true,
+                        sig.integer_sign_parameters[param] == true,
                         format_args!("{name} argument {param:?}"),
                     )?;
                 }
