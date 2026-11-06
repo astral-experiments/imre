@@ -1,4 +1,5 @@
 import gc
+import io
 import re
 
 
@@ -42,6 +43,32 @@ def current():
     assert owners[0].count(drop_owner()) == 0
     assert events[-1] == "finalized"
     assert (1, 2, 1).count(1) == 2
+
+    class Writer:
+        def write(self, value):
+            return ("original", value)
+
+    writers = [Writer()]
+
+    def replace_writer():
+        Writer.write = lambda self, value: ("replacement", value)
+        writers.clear()
+        gc.collect()
+        return 7
+
+    assert writers[0].write(replace_writer()) == ("original", 7)
+
+    with io.TextIOWrapper(io.BytesIO(), encoding="utf-8") as stream:
+        def shadow_write():
+            stream.write = lambda text: 0
+            return "x"
+
+        assert stream.write(shadow_write()) == 1
+        assert stream.write("second") == 0
+        del stream.write
+        assert stream.write("y") == 1
+        stream.flush()
+        assert stream.buffer.getvalue() == b"xy"
 
     pattern = re.compile(r"(a)(b)?")
     match = pattern.search("--ab")

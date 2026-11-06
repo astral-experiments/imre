@@ -34,9 +34,9 @@ pub(super) enum MappingOperation {
 }
 
 #[derive(PartialEq, Eq)]
-enum AttributeLookup {
+enum AttributeLookup<'a> {
     Value,
-    Method,
+    Method(Option<&'a mut Id>),
     ListedClassMember,
 }
 
@@ -2192,7 +2192,9 @@ impl Context {
         {
             return self.retain_builtin_method_receiver(receiver, &symbol);
         }
-        Ok((self.lookup_method(receiver, name)?, NONE))
+        let mut bound = NONE;
+        let callable = self.lookup_method_with_receiver(receiver, name, Some(&mut bound))?;
+        Ok((callable, bound))
     }
 
     /// Resolve an immediate get call while preserving custom attribute lookup for other receivers.
@@ -2200,7 +2202,7 @@ impl Context {
         if matches!(self.heap.get(receiver), Value::Dict(_)) {
             return self.retain_builtin_method_receiver(receiver, "dict.get");
         }
-        Ok((self.lookup_method(receiver, "get")?, NONE))
+        self.builtin_method_target(receiver, "get")
     }
 
     /// Keep the receiver alive while the caller evaluates the positional arguments.
@@ -2212,6 +2214,16 @@ impl Context {
 
     /// Resolve an immediately called attribute before its arguments are evaluated.
     pub(super) fn lookup_method(&mut self, obj: Id, name: &str) -> Result<Id> {
+        self.lookup_method_with_receiver(obj, name, None)
+    }
+
+    /// Let a positional call keep the receiver separately when looking up an instance method.
+    fn lookup_method_with_receiver(
+        &mut self,
+        obj: Id,
+        name: &str,
+        receiver: Option<&mut Id>,
+    ) -> Result<Id> {
         if name == "writelines"
             && matches!(
                 self.heap.get(obj),
@@ -2235,7 +2247,7 @@ impl Context {
             && self.class_attr(class, "__getattr__").is_none()
             && self.class_attr(class, "__getattribute__").is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
         {
-            self.default_attr(obj, name, AttributeLookup::Method)
+            self.default_attr(obj, name, AttributeLookup::Method(receiver))
         } else {
             self.lookup_attr(obj, name)
         }
@@ -2252,7 +2264,7 @@ impl Context {
     }
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
-    fn default_attr(&mut self, obj: Id, name: &str, lookup: AttributeLookup) -> Result<Id> {
+    fn default_attr(&mut self, obj: Id, name: &str, mut lookup: AttributeLookup<'_>) -> Result<Id> {
         if name == "__dict__"
             && let Some(&dictionary) = self.native_type_dicts.get(&obj)
         {
@@ -2440,7 +2452,23 @@ impl Context {
             } else {
                 self.dictionary_field(namespace, name)?
             };
-            if lookup == AttributeLookup::Method
+            if field.is_none()
+                && let Some(member) = member
+                && let AttributeLookup::Method(Some(receiver)) = &mut lookup
+                && match self.heap.get(member) {
+                    Value::Function { .. } => true,
+                    // Direct writelines calls use the defining descriptor in argument errors.
+                    Value::IoMethod { name, .. } => *name != "writelines",
+                    _ => false,
+                }
+            {
+                // The call target roots the callable. Its arguments can release the receiver.
+                self.heap.reserve_temporaries(1)?;
+                self.heap.keep(obj);
+                **receiver = obj;
+                return Ok(member);
+            }
+            if matches!(lookup, AttributeLookup::Method(_))
                 && field.is_none()
                 && let Some(member) = member
                 && match self.heap.get(member) {
