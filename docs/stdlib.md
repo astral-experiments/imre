@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 149 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 150 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -233,6 +233,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | Module | Import | Native API example or boundary | Native / upstream | CPython fixture | CPython test |
 | --- | --- | --- | ---: | ---: | ---: |
 | `__future__` | Yes | The `annotations` future statement and postponed annotations on supported classes and functions. [Evidence](../tests/fixtures/callables/annotations_future.py) | — | — | — |
+| `_ast_unparse` | Yes | No API example recorded. | — | — | — |
 | `_blake2` | Yes | No API example recorded. | — | — | — |
 | `_codecs` | Yes | No API example recorded. | — | — | — |
 | `_collections` | Yes | No API example recorded. | — | — | — |
@@ -270,7 +271,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_android_support` |
 | `_apple_support` |
 | `_ast` |
-| `_ast_unparse` |
 | `_asyncio` |
 | `_bisect` |
 | `_bz2` |
