@@ -36,10 +36,12 @@ with warnings.catch_warnings(record=True) as recorded:
     try:
         fixed = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
     except ValueError as exc:
-        # OpenSSL can omit its deprecated method selectors.
-        assert str(exc) == "invalid or unsupported protocol version 5"
+        # The provider can disable TLS 1.2 or omit its deprecated method.
+        assert type(exc) is ValueError
+        assert exc.args == ("invalid or unsupported protocol version 5",)
         assert not recorded
     else:
+        assert getattr(ssl, "HAS_TLSv1_2", True)
         assert [str(item.message) for item in recorded] == ["ssl.PROTOCOL_TLSv1_2 is deprecated"]
         assert fixed.protocol is ssl.PROTOCOL_TLSv1_2
         assert fixed.verify_mode is ssl.CERT_NONE and fixed.check_hostname is False

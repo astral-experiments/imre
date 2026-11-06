@@ -465,8 +465,19 @@ pub(super) enum Protocol {
 }
 
 impl Protocol {
+    // Bit positions in imre_ssl_protocol_mask, distinct from the method selectors.
+    fn fixed_version_bit(self) -> Option<u32> {
+        match self {
+            Self::Ssl3 => Some(1 << 0),
+            Self::Tls1 => Some(1 << 1),
+            Self::Tls1_1 => Some(1 << 2),
+            Self::Tls1_2 => Some(1 << 3),
+            Self::Tls | Self::Client | Self::Server => None,
+        }
+    }
+
     pub(super) fn is_fixed(self) -> bool {
-        !matches!(self, Self::Tls | Self::Client | Self::Server)
+        self.fixed_version_bit().is_some()
     }
 }
 
@@ -498,6 +509,13 @@ impl Method {
             17 => (Protocol::Server, Some(api.TLS_server_method), None),
             _ => return Err(Failure::UnsupportedProtocol(code)),
         };
+        if let Some(bit) = protocol.fixed_version_bit() {
+            // SAFETY: this function queries the library that supplied the method selector.
+            let version = unsafe { (api.OpenSSL_version_num)() };
+            if versions::capabilities(version).is_some_and(|mask| mask & bit == 0) {
+                return Err(Failure::UnsupportedProtocol(code));
+            }
+        }
         Ok(Self {
             api,
             protocol,

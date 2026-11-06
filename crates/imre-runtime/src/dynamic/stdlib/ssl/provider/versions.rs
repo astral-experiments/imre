@@ -19,7 +19,7 @@ unsafe extern "C" {
     fn imre_ssl_protocol_mask(runtime_version: c_ulong) -> c_int;
 }
 
-fn capabilities(version: c_ulong) -> Option<u32> {
+pub(super) fn capabilities(version: c_ulong) -> Option<u32> {
     // SAFETY: the shim reads only its build-time OpenSSL header constants. A
     // missing header or a runtime/header version mismatch returns -1.
     u32::try_from(unsafe { imre_ssl_protocol_mask(version) }).ok()
