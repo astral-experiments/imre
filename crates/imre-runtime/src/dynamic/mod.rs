@@ -3446,6 +3446,7 @@ impl Context {
                 "minor",
                 "makedev",
                 "mknod",
+                "pidfd_open",
                 "timerfd_create",
                 "timerfd_gettime",
                 "timerfd_gettime_ns",
@@ -3455,6 +3456,8 @@ impl Context {
                 let function = self.builtin(&format!("posix.{name}"));
                 self.bind(scope, name, function);
             }
+            let nonblock = self.int(i64::from(libc::PIDFD_NONBLOCK));
+            self.bind(scope, "PIDFD_NONBLOCK", nonblock);
             for (name, flag) in [
                 ("TFD_CLOEXEC", libc::TFD_CLOEXEC),
                 ("TFD_NONBLOCK", libc::TFD_NONBLOCK),

@@ -653,6 +653,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             && matches!(
                 name,
                 "copy_file_range"
+                    | "pidfd_open"
                     | "get_terminal_size"
                     | "tcgetpgrp"
                     | "tcsetpgrp"
@@ -1056,6 +1057,17 @@ pub(super) fn descriptor(
     #[cfg(target_os = "linux")]
     if name.starts_with("timerfd_") {
         return timerfd::call(ctx, name, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "pidfd_open" {
+        let [pid, flags] =
+            builtins::bind_builtin_arguments(name, args, kwargs, ["pid", "flags"], 1)?;
+        let pid = c_int(ctx, pid.unwrap())?;
+        let flags = flags
+            .map(|value| unsigned(ctx, value, u64::from(u32::MAX), "int"))
+            .transpose()?
+            .unwrap_or(0) as u32;
+        return Ok(ctx.int(i64::from(native::pidfd_open(pid, flags)?)));
     }
     if name == "device_encoding" {
         let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
