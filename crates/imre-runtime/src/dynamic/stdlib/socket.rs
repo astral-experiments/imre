@@ -1044,13 +1044,7 @@ pub(super) fn cmsg_size(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
-    let length = usize::try_from(receive_size(ctx, arg)?)
-        .map_err(|_| Error::new("OverflowError", format!("{name}() argument out of range")))?;
-    let size = if name == "CMSG_SPACE" {
-        native::message::cmsg_space(length)?
-    } else {
-        native::message::cmsg_len(length)?
-    };
+    let size = native::message::control_size(receive_size(ctx, arg)?, name == "CMSG_SPACE")?;
     Ok(ctx.int(size as i64))
 }
 

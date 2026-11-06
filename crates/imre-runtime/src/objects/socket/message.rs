@@ -31,6 +31,40 @@ pub(crate) fn cmsg_space(size: usize) -> Result<usize> {
     Ok(unsafe { libc::CMSG_SPACE(size as u32) } as usize)
 }
 
+/// Size a Python ancillary payload using the same checked ABI layout in both execution paths.
+pub(crate) fn control_size(length: isize, padded: bool) -> Result<usize> {
+    let size = usize::try_from(length).map_err(|_| {
+        let name = if padded { "CMSG_SPACE" } else { "CMSG_LEN" };
+        Error::new(
+            Kind::OverflowError,
+            format!("{name}() argument out of range"),
+        )
+    })?;
+    if padded {
+        cmsg_space(size)
+    } else {
+        cmsg_len(size)
+    }
+}
+
+/// # Safety
+/// The caller keeps the Python integer word alive for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_socket_control_size(length: usize, padded: bool) -> usize {
+    // SAFETY: the input word is rooted by the typed caller.
+    let integer = unsafe { super::Int::borrow(length) };
+    let result = crate::signed_index(&integer)
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C ssize_t",
+            )
+        })
+        .and_then(|n| control_size(n, padded))
+        .map(|n| super::word(n as i32));
+    super::finish(result, super::word(0))
+}
+
 struct Control {
     // A header array provides libc's required alignment; len is the exact capacity in bytes.
     storage: Box<[libc::cmsghdr]>,

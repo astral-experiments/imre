@@ -9803,6 +9803,15 @@ impl<'a> Checker<'a> {
                 return self.unicode_normalize(call, check);
             }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
+            Some(Binding::Intrinsic(Intrinsic::SocketControlSize { padded })) => {
+                let params = [ParameterKind::PositionalOnly.parameter("length", Type::Int, None)];
+                let args = self.arguments(call, &params, None)?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Socket(ir::SocketOp::ControlSize { padded }),
+                    Type::Int,
+                    args,
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::SocketGetFqdn)) => {
                 let params = [parameter(
                     "name",
