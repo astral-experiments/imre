@@ -41,6 +41,12 @@ class Case(IsolatedAsyncioTestCase):
         coro = task.get_coro()
         self.assertEqual(coro.__name__, "test_body")
         self.assertEqual(coro.__qualname__, "Case.test_body")
+        for field in ("__name__", "__qualname__"):
+            previous = getattr(coro, field)
+            name = "read" + chr(0xd800)
+            setattr(coro, field, name)
+            self.assertIs(getattr(coro, field), name)
+            setattr(coro, field, previous)
         coro.__qualname__ = "connection.read"
         self.assertIn("coro=<connection.read()", repr(task))
         self.assertEqual(self.test_body.__qualname__, "Case.test_body")

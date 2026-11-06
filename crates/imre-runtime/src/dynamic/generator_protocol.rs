@@ -60,7 +60,7 @@ impl Context {
     }
 
     pub(super) fn set_generator_name(&mut self, obj: Id, field: &str, value: Id) -> Result<()> {
-        if !matches!(self.heap.get(self.scalar_value(value)), Value::Str(_)) {
+        if self.string_storage(value).is_none() {
             return Err(Error::new(
                 "TypeError",
                 format!("{field} must be set to a string object"),
