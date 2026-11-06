@@ -11,12 +11,14 @@ import operator
 import os
 import posixpath
 import sys
-from _imre_posixpath import normalized_parts as _native_parts
+from _imre_posixpath import normalized_parts as _native_parts, string_args as _string_args
 from errno import *
 from glob import _StringGlobber, _no_recurse_symlinks
 from itertools import chain
 from stat import S_ISDIR, S_ISREG, S_ISSOCK, S_ISBLK, S_ISCHR, S_ISFIFO
 from _collections_abc import Sequence
+
+_path_namespace = globals()
 
 try:
     import pwd
@@ -135,6 +137,10 @@ class PurePath:
         return object.__new__(cls)
 
     def __init__(self, *args):
+        paths = _string_args(args, _path_namespace)
+        if paths is not None:
+            self._raw_paths = paths
+            return
         paths = []
         for arg in args:
             if isinstance(arg, PurePath):

@@ -50,6 +50,44 @@ def current():
         def splitroot(path):
             return "", "", Spelling(path)
 
+    reads = []
+
+    class PathFunctions:
+        @property
+        def fspath(self):
+            reads.append("fspath")
+            return os.fspath
+
+    original_os = pathlib.os
+    try:
+        pathlib.os = PathFunctions()
+        raw = PurePosixPath("first", "second")
+        copied = PurePosixPath(raw)
+        empty = PurePosixPath()
+    finally:
+        pathlib.os = original_os
+    assert reads == ["fspath", "fspath"]
+    assert raw.parts == copied.parts == ("first", "second")
+    assert not empty.parts
+
+    checks = []
+
+    class PathMeta(type):
+        def __instancecheck__(cls, value):
+            checks.append(value)
+            return False
+
+    class PathMarker(metaclass=PathMeta):
+        pass
+
+    original_type = pathlib.PurePath
+    try:
+        pathlib.PurePath = PathMarker
+        assert PurePosixPath("one", "two")._raw_paths == ["one", "two"]
+    finally:
+        pathlib.PurePath = original_type
+    assert checks == ["one", "two"]
+
     class CustomPath(PurePosixPath):
         parser = Parser
 

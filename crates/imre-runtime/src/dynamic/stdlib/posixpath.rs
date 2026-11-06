@@ -214,6 +214,75 @@ pub(super) fn call(
     if let Some(op) = name.strip_prefix("_imre_posixpath.realpath_") {
         return realpath_op(ctx, op, args);
     }
+    if name == "_imre_posixpath.string_args" {
+        let [values, namespace] = args else {
+            return Err(Error::new(
+                "TypeError",
+                "expected path arguments and the pathlib namespace",
+            ));
+        };
+        let Value::Tuple(parts) = ctx.heap.get(*values) else {
+            return Ok(NONE);
+        };
+        if !parts
+            .iter()
+            .all(|&part| matches!(ctx.heap.get(part), Value::Str(_) | Value::SurrogateStr(_)))
+        {
+            return Ok(NONE);
+        }
+        let paths = parts.clone();
+        if !paths.is_empty() {
+            // Look up the live names without invoking a replacement protocol or metaclass.
+            // A plain string cannot be an instance of an ordinary user-defined class.
+            if !matches!(ctx.heap.get(*namespace), Value::Dict(_)) {
+                return Ok(NONE);
+            }
+            let Some(class) = ctx.dict_named_item(*namespace, "PurePath") else {
+                return Ok(NONE);
+            };
+            let Value::Class { metaclass, .. } = ctx.heap.get(class) else {
+                return Ok(NONE);
+            };
+            if metaclass
+                .is_some_and(|meta| !matches!(ctx.heap.get(meta), Value::Native(n) if n == "type"))
+            {
+                return Ok(NONE);
+            }
+            let defaults = ctx.default_source_builtins()?;
+            for key in ["isinstance", "str"] {
+                let binding = ctx
+                    .dict_named_item(*namespace, key)
+                    .or_else(|| ctx.dict_named_item(defaults, key));
+                if !binding
+                    .is_some_and(|id| matches!(ctx.heap.get(id), Value::Native(n) if n == key))
+                {
+                    return Ok(NONE);
+                }
+            }
+            let Some(os) = ctx.dict_named_item(*namespace, "os") else {
+                return Ok(NONE);
+            };
+            // Leave module hooks and replacement path protocols to the Python loop.
+            if !matches!(
+                ctx.heap.get(os),
+                Value::Module {
+                    constructor: None,
+                    ..
+                }
+            ) {
+                return Ok(NONE);
+            }
+            let fspath = match ctx.default_get_attr(os, "fspath") {
+                Ok(fspath) => fspath,
+                Err(error) if ctx.is_attribute_error(&error) => return Ok(NONE),
+                Err(error) => return Err(error),
+            };
+            if !matches!(ctx.heap.get(fspath), Value::Native(name) if name == "posix.fspath") {
+                return Ok(NONE);
+            }
+        }
+        return Ok(ctx.alloc(Value::List(paths)));
+    }
     if name == "_imre_posixpath.normalized_parts" {
         let [path, sep] = args else {
             return Err(Error::new("TypeError", "expected a path and separator"));
