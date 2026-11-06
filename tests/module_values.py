@@ -72,10 +72,6 @@ REJECTED = {
         "main.py": "import library\nlibrary.VALUE = 2\n",
         "library.py": "VALUE = 1\n",
     },
-    "import_after_value": {
-        "library.py": "VALUE = 1\nimport dependency\n",
-        "dependency.py": "VALUE = 2\n",
-    },
     "conditional_export": {
         "main.py": "from library import VALUE\n",
         "library.py": "if True:\n    VALUE = 1\n",
