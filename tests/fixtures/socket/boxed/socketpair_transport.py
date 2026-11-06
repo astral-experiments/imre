@@ -34,6 +34,43 @@ with left, right:
         raise AssertionError("read descriptor flags after close")
 assert right.fileno() == -1
 
+# A release callback can reuse an earlier exporter's storage once its view is gone.
+def check_vector_release(retain):
+    page = bytearray(b"A")
+    saved = []
+    released = []
+
+    class Page:
+        def __buffer__(self, flags):
+            view = memoryview(page)
+            if retain:
+                saved.append(view)
+            return view
+
+    class Trailer:
+        def __buffer__(self, flags):
+            return memoryview(b"B")
+
+        def __release_buffer__(self, view):
+            try:
+                page.extend(b"!")
+            except BufferError:
+                released.append(False)
+            else:
+                released.append(True)
+
+    left, right = socketpair()
+    with left, right:
+        assert left.sendmsg([Page(), Trailer()]) == 2
+        assert right.recv(2) == b"AB"
+    assert released == [not retain]
+    assert page == (b"A" if retain else b"A!")
+
+
+check_vector_release(False)
+check_vector_release(True)
+
+
 # Transfer two data ranges and retain the received file after the sender closes its copy.
 left, right = socketpair()
 with left, right:

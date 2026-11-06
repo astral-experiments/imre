@@ -9,7 +9,7 @@ use std::ops::Range;
 // Retain both the exported view and its backing through conversions of subsequent
 // buffers, without retaining any Rust borrow over a call into Python.
 struct Lease {
-    object: Id,
+    object_root: usize,
     view: Option<Id>,
     release_native: bool,
 }
@@ -39,7 +39,7 @@ impl Buffers {
         ctx.buffer_exports
             .try_reserve(2)
             .map_err(|_| crate::Error::memory_error())?;
-        ctx.heap.reserve_temporaries(2)?;
+        ctx.heap.reserve_temporaries(1)?;
         let inherited = matches!(
             ctx.heap.get(ctx.scalar_value(object)),
             Value::Bytes(_) | Value::ByteArray(_)
@@ -62,7 +62,13 @@ impl Buffers {
                 .ok_or_else(|| Error::new("BufferError", "buffer is not contiguous or writable"))?;
             Ok((view, method.is_some(), span))
         };
-        let (view, python, (storage, range)) = acquire(ctx).map_err(|err| {
+        let object_root = ctx.heap.temporary_mark();
+        ctx.heap.keep(object);
+        let acquired = acquire(ctx);
+        // The export slots below own the acquired view. A temporary from calling
+        // __buffer__ must not keep it alive after this vector entry is released.
+        ctx.heap.release_temporaries_since(object_root);
+        let (view, python, (storage, range)) = acquired.map_err(|err| {
             if writable {
                 Error::new("TypeError", "recvmsg_into() argument 1 must be an iterable of single-segment read-write buffers")
             } else {
@@ -70,11 +76,10 @@ impl Buffers {
             }
         })?;
         ctx.heap.keep(object);
-        ctx.heap.keep(view);
         ctx.buffer_exports.extend([view, storage]);
         self.spans.push((storage, range));
         self.leases.push(Lease {
-            object,
+            object_root,
             view: python.then_some(view),
             release_native: inherited,
         });
@@ -90,19 +95,24 @@ impl Buffers {
         // CPython releases each vector in acquisition order. Other exports of the
         // same allocation must remain visible to a reentrant release callback.
         for (i, lease) in self.leases.into_iter().enumerate() {
+            let object = *ctx.heap.temporary_root(lease.object_root);
+            let mark = ctx.heap.temporary_mark();
             if lease.release_native
                 && ctx
-                    .buffer_slot(lease.object, "__release_buffer__")
+                    .buffer_slot(object, "__release_buffer__")
                     .flatten()
                     .is_some()
             {
-                ctx.notify_native_buffer_release(lease.object);
+                ctx.notify_native_buffer_release(object);
             }
             let slot = self.mark + 2 * i;
             ctx.buffer_exports[slot..slot + 2].fill(NONE);
             if let Some(view) = lease.view {
-                ctx.release_python_buffer(lease.object, view);
+                ctx.heap.keep(view);
+                ctx.release_python_buffer(object, view);
             }
+            ctx.heap.release_temporaries_since(mark);
+            *ctx.heap.temporary_root(lease.object_root) = NONE;
         }
         ctx.buffer_exports.truncate(self.mark);
         result
