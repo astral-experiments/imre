@@ -413,6 +413,8 @@ fn emit_program(
         append_windows: BTreeMap::new(),
         reserved_append_window: None,
         uses_append_windows: false,
+        uses_byte_output_windows: false,
+        byte_output_owners: Vec::new(),
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
@@ -582,6 +584,12 @@ fn emit_program(
     record_layouts(module, emitter.output);
     callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
+    if emitter.uses_byte_output_windows {
+        emitter
+            .output
+            .common()
+            .push_str(include_str!("llvm/byte_output_window.ll"));
+    }
     if emitter.uses_append_windows {
         emitter
             .output
@@ -669,6 +677,8 @@ struct Emitter<'a, 'module> {
     append_windows: BTreeMap<usize, String>,
     reserved_append_window: Option<(usize, String)>,
     uses_append_windows: bool,
+    uses_byte_output_windows: bool,
+    byte_output_owners: Vec<Option<usize>>,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
@@ -2051,7 +2061,10 @@ impl Emitter<'_, '_> {
         self.borrowed_locals = borrows.locals.clone();
         self.rooted_locals = borrows.rooted.clone();
         // The sole owner stays live while extend() evaluates and uses its receiver.
-        for (capture, owner) in byte_outputs::select(function, &mut self.locals) {
+        let aliases =
+            byte_outputs::select(function, &mut self.locals, &mut self.byte_output_owners);
+        self.uses_byte_output_windows |= self.byte_output_owners.iter().any(Option::is_some);
+        for (capture, owner) in aliases {
             self.borrowed_locals[capture] = true;
             self.rooted_locals[owner] = true;
         }
@@ -2275,6 +2288,9 @@ impl Emitter<'_, '_> {
             ));
         }
         for (slot, &ty) in function.locals.iter().enumerate() {
+            if self.byte_output_owners.get(slot) == Some(&Some(slot)) {
+                self.line(format!("%byte_window{slot} = alloca {{ ptr, i64, i64 }}"));
+            }
             self.line(format!("%local{slot} = alloca {}", ty.llvm()));
             // Parameters initialize exactly once below. ASan can relocate their
             // argument stores into its prologue, ahead of a default initializer.
@@ -2544,10 +2560,13 @@ impl Emitter<'_, '_> {
         {
             return false;
         }
+        let window = self.byte_output_window(receiver);
         let receiver = self.operand(receiver);
         let first = self.operand(first);
         let second = self.operand(second);
-        if receiver.value.ty == Type::ByteOutput {
+        if let Some(window) = window {
+            self.append_private_bytes(window, &receiver.value, &first.value, Some(&second.value));
+        } else if receiver.value.ty == Type::ByteOutput {
             self.runtime_call(
                 &BYTE_OUTPUT_APPEND_PAIR,
                 [&receiver.value, &first.value, &second.value],
@@ -2626,6 +2645,11 @@ impl Emitter<'_, '_> {
                     && matches!(&expression.kind, ExprKind::List(values) if values.is_empty())
                 {
                     let value = self.call("imre_byte_output_new", Type::ByteOutput, &[]);
+                    if self.byte_output_owners.get(*slot) == Some(&Some(*slot)) {
+                        self.line(format!(
+                            "store {{ ptr, i64, i64 }} zeroinitializer, ptr %byte_window{slot}"
+                        ));
+                    }
                     self.store(*slot, &value);
                     return;
                 }
@@ -6727,7 +6751,19 @@ impl Emitter<'_, '_> {
                 Type::Int => self.call("imre_bytes_count", Type::Bytes, &[&args[0].value]),
                 Type::ListInt => self.call("imre_bytes_list", Type::Bytes, &[&args[0].value]),
                 Type::ByteOutput => {
-                    self.call("imre_byte_output_finish", Type::Bytes, &[&args[0].value])
+                    if let Some(window) = self.byte_output_window(&expressions[0]) {
+                        let operand = self.checked_instruction(format!(
+                            "call ptr @imre_byte_output_finish_window(ptr {}, ptr %byte_window{window})",
+                            args[0].value.operand
+                        ));
+                        self.owned(Value {
+                            ty: Type::Bytes,
+                            operand,
+                            small_integer: false,
+                        })
+                    } else {
+                        self.call("imre_byte_output_finish", Type::Bytes, &[&args[0].value])
+                    }
                 }
                 _ => unreachable!("bytes conversion was checked"),
             },
@@ -7975,13 +8011,19 @@ impl Emitter<'_, '_> {
             ),
             Builtin::ListReserveRange => {
                 let count = self.index_word(&args[4].value, true);
-                let name = if args[0].value.ty == Type::ByteOutput {
-                    "imre_byte_output_reserve_range"
+                let (name, cursor) = if let Some(window) = self.byte_output_window(&expressions[0])
+                {
+                    (
+                        "imre_byte_output_reserve_window",
+                        format!(", ptr %byte_window{window}"),
+                    )
+                } else if args[0].value.ty == Type::ByteOutput {
+                    ("imre_byte_output_reserve_range", String::new())
                 } else {
-                    "imre_list_reserve_range"
+                    ("imre_list_reserve_range", String::new())
                 };
                 self.line(format!(
-                    "call void @{name}(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count})",
+                    "call void @{name}(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count}{cursor})",
                     args[0].value.operand,
                     args[1].value.operand,
                     args[2].value.operand,
@@ -8979,6 +9021,8 @@ impl Emitter<'_, '_> {
                     self.forget(item);
                     self.release_operand(&args[0]);
                     return none();
+                } else if let Some(window) = self.byte_output_window(&expressions[0]) {
+                    self.append_private_bytes(window, &args[0].value, &args[1].value, None);
                 } else {
                     self.append(&args[0].value, &args[1].value);
                 }
@@ -9730,6 +9774,30 @@ impl Emitter<'_, '_> {
         self.append_windows.insert(output, window.clone());
         self.uses_append_windows = true;
         window
+    }
+
+    /// The scoped extend receiver borrows the same span as its private owner.
+    fn byte_output_window(&self, expr: &Expr) -> Option<usize> {
+        let ExprKind::Local(slot) = expr.kind else {
+            return None;
+        };
+        self.byte_output_owners.get(slot).copied().flatten()
+    }
+
+    /// Append one or two rooted integer words, preserving the allocation error edge.
+    fn append_private_bytes(
+        &mut self,
+        window: usize,
+        output: &Value,
+        a: &Value,
+        b: Option<&Value>,
+    ) {
+        let count = if b.is_some() { 2 } else { 1 };
+        let b = b.map_or("1", |value| &value.operand);
+        self.checked_status(format!(
+            "call i32 @append_private_bytes(ptr %byte_window{window}, ptr {}, i64 {}, i64 {b}, i64 {count})",
+            output.operand, a.operand
+        ));
     }
 
     fn append(&mut self, list: &Value, value: &Value) {
@@ -12759,6 +12827,11 @@ def total(text: str) -> int:
             .expect("private byte append");
         assert!(instructions.next().unwrap().contains("icmp eq i32"));
         assert!(eligible.contains("call ptr @imre_byte_output_finish("));
+        let ranged = function_body(
+            "def encode(data: list[int]) -> bytes:\n    out: list[int] = []\n    for i in range(1, len(data)):\n        previous = data[i - 1]\n        current = data[i]\n        out.extend(divmod(previous + current, 256))\n    return bytes(out)\n",
+        );
+        assert!(ranged.contains("call i32 @append_private_bytes("));
+        assert!(ranged.contains("call ptr @imre_byte_output_finish_window("));
         assert!(!eligible.contains("call void @imre_object_retain("));
         assert!(!eligible.contains("call ptr @imre_bytes_list("));
 
