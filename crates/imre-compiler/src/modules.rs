@@ -1006,7 +1006,9 @@ pub(crate) enum Intrinsic {
     GaiError,
     HError,
     SocketGetFqdn,
-    SocketControlSize { padded: bool },
+    SocketControlSize {
+        padded: bool,
+    },
     SocketConstant(&'static str),
     Sha1,
     Sha256,
@@ -2172,7 +2174,9 @@ impl IntrinsicModule {
             }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             (Self::Socket | Self::SocketNative, name @ ("CMSG_LEN" | "CMSG_SPACE")) => {
-                Intrinsic::SocketControlSize { padded: name == "CMSG_SPACE" }
+                Intrinsic::SocketControlSize {
+                    padded: name == "CMSG_SPACE",
+                }
             }
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
