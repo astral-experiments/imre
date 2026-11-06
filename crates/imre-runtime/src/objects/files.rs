@@ -443,7 +443,7 @@ impl FileState {
             return self.text_memory()?.write(text);
         }
         if let Some(Stream::Write(writer)) = self.stream.as_mut() {
-            return writer.write_text(text);
+            return writer.write_text(text, input);
         }
         self.write_bytes(text.as_bytes())
     }
