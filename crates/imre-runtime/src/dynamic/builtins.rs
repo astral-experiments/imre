@@ -217,37 +217,29 @@ pub(super) fn is_exception(name: &str) -> bool {
 
 pub(super) const IMPORT_KEYWORDS: [&str; 3] = ["name", "path", "name_from"];
 
-/// Return the initializer inherited from the built-in exception class.
-pub(super) fn exception_initializer(kind: &str) -> &'static str {
-    match kind {
-        "StopIteration" => "StopIteration.__init__",
-        "SystemExit" => "SystemExit.__init__",
-        "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
-        kind if exception_subclass(kind, "OSError") == Some(true) => "OSError.__init__",
-        _ => "BaseException.__init__",
+/// Test the declaring class, independently of the Rust function implementing the slot.
+pub(super) fn declares_exception_constructor(kind: imre_ast::exceptions::Kind, slot: &str) -> bool {
+    use imre_ast::exceptions::Kind::*;
+    match slot {
+        "__init__" => matches!(
+            kind,
+            BaseException | BaseExceptionGroup | AttributeError | ImportError | NameError | OSError
+                | StopIteration | SyntaxError | SystemExit | UnicodeDecodeError | UnicodeEncodeError
+        ),
+        "__new__" => match kind {
+            KeyError | ExceptionGroup | SystemExit | NameError | UnboundLocalError | AttributeError
+            | ImportError | ModuleNotFoundError | StopIteration | SyntaxError | IndentationError
+            | TabError | BinasciiIncomplete | BinasciiError | LzmaError | ZlibError => false,
+            OSError => true,
+            _ => !kind.matches(OSError),
+        },
+        _ => false,
     }
 }
 
-/// Return the exception that declares the inherited CPython allocation slot.
-pub(super) fn exception_new_owner(name: &str) -> &str {
-    match name {
-        "KeyError" => "LookupError",
-        "ExceptionGroup" => "BaseExceptionGroup",
-        "SystemExit" | "GeneratorExit" | "KeyboardInterrupt" => "BaseException",
-        "NameError"
-        | "UnboundLocalError"
-        | "AttributeError"
-        | "ImportError"
-        | "ModuleNotFoundError"
-        | "StopIteration"
-        | "StopAsyncIteration"
-        | "binascii.Incomplete"
-        | "_lzma.LZMAError"
-        | "zlib.error" => "Exception",
-        "binascii.Error" => "ValueError",
-        name if exception_subclass(name, "OSError") == Some(true) => "OSError",
-        _ => name,
-    }
+pub(super) fn exception_init_descriptor(symbol: &str) -> Option<&'static str> {
+    let kind = exception_kind(symbol.strip_suffix(".__init__")?)?;
+    declares_exception_constructor(kind, "__init__").then(|| kind.name())
 }
 
 /// Consult the native hierarchy when both names denote known exception types.
@@ -1622,10 +1614,7 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(
-        owner @ ("BaseException" | "StopIteration" | "SystemExit" | "OSError" | "ImportError"),
-    ) = name.strip_suffix(".__init__")
-    {
+    if let Some(owner) = exception_init_descriptor(name) {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
     let complex_op = match name {
