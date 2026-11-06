@@ -50,3 +50,11 @@ assert list(nodes) == []
 
 leaf.iter = lambda tag: iter([added])
 assert list(branch.iter("custom")) == [custom, added]
+
+# An ordinary bound method can redirect iteration to a different element.
+redirected = base("root")
+proxy = base("target")
+target = base("target")
+redirected.append(proxy)
+proxy.iter = target.iter
+assert list(redirected.iter("target")) == [target]
