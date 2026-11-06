@@ -290,13 +290,6 @@ impl Error {
         self.trace.as_deref_mut()
     }
 
-    pub(super) fn clear_traceback(&mut self) {
-        if let Some(trace) = self.trace.as_mut() {
-            trace.pending_frames.clear();
-            trace.head = NONE;
-        }
-    }
-
     pub(super) fn tracing(&mut self) -> &mut Trace {
         self.trace.get_or_insert_with(Default::default)
     }
@@ -595,11 +588,16 @@ impl Context {
         let Value::Raised(error) = self.heap.get_mut(exception) else {
             unreachable!()
         };
-        error.clear_traceback();
-        if tb != NONE {
-            error.tracing().head = tb;
+        if tb == NONE && error.trace.is_none() {
+            return Ok(());
         }
-        self.heap.collect_next_statement = true;
+        let trace = error.tracing();
+        let released = !trace.pending_frames.is_empty() || (trace.head != NONE && trace.head != tb);
+        trace.pending_frames.clear();
+        trace.head = tb;
+        if released {
+            self.heap.check_released_roots();
+        }
         Ok(())
     }
 
@@ -2886,6 +2884,8 @@ pub(super) struct Heap {
     check_finalizers_next_statement: bool,
     // Non-rooting handles to files and sockets whose destruction flushes or closes a descriptor.
     descriptor_owners: Vec<Id>,
+    // Native descriptors whose drop must remain observable after clearing a traceback or frame.
+    native_drop_observers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
@@ -3105,6 +3105,7 @@ impl Heap {
             collect_next_statement: false,
             check_finalizers_next_statement: false,
             descriptor_owners: Vec::new(),
+            native_drop_observers: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
             finalizer_operands: std::array::from_fn(|_| Cell::new(None)),
@@ -3293,6 +3294,27 @@ impl Heap {
     /// An interpreter root (such as packed callback operands) can own weak targets indirectly.
     pub(super) fn observes_released_roots(&self) -> bool {
         self.has_weak_values || self.tracks_finalizers()
+    }
+
+    fn check_released_roots(&mut self) {
+        // An audit veto can restore a borrowed hook until a sweep invalidates its handle.
+        if self.borrowed_hooks.iter().any(|&hook| hook != NONE)
+            || self
+                .native_drop_observers
+                .iter()
+                .any(|&id| match self.get(id) {
+                    Value::File(file) => !file.closed(),
+                    #[cfg(unix)]
+                    Value::TlsListener(socket) => crate::objects::socket::fd(socket) >= 0,
+                    #[cfg(unix)]
+                    Value::TlsSession(state) => state.borrow().is_some(),
+                    _ => unreachable!("native descriptor drop observer"),
+                })
+        {
+            self.collect_next_statement = true;
+        } else {
+            self.check_finalizers_next_statement = true;
+        }
     }
 
     pub fn weak_edge_removed(&mut self, value: Id) {
@@ -4040,6 +4062,7 @@ impl Heap {
             scope,
             unoptimized_locals,
             class_proxy_scope,
+            back,
             ..
         } = *self.get(value)
         else {
@@ -4053,7 +4076,9 @@ impl Heap {
             && unoptimized_locals.is_none()
         {
             // Clearing again releases extras but keeps local slots rebound after the first clear.
-            self.collect_next_statement |= data.closure.extra_locals.take().is_some();
+            if data.closure.extra_locals.take().is_some() {
+                self.check_released_roots();
+            }
             return Ok(());
         }
         if scope != NONE && self.frames.iter().any(|frame| frame.scope == scope) {
@@ -4062,18 +4087,20 @@ impl Heap {
                 "cannot clear an executing frame",
             ));
         }
-        if let Some((id, offset)) = self
-            .slots
-            .iter()
-            .enumerate()
-            .find_map(|(id, slot)| match &slot.value {
-                Some(Value::Generator {
-                    frame: Some(frame),
-                    offset: Some(offset),
-                    ..
-                }) if *frame == value => Some((id as Id, *offset)),
-                _ => None,
-            })
+        // Only generator frames store None for back and can be suspended.
+        if back.is_none()
+            && let Some((id, offset)) =
+                self.slots
+                    .iter()
+                    .enumerate()
+                    .find_map(|(id, slot)| match &slot.value {
+                        Some(Value::Generator {
+                            frame: Some(frame),
+                            offset: Some(offset),
+                            ..
+                        }) if *frame == value => Some((id as Id, *offset)),
+                        _ => None,
+                    })
         {
             if offset != 0 {
                 return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
@@ -4107,7 +4134,7 @@ impl Heap {
         };
         *scope = NONE;
         *unoptimized_locals = namespace;
-        self.collect_next_statement = true;
+        self.check_released_roots();
         Ok(())
     }
 
@@ -4835,6 +4862,16 @@ impl Heap {
         let id = self.alloc(value);
         self.descriptor_owners.push(id);
         self.frames.last_mut().unwrap().created_finalizer = true;
+        Ok(id)
+    }
+
+    /// Preserve prompt frame and traceback cleanup without tracking ordinary call releases.
+    pub(super) fn alloc_native_drop_observer(&mut self, value: Value) -> Result<Id> {
+        self.native_drop_observers
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let id = self.alloc(value);
+        self.native_drop_observers.push(id);
         Ok(id)
     }
 
@@ -5639,6 +5676,8 @@ impl Heap {
                     _ => false,
                 }
         });
+        self.native_drop_observers
+            .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.interned
             .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
         let callbacks = self.clear_weak_targets(None, None);

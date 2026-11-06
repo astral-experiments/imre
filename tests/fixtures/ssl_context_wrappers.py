@@ -1,5 +1,7 @@
+import os
 import socket
 import ssl
+import sys
 
 
 class ClientContext(ssl.SSLContext):
@@ -70,3 +72,20 @@ with socket.socket(type=socket.SOCK_DGRAM) as raw:
     else:
         raise AssertionError("wrapped a datagram socket")
     assert raw.fileno() >= 0
+
+
+def capture_wrapped_socket():
+    with socket.socket() as raw:
+        peer = context.wrap_socket(raw, server_side=True)
+    return sys._getframe(), peer.fileno()
+
+
+frame, fd = capture_wrapped_socket()
+os.fstat(fd)
+frame.clear()
+try:
+    os.fstat(fd)
+except OSError:
+    pass
+else:
+    raise AssertionError("clearing the frame left the TLS descriptor open")

@@ -300,6 +300,33 @@ def check_clear():
 check_clear()
 
 
+def raise_again(error, refs, callbacks):
+    local = Local()
+    refs.append(ref(local, callbacks.append))
+    raise error
+
+
+def check_replace_pending():
+    error = LookupError()
+    try:
+        raise error
+    except LookupError as raised:
+        head = raised.__traceback__
+
+    refs = []
+    callbacks = []
+    try:
+        raise_again(error, refs, callbacks)
+    except LookupError as raised:
+        assert refs[0]() is not None
+        raised.with_traceback(head)
+        assert refs[0]() is None and callbacks == refs
+        assert raised.__traceback__ is head
+
+
+check_replace_pending()
+
+
 class FailingExit:
     def __enter__(self):
         return self

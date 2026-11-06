@@ -1,6 +1,7 @@
 """Original descriptor lifetime and a single buffered cursor across reads."""
 import io
 import socket
+import sys
 
 
 def reject_negative_read(file, length):
@@ -35,6 +36,10 @@ class ClosingWhence:
     def __index__(self):
         self.stream.close()
         return 0
+
+
+def capture_reader(reader):
+    return sys._getframe()
 
 
 def run():
@@ -130,6 +135,15 @@ def run():
         assert raw.read() == b""
         raw.close()
         assert raw.closed and raw.name == -1 and sock.fileno() == -1
+    sock, peer = socket.socketpair()
+    with sock, peer:
+        frame = capture_reader(sock.makefile("rb"))
+        fd = sock.fileno()
+        sock.close()
+        assert sock.fileno() == fd
+        peer.setblocking(False)
+        frame.clear()
+        assert peer.recv(1) == b""
     print("socket buffered input and close orders passed")
 
 
