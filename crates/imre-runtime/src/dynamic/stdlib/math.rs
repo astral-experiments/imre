@@ -7,6 +7,7 @@ use smallvec::SmallVec;
 
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
+use crate::sumprod::{self, Number, Operands, Side};
 
 /// Retain the original function's argument binding and live arithmetic hooks.
 pub(in crate::dynamic) fn fraction_hash(
@@ -142,6 +143,15 @@ pub(super) fn call(
             _ => scale_by_power_of_two(ctx, first, second)?,
         };
         return Ok(ctx.alloc(Value::Float(result)));
+    }
+    if operation == "sumprod" {
+        let &[left, right] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("sumprod expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        return sumprod(ctx, left, right);
     }
     if operation == "dist" {
         let &[p, q] = args else {
@@ -513,6 +523,140 @@ fn prod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         ctx.collect_streaming_garbage(&mut limit);
     }
     Ok(product)
+}
+
+/// Release each owner separately because its destructor can observe the remaining owners.
+fn release_sumprod_owners<const N: usize>(
+    ctx: &mut Context,
+    mark: usize,
+    owners: [Option<Id>; N],
+    result: &Result<Id>,
+) {
+    let mut mark = mark;
+    let mut protect = |value| {
+        ctx.heap.keep_at(mark, value);
+        mark += 1;
+    };
+    match result {
+        Ok(value) => protect(*value),
+        Err(error) => error.roots().for_each(protect),
+    }
+    let mut end = mark;
+    for owner in owners.into_iter().flatten() {
+        ctx.heap.keep_at(mark, owner);
+        end += 1;
+    }
+    // First clear call temporaries while every owner and the result are rooted.
+    for root in (mark..=end).rev() {
+        ctx.discard_temporaries(root, None);
+    }
+}
+
+struct BoxedSumprod<'a> {
+    ctx: &'a mut Context,
+    iterators: [Id; 2],
+    items: [Option<Id>; 2],
+    product: Option<Id>,
+    total: Option<Id>,
+    pair_mark: usize,
+    collection_limit: usize,
+}
+
+impl Operands for BoxedSumprod<'_> {
+    type Value = Id;
+    type Error = Error;
+
+    fn next(&mut self, side: Side) -> Result<Option<Id>> {
+        let index = match side {
+            Side::Left => 0,
+            Side::Right => 1,
+        };
+        let mark = self.ctx.heap.temporary_mark();
+        let item = self.ctx.next_item(self.iterators[index])?;
+        self.ctx.discard_temporaries(mark, item);
+        self.items[index] = item;
+        Ok(item)
+    }
+
+    fn number<'a>(&'a self, value: &'a Id) -> Number<'a> {
+        match self.ctx.heap.get(*value) {
+            Value::Int(n) => Number::Int(n),
+            Value::Float(x) => Number::Float(*x),
+            Value::Bool(b) => Number::Bool(*b),
+            _ => Number::Other,
+        }
+    }
+
+    fn integer(&mut self, value: std::os::raw::c_long) -> Id {
+        self.ctx.int(value.into())
+    }
+
+    fn float(&mut self, value: f64) -> Id {
+        self.ctx.alloc(Value::Float(value))
+    }
+
+    fn multiply(&mut self, left: &Id, right: &Id) -> Result<Id> {
+        let mark = self.ctx.heap.temporary_mark();
+        let term = self.ctx.binary("*", *left, *right)?;
+        self.ctx.discard_temporaries(mark, Some(term));
+        self.product = Some(term);
+        Ok(term)
+    }
+
+    fn add(&mut self, left: &Id, right: &Id) -> Result<Id> {
+        self.ctx.binary("+", *left, *right)
+    }
+
+    fn value_error(&self, message: &'static str) -> Error {
+        Error::new("ValueError", message)
+    }
+
+    fn end_pair(&mut self, total: &Id) {
+        let [left, right] = std::mem::take(&mut self.items);
+        let previous = self.total.replace(*total);
+        if let Some(product) = self.product.take() {
+            let owners = [previous, left, right, Some(product)];
+            release_sumprod_owners(self.ctx, self.pair_mark, owners, &Ok(*total));
+        } else {
+            // The fast lanes consumed exact scalars without observable destructors.
+            self.ctx.discard_temporaries(self.pair_mark, Some(*total));
+        }
+        self.ctx
+            .collect_streaming_garbage(&mut self.collection_limit);
+    }
+}
+
+fn sumprod(ctx: &mut Context, left: Id, right: Id) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    let left = ctx.iterator(left)?;
+    ctx.discard_temporaries(mark, Some(left));
+    let right_mark = ctx.heap.temporary_mark();
+    let right = match ctx.iterator(right) {
+        Ok(iterator) => iterator,
+        Err(error) => return ctx.release_with_result(mark, Err(error)),
+    };
+    ctx.discard_temporaries(right_mark, Some(right));
+    let mut operands = BoxedSumprod {
+        iterators: [left, right],
+        items: [None; 2],
+        product: None,
+        total: None,
+        pair_mark: ctx.heap.temporary_mark(),
+        collection_limit: ctx.heap.streaming_collection_limit(),
+        ctx,
+    };
+    let result = sumprod::reduce(&mut operands);
+    let [left_item, right_item] = operands.items;
+    let owners = [
+        Some(left),
+        Some(right),
+        operands.total,
+        left_item,
+        right_item,
+        operands.product,
+    ];
+    release_sumprod_owners(operands.ctx, mark, owners, &result);
+    result
 }
 
 fn nextafter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

@@ -2316,6 +2316,7 @@ impl IntrinsicModule {
             (Self::Math, "nextafter") => Intrinsic::ScopedObjectExport("math.nextafter"),
             (Self::Math, "pow") => Intrinsic::ScopedObjectExport("math.pow"),
             (Self::Math, "prod") => Intrinsic::ScopedObjectExport("math.prod"),
+            (Self::Math, "sumprod") => Intrinsic::ScopedObjectExport("math.sumprod"),
             (Self::Math, "remainder") => Intrinsic::ScopedObjectExport("math.remainder"),
             (Self::Math, "sin") => Intrinsic::ScopedObjectExport("math.sin"),
             (Self::Math, "sinh") => Intrinsic::ScopedObjectExport("math.sinh"),
