@@ -97,13 +97,19 @@ impl Batch<'_> {
     }
 
     fn read(&mut self, source: &str, base: i64, eof: bool) {
-        // Keep unmodified source for the records even when the C tokenizer
-        // would have inserted a newline after the last physical line.
-        let input: Cow<'_, str> = if source.ends_with('\n') {
-            Cow::Borrowed(source)
+        // Decoding already handled a bytes source's BOM. For public tokens a
+        // U+FEFF still in the callback text is a potential NAME character,
+        // even at the start of a batch where Ruff would skip it. A non-ASCII
+        // identifier letter of the same UTF-8 width preserves lexer offsets;
+        // token strings, lines and diagnostics still use the original source.
+        let mut input = if self.extra && source.contains('\u{feff}') {
+            Cow::Owned(source.replace('\u{feff}', "名"))
         } else {
-            Cow::Owned(format!("{source}\n"))
+            Cow::Borrowed(source)
         };
+        if !source.ends_with('\n') {
+            input.to_mut().push('\n');
+        }
         let mut lexer = lex(&input, Mode::Module);
         let mut line_start = Some(0);
         let mut brackets = Vec::new();

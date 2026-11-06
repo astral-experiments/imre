@@ -1,4 +1,4 @@
-from io import BytesIO
+from io import BytesIO, StringIO
 import token
 import tokenize
 
@@ -13,6 +13,11 @@ def current():
     source = br"f'\N{EXCLAMATION MARK}'" + b"\n"
     tokens = list(tokenize.tokenize(BytesIO(source).readline))
     assert tokenize.untokenize(tokens) == source
+
+    text = "\ufeffvalue = 1\n"
+    tokens = list(tokenize.generate_tokens(StringIO(text).readline))
+    assert (tokens[0].type, tokens[0].string, tokens[0].end) == (token.NAME, "\ufeffvalue", (1, 6))
+    assert tokenize.untokenize(tokens) == text
 
     invalid = BytesIO(b"# coding: no-such-encoding\n")
     try:
