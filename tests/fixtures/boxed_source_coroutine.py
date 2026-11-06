@@ -1,3 +1,4 @@
+import gc
 import types
 import weakref
 from inspect import getcoroutinelocals
@@ -200,6 +201,19 @@ async def outer():
     first = scope['first']()
     assert first.send(None) == 'paused'
     first.close()
+    assert events == ['finally']
+
+    events.clear()
+    pending = scope['first']()
+    assert pending.send(None) == 'paused'
+    frame = pending.cr_frame
+    reference = weakref.ref(pending)
+    del pending
+    gc.collect()
+    assert reference() is None
+    assert frame is not None and events == ['finally']
+    del frame
+    gc.collect()
     assert events == ['finally']
 
     outer = scope['outer']()
