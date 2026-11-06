@@ -26,6 +26,16 @@ def iter_child_nodes(node):
                     yield item
 
 
+def unparse(ast_obj):
+    global _Unparser
+    try:
+        unparser = _Unparser()
+    except NameError:
+        from _ast_unparse import Unparser as _Unparser
+        unparser = _Unparser()
+    return unparser.visit(ast_obj)
+
+
 class NodeVisitor(object):
     """
     A node visitor base class that walks the abstract syntax tree and calls a
