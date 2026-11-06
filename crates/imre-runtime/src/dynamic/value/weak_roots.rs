@@ -423,23 +423,51 @@ impl Heap {
 
     /// Check published operands in the caller frames and the surviving prefix of the active frame.
     fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
-        let mut frames = self.frames.iter().rev();
-        let current = frames
-            .next()
-            .into_iter()
-            .flat_map(|frame| frame.live.iter().take(retained_current.min(8)));
-        // Check the same maximum number of operands across sparse call stacks.
+        let Some(active) = self.frames.len().checked_sub(1) else {
+            return false;
+        };
+        // The operand and its children can change between releases.
+        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
+        if let Some((last_owner, frame, operand)) = cached.get()
+            && last_owner == owner
+            && (frame < active || operand < retained_current)
+            && let Some(&root) = self.frames.get(frame).and_then(|f| f.live.get(operand))
+            && self.short_path_keeps_owner(root, owner)
+        {
+            return true;
+        }
+
         const MAX_CALLER_OPERANDS: usize = 192;
-        let callers = frames
-            .take(MAX_CALLER_OPERANDS)
-            .flat_map(|frame| frame.live.iter().take(8))
-            .take(MAX_CALLER_OPERANDS);
-        let mut operands = current.chain(callers);
-        operands.clone().any(|&id| {
-            id == owner
-                || matches!(self.get(id), Value::LoopIterator { source, peeked }
+        let active_limit = self.frames[active].live.len().min(retained_current).min(8);
+        let mut operands = self
+            .frames
+            .iter()
+            .enumerate()
+            .rev()
+            .take(MAX_CALLER_OPERANDS + 1)
+            .flat_map(|(index, frame)| {
+                let limit = if index == active { active_limit } else { 8 };
+                frame
+                    .live
+                    .iter()
+                    .take(limit)
+                    .enumerate()
+                    .map(move |(slot, &root)| (index, slot, root))
+            })
+            .take(active_limit + MAX_CALLER_OPERANDS);
+        let found = operands
+            .clone()
+            .find(|&(_, _, root)| {
+                root == owner
+                    || matches!(self.get(root), Value::LoopIterator { source, peeked }
                 if *source == owner || *peeked == Some(owner))
-        }) || operands.any(|&root| self.short_path_keeps_owner(root, owner))
+            })
+            .or_else(|| operands.find(|&(_, _, root)| self.short_path_keeps_owner(root, owner)));
+        if let Some((frame, slot, _)) = found {
+            cached.set(Some((owner, frame, slot)));
+            return true;
+        }
+        false
     }
 
     /// A pending discard preserves the active frame's operands below its mark. It must also

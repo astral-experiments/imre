@@ -2,6 +2,39 @@ use super::super::{FrameOwner, NONE, Value};
 use crate::dynamic::{ffi, stdlib, weakref};
 
 #[test]
+fn cached_operand_rechecks_the_frame_and_its_current_edge() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let class = ctx.builtin("object");
+    let owner = ctx.instance(class, None);
+    let other = ctx.instance(class, None);
+    let iterator = ctx.alloc(Value::LoopIterator {
+        source: owner,
+        peeked: None,
+    });
+    let scope = ctx.scope("sample", None);
+    let heap = &mut ctx.heap;
+    heap.release_temporaries_since(0);
+    heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    heap.keep(iterator);
+    assert!(heap.operand_keeps_finalizer(owner, 1));
+    assert!(!heap.operand_keeps_finalizer(owner, 0));
+
+    heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    assert!(heap.operand_keeps_finalizer(owner, 0));
+    let Value::LoopIterator { source, .. } = heap.get_mut(iterator) else {
+        unreachable!()
+    };
+    *source = other;
+    assert!(!heap.operand_keeps_finalizer(owner, 0));
+    assert!(heap.operand_keeps_finalizer(other, 0));
+
+    heap.leave(NONE, false);
+    assert!(!heap.operand_keeps_finalizer(other, 0));
+    heap.leave(NONE, false);
+    assert!(!heap.operand_keeps_finalizer(other, usize::MAX));
+}
+
+#[test]
 fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let class = ctx.builtin("object");
