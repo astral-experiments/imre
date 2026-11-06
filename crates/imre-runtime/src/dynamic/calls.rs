@@ -3402,6 +3402,9 @@ impl Context {
                 }
             }
             Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
+            Value::Coroutine { frame, .. } if matches!(name, "__name__" | "__qualname__") => {
+                return self.default_get_attr(frame, name);
+            }
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
                 return Ok(self.readonly_member("coroutine", "cr_origin"));
             }
@@ -5310,9 +5313,9 @@ impl Context {
             return result;
         }
         if matches!(name, "__name__" | "__qualname__")
-            && matches!(self.heap.get(obj), Value::Generator { .. })
+            && let Some(frame) = self.generator_name_frame(obj)
         {
-            return self.set_generator_name(obj, name, NONE);
+            return self.set_generator_name(frame, name, NONE);
         }
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
@@ -6264,9 +6267,9 @@ impl Context {
             return result;
         }
         if matches!(name, "__name__" | "__qualname__")
-            && matches!(self.heap.get(obj), Value::Generator { .. })
+            && let Some(frame) = self.generator_name_frame(obj)
         {
-            return self.set_generator_name(obj, name, value);
+            return self.set_generator_name(frame, name, value);
         }
         if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
             return result;
