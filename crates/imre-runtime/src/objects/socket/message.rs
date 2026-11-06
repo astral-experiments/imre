@@ -225,8 +225,6 @@ pub(crate) unsafe fn send(
     msg.msg_control = control.data();
     msg.msg_controllen = control.len as _;
     let raw = fd(socket);
-    #[cfg(not(target_vendor = "apple"))]
-    let flags = flags | libc::MSG_NOSIGNAL;
     socket_call(raw, libc::POLLOUT, deadline(socket), || {
         // SAFETY: control, address and all caller-owned iovec ranges live through retries.
         usize::try_from(unsafe { libc::sendmsg(raw, &msg, flags) })

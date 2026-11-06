@@ -71,6 +71,30 @@ check_vector_release(False)
 check_vector_release(True)
 
 
+# Linux sendmsg uses the caller's flags and current SIGPIPE disposition.
+if hasattr(socket, "MSG_NOSIGNAL"):
+    import signal
+    import sys
+
+    if sys.platform == "linux":
+        delivered = []
+        previous = signal.signal(signal.SIGPIPE, lambda signum, frame: delivered.append(signum))
+        try:
+            left, right = socketpair()
+            right.close()
+            with left:
+                for flags in (socket.MSG_NOSIGNAL, 0):
+                    try:
+                        left.sendmsg([b"x"], [], flags)
+                    except BrokenPipeError as exc:
+                        assert exc.errno == errno.EPIPE
+                    else:
+                        raise AssertionError("write to closed socketpair")
+            assert delivered == [signal.SIGPIPE]
+        finally:
+            signal.signal(signal.SIGPIPE, previous)
+
+
 # Transfer two data ranges and retain the received file after the sender closes its copy.
 left, right = socketpair()
 with left, right:
