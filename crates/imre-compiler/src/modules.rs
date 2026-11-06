@@ -1507,6 +1507,9 @@ impl IntrinsicModule {
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
+            (Self::Ast, "iter_child_nodes") => {
+                Intrinsic::ObjectRuntimeExport("ast.iter_child_nodes")
+            }
             (Self::Ast, "NodeVisitor") => Intrinsic::ObjectRuntimeExport("ast.NodeVisitor"),
             (Self::Ast, "NodeTransformer") => Intrinsic::ObjectRuntimeExport("ast.NodeTransformer"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
