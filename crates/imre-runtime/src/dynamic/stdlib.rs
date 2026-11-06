@@ -3232,7 +3232,9 @@ pub(super) fn call(
         }
         "sysconfig.get_path_names" => tuple_text(ctx, system::PATH_NAMES),
         "sysconfig._getuserbase" => match system::InterpreterLayout::user_base() {
-            Some(base) => path_text(ctx, &base)?,
+            Some(base) => {
+                ctx.text_codepoints(system::fsdecode(base.as_os_str().as_encoded_bytes()).collect())
+            }
             None => NONE,
         },
         "sysconfig.get_platform" => ctx.text(system::sysconfig_platform().map_err(os_error)?),

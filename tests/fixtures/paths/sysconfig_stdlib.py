@@ -26,6 +26,7 @@ assert paths["scripts"] == sysconfig.get_path("scripts", vars=overrides)
 assert paths["data"] == "/tmp/staging"
 assert paths["platlib"].startswith("/tmp/platform/")
 assert overrides["base"] == "/tmp/install/../staging" and "prefix" in overrides
+assert sysconfig.get_path("data", vars={1: "unused"}) == sysconfig.get_path("data")
 assert sysconfig.get_path("scripts", "posix_user", {"userbase": "/tmp/user"}) == "/tmp/user/bin"
 raw = {}
 assert sysconfig.get_path("scripts", "posix_user", raw, False) == "{userbase}/bin"

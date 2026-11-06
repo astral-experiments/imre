@@ -75,7 +75,9 @@ def get_paths(scheme=get_default_scheme(), vars=None, expand=True):
     for key, value in get_config_vars().items():
         if key not in keys:
             vars[key] = value
-    return {name: os.path.normpath(_subst_vars(os.path.expanduser(template), vars))
+    # Only string keys can name fields in an installation scheme.
+    fields = {key: vars[key] for key in vars.keys() if isinstance(key, str)}
+    return {name: os.path.normpath(_subst_vars(os.path.expanduser(template), fields))
             for name, template in _INSTALL_SCHEMES[scheme].items()}
 
 
