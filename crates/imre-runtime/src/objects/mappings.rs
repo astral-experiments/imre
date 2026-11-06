@@ -2476,6 +2476,62 @@ pub unsafe extern "C" fn imre_dict_get(value: *const Object, key: usize) -> usiz
     }
 }
 
+/// Read a numeric subscription and retain its dense position across the right side.
+///
+/// # Safety
+/// The dictionary and key are rooted, the key type is exactly string or integer,
+/// and `position` points to one writable native word.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_get_position(
+    value: *const Object,
+    key: usize,
+    position: *mut usize,
+) -> usize {
+    /// Probe once and return both the dense position and the borrowed value word.
+    unsafe fn find<K: ScalarKey + InfallibleKey>(
+        table: &Table<K, usize>,
+        key: usize,
+    ) -> Option<(usize, usize)> {
+        // SAFETY: the caller roots a key with this table's exact representation.
+        let key = unsafe { K::borrow(key) };
+        // Use the same identity shortcut and equality as ordinary subscription.
+        let Ok(position) = table.key_position(key.table_hash(), &key) else {
+            unreachable!("exact string and integer keys have infallible equality")
+        };
+        let index = position?;
+        Some((index, table.entries[index].as_ref().unwrap().value))
+    }
+
+    // SAFETY: generated code supplies a separate word for this augmented assignment.
+    let position = unsafe { &mut *position };
+    *position = usize::MAX;
+    // SAFETY: the lookup cannot reenter and acquires the value before releasing storage.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let mapping = storage.dictionary();
+            let found = match &mapping.tables {
+                Tables::Str(table) => find(table, key),
+                Tables::Int(table) => find(table, key),
+                _ => unreachable!("augmented dictionary key kind"),
+            };
+            found
+                .map(|(index, word)| {
+                    *position = index;
+                    mapping.value_kind.acquire(word)
+                })
+                .ok_or(mapping.missing)
+        })
+    };
+    match result {
+        Ok(owned) => owned.into_word(),
+        Err(Missing::Zero) => Int::small(0).unwrap().0,
+        // SAFETY: the key stays rooted while building the ordinary subscription error.
+        Err(Missing::Raise | Missing::NoFactory) => unsafe { missing_key(value, key) }.returning(0),
+        // Preserve factory insertion and its error behavior on a miss.
+        Err(Missing::List(_)) => unsafe { imre_dict_get(value, key) },
+    }
+}
+
 /// Subscribe to an enum-keyed dictionary with an equal Python integer. KeyError
 /// retains the original integer even when its enum member exists outside this map.
 ///
@@ -2723,6 +2779,55 @@ pub unsafe extern "C" fn imre_dict_setdefault(
 pub unsafe extern "C" fn imre_dict_set(value: *const Object, key: usize, word: usize) {
     // SAFETY: generated arguments obey the native insertion contract.
     crate::finish(unsafe { dict_set(value, key, word) }, ());
+}
+
+/// Replace an entry found by the subscription if it still has the same key.
+///
+/// # Safety
+/// The dictionary has exact string or integer keys. All three words remain
+/// rooted. The right side may have removed, moved or replaced the original entry.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_set_position(
+    value: *const Object,
+    key: usize,
+    position: usize,
+    word: usize,
+) {
+    /// Revalidate the index by key, including an equal key at another address.
+    unsafe fn replace<K: ScalarKey + InfallibleKey>(
+        table: &mut Table<K, usize>,
+        key: usize,
+        position: usize,
+        word: usize,
+    ) -> Option<usize> {
+        let entry = table.entries.get_mut(position)?.as_mut()?;
+        // SAFETY: the incoming word stays rooted and has this exact key representation.
+        let key = unsafe { K::borrow(key) };
+        entry
+            .key
+            .same_key(&key)
+            .then(|| std::mem::replace(&mut entry.value, word))
+    }
+
+    // SAFETY: the table roots each resident key and transfers the old value
+    // out of the storage borrow before its owner can run a destructor.
+    let old = unsafe {
+        object(value).0.with_mut(|storage| {
+            let mapping = storage.dictionary_mut();
+            let old = match &mut mapping.tables {
+                Tables::Str(table) => replace(table, key, position, word),
+                Tables::Int(table) => replace(table, key, position, word),
+                _ => unreachable!("augmented dictionary key kind"),
+            }?;
+            mapping.value_kind.acquire(word).into_word();
+            mapping.update_ascii_int(key, word);
+            Some(OwnedWord::from_owned(old, mapping.value_kind))
+        })
+    };
+    if old.is_none() {
+        // SAFETY: a missing Counter entry or a mutation uses ordinary assignment.
+        unsafe { imre_dict_set(value, key, word) };
+    }
 }
 
 /// # Safety
