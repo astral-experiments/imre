@@ -1879,7 +1879,7 @@ def main() -> None:
         if sys.platform in ("linux", "darwin"):
             constants = ["SO_ERROR"]
             if sys.platform == "linux":
-                constants.extend(["SOCK_NONBLOCK", "SOCK_CLOEXEC"])
+                constants.extend(["SOCK_NONBLOCK", "SOCK_CLOEXEC", "TCP_QUICKACK"])
             for module in ("socket", "_socket"):
                 case = temporary / f"{module}_constants_keep_typed_calls"
                 write_files(case, {"main.py": (
