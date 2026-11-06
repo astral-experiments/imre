@@ -1,5 +1,5 @@
 import ast
-from ast import NodeTransformer, NodeVisitor, iter_fields
+from ast import NodeTransformer, NodeVisitor, iter_child_nodes, iter_fields
 
 
 def current():
@@ -55,3 +55,13 @@ def current():
     assert fields.throw(AttributeError("missing")) == ("b", 2)
     fields.close()
     assert next(fields, None) is None
+
+    assert list(ast.iter_child_nodes(tree)) == tree.body
+    node.a = tree.body[0]
+    children = iter_child_nodes(node)
+    assert next(children) is node.a
+    node.b = [1, tree.body[2], "text"]
+    assert list(children) == [tree.body[2]]
+    node.a = (tree.body[0],)
+    del node.b
+    assert list(iter_child_nodes(node)) == []
