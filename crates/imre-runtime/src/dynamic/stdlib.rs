@@ -860,9 +860,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
-            "extension_start" | "normalized_parts" | "relative_parts" | "realpath_parts"
-            | "realpath_parent" | "realpath_kind" | "realpath_readlink" | "realpath_notdir"
-            | "realpath_loop",
+            "extension_start" | "string_args" | "normalized_parts" | "relative_parts"
+            | "realpath_parts" | "realpath_parent" | "realpath_kind" | "realpath_readlink"
+            | "realpath_notdir" | "realpath_loop",
         )
         | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
