@@ -16,6 +16,12 @@ def current():
     assert total == Decimal("3.5") and total > left
     assert Decimal(value=left) is left
 
+    assert format(left, "f") == "1.20"
+    assert format(Decimal("-0E+8"), "f") == "-0"
+    assert format(Decimal("-0.000"), "f") == "-0.000"
+    assert format(Decimal("1.23E+4"), "f") == "12300"
+    assert format(Decimal("2.70E-8"), "f") == "0.0000000270"
+
     with decimal.localcontext(prec=2) as ctx:
         assert Decimal(1) / Decimal(3) == Decimal("0.33")
         assert ctx.flags[decimal.Inexact]
