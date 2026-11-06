@@ -3485,6 +3485,21 @@ def report(text):
         compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--runtime-imports", "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
         compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
+        # An unused generic in the entry must preserve first-party argument diagnostics.
+        generic_scope = root / "generic-scope-contract"
+        generic_scope.mkdir()
+        (generic_scope / "scores.py").write_text(
+            "def take(n: int) -> int:\n    return 7\n\nscore = take('x')\n"
+        )
+        caller = generic_scope / "entry.py"
+        caller.write_text(
+            "import sys\nfrom scores import score\nprint(score)\n"
+            "if False:\n    def unused[T](): pass\n"
+        )
+        rejected = run(imre, "check", caller)
+        assert rejected.returncode == 1, rejected
+        assert b"scores.py:4:14: Imre: expected int, got str" in rejected.stderr, rejected
+
         for name in ("module_generic_function.py", "postponed_generic_method.py"):
             generic = fixtures / name
             compare("-IB", generic, native_args=("run", generic, "--quiet"))
