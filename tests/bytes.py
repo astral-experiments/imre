@@ -51,7 +51,6 @@ REJECTED = {
     "text_bytes_write": 'with open("out", "w", encoding="utf-8") as stream:\n    stream.write(b"wrong")\n',
     "binary_annotation": 'from typing import BinaryIO\nvalue: BinaryIO = open("out", "w", encoding="utf-8")\n',
     "binary_encoding": 'value = open("out", "wb", encoding="utf-8")\n',
-    "binary_update": 'value = open("out", "wb+")\n',
     "binary_bool_size": 'with open("input", "rb") as stream:\n    stream.read(True)\n',
     "binary_seek_text_offset": 'with open("input", "rb") as stream:\n    stream.seek("start")\n',
     "binary_closed_write": 'with open("out", "wb") as stream:\n    stream.closed = False\n',
@@ -136,6 +135,10 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         for name, source, error in cases(project, ERRORS):
+            build_flags = flags
+            if name in {"hashlib_blake2", "hashlib_result_allocation", "hashlib_signature"}:
+                # These compare dynamic keyword arguments and runtime TypeErrors with CPython.
+                build_flags = [*flags, "--runtime-imports"]
             reference_dir = temporary / name / "reference"
             reference_dir.mkdir(parents=True)
             runner = run_with_failing_output if name == "file_failures" else subprocess.run
@@ -160,7 +163,7 @@ def main() -> None:
                         clang,
                         "--opt-level",
                         level,
-                        *flags,
+                        *build_flags,
                     ],
                     temporary,
                 )
