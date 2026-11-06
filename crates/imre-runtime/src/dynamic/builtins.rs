@@ -12,7 +12,7 @@ pub(super) mod dir;
 mod exceptions;
 mod float;
 mod round;
-pub(super) use float::{from_numeric, from_numeric_slots};
+pub(super) use float::{from_numeric, from_numeric_slots, round_float_to_integer};
 mod integer;
 mod power;
 mod print;
@@ -613,6 +613,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
         ],
         "float" => &[
             "__abs__",
+            "__ceil__",
             "__eq__",
             "__floor__",
             "__float__",
@@ -2038,13 +2039,12 @@ pub(super) fn call(
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 integer::truncate_real(ctx, receiver)
             }
-            "float" if method == "__floor__" => {
+            "float" if matches!(method, "__ceil__" | "__floor__") => {
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
                     unreachable!("validated float receiver")
                 };
-                let integer = crate::floats::float_to_integer(value.floor())?;
-                Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
+                round_float_to_integer(ctx, value, method)
             }
             "float" if method == "hex" => float::hex(ctx, args, kwargs),
             "float" if method == "is_integer" => {

@@ -267,6 +267,7 @@ impl BuiltinDescriptor {
                         "__copy__"
                             | "__deepcopy__"
                             | "__reversed__"
+                            | "__ceil__"
                             | "__floor__"
                             | "__round__"
                             | "__trunc__"
@@ -930,8 +931,9 @@ impl BuiltinDescriptor {
                     ("__round__", _) => "($self, ndigits=None, /)",
                     ("__trunc__", "__doc__") if self.owner == "int" => "Truncating an Integral returns itself.",
                     ("__trunc__", "__doc__") => "Return the Integral closest to x between 0 and x.",
+                    ("__ceil__", "__doc__") => "Return the ceiling as an Integral.",
                     ("__floor__", "__doc__") => "Return the floor as an Integral.",
-                    ("__floor__" | "__trunc__", _) => "($self, /)",
+                    ("__ceil__" | "__floor__" | "__trunc__", _) => "($self, /)",
                     ("as_integer_ratio", "__doc__") => {
                         "Return a pair of integers, whose ratio is exactly equal to the original float.\n\nThe ratio is in lowest terms and has a positive denominator.  Raise\nOverflowError on infinities and a ValueError on NaNs.\n\n>>> (10.0).as_integer_ratio()\n(10, 1)\n>>> (0.0).as_integer_ratio()\n(0, 1)\n>>> (-.25).as_integer_ratio()\n(-1, 4)"
                     }
