@@ -1465,7 +1465,6 @@ pub(super) enum Value {
     ProcessPreparation(std::rc::Rc<std::cell::RefCell<crate::objects::BoxedPreparation>>),
     ProcessHandle {
         child: Option<crate::objects::BoxedPopen>,
-        reported: bool,
     },
     File(BoxedFile<crate::Shared<super::stdlib::BinaryFile>>),
     TextFile(BoxedTextFile),

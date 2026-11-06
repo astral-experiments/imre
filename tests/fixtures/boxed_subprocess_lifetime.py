@@ -31,6 +31,33 @@ def current():
         except ChildProcessError:
             pass
 
+    # An event loop may reap an abandoned process before the next launch.
+    child = subprocess.Popen(["/bin/cat"], stdin=subprocess.PIPE)
+    writer = child.stdin
+    pid = child.pid
+
+    def instrumented_poll():
+        raise AssertionError("cleanup called public poll()")
+
+    child.poll = instrumented_poll
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+            child = None
+        owner = caught[0].source
+        assert subprocess.call(["/bin/true"]) == 0
+        assert owner in subprocess._active and owner.returncode is None
+        writer.close()
+        assert os.waitpid(pid, 0) == (pid, 0)
+        assert subprocess.call(["/bin/true"]) == 0
+        assert owner not in subprocess._active and owner.returncode == sys.maxsize
+    finally:
+        writer.close()
+        try:
+            os.waitpid(pid, 0)
+        except ChildProcessError:
+            pass
+
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", ResourceWarning)
         child = subprocess.Popen(["/bin/sh", "-c", "exit 7"])
