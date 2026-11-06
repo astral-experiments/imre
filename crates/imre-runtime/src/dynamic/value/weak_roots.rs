@@ -460,7 +460,7 @@ impl Heap {
             .find(|&(_, _, root)| {
                 root == owner
                     || matches!(self.get(root), Value::LoopIterator { source, peeked }
-                if *source == owner || *peeked == Some(owner))
+                if *peeked == Some(owner) || self.short_path_keeps_owner(*source, owner))
             })
             .or_else(|| operands.find(|&(_, _, root)| self.short_path_keeps_owner(root, owner)));
         if let Some((frame, slot, _)) = found {
