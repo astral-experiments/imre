@@ -313,6 +313,44 @@ impl Context {
         }
     }
 
+    /// Chain an explicitly raised instance to the exception currently being handled.
+    pub(super) fn chain_raised_instance(&mut self, error: &mut Error) {
+        let active = self.heap.active_exception();
+        if active == NONE {
+            return;
+        }
+        let raised = error
+            .tracing()
+            .instance
+            .expect("explicitly raised exception instance");
+        if active == raised {
+            return;
+        }
+        let mut current = active;
+        let mut checkpoint = active;
+        for distance in 1usize.. {
+            let Value::Raised(previous) = self.heap.get_mut(current) else {
+                unreachable!("exception context")
+            };
+            if previous.context == raised {
+                previous.context = NONE;
+                break;
+            }
+            current = previous.context;
+            if current == NONE || current == checkpoint {
+                break;
+            }
+            // Detect a pre-existing cycle without modifying it or allocating a visited set.
+            if distance.is_power_of_two() {
+                checkpoint = current;
+            }
+        }
+        if error.context != NONE && error.context != active {
+            self.heap.collect_next_statement = true;
+        }
+        error.context = active;
+    }
+
     /// Snapshot active Python code without materializing Python frame objects.
     pub(super) fn publish_fault_frames(&self) {
         self.heap
