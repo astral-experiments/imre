@@ -80,12 +80,28 @@ pub(crate) fn length(text: &Str) -> usize {
 
 pub(crate) fn character(text: &Str, index: isize) -> Option<char> {
     if index < 0 {
-        return text.chars().rev().nth(index.unsigned_abs() - 1);
+        return character_from_end(text, index.unsigned_abs());
     }
     cached(text, |c| {
         text[c.seek(text, index as usize)?..].chars().next()
     })
     .unwrap_or_else(|| text.chars().nth(index as usize))
+}
+
+/// Read a negative index using at most four bytes per scalar counted from the end.
+pub(crate) fn character_from_end(text: &str, distance: usize) -> Option<char> {
+    // A few reverse steps cost less than counting and indexing a suffix.
+    if distance <= 8 {
+        return text.chars().nth_back(distance.checked_sub(1)?);
+    }
+    if distance > text.len() {
+        return None;
+    }
+    // The last `distance` scalars fit in this suffix even when they occupy four bytes each.
+    let start = text.len().saturating_sub(distance.saturating_mul(4));
+    let suffix = &text[text.ceil_char_boundary(start)..];
+    let index = suffix.chars().count().checked_sub(distance)?;
+    suffix.chars().nth(index)
 }
 
 /// A nonzero forward search seeds one cursor. Reads on other strings do not displace it.
@@ -119,6 +135,20 @@ pub(crate) fn find(text: &StrOwner, needle: &str, start: usize) -> Option<usize>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn negative_indices_cover_every_utf8_boundary() {
+        for unit in ["", "abc", "é狐🦊xy", "🦀🦀🦀🦀", "a\0é\u{301}界🦀"] {
+            let text = unit.repeat(13);
+            for distance in 0..=text.len() + 1 {
+                let expected = distance
+                    .checked_sub(1)
+                    .and_then(|n| text.chars().nth_back(n));
+                assert_eq!(character_from_end(&text, distance), expected);
+            }
+            assert_eq!(character_from_end(&text, usize::MAX), None);
+        }
+    }
 
     #[test]
     fn searches_and_indices_can_move_in_either_direction() {

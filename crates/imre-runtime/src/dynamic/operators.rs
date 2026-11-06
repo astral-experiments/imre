@@ -3173,13 +3173,14 @@ impl Context {
                 self.text(character.to_string())
             }
             Value::Str(s) => {
-                let index = if (0..s.chars().size_hint().0 as i128).contains(&offset) {
-                    offset as usize
+                let index = isize::try_from(offset).map_err(|_| bounds_error())?;
+                let character = if index < 0 {
+                    crate::string_cursor::character_from_end(s, index.unsigned_abs())
                 } else {
-                    position(s.chars().count())?
-                };
-                let c = s.chars().nth(index).unwrap();
-                self.text(c.to_string())
+                    s.chars().nth(index as usize)
+                }
+                .ok_or_else(bounds_error)?;
+                self.text(character.to_string())
             }
             Value::Array(array) => {
                 let item = array.at(position(array.len())?)?;
