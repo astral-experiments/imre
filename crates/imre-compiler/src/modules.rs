@@ -2289,6 +2289,7 @@ impl IntrinsicModule {
             (Self::Math, "cosh") => Intrinsic::ScopedObjectExport("math.cosh"),
             (Self::Math, "erfc") => Intrinsic::MathErfc,
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
+            (Self::Math, "fabs") => Intrinsic::ScopedObjectExport("math.fabs"),
             (Self::Math, "fma") => Intrinsic::ScopedObjectExport("math.fma"),
             (Self::Math, "frexp") => Intrinsic::ScopedObjectExport("math.frexp"),
             (Self::Math, "fsum") => Intrinsic::ScopedObjectExport("math.fsum"),

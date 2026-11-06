@@ -9890,6 +9890,20 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
             ))) => return self.base85_encode(call, name),
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport("math.fabs")))
+                if call.arguments.keywords.is_empty()
+                    && let [arg] = call.arguments.args.as_ref()
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "math",
+                        "fabs",
+                    ) =>
+            {
+                let value = self.expr(arg)?;
+                return stdlib::unary_float_builtin(Builtin::Abs, value)
+                    .ok_or_else(|| self.scoped_builtin_error("math.fabs", call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.log2")))
                 if call.arguments.keywords.is_empty()
                     && let [arg] = call.arguments.args.as_ref()
@@ -10221,20 +10235,12 @@ impl<'a> Checker<'a> {
                     ));
                 };
                 let value = self.expr(arg)?;
-                if !matches!(value.ty, Type::Float | Type::Int | Type::Bool) {
-                    return Err(error(
+                return stdlib::unary_float_builtin(builtin, value).ok_or_else(|| {
+                    error(
                         self.source,
                         arg,
                         &format!("{name} requires an integer or float"),
-                    ));
-                }
-                let number = Expr {
-                    ty: Type::Float,
-                    kind: ExprKind::Builtin(Builtin::Float, vec![value]),
-                };
-                return Ok(Expr {
-                    ty: Type::Float,
-                    kind: ExprKind::Builtin(builtin, vec![number]),
+                    )
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
