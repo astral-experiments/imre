@@ -2558,6 +2558,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_methodcaller.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
         static_fixture = Path(__file__).with_name("fixtures") / "boxed_getattr_static.py"
         compare("-IB", static_fixture, native_args=("run", static_fixture, "--runtime-imports", "--quiet"))

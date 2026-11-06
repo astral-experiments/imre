@@ -2608,6 +2608,12 @@ pub(super) fn call(
         if name == "itemgetter" {
             return operator::itemgetter(ctx, args, kwargs);
         }
+        if name == "methodcaller" {
+            return operator::methodcaller(ctx, args, kwargs);
+        }
+        if name == "methodcaller.__reduce__" {
+            return operator::reduce_methodcaller(ctx, args, kwargs);
+        }
         if name == "itemgetter.__reduce__" {
             return operator::reduce_itemgetter(ctx, args, kwargs);
         }

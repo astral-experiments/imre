@@ -57,6 +57,14 @@ REJECTED = {
     "unused_strptime_preserves_typed_call": ({
         "main.py": "from time import strptime\n" + HELPER + "f('wrong')\n",
     }, "expected int, got str"),
+    "methodcaller_preserves_typed_call": ({
+        "main.py": (
+            "from operator import methodcaller\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(methodcaller('upper')('ok'))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unused_is_tracked_preserves_typed_call": ({
         "main.py": "from gc import is_tracked\n" + HELPER + "f('wrong')\n",
     }, "expected int, got str"),
@@ -720,6 +728,12 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "methodcaller_module_alias": {
+        "main.py": "import operator as op\nprint(op.methodcaller('upper')('ok'))\n",
+    },
+    "methodcaller_from_alias": {
+        "main.py": "from operator import methodcaller as call\nprint(call('replace', 'a', 'b')('abc'))\n",
+    },
     "doctest_qualified_exception": {
         "events_module.py": (
             '"""\n>>> raise Problem("sample event")\nTraceback (most recent call last):\n'

@@ -2328,6 +2328,9 @@ impl IntrinsicModule {
             }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
+            (Self::Operator | Self::OperatorNative, "methodcaller") => {
+                Intrinsic::ScopedObjectExport("operator.methodcaller")
+            }
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Gc, "is_tracked") => Intrinsic::ScopedObjectExport("gc.is_tracked"),
             (Self::Math, "acos") => Intrinsic::MathAcos,

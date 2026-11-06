@@ -931,6 +931,7 @@ impl Context {
                 | Value::FractionHash(_)
                 | Value::AttrGetter(_)
                 | Value::ItemGetter(_)
+                | Value::MethodCaller { .. }
                 | Value::StaticMethod { .. }
                 | Value::KeyWrapper { .. }
                 | Value::Cached { .. }
@@ -1619,6 +1620,7 @@ impl Context {
                             | "operator.attrgetter"
                             | super::namedtuple::GETTER
                             | "operator.itemgetter"
+                            | "operator.methodcaller"
                             | "datetime.date"
                             | "datetime.datetime"
                             | "datetime.time"
@@ -1850,6 +1852,7 @@ impl Context {
                 Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. },
             )
             | ("operator.itemgetter", Value::ItemGetter(_))
+            | ("operator.methodcaller", Value::MethodCaller { .. })
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
             | (super::deque::ITERATOR, Value::DequeIterator { reverse: false, .. })
@@ -4895,8 +4898,13 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("{}.{name}", super::namedtuple::GETTER)));
             }
-            Value::Native(ref class) if class == "operator.itemgetter" && name == "__reduce__" => {
-                return Ok(self.builtin("operator.itemgetter.__reduce__"));
+            Value::Native(ref class)
+                if matches!(
+                    class.as_str(),
+                    "operator.itemgetter" | "operator.methodcaller"
+                ) && name == "__reduce__" =>
+            {
+                return Ok(self.builtin(&format!("{class}.__reduce__")));
             }
             Value::Native(ref class)
                 if (class == "range" && super::range::METHODS.contains(&name))
@@ -7721,6 +7729,7 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
+            Value::MethodCaller { .. } => self.apply_methodcaller(callable, &args, &kwargs),
             Value::Cached {
                 function,
                 table,
