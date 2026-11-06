@@ -1,3 +1,34 @@
+class DocTestCase(_DocTestCase):
+    pass
+
+
+def _call_hook(case: _DocTestCase, test: DocTest, setup: bool) -> None:
+    pass
+
+
+# Checked debug exceptions retain their message. Their native records do not
+# expose a Python traceback or carry the DocTest and Example in exception args.
+def _set_exception_info(failure: UnexpectedException, test: DocTest, example: Example,
+                        exc_info: object) -> None:
+    pass
+
+
+def _set_failure_output(failure: DocTestFailure, test: DocTest, example: Example, got: str,
+                        exc_info: object) -> None:
+    pass
+
+
+def _execute_case(case: _DocTestCase, debug: bool) -> None:
+    test = case._dt_test
+    if not debug:
+        for example in test.examples:
+            if not _optionflags(example) & SKIP:
+                break
+        else:
+            raise unittest.SkipTest("all examples were skipped")
+    execute(test, debug)
+
+
 def _checked_example(test: DocTest, index: int, source: str) -> Example:
     example = test.examples[index]
     if example.source != source:
@@ -23,18 +54,20 @@ class _DocTestSuite:
 
 
 class _ModuleDocs:
-    _docs: list[tuple[str, str]]
+    _filename: str | None
+    _docs: list[tuple[str, str, int | None]]
 
-    def __init__(self, docs: list[tuple[str, str]]) -> None:
+    def __init__(self, filename: str | None, docs: list[tuple[str, str, int | None]]) -> None:
+        self._filename = filename
         self._docs = docs
 
 
 _modules: dict[str, _ModuleDocs] = {}
 
 
-def _module_docs(name: str, docs: list[tuple[str, str]]) -> _ModuleDocs:
+def _module_docs(name: str, filename: str | None, docs: list[tuple[str, str, int | None]]) -> _ModuleDocs:
     if name not in _modules:
-        _modules[name] = _ModuleDocs(docs)
+        _modules[name] = _ModuleDocs(filename, docs)
     return _modules[name]
 
 
@@ -43,8 +76,8 @@ def DocTestSuite(module: _ModuleDocs) -> _DocTestSuite:
     # Parsing and building cases happen at the point of the Python call.
     suite = _DocTestSuite()
     parser = DocTestParser()
-    for name, docstring in module._docs:
-        examples = parser.get_examples(docstring, name)
-        if examples:
-            suite._tests.append(DocTestCase(DocTest(name, docstring, examples)))
+    for name, docstring, lineno in module._docs:
+        test = parser.get_doctest(docstring, {}, name, module._filename, lineno)
+        if test.examples:
+            suite._tests.append(DocTestCase(test))
     return suite

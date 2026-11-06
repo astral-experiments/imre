@@ -7,6 +7,17 @@ def ascii_output(text):
     return text.encode("ascii", "backslashreplace").decode("ascii")
 
 
+def exception_name(exc):
+    cls = type(exc)
+    name = cls.__qualname__
+    module = cls.__module__
+    if module not in ("__main__", "builtins"):
+        if not isinstance(module, str):
+            module = "<unknown>"
+        name = module + "." + name
+    return name
+
+
 def execute(test, debug, optionflags=0, checker=None):
     from doctest import (_check_output, _exception_line, _optionflags, OutputChecker,
                          FAIL_FAST, REPORT_ONLY_FIRST_FAILURE, SKIP)
@@ -33,21 +44,23 @@ def execute(test, debug, optionflags=0, checker=None):
             attempted += 1
             filename = f"<doctest {test.name}[{index}]>"
             error = ""
+            exc_info = None
             try:
                 exec(compile(example.source, filename, "single"), test.globs)
             except KeyboardInterrupt:
                 raise
             except BaseException as exc:
+                if debug:
+                    tb = exc.__traceback__
+                    exc_info = (type(exc), exc, tb.tb_next if tb is not None else None)
+                # Formatting can write to stdout. Capture it with the raising prompt.
                 error = _exception_line(exc)
             got = stream.getvalue()
             stream.seek(0)
             stream.truncate(0)
             if got and not got.endswith("\n"):
                 got += "\n"
-            location = f"{test.name}, line {example.lineno + 1}"
-            if getattr(test, "filename", None) is not None:
-                location = f'File "{test.filename}", line {example.lineno + 1}, in {test.name}'
-            if not _check_output(location, example, got, error, failures, debug, checker, flags, quiet):
+            if not _check_output(test, example, got, error, failures, debug, checker, flags, quiet, exc_info):
                 failure_count += 1
             if failure_count and flags & FAIL_FAST:
                 break

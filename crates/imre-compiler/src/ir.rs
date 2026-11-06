@@ -1769,6 +1769,7 @@ pub(crate) enum Builtin {
     SetIter,
     FreezeStrings,
     ExceptionMessage,
+    ExceptionName,
     JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,

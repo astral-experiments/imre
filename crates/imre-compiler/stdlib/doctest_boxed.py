@@ -21,7 +21,7 @@ def _boxed_docs(obj, name, owner, found, seen):
     seen.add(key)
     doc = obj if isinstance(obj, str) else getattr(obj, "__doc__", None)
     if isinstance(doc, str) and doc:
-        found[name] = doc
+        found[name] = (obj, doc)
     is_module = isinstance(obj, types.ModuleType)
     if not is_module and not isinstance(obj, type):
         return
@@ -43,12 +43,42 @@ def _boxed_docs(obj, name, owner, found, seen):
             _boxed_docs(item, name + ".__test__." + attr, owner, found, seen)
 
 
+def _docstring_lineno(obj, lines, filename):
+    if isinstance(obj, types.ModuleType):
+        start = 0
+    elif isinstance(obj, type):
+        if not lines:
+            return None
+        first = vars(obj).get("__firstlineno__")
+        if first is None:
+            return None
+        start = first - 1
+    else:
+        if isinstance(obj, property):
+            obj = obj.fget
+        if hasattr(obj, "__wrapped__"):
+            from inspect import unwrap
+            obj = unwrap(obj)
+        code = getattr(obj, "__code__", None)
+        if code is None or (lines and code.co_filename != filename):
+            return None
+        start = code.co_firstlineno - 1
+    if not lines:
+        return start + 1
+    # DocTestFinder counts from the opening quote, including on a definition line.
+    import re
+    for index in range(start, len(lines)):
+        if re.match(r"(^|.*:)\s*\w*['\"]", lines[index]):
+            return index
+    return None
+
+
 class _DocTestSuite(unittest.TestSuite):
     def _removeTestAtIndex(self, index):
         pass
 
 
-def DocTestSuite(module=None, globs=None, extraglobs=None):
+def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, setUp=None, tearDown=None, checker=None):
     if module is None:
         module = sys.modules[sys._getframemodulename(1)]
     elif isinstance(module, str):
@@ -63,38 +93,26 @@ def DocTestSuite(module=None, globs=None, extraglobs=None):
     _boxed_docs(module, module.__name__, module, found, set())
     parser = DocTestParser()
     suite = _DocTestSuite()
+    filename = getattr(module, "__file__", None) or module.__name__
+    if filename.endswith(".pyc"):
+        filename = filename[:-1]
+    lines = None if filename.endswith((".py", ".pyw")) else []
     for name in sorted(found):
-        doc = found[name]
+        obj, doc = found[name]
         examples = parser.get_examples(doc, name)
         if examples:
             test = DocTest(name, doc, examples)
             test.globs = namespace.copy()
-            suite.addTest(DocTestCase(test))
+            test.filename = filename
+            if lines is None:
+                import linecache
+                lines = linecache.getlines(filename, module.__dict__)
+            test.lineno = _docstring_lineno(obj, lines, filename)
+            suite.addTest(DocTestCase(test, optionflags, setUp, tearDown, checker))
     return suite
 
 
-def _case_setup(self):
-    self._dt_globs = self._dt_test.globs.copy()
-
-
-def _case_teardown(self):
-    globs = self._dt_test.globs
-    globs.clear()
-    globs.update(self._dt_globs)
-
-
-def _case_debug(self):
-    self.setUp()
-    execute(self._dt_test, True)
-    self.tearDown()
-
-
-DocTestCase.setUp = _case_setup
-DocTestCase.tearDown = _case_teardown
-DocTestCase.debug = _case_debug
-
-
-class DocFileCase(DocTestCase):
+class DocTestCase(_DocTestCase):
     def __init__(self, test, optionflags=0, setUp=None, tearDown=None, checker=None):
         super().__init__(test)
         self._dt_optionflags = optionflags
@@ -102,6 +120,33 @@ class DocFileCase(DocTestCase):
         self._dt_setUp = setUp
         self._dt_tearDown = tearDown
 
+
+def _call_hook(case, test, setup):
+    hook = case._dt_setUp if setup else case._dt_tearDown
+    if hook is not None:
+        hook(test)
+
+
+def _set_exception_info(failure, test, example, exc_info):
+    failure.test = test
+    failure.example = example
+    failure.exc_info = exc_info
+
+
+def _set_failure_output(failure, test, example, got, exc_info):
+    if exc_info is not None:
+        from traceback import format_exception
+        got += "".join(format_exception(*exc_info))
+    failure.test = test
+    failure.example = example
+    failure.got = got
+
+
+def _execute_case(case, debug):
+    execute(case._dt_test, debug, case._dt_optionflags, case._dt_checker)
+
+
+class DocFileCase(DocTestCase):
     def id(self):
         return self._dt_test.name.replace(".", "_")
 
@@ -113,31 +158,18 @@ class DocFileCase(DocTestCase):
     def shortDescription(self):
         return "Doctest: " + self._dt_test.name
 
-    def setUp(self):
-        super().setUp()
-        if self._dt_setUp is not None:
-            self._dt_setUp(self._dt_test)
-
     def tearDown(self):
-        try:
-            if self._dt_tearDown is not None:
-                self._dt_tearDown(self._dt_test)
-        finally:
-            super().tearDown()
+        # File cases restore globals before unittest cleanups even if their hook raises.
+        self._tear_down(True)
 
     def runTest(self):
         test = self._dt_test
         try:
-            execute(test, False, self._dt_optionflags, self._dt_checker)
+            super().runTest()
         except AssertionError as exc:
             raise self.failureException(
                 f'Failed doctest test for {test.name}\n  File "{test.filename}", line 0\n\n{exc}'
             ) from None
-
-    def debug(self):
-        self.setUp()
-        execute(self._dt_test, True, self._dt_optionflags, self._dt_checker)
-        self.tearDown()
 
 
 def _docfile_package(package):

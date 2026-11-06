@@ -2334,6 +2334,21 @@ pub unsafe extern "C" fn imre_exception_message(value: *const Object) -> *const 
     unsafe { display(value, false) }
 }
 
+/// Return the Python diagnostic name without invoking the exception's display methods.
+///
+/// # Safety
+/// `value` must be a rooted native exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_name(value: *const Object) -> *const Str {
+    // SAFETY: the borrowed exception is live while its name is copied.
+    let name = unsafe {
+        object(value)
+            .0
+            .with(|s| Str::new(s.exception().diagnostic_name()))
+    };
+    finish(crate::checked_owned_str(name), std::ptr::null())
+}
+
 /// Record a Python raise site without changing the exception's message or identity.
 ///
 /// # Safety

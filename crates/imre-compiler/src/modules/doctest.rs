@@ -32,12 +32,16 @@ pub(crate) fn source_docstrings(
     name: &str,
     body: &[ast::Stmt],
     classes: bool,
-    out: &mut Vec<(String, String)>,
+    out: &mut Vec<(String, String, Option<TextSize>)>,
 ) {
     if let Some(ast::Stmt::Expr(stmt)) = body.first()
         && let ast::Expr::StringLiteral(doc) = stmt.value.as_ref()
     {
-        out.push((name.to_owned(), doc.value.to_str().to_owned()));
+        out.push((
+            name.to_owned(),
+            doc.value.to_str().to_owned(),
+            Some(doc.start()),
+        ));
     }
     if classes {
         for stmt in body {
@@ -74,11 +78,11 @@ impl SealedDocs {
         })
     }
 
-    pub(crate) fn append_to(&self, docs: &mut Vec<(String, String)>) {
+    pub(crate) fn append_to(&self, docs: &mut Vec<(String, String, Option<TextSize>)>) {
         docs.extend(
             self.entries
                 .iter()
-                .map(|&(name, text)| (name.into(), text.into())),
+                .map(|&(name, text)| (name.into(), text.into(), None)),
         );
     }
 }
@@ -599,7 +603,7 @@ impl Loader<'_> {
                     }
                     _ => continue,
                 }
-                for (name, doc) in docs {
+                for (name, doc, _) in docs {
                     let sources = prompts(&doc);
                     if !sources.is_empty() {
                         cases.insert(name, (sources, target));
