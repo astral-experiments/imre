@@ -156,6 +156,8 @@ impl BuildOptions {
             (version.major, version.minor),
         )
         .map_err(|e| e.to_string())?;
+        let stdlib = layout.stdlib_dir();
+        let stdlib = stdlib.is_dir().then_some(stdlib);
         let venv = layout.venv_system_site;
         let user_site = if !flags.no_site
             && imre_ast::layout::InterpreterLayout::user_site_enabled(flags.no_user_site, venv)
@@ -189,6 +191,10 @@ impl BuildOptions {
         site_dirs.extend(prefix_sites);
         site_dirs.retain(|path| path.is_dir());
         // site runs before Python prepends the script directory or command cwd.
+        let has_hook = |root: &PathBuf| {
+            root.join("sitecustomize.py").is_file() || root.join("sitecustomize").is_dir()
+        };
+        let stdlib_sitecustomize = !flags.no_site && stdlib.as_ref().is_some_and(has_hook);
         options.compile.sitecustomize = process_pth
             || (!flags.no_site
                 && options
@@ -196,15 +202,14 @@ impl BuildOptions {
                     .extension_paths
                     .iter()
                     .chain(&site_dirs)
-                    .any(|root| {
-                        root.join("sitecustomize.py").is_file()
-                            || root.join("sitecustomize").is_dir()
-                    }));
+                    .any(has_hook));
+        options.compile.stdlib_sitecustomize = stdlib_sitecustomize;
         #[cfg(unix)]
         if !layout.stdlib_archive.is_file() {
             options.compile.stdlib_fallback = Some(super::build_cache::stdlib_archive_path()?);
         }
         options.compile.user_site_pth = user_site.filter(|_| process_pth);
+        options.compile.stdlib_dir = stdlib;
         options.compile.site_dirs = site_dirs;
         Ok(options)
     }

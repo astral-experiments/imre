@@ -784,21 +784,24 @@ pub(crate) fn compile(
             .filter(|p| !dedup || seen.insert(p.clone())),
     );
     let startup_paths = &initial[path0_len..];
-    let installed_layout = options.site_dirs.iter().any(|p| !startup_paths.contains(p));
-    let sites: Vec<_> = options
-        .implicit_sites()
+    let installed_layout = options
+        .stdlib_dir
         .iter()
+        .chain(&options.site_dirs)
+        .any(|p| !startup_paths.contains(p));
+    let installed_dirs: Vec<_> = options
+        .installed_dirs()
         .filter(|p| !startup_paths.contains(p))
         .cloned()
         .collect();
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
-    let implicit_sites: Vec<_> = sites
+    let implicit_dirs: Vec<_> = installed_dirs
         .iter()
         .filter(|p| !roots.contains(p))
         .cloned()
         .collect();
-    roots.extend(implicit_sites.iter().cloned());
+    roots.extend(implicit_dirs.iter().cloned());
     // Discover each search directory once even when it appears twice in sys.path.
     let mut seen_roots = HashSet::new();
     roots.retain(|root| seen_roots.insert(root.clone()));
@@ -1046,7 +1049,7 @@ pub(crate) fn compile(
                 } else {
                     None
                 };
-                if !implicit_sites.is_empty()
+                if !implicit_dirs.is_empty()
                     && (bundled.is_some()
                         || installed.is_some()
                         || imre_ast::providers::provider(&prefix).is_some()
@@ -1091,7 +1094,7 @@ pub(crate) fn compile(
                     continue;
                 }
                 for root in roots.iter().filter(|_| !bundled_only) {
-                    if implicit_sites.contains(root) && before_site.contains(&prefix) {
+                    if implicit_dirs.contains(root) && before_site.contains(&prefix) {
                         continue;
                     }
                     if let Some((parent, _)) = prefix.rsplit_once('.')
@@ -1119,7 +1122,7 @@ pub(crate) fn compile(
                             {
                                 work.push_back((prefix.clone(), package, imports));
                             }
-                            if !implicit_sites.is_empty() {
+                            if !implicit_dirs.is_empty() {
                                 before_site.insert(prefix.clone());
                             }
                             entry_sources.insert(prefix.clone(), (root.clone(), package));
@@ -1151,7 +1154,7 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
-                    if !implicit_sites.is_empty() && !implicit_sites.contains(root) {
+                    if !implicit_dirs.is_empty() && !implicit_dirs.contains(root) {
                         before_site.insert(prefix.clone());
                     }
                     // A late command import can use the runtime's builtins and bundled
@@ -1263,7 +1266,7 @@ pub(crate) fn compile(
         && let Some(i) = options.site_dirs.iter().position(|p| p == user)
     {
         // A user's .pth files run before the following prefix site is visible.
-        for site in sites {
+        for site in installed_dirs {
             if options.site_dirs[i + 1..].contains(&site) {
                 after_user_site.push(site);
             } else {
@@ -1271,14 +1274,14 @@ pub(crate) fn compile(
             }
         }
     } else {
-        initial.extend(sites);
+        initial.extend(installed_dirs);
     }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
-        "sitecustomize":options.sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":options.path_entry || !safe_path,
+        "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":options.path_entry || !safe_path,
         "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
