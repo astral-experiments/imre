@@ -49,7 +49,7 @@ impl Property {
         }
     }
 
-    pub(super) fn children(self, visit: &mut super::value::MarkQueue<'_>) {
+    pub(super) fn children(self, visit: &mut impl super::value::VisitReferences) {
         visit.extend([self.get, self.set, self.delete, self.doc]);
         visit.extend(self.name);
     }

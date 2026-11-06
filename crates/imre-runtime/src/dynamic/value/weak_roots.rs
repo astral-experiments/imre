@@ -478,9 +478,21 @@ impl Heap {
         stdin: Option<&[Id; 3]>,
         discard_from: Option<usize>,
     ) -> bool {
+        self.cached_finalizers_kept_except(globals, stdin, discard_from, None)
+    }
+
+    /// Check the other owners when a separate reachability check will handle one generator.
+    pub(in crate::dynamic) fn cached_finalizers_kept_except(
+        &self,
+        globals: [Id; 2],
+        stdin: Option<&[Id; 3]>,
+        discard_from: Option<usize>,
+        except: Option<Id>,
+    ) -> bool {
         let paths_valid = self.finalizer_roots.valid(self, globals);
         let kept = |owner: &Id| {
-            (paths_valid && self.finalizer_roots.contains(*owner))
+            except == Some(*owner)
+                || (paths_valid && self.finalizer_roots.contains(*owner))
                 || stdin.is_some_and(|input| input.contains(owner))
                 || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
                 || self.bound_in_active_frame(*owner)
