@@ -421,53 +421,61 @@ impl Heap {
         !self.finalizer_roots.nodes.is_empty()
     }
 
-    /// Check published operands in the caller frames and the surviving prefix of the active frame.
-    fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
-        let Some(active) = self.frames.len().checked_sub(1) else {
-            return false;
-        };
-        // The operand and its children can change between releases.
-        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
-        if let Some((last_owner, frame, operand)) = cached.get()
-            && last_owner == owner
-            && (frame < active || operand < retained_current)
-            && let Some(&root) = self.frames.get(frame).and_then(|f| f.live.get(operand))
-            && self.short_path_keeps_owner(root, owner)
-        {
-            return true;
-        }
-
-        const MAX_CALLER_OPERANDS: usize = 192;
-        let active_limit = self.frames[active].live.len().min(retained_current).min(8);
-        let mut operands = self
+    /// Visit the surviving active operands, then the bounded caller roots in stack order.
+    fn finalizer_frame_operands(
+        &self,
+        retained_current: usize,
+    ) -> impl Iterator<Item = Id> + Clone + '_ {
+        const CALLER_LIMIT: usize = 192;
+        let active_limit = self
             .frames
+            .last()
+            .map_or(0, |frame| frame.live.len().min(retained_current).min(8));
+        self.frames
             .iter()
-            .enumerate()
             .rev()
-            .take(MAX_CALLER_OPERANDS + 1)
-            .flat_map(|(index, frame)| {
-                let limit = if index == active { active_limit } else { 8 };
-                frame
-                    .live
-                    .iter()
-                    .take(limit)
-                    .enumerate()
-                    .map(move |(slot, &root)| (index, slot, root))
+            .enumerate()
+            .take(CALLER_LIMIT + 1)
+            .flat_map(move |(depth, frame)| {
+                let limit = if depth == 0 { active_limit } else { 8 };
+                frame.live.iter().take(limit).copied()
             })
-            .take(active_limit + MAX_CALLER_OPERANDS);
-        let found = operands
-            .clone()
-            .find(|&(_, _, root)| {
-                root == owner
-                    || matches!(self.get(root), Value::LoopIterator { source, peeked }
-                if *peeked == Some(owner) || self.short_path_keeps_owner(*source, owner))
-            })
-            .or_else(|| operands.find(|&(_, _, root)| self.short_path_keeps_owner(root, owner)));
-        if let Some((frame, slot, _)) = found {
-            cached.set(Some((owner, frame, slot)));
+    }
+
+    /// Nested calls commonly retain their finalizers in reverse registration order.
+    /// Prove the whole sequence in one pass. A miss falls back to the full owner checks.
+    fn frame_operands_keep_cohort(
+        &self,
+        retained_current: usize,
+        mut owners: impl Iterator<Item = Id>,
+    ) -> bool {
+        let Some(mut owner) = owners.next() else {
             return true;
+        };
+        for root in self.finalizer_frame_operands(retained_current) {
+            if root == owner
+                || matches!(self.get(root), Value::LoopIterator { source, peeked }
+                    if *source == owner || *peeked == Some(owner))
+            {
+                let Some(next) = owners.next() else {
+                    return true;
+                };
+                owner = next;
+            }
         }
         false
+    }
+
+    /// Follow the bounded strong paths for an owner outside the ordered operand proof.
+    fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+        let mut operands = self
+            .finalizer_frame_operands(retained_current)
+            .take(192 + retained_current.min(8));
+        operands.clone().any(|root| {
+            root == owner
+                || matches!(self.get(root), Value::LoopIterator { source, peeked }
+                if *peeked == Some(owner) || self.short_path_keeps_owner(*source, owner))
+        }) || operands.any(|root| self.short_path_keeps_owner(root, owner))
     }
 
     /// A pending discard preserves the active frame's operands below its mark. It must also
@@ -490,14 +498,25 @@ impl Heap {
         except: &[Id],
     ) -> bool {
         let paths_valid = self.finalizer_roots.valid(self, globals);
-        let kept = |owner: &Id| {
+        let rooted = |owner: &Id| {
             except.contains(owner)
                 || (paths_valid && self.finalizer_roots.contains(*owner))
                 || stdin.is_some_and(|input| input.contains(owner))
-                || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
+        };
+        let retained = discard_from.unwrap_or(usize::MAX);
+        let kept = |owner: &Id| {
+            rooted(owner)
+                || self.operand_keeps_finalizer(*owner, retained)
                 || self.bound_in_active_frame(*owner)
         };
-        self.ordinary_finalizers.iter().all(&kept)
+        let owners = self
+            .ordinary_finalizers
+            .iter()
+            .rev()
+            .copied()
+            .filter(|id| !rooted(id));
+        (self.ordinary_finalizers.len() > 1 && self.frame_operands_keep_cohort(retained, owners)
+            || self.ordinary_finalizers.iter().all(&kept))
             && (discard_from.is_none()
                 || (self.descriptor_owners.iter().all(kept)
                     && (!self.has_weak_values || self.weak_values_kept_by(globals[0], globals[1]))))

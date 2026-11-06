@@ -2863,8 +2863,6 @@ pub(super) struct Heap {
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
     finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
-    /// Last successful (owner, frame, operand) hints for finalizer reachability checks.
-    finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 64],
     // A recently allocated iterator may be the only holder of an unreferenced generator.
     last_generator_iterator: Option<Id>,
     // Weak handles in direct-base attachment order, pruned before recycling class slots.
@@ -3075,7 +3073,6 @@ impl Heap {
             descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
-            finalizer_operands: std::array::from_fn(|_| Cell::new(None)),
             last_generator_iterator: None,
             classes: Vec::new(),
             discarded_shutdown_write: None,
