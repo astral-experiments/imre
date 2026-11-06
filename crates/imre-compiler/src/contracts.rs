@@ -706,6 +706,8 @@ impl Builtin {
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
+            | Self::InputSelectStdout
+            | Self::InputFinish
             | Self::LengthResult
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
@@ -1436,6 +1438,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bool"
                 | "imre_print_none"
                 | "imre_input"
+                | "imre_input_select_stdout"
+                | "imre_input_finish"
                 | "imre_sys_stdout"
                 | "imre_sys_stdout_del"
                 | "imre_text_optional_receiver"

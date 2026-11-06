@@ -55,6 +55,21 @@ print(1 // zero)
 ''',
     "input_eof": 'print("before input EOF")\ninput()\n',
     "pipe_input": 'print("input-ready")\nanswer = input()\nprint(answer)\nprint("input-finished")\n',
+    "prompt_input": """import io
+import sys
+
+class Prompt:
+    def __str__(self) -> str:
+        sys.stdout = io.StringIO()
+        return "desk> "
+
+saved = sys.stdout
+try:
+    answer = input(Prompt())
+finally:
+    sys.stdout = saved
+print(answer)
+""",
     "terminal_loop": 'print("terminal-ready")\nwhile True:\n    pass\n',
 }
 ERRORS = {"division_error": b"ZeroDivisionError", "input_eof": b"EOFError"}
@@ -151,7 +166,7 @@ def stop(process: subprocess.Popen[bytes]) -> tuple[bytes | None, bytes | None]:
     return process.communicate(timeout=10)
 
 
-def pipe_exchange(command: list[str], payload: bytes, timeout: float) -> bytes:
+def pipe_exchange(command: list[str], payload: bytes, timeout: float, ready: bytes = b"input-ready\n") -> bytes:
     process = subprocess.Popen(
         command,
         stdin=subprocess.PIPE,
@@ -162,7 +177,7 @@ def pipe_exchange(command: list[str], payload: bytes, timeout: float) -> bytes:
     )
     try:
         assert process.stdout is not None
-        prefix = visible_output(process.stdout.fileno(), b"input-ready\n", timeout)
+        prefix = visible_output(process.stdout.fileno(), ready, timeout)
         assert process.poll() is None, "child exited before receiving input"
         rest, error = process.communicate(input=payload, timeout=timeout)
         assert process.returncode == 0 and not error, (
@@ -377,6 +392,9 @@ def main() -> None:
             )
             for ending, payload in PAYLOADS.items()
         }
+        prompt_reference = pipe_exchange(
+            [args.python, "-I", str(sources["prompt_input"])], b"reply\n", args.timeout, b"desk> "
+        )
         reference["terminal_loop"] = terminal_message(
             [args.python, "-I", str(sources["terminal_loop"])], args.timeout
         )
@@ -428,6 +446,11 @@ def main() -> None:
                     pipe_reference[ending], f"pipe input {ending} O{level}",
                 )
                 passed += 1
+            same_output(
+                pipe_exchange([binaries["prompt_input"]], b"reply\n", args.timeout, b"desk> "),
+                prompt_reference, f"prompted input O{level}",
+            )
+            passed += 1
             same_output(
                 terminal_message([binaries["terminal_loop"]], args.timeout),
                 reference["terminal_loop"], f"terminal output O{level}",

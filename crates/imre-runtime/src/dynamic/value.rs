@@ -3683,6 +3683,11 @@ impl Heap {
         self.frames.last_mut().unwrap().live.push(value);
     }
 
+    /// Insert a root below newer temporaries so they can be released before it.
+    pub(super) fn keep_at(&mut self, mark: usize, value: Id) {
+        self.frames.last_mut().unwrap().live.insert(mark, value);
+    }
+
     /// Mark temporary roots that must survive the next iteration of a native loop.
     pub fn temporary_mark(&self) -> usize {
         self.frames.last().unwrap().live.len()

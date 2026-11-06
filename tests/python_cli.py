@@ -4092,6 +4092,7 @@ for name in ("md4", "ripemd160"):
             "boxed_global_enum.py",
             "boxed_float_enum.py",
             "boxed_print_streams.py",
+            "boxed_input_callbacks.py",
             "boxed_redirect_streams.py",
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",

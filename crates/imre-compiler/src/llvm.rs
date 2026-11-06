@@ -6050,6 +6050,12 @@ impl Emitter<'_, '_> {
             },
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
+            Builtin::InputSelectStdout => self.call("imre_input_select_stdout", Type::TextIO, &[]),
+            Builtin::InputFinish => self.call(
+                "imre_input_finish",
+                Type::Str,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
             Builtin::Random(op) => {
                 use crate::ir::RandomOperation::*;
@@ -11275,6 +11281,8 @@ declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
 declare i64 @imre_int_parse_hex(ptr)
 declare ptr @imre_input()
+declare ptr @imre_input_select_stdout()
+declare ptr @imre_input_finish(ptr, ptr)
 declare ptr @imre_chr(i64)
 declare void @imre_random_shuffle_int_list(ptr)
 declare void @imre_random_shuffle_list(ptr)

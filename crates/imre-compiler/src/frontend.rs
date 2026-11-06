@@ -11500,6 +11500,9 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if name.id == "str" && args.len() == 1 {
+            return self.checked_string(args.into_iter().next().unwrap(), call);
+        }
         if tuple_dir && self.types.is_plain_or_declared_tuple(args[0].ty) {
             return Err(self.object_builtin_error("dir", call));
         }
@@ -11569,7 +11572,7 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1
             && matches!(args[0].ty, Type::Calendar(_))
-            && matches!(name.id.as_str(), "str" | "print" | "repr")
+            && matches!(name.id.as_str(), "print" | "repr")
         {
             return Ok(calendar::format_builtin(name.id.as_str(), args));
         }
@@ -11623,9 +11626,8 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1
             && (((args[0].ty.is_path() || self.types.payload(args[0].ty) == Some(Type::Str))
-                && matches!(name.id.as_str(), "str" | "print"))
-                || (args[0].ty == Type::PathInfo
-                    && matches!(name.id.as_str(), "str" | "repr" | "print")))
+                && name.id == "print")
+                || (args[0].ty == Type::PathInfo && matches!(name.id.as_str(), "repr" | "print")))
         {
             let text = if self.types.payload(args[0].ty) == Some(Type::Str) {
                 self.optional_text(args.into_iter().next().unwrap())
@@ -11666,8 +11668,7 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1
             && matches!(args[0].ty, Type::Enum(_) | Type::BuiltinClass)
-            && (matches!(name.id.as_str(), "str" | "print")
-                || (args[0].ty == Type::BuiltinClass && name.id == "repr"))
+            && (name.id == "print" || (args[0].ty == Type::BuiltinClass && name.id == "repr"))
         {
             let builtin = if args[0].ty == Type::BuiltinClass {
                 Builtin::Repr
@@ -11689,16 +11690,14 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1
             && (matches!(args[0].ty, Type::StrEnum(_))
-                && matches!(name.id.as_str(), "str" | "print" | "len")
-                || matches!(args[0].ty, Type::IntEnum(_))
-                    && matches!(name.id.as_str(), "str" | "print"))
+                && matches!(name.id.as_str(), "print" | "len")
+                || matches!(args[0].ty, Type::IntEnum(_)) && name.id == "print")
         {
             let text = Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::StrEnumValue, args),
             };
             return Ok(match name.id.as_str() {
-                "str" => text,
                 "print" => Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Print, vec![text]),
@@ -11788,21 +11787,14 @@ impl<'a> Checker<'a> {
                 });
             }
         }
-        if matches!(name.id.as_str(), "str" | "print")
-            && args.len() == 1
-            && args[0].ty == Type::ObjectValue
-        {
+        if name.id == "print" && args.len() == 1 && args[0].ty == Type::ObjectValue {
             let text = Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::Str, args),
             };
-            return Ok(if name.id == "str" {
-                text
-            } else {
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
-                }
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::Print, vec![text]),
             });
         }
         if name.id == "print"
@@ -11847,7 +11839,7 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1
             && args[0].ty == Type::LogRecord
-            && matches!(name.id.as_str(), "repr" | "str" | "print")
+            && matches!(name.id.as_str(), "repr" | "print")
         {
             let text = logging_records::op(ir::LogRecordOperation::Repr, Type::Str, args);
             return Ok(if name.id == "print" {
@@ -11860,7 +11852,7 @@ impl<'a> Checker<'a> {
             });
         }
         if let [value] = args.as_slice()
-            && matches!(name.id.as_str(), "repr" | "str")
+            && name.id == "repr"
             && let Some(rendered) = self.mock_call_repr(value, call)?
         {
             return Ok(rendered);
@@ -11870,7 +11862,7 @@ impl<'a> Checker<'a> {
                 args[0].ty,
                 Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
             )
-            && matches!(name.id.as_str(), "repr" | "str" | "print")
+            && matches!(name.id.as_str(), "repr" | "print")
         {
             let rendered = Expr {
                 ty: Type::Str,
@@ -11936,51 +11928,18 @@ impl<'a> Checker<'a> {
         if name.id == "repr" && args.len() == 1 && matches!(args[0].ty, Type::Class(_)) {
             return self.record_repr(args.into_iter().next().unwrap(), call);
         }
-        if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
-            if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {
-                if !dataclass_values::can_format(args[0].ty, self.types, self.classes) {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "generated repr cannot format resource or callable fields",
-                    ));
+        if matches!(name.id.as_str(), "print" | "repr")
+            && let [value] = args.as_slice()
+            && let Some(text) = self.structured_display(name.id.as_str(), value, call)?
+        {
+            return Ok(if name.id == "print" {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
                 }
-                return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Repr, args),
-                });
-            }
-            if matches!(name.id.as_str(), "str" | "print")
-                && (matches!(
-                    args[0].ty,
-                    Type::Class(_)
-                        | Type::Hash
-                        | Type::SysImplementation
-                        | Type::CompletedProcess(..)
-                        | Type::Context
-                        | Type::ContextMissing
-                        | Type::ContextVar(_)
-                        | Type::ContextToken(_)
-                        | Type::ForwardRef(_)
-                        | Type::ModuleSpec(_)
-                        | Type::SimpleNamespace(_)
-                        | Type::Dict(_)
-                        | Type::Tuple(_)
-                        | Type::VarTuple(_)
-                        | Type::StringIterable
-                ) || self.types.payload(args[0].ty) == Some(Type::Int)
-                    || (name.id == "print" && self.types.element(args[0].ty).is_some()))
-            {
-                let text = self.record_text(args.into_iter().next().unwrap(), call)?;
-                return Ok(if name.id == "str" {
-                    text
-                } else {
-                    Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Builtin(Builtin::Print, vec![text]),
-                    }
-                });
-            }
+            } else {
+                text
+            });
         }
         if name.id == "len"
             && let [value] = args.as_slice()
@@ -12019,6 +11978,9 @@ impl<'a> Checker<'a> {
                 (Builtin::ByteArrayNew, Type::ByteArray)
             }
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
+            "input" if args.len() == 1 && self.unshadowed_builtin(&call.func, "input") => {
+                return self.input_prompt(args.into_iter().next().unwrap(), call);
+            }
             "chr" if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool) => {
                 let value = args.into_iter().next().unwrap();
                 let integer = if value.ty == Type::Int {
@@ -12071,24 +12033,6 @@ impl<'a> Checker<'a> {
                     Builtin::Process(ir::ProcessOperation::PopenIdentity),
                     Type::Int,
                 )
-            }
-            "str"
-                if args.len() == 1
-                    && matches!(
-                        args[0].ty,
-                        Type::Int
-                            | Type::Float
-                            | Type::Bool
-                            | Type::Str
-                            | Type::Bytes
-                            | Type::None
-                            | Type::Exception
-                            | Type::NamedException(_)
-                            | Type::ImportException
-                            | Type::TimeoutExpired
-                    ) =>
-            {
-                (Builtin::Str, Type::Str)
             }
             "int"
                 if args.len() == 1

@@ -1200,6 +1200,8 @@ pub(crate) enum Builtin {
     LogRecord(LogRecordOperation),
     Formatter(FormatterOperation),
     Input,
+    InputSelectStdout,
+    InputFinish,
     Chr,
     Ord,
     IntegerPower,
