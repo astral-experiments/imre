@@ -8207,7 +8207,12 @@ impl Context {
                 self.call_depth -= 1;
                 let value = result?;
                 if let Some(expected) = sig.return_type.as_deref() {
-                    self.require_scalar(value, expected, false, format_args!("{name} return value"))?;
+                    self.require_scalar(
+                        value,
+                        expected,
+                        false,
+                        format_args!("{name} return value"),
+                    )?;
                 }
                 Ok(value)
             }
