@@ -13,7 +13,16 @@ def evaluate(value: int) -> int:
     return value
 
 
+def has_numeric_key(value: object) -> bool:
+    return value in {0: "zero", -7: "negative", 1 << 180: "wide"}
+
+
 def main() -> None:
+    assert has_numeric_key(-0.0)
+    assert has_numeric_key(-7.0)
+    assert has_numeric_key(float(1 << 180))
+    for absent_key in [1.5, float("inf"), float("nan")]:
+        assert not has_numeric_key(absent_key)
     mod = errno
     assert module_has_code(mod, "EDOM")
     assert not module_has_code(mod, "NOT_AN_ERRNO_CODE")
