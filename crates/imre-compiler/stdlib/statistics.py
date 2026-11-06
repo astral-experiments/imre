@@ -97,10 +97,10 @@ def _mean_from_integer(data, value, count, partials):
             partials[d] = partials.get(d, 0) + n
         else:
             if not partials and type(kind) is type:
-                # Seed the usual ratio groups with the exact integer
-                # prefix. The remaining iterator stays live for callbacks.
-                T, total, n = _sum(chain((value,), values), count, integer_sum)
-                return _convert(total / n, T)
+                # Fold the exact integer prefix into one input. It represents
+                # count values in the mean, and the tail iterator stays live.
+                T, total, n = _sum(chain((integer_sum, value), values))
+                return _convert(total / (n + count - 1), T)
             break
         count += 1
     else:
@@ -126,7 +126,7 @@ def _binary_float_mean(partials, count):
     return numerator / (denominator * count)
 
 
-def _sum(data, count=0, integer_sum=0):
+def _sum(data):
     """_sum(data) -> (type, sum, count)
 
     Return a high-precision sum of the given numeric data as a fraction,
@@ -163,13 +163,13 @@ def _sum(data, count=0, integer_sum=0):
         first, last = data[0], data[-1]
         # The mathematical length can exceed the limit of len(range(...)).
         size = (last - first) // data.step + 1
-        total = integer_sum + (first + last) * size // 2
-        return int, Fraction(total), count + size
+        total = (first + last) * size // 2
+        return int, Fraction(total), size
 
-    # A preconsumed integer prefix contributes one exact denominator group.
-    types = {int} if count else set()
+    count = 0
+    types = set()
     types_add = types.add
-    partials = {1: integer_sum} if count else {}
+    partials = {}
     partials_get = partials.get
 
     for typ, values in groupby(data, type):

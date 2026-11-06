@@ -1,6 +1,6 @@
 from decimal import Decimal
 from fractions import Fraction
-from statistics import StatisticsError, mean
+from statistics import StatisticsError, _sum, mean
 
 
 def current():
@@ -23,6 +23,13 @@ def current():
     assert mean([2**100, 0.5, -(2**100)]) == 1 / 6
     assert mean([0.5, 2**100, -(2**100)]) == 1 / 6
     assert mean((2, 4, Fraction(1, 3))) == Fraction(19, 9)
+
+    try:
+        _sum([1, 2.0], Decimal(1))
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("_sum accepted a second argument")
 
     class AppendingInt(int):
         def as_integer_ratio(self):
