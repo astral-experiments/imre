@@ -4183,6 +4183,16 @@ impl Context {
     }
 
     pub(super) fn generator_send(&mut self, generator: Id, sent: Id) -> Result<Id> {
+        self.send_generator_frame(generator, generator, sent)
+    }
+
+    /// Send a value into a frame while keeping its public generator or coroutine alive.
+    pub(super) fn send_generator_frame(
+        &mut self,
+        generator: Id,
+        finalizer: Id,
+        sent: Id,
+    ) -> Result<Id> {
         let Value::Generator {
             code,
             running,
@@ -4215,30 +4225,33 @@ impl Context {
                 format!("can't send non-None value to a just-started {kind}"),
             ));
         }
-        let next = if sent == NONE || matches!(self.code_object(code).body, Body::Native(_)) {
+        let next = if matches!(self.code_object(code).body, Body::Native(_)) {
             self.next_result(generator)?
         } else {
             stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                self.resume_source(generator, sent)
+                self.resume_source_input(generator, finalizer, GeneratorInput::Send(sent))
             })?
         };
         next.ok_or_else(|| self.exception("StopIteration", &[]))
     }
 
     pub(super) fn resume_source(&mut self, id: Id, sent: Id) -> Result<Option<Id>> {
-        self.resume_source_input(id, GeneratorInput::Send(sent))
+        self.resume_source_input(id, id, GeneratorInput::Send(sent))
     }
 
     pub(super) fn resume_source_input(
         &mut self,
         mut id: Id,
+        finalizer: Id,
         mut input: GeneratorInput,
     ) -> Result<Option<Id>> {
+        let initial = id;
         let mut parents = Vec::new();
         let mut advanced = None;
         loop {
             let step = self.resume_source_frame(
                 id,
+                if id == initial { finalizer } else { id },
                 advanced.take(),
                 std::mem::replace(&mut input, GeneratorInput::Send(NONE)),
                 !parents.is_empty(),
@@ -4298,6 +4311,7 @@ impl Context {
     fn resume_source_frame(
         &mut self,
         id: Id,
+        finalizer: Id,
         advanced: Option<Result<DelegateOutcome>>,
         input: GeneratorInput,
         nested_resume: bool,
@@ -4308,7 +4322,7 @@ impl Context {
                 GeneratorInput::Throw { error, args } => args.len() + error.roots().count(),
             };
             self.heap.reserve_temporaries(1 + input_roots)?;
-            self.heap.keep(id);
+            self.heap.keep(finalizer);
             match &input {
                 GeneratorInput::Send(value) => self.heap.keep(*value),
                 GeneratorInput::Throw { error, args } => {
@@ -4343,7 +4357,7 @@ impl Context {
         let (code, frame_scope) = (*code, *scope);
         let mut active = std::mem::take(iterators);
         let mut blocks = std::mem::take(protected);
-        self.heap.disarm_finalizer(id);
+        self.heap.disarm_finalizer(finalizer);
         let result = self
             .prepare_generator(code)
             .and_then(|()| {
@@ -4391,7 +4405,7 @@ impl Context {
                 *iterators = active;
                 *protected = blocks;
                 if needs_finalizer && !async_generator {
-                    self.heap.register_finalizer(id);
+                    self.heap.register_finalizer(finalizer);
                 }
                 return Ok(step);
             }
@@ -4401,7 +4415,7 @@ impl Context {
         *scope = NONE;
         *frame = None;
         *owner = FrameOwner::Module(NONE);
-        self.heap.disarm_finalizer(id);
+        self.heap.disarm_finalizer(finalizer);
         if self.heap.tracks_finalizers()
             && (!active.is_empty()
                 || !self.scope_data(frame_scope).closure.cells.is_empty()

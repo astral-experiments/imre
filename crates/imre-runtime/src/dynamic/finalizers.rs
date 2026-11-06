@@ -104,7 +104,11 @@ impl Context {
             _ => None,
         };
         let async_generator = matches!(self.heap.get(owner), Value::AsyncGenerator { .. });
-        let generator = matches!(self.heap.get(owner), Value::Generator { .. });
+        let generator_frame = match *self.heap.get(owner) {
+            Value::Generator { .. } => Some(owner),
+            Value::Coroutine { frame, .. } => Some(frame),
+            _ => None,
+        };
         let unpack_iterator = matches!(
             self.heap.get(owner),
             Value::StructUnpackIterator {
@@ -113,7 +117,7 @@ impl Context {
             }
         );
         let found = scan.is_some()
-            || generator
+            || generator_frame.is_some()
             || async_generator
             || unpack_iterator
             || self.slot(owner, "__del__").is_some();
@@ -143,8 +147,8 @@ impl Context {
                     error.report(&self.heap)
                 );
             }
-        } else if generator {
-            if let Err(error) = self.generator_close(owner) {
+        } else if let Some(frame) = generator_frame {
+            if let Err(error) = self.close_generator_frame(frame, owner) {
                 eprintln!(
                     "Exception ignored while calling __del__: {}",
                     error.report(&self.heap)
