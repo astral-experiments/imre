@@ -186,6 +186,7 @@ pub(crate) struct Context {
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
     signal_handlers: Vec<Id>,
+    reporting_wakeup_errors: bool,
     typing: typing::Registry,
     builtins: HashMap<String, Id>,
     /// Last observed binding position for each name bucket, validated against the current scope.

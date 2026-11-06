@@ -318,6 +318,7 @@ impl Callback {
                 Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
                 Value::Native(name) if !high_level => {
                     let symbol = [
+                        "_signal.set_wakeup_fd",
                         "_thread._count",
                         "sys.exit",
                         "sys.get_coroutine_origin_tracking_depth",

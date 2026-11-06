@@ -105,7 +105,12 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         #[cfg(unix)]
         "_signal" if matches!(function, "sigpending" | "valid_signals") => Some((module, function)),
         #[cfg(unix)]
-        "_signal" if matches!(function, "default_int_handler" | "getsignal" | "signal") => {
+        "_signal"
+            if matches!(
+                function,
+                "default_int_handler" | "getsignal" | "set_wakeup_fd" | "siginterrupt" | "signal"
+            ) =>
+        {
             Some((module, function))
         }
         "_contextvars" if function == "copy_context" => Some((module, function)),
@@ -2979,6 +2984,18 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "_signal.getsignal" => {
                         return Ok(self.text("($module, signalnum, /)"));
+                    }
+                    "__text_signature__" if symbol == "_signal.set_wakeup_fd" => {
+                        return Ok(self.text("($module, fd, /, *, warn_on_full_buffer=True)"));
+                    }
+                    "__doc__" if symbol == "_signal.set_wakeup_fd" => {
+                        return Ok(self.text("Sets the fd to be written to (with the signal number) when a signal comes in.\n\nA library can use this to wakeup select or poll.\nThe previous fd or -1 is returned.\n\nThe fd must be non-blocking."));
+                    }
+                    "__text_signature__" if symbol == "_signal.siginterrupt" => {
+                        return Ok(self.text("($module, signalnum, flag, /)"));
+                    }
+                    "__doc__" if symbol == "_signal.siginterrupt" => {
+                        return Ok(self.text("Change system call restart behaviour.\n\nIf flag is False, system calls will be restarted when interrupted by\nsignal sig, else system calls will be interrupted."));
                     }
                     "__doc__" if symbol == "_signal.default_int_handler" => {
                         return Ok(self.text("The default handler for SIGINT installed by Python.\n\nIt raises KeyboardInterrupt."));

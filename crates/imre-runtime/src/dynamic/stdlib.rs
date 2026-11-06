@@ -1160,6 +1160,8 @@ pub(super) fn call(
     if matches!(
         name,
         "_signal.sigpending"
+            | "_signal.set_wakeup_fd"
+            | "_signal.siginterrupt"
             | "_signal.valid_signals"
             | "_imre_signal.make_signals"
             | "_thread.interrupt_main"

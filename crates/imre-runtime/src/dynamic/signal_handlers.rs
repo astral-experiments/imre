@@ -40,29 +40,47 @@ impl Context {
         if !signals::begin_dispatch() {
             return Ok(());
         }
+        let mut pending = (1..signals::nsig()).filter(|&number| signals::take(number));
+        // Claim the first delivery before entering Python. A signal raised in
+        // the error hook may have the same number and must remain deliverable.
+        let first = pending.next();
+        if !self.reporting_wakeup_errors && signals::has_wakeup_errors() {
+            self.reporting_wakeup_errors = true;
+            for error in signals::wakeup_errors() {
+                super::unraisable::report(
+                    self,
+                    stdlib::os_error(error),
+                    true,
+                    None,
+                    "Exception ignored while trying to write to the signal wakeup fd",
+                );
+            }
+            self.reporting_wakeup_errors = false;
+            if signals::has_wakeup_errors() {
+                signals::resume_dispatch();
+            }
+        }
         self.initialize_signal_handlers();
-        for number in 1..signals::nsig() {
-            if signals::take(number) {
-                let handler = self.signal_handlers[number as usize];
-                if self.callable(handler) {
-                    let result = self.call_signal_handler(number, handler);
-                    if result.is_err() {
-                        // A raising handler leaves later pending signals for the next checkpoint.
-                        signals::resume_dispatch();
-                    }
-                    result?;
-                } else {
-                    super::unraisable::report(
-                        self,
-                        Error::new(
-                            "OSError",
-                            format!("Signal {number} ignored due to race condition"),
-                        ),
-                        true,
-                        None,
-                        "Exception ignored while calling signal handler",
-                    );
+        for number in first.into_iter().chain(pending) {
+            let handler = self.signal_handlers[number as usize];
+            if self.callable(handler) {
+                let result = self.call_signal_handler(number, handler);
+                if result.is_err() {
+                    // A raising handler leaves later pending signals for the next checkpoint.
+                    signals::resume_dispatch();
                 }
+                result?;
+            } else {
+                super::unraisable::report(
+                    self,
+                    Error::new(
+                        "OSError",
+                        format!("Signal {number} ignored due to race condition"),
+                    ),
+                    true,
+                    None,
+                    "Exception ignored while calling signal handler",
+                );
             }
         }
         Ok(())
