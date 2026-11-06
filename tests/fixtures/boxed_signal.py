@@ -181,3 +181,90 @@ def check_buffered_read_eintr():
 
 
 check_buffered_read_eintr()
+
+
+def check_wakeup_fd():
+    import _signal
+    import errno
+    import os
+
+    seen = []
+    sig = signal.SIGUSR1
+    previous = signal.signal(sig, lambda number, frame: seen.append(number))
+    read, write = os.pipe()
+    other_read, other_write = os.pipe()
+    old_fd = signal.set_wakeup_fd(-1)
+    try:
+        assert signal.set_wakeup_fd is _signal.set_wakeup_fd
+        os.set_blocking(read, False)
+        os.set_blocking(other_read, False)
+        os.set_blocking(write, False)
+        assert signal.set_wakeup_fd(write) == -1
+        try:
+            signal.set_wakeup_fd(other_write)
+        except ValueError as exc:
+            assert str(exc) == f"the fd {other_write} must be in non-blocking mode"
+        else:
+            raise AssertionError("accepted a blocking pipe")
+        os.set_blocking(other_write, False)
+        assert signal.set_wakeup_fd(other_write, warn_on_full_buffer=False) == write
+        os.kill(os.getpid(), sig)
+        assert os.read(other_read, 1) == bytes([sig])
+        assert signal.set_wakeup_fd(write) == other_write
+        stale = os.dup(other_write)
+        os.close(stale)
+        try:
+            signal.set_wakeup_fd(stale)
+        except OSError as exc:
+            assert exc.errno == errno.EBADF
+        else:
+            raise AssertionError("accepted a closed descriptor")
+        os.kill(os.getpid(), sig)
+        assert os.read(read, 1) == bytes([sig])
+        assert seen == [sig, sig]
+        assert signal.set_wakeup_fd(-1) == write
+        assert os.write(write, b"x") == 1
+    finally:
+        signal.set_wakeup_fd(old_fd)
+        signal.signal(sig, previous)
+        for fd in (read, write, other_read, other_write):
+            os.close(fd)
+
+
+check_wakeup_fd()
+
+
+def check_recursive_wakeup_error():
+    import errno
+    import os
+    import sys
+
+    sig = signal.SIGUSR1
+    events = []
+
+    def hook(record):
+        assert record.exc_value.errno == errno.EBADF
+        assert record.exc_traceback is not None
+        events.append("enter")
+        if events == ["enter"]:
+            os.kill(os.getpid(), sig)
+        events.append("leave")
+
+    read, write = os.pipe()
+    os.set_blocking(read, False)
+    old_handler = signal.signal(sig, lambda *args: events.append("signal"))
+    old_fd = signal.set_wakeup_fd(read)
+    old_hook = sys.unraisablehook
+    try:
+        sys.unraisablehook = hook
+        os.kill(os.getpid(), sig)
+        assert events == ["enter", "signal", "leave", "enter", "leave", "signal"]
+    finally:
+        sys.unraisablehook = old_hook
+        signal.set_wakeup_fd(old_fd)
+        signal.signal(sig, old_handler)
+        os.close(read)
+        os.close(write)
+
+
+check_recursive_wakeup_error()
