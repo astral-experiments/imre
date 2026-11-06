@@ -1251,6 +1251,7 @@ pub(super) enum Value {
         remaining: usize,
         reverse: bool,
     },
+    TeeBlock(super::stdlib::itertools::TeeBlock),
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
@@ -1923,6 +1924,7 @@ impl Value {
             | Self::ReverseSequence { source, .. }
             | Self::GenericAliasIterator(source) => visit.extend(*source),
             Self::DequeIterator { deque, .. } => visit.push(*deque),
+            Self::TeeBlock(block) => block.children(visit),
             Self::List(v) | Self::Tuple(v) => visit.extend(v.iter().rev()),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
             Self::Iterator {

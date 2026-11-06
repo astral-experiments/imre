@@ -1641,6 +1641,13 @@ impl Context {
             } if cursor.is_exact_accumulate(*class) => {
                 return stdlib::itertools::next_accumulated(self, id);
             }
+            Value::Instance {
+                class,
+                itertools: Some(cursor),
+                ..
+            } if let Some(state) = cursor.exact_tee(*class) => {
+                return stdlib::itertools::next_tee(self, id, state);
+            }
             _ => {
                 if let Some(method) = self.bound_slot(id, "__next__")? {
                     return self.call(method, Vec::new(), Vec::new()).map(Some);
@@ -3764,6 +3771,8 @@ impl Context {
                     "_predicate_state",
                     "_chain_allocate",
                     "_chain_next",
+                    "_tee_allocate",
+                    "_tee_next",
                 ] {
                     let value = self.builtin(&format!("{name}.{attr}"));
                     self.bind(scope, attr, value);
@@ -4492,6 +4501,7 @@ impl Context {
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),
                     ("compress", "itertools.compress"),
+                    ("_tee", "itertools._tee"),
                     ("zip_longest", "itertools.zip_longest"),
                 ] {
                     if let Some(class) = self.scope_name(scope, name)

@@ -160,6 +160,7 @@ pub(in crate::dynamic) struct Cycle {
 pub(in crate::dynamic) enum Cursor {
     Cycle(Cycle),
     Accumulate(Accumulator),
+    Tee(Tee),
 }
 
 #[derive(Clone)]
@@ -186,11 +187,19 @@ impl Cursor {
                 visit.extend([state.base, state.source, state.function]);
                 visit.extend(state.total);
             }
+            Self::Tee(state) => visit.extend([state.base, state.block]),
         }
     }
 
     pub(in crate::dynamic) fn is_exact_accumulate(&self, class: Id) -> bool {
         matches!(self, Self::Accumulate(state) if state.base == class)
+    }
+
+    pub(in crate::dynamic) fn exact_tee(&self, class: Id) -> Option<Tee> {
+        match self {
+            Self::Tee(state) if state.base == class => Some(*state),
+            _ => None,
+        }
     }
 }
 
@@ -277,6 +286,168 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         .ok_or_else(|| Error::new("StopIteration", ""))?;
     state.index = (state.index + 1) % state.saved.len();
     Ok(item)
+}
+
+const TEE_BLOCK_SIZE: usize = 57;
+
+#[derive(Clone, Copy)]
+pub(in crate::dynamic) struct Tee {
+    base: Id,
+    block: Id,
+    index: usize,
+}
+
+/// Forks root only their current block. Tracing each link once keeps cached items
+/// alive for lagging forks, and sweeping a long chain does not recurse.
+#[derive(Clone)]
+pub(in crate::dynamic) struct TeeBlock {
+    source: Id,
+    items: Vec<Id>,
+    following: Option<Id>,
+    running: bool,
+}
+
+impl TeeBlock {
+    pub(in crate::dynamic) fn children(
+        &self,
+        visit: &mut impl crate::dynamic::value::VisitReferences,
+    ) {
+        visit.push(self.source);
+        visit.extend(self.following);
+        visit.extend(&self.items);
+    }
+}
+
+fn new_tee_block(ctx: &mut Context, source: Id) -> Result<Id> {
+    let mut items = Vec::new();
+    items
+        .try_reserve_exact(TEE_BLOCK_SIZE)
+        .map_err(|_| crate::Error::allocation())?;
+    Ok(ctx.alloc(Value::TeeBlock(TeeBlock {
+        source,
+        items,
+        following: None,
+        running: false,
+    })))
+}
+
+fn tee_cursor(ctx: &mut Context, receiver: Id) -> Result<&mut Tee> {
+    match cursor(ctx, receiver) {
+        Some(Cursor::Tee(state)) => Ok(state),
+        _ => Err(Error::new(
+            "TypeError",
+            "expected an initialized tee iterator",
+        )),
+    }
+}
+
+fn tee_block(ctx: &mut Context, id: Id) -> &mut TeeBlock {
+    let Value::TeeBlock(block) = ctx.heap.get_mut(id) else {
+        unreachable!("live tee block")
+    };
+    block
+}
+
+pub(super) fn tee_allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (base, iterable) = match *args {
+        [base, iterable]
+            if kwargs.is_empty() && ctx.itertools_layout(base) == Some("itertools._tee") =>
+        {
+            (base, iterable)
+        }
+        _ => return Err(Error::new("TypeError", "expected the itertools._tee class")),
+    };
+    let source = ctx.iterator(iterable)?;
+    ctx.heap.keep(source);
+    let state = match ctx.heap.get(source) {
+        Value::Instance {
+            class,
+            itertools: Some(state),
+            ..
+        } if *class == base
+            && let Cursor::Tee(tee) = **state =>
+        {
+            tee
+        }
+        _ => Tee {
+            base,
+            block: new_tee_block(ctx, source)?,
+            index: 0,
+        },
+    };
+    Ok(cursor_instance(ctx, base, Cursor::Tee(state)))
+}
+
+pub(super) fn tee_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if let [base, receiver] = *args
+        && kwargs.is_empty()
+        && let state = *tee_cursor(ctx, receiver)?
+        && state.base == base
+    {
+        return next_tee(ctx, receiver, state)?.ok_or_else(|| Error::new("StopIteration", ""));
+    }
+    Err(Error::new("TypeError", "expected a tee iterator"))
+}
+
+pub(in crate::dynamic) fn next_tee(
+    ctx: &mut Context,
+    receiver: Id,
+    mut state: Tee,
+) -> Result<Option<Id>> {
+    if state.index == TEE_BLOCK_SIZE {
+        let previous = state.block;
+        let Value::TeeBlock(block) = ctx.heap.get(previous) else {
+            unreachable!("live tee block")
+        };
+        let (source, following) = (block.source, block.following);
+        let may_release = ctx.heap.observes_released_roots()
+            && block
+                .items
+                .iter()
+                .any(|&item| ctx.heap.could_release_callback_result(item));
+        state.block = if let Some(following) = following {
+            following
+        } else {
+            let mark = ctx.heap.temporary_mark();
+            let following = new_tee_block(ctx, source)?;
+            tee_block(ctx, previous).following = Some(following);
+            ctx.heap.release_temporaries_since(mark);
+            following
+        };
+        *tee_cursor(ctx, receiver)? = state;
+        if may_release {
+            // CPython releases the old block with the new block and old index
+            // visible. A callback can reenter and replace the new block again.
+            ctx.finish_binding_release();
+        }
+        let live = tee_cursor(ctx, receiver)?;
+        live.index = 0;
+        state = *live;
+    }
+
+    let block = tee_block(ctx, state.block);
+    let item = if let Some(&item) = block.items.get(state.index) {
+        item
+    } else {
+        if block.running {
+            return Err(Error::new(
+                "RuntimeError",
+                "cannot re-enter the tee iterator",
+            ));
+        }
+        block.running = true;
+        let source = block.source;
+        let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || ctx.next_item(source));
+        let block = tee_block(ctx, state.block);
+        block.running = false;
+        let Some(item) = result? else {
+            return Ok(None);
+        };
+        block.items.push(item);
+        item
+    };
+    tee_cursor(ctx, receiver)?.index += 1;
+    Ok(Some(item))
 }
 
 impl Context {

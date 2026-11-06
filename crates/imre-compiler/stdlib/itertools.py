@@ -391,79 +391,42 @@ def _make_zip_longest(_allocate, _state, _State):
 
 
 zip_longest = _make_zip_longest(_itertools._zip_longest_allocate, _itertools._zip_longest_state, _ZipLongestState)
+
+
+def _make_tee(_allocate, _advance):
+    class _tee:
+        __slots__ = ("__weakref__",)
+
+        def __new__(cls, iterable, /):
+            if cls is not __class__:
+                raise TypeError("expected the itertools._tee class")
+            return _allocate(cls, iterable)
+
+        def __init__(self, *args, **kwargs):
+            # Reinitialization leaves the existing cursor in place.
+            pass
+
+        def __init_subclass__(cls):
+            raise TypeError("type 'itertools._tee' is not an acceptable base type")
+
+        def __copy__(self):
+            return type(self)(self)
+
+        def __reduce__(self):
+            raise TypeError("cannot pickle '_tee' object")
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return _advance(__class__, self)
+
+    _tee.__qualname__ = "_tee"
+    return _tee
+
+
+_tee = _make_tee(_itertools._tee_allocate, _itertools._tee_next)
 del _itertools
-
-
-class _TeeBlock:
-    # Forks only root their current block. Once all forks move past it, its
-    # items can be collected without retaining any preceding blocks.
-    __slots__ = ("source", "values", "filled", "following", "running")
-
-    def __init__(self, source):
-        self.source = source
-        self.values = [None] * 57
-        self.filled = 0
-        self.following = None
-        self.running = False
-
-
-class _tee:
-    __slots__ = ("_block", "_index", "__weakref__")
-
-    def __new__(cls, iterable, /):
-        if cls is not __class__:
-            raise TypeError("expected the itertools._tee class")
-        source = iter(iterable)
-        fork = object.__new__(cls)
-        if type(source) is cls:
-            fork._block = source._block
-            fork._index = source._index
-        else:
-            fork._block = _TeeBlock(source)
-            fork._index = 0
-        return fork
-
-    def __init__(self, *args, **kwargs):
-        # Reinitialization leaves the existing cursor in place.
-        pass
-
-    def __init_subclass__(cls):
-        raise TypeError("type 'itertools._tee' is not an acceptable base type")
-
-    def __copy__(self):
-        return type(self)(self)
-
-    def __reduce__(self):
-        raise TypeError("cannot pickle '_tee' object")
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        block = self._block
-        index = self._index
-        if index == len(block.values):
-            if block.following is None:
-                block.following = _TeeBlock(block.source)
-            self._block = block = block.following
-            self._index = index = 0
-        if index == block.filled:
-            if block.running:
-                raise RuntimeError("cannot re-enter the tee iterator")
-            block.running = True
-            try:
-                value = next(block.source)
-            except StopIteration:
-                pass
-            else:
-                block.values[index] = value
-                block.filled = index + 1
-            finally:
-                block.running = False
-            if index == block.filled:
-                raise StopIteration
-        self._index = index + 1
-        return block.values[index]
 
 
 def tee(iterable, n=2, /):

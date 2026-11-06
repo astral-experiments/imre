@@ -2215,6 +2215,12 @@ pub(super) fn call(
     if name == "_imre_itertools._zip_longest_state" {
         return itertools::iterator_state(ctx, args, kwargs, "zip_longest");
     }
+    if name == "_imre_itertools._tee_allocate" {
+        return itertools::tee_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._tee_next" {
+        return itertools::tee_next(ctx, args, kwargs);
+    }
     if name == "_imre_itertools._chain_allocate" {
         let [base, class, source] = args else {
             return Err(Error::new(
