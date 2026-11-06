@@ -19,13 +19,14 @@ impl Context {
         let native = self.lookup_attr(core, "_NativeImporter")?;
         let bundled = self.lookup_attr(core, "_BundledImporter")?;
         let path = self.lookup_attr(external, "PathFinder")?;
-        let file_hook = self.lookup_attr(external, "_registered_path_hook")?;
+        let registered_hook = self.lookup_attr(external, "_registered_path_hook")?;
+        let file_hook = self.lookup_attr(external, "_file_path_hook")?;
         let mut hooks = Vec::new();
         if cfg!(unix) {
             let zip = self.module("zipimport")?;
             hooks.push(self.lookup_attr(zip, "zipimporter")?);
         }
-        hooks.push(file_hook);
+        hooks.extend([registered_hook, file_hook]);
         let sys = self.module("sys")?;
         let meta = self.alloc(Value::List(vec![native, path, bundled]));
         let hooks = self.alloc(Value::List(hooks));

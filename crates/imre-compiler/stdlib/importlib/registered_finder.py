@@ -51,6 +51,6 @@ _file_path_hook = FileFinder.path_hook(*_file_loader_defaults())
 
 def _registered_path_hook(path):
     registry_path = registered_path(path)
-    if registry_path is not None:
-        return _RegisteredFileFinder(path, registry_path)
-    return _file_path_hook(path)
+    if registry_path is None:
+        raise ImportError('not a registered module path', path=path)
+    return _RegisteredFileFinder(path, registry_path)
