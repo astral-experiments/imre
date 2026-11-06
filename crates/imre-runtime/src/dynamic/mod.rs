@@ -188,6 +188,8 @@ pub(crate) struct Context {
     signal_handlers: Vec<Id>,
     typing: typing::Registry,
     builtins: HashMap<String, Id>,
+    /// Last observed binding position for each name bucket, validated against the current scope.
+    scope_name_slots: [std::cell::Cell<usize>; 16],
     native_type_dicts: HashMap<Id, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
@@ -2019,7 +2021,16 @@ impl Context {
         if let Some(namespace) = scope.binding_namespace(name) {
             return self.dict_named_item(namespace, name);
         }
-        scope.names.get(name).copied()
+        let bucket = name.len() ^ usize::from(name.as_bytes().first().copied().unwrap_or(0));
+        let slot = &self.scope_name_slots[bucket % self.scope_name_slots.len()];
+        if let Some((key, value)) = scope.names.get_index(slot.get())
+            && key == name
+        {
+            return Some(*value);
+        }
+        let (index, _, &value) = scope.names.get_full(name)?;
+        slot.set(index);
+        Some(value)
     }
 
     /// Enumerate a scope's bindings even after Python code materializes its namespace.

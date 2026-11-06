@@ -826,6 +826,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         signal_handlers: Vec::new(),
         typing: super::typing::Registry::default(),
         builtins: HashMap::new(),
+        scope_name_slots: Default::default(),
         native_type_dicts: HashMap::new(),
         sources: HashMap::new(),
         call_depth: 0,
