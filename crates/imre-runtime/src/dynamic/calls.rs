@@ -103,7 +103,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         #[cfg(unix)]
-        "_signal" if function == "sigpending" => Some((module, function)),
+        "_signal" if matches!(function, "sigpending" | "valid_signals") => Some((module, function)),
         #[cfg(unix)]
         "_signal" if matches!(function, "default_int_handler" | "getsignal" | "signal") => {
             Some((module, function))
@@ -2946,6 +2946,9 @@ impl Context {
                     "__text_signature__" if symbol == "_signal.default_int_handler" => {
                         return Ok(self.text("($module, signalnum, frame, /)"));
                     }
+                    "__doc__" if symbol == "_signal.valid_signals" => {
+                        return Ok(self.text("Return a set of valid signal numbers on this platform.\n\nThe signal numbers returned by this function can be safely passed to\nfunctions like `pthread_sigmask`."));
+                    }
                     "__doc__" if symbol == "_signal.sigpending" => {
                         return Ok(self.text("Examine pending signals.\n\nReturns a set of signal numbers that are pending for delivery to\nthe calling thread."));
                     }
@@ -3244,6 +3247,7 @@ impl Context {
                                 | "gc.isenabled"
                                 | "gc.get_threshold"
                                 | "_signal.sigpending"
+                                | "_signal.valid_signals"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"

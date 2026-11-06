@@ -29,6 +29,13 @@ def sigpending():
 sigpending.__doc__ = _signal.sigpending.__doc__
 
 
+def valid_signals():
+    return {_int_to_enum(x, Signals) for x in _signal.valid_signals()}
+
+
+valid_signals.__doc__ = _signal.valid_signals.__doc__
+
+
 class Handlers(_IntEnum):
     """An enumeration."""
 
