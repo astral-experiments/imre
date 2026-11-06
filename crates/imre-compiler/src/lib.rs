@@ -278,7 +278,15 @@ fn check_file_with(
         let (module, _) = checked_lower_with(graph, cache.as_deref_mut())?;
         verify_after(&module, "lowering")
     };
-    object_fallback::<false, _>(path, module_root, options, filesystem, typed, |_| ())
+    object_fallback(
+        BoxedLayout::Whole,
+        path,
+        module_root,
+        options,
+        filesystem,
+        typed,
+        |_| (),
+    )
 }
 
 fn named_bytecode(path: &Path) -> bool {
@@ -322,8 +330,16 @@ fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
     Some("NotImplementedError: native marshal cannot load CPython code objects")
 }
 
-/// Compile runtime import paths with native object operations when static lowering cannot resolve them.
-fn object_fallback<const SPLIT: bool, T>(
+/// Selects the LLVM outputs for a resolved boxed program.
+enum BoxedLayout<'a> {
+    Whole,
+    Split,
+    WholeWithUnits(&'a mut Vec<CodegenUnit>),
+}
+
+/// Uses the boxed backend when the checked graph requires Python object operations.
+fn object_fallback<T>(
+    layout: BoxedLayout<'_>,
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
@@ -332,9 +348,17 @@ fn object_fallback<const SPLIT: bool, T>(
     boxed: impl FnOnce(UnitCompilation) -> T,
 ) -> Result<T, String> {
     if options.module_entry.is_some() {
-        return dynamic::compile::<SPLIT>(path, module_root, options, true, None, None, || Ok(()))?
-            .map(boxed)
-            .ok_or_else(|| "could not compile the module entry".to_owned());
+        return dynamic::compile(
+            (path, module_root),
+            options,
+            true,
+            None,
+            None,
+            layout,
+            || Ok(()),
+        )?
+        .map(boxed)
+        .ok_or_else(|| "could not compile the module entry".to_owned());
     }
     let boxed_startup = options.sitecustomize
         || options
@@ -454,14 +478,14 @@ fn object_fallback<const SPLIT: bool, T>(
         }
         Ok(())
     };
-    match dynamic::compile::<SPLIT>(
-        path,
-        module_root,
+    match dynamic::compile(
+        (path, module_root),
         options,
         runtime_imports,
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
         graph.as_ref(),
+        layout,
         check_returns,
     )? {
         Some(compilation) => Ok(boxed(compilation)),
@@ -474,6 +498,32 @@ pub fn compile_file(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
+) -> Result<Compilation, String> {
+    compile_file_with_layout(path, module_root, options, BoxedLayout::Whole)
+}
+
+/// Preserves the whole-program IR and returns independent boxed initializers for native codegen.
+pub fn compile_file_with_boxed_units(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+) -> Result<(Compilation, Vec<CodegenUnit>), String> {
+    let mut units = Vec::new();
+    let compilation = compile_file_with_layout(
+        path,
+        module_root,
+        options,
+        BoxedLayout::WholeWithUnits(&mut units),
+    )?;
+    Ok((compilation, units))
+}
+
+/// Resolves and checks the source graph once for the requested boxed outputs.
+fn compile_file_with_layout(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+    layout: BoxedLayout<'_>,
 ) -> Result<Compilation, String> {
     let typed = |graph: &mut modules::SourceGraph| {
         let (mut module, _) = checked_lower(graph)?;
@@ -491,7 +541,8 @@ pub fn compile_file(
             input_paths,
         })
     };
-    object_fallback::<false, _>(
+    object_fallback(
+        layout,
         path,
         module_root,
         options,
@@ -643,7 +694,15 @@ fn compile_file_units_with(
             source_inputs,
         })
     };
-    object_fallback::<true, _>(path, module_root, options, Default::default(), typed, |c| c)
+    object_fallback(
+        BoxedLayout::Split,
+        path,
+        module_root,
+        options,
+        Default::default(),
+        typed,
+        |c| c,
+    )
 }
 
 /// Reject unsupported operations before ty renders potentially exponential types.
@@ -920,7 +979,8 @@ mod tests {
                     runtime_imports,
                     ..Default::default()
                 };
-                let ordinary = super::object_fallback::<false, _>(
+                let ordinary = super::object_fallback(
+                    super::BoxedLayout::Whole,
                     &path,
                     None,
                     &options,

@@ -293,8 +293,8 @@ fn run() -> Result<ExitCode, String> {
     let bundled_native = bundled
         .as_ref()
         .filter(|_| target.as_deref().is_none_or(native_linux_gnu_target));
-    let native_objects =
-        target.is_none() && lto_linker.is_none() && llvm_path.is_none() && link.args.is_empty();
+    let native_link = target.is_none() && lto_linker.is_none() && link.args.is_empty();
+    let native_objects = native_link && llvm_path.is_none();
     let native = if native_objects && clang.is_none() && !options.address_sanitizer {
         build_cache::native_toolchain(&runtime, bundled_native)
     } else {
@@ -398,6 +398,7 @@ fn run() -> Result<ExitCode, String> {
         Whole(String),
         Units(Vec<CodegenUnit>),
     }
+    let mut boxed_ir_dump = None;
     let (code, input_paths, sources, extension_archives) = if split {
         let c = imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)?;
         (
@@ -407,13 +408,26 @@ fn run() -> Result<ExitCode, String> {
             c.extension_archives,
         )
     } else {
-        let c = imre_compiler::compile_file(&source_path, module_root.as_deref(), &options)?;
-        (
-            Code::Whole(c.llvm_ir),
-            c.input_paths,
-            c.source_inputs,
-            c.extension_archives,
-        )
+        let (c, units) =
+            if native_link && !whole_program && options.address_sanitizer && llvm_path.is_some() {
+                imre_compiler::compile_file_with_boxed_units(
+                    &source_path,
+                    module_root.as_deref(),
+                    &options,
+                )?
+            } else {
+                (
+                    imre_compiler::compile_file(&source_path, module_root.as_deref(), &options)?,
+                    Vec::new(),
+                )
+            };
+        let code = if units.is_empty() {
+            Code::Whole(c.llvm_ir)
+        } else {
+            boxed_ir_dump = Some(c.llvm_ir);
+            Code::Units(units)
+        };
+        (code, c.input_paths, c.source_inputs, c.extension_archives)
     };
     let (library_manifests, native_libraries) = extension_libraries(&extension_archives)?;
     validate_paths(
@@ -434,6 +448,9 @@ fn run() -> Result<ExitCode, String> {
         lto_linker.as_deref().or(native_lld),
         bundled.as_ref().map(|tools| tools.clang.as_path()),
     )?;
+    if let (Some(path), Some(ir)) = (&llvm_path, boxed_ir_dump) {
+        std::fs::write(path, ir).map_err(|e| e.to_string())?;
+    }
     let stage = executable_cache.and_then(|c| c.stage());
     let staged_output = stage.as_ref().map(|s| s.path().join("program"));
     let mut temporary = None;
