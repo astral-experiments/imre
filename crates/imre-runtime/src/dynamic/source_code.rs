@@ -3867,7 +3867,7 @@ impl Context {
         let mut local = scope;
         loop {
             let frame = self.scope_data(local);
-            names.extend(frame.names.keys().cloned());
+            names.extend(frame.names.keys().map(|name| name.as_str().to_owned()));
             let mut cells: Vec<_> = frame.closure.cells.keys().cloned().collect();
             cells.sort_unstable();
             names.extend(cells);

@@ -8088,7 +8088,7 @@ impl Context {
                 let mut keywords = kwargs.into_iter();
                 while let Some((n, v)) = keywords.next() {
                     if !posonly.contains(&n) && (pos.contains(&n) || kwonly.contains(&n)) {
-                        if self.scope_data(local).names.contains_key(&n) {
+                        if self.scope_data(local).names.contains_key(n.as_str()) {
                             return Err(Error::new(
                                 "TypeError",
                                 format!("{name}() got multiple values for argument '{n}'"),
@@ -8135,7 +8135,10 @@ impl Context {
                 };
                 if given > pos.len() && sig.varargs.is_none() {
                     let bound = &self.scope_data(local).names;
-                    let keywords = kwonly.iter().filter(|n| bound.contains_key(*n)).count();
+                    let keywords = kwonly
+                        .iter()
+                        .filter(|n| bound.contains_key(n.as_str()))
+                        .count();
                     return Err(excess_positional_error(
                         &name,
                         pos.len(),
@@ -8149,7 +8152,7 @@ impl Context {
                 let supplied_types = self.check_supplied_types(local, &sig, &name);
                 let mut missing = Vec::new();
                 for (index, n) in pos.iter().enumerate() {
-                    if !self.scope_data(local).names.contains_key(n) {
+                    if !self.scope_data(local).names.contains_key(n.as_str()) {
                         let offset = index + default_values.len();
                         if let Some(&val) = offset
                             .checked_sub(pos.len())
@@ -8168,7 +8171,7 @@ impl Context {
                     return Err(missing_arguments_error(&name, "positional", &missing));
                 }
                 for n in kwonly {
-                    if !self.scope_data(local).names.contains_key(n) {
+                    if !self.scope_data(local).names.contains_key(n.as_str()) {
                         let val = self.dict_entries(kwdefaults).and_then(|entries| {
                             entries.iter().find_map(|&(key, value)| {
                                 matches!(self.heap.get(key), Value::Str(text) if text == n)
@@ -8258,7 +8261,7 @@ impl Context {
     fn check_supplied_types(&self, local: Id, sig: &CallParameters, name: &str) -> Result<()> {
         if let Some(types) = sig.types.as_object() {
             for (param, expected) in types {
-                if let Some(&id) = self.scope_data(local).names.get(param) {
+                if let Some(&id) = self.scope_data(local).names.get(param.as_str()) {
                     self.require_scalar(
                         id,
                         expected.as_str().unwrap_or_default(),
@@ -8339,7 +8342,7 @@ impl Context {
             let members = body
                 .into_iter()
                 .map(|name| {
-                    let value = class_scope.names[&name];
+                    let value = class_scope.names[name.as_str()];
                     (name, value)
                 })
                 .collect();
@@ -8960,10 +8963,7 @@ impl Context {
             .and_then(|namespace| namespace.slot_names.as_deref())
             .is_some_and(|slots| slots.iter().any(|slot| slot == "__doc__"));
         if !has_doc_slot {
-            class_scope
-                .names
-                .entry("__doc__".to_owned())
-                .or_insert(NONE);
+            class_scope.names.entry("__doc__".into()).or_insert(NONE);
         }
         if let Some(body) = exposed_body {
             // type.__new__ replaces the body namespace with the finished type's dictionary.
