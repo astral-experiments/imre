@@ -1,6 +1,6 @@
 //! Vectored socket I/O and control messages using the target's native socket ABI.
-use super::{Error, Kind, Object, Result, SocketAddress, SocketName, deadline, errno_error, fd};
-use super::{socket_call, unpack_socket_name};
+use super::{Deadline, Error, Kind, Object, Result, SocketAddress, SocketName, errno_error, fd};
+use super::{socket_call_interruptible, unpack_socket_name};
 use allocator_api2::boxed::Box;
 use std::{io, ptr, slice};
 
@@ -65,7 +65,7 @@ pub unsafe extern "C" fn imre_socket_control_size(length: usize, padded: bool) -
     super::finish(result, super::word(0))
 }
 
-struct Control {
+pub(crate) struct Control {
     // A header array provides libc's required alignment; len is the exact capacity in bytes.
     storage: Box<[libc::cmsghdr]>,
     len: usize,
@@ -91,7 +91,7 @@ impl Control {
         }
     }
 
-    fn from_items(items: &[(i32, i32, &[u8])]) -> Result<Self> {
+    pub(crate) fn from_items(items: &[(i32, i32, &[u8])]) -> Result<Self> {
         let mut len = 0;
         for (_, _, data) in items {
             let space = cmsg_space(data.len())
@@ -170,6 +170,19 @@ pub(crate) struct ReceivedControl {
 }
 
 impl ReceivedControl {
+    pub(crate) fn new(size: usize) -> Result<Self> {
+        if size > SOCKLEN_LIMIT {
+            return Err(Error::new(
+                Kind::ValueError,
+                "invalid ancillary data buffer length",
+            ));
+        }
+        Ok(Self {
+            control: Control::new(size)?,
+            owns_fds: false,
+        })
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (i32, i32, &[u8])> {
         self.control.items()
     }
@@ -206,11 +219,11 @@ impl Drop for ReceivedControl {
 pub(crate) unsafe fn send(
     socket: &Object,
     iov: &mut [libc::iovec],
-    ancillary: &[(i32, i32, &[u8])],
+    control: &mut Control,
     flags: i32,
     address: Option<&SocketAddress>,
+    until: Option<Deadline>,
 ) -> Result<usize> {
-    let mut control = Control::from_items(ancillary)?;
     // SAFETY: msghdr contains pointers and integers; only the fields used below are nonzero.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
     if let Some(address) = address {
@@ -225,7 +238,7 @@ pub(crate) unsafe fn send(
     msg.msg_control = control.data();
     msg.msg_controllen = control.len as _;
     let raw = fd(socket);
-    socket_call(raw, libc::POLLOUT, deadline(socket), || {
+    socket_call_interruptible(raw, libc::POLLOUT, until, || {
         // SAFETY: control, address and all caller-owned iovec ranges live through retries.
         usize::try_from(unsafe { libc::sendmsg(raw, &msg, flags) })
             .map_err(|_| io::Error::last_os_error())
@@ -241,16 +254,11 @@ pub(crate) unsafe fn send(
 pub(crate) unsafe fn recv(
     socket: &Object,
     iov: &mut [libc::iovec],
-    ancbufsize: usize,
+    received: &mut ReceivedControl,
     flags: i32,
-) -> Result<(usize, ReceivedControl, i32, SocketName)> {
-    if ancbufsize > SOCKLEN_LIMIT {
-        return Err(Error::new(
-            Kind::ValueError,
-            "invalid ancillary data buffer length",
-        ));
-    }
-    let mut control = Control::new(ancbufsize)?;
+    until: Option<Deadline>,
+) -> Result<(usize, i32, SocketName)> {
+    let control = &mut received.control;
     // SAFETY: zero is a valid empty msghdr and initialized sockaddr_storage.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
     let mut addr: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
@@ -261,22 +269,19 @@ pub(crate) unsafe fn recv(
         .map_err(|_| Error::new(Kind::OSError, "recvmsg_into() argument 1 is too long"))?
         as _;
     let raw = fd(socket);
-    let count = socket_call(raw, libc::POLLIN, deadline(socket), || {
+    let count = socket_call_interruptible(raw, libc::POLLIN, until, || {
         msg.msg_namelen = size_of_val(&addr) as _;
-        msg.msg_controllen = ancbufsize as _;
+        msg.msg_controllen = control.len as _;
         msg.msg_flags = 0;
         // SAFETY: msg points into initialized address/control storage and pinned caller buffers.
         usize::try_from(unsafe { libc::recvmsg(raw, &mut msg, flags) })
             .map_err(|_| io::Error::last_os_error())
     })
     .map_err(errno_error)?;
-    control.len = ancbufsize.min(msg.msg_controllen as usize);
-    let control = ReceivedControl {
-        control,
-        owns_fds: true,
-    };
+    control.len = control.len.min(msg.msg_controllen as usize);
+    received.owns_fds = true;
     let peer = unpack_socket_name(&addr, msg.msg_namelen.min(size_of_val(&addr) as _))?;
-    Ok((count, control, msg.msg_flags, peer))
+    Ok((count, msg.msg_flags, peer))
 }
 
 #[cfg(test)]
@@ -300,14 +305,20 @@ mod tests {
             iov_len: byte.len(),
         }];
         let record = [(libc::SOL_SOCKET, libc::SCM_RIGHTS, rights.as_slice())];
+        let mut outgoing = Control::from_items(&record).ok().unwrap();
+        let mut control = ReceivedControl::new(cmsg_space(rights.len()).ok().unwrap())
+            .ok()
+            .unwrap();
         // SAFETY: the single iovec is live and accessible for both synchronous calls.
-        let (_, control, _, _) = unsafe {
-            send(&tx, &mut iov, &record, 0, None).ok().expect("sendmsg");
-            drop(owner);
-            recv(&rx, &mut iov, cmsg_space(rights.len()).ok().unwrap(), 0)
+        unsafe {
+            send(&tx, &mut iov, &mut outgoing, 0, None, None)
                 .ok()
-                .expect("recvmsg")
-        };
+                .expect("sendmsg");
+            drop(owner);
+            recv(&rx, &mut iov, &mut control, 0, None)
+                .ok()
+                .expect("recvmsg");
+        }
         let (level, kind, data) = control.iter().next().expect("received rights");
         assert_eq!(
             (level, kind, data.len()),

@@ -21,6 +21,10 @@ def drain(signum, frame):
             return
 
 
+def wake_receiver(signum, frame):
+    sender.send(b"R")
+
+
 previous = signal.signal(signal.SIGALRM, interrupt)
 try:
     sender, peer = socket.socketpair()
@@ -51,6 +55,15 @@ try:
         assert drained
         sender.close()
         assert peer.recv(1) == b"x"
+
+    sender, peer = socket.socketpair()
+    with sender, peer:
+        peer.settimeout(3)
+        buffer = bytearray(1)
+        signal.signal(signal.SIGALRM, wake_receiver)
+        signal.alarm(1)
+        assert peer.recvmsg_into([buffer])[0] == 1
+        assert buffer == b"R"
 finally:
     signal.alarm(0)
     signal.signal(signal.SIGALRM, previous)

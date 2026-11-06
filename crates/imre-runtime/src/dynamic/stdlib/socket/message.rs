@@ -198,6 +198,26 @@ fn control_item(ctx: &mut Context, item: Id) -> Result<[Id; 3]> {
     })
 }
 
+/// Recreate any pointers into the Python heap after a returning signal handler.
+fn retry<T>(
+    ctx: &mut Context,
+    socket: &Object,
+    mut attempt: impl FnMut(&mut Context, Option<native::Deadline>) -> Result<T>,
+) -> Result<T> {
+    let until = native::deadline(socket);
+    loop {
+        match attempt(ctx, until) {
+            Err(err) if ctx.has_errno(&err, libc::EINTR) => {
+                ctx.dispatch_signals()?;
+                if until.is_some_and(|end| end.remaining().is_zero()) {
+                    return Err(Error::new("TimeoutError", "timed out"));
+                }
+            }
+            result => return result,
+        }
+    }
+}
+
 fn send(ctx: &mut Context, socket: &Object, receiver: Id, args: &[Id], flags: i32) -> Result<Id> {
     let peer = args.get(3).copied().unwrap_or(NONE);
     let destination = if peer == NONE {
@@ -227,8 +247,6 @@ fn send(ctx: &mut Context, socket: &Object, receiver: Id, args: &[Id], flags: i3
                     headers.push((level, kind));
                 }
             }
-            let mut scratch = IoVectors::new(streams.spans.len())?;
-            let iov = scratch.resolve(ctx, &streams.spans, false)?;
             let mut ancillary = Vec::new();
             ancillary
                 .try_reserve_exact(headers.len())
@@ -236,11 +254,23 @@ fn send(ctx: &mut Context, socket: &Object, receiver: Id, args: &[Id], flags: i3
             for ((level, kind), (storage, span)) in headers.into_iter().zip(&controls.spans) {
                 ancillary.push((level, kind, &ctx.owner_bytes(*storage)?[span.clone()]));
             }
-            // SAFETY: the vectors refer to pinned readable storage. No Python
-            // callback can run from here until the synchronous syscall completes.
-            let n = unsafe {
-                native::message::send(socket, iov, &ancillary, flags, destination.as_ref())
-            }?;
+            let mut control = native::message::Control::from_items(&ancillary)?;
+            drop(ancillary);
+            let n = retry(ctx, socket, |ctx, until| {
+                let mut scratch = IoVectors::new(streams.spans.len())?;
+                let iov = scratch.resolve(ctx, &streams.spans, false)?;
+                // SAFETY: the exports pin all ranges. The pointers expire before dispatch.
+                Ok(unsafe {
+                    native::message::send(
+                        socket,
+                        iov,
+                        &mut control,
+                        flags,
+                        destination.as_ref(),
+                        until,
+                    )
+                }?)
+            })?;
             Ok(ctx.int(n as i64))
         })();
         controls.finish(ctx, result)
@@ -251,16 +281,30 @@ fn send(ctx: &mut Context, socket: &Object, receiver: Id, args: &[Id], flags: i3
 fn receive(
     ctx: &mut Context,
     socket: &Object,
-    iov: &mut [libc::iovec],
-    data: Option<Vec<u8>>,
+    spans: &[(Id, Range<usize>)],
+    mut data: Option<Vec<u8>>,
     ancbufsize: isize,
     flags: i32,
 ) -> Result<Id> {
     let size = usize::try_from(ancbufsize)
         .map_err(|_| Error::new("ValueError", "invalid ancillary data buffer length"))?;
-    // SAFETY: recvmsg owns data, or recvmsg_into holds every writable export.
-    // Aliased iovecs point into the same pinned backing without live Rust slices.
-    let (n, mut control, flags, peer) = unsafe { native::message::recv(socket, iov, size, flags) }?;
+    let mut control = native::message::ReceivedControl::new(size)?;
+    let (n, flags, peer) = retry(ctx, socket, |ctx, until| {
+        let mut single;
+        let mut scratch;
+        let iov = if let Some(bytes) = &mut data {
+            single = [libc::iovec {
+                iov_base: bytes.as_mut_ptr().cast(),
+                iov_len: bytes.len(),
+            }];
+            &mut single[..]
+        } else {
+            scratch = IoVectors::new(spans.len())?;
+            scratch.resolve(ctx, spans, true)?
+        };
+        // SAFETY: the private buffer or pinned writable exports outlive this attempt.
+        Ok(unsafe { native::message::recv(socket, iov, &mut control, flags, until) }?)
+    })?;
     if control.malformed() {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
@@ -347,19 +391,13 @@ pub(super) fn call(
     if method == "recvmsg" {
         let size = usize::try_from(size)
             .map_err(|_| Error::new("ValueError", "negative buffer size in recvmsg()"))?;
-        let mut bytes = native::zeroed_receive_buffer(size)?;
-        let mut iov = [libc::iovec {
-            iov_base: bytes.as_mut_ptr().cast(),
-            iov_len: bytes.len(),
-        }];
-        return receive(ctx, socket, &mut iov, Some(bytes), ancillary, flags);
+        let bytes = native::zeroed_receive_buffer(size)?;
+        return receive(ctx, socket, &[], Some(bytes), ancillary, flags);
     }
     let mut buffers = Buffers::new(ctx);
     let result = (|| {
         data_buffers(ctx, &mut buffers, args[0], method)?;
-        let mut scratch = IoVectors::new(buffers.spans.len())?;
-        let iov = scratch.resolve(ctx, &buffers.spans, true)?;
-        receive(ctx, socket, iov, None, ancillary, flags)
+        receive(ctx, socket, &buffers.spans, None, ancillary, flags)
     })();
     buffers.finish(ctx, result)
 }
