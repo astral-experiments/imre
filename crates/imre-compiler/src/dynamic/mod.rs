@@ -456,8 +456,21 @@ impl<'a> Visitor<'a> for Imports {
     }
 }
 
-/// A synchronous function with one body scope can capture its unbounded type parameters.
+/// Keep eligibility for object lowering independent of what an already-boxed body can emit.
 pub(crate) fn function_type_params<'a>(
+    function: &'a ast::StmtFunctionDef,
+    string_annotations: bool,
+    nested: bool,
+    private_names: Option<&imre_ast::Names>,
+) -> Option<&'a ast::TypeParams> {
+    if nested && !string_annotations {
+        return None;
+    }
+    boxed_function_type_params(function, string_annotations, nested, private_names)
+}
+
+/// A synchronous boxed function with one body scope can capture its unbounded type parameters.
+fn boxed_function_type_params<'a>(
     function: &'a ast::StmtFunctionDef,
     string_annotations: bool,
     nested: bool,
@@ -469,7 +482,6 @@ pub(crate) fn function_type_params<'a>(
     let params = function.type_params.as_deref()?;
     let mut names = HashSet::new();
     if function.is_async
-        || (nested && !string_annotations)
         || !params.iter().all(|p| {
             let name = private_names.map_or(p.name().as_str(), |names| names.definition(p.name()));
             p.default().is_none()
