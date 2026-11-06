@@ -2845,10 +2845,36 @@ impl Emitter<'_, '_> {
                             .map(|(_, value)| value)
                     })
                     .unwrap();
-                let old = self.get_item(&list.value, &index.value, element, nonnegative);
+                let entry = self
+                    .module
+                    .types
+                    .mapping(list.value.ty)
+                    .is_some_and(|(key, _)| {
+                        key == index.value.ty && matches!(key, Type::Int | Type::Str)
+                    })
+                    .then(|| self.entry_alloca("i64"));
+                let old = if let Some(entry) = &entry {
+                    let key = self.key_word(&index.value);
+                    let word = self.checked_instruction(format!(
+                        "call i64 @imre_dict_get_position(ptr {}, i64 {key}, ptr {entry})",
+                        list.value.operand
+                    ));
+                    self.unpack_word(word, element)
+                } else {
+                    self.get_item(&list.value, &index.value, element, nonnegative)
+                };
                 let right = self.operand(expression);
                 let value = self.binary(*op, &old, &right.value);
-                self.set_item(&list.value, &index.value, &value, nonnegative);
+                if let Some(entry) = entry {
+                    let position = self.instruction(format!("load i64, ptr {entry}"));
+                    let key = self.key_word(&index.value);
+                    let word = self.word(&value);
+                    self.checked_line(format!(
+                        "call void @imre_dict_set_position(ptr {}, i64 {key}, i64 {position}, i64 {word})", list.value.operand
+                    ));
+                } else {
+                    self.set_item(&list.value, &index.value, &value, nonnegative);
+                }
                 self.release(&value);
                 self.release_operand(&right);
                 self.release(&old);
@@ -11019,6 +11045,8 @@ declare ptr @imre_sorted_record_rows(ptr, i64, ptr, ptr)
 declare i64 @imre_dict_len(ptr)
 declare i32 @imre_dict_contains(ptr, i64)
 declare i64 @imre_dict_get(ptr, i64)
+declare i64 @imre_dict_get_position(ptr, i64, ptr)
+declare void @imre_dict_set_position(ptr, i64, i64, i64)
 declare i64 @imre_dict_get_enum_int(ptr, i64, i64)
 declare ptr @imre_dict_gather_str_int(ptr, ptr)
 declare ptr @imre_dict_gather_bytes_int(ptr, ptr)
