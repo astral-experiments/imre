@@ -281,6 +281,7 @@ pub(super) fn call(
         "cosh" => Some(f64::cosh),
         "erfc" => Some(|x| erfc(x)),
         "exp" => Some(f64::exp),
+        "fabs" => Some(f64::abs),
         "sin" => Some(f64::sin),
         "sinh" => Some(f64::sinh),
         "tan" => Some(f64::tan),

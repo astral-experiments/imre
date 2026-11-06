@@ -15,6 +15,21 @@ pub(super) enum ReverseSequence {
     Deque,
 }
 
+/// Lower a unary math operation when the argument has a native numeric representation.
+pub(super) fn unary_float_builtin(builtin: Builtin, value: Expr) -> Option<Expr> {
+    if !matches!(value.ty, Type::Float | Type::Int | Type::Bool) {
+        return None;
+    }
+    let number = Expr {
+        ty: Type::Float,
+        kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+    };
+    Some(Expr {
+        ty: Type::Float,
+        kind: ExprKind::Builtin(builtin, vec![number]),
+    })
+}
+
 /// All leaves must be plain local reads so no later operand can change the
 /// keys captured by an earlier union. Bound the number of membership probes.
 fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
