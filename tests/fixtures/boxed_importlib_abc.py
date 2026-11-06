@@ -88,3 +88,15 @@ def current():
     assert module.value == 42 and module.__file__ == spec.origin == "memory_plugin.py"
     assert module.__spec__ is spec and module.__loader__ is loader
     assert reads == ["memory_plugin.py", "memory_plugin.py"]
+
+    class InvalidSource(MemorySource):
+        def get_data(self, path):
+            return b"def quote(:\n    pass\n"
+
+    try:
+        InvalidSource().get_code("memory_plugin")
+    except SyntaxError as exc:
+        assert (exc.filename, exc.lineno, exc.offset) == ("memory_plugin.py", 1, 11)
+        assert (exc.text, exc.end_lineno, exc.end_offset) == ("def quote(:\n", 1, 12)
+    else:
+        raise AssertionError("compiled invalid in-memory source")

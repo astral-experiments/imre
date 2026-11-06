@@ -1,3 +1,4 @@
+import os
 from importlib.machinery import SourceFileLoader
 from types import ModuleType
 import local_body
@@ -16,6 +17,24 @@ try:
     module = ModuleType(local_body.__name__)
     loader.exec_module(module)
     assert module.value == "changed on disk"
+
+    with open(origin, "wb") as stream:
+        stream.write(b"def broken(:\n")
+    try:
+        loader.exec_module(module)
+    except SyntaxError as error:
+        assert error.filename == origin and error.lineno == 1
+    else:
+        raise AssertionError("executed invalid physical source")
+    assert module.value == "changed on disk"
+
+    os.unlink(origin)
+    try:
+        loader.get_code(local_body.__name__)
+    except FileNotFoundError as error:
+        assert error.filename == origin
+    else:
+        raise AssertionError("loaded code after the physical source was deleted")
 finally:
     with open(origin, "wb") as stream:
         stream.write(original)
