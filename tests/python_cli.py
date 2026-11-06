@@ -4065,6 +4065,7 @@ for name in ("md4", "ripemd160"):
             "boxed_gc_finalizers.py",
             "boxed_gc_generator_loop.py",
             "boxed_gc_returned_stream.py",
+            "boxed_weak_frame_return.py",
             "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
