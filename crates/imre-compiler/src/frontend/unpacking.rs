@@ -397,7 +397,8 @@ impl Checker<'_> {
                         vec![value, receiver],
                     )));
                 }
-                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "returncode"
+                if matches!(receiver.ty, Type::Popen(..) | Type::ActivePopen)
+                    && attribute.attr.as_str() == "returncode"
                 {
                     let value = self.coerce(value, self.types.optional(Type::Int), target)?;
                     return Ok(Statement::Expr(builtin(

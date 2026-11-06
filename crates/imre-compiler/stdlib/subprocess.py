@@ -23,9 +23,14 @@ _active = []
 
 
 def _cleanup():
-    for child in _active[:]:
-        if child.poll() is not None:
-            _active.remove(child)
+    if _active is not None:
+        for child in _active[:]:
+            if child._internal_poll(_deadstate=sys.maxsize) is not None:
+                try:
+                    _active.remove(child)
+                except ValueError:
+                    # A concurrent cleanup may already have removed this child.
+                    pass
     _process.cleanup()
 
 
@@ -268,6 +273,7 @@ class Popen:
                  stderr=None, preexec_fn=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
                  umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, group=None, extra_groups=None, user=None):
+        _cleanup()
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -300,7 +306,6 @@ class Popen:
         if line_buffering:
             bufsize = -1
         self._communication_started = False
-        _cleanup()
         self.args = args
         self.returncode = None
         self.pipesize = pipesize
@@ -369,13 +374,16 @@ class Popen:
             return result[:76] + "...>"
         return result
 
-    def __del__(self, _warn=_warn):
-        if self._handle is None or not _process.started(self._handle):
+    def __del__(self, _maxsize=sys.maxsize, _warn=_warn):
+        handle = self._handle
+        if handle is None or not _process.started(handle):
             return
         if self.returncode is None:
             _warn("subprocess %s is still running" % self.pid, ResourceWarning, source=self)
-        if self._internal_poll() is None and _active is not None:
+        self._internal_poll(_deadstate=_maxsize)
+        if self.returncode is None and _active is not None:
             _active.append(self)
+        _process.finalized(handle)
 
     @property
     def universal_newlines(self):
@@ -389,9 +397,12 @@ class Popen:
     def pid(self):
         return _process.pid(self._handle)
 
-    def _internal_poll(self):
+    def _internal_poll(self, _deadstate=None):
         if self.returncode is None:
-            status = _process.poll(self._handle)
+            try:
+                status = _process.poll(self._handle, _deadstate)
+            except OSError:
+                status = _deadstate
             if status is not None:
                 self.returncode = status
         return self.returncode
