@@ -95,10 +95,10 @@ fn ascii_prefix<'s, 'a, E: From<Error>>(
                 _ => break,
             };
         }
-        if *slot != DELETE {
-            bytes[written].write(*slot);
-            written += 1;
-        }
+        // Each preceding input byte contributes at most one output byte, so
+        // this position always fits. A deleted byte is outside the committed prefix.
+        unsafe { bytes.get_unchecked_mut(written) }.write(*slot);
+        written += usize::from(*slot != DELETE);
         consumed += 1;
     }
     // SAFETY: the initialized prefix consists entirely of ASCII bytes.
