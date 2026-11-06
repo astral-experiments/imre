@@ -5012,6 +5012,17 @@ impl Context {
     }
 
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+        // Rich comparison calls a native wrapper with an explicit receiver. In
+        // particular, an alias on a foreign class raises the wrapper's call error.
+        if comparison_op(name).is_some()
+            && let Some(slot) = self.slot(obj, name)
+            && let Value::Native(symbol) = self.heap.get(slot)
+            && let Some(("int" | "float", method)) = symbol.split_once('.')
+            && comparison_op(method).is_some()
+        {
+            let result = self.call(slot, vec![obj, other], vec![])?;
+            return Ok((result != value::NOT_IMPLEMENTED).then_some(result));
+        }
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
         }
@@ -5131,26 +5142,6 @@ impl Context {
                     .map(Some);
             }
 
-            // A float subtype inherits float's comparison slots independently. In particular,
-            // float.__ne__ need not call an overridden __eq__, and NaN is unequal to itself.
-            if matches!(name, "__eq__" | "__ne__")
-                && let Value::Instance {
-                    scalar: Some(scalar),
-                    ..
-                } = self.heap.get(obj)
-                && let Value::Float(number) = self.heap.get(*scalar)
-            {
-                let other = self.scalar_value(other);
-                let equal = match self.heap.get(other) {
-                    Value::Float(right) => number == right,
-                    Value::Int(_) | Value::Bool(_) => {
-                        crate::floats::compare(&self.as_int(other)?, *number) == 0
-                    }
-                    _ => return Ok(None),
-                };
-                return Ok(Some(builtins::boolean(equal == (name == "__eq__"))));
-            }
-
             if name == "__ne__"
                 && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
             {
@@ -5266,18 +5257,61 @@ impl Context {
         self.truth(different)
     }
 
+    /// Compare through the native int or float slot, bypassing the receiver’s override.
+    /// Float accepts either real payload. Int declines floats so they can reflect.
+    pub(super) fn real_compare_slot(
+        &mut self,
+        op: &str,
+        receiver: Id,
+        other: Id,
+    ) -> Result<Option<Id>> {
+        let payload = self.scalar_value(other);
+        if other != payload
+            && let (Value::Float(number), Value::Int(integer)) =
+                (self.heap.get(receiver), self.heap.get(payload))
+            && number.is_finite()
+            && (49..=1024).contains(&integer.bits())
+        {
+            // CPython compares equal-width, same-sign magnitudes above 48 bits
+            // as integers. The original int subtype can observe that comparison.
+            let whole = crate::floats::float_to_integer(*number)?;
+            if whole.bits() == integer.bits() && whole.sign() == integer.big().sign() {
+                let op = if number.fract() == 0.0 {
+                    op
+                } else {
+                    match op {
+                        "==" | "!=" => return Ok(Some(builtins::boolean(op == "!="))),
+                        "<" | "<=" if *number > 0.0 => "<",
+                        "<" | "<=" => "<=",
+                        _ if *number > 0.0 => ">=",
+                        _ => ">",
+                    }
+                };
+                let left = self.alloc(Value::Int(crate::Int::new(whole)));
+                let result = self.binary(op, left, other)?;
+                return Ok(Some(builtins::boolean(self.truth(result)?)));
+            }
+        }
+        match (self.heap.get(receiver), self.heap.get(payload)) {
+            (Value::Int(_) | Value::Bool(_) | Value::Float(_), Value::Int(_) | Value::Bool(_))
+            | (Value::Float(_), Value::Float(_)) => self.binary(op, receiver, payload).map(Some),
+            _ => Ok(None),
+        }
+    }
+
     /// Call the first Python or native comparison slot in the receiver's MRO.
     fn builtin_compare_slot(
         &mut self,
         name: &str,
         a: Id,
         b: Id,
-        native_order: bool,
+        native_comparison: bool,
     ) -> Result<Option<Id>> {
-        if native_order {
+        if native_comparison {
             let receiver = self.heap.get(self.scalar_value(a));
             let other = self.heap.get(self.scalar_value(b));
             let compatible = match receiver {
+                Value::Complex(_) => matches!(other, Value::Float(_)),
                 Value::Set { .. } => matches!(other, Value::Set { .. }),
                 Value::Calendar { value, .. } if value.class() != "timezone" => {
                     matches!(other, Value::Calendar { value: right, .. } if value.class() == right.class())
@@ -5287,7 +5321,7 @@ impl Context {
             let class = self.exact_type(a)?;
             let native = self.find_in_mro(class, |base| match self.heap.get(base) {
                 Value::Native(kind)
-                    if matches!(kind.as_str(), "set" | "frozenset")
+                    if matches!(kind.as_str(), "complex" | "set" | "frozenset")
                         || stdlib::datetime::members(kind).is_some() =>
                 {
                     Some(true)
@@ -5302,6 +5336,15 @@ impl Context {
             }
         } else if self.slot(a, name).is_some() {
             return self.operator_slot(a, name, b);
+        } else if matches!(
+            self.heap.get(a),
+            Value::Int(_) | Value::Bool(_) | Value::Float(_)
+        ) {
+            return self.real_compare_slot(
+                comparison_op(name).expect("rich comparison slot"),
+                a,
+                b,
+            );
         }
         let value = match name {
             "__eq__" | "__ne__" => {
@@ -5512,20 +5555,34 @@ impl Context {
         {
             return Ok(None);
         }
-        let native_order = matches!(op, "<" | "<=" | ">" | ">=")
-            && [a, b]
-                .into_iter()
-                .any(|id| match self.heap.get(self.scalar_value(id)) {
-                    Value::Set { .. } | Value::Deque(_) => true,
-                    Value::Calendar { value, .. } => value.class() != "timezone",
-                    _ => false,
-                });
-        // An int (including bool) or an exact float can compare an integer
-        // operand itself. Only a strict subtype gets to try its slot first.
-        let compares_integer = self.builtin_slot_accepts(b, "int")
-            && (self.builtin_slot_accepts(a, "int") || matches!(self.heap.get(a), Value::Float(_)));
-        if inplace.is_empty()
-            && (self.same_sequence_family(a, b) || compares_integer || native_order)
+        let native_comparison = match op {
+            // Complex accepts float equality before an unrelated float subtype can reflect.
+            "==" | "!=" => matches!(
+                (
+                    self.heap.get(self.scalar_value(a)),
+                    self.heap.get(self.scalar_value(b))
+                ),
+                (Value::Complex(_), Value::Float(_)) | (Value::Float(_), Value::Complex(_))
+            ),
+            "<" | "<=" | ">" | ">=" => {
+                [a, b]
+                    .into_iter()
+                    .any(|id| match self.heap.get(self.scalar_value(id)) {
+                        Value::Set { .. } | Value::Deque(_) => true,
+                        Value::Calendar { value, .. } => value.class() != "timezone",
+                        _ => false,
+                    })
+            }
+            _ => false,
+        };
+        let real_pair = inplace.is_empty()
+            && [a, b].into_iter().all(|value| {
+                matches!(
+                    self.heap.get(self.scalar_value(value)),
+                    Value::Int(_) | Value::Bool(_) | Value::Float(_)
+                )
+            });
+        if real_pair || native_comparison || (inplace.is_empty() && self.same_sequence_family(a, b))
         {
             let ac = self.exact_type(a)?;
             let bc = self.exact_type(b)?;
@@ -5536,7 +5593,9 @@ impl Context {
                 [(left, a, b), (right, b, a)]
             };
             for (name, left, right) in slots {
-                if let Some(result) = self.builtin_compare_slot(name, left, right, native_order)? {
+                if let Some(result) =
+                    self.builtin_compare_slot(name, left, right, native_comparison)?
+                {
                     return Ok(Some(result));
                 }
             }
