@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 const SITE_PACKAGES: &str = "{base}/lib/imre{py_version_short}/site-packages";
 
-pub const SCHEME_NAMES: &[&str] = &["posix_prefix", "venv"];
+pub const SCHEME_NAMES: &[&str] = &["posix_prefix", "posix_user", "venv"];
 pub const PATH_NAMES: &[&str] = &[
     "stdlib",
     "platstdlib",
@@ -182,36 +182,47 @@ impl InterpreterLayout {
 
     /// Return the installation destination or its format string for sysconfig.
     pub fn path(&self, scheme: &str, name: &str, expand: bool) -> Option<String> {
-        if !SCHEME_NAMES.contains(&scheme) {
-            return None;
-        }
-        let template = match name {
-            "stdlib" | "platstdlib" => "{base}/lib/imre{py_version_short}",
-            "purelib" | "platlib" => SITE_PACKAGES,
-            "include" | "platinclude" => "{base}/include/imre{py_version_short}",
-            "scripts"
-                if scheme == "posix_prefix" && self.executable.parent() == Some(&self.prefix) =>
-            {
+        let template = match (scheme, name) {
+            ("posix_user", "stdlib" | "platstdlib") => "{userbase}/lib/python{py_version_short}",
+            ("posix_user", "purelib" | "platlib") => {
+                "{userbase}/lib/python{py_version_short}/site-packages"
+            }
+            ("posix_user", "include") => "{userbase}/include/python{py_version_short}",
+            ("posix_user", "scripts") => "{userbase}/bin",
+            ("posix_user", "data") => "{userbase}",
+            ("posix_prefix" | "venv", "stdlib") => "{base}/lib/imre{py_version_short}",
+            ("posix_prefix" | "venv", "platstdlib") => "{platbase}/lib/imre{py_version_short}",
+            ("posix_prefix" | "venv", "purelib") => SITE_PACKAGES,
+            ("posix_prefix" | "venv", "platlib") => {
+                "{platbase}/lib/imre{py_version_short}/site-packages"
+            }
+            ("posix_prefix" | "venv", "include") => "{base}/include/imre{py_version_short}",
+            ("posix_prefix" | "venv", "platinclude") => "{platbase}/include/imre{py_version_short}",
+            ("posix_prefix", "scripts") if self.executable.parent() == Some(&self.prefix) => {
                 "{base}"
             }
-            "scripts" => "{base}/bin",
-            "data" => "{base}",
+            ("posix_prefix" | "venv", "scripts") => "{base}/bin",
+            ("posix_prefix" | "venv", "data") => "{base}",
             _ => return None,
         };
         if !expand {
             return Some(template.to_owned());
         }
-        self.expand_path(&self.prefix, template)
+        let userbase;
+        let prefix = if scheme == "posix_user" {
+            userbase = Self::user_base()?;
+            &userbase
+        } else {
+            &self.prefix
+        };
+        self.expand_path(prefix, template)
             .into_os_string()
             .into_string()
             .ok()
     }
 
     fn expand_path(&self, prefix: &Path, template: &str) -> PathBuf {
-        let suffix = template
-            .strip_prefix("{base}")
-            .unwrap()
-            .trim_start_matches('/');
+        let suffix = template.split_once('}').unwrap().1.trim_start_matches('/');
         if suffix.is_empty() {
             prefix.to_owned()
         } else {
