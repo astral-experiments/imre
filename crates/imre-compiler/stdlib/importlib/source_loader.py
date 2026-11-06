@@ -8,6 +8,7 @@ import sys
 from _imre_importlib import (
     cache_name as _cache_name,
     get_code as _registered_code,
+    get_source_data as _registered_source_data,
     index as _index,
     loader_fields as _loader_fields,
     path_stats as _path_stats,
@@ -169,7 +170,11 @@ class FileLoader:
 
     def get_data(self, path):
         if isinstance(self, SourceFileLoader):
-            file = _io.open_code(str(path))
+            filename = str(path)
+            data = _registered_source_data(self, filename)
+            if data is not None:
+                return data
+            file = _io.open_code(filename)
         else:
             file = open(path, "rb")
         with file:

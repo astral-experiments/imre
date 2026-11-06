@@ -4256,12 +4256,12 @@ impl Context {
                     })
                 }
                 importlib::SourceBody::Namespace => Ok(NONE),
-                importlib::SourceBody::Zip(loader) => self.initialize_source(
+                importlib::SourceBody::Zip(_) => self.initialize_source(
                     module,
                     scope,
                     name_id,
                     origin.expect("ZIP source has a filename"),
-                    loader,
+                    body,
                 ),
                 importlib::SourceBody::Registered(_)
                     if let Some(origin) = origin
@@ -4274,13 +4274,13 @@ impl Context {
                                 && self.sources.contains_key("importlib")
                                 && path.is_absolute())) =>
                 {
-                    self.initialize_source(module, scope, name_id, origin, NONE)
+                    self.initialize_source(module, scope, name_id, origin, body)
                 }
                 importlib::SourceBody::Registered(entry) => self
                     .module_code(entry, &path)
                     .and_then(|code| self.execute(code, scope, FrameOwner::Module(name_id))),
                 importlib::SourceBody::Filesystem => match origin {
-                    Some(file) => self.initialize_source(module, scope, name_id, file, NONE),
+                    Some(file) => self.initialize_source(module, scope, name_id, file, body),
                     // Namespace packages have no initializer.
                     None => Ok(NONE),
                 },
