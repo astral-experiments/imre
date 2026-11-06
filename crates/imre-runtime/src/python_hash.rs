@@ -65,7 +65,7 @@ fn normalized(hash: u64) -> i64 {
 }
 
 /// Signed residue before CPython remaps the reserved hash -1.
-pub(crate) fn integer_hash(value: &Int) -> i64 {
+fn integer_residue(value: &Int) -> i64 {
     value.to_i64().map_or_else(
         || {
             (value.big().as_ref() % MODULUS)
@@ -76,13 +76,27 @@ pub(crate) fn integer_hash(value: &Int) -> i64 {
     )
 }
 
+/// Hash an integer and remap the reserved error value.
+pub(crate) fn integer_hash(value: &Int) -> i64 {
+    normalized(integer_residue(value) as u64)
+}
+
+/// # Safety
+/// The argument must be a live, rooted integer handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_hash(value: usize) -> usize {
+    // SAFETY: The caller keeps the integer alive through this borrow.
+    let value = unsafe { Int::borrow(value) };
+    Int::from(integer_hash(&value)).into_raw()
+}
+
 /// Hash a rational directly in the prime field used for Python numeric hashes.
 pub(crate) fn fraction_hash(numerator: &Int, denominator: &Int) -> Option<i64> {
-    let d = integer_hash(denominator).rem_euclid(MODULUS);
+    let d = integer_residue(denominator).rem_euclid(MODULUS);
     if d == 0 {
         return None;
     }
-    let n = integer_hash(numerator);
+    let n = integer_residue(numerator);
     let hash = if d == 1 {
         n
     } else {

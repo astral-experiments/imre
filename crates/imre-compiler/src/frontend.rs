@@ -2673,6 +2673,18 @@ impl<'a> Checker<'a> {
         self.field_value(attribute, receiver)
     }
 
+    /// Obtain the exact integer payload for a checked integer method.
+    fn int_method_receiver(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
+        if self.types.is_bool_or_int(value.ty) {
+            Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::UnionProject, vec![value]),
+            })
+        } else {
+            self.coerce(powers::integer(value), Type::Int, node)
+        }
+    }
+
     fn boxed_set_method(
         &self,
         attribute: &ast::ExprAttribute,
@@ -10619,6 +10631,30 @@ impl<'a> Checker<'a> {
                     ),
                 ));
             }
+            if attribute.attr.as_str() == "__hash__"
+                && self.unshadowed_builtin(&attribute.value, "int")
+            {
+                let [arg] = call.arguments.args.as_slice() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "int.__hash__ requires one receiver",
+                    ));
+                };
+                if !call.arguments.keywords.is_empty() {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "int.__hash__ takes no keyword arguments",
+                    ));
+                }
+                let value = self.expr(arg)?;
+                let receiver = self.int_method_receiver(value, arg)?;
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::IntHash, vec![receiver]),
+                });
+            }
             self.check_namedtuple_asdict(attribute, None)?;
             let receiver = match receiver {
                 Some(value) => value,
@@ -10861,24 +10897,22 @@ impl<'a> Checker<'a> {
                 });
             }
             if (method == "to_bytes"
-                || (method == "bit_length"
+                || (matches!(method, "bit_length" | "__hash__")
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()))
                 && (matches!(receiver.ty, Type::Int | Type::Bool)
                     || self.types.is_bool_or_int(receiver.ty))
             {
-                let receiver = if self.types.is_bool_or_int(receiver.ty) {
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::UnionProject, vec![receiver]),
-                    }
-                } else {
-                    powers::integer(receiver)
-                };
-                if method == "bit_length" {
+                let receiver = self.int_method_receiver(receiver, attribute)?;
+                if method != "to_bytes" {
+                    let builtin = if method == "__hash__" {
+                        Builtin::IntHash
+                    } else {
+                        Builtin::IntBitLength
+                    };
                     return Ok(Expr {
                         ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::IntBitLength, vec![receiver]),
+                        kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
                 let params = [

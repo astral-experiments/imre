@@ -589,6 +589,7 @@ impl Builtin {
             | Self::GeneratorFrameLeave
             | Self::IntExtremum { .. }
             | Self::IntBitLength
+            | Self::IntHash
             | Self::FloatIsInteger
             | Self::FloatAtan
             | Self::FloatErfc
@@ -966,7 +967,7 @@ impl Builtin {
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
-            Self::IntBitLength => signature(&[Type::Int], Type::Int),
+            Self::IntBitLength | Self::IntHash => signature(&[Type::Int], Type::Int),
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
             Self::FloatAcos
             | Self::FloatAsin
