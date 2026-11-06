@@ -35,6 +35,26 @@ fn call_stream_method(ctx: &mut Context, stream: Id, name: &str) -> Result<Id> {
     ctx.release_with_result(mark, result)
 }
 
+/// Flush native text files directly when their instance dictionary cannot override the method.
+fn flush_stream(ctx: &mut Context, stream: Id) -> Result<()> {
+    // Avoid Python equality for small dictionaries of exact strings. Let ordinary
+    // lookup handle arbitrary keys, larger dictionaries, and explicit overrides.
+    if let Value::TextFile(file) = ctx.heap.get(stream)
+        && let Some(fields) = ctx.heap.dict_entries(file.dictionary)
+        && fields.len() <= 8
+        && fields
+            .iter()
+            .all(|&(key, _)| matches!(ctx.heap.get(key), Value::Str(field) if field != "flush"))
+    {
+        file.flush()?;
+        return Ok(());
+    }
+    let mark = ctx.heap.temporary_mark();
+    call_stream_method(ctx, stream, "flush")?;
+    ctx.discard_temporaries(mark, None);
+    Ok(())
+}
+
 /// The contiguous stream roots are ordered so stdin is released first.
 struct BoxedInput<'a>(&'a mut Context, std::ops::Range<usize>);
 
@@ -86,8 +106,9 @@ impl crate::input::Backend for BoxedInput<'_> {
 
     fn flush_ignoring_errors(&mut self, stream: &Id) {
         let mark = self.0.heap.temporary_mark();
-        let _ = call_stream_method(self.0, *stream, "flush");
-        self.0.discard_temporaries(mark, None);
+        if flush_stream(self.0, *stream).is_err() {
+            self.0.discard_temporaries(mark, None);
+        }
     }
 
     fn write_prompt(&mut self, stream: &Id, prompt: Id) -> Result<()> {
