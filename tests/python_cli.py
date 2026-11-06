@@ -3695,7 +3695,10 @@ for name in ("md4", "ripemd160"):
             "-B", "-c", "from unittest.mock import Mock\nm = Mock(['close'])\nm.close()\nassert not hasattr(m, 'read')\n",
             extra=mock_compile_flags, native_timeout=300,
         )
-        for name in ("boxed_unittest_mock_open.py", "boxed_unittest_autospec_function.py", "boxed_unittest_autospec.py"):
+        for name in (
+            "boxed_unittest_mock_open.py", "boxed_unittest_autospec_function.py",
+            "boxed_unittest_autospec.py", "unittest_mock_callable_spec.py",
+        ):
             fixture = fixtures / name
             for import_flags in ((), ("--runtime-imports",)):
                 compare(
