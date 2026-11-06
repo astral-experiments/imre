@@ -102,10 +102,18 @@ def main() -> None:
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument(
+        "--thinlto-build-timeout",
+        type=int,
+        default=300,
+        help="ThinLTO build timeout in seconds",
+    )
+    parser.add_argument(
         "--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"]
     )
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
+    if args.thinlto_build_timeout < 1:
+        parser.error("--thinlto-build-timeout must be positive")
     version = run(
         [
             args.python, "-I", "-c",
@@ -137,8 +145,10 @@ def main() -> None:
             expected_dir.mkdir(parents=True)
             expected = reference(args.python, source, expected_dir, error)
             expected_files = snapshot(expected_dir)
-            # The boxed contextlib fixture can take 13 minutes to compile with a cold ThinLTO cache.
-            thinlto_timeout = 1200 if case.name == "contextdecorator_local" else 300
+            # The first boxed contextlib fixture builds with a cold ThinLTO cache.
+            thinlto_timeout = (
+                1200 if case.name == "contextdecorator_local" else args.thinlto_build_timeout
+            )
             modes = [(level, ()) for level in args.opt_levels]
             if case.name == "distribution_version":
                 modes.extend((level, ("--runtime-imports",)) for level in args.opt_levels)
@@ -146,6 +156,8 @@ def main() -> None:
                 actual_dir = temporary / case.name / (f"O{level}-boxed" if import_flags else f"O{level}")
                 actual_dir.mkdir()
                 binary = actual_dir / "program"
+                if args.lto_linker:
+                    print(f"Building {case.name} {actual_dir.name}", flush=True)
                 require_success(
                     run_build(
                         [
