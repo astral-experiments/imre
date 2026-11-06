@@ -343,6 +343,7 @@ fn emit_program(
     let mut extension_modules = std::collections::BTreeSet::new();
     let mut function_link_types = HashSet::new();
     let mut declared_caches = HashSet::new();
+    let mut uses_regex_positions = false;
     let mut uses_sys_argv = false;
     let mut uses_orig_argv = false;
     let mut uses_linecache = false;
@@ -355,6 +356,10 @@ fn emit_program(
                 return;
             };
             match builtin {
+                Builtin::RegexCapture {
+                    operation: RegexCapture::Start | RegexCapture::End,
+                    ..
+                } => uses_regex_positions = true,
                 Builtin::ExtensionImport(name) => {
                     extension_modules.insert(name.clone());
                 }
@@ -424,6 +429,7 @@ fn emit_program(
         async_invoke_frames: BTreeMap::new(),
         function_link_types,
         json_schema_roots: Vec::new(),
+        uses_regex_positions,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -680,6 +686,7 @@ struct Emitter<'a, 'module> {
     async_invoke_frames: BTreeMap<usize, (String, Type)>,
     function_link_types: HashSet<Type>,
     json_schema_roots: Vec<Type>,
+    uses_regex_positions: bool,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -5458,7 +5465,11 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::RegexFindIter => self.call(
-                "imre_regex_finditer",
+                if self.uses_regex_positions {
+                    "imre_regex_finditer_positions"
+                } else {
+                    "imre_regex_finditer"
+                },
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
@@ -11228,6 +11239,7 @@ declare void @imre_log_set_level(ptr, i64)
 declare ptr @imre_regex_group(ptr, i64, i32)
 declare ptr @imre_regex_groupdict(ptr)
 declare ptr @imre_regex_finditer(ptr, ptr)
+declare ptr @imre_regex_finditer_positions(ptr, ptr)
 declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)

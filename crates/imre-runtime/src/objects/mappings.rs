@@ -3308,7 +3308,8 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                     .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
             }),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
-            Storage::RegexIterator(iterator) => Ok(iterator.next()),
+            Storage::RegexIterator(iterator) => Ok(iterator.next::<false>(&mut 0)),
+            Storage::RegexPositionIterator(iterator, chars) => Ok(iterator.next::<true>(chars)),
             Storage::LineIterator(iterator) => iterator.next(),
             Storage::SplitFields(iterator) => iterator.next(),
             Storage::SortedSplitFields(iterator) => iterator.next(),

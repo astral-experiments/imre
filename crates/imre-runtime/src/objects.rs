@@ -238,6 +238,7 @@ enum Storage {
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     RegexIterator(regexes::FindIter),
+    RegexPositionIterator(regexes::FindIter, usize),
     Repeat(Repeat<OwnedWord>),
     Accumulate(itertools::Accumulate),
     IntegerAccumulate(itertools::IntegerAccumulate),
