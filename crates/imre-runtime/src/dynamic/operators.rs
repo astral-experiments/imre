@@ -5335,18 +5335,14 @@ impl Context {
                 return Ok(None);
             }
         } else if let Some(slot) = self.slot(a, name) {
-            // The matching native descriptor accepts the stored receiver and the original other operand.
+            // A class may bind int.__gt__ as __lt__. The descriptor selects the operation.
             if let Value::Native(symbol) = self.heap.get(slot)
                 && let Some((kind, member)) = symbol.split_once('.')
-                && member == name
                 && matches!(kind, "int" | "float")
+                && let Some(op) = comparison_op(member)
                 && self.builtin_slot_accepts(a, kind)
             {
-                return self.real_compare_slot(
-                    comparison_op(name).expect("rich comparison slot"),
-                    self.scalar_value(a),
-                    b,
-                );
+                return self.real_compare_slot(op, self.scalar_value(a), b);
             }
             return self.operator_slot(a, name, b);
         } else if matches!(
