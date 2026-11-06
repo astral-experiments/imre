@@ -129,6 +129,7 @@ async def forward(awaitable):
 
     awaited_call_arguments()
     awaited_binary_operands()
+    awaited_comparisons()
 
 
 def awaited_call_arguments():
@@ -239,3 +240,93 @@ def awaited_binary_operands():
     else:
         raise AssertionError("awaited difference did not return")
     assert calls == ['right', 'subtract']
+
+
+def awaited_comparisons():
+    events = []
+
+    class Truth:
+        def __bool__(self):
+            events.append('truth')
+            return False
+
+    result = Truth()
+
+    class Left:
+        def __ne__(self, right):
+            events.append(('compare', right))
+            return result
+
+    def left():
+        events.append('left')
+        return Left()
+
+    def right():
+        events.append('right')
+        return 0
+
+    scope = {'left': left, 'right': right, 'pause': Pause()}
+    exec("""\
+async def branch():
+    if left() != await pause:
+        return 'first'
+    elif await pause != right():
+        return 'second'
+    return 'neither'
+
+async def value():
+    return left() != await pause
+
+async def loop():
+    iterations = 0
+    while await pause != 0:
+        iterations += 1
+        continue
+    return iterations
+""", scope)
+
+    branch = scope['branch']()
+    assert branch.send(None) == 'paused'
+    assert events == ['left']
+    assert branch.send(7) == 'paused'
+    assert events == ['left', ('compare', 7), 'truth']
+    try:
+        branch.send(1)
+    except StopIteration as done:
+        assert done.value == 'second'
+    else:
+        raise AssertionError("awaited branch did not return")
+    assert events == ['left', ('compare', 7), 'truth', 'right']
+
+    events.clear()
+    value = scope['value']()
+    assert value.send(None) == 'paused'
+    try:
+        value.send(7)
+    except StopIteration as done:
+        assert done.value is result
+    else:
+        raise AssertionError("awaited comparison did not return")
+    assert events == ['left', ('compare', 7)]
+
+    events.clear()
+    interrupted = scope['value']()
+    assert interrupted.send(None) == 'paused'
+    error = ValueError('interrupt')
+    try:
+        interrupted.throw(error)
+    except ValueError as caught:
+        assert caught is error
+    else:
+        raise AssertionError("throw was lost")
+    assert events == ['left']
+
+    loop = scope['loop']()
+    assert loop.send(None) == 'paused'
+    assert loop.send(7) == 'paused'
+    try:
+        loop.send(0)
+    except StopIteration as done:
+        assert done.value == 1
+    else:
+        raise AssertionError("awaited loop did not return")

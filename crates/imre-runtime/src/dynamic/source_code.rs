@@ -172,7 +172,7 @@ enum Instruction {
     ReturnSent,
     Raise(ast::StmtRaise),
     Assert(ast::StmtAssert),
-    Unless(ast::Expr, usize),
+    Unless(Option<ast::Expr>, usize),
     Match {
         subject: ast::Expr,
         cases: Vec<SourceCase>,
@@ -185,7 +185,7 @@ enum Instruction {
     EndAsyncFor,
     Await(Option<ast::Expr>),
     SaveOperand(Option<ast::Expr>),
-    Binary(ast::Operator, ruff_text_size::TextRange),
+    Binary(&'static str, ruff_text_size::TextRange),
     SaveCallMethod(ast::ExprAttribute),
     CallSaved {
         positional: usize,
@@ -1291,7 +1291,7 @@ impl Program {
                 }
                 Instruction::Eval(e)
                 | Instruction::Discard(e)
-                | Instruction::Unless(e, _)
+                | Instruction::Unless(Some(e), _)
                 | Instruction::Iter(e)
                 | Instruction::ExceptMatch(e, _)
                 | Instruction::Await(Some(e))
@@ -1468,6 +1468,7 @@ impl Program {
                 Instruction::ReturnSent
                 | Instruction::Await(None)
                 | Instruction::SaveOperand(None)
+                | Instruction::Unless(None, _)
                 | Instruction::Binary(_, _)
                 | Instruction::Jump(_)
                 | Instruction::Break(_)
@@ -1662,7 +1663,7 @@ impl Program {
             for predicate in &clause.ifs {
                 self.instructions.push((
                     line_at(predicate.start().to_usize()),
-                    Instruction::Unless(predicate.clone(), head),
+                    Instruction::Unless(Some(predicate.clone()), head),
                 ));
             }
         }
@@ -1962,15 +1963,49 @@ impl Program {
         ));
     }
 
-    /// Binary operations can preserve an operand while a nested await delegates.
+    /// Binary operations and single comparisons can save an operand across an await.
     fn awaits_in_operand(expr: &ast::Expr) -> bool {
         match expr {
             ast::Expr::Await(_) => true,
             ast::Expr::BinOp(binary) => {
                 Self::awaits_in_operand(&binary.left) || Self::awaits_in_operand(&binary.right)
             }
+            ast::Expr::Compare(comparison) if comparison.ops.len() == 1 => {
+                comparison.operands.iter().any(Self::awaits_in_operand)
+            }
             ast::Expr::Call(call) => Self::has_awaited_call_arguments(call),
             _ => false,
+        }
+    }
+
+    fn lower_awaited_binary(
+        &mut self,
+        operands: impl IntoIterator<Item = ast::Expr>,
+        op: &'static str,
+        range: ruff_text_size::TextRange,
+        line: u32,
+        function: bool,
+    ) -> Result<Option<ast::Expr>> {
+        for operand in operands {
+            let value = self.lower_suspension(operand, line, function)?;
+            self.instructions
+                .push((line, Instruction::SaveOperand(value)));
+        }
+        self.instructions
+            .push((line, Instruction::Binary(op, range)));
+        Ok(None)
+    }
+
+    fn lower_condition(
+        &mut self,
+        test: ast::Expr,
+        line: u32,
+        function: bool,
+    ) -> Result<Option<ast::Expr>> {
+        if self.kind.is_async() && Self::awaits_in_operand(&test) {
+            self.lower_suspension(test, line, function)
+        } else {
+            Ok(Some(test))
         }
     }
 
@@ -2008,14 +2043,26 @@ impl Program {
                     && (Self::awaits_in_operand(&binary.left)
                         || Self::awaits_in_operand(&binary.right)) =>
             {
-                for operand in [*binary.left, *binary.right] {
-                    let value = self.lower_suspension(operand, line, function)?;
-                    self.instructions
-                        .push((line, Instruction::SaveOperand(value)));
-                }
-                self.instructions
-                    .push((line, Instruction::Binary(binary.op, binary.range)));
-                return Ok(None);
+                return self.lower_awaited_binary(
+                    [*binary.left, *binary.right],
+                    binary.op.as_str(),
+                    binary.range,
+                    line,
+                    function,
+                );
+            }
+            ast::Expr::Compare(comparison)
+                if self.kind.is_async()
+                    && comparison.ops.len() == 1
+                    && comparison.operands.iter().any(Self::awaits_in_operand) =>
+            {
+                return self.lower_awaited_binary(
+                    comparison.operands,
+                    comparison.ops[0].as_str(),
+                    comparison.range,
+                    line,
+                    function,
+                );
             }
             ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
             ast::Expr::YieldFrom(y) => {
@@ -2571,7 +2618,7 @@ impl Program {
                 }
                 Stmt::For(_) | Stmt::While(_) => {
                     let mut async_target = None;
-                    let (body, orelse, guard) = match stmt {
+                    let (body, orelse, head, guard) = match stmt {
                         Stmt::For(s) => {
                             self.declare_target(&s.target)?;
                             let guard = if s.is_async {
@@ -2590,18 +2637,22 @@ impl Program {
                                 self.instructions.push((line, Instruction::Iter(*s.iter)));
                                 Instruction::Next(Some(*s.target), 0)
                             };
-                            (s.body, s.orelse, guard)
+                            (s.body, s.orelse, self.instructions.len(), guard)
                         }
-                        Stmt::While(s) => (s.body, s.orelse, Instruction::Unless(*s.test, 0)),
+                        Stmt::While(s) => {
+                            let head = self.instructions.len();
+                            let test = self.lower_condition(*s.test, line, function)?;
+                            (s.body, s.orelse, head, Instruction::Unless(test, 0))
+                        }
                         _ => unreachable!("loop statement"),
                     };
-                    let head = self.instructions.len();
                     let mut current = LoopJumps {
                         head,
                         has_iterator: async_target.is_some()
                             || matches!(guard, Instruction::Next(..)),
                         breaks: Vec::new(),
                     };
+                    let guard_index = self.instructions.len();
                     self.instructions.push((line, guard));
                     if let Some(target) = async_target {
                         // Only GET_ANEXT and its await are protected by END_ASYNC_FOR.
@@ -2613,7 +2664,7 @@ impl Program {
                     self.lower(body, lines, function, Some(&mut current))?;
                     self.instructions.push((line, Instruction::Jump(head)));
                     let other = self.instructions.len();
-                    match &mut self.instructions[head].1 {
+                    match &mut self.instructions[guard_index].1 {
                         Instruction::Next(_, end) | Instruction::Unless(_, end) => *end = other,
                         Instruction::EnterExcept { handler, end } => {
                             *handler = other;
@@ -3000,6 +3051,7 @@ impl Program {
         function: bool,
         active: Option<&mut LoopJumps>,
     ) -> Result<usize> {
+        let test = self.lower_condition(test, line, function)?;
         let index = self.instructions.len();
         self.instructions.push((line, Instruction::Jump(0)));
         self.lower(body, lines, function, active)?;
@@ -4514,6 +4566,7 @@ impl Context {
                             | Instruction::Delegate
                             | Instruction::Await(None)
                             | Instruction::SaveOperand(None)
+                            | Instruction::Unless(None, _)
                             | Instruction::AsyncWithMethods(None)
                             | Instruction::AsyncIter(None)
                             | Instruction::BindAsyncItem(_)
@@ -4990,7 +5043,11 @@ impl Context {
                 *ip = target;
             }
             Instruction::Unless(e, destination) => {
-                if !self.source_condition(code, scope, e)? {
+                let truth = match e {
+                    Some(expr) => self.source_condition(code, scope, expr)?,
+                    None => self.truth(std::mem::replace(sent, NONE))?,
+                };
+                if !truth {
                     *ip = *destination;
                 }
             }
@@ -5206,7 +5263,7 @@ impl Context {
                         offset: range.start(),
                         range: *range,
                     });
-                let result = self.op(op.as_str(), left, right, NONE);
+                let result = self.op(op, left, right, NONE);
                 self.heap.replace_expression(previous);
                 self.heap.weak_edge_removed(right);
                 self.heap.weak_edge_removed(left);
