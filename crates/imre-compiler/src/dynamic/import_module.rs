@@ -396,6 +396,12 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 // Preserve FileFinder’s package, loader and cache ordering for filesystem entries.
                 let spec = section("_POPULATE = object()", "def _bless_my_loader(")
                     .replace("_get_supported_file_loaders()", "_file_loader_defaults(location)");
+                let members: Vec<_> = include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt"))
+                    .lines()
+                    .collect();
+                let members = serde_json::to_string(&members)
+                    .expect("stdlib source paths serialize as strings");
+                let installed_sources = format!("_installed_source_members = {members}");
                 [
                     include_str!("../../stdlib/importlib/source_loader.py"),
                     section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
@@ -410,6 +416,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",
                                  "_warn_import(globals(), 'sys.path_hooks is empty', 1224, _is_frozen)"),
                     section("class FileFinder:", "class AppleFrameworkLoader("),
+                    &installed_sources,
                     include_str!("../../stdlib/importlib/registered_finder.py"),
                     section("def _set_bootstrap_module(", "def _install("),
                 ].join("\n")

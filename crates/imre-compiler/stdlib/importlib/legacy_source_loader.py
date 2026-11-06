@@ -90,8 +90,7 @@ class _NativeImporter:
     def find_spec(cls, fullname, path=None, target=None):
         info = _native_spec_info(fullname, path, cls is _BundledImporter)
         if info is None:
-            if (cls is _BundledImporter and path is None and fullname in ('html', 'xml', '_pydatetime', '_pydecimal', 'cmd', 'getpass', 'graphlib', 'shlex', 'statistics', 'tarfile', 'timeit', 'wave')
-                    and _bootstrap_external is not None):
+            if cls is _BundledImporter and path is None and _bootstrap_external is not None:
                 return _bootstrap_external._installed_source_spec(fullname, '<imre stdlib>', target)
             return None
         origin, locations = info
