@@ -242,6 +242,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "pathlib._os" => bundled_source!("pathlib/_os.py"),
         "pathlib.types" => bundled_source!("pathlib/types.py"),
         "glob" => bundled_source!("glob.py"),
+        "bz2" => bundled_source!("bz2.py"),
         "gzip" => bundled_source!("gzip.py"),
         "ntpath" => bundled_source!("ntpath.py"),
         "shlex" => Some((

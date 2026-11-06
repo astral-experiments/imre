@@ -432,6 +432,8 @@ impl Context {
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
+            | (value::BZ2_COMPRESS_TYPE, Value::Bz2Compressor(_))
+            | (value::BZ2_DECOMPRESS_TYPE, Value::Bz2Decompressor(_))
             | (value::REGEX_MATCH_TYPE, Value::RegexMatch(_))
             | (thread_local::CLASS, Value::ThreadLocal(_)) => true,
             _ => false,
@@ -538,6 +540,28 @@ impl Context {
             ));
         }
         Ok(view)
+    }
+
+    // Acquire the data before converting any later argument via Python's __index__.
+    // While the export is held, callbacks can modify its bytes but cannot resize it.
+    fn with_read_buffer<T>(
+        &mut self,
+        data: Id,
+        consume: impl FnOnce(&mut Context, Id) -> Result<T>,
+    ) -> Result<T> {
+        if matches!(
+            self.heap.get(self.scalar_value(data)),
+            Value::Bytes(_) | Value::ByteArray(_)
+        ) && self.buffer_slot(data, "__buffer__") == Some(None)
+        {
+            return self.with_native_bytes_export(data, consume);
+        }
+        if let Some(method) = self.python_buffer_method(data, true)? {
+            self.with_contiguous_python_buffer(data, method, 0, consume)
+        } else {
+            self.native_buffer_bytes(data)?;
+            self.with_buffer_export(data, |ctx| consume(ctx, data))
+        }
     }
 
     /// Consume a contiguous view returned by a Python buffer provider.
@@ -2647,23 +2671,43 @@ impl Context {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
             self.builtins.insert("object.__class__".into(), descriptor);
         }
-        if matches!(
-            name,
-            value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
-        ) {
+        let codec_members = match name {
+            value::BZ2_COMPRESS_TYPE => Some((
+                value::BZ2_COMPRESS_TYPE,
+                value::CODEC_COMPRESS_METHODS,
+                &[][..],
+            )),
+            value::BZ2_DECOMPRESS_TYPE => Some((
+                value::BZ2_DECOMPRESS_TYPE,
+                value::CODEC_DECOMPRESS_METHODS,
+                value::BZ2_DECOMPRESS_FIELDS,
+            )),
+            value::LZMA_COMPRESS_TYPE => Some((
+                value::LZMA_COMPRESS_TYPE,
+                value::CODEC_COMPRESS_METHODS,
+                &[][..],
+            )),
+            value::LZMA_DECOMPRESS_TYPE => Some((
+                value::LZMA_DECOMPRESS_TYPE,
+                value::CODEC_DECOMPRESS_METHODS,
+                value::LZMA_DECOMPRESS_FIELDS,
+            )),
+            _ => None,
+        };
+        if let Some((owner, methods, fields)) = codec_members {
+            let (module, _) = owner.split_once('.').expect("qualified codec type");
             let mut entries = vec![(
                 self.heap.code_name("__module__"),
-                self.heap.code_name("_lzma"),
+                self.heap.code_name(module),
             )];
-            let methods = if name == value::LZMA_DECOMPRESS_TYPE {
-                for &field in value::LZMA_DECOMPRESS_FIELDS {
-                    let member = self.readonly_member(value::LZMA_DECOMPRESS_TYPE, field);
-                    entries.push((self.heap.code_name(field), member));
-                }
-                value::LZMA_DECOMPRESS_METHODS
-            } else {
-                value::LZMA_COMPRESS_METHODS
-            };
+            if module == "_bz2" {
+                let new = self.builtin(&format!("{owner}.__new__"));
+                entries.push((self.heap.code_name("__new__"), new));
+            }
+            for &field in fields {
+                let member = self.readonly_member(owner, field);
+                entries.push((self.heap.code_name(field), member));
+            }
             for &method in methods {
                 let member = self.builtin(&format!("{name}.{method}"));
                 entries.push((self.heap.code_name(method), member));
@@ -4003,6 +4047,12 @@ impl Context {
             "pwd" => stdlib::pwd::install(self, scope),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "termios" if source.is_none() => stdlib::termios::install(self, module, scope)?,
+            "_bz2" if source.is_none() => {
+                for name in ["BZ2Compressor", "BZ2Decompressor"] {
+                    let class = self.builtin(&format!("_bz2.{name}"));
+                    self.bind(scope, name, class);
+                }
+            }
             "_lzma" if source.is_none() => {
                 for name in [
                     "is_check_supported",

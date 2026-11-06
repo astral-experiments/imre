@@ -288,6 +288,8 @@ impl Context {
                 kind.as_str(),
                 stdlib::datetime::TZINFO
                     | "datetime.timezone"
+                    | value::BZ2_COMPRESS_TYPE
+                    | value::BZ2_DECOMPRESS_TYPE
                     | value::LZMA_COMPRESS_TYPE
                     | value::LZMA_DECOMPRESS_TYPE
             )
@@ -1476,6 +1478,11 @@ impl Context {
                 _ => unreachable!("unknown exception group member"),
             });
         }
+        if owner == value::BZ2_DECOMPRESS_TYPE
+            && let Value::Bz2Decompressor(state) = self.heap.get(receiver)
+        {
+            return stdlib::bz2::field(&state.borrow(), field);
+        }
         if owner == value::LZMA_DECOMPRESS_TYPE
             && matches!(self.heap.get(receiver), Value::LzmaDecompressor(_))
         {
@@ -1635,6 +1642,8 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | value::BZ2_COMPRESS_TYPE
+                            | value::BZ2_DECOMPRESS_TYPE
                             | value::LZMA_COMPRESS_TYPE
                             | value::LZMA_DECOMPRESS_TYPE
                             | value::ZLIB_COMPRESS_TYPE
@@ -1824,6 +1833,8 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | (value::BZ2_COMPRESS_TYPE, Value::Bz2Compressor(_))
+            | (value::BZ2_DECOMPRESS_TYPE, Value::Bz2Decompressor(_))
             | (value::LZMA_COMPRESS_TYPE, Value::LzmaCompressor(_))
             | (value::LZMA_DECOMPRESS_TYPE, Value::LzmaDecompressor(_))
             | (value::ZLIB_COMPRESS_TYPE, Value::ZlibCompressor(_))
@@ -2294,7 +2305,10 @@ impl Context {
         if let Value::Native(owner) = self.heap.get(obj)
             && matches!(
                 owner.as_str(),
-                value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE
+                value::BZ2_COMPRESS_TYPE
+                    | value::BZ2_DECOMPRESS_TYPE
+                    | value::LZMA_COMPRESS_TYPE
+                    | value::LZMA_DECOMPRESS_TYPE
             )
         {
             if let Some(member) = self.class_attr(obj, name) {
@@ -2311,7 +2325,10 @@ impl Context {
         }
         if matches!(
             self.heap.get(obj),
-            Value::LzmaCompressor(_) | Value::LzmaDecompressor(_)
+            Value::Bz2Compressor(_)
+                | Value::Bz2Decompressor(_)
+                | Value::LzmaCompressor(_)
+                | Value::LzmaDecompressor(_)
         ) {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name) {
@@ -5760,8 +5777,11 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
-        if matches!(self.heap.get(obj), Value::LzmaDecompressor(_)) {
-            let class = self.builtin(value::LZMA_DECOMPRESS_TYPE);
+        if matches!(
+            self.heap.get(obj),
+            Value::LzmaDecompressor(_) | Value::Bz2Decompressor(_)
+        ) {
+            let class = self.exact_type(obj)?;
             return Ok(self.own_class_attr(class, name));
         }
         if self.heap.get(obj).native_io_class_name().is_some() {
