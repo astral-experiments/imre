@@ -4908,7 +4908,11 @@ impl Context {
             Value::Native(ref class)
                 if matches!(
                     class.as_str(),
-                    "list_iterator" | "tuple_iterator" | "enumerate"
+                    "list_iterator"
+                        | "tuple_iterator"
+                        | "str_ascii_iterator"
+                        | "str_iterator"
+                        | "enumerate"
                 ) && matches!(name, "__iter__" | "__next__") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
@@ -7557,6 +7561,8 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "list_iterator"
+                                | "str_ascii_iterator"
+                                | "str_iterator"
                                 | "tuple_iterator"
                                 | "map"
                                 | "filter"

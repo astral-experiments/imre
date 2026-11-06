@@ -90,6 +90,19 @@ def current():
     assert list(filter(None, [False, "x", 0, 1])) == ["x", 1]
     from operator import length_hint
 
+    for text, name in (("", "str_ascii_iterator"), ("abc", "str_ascii_iterator"),
+                       ("é中🌍", "str_iterator"), ("x\ud800y", "str_iterator")):
+        cursor = iter(text)
+        assert type(cursor).__name__ == name and cursor.__iter__() is cursor
+        for index, character in enumerate(text):
+            assert length_hint(cursor) == len(text) - index
+            assert cursor.__next__() == character
+        assert length_hint(cursor) == 0 and next(cursor, None) is None
+        assert list(cursor) == []
+
+    cursor = iter("é🌍z")
+    assert next(cursor) == "é" and list(cursor) == ["🌍", "z"]
+
     class Text(str):
         pass
     class Data(bytes):
