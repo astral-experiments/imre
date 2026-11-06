@@ -429,7 +429,8 @@ fn emit_program(
         async_invoke_frames: BTreeMap::new(),
         function_link_types,
         json_schema_roots: Vec::new(),
-        uses_regex_positions,
+        module_reads_regex_positions: uses_regex_positions,
+        uses_regex_positions: false,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -686,6 +687,7 @@ struct Emitter<'a, 'module> {
     async_invoke_frames: BTreeMap<usize, (String, Type)>,
     function_link_types: HashSet<Type>,
     json_schema_roots: Vec<Type>,
+    module_reads_regex_positions: bool,
     uses_regex_positions: bool,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
@@ -736,6 +738,41 @@ struct Emitter<'a, 'module> {
     uses_cache_paths: bool,
     changes_stdout: bool,
     has_extensions: bool,
+}
+
+/// A function can use byte cursors when every match or cursor stays in locals
+/// and its only observable uses read capture text or participation.
+fn regex_positions_may_escape(module: &crate::ir::Module, function: &Function) -> bool {
+    let cursor = |ty| module.types.cursor_element(ty) == Some(Type::RegexMatch);
+    if !function.locals.iter().copied().any(cursor) {
+        return true;
+    }
+    let tracked = |ty| ty == Type::RegexMatch || cursor(ty);
+    let mut values = 0;
+    let mut consumed = 0;
+    crate::ir::walk_expressions(&function.body, &mut |value| {
+        values += usize::from(tracked(value.ty));
+        if let ExprKind::Builtin(
+            Builtin::RegexGroupDict
+            | Builtin::RegexCapture {
+                operation: RegexCapture::Group | RegexCapture::Absent,
+                ..
+            },
+            args,
+        ) = &value.kind
+        {
+            consumed += usize::from(args[0].ty == Type::RegexMatch);
+        }
+    });
+    crate::ir::walk_statements(&function.body, &mut |stmt| {
+        if let Statement::Assign(slot, value) = stmt
+            && tracked(value.ty)
+            && function.locals[*slot] == value.ty
+        {
+            consumed += 1;
+        }
+    });
+    values != consumed
 }
 
 impl Emitter<'_, '_> {
@@ -2052,6 +2089,8 @@ impl Emitter<'_, '_> {
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
     ) -> Result<String, String> {
+        self.uses_regex_positions =
+            self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
         self.entry_allocas.clear();
         self.mapping_words = 0;
         self.locals = function.locals.clone();
