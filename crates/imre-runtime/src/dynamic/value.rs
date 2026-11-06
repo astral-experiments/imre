@@ -3694,7 +3694,8 @@ impl Heap {
                 if scope.parent.is_some() && scope.class_body.is_none() {
                     self.release_scope_temporary(frame.scope);
                 }
-                self.collect_next_statement |= weak_released;
+                // Recheck the surviving weak roots after publishing the caller's temporaries.
+                self.check_finalizers_next_statement |= weak_released;
             }
         }
         self.keep(value);
