@@ -140,6 +140,15 @@ enum EnclosingBinding {
     ClassCell,
 }
 
+// A plain if or while needs a single forward destination without a heap allocation.
+type BranchTargets = smallvec::SmallVec<[usize; 1]>;
+
+#[derive(Clone, Copy, PartialEq)]
+enum BranchUse {
+    Condition,
+    Operand,
+}
+
 enum Instruction {
     Eval(ast::Expr),
     Discard(ast::Expr),
@@ -185,7 +194,24 @@ enum Instruction {
     EndAsyncFor,
     Await(Option<ast::Expr>),
     SaveOperand(Option<ast::Expr>),
-    Binary(ast::Operator, ruff_text_size::TextRange),
+    Binary(&'static str, ruff_text_size::TextRange, bool),
+    NextComparison {
+        end: usize,
+        condition: bool,
+    },
+    Branch {
+        value: Option<ast::Expr>,
+        when: bool,
+        usage: BranchUse,
+        end: usize,
+    },
+    LoadResult(ast::Expr),
+    Unary(ast::UnaryOp),
+    Attribute {
+        name: ast::Identifier,
+        method: bool,
+    },
+    JumpResult(usize),
     SaveCallMethod(ast::ExprAttribute),
     CallSaved {
         positional: usize,
@@ -1292,10 +1318,15 @@ impl Program {
                 Instruction::Eval(e)
                 | Instruction::Discard(e)
                 | Instruction::Unless(e, _)
+                | Instruction::Branch { value: Some(e), .. }
+                | Instruction::LoadResult(e)
                 | Instruction::Iter(e)
                 | Instruction::ExceptMatch(e, _)
                 | Instruction::Await(Some(e))
                 | Instruction::SaveOperand(Some(e)) => strings.visit_expr(e),
+                Instruction::Attribute { name, .. } => {
+                    strings.heap.code_name(name.as_str());
+                }
                 Instruction::SaveCallMethod(field) => {
                     strings.heap.code_name(field.attr.as_str());
                     strings.visit_expr(&field.value);
@@ -1468,7 +1499,11 @@ impl Program {
                 Instruction::ReturnSent
                 | Instruction::Await(None)
                 | Instruction::SaveOperand(None)
-                | Instruction::Binary(_, _)
+                | Instruction::Binary(_, _, _)
+                | Instruction::NextComparison { .. }
+                | Instruction::Branch { value: None, .. }
+                | Instruction::Unary(_)
+                | Instruction::JumpResult(_)
                 | Instruction::Jump(_)
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
@@ -1902,17 +1937,21 @@ impl Program {
         }
     }
 
-    /// A fixed call can save its callable and earlier arguments in the source frame
-    /// while a directly awaited argument delegates. Unpacking retains its own calling protocol.
-    fn has_awaited_call_arguments(call: &ast::ExprCall) -> bool {
+    /// Fixed calls retain their callable and earlier arguments while a receiver or argument
+    /// suspends. Starred arguments require their separate unpacking protocol.
+    fn awaited_call(call: &ast::ExprCall) -> bool {
         let args = &call.arguments;
         !args.args.iter().any(ast::Expr::is_starred_expr)
             && args.keywords.iter().all(|kw| kw.arg.is_some())
-            && (args.args.iter().any(ast::Expr::is_await_expr)
-                || args.keywords.iter().any(|kw| kw.value.is_await_expr()))
+            && (Self::awaits_in_operand(&call.func)
+                || args.args.iter().any(Self::awaits_in_operand)
+                || args
+                    .keywords
+                    .iter()
+                    .any(|kw| Self::awaits_in_operand(&kw.value)))
     }
 
-    fn lower_awaited_call(&mut self, call: ast::ExprCall, line: u32) {
+    fn lower_awaited_call(&mut self, call: ast::ExprCall, line: u32, function: bool) -> Result<()> {
         let method =
             imre_ast::direct_method(&call, &self.method_imports, self.private_names.as_deref());
         let position = value::ExpressionPosition::Source {
@@ -1923,9 +1962,21 @@ impl Program {
             let ast::Expr::Attribute(field) = *call.func else {
                 unreachable!()
             };
-            Instruction::SaveCallMethod(field)
+            if Self::awaits_in_operand(&field.value) {
+                self.lower_result(*field.value, line, function)?;
+                self.instructions.push((
+                    line,
+                    Instruction::Attribute {
+                        name: field.attr,
+                        method: true,
+                    },
+                ));
+                Instruction::SaveOperand(None)
+            } else {
+                Instruction::SaveCallMethod(field)
+            }
         } else {
-            Instruction::SaveOperand(Some(*call.func))
+            Instruction::SaveOperand(self.lower_suspension(*call.func, line, function)?)
         };
         self.instructions.push((line, callable));
         let positional = call.arguments.args.len();
@@ -1941,16 +1992,7 @@ impl Program {
             .into_iter()
             .chain(call.arguments.keywords.into_iter().map(|kw| kw.value));
         for expr in operands {
-            let value = if let ast::Expr::Await(awaited) = expr {
-                self.instructions
-                    .push((line, Instruction::Await(Some(*awaited.value))));
-                self.instructions.push((line, Instruction::Delegate));
-                None
-            } else {
-                Some(expr)
-            };
-            self.instructions
-                .push((line, Instruction::SaveOperand(value)));
+            self.save_operand(expr, line, function)?;
         }
         self.instructions.push((
             line,
@@ -1960,16 +2002,24 @@ impl Program {
                 position,
             },
         ));
+        Ok(())
     }
 
-    /// Binary operations can preserve an operand while a nested await delegates.
+    /// Expressions whose operands this source frame can suspend and resume.
     fn awaits_in_operand(expr: &ast::Expr) -> bool {
         match expr {
             ast::Expr::Await(_) => true,
             ast::Expr::BinOp(binary) => {
                 Self::awaits_in_operand(&binary.left) || Self::awaits_in_operand(&binary.right)
             }
-            ast::Expr::Call(call) => Self::has_awaited_call_arguments(call),
+            ast::Expr::Call(call) => Self::awaited_call(call),
+            ast::Expr::Compare(c) => c.operands.iter().any(Self::awaits_in_operand),
+            ast::Expr::BoolOp(b) => b.values.iter().any(Self::awaits_in_operand),
+            ast::Expr::UnaryOp(u) => Self::awaits_in_operand(&u.operand),
+            ast::Expr::Attribute(a) => Self::awaits_in_operand(&a.value),
+            ast::Expr::If(b) => [&*b.test, &*b.body, &*b.orelse]
+                .into_iter()
+                .any(Self::awaits_in_operand),
             _ => false,
         }
     }
@@ -1986,21 +2036,13 @@ impl Program {
                 return Err(Error::new("SyntaxError", "'yield' outside function"));
             }
             ast::Expr::Await(a) if self.kind.is_async() => {
-                let value = match *a.value {
-                    ast::Expr::Call(call) if Self::has_awaited_call_arguments(&call) => {
-                        self.lower_awaited_call(call, line);
-                        None
-                    }
-                    expr => Some(expr),
-                };
+                let value = self.lower_suspension(*a.value, line, function)?;
                 self.instructions.push((line, Instruction::Await(value)));
                 self.instructions.push((line, Instruction::Delegate));
                 return Ok(None);
             }
-            ast::Expr::Call(call)
-                if self.kind.is_async() && Self::has_awaited_call_arguments(&call) =>
-            {
-                self.lower_awaited_call(call, line);
+            ast::Expr::Call(call) if self.kind.is_async() && Self::awaited_call(&call) => {
+                self.lower_awaited_call(call, line, function)?;
                 return Ok(None);
             }
             ast::Expr::BinOp(binary)
@@ -2009,12 +2051,81 @@ impl Program {
                         || Self::awaits_in_operand(&binary.right)) =>
             {
                 for operand in [*binary.left, *binary.right] {
-                    let value = self.lower_suspension(operand, line, function)?;
-                    self.instructions
-                        .push((line, Instruction::SaveOperand(value)));
+                    self.save_operand(operand, line, function)?;
                 }
-                self.instructions
-                    .push((line, Instruction::Binary(binary.op, binary.range)));
+                self.instructions.push((
+                    line,
+                    Instruction::Binary(binary.op.as_str(), binary.range, false),
+                ));
+                return Ok(None);
+            }
+            ast::Expr::Compare(c)
+                if self.kind.is_async() && c.operands.iter().any(Self::awaits_in_operand) =>
+            {
+                self.lower_comparison(c, line, function, false)?;
+                return Ok(None);
+            }
+            ast::Expr::BoolOp(b)
+                if self.kind.is_async() && b.values.iter().any(Self::awaits_in_operand) =>
+            {
+                let mut operands = b.values;
+                let last = operands.pop().expect("boolean expression has operands");
+                let mut done = BranchTargets::new();
+                for expr in operands {
+                    self.branch_on(
+                        expr,
+                        b.op == ast::BoolOp::Or,
+                        BranchUse::Operand,
+                        line,
+                        function,
+                        &mut done,
+                    )?;
+                }
+                self.lower_result(last, line, function)?;
+                self.finish_branches(done);
+                return Ok(None);
+            }
+            ast::Expr::UnaryOp(u)
+                if self.kind.is_async() && Self::awaits_in_operand(&u.operand) =>
+            {
+                self.lower_result(*u.operand, line, function)?;
+                self.instructions.push((line, Instruction::Unary(u.op)));
+                return Ok(None);
+            }
+            ast::Expr::Attribute(a)
+                if self.kind.is_async() && Self::awaits_in_operand(&a.value) =>
+            {
+                self.lower_result(*a.value, line, function)?;
+                self.instructions.push((
+                    line,
+                    Instruction::Attribute {
+                        name: a.attr,
+                        method: false,
+                    },
+                ));
+                return Ok(None);
+            }
+            ast::Expr::If(b)
+                if self.kind.is_async()
+                    && [&*b.test, &*b.body, &*b.orelse]
+                        .into_iter()
+                        .any(Self::awaits_in_operand) =>
+            {
+                let mut otherwise = BranchTargets::new();
+                self.branch_on(
+                    *b.test,
+                    false,
+                    BranchUse::Condition,
+                    line,
+                    function,
+                    &mut otherwise,
+                )?;
+                self.lower_result(*b.body, line, function)?;
+                let done = self.instructions.len();
+                self.instructions.push((line, Instruction::JumpResult(0)));
+                self.finish_branches(otherwise);
+                self.lower_result(*b.orelse, line, function)?;
+                self.finish_branches([done]);
                 return Ok(None);
             }
             ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
@@ -2029,6 +2140,138 @@ impl Program {
         }
         self.instructions.push((line, op));
         Ok(None)
+    }
+
+    fn save_operand(&mut self, expr: ast::Expr, line: u32, function: bool) -> Result<()> {
+        let value = self.lower_suspension(expr, line, function)?;
+        self.instructions
+            .push((line, Instruction::SaveOperand(value)));
+        Ok(())
+    }
+
+    fn lower_result(&mut self, expr: ast::Expr, line: u32, function: bool) -> Result<()> {
+        if let Some(expr) = self.lower_suspension(expr, line, function)? {
+            self.instructions
+                .push((line, Instruction::LoadResult(expr)));
+        }
+        Ok(())
+    }
+
+    /// Save the middle operand of a chain across comparison hooks and subsequent awaits.
+    fn lower_comparison(
+        &mut self,
+        c: ast::ExprCompare,
+        line: u32,
+        function: bool,
+        condition: bool,
+    ) -> Result<()> {
+        let mut operands = c.operands.into_vec().into_iter();
+        self.save_operand(operands.next().expect("left operand"), line, function)?;
+        let mut done = BranchTargets::new();
+        let length = c.ops.len();
+        for (i, (op, operand)) in c.ops.into_vec().into_iter().zip(operands).enumerate() {
+            self.save_operand(operand, line, function)?;
+            let more = i + 1 < length;
+            self.instructions
+                .push((line, Instruction::Binary(op.as_str(), c.range, more)));
+            if more {
+                done.push(self.instructions.len());
+                self.instructions
+                    .push((line, Instruction::NextComparison { end: 0, condition }));
+            }
+        }
+        self.finish_branches(done);
+        Ok(())
+    }
+
+    /// A condition consumes a comparison chain's known truth. In an and/or value expression
+    /// the chain yields its Python result and the enclosing operand tests it, even on an
+    /// opposite branch that will discard the result. Nested boolean branches share exits.
+    fn branch_on(
+        &mut self,
+        expr: ast::Expr,
+        when: bool,
+        usage: BranchUse,
+        line: u32,
+        function: bool,
+        exits: &mut BranchTargets,
+    ) -> Result<()> {
+        let value = if self.kind.is_async() && Self::awaits_in_operand(&expr) {
+            match expr {
+                ast::Expr::BoolOp(b) => {
+                    let stop = b.op == ast::BoolOp::Or;
+                    let mut operands = b.values;
+                    let last = operands.pop().expect("boolean expression has operands");
+                    let mut opposite = BranchTargets::new();
+                    for expr in operands {
+                        if stop == when {
+                            self.branch_on(expr, when, usage, line, function, exits)?;
+                        } else {
+                            self.branch_on(expr, stop, usage, line, function, &mut opposite)?;
+                        }
+                    }
+                    self.branch_on(last, when, usage, line, function, exits)?;
+                    self.finish_branches(opposite);
+                    return Ok(());
+                }
+                ast::Expr::UnaryOp(u)
+                    if usage == BranchUse::Condition && u.op == ast::UnaryOp::Not =>
+                {
+                    return self.branch_on(*u.operand, !when, usage, line, function, exits);
+                }
+                ast::Expr::Compare(c) => {
+                    self.lower_comparison(c, line, function, usage == BranchUse::Condition)?;
+                    None
+                }
+                ast::Expr::If(b) if usage == BranchUse::Condition => {
+                    let mut otherwise = BranchTargets::new();
+                    self.branch_on(
+                        *b.test,
+                        false,
+                        BranchUse::Condition,
+                        line,
+                        function,
+                        &mut otherwise,
+                    )?;
+                    self.branch_on(*b.body, when, usage, line, function, exits)?;
+                    let done = self.instructions.len();
+                    self.instructions.push((line, Instruction::Jump(0)));
+                    self.finish_branches(otherwise);
+                    self.branch_on(*b.orelse, when, usage, line, function, exits)?;
+                    self.finish_branches([done]);
+                    return Ok(());
+                }
+                value => self.lower_suspension(value, line, function)?,
+            }
+        } else {
+            Some(expr)
+        };
+        exits.push(self.instructions.len());
+        let branch = match value {
+            Some(expr) if !when && usage == BranchUse::Condition => Instruction::Unless(expr, 0),
+            value => Instruction::Branch {
+                value,
+                when,
+                usage,
+                end: 0,
+            },
+        };
+        self.instructions.push((line, branch));
+        Ok(())
+    }
+
+    fn finish_branches(&mut self, exits: impl IntoIterator<Item = usize>) {
+        let end = self.instructions.len();
+        for index in exits {
+            match &mut self.instructions[index].1 {
+                Instruction::Branch { end: target, .. }
+                | Instruction::NextComparison { end: target, .. }
+                | Instruction::JumpResult(target)
+                | Instruction::Jump(target)
+                | Instruction::Unless(_, target) => *target = end,
+                _ => unreachable!("branch destination"),
+            }
+        }
     }
 
     fn qualified_name(parent: &str, class: bool, name: &str) -> String {
@@ -2602,7 +2845,19 @@ impl Program {
                             || matches!(guard, Instruction::Next(..)),
                         breaks: Vec::new(),
                     };
-                    self.instructions.push((line, guard));
+                    let mut skip = BranchTargets::new();
+                    if let Instruction::Unless(test, _) = guard {
+                        self.branch_on(
+                            test,
+                            false,
+                            BranchUse::Condition,
+                            line,
+                            function,
+                            &mut skip,
+                        )?;
+                    } else {
+                        self.instructions.push((line, guard));
+                    }
                     if let Some(target) = async_target {
                         // Only GET_ANEXT and its await are protected by END_ASYNC_FOR.
                         self.instructions.push((line, Instruction::AsyncNext));
@@ -2613,14 +2868,18 @@ impl Program {
                     self.lower(body, lines, function, Some(&mut current))?;
                     self.instructions.push((line, Instruction::Jump(head)));
                     let other = self.instructions.len();
-                    match &mut self.instructions[head].1 {
-                        Instruction::Next(_, end) | Instruction::Unless(_, end) => *end = other,
-                        Instruction::EnterExcept { handler, end } => {
-                            *handler = other;
-                            *end = other + 1;
-                            self.instructions.push((line, Instruction::EndAsyncFor));
+                    if !skip.is_empty() {
+                        self.finish_branches(skip);
+                    } else {
+                        match &mut self.instructions[head].1 {
+                            Instruction::Next(_, end) => *end = other,
+                            Instruction::EnterExcept { handler, end } => {
+                                *handler = other;
+                                *end = other + 1;
+                                self.instructions.push((line, Instruction::EndAsyncFor));
+                            }
+                            _ => unreachable!("loop guard"),
                         }
-                        _ => unreachable!("loop guard"),
                     }
                     self.lower(orelse, lines, function, active.as_deref_mut())?;
                     let end = self.instructions.len();
@@ -3000,12 +3259,12 @@ impl Program {
         function: bool,
         active: Option<&mut LoopJumps>,
     ) -> Result<usize> {
-        let index = self.instructions.len();
-        self.instructions.push((line, Instruction::Jump(0)));
+        let mut skip = BranchTargets::new();
+        self.branch_on(test, false, BranchUse::Condition, line, function, &mut skip)?;
         self.lower(body, lines, function, active)?;
         let end = self.instructions.len();
         self.instructions.push((line, Instruction::Jump(0)));
-        self.instructions[index].1 = Instruction::Unless(test, self.instructions.len());
+        self.finish_branches(skip);
         Ok(end)
     }
 }
@@ -4514,6 +4773,11 @@ impl Context {
                             | Instruction::Delegate
                             | Instruction::Await(None)
                             | Instruction::SaveOperand(None)
+                            | Instruction::Branch { value: None, .. }
+                            | Instruction::NextComparison { .. }
+                            | Instruction::JumpResult(_)
+                            | Instruction::Unary(_)
+                            | Instruction::Attribute { .. }
                             | Instruction::AsyncWithMethods(None)
                             | Instruction::AsyncIter(None)
                             | Instruction::BindAsyncItem(_)
@@ -5197,7 +5461,47 @@ impl Context {
                 };
                 iterators.push(value);
             }
-            Instruction::Binary(op, range) => {
+            Instruction::LoadResult(expr) => *sent = eval(self, expr)?,
+            Instruction::Unary(op) => *sent = self.source_unary(*op, *sent)?,
+            Instruction::Attribute { name, method } => {
+                *sent = if *method {
+                    self.source_method(*sent, name.as_str())?
+                } else {
+                    self.lookup_attr(*sent, name.as_str())?
+                };
+            }
+            Instruction::JumpResult(end) => *ip = *end,
+            Instruction::Branch {
+                value,
+                when,
+                usage,
+                end,
+            } => {
+                let truth = match value {
+                    Some(expr) if *usage == BranchUse::Operand => {
+                        let (value, known) = self.source_bool_operand(code, scope, expr)?;
+                        *sent = value;
+                        known.map_or_else(|| self.truth(value), Ok)?
+                    }
+                    Some(expr) => self.source_condition(code, scope, expr)?,
+                    None => self.truth(*sent)?,
+                };
+                if truth == *when {
+                    *ip = *end;
+                }
+            }
+            Instruction::NextComparison { end, condition } => {
+                if !self.truth(*sent)? {
+                    let right = iterators.pop().expect("middle operand");
+                    self.heap.weak_edge_removed(right);
+                    self.heap.release_unbound_finalizers();
+                    if *condition {
+                        *sent = FALSE;
+                    }
+                    *ip = *end;
+                }
+            }
+            Instruction::Binary(op, range, keep_right) => {
                 let right = iterators.pop().expect("saved right operand");
                 let left = iterators.pop().expect("saved left operand");
                 let previous = self
@@ -5206,9 +5510,13 @@ impl Context {
                         offset: range.start(),
                         range: *range,
                     });
-                let result = self.op(op.as_str(), left, right, NONE);
+                let result = self.op(op, left, right, NONE);
                 self.heap.replace_expression(previous);
-                self.heap.weak_edge_removed(right);
+                if *keep_right && result.is_ok() {
+                    iterators.push(right);
+                } else {
+                    self.heap.weak_edge_removed(right);
+                }
                 self.heap.weak_edge_removed(left);
                 self.heap.release_unbound_finalizers();
                 *sent = result?;
@@ -5726,7 +6034,20 @@ impl Context {
         field: &ast::ExprAttribute,
     ) -> Result<Id> {
         let receiver = self.source_expr(code, scope, &field.value)?;
-        let method = self.lookup_method(receiver, field.attr.as_str())?;
+        self.source_method(receiver, field.attr.as_str())
+    }
+
+    fn source_unary(&mut self, op: ast::UnaryOp, value: Id) -> Result<Id> {
+        let name = match op {
+            ast::UnaryOp::UAdd => "pos",
+            ast::UnaryOp::USub => "neg",
+            op => op.as_str(),
+        };
+        self.op(name, value, NONE, NONE)
+    }
+
+    fn source_method(&mut self, receiver: Id, name: &str) -> Result<Id> {
+        let method = self.lookup_method(receiver, name)?;
         // Evaluating an argument can delete the receiver's reference to the callable.
         self.heap.reserve_temporaries(1)?;
         self.heap.keep(method);
@@ -6382,12 +6703,7 @@ impl Context {
             }
             Expr::UnaryOp(v) => {
                 let value = eval(self, &v.operand)?;
-                let op = match v.op {
-                    ast::UnaryOp::UAdd => "pos",
-                    ast::UnaryOp::USub => "neg",
-                    op => op.as_str(),
-                };
-                self.op(op, value, NONE, NONE)
+                self.source_unary(v.op, value)
             }
             Expr::Compare(v) => Ok(self.source_comparison(code, scope, v)?.0),
             Expr::If(v) => {

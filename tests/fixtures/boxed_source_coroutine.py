@@ -129,6 +129,8 @@ async def forward(awaitable):
 
     awaited_call_arguments()
     awaited_binary_operands()
+    awaited_conditions()
+    awaited_receiver()
 
 
 def awaited_call_arguments():
@@ -239,3 +241,88 @@ def awaited_binary_operands():
     else:
         raise AssertionError("awaited difference did not return")
     assert calls == ['right', 'subtract']
+
+
+def completed_send(task, value):
+    try:
+        task.send(value)
+    except StopIteration as done:
+        return done.value
+    raise AssertionError('coroutine yielded instead of returning')
+
+
+def awaited_conditions():
+    events = []
+
+    def pause(label):
+        events.append(label)
+        return Pause()
+
+    class Verdict:
+        def __bool__(self):
+            events.append('truth')
+            return events.count('truth') > 1
+
+    verdict = Verdict()
+
+    class Left:
+        def __lt__(self, right):
+            events.append('compare')
+            return verdict
+
+    async def choose():
+        while await pause('wait') != 0:
+            if not await pause('retry'):
+                continue
+            if Left() < await pause('middle') < pause('unreachable'):
+                raise AssertionError('false comparison chain')
+            return await pause('result') or pause('skipped')
+        return None
+
+    task = choose()
+    assert task.send(None) == 'paused'
+    assert task.send(1) == 'paused'
+    assert task.send(False) == 'paused'
+    assert task.send(2) == 'paused'
+    assert task.send(True) == 'paused'
+    assert task.send(3) == 'paused'
+    assert completed_send(task, 42) == 42
+    assert events == ['wait', 'retry', 'wait', 'retry', 'middle', 'compare', 'truth', 'result']
+
+    async def value():
+        return Left() < await pause('middle') < pause('skipped')
+
+    events.clear()
+    task = value()
+    assert task.send(None) == 'paused'
+    assert completed_send(task, 1) is verdict
+    assert events == ['middle', 'compare', 'truth']
+
+    async def mixed():
+        return ((Left() < await pause('middle') < pause('skipped')) and 'end') or 'fallback'
+
+    events.clear()
+    task = mixed()
+    assert task.send(None) == 'paused'
+    assert completed_send(task, 1) == 'end'
+    assert events == ['middle', 'compare', 'truth', 'truth']
+
+
+def awaited_receiver():
+    events = []
+
+    class Process:
+        @property
+        def wait(self):
+            events.append('lookup')
+            return Pause
+
+    async def status():
+        return -await (await Pause()).wait()
+
+    task = status()
+    assert task.send(None) == 'paused'
+    assert events == []
+    assert task.send(Process()) == 'paused'
+    assert events == ['lookup']
+    assert completed_send(task, 7) == -7
