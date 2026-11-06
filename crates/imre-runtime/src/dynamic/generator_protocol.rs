@@ -36,7 +36,7 @@ impl Context {
             }
             _ => (definition.name, definition.qualname),
         };
-        self.alloc(Value::Generator {
+        let generator = self.alloc(Value::Generator {
             owner,
             frame: None,
             name,
@@ -48,7 +48,9 @@ impl Context {
             protected: Vec::new(),
             offset: Some(0),
             running: false,
-        })
+        });
+        self.heap.record_generator_birth(generator);
+        generator
     }
 
     pub(super) fn set_generator_name(&mut self, obj: Id, field: &str, value: Id) -> Result<()> {
