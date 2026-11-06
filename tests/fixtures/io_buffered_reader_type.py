@@ -1,6 +1,7 @@
 import io
 import gc
 import pickle
+import sys
 from _io import BufferedReader as NativeReader
 
 
@@ -246,3 +247,31 @@ def check_detached_stream_lifetime(wrapper_type):
 
 check_detached_stream_lifetime(io.BufferedReader)
 check_detached_stream_lifetime(io.BufferedWriter)
+
+
+if sys.platform == "linux":
+    import resource
+
+    class CountingFile(io.FileIO):
+        calls = 0
+
+        def readinto(self, dest):
+            self.calls += 1
+            return super().readinto(dest)
+
+    with CountingFile(__file__, "r") as raw, io.BufferedReader(raw, 8) as reader:
+        assert reader.read(1) == b"i"
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        cap = 512 << 20 if soft == resource.RLIM_INFINITY else min(soft, 512 << 20)
+        resource.setrlimit(resource.RLIMIT_AS, (cap, hard))
+        try:
+            reader.read(16 << 30)
+        except MemoryError as exc:
+            error_args = exc.args
+        else:
+            raise AssertionError("read exceeded the address-space limit")
+        finally:
+            resource.setrlimit(resource.RLIMIT_AS, (soft, hard))
+        assert (reader.tell(), raw.tell(), raw.calls) == (1, 8, 1)
+        assert reader.read(8) == b"mport io" and raw.calls == 2
+        assert error_args == ()
