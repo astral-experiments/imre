@@ -68,6 +68,7 @@ def current():
     copied_doc = types.FunctionType(documented.__code__, {})
     print(copied_doc.__doc__, copied_doc())
     namespace = {}
-    exec("def source_function():\n    'source documentation'\n    return 5\n", namespace)
+    doc = "source documentation\n        Example:\n            source_function()"
+    exec(f"def source_function():\n    {doc!r}\n    return 5\n", namespace)
     source_copy = types.FunctionType(namespace["source_function"].__code__, namespace)
     print(source_copy.__doc__, source_copy())

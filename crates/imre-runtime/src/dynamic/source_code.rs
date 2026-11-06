@@ -1275,6 +1275,14 @@ impl Program {
         };
         for (_, op) in &mut self.instructions {
             match op {
+                Instruction::Eval(ast::Expr::StringLiteral(doc))
+                    if self.scope_flags & code_flags::HAS_DOCSTRING != 0
+                        && self.doc == Some(doc.range()) =>
+                {
+                    let text = imre_ast::strings::clean_doc(doc.value.to_str());
+                    let id = strings.text(text.into())?;
+                    strings.constant(doc.range(), id)?;
+                }
                 Instruction::Eval(e)
                 | Instruction::Discard(e)
                 | Instruction::Unless(e, _)
