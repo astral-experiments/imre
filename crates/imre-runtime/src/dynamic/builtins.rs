@@ -508,6 +508,8 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "async_generator_athrow"
             | "list_iterator"
             | "list_reverseiterator"
+            | "str_ascii_iterator"
+            | "str_iterator"
             | "tuple_iterator"
             | "generic_alias_iterator"
             | "memory_iterator"
@@ -806,7 +808,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             iter.class_name()
         }
         Value::Iterator {
-            kind: kind @ ("list_iterator" | "tuple_iterator"),
+            kind:
+                kind @ ("list_iterator" | "tuple_iterator" | "str_ascii_iterator" | "str_iterator"),
             ..
         } if matches!(attr, "__iter__" | "__next__") => kind,
         Value::RangeIterator(iter)
@@ -2354,9 +2357,8 @@ pub(super) fn call(
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "list_iterator" | "tuple_iterator" | "map" | "filter" | "enumerate" => {
-                ctx.iterator_method(owner, method, args, kwargs)
-            }
+            "list_iterator" | "tuple_iterator" | "str_ascii_iterator" | "str_iterator" | "map"
+            | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "cell" | "mappingproxy" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {

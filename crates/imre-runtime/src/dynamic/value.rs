@@ -956,7 +956,7 @@ pub(super) struct Scope {
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
-    pub names: indexmap::IndexMap<String, Id>,
+    pub names: indexmap::IndexMap<crate::Str, Id>,
     pub closure: ClosureScope,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
@@ -2942,6 +2942,13 @@ impl CycleSet {
     }
 }
 
+/// A position in the local names or namespace dictionary of a frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FinalizerBindingSlot {
+    Local(usize),
+    Namespace(usize),
+}
+
 /// A pending owner followed by incoming strong edges until a slot repeats.
 type FinalizerCyclePath = smallvec::SmallVec<[Id; 17]>;
 
@@ -3000,7 +3007,7 @@ pub(super) struct Heap {
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
-    finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
+    finalizer_bindings: Cell<[Option<(usize, FinalizerBindingSlot)>; 2]>,
     /// Last successful (owner, frame, operand) hints for finalizer reachability checks.
     finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 64],
     // A recently allocated iterator may be the only holder of an unreferenced generator.
@@ -4714,29 +4721,39 @@ impl Heap {
             let Value::Scope(scope) = self.get(self.frames.get(frame)?.scope) else {
                 return None;
             };
-            let (_, &owner) = scope.names.get_index(slot)?;
+            let owner = match slot {
+                FinalizerBindingSlot::Local(index) => *scope.names.get_index(index)?.1,
+                FinalizerBindingSlot::Namespace(index) => {
+                    self.dict_entries(scope.namespace?)?.get(index)?.1
+                }
+            };
             Some(super::stdlib::io::text_descriptor_chain(self, owner).unwrap_or([owner; 3]))
         })
     }
 
-    /// Remember where a surviving local keeps the owner so subsequent checks can validate it directly.
+    /// Remember the binding position so later checks can validate its current occupant.
     fn find_finalizer_binding(&self, owner: Id) -> bool {
         for (frame_index, frame) in self.frames.iter().enumerate().rev() {
             let Value::Scope(scope) = self.get(frame.scope) else {
                 continue;
             };
-            if let Some(slot) = scope.names.values().position(|&bound| bound == owner) {
+            let slot = scope
+                .names
+                .values()
+                .position(|&bound| bound == owner)
+                .map(FinalizerBindingSlot::Local)
+                .or_else(|| {
+                    self.dict_entries(scope.namespace?)?
+                        .iter()
+                        .position(|&(_, bound)| bound == owner)
+                        .map(FinalizerBindingSlot::Namespace)
+                });
+            if let Some(slot) = slot {
                 let position = Some((frame_index, slot));
                 let [first, _] = self.finalizer_bindings.get();
                 if first != position {
                     self.finalizer_bindings.set([position, first]);
                 }
-                return true;
-            }
-            if let Some(namespace) = scope.namespace
-                && matches!(self.get(namespace), Value::Dict(entries)
-                    if entries.iter().any(|&(_, bound)| bound == owner))
-            {
                 return true;
             }
         }
@@ -5285,10 +5302,15 @@ impl Heap {
     /// Keep cycle scratch proportional to the garbage using only containers with outgoing edges.
     fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
         let mut slots = smallvec::SmallVec::new();
+        // A sparse candidate graph avoids allocating and scanning counters for the whole heap.
+        let limit = slots.inline_size().max(self.slots.len() / 64);
         for (id, trace) in self.traces.iter().enumerate() {
             if trace.get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
-                if slots.len() == 256 {
+                if slots.len() == limit {
                     return None;
+                }
+                if slots.len() == slots.capacity() {
+                    slots.try_reserve(1).ok()?;
                 }
                 slots.push(id);
             }
@@ -6018,6 +6040,28 @@ mod tests {
     }
 
     #[test]
+    fn namespace_finalizer_bindings_follow_the_current_value() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        let replacement = heap.alloc(Value::List(Vec::new()));
+        let namespace = heap.alloc(Value::Dict(vec![(TRUE, owner)].into()));
+        let mut scope = Scope::new(String::new(), None);
+        scope.namespace = Some(namespace);
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
+        heap.frames[0].scope = scope;
+
+        assert!(heap.find_finalizer_binding(owner));
+        assert_eq!(heap.bound_finalizer_chains(), [Some([owner; 3]), None]);
+        *heap.get_mut(namespace) = Value::Dict(vec![(FALSE, replacement)].into());
+        assert_eq!(
+            heap.bound_finalizer_chains(),
+            [Some([replacement; 3]), None]
+        );
+        *heap.get_mut(namespace) = Value::Dict(Default::default());
+        assert_eq!(heap.bound_finalizer_chains(), [None; 2]);
+    }
+
+    #[test]
     fn checking_a_finalizer_preserves_a_byte_buffer_sweep() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -6568,9 +6612,12 @@ mod reachability_tests {
     }
 
     #[test]
-    fn prompt_cycles_preserve_descendants_and_release_acyclic_peers_at_both_sizes() {
-        for garbage in [4, 256, 257] {
+    fn prompt_cycles_preserve_descendants_and_release_acyclic_peers() {
+        for (garbage, live) in [(4, 0), (256, 0), (257, 0), (300, 20_000), (400, 20_000)] {
             let mut heap = Heap::new();
+            for _ in 0..live {
+                heap.alloc(Value::List(Vec::new()));
+            }
             let mark = heap.temporary_mark();
             let dead: Vec<_> = (0..garbage)
                 .map(|_| heap.alloc(Value::List(Vec::new())))
