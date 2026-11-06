@@ -8034,7 +8034,7 @@ impl Context {
                 ..
             } => {
                 let parameters = self.code_object(code).parameters;
-                let name = copy_label(self.str_value(fields.qualname)?)?;
+                let name = self.copy_name(fields.qualname)?;
                 if parameters == NONE {
                     if let Some((key, _)) = kwargs.first() {
                         return Err(Error::new(

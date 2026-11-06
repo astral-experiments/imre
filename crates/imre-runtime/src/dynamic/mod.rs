@@ -960,6 +960,11 @@ impl Context {
             _ => unreachable!("string storage"),
         }
     }
+    /// Copy a name across a mutable context operation, keeping short strings inline.
+    fn copy_name(&self, id: Id) -> Result<crate::Str> {
+        crate::Str::try_new(self.str_value(id)?).map_err(|_| Error::new("MemoryError", ""))
+    }
+
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(self.scalar_value(id)) {
             Value::Int(n) => Ok(n.clone()),
