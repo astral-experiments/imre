@@ -888,6 +888,108 @@ def choose(value, guard):
     assert choose(None, False) == "none"
     assert choose(1, False) == choose(0, False) == "other"
 
+    exec("""
+def nested(value):
+    def captured():
+        return item, pair
+    match value:
+        case (("tag", item) as pair, True) if observe(item):
+            return "guard passed"
+        case (_, _):
+            return captured()
+    return None
+
+class Private:
+    def unpack(self, value):
+        match value:
+            case (__item,):
+                return __item
+""", scope)
+    assert scope["Private"]().unpack((42,)) == 42
+    nested = scope["nested"]
+
+    class Logged(list):
+        def __len__(self):
+            calls.append("len")
+            return super().__len__()
+
+        def __iter__(self):
+            calls.append("iter")
+            return super().__iter__()
+
+    calls.clear()
+    pair = ("tag", 0)
+    item, alias = nested(Logged([pair, True]))
+    assert item == 0 and alias is pair
+    assert calls == ["len", "iter", 0, "len"]
+    assert nested((("tag", 1), True)) == "guard passed"
+    assert nested("ab") is None and nested(b"ab") is None
+
+    class Broken(list):
+        def __iter__(self):
+            raise ValueError("iterator failed")
+
+    assert nested(Broken([pair])) is None
+    try:
+        nested(Broken([pair, True]))
+    except ValueError as error:
+        assert str(error) == "iterator failed"
+    else:
+        raise AssertionError("sequence iteration error was suppressed")
+
+    class Dropped:
+        def __del__(self):
+            calls.append("dropped")
+
+    class Compare:
+        def __eq__(self, other):
+            import gc
+            gc.collect()
+            calls.append("compared")
+            return True
+
+    class FreshPair(list):
+        def __iter__(self):
+            return iter((Dropped(), Compare()))
+
+    scope["fresh"] = FreshPair([0, 1])
+    for target, expected in (("_", ["dropped", "compared"]), ("saved", ["compared"])):
+        calls.clear()
+        exec("match fresh:\n    case (" + target + ", 1): matched = True", scope)
+        assert scope.pop("matched") and calls == expected
+    assert isinstance(scope["saved"], Dropped)
+    scope.update(Dropped=Dropped, Compare=Compare)
+    calls.clear()
+    exec("match (Dropped(), Compare()):\n    case (_, 1): pass", scope)
+    assert calls == ["dropped", "compared"]
+
+    class Compared(Dropped):
+        def __eq__(self, other):
+            return calls
+
+    scope.update(Compared=Compared, events=calls)
+    calls.clear()
+    exec("match [Compared()]:\n    case [1] if events: matched = True\n    case _: matched = False", scope)
+    assert scope.pop("matched") and calls == ["dropped"]
+
+    class Private:
+        def pick(self, value):
+            match value:
+                case [*__parts] | {"key": _, **__parts} | __parts:
+                    return __parts
+
+    picker = Private()
+    assert picker.pick([1]) == [1]
+    assert picker.pick({"key": 1, "value": 2}) == {"value": 2}
+    assert picker.pick(3) == 3
+
+    try:
+        compile("match value:\n    case [a, a]: pass", "<match>", "exec")
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("duplicate sequence capture accepted")
+
 
 def source_genexpr():
     namespace = {}

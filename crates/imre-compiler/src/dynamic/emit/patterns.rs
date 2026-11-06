@@ -1,12 +1,8 @@
 //! Structural patterns and their case guards for runtime-loaded Python.
+use imre_ast::wildcard_pattern as wildcard;
 use ruff_python_ast as ast;
 
 use super::Function;
-
-fn wildcard(pattern: &ast::Pattern) -> bool {
-    matches!(pattern, ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none())
-        || matches!(pattern, ast::Pattern::MatchStar(p) if p.name.is_none())
-}
 
 impl Function<'_, '_> {
     /// Keep the subject across failed cases and publish captures before evaluating a guard.
