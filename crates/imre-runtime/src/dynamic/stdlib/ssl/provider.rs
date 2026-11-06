@@ -76,6 +76,10 @@ macro_rules! functions {
 
 functions! {
     optional {
+        SSLv3_method() -> Handle;
+        TLSv1_method() -> Handle;
+        TLSv1_1_method() -> Handle;
+        TLSv1_2_method() -> Handle;
         PEM_read_DHparams(*mut libc::FILE, *mut Handle, PasswordCallback, Handle) -> Handle;
         DH_free(Handle) -> ();
     }
@@ -269,6 +273,7 @@ pub(crate) fn version() -> Option<String> {
 
 #[derive(Debug)]
 pub(crate) enum Failure {
+    UnsupportedProtocol(i32),
     Verify {
         code: i64,
         message: String,
@@ -450,9 +455,56 @@ unsafe extern "C" fn reject_password(_: *mut c_char, _: c_int, _: c_int, _: Hand
 // Method selectors exposed by CPython, distinct from TLS wire versions.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Protocol {
+    Ssl3 = 1,
     Tls = 2,
+    Tls1 = 3,
+    Tls1_1 = 4,
+    Tls1_2 = 5,
     Client = 16,
     Server = 17,
+}
+
+impl Protocol {
+    pub(super) fn is_fixed(self) -> bool {
+        !matches!(self, Self::Tls | Self::Client | Self::Server)
+    }
+}
+
+pub(super) struct Method {
+    api: &'static Api,
+    protocol: Protocol,
+    select: unsafe extern "C" fn() -> Handle,
+    pub(super) deprecated: Option<&'static str>,
+}
+
+impl Method {
+    pub(super) fn lookup(code: i32) -> Result<Self, Failure> {
+        let api = api().ok_or_else(|| Failure::Other("OpenSSL 3 TLS is unavailable".into()))?;
+        let (protocol, select, deprecated) = match code {
+            1 => (Protocol::Ssl3, api.SSLv3_method, Some("PROTOCOL_SSLv3")),
+            2 => (Protocol::Tls, Some(api.TLS_method), None),
+            3 => (Protocol::Tls1, api.TLSv1_method, Some("PROTOCOL_TLSv1")),
+            4 => (
+                Protocol::Tls1_1,
+                api.TLSv1_1_method,
+                Some("PROTOCOL_TLSv1_1"),
+            ),
+            5 => (
+                Protocol::Tls1_2,
+                api.TLSv1_2_method,
+                Some("PROTOCOL_TLSv1_2"),
+            ),
+            16 => (Protocol::Client, Some(api.TLS_client_method), None),
+            17 => (Protocol::Server, Some(api.TLS_server_method), None),
+            _ => return Err(Failure::UnsupportedProtocol(code)),
+        };
+        Ok(Self {
+            api,
+            protocol,
+            select: select.ok_or(Failure::UnsupportedProtocol(code))?,
+            deprecated,
+        })
+    }
 }
 
 const SSL_VERIFY_PEER: c_int = 1;
@@ -492,16 +544,16 @@ impl Drop for StoreSnapshot {
 }
 
 impl Context {
-    pub(super) fn new(protocol: Protocol) -> Result<Self, Failure> {
-        let api = api().ok_or_else(|| Failure::Other("OpenSSL 3 TLS is unavailable".into()))?;
+    pub(super) fn new(method: Method) -> Result<Self, Failure> {
+        let Method {
+            api,
+            protocol,
+            select,
+            ..
+        } = method;
         api.clear();
-        let method = match protocol {
-            Protocol::Tls => api.TLS_method,
-            Protocol::Client => api.TLS_client_method,
-            Protocol::Server => api.TLS_server_method,
-        };
         // SAFETY: each selector returns a process-lifetime SSL_METHOD from this same provider.
-        let handle = NonNull::new(unsafe { (api.SSL_CTX_new)(method()) })
+        let handle = NonNull::new(unsafe { (api.SSL_CTX_new)(select()) })
             .ok_or_else(|| api.error("SSL_CTX_new"))?;
         let mut ctx = Self {
             api,
@@ -519,14 +571,15 @@ impl Context {
             (api.SSL_CTX_set_default_passwd_cb)(handle.as_ptr(), reject_password);
         }
         // SAFETY: arguments implement the SSL_CTX_set_min_proto_version macro.
-        if unsafe {
-            (api.SSL_CTX_ctrl)(
-                handle.as_ptr(),
-                SSL_CTRL_SET_MIN_PROTO_VERSION,
-                TLS1_2_VERSION,
-                ptr::null_mut(),
-            )
-        } == 0
+        if !protocol.is_fixed()
+            && unsafe {
+                (api.SSL_CTX_ctrl)(
+                    handle.as_ptr(),
+                    SSL_CTRL_SET_MIN_PROTO_VERSION,
+                    TLS1_2_VERSION,
+                    ptr::null_mut(),
+                )
+            } == 0
         {
             return Err(api.error("SSL_CTX_set_min_proto_version"));
         }
@@ -535,8 +588,10 @@ impl Context {
         const WORKAROUNDS: u64 = (1 << 31) | (1 << 6) | (1 << 4);
         const NO_COMPRESSION: u64 = 1 << 17;
         const CIPHER_SERVER_PREFERENCE: u64 = 1 << 22;
-        let defaults =
-            WORKAROUNDS | versions::SSL_OP_NO_SSLV3 | NO_COMPRESSION | CIPHER_SERVER_PREFERENCE;
+        let mut defaults = WORKAROUNDS | NO_COMPRESSION | CIPHER_SERVER_PREFERENCE;
+        if protocol != Protocol::Ssl3 {
+            defaults |= versions::SSL_OP_NO_SSLV3;
+        }
         // SAFETY: options are set on a live, exclusively owned SSL_CTX.
         unsafe { (api.SSL_CTX_set_options)(handle.as_ptr(), defaults) };
 
