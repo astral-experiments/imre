@@ -2162,6 +2162,83 @@ fn partition_bytes(ctx: &mut Context, receiver: Id, separator: Id) -> Result<Id>
     Ok(ctx.alloc(Value::Tuple(fields)))
 }
 
+/// Decode a boxed replacement, borrowing its text when lookup cannot run Python.
+fn translation_value<'a, T>(
+    ctx: &'a Context,
+    item: Id,
+    text: impl FnOnce(&'a str) -> Result<T>,
+) -> Result<translate::Piece<T>> {
+    match ctx.heap.get(ctx.scalar_value(item)) {
+        Value::None => Ok(translate::Piece::Delete),
+        Value::Str(value) => text(value).map(translate::Piece::Text),
+        Value::Int(value) => translate::Piece::ordinal(value).map_err(Error::from),
+        Value::Bool(value) => Ok(translate::Piece::Character(char::from(u8::from(*value)))),
+        _ => Err(type_error(translate::INVALID_VALUE)),
+    }
+}
+
+/// Subscribe with the integer ordinal, releasing each callback's result before the next lookup.
+fn translation_item(ctx: &mut Context, table: Id, ch: char) -> Result<translate::Piece<String>> {
+    let mark = ctx.heap.temporary_mark();
+    let key = ctx.int(i64::from(u32::from(ch)));
+    let item = if matches!(ctx.heap.get(table), Value::Dict(_)) {
+        // A missing exact-dict key needs no Python exception or argument tuple.
+        ctx.find_dictionary_key(table, key, None)
+            .map(|(_, index)| index.map(|i| ctx.stored_entries(table)[i].1))
+    } else {
+        ctx.get_item(table, key).map(Some)
+    };
+    let item = match item {
+        Ok(Some(item)) => Ok(item),
+        Err(error) if !ctx.is_builtin_error(&error, "LookupError") => Err(error),
+        Ok(None) | Err(_) => {
+            ctx.discard_temporaries(mark, None);
+            return Ok(translate::Piece::Character(ch));
+        }
+    };
+    let item = ctx.release_with_result(mark, item)?;
+    let piece = translation_value(ctx, item, super::super::copy_label);
+    ctx.discard_temporaries(mark, None);
+    piece
+}
+
+/// Try the shared loop with borrowed strings before resorting to Python subscription.
+fn translate_str(ctx: &mut Context, receiver: Id, table: Id) -> Result<Id> {
+    enum BorrowedError {
+        Subscription,
+        Error(Error),
+    }
+    impl From<crate::Error> for BorrowedError {
+        fn from(error: crate::Error) -> Self {
+            Self::Error(error.into())
+        }
+    }
+    if let Value::Dict(entries) = ctx.heap.get(table) {
+        let output = translate::borrowed_text(ctx.str_value(receiver)?, |ch| {
+            match entries.lookup_ordinal(ctx, ch) {
+                std::ops::ControlFlow::Continue(Some(item)) => {
+                    translation_value(ctx, item, Ok).map_err(BorrowedError::Error)
+                }
+                std::ops::ControlFlow::Continue(None) => Ok(translate::Piece::Character(ch)),
+                std::ops::ControlFlow::Break(()) => Err(BorrowedError::Subscription),
+            }
+        });
+        match output {
+            Ok(text) => return Ok(ctx.text(text.into_string())),
+            Err(BorrowedError::Error(error)) => return Err(error),
+            // The borrowed prefix made no Python calls. Restart before invoking any hook.
+            Err(BorrowedError::Subscription) => {}
+        }
+    }
+    let source = super::super::copy_label(ctx.str_value(receiver)?)?;
+    let mut limit = ctx.heap.streaming_collection_limit();
+    let text = translate::text(&source, |ch| {
+        ctx.collect_streaming_garbage(&mut limit);
+        translation_item(ctx, table, ch)
+    })?;
+    Ok(ctx.text(text.into_string()))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -2712,33 +2789,7 @@ pub(super) fn method(
     if name == "translate" {
         positional(name, kwargs)?;
         arity(name, args, 1, 1)?;
-        let Value::Dict(table) = ctx.heap.get(args[0]) else {
-            return Err(type_error("str.translate requires a plain dictionary"));
-        };
-        let text = translate::text(ctx.str_value(receiver)?, |ch| {
-            let ordinal = i64::from(u32::from(ch));
-            let entry = table
-                .iter()
-                .find(|&&(key, _)| match ctx.heap.get(ctx.scalar_value(key)) {
-                    Value::Int(key) => key.to_i64() == Some(ordinal),
-                    Value::Bool(key) => i64::from(*key) == ordinal,
-                    _ => false,
-                });
-            let Some(&(_, id)) = entry else {
-                return Ok(translate::Piece::Character(ch));
-            };
-            match ctx.heap.get(ctx.scalar_value(id)) {
-                Value::None => Ok(translate::Piece::Text("")),
-                Value::Str(value) => Ok(translate::Piece::Text(value)),
-                Value::Int(value) => translate::Piece::ordinal(value),
-                Value::Bool(value) => Ok(translate::Piece::Character(char::from(u8::from(*value)))),
-                _ => Err(crate::Error::new(
-                    crate::Kind::TypeError,
-                    translate::INVALID_VALUE,
-                )),
-            }
-        })?;
-        return Ok(ctx.text(text.into_string()));
+        return translate_str(ctx, receiver, args[0]);
     }
     if name == "join" {
         if owner == "bytes" {
