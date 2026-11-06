@@ -255,6 +255,7 @@ impl Context {
     pub(super) fn allocate_module(&mut self, class: Id) -> Id {
         let scope = self.scope("", None);
         self.builtin("module.__init__");
+        self.builtin("module.__repr__");
         self.alloc(Value::Module {
             name: String::new(),
             scope,

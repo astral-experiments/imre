@@ -73,6 +73,26 @@ def current():
     else:
         raise AssertionError("recursive module representation")
 
+    class Later:
+        def __repr__(self):
+            raise AssertionError("looked beyond ModuleType.__repr__")
+
+    class Plugin(ModuleType, Later):
+        pass
+
+    plugin = Plugin("billing")
+    assert repr([plugin]) == "[<module 'billing'>]"
+
+    from importlib.machinery import ModuleSpec
+
+    class Origin:
+        def __format__(self, fmt):
+            plugin.__spec__.origin = "ready"
+            return repr(plugin)
+
+    plugin.__spec__ = ModuleSpec("billing", None, origin=Origin())
+    assert repr(plugin) == "<module 'billing' (<module 'billing' (ready)>)>"
+
     reference = _weakref.ref(child)
     assert reference() is child
     del child

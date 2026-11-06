@@ -1359,16 +1359,10 @@ impl Context {
                 constructor: Some(class),
                 ..
             } => {
-                // A module subclass may define its own slot. The builtin slot below
-                // renders from the spec, including when explicitly invoked on a subclass.
-                let method = self.find_in_mro(*class, |base| {
-                    if matches!(self.heap.get(base), Value::Class { .. }) {
-                        self.own_class_attr(base, name)
-                    } else {
-                        None
-                    }
-                })?;
-                return Some((*class, method));
+                // The native module slot uses the renderer's recursion guard.
+                let slot = self.class_attr(*class, name)?;
+                return (self.builtins.get("module.__repr__") != Some(&slot))
+                    .then_some((*class, slot));
             }
             Value::Raised(error) => error.class()?,
             Value::Weak(wr) if name == "__repr__" => *self.builtins.get(wr.kind.class())?,
@@ -2286,20 +2280,9 @@ impl Context {
                             constructor: Some(_),
                             ..
                         } => {
-                            if !enter_ancestor(&mut ancestors, id)? {
-                                if checked {
-                                    return Err(Error::new(
-                                        "RecursionError",
-                                        "maximum recursion depth exceeded",
-                                    ));
-                                }
-                                append_rendered_text(&mut output, "<module ...>")?;
-                                continue;
-                            }
-                            let scope = *scope;
-                            push_frame(&mut active, id)?;
+                            // The Python formatter can re-enter this module after a callback
+                            // changes its spec. Only enclosing containers are active here.
                             if checked && ctx.bootstrap_globals != NONE {
-                                push_frame(&mut work, Part::Leave(id, ""))?;
                                 let text = element_repr(
                                     &mut ctx,
                                     id,
@@ -2312,21 +2295,32 @@ impl Context {
                                 append_rendered_text(&mut output, ctx.str_value(text)?)?;
                                 continue;
                             }
+                            if !enter_ancestor(&mut ancestors, id)? {
+                                if checked {
+                                    return Err(Error::new(
+                                        "RecursionError",
+                                        "maximum recursion depth exceeded",
+                                    ));
+                                }
+                                append_rendered_text(&mut output, "<module ...>")?;
+                                continue;
+                            }
+                            push_frame(&mut active, id)?;
                             append_rendered_text(&mut output, "<module ")?;
                             push_frame(&mut work, Part::Leave(id, ">"))?;
                             if let Some(file) =
-                                ctx.scope_name(scope, "__file__").filter(|&id| id != NONE)
+                                ctx.scope_name(*scope, "__file__").filter(|&id| id != NONE)
                             {
                                 push_frame(&mut work, Part::Value(file, true))?;
                                 push_frame(&mut work, Part::Text(" from "))?;
                             } else if let Some(loader) =
-                                ctx.scope_name(scope, "__loader__").filter(|&id| id != NONE)
+                                ctx.scope_name(*scope, "__loader__").filter(|&id| id != NONE)
                             {
                                 push_frame(&mut work, Part::Text(")"))?;
                                 push_frame(&mut work, Part::Value(loader, true))?;
                                 push_frame(&mut work, Part::Text(" ("))?;
                             }
-                            if let Some(name) = ctx.scope_name(scope, "__name__") {
+                            if let Some(name) = ctx.scope_name(*scope, "__name__") {
                                 push_frame(&mut work, Part::Value(name, true))?;
                             } else {
                                 push_frame(&mut work, Part::Text("'?'"))?;
