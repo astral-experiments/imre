@@ -58,15 +58,18 @@ fn win_split(s: &str) -> (&str, &str, &str) {
     ("", "", s)
 }
 
-fn replace_separator(source: &str, from: char, to: char) -> Result<Str> {
-    // Both separators are single-byte ASCII, so the result has exactly the input length.
-    let mut text = Str::try_with_capacity(source.len()).map_err(|_| Error::allocation())?;
-    for piece in source.split_inclusive(from) {
-        if let Some(piece) = piece.strip_suffix(from) {
-            text.push_str(piece);
-            text.push(to);
-        } else {
-            text.push_str(piece);
+/// Translate equal-width ASCII path separators directly in a copy of the spelling.
+fn replace_separator(source: &str, windows: bool) -> Result<Str> {
+    let (from, to) = if windows {
+        (b'/', b'\\')
+    } else {
+        (b'\\', b'/')
+    };
+    let mut text = Str::try_new(source).map_err(|_| Error::allocation())?;
+    // SAFETY: replacing one ASCII byte with another preserves UTF-8 and its length.
+    for byte in unsafe { text.as_mut_str().as_bytes_mut() } {
+        if *byte == from {
+            *byte = to;
         }
     }
     Ok(text)
@@ -92,8 +95,11 @@ fn copy_components<'a>(parts: impl Iterator<Item = &'a str>) -> Result<Vec<Str>>
 fn win_join(raw: &[StrOwner]) -> Result<Str> {
     let (mut drive, mut root, mut tail) = ("", "", Str::default());
     for part in raw {
-        let input = replace_separator(part, '/', '\\')?;
-        let (d, r, t) = win_split(&input);
+        let normalized = part
+            .contains('/')
+            .then(|| replace_separator(part, true))
+            .transpose()?;
+        let (d, r, t) = win_split(normalized.as_deref().unwrap_or(part));
         // ntpath.join compares the original drive spellings, including separators.
         let d = &part[..d.len()];
         if !r.is_empty()
@@ -120,7 +126,7 @@ fn win_join(raw: &[StrOwner]) -> Result<Str> {
             append_segment(&mut tail, sep, t)?;
         }
     }
-    let mut path = replace_separator(drive, '/', '\\')?;
+    let mut path = replace_separator(drive, true)?;
     let sep = if !tail.is_empty()
         && root.is_empty()
         && !path.is_empty()
@@ -485,12 +491,13 @@ impl PurePath {
             ));
         };
         *last = Str::try_new(name).map_err(|_| Error::allocation())?;
-        self.with_parts(&self.drive, &self.root, tail)?.into_object()
+        self.with_parts(&self.drive, &self.root, tail)?
+            .into_object()
     }
 
     pub(super) fn as_posix(&self) -> Result<StrOwner> {
         if self.windows && self.text.contains('\\') {
-            Ok(StrOwner::new(replace_separator(&self.text, '\\', '/')?))
+            Ok(StrOwner::new(replace_separator(&self.text, false)?))
         } else {
             Ok(StrOwner::clone(&self.text))
         }
