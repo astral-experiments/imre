@@ -4,6 +4,18 @@ from statistics import StatisticsError, mean
 
 
 def current():
+    for values in (range(-9, 11, 4), range(10, -7, -3), range(1), range(-8, 4, 3),
+                   range(2**80 + 1, 2**80 + 8, 2), range(-2**80, -2**80 + 4)):
+        result = mean(values)
+        expected = mean(list(values))
+        assert type(result) is type(expected) and result == expected
+    try:
+        mean(range(2, 2))
+    except StatisticsError as error:
+        assert str(error) == "mean requires at least one data point"
+    else:
+        raise AssertionError("expected StatisticsError")
+
     huge = 1 << 500
     assert mean((huge, huge)) == huge
     assert type(mean([huge, -huge])) is int

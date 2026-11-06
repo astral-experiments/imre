@@ -159,6 +159,13 @@ def _sum(data, count=0, integer_sum=0):
     allowed.
 
     """
+    if type(data) is range and data:
+        first, last = data[0], data[-1]
+        # The mathematical length can exceed the limit of len(range(...)).
+        size = (last - first) // data.step + 1
+        total = integer_sum + (first + last) * size // 2
+        return int, Fraction(total), count + size
+
     # A preconsumed integer prefix contributes one exact denominator group.
     types = {int} if count else set()
     types_add = types.add
