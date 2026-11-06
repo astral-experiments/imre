@@ -515,22 +515,12 @@ fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
             Err(_) => Error::memory_error(),
         }
     })?;
-    if preserve_newlines || memchr::memchr(b'\r', text.as_bytes()).is_none() {
-        return Ok(Str::from(text));
-    }
-    let mut normalized = Str::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(value) = chars.next() {
-        if value == '\r' {
-            if chars.peek() == Some(&'\n') {
-                chars.next();
-            }
-            normalized.push('\n');
-        } else {
-            normalized.push(value);
-        }
-    }
-    Ok(normalized)
+    let text = if preserve_newlines {
+        text
+    } else {
+        super::codecs::universal_newlines(text)
+    };
+    Ok(Str::from(text))
 }
 
 impl Storage {

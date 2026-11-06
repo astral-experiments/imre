@@ -841,16 +841,19 @@ fn encoding_error(
 }
 
 /// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
-pub(super) fn universal_newlines(text: String) -> String {
-    let mut bytes = text.into_bytes();
-    normalize_newlines(&mut bytes);
-    String::from_utf8(bytes).expect("ASCII newline conversion preserves UTF-8")
+pub(super) fn universal_newlines(mut text: String) -> String {
+    // SAFETY: newline translation only replaces ASCII CR and CRLF with ASCII LF.
+    normalize_newlines(unsafe { text.as_mut_vec() });
+    text
 }
 
 /// Compact physical CR and CRLF endings in place, even before the encoding is known.
 pub(super) fn normalize_newlines(bytes: &mut Vec<u8>) {
-    let mut read = 0;
-    let mut written = 0;
+    let Some(first) = memchr::memchr(b'\r', bytes) else {
+        return;
+    };
+    let mut read = first;
+    let mut written = first;
     while read < bytes.len() {
         let byte = bytes[read];
         read += 1;
