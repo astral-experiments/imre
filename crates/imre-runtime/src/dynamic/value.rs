@@ -2885,6 +2885,13 @@ impl CycleSet {
     }
 }
 
+/// A position in the local names or namespace dictionary of a frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FinalizerBindingSlot {
+    Local(usize),
+    Namespace(usize),
+}
+
 /// Native frames hold temporaries until the next Python statement. A caller's
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
@@ -2938,7 +2945,7 @@ pub(super) struct Heap {
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
-    finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
+    finalizer_bindings: Cell<[Option<(usize, FinalizerBindingSlot)>; 2]>,
     /// Last successful (owner, frame, operand) hints for finalizer reachability checks.
     finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 64],
     // A recently allocated iterator may be the only holder of an unreferenced generator.
@@ -4650,29 +4657,39 @@ impl Heap {
             let Value::Scope(scope) = self.get(self.frames.get(frame)?.scope) else {
                 return None;
             };
-            let (_, &owner) = scope.names.get_index(slot)?;
+            let owner = match slot {
+                FinalizerBindingSlot::Local(index) => *scope.names.get_index(index)?.1,
+                FinalizerBindingSlot::Namespace(index) => {
+                    self.dict_entries(scope.namespace?)?.get(index)?.1
+                }
+            };
             Some(super::stdlib::io::text_descriptor_chain(self, owner).unwrap_or([owner; 3]))
         })
     }
 
-    /// Remember where a surviving local keeps the owner so subsequent checks can validate it directly.
+    /// Remember the binding position so later checks can validate its current occupant.
     fn find_finalizer_binding(&self, owner: Id) -> bool {
         for (frame_index, frame) in self.frames.iter().enumerate().rev() {
             let Value::Scope(scope) = self.get(frame.scope) else {
                 continue;
             };
-            if let Some(slot) = scope.names.values().position(|&bound| bound == owner) {
+            let slot = scope
+                .names
+                .values()
+                .position(|&bound| bound == owner)
+                .map(FinalizerBindingSlot::Local)
+                .or_else(|| {
+                    self.dict_entries(scope.namespace?)?
+                        .iter()
+                        .position(|&(_, bound)| bound == owner)
+                        .map(FinalizerBindingSlot::Namespace)
+                });
+            if let Some(slot) = slot {
                 let position = Some((frame_index, slot));
                 let [first, _] = self.finalizer_bindings.get();
                 if first != position {
                     self.finalizer_bindings.set([position, first]);
                 }
-                return true;
-            }
-            if let Some(namespace) = scope.namespace
-                && matches!(self.get(namespace), Value::Dict(entries)
-                    if entries.iter().any(|&(_, bound)| bound == owner))
-            {
                 return true;
             }
         }
@@ -5829,6 +5846,28 @@ mod tests {
             assert!(matches!(heap.get(id), Value::Int(value) if value.as_small() == Some(n)));
             assert_eq!(heap.alloc(Value::Int(crate::Int::from(n))), id);
         }
+    }
+
+    #[test]
+    fn namespace_finalizer_bindings_follow_the_current_value() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        let replacement = heap.alloc(Value::List(Vec::new()));
+        let namespace = heap.alloc(Value::Dict(vec![(TRUE, owner)].into()));
+        let mut scope = Scope::new(String::new(), None);
+        scope.namespace = Some(namespace);
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
+        heap.frames[0].scope = scope;
+
+        assert!(heap.find_finalizer_binding(owner));
+        assert_eq!(heap.bound_finalizer_chains(), [Some([owner; 3]), None]);
+        *heap.get_mut(namespace) = Value::Dict(vec![(FALSE, replacement)].into());
+        assert_eq!(
+            heap.bound_finalizer_chains(),
+            [Some([replacement; 3]), None]
+        );
+        *heap.get_mut(namespace) = Value::Dict(Default::default());
+        assert_eq!(heap.bound_finalizer_chains(), [None; 2]);
     }
 
     #[test]
