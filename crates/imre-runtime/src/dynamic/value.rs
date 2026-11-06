@@ -1404,6 +1404,12 @@ pub(super) enum Value {
     },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
+    /// Captured arguments are kept alive across calls, including Python attribute hooks.
+    MethodCaller {
+        name: Id,
+        args: Id,
+        keywords: Id,
+    },
     ThreadLocal(super::thread_local::Dictionaries),
     ThreadHandle(std::sync::Arc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
@@ -1725,6 +1731,7 @@ impl Value {
                 "member_descriptor"
             }
             Self::ItemGetter(_) => "operator.itemgetter",
+            Self::MethodCaller { .. } => "operator.methodcaller",
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
@@ -1933,6 +1940,11 @@ impl Value {
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::TupleGetter { doc, .. } => visit.extend(doc),
             Self::ItemGetter(keys) => visit.push(*keys),
+            Self::MethodCaller {
+                name,
+                args,
+                keywords,
+            } => visit.extend([*name, *args, *keywords]),
             Self::KeyWrapper { comparator, object } => {
                 visit.push(*comparator);
                 visit.extend(object);
