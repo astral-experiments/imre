@@ -211,11 +211,23 @@ impl<F: Read + Write + Seek> Random<F> {
 
     pub(crate) fn read_bytes(&mut self, limit: Option<usize>) -> Result<Bytes> {
         let mut result = Vec::new();
-        match limit {
-            Some(n) => self.take(n as u64).read_to_end(&mut result),
-            None => self.read_to_end(&mut result),
+        if let Some(size) = limit {
+            if size > crate::MAX_BYTES_LEN {
+                return Err(Error::new(Kind::OverflowError, "byte string is too large"));
+            }
+            // Reserve before advancing read-ahead or flushing pending writes.
+            result
+                .try_reserve_exact(size)
+                .map_err(|_| Error::memory_error())?;
+            self.take(size as u64)
+                .read_to_end(&mut result)
+                .map_err(errno_error)?;
+            if result.len() < size {
+                crate::compact_bytes(&mut result);
+            }
+        } else {
+            self.read_to_end(&mut result).map_err(errno_error)?;
         }
-        .map_err(errno_error)?;
         Ok(result)
     }
 
