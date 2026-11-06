@@ -47,6 +47,17 @@ def current():
     assert match.regs == ((1, 3), (1, 2), (1, 2), (2, 3))
     assert match.regs is match.regs
     assert (match.lastindex, match.lastgroup) == (3, None)
+    for spelling in (r"(?P<a>a)|(?P<b>b)", r"(?=(?P<a>a)|(?P<b>b))[ab]"):
+        pattern = re.compile(spelling)
+        first = pattern.search("!a")
+        assert pattern.search("!") is None
+        second = pattern.match("b")
+        assert pattern.fullmatch("b").groups() == (None, "b")
+        assert pattern.fullmatch("aa") is None
+        assert pattern.fullmatch("a").groups() == ("a", None)
+        assert (second.groups(), second.lastgroup) == ((None, "b"), "b")
+        assert (first.groups(), first.lastgroup) == (("a", None), "a")
+        assert first.regs == ((1, 2), (1, 2), (-1, -1))
     parts = re.compile(r"(é)|(a)").finditer("xéa!", 1, 3)
     first, second = tuple(parts)
     assert first.regs == ((1, 2), (1, 2), (-1, -1))

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::fmt::Write;
 use std::rc::Rc;
 
@@ -105,6 +105,8 @@ pub(in crate::dynamic) struct Pattern {
     regex: Matcher,
     assertions: Vec<(String, Guard)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
+    captures: OnceCell<Box<RefCell<Captures>>>,
+    full_captures: OnceCell<Box<RefCell<Captures>>>,
     close_order: OnceCell<Option<Vec<usize>>>,
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
@@ -1290,6 +1292,8 @@ fn prepare(
         regex,
         assertions,
         full: OnceCell::new(),
+        captures: OnceCell::new(),
+        full_captures: OnceCell::new(),
         close_order: OnceCell::new(),
         split_retry: OnceCell::new(),
     })
@@ -1846,7 +1850,8 @@ pub(super) fn search(
         }
         return Ok(NONE);
     }
-    let matcher = match pattern.matcher(method == "fullmatch") {
+    let full = method == "fullmatch";
+    let matcher = match pattern.matcher(full) {
         Ok(matcher) => matcher,
         Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
     };
@@ -1858,7 +1863,14 @@ pub(super) fn search(
     let input = Input::new(&text[..end])
         .range(start..end)
         .anchored(anchored);
-    let mut captures = matcher.create_captures();
+    let storage = if full {
+        &pattern.full_captures
+    } else {
+        &pattern.captures
+    };
+    let mut captures = storage
+        .get_or_init(|| Box::new(RefCell::new(matcher.create_captures())))
+        .borrow_mut();
     matcher
         .captures(input, &mut captures)
         .map_err(|message| Error::new("RuntimeError", message))?;
@@ -1869,6 +1881,7 @@ pub(super) fn search(
     let spans = group_spans(&captures)
         .map(|span| span.map(|s| subject.original(s)))
         .collect();
+    drop(captures);
     Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
         last,
         pattern: receiver,
