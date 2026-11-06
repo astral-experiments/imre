@@ -100,6 +100,7 @@ import collections
 import collections.abc
 import contextlib
 import weakref
+from types import MethodType as _MethodType
 
 from . import ElementPath
 
@@ -399,22 +400,39 @@ class Element:
                 yield from child.iter(tag)
             return
 
-        # Keep each parent and its live child iterator until the subtree ends.
-        stack = [(self, iter(self._children))]
-        while stack:
-            child = next(stack[-1][1], _ITER_END)
+        # Only suspended parents need a stack entry. Keep the active parent
+        # alive while advancing its iterator, even if the tree is mutated.
+        parent = self
+        children = iter(self._children)
+        stack = []
+        while True:
+            child = next(children, _ITER_END)
             if child is _ITER_END:
-                stack.pop()
+                if not stack:
+                    return
+                parent, children = stack.pop()
                 continue
-            if (type(child) is _Element_Py
-                    and _Element_Py.__getattribute__ is object.__getattribute__
-                    and vars(_Element_Py).get("iter") is _element_iter
-                    and "iter" not in vars(child)):
+            if type(child) is not _Element_Py:
+                yield from child.iter(tag)
+                continue
+            method = child.iter
+            if (type(method) is _MethodType and method.__self__ is child
+                    and method.__func__ is _element_iter):
+                del method
                 if tag is None or child.tag == tag:
                     yield child
-                stack.append((child, iter(child._children)))
+                descendants = child._children
+                if type(descendants) is not list or descendants:
+                    stack.append((parent, children))
+                    parent = child
+                    children = iter(descendants)
+                del descendants
             else:
-                yield from child.iter(tag)
+                # A descriptor can return a temporary callable. Drop its last
+                # local reference before suspending on the iterator it returns.
+                stack.append(method)
+                del method
+                yield from stack.pop()(tag)
 
     def itertext(self):
         """Create text iterator.
