@@ -138,6 +138,16 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
+            Some((value::ZSTD_COMPRESS_TYPE, attr)) => Some((
+                value::ZSTD_COMPRESS_TYPE,
+                attr,
+                value::ZSTD_COMPRESS_METHODS,
+            )),
+            Some((value::ZSTD_DECOMPRESS_TYPE, attr)) => Some((
+                value::ZSTD_DECOMPRESS_TYPE,
+                attr,
+                value::CODEC_DECOMPRESS_METHODS,
+            )),
             Some((value::BZ2_COMPRESS_TYPE, attr)) => Some((
                 value::BZ2_COMPRESS_TYPE,
                 attr,
@@ -517,6 +527,8 @@ impl BuiltinDescriptor {
             | "tuple_iterator"
             | "memory_iterator"
             | thread_handle::CLASS
+            | value::ZSTD_COMPRESS_TYPE
+            | value::ZSTD_DECOMPRESS_TYPE
             | value::BZ2_COMPRESS_TYPE
             | value::BZ2_DECOMPRESS_TYPE
             | value::LZMA_COMPRESS_TYPE
@@ -674,7 +686,7 @@ impl BuiltinDescriptor {
                 {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" || self.class() == "classmethod_descriptor" => ctx.class_qualname(receiver),
-                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE | value::BZ2_COMPRESS_TYPE | value::BZ2_DECOMPRESS_TYPE | value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE) => self.owner.rsplit('.').next()?,
+                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE | value::ZSTD_COMPRESS_TYPE | value::ZSTD_DECOMPRESS_TYPE | value::BZ2_COMPRESS_TYPE | value::BZ2_DECOMPRESS_TYPE | value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE) => self.owner.rsplit('.').next()?,
                         _ if matches!(self.owner, "builtin_function_or_method" | "method") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",

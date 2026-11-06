@@ -437,6 +437,8 @@ impl Context {
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
+            | (value::ZSTD_COMPRESS_TYPE, Value::ZstdCompressor(_))
+            | (value::ZSTD_DECOMPRESS_TYPE, Value::ZstdDecompressor(_))
             | (value::BZ2_COMPRESS_TYPE, Value::Bz2Compressor(_))
             | (value::BZ2_DECOMPRESS_TYPE, Value::Bz2Decompressor(_))
             | (value::REGEX_MATCH_TYPE, Value::RegexMatch(_))
@@ -2710,6 +2712,16 @@ impl Context {
             thread_handle::install(self, value);
         }
         let codec_members = match name {
+            value::ZSTD_COMPRESS_TYPE => Some((
+                value::ZSTD_COMPRESS_TYPE,
+                value::ZSTD_COMPRESS_METHODS,
+                &["last_mode"][..],
+            )),
+            value::ZSTD_DECOMPRESS_TYPE => Some((
+                value::ZSTD_DECOMPRESS_TYPE,
+                value::CODEC_DECOMPRESS_METHODS,
+                value::BZ2_DECOMPRESS_FIELDS,
+            )),
             value::BZ2_COMPRESS_TYPE => Some((
                 value::BZ2_COMPRESS_TYPE,
                 value::CODEC_COMPRESS_METHODS,
@@ -2733,12 +2745,18 @@ impl Context {
             _ => None,
         };
         if let Some((owner, methods, fields)) = codec_members {
-            let (module, _) = owner.split_once('.').expect("qualified codec type");
+            let (module, _) = owner.rsplit_once('.').expect("qualified codec type");
             let mut entries = vec![(
                 self.heap.code_name("__module__"),
                 self.heap.code_name(module),
             )];
-            if module == "_bz2" {
+            if owner == value::ZSTD_COMPRESS_TYPE {
+                for (mode, n) in [("CONTINUE", 0), ("FLUSH_BLOCK", 1), ("FLUSH_FRAME", 2)] {
+                    let n = self.int(n);
+                    entries.push((self.heap.code_name(mode), n));
+                }
+            }
+            if matches!(module, "_bz2" | "compression.zstd") {
                 let new = self.builtin(&format!("{owner}.__new__"));
                 entries.push((self.heap.code_name("__new__"), new));
             }
@@ -4104,6 +4122,7 @@ impl Context {
             "pwd" => stdlib::pwd::install(self, scope),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "termios" if source.is_none() => stdlib::termios::install(self, module, scope)?,
+            "_zstd" if source.is_none() => stdlib::zstd::install(self, scope),
             "_bz2" if source.is_none() => {
                 for name in ["BZ2Compressor", "BZ2Decompressor"] {
                     let class = self.builtin(&format!("_bz2.{name}"));

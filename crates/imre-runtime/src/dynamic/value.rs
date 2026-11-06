@@ -69,6 +69,9 @@ const FIRST_DYNAMIC_SLOT: usize =
 /// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
 pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
 
+pub(super) const ZSTD_COMPRESS_TYPE: &str = "compression.zstd.ZstdCompressor";
+pub(super) const ZSTD_DECOMPRESS_TYPE: &str = "compression.zstd.ZstdDecompressor";
+pub(super) const ZSTD_COMPRESS_METHODS: &[&str] = &["compress", "flush", "set_pledged_input_size"];
 pub(super) const BZ2_COMPRESS_TYPE: &str = "_bz2.BZ2Compressor";
 pub(super) const BZ2_DECOMPRESS_TYPE: &str = "_bz2.BZ2Decompressor";
 pub(super) const BZ2_DECOMPRESS_FIELDS: &[&str] = &["eof", "unused_data", "needs_input"];
@@ -1561,6 +1564,8 @@ pub(super) enum Value {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
+    ZstdCompressor(crate::Shared<std::cell::RefCell<super::stdlib::zstd::streams::Compressor>>),
+    ZstdDecompressor(crate::Shared<std::cell::RefCell<super::stdlib::zstd::Decompressor>>),
     Bz2Compressor(crate::Shared<std::cell::RefCell<super::stdlib::bz2::codec::Compressor>>),
     Bz2Decompressor(crate::Shared<std::cell::RefCell<super::stdlib::bz2::Decompressor>>),
     LzmaCompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Compressor>>),
@@ -1718,6 +1723,8 @@ impl Value {
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GzipDecoder(_) => "object",
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
+            Self::ZstdCompressor(_) => ZSTD_COMPRESS_TYPE,
+            Self::ZstdDecompressor(_) => ZSTD_DECOMPRESS_TYPE,
             Self::Bz2Compressor(_) => BZ2_COMPRESS_TYPE,
             Self::Bz2Decompressor(_) => BZ2_DECOMPRESS_TYPE,
             Self::LzmaCompressor(_) => LZMA_COMPRESS_TYPE,
@@ -2429,6 +2436,7 @@ impl Value {
             | Self::TokenMissing
             | Self::ProcessPreparation(_)
             | Self::GzipDecoder(_)
+            | Self::ZstdCompressor(_)
             | Self::Bz2Compressor(_)
             | Self::LzmaCompressor(_)
             | Self::ZlibCompressor(_)
@@ -2439,6 +2447,7 @@ impl Value {
             | Self::TlsSession(_)
             | Self::TlsListener(_)
             | Self::TlsBioSession(_) => {}
+            Self::ZstdDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::Bz2Decompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::LzmaDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::ZlibDecompressor { state, dictionary } => {

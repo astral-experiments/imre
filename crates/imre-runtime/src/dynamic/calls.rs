@@ -271,6 +271,8 @@ impl Context {
                 stdlib::datetime::TZINFO
                     | super::thread_handle::CLASS
                     | "datetime.timezone"
+                    | value::ZSTD_COMPRESS_TYPE
+                    | value::ZSTD_DECOMPRESS_TYPE
                     | value::BZ2_COMPRESS_TYPE
                     | value::BZ2_DECOMPRESS_TYPE
                     | value::LZMA_COMPRESS_TYPE
@@ -1475,6 +1477,17 @@ impl Context {
                 _ => unreachable!("unknown exception group member"),
             });
         }
+        if owner == value::ZSTD_COMPRESS_TYPE
+            && let Value::ZstdCompressor(state) = self.heap.get(receiver)
+        {
+            let mode = state.borrow().last_mode;
+            return Ok(self.int(i64::from(mode)));
+        }
+        if owner == value::ZSTD_DECOMPRESS_TYPE
+            && let Value::ZstdDecompressor(state) = self.heap.get(receiver)
+        {
+            return Ok(state.borrow().field(field));
+        }
         if owner == value::BZ2_DECOMPRESS_TYPE
             && let Value::Bz2Decompressor(state) = self.heap.get(receiver)
         {
@@ -1640,6 +1653,8 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | value::ZSTD_COMPRESS_TYPE
+                            | value::ZSTD_DECOMPRESS_TYPE
                             | value::BZ2_COMPRESS_TYPE
                             | value::BZ2_DECOMPRESS_TYPE
                             | value::LZMA_COMPRESS_TYPE
@@ -1832,6 +1847,8 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | (value::ZSTD_COMPRESS_TYPE, Value::ZstdCompressor(_))
+            | (value::ZSTD_DECOMPRESS_TYPE, Value::ZstdDecompressor(_))
             | (value::BZ2_COMPRESS_TYPE, Value::Bz2Compressor(_))
             | (value::BZ2_DECOMPRESS_TYPE, Value::Bz2Decompressor(_))
             | (value::LZMA_COMPRESS_TYPE, Value::LzmaCompressor(_))
@@ -2307,6 +2324,8 @@ impl Context {
             && matches!(
                 owner.as_str(),
                 super::thread_handle::CLASS
+                    | value::ZSTD_COMPRESS_TYPE
+                    | value::ZSTD_DECOMPRESS_TYPE
                     | value::BZ2_COMPRESS_TYPE
                     | value::BZ2_DECOMPRESS_TYPE
                     | value::LZMA_COMPRESS_TYPE
@@ -2328,6 +2347,8 @@ impl Context {
         if matches!(
             self.heap.get(obj),
             Value::ThreadHandle(_)
+                | Value::ZstdCompressor(_)
+                | Value::ZstdDecompressor(_)
                 | Value::Bz2Compressor(_)
                 | Value::Bz2Decompressor(_)
                 | Value::LzmaCompressor(_)
@@ -4748,13 +4769,14 @@ impl Context {
                     "gzip.BadGzipFile"
                         | "binascii.Error"
                         | "binascii.Incomplete"
+                        | "compression.zstd.ZstdError"
                         | "_lzma.LZMAError"
                         | "socket.gaierror"
                         | "socket.herror"
                         | "zlib.error"
                 ) =>
             {
-                let (module, short) = builtin.split_once('.').unwrap();
+                let (module, short) = builtin.rsplit_once('.').unwrap();
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(short.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
@@ -5819,7 +5841,11 @@ impl Context {
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
         if matches!(
             self.heap.get(obj),
-            Value::LzmaDecompressor(_) | Value::Bz2Decompressor(_) | Value::ThreadHandle(_)
+            Value::LzmaDecompressor(_)
+                | Value::Bz2Decompressor(_)
+                | Value::ThreadHandle(_)
+                | Value::ZstdDecompressor(_)
+                | Value::ZstdCompressor(_)
         ) {
             let class = self.exact_type(obj)?;
             return Ok(self.own_class_attr(class, name));

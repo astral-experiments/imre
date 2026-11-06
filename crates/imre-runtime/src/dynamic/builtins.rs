@@ -128,6 +128,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
         "socket.gaierror" => Some(Kind::GaiError),
         "socket.herror" => Some(Kind::HError),
+        "compression.zstd.ZstdError" => Some(Kind::ZstdError),
         "_lzma.LZMAError" => Some(Kind::LzmaError),
         "zlib.error" => Some(Kind::ZlibError),
         "gzip.BadGzipFile" => Some(Kind::BadGzipFile),
@@ -239,7 +240,7 @@ pub(super) fn declares_exception_constructor(kind: imre_ast::exceptions::Kind, s
             KeyError | ExceptionGroup | SystemExit | NameError | UnboundLocalError
             | AttributeError | ImportError | ModuleNotFoundError | StopIteration | SyntaxError
             | IndentationError | TabError | BinasciiIncomplete | BinasciiError | LzmaError
-            | ZlibError => false,
+            | ZlibError | ZstdError => false,
             OSError => true,
             _ => !kind.matches(OSError),
         },
@@ -1118,6 +1119,44 @@ pub(super) fn bind<const N: usize>(
         }
     }
     Ok(values)
+}
+
+/// For a non-subclassable native type, bind and validate the explicit receiver of __new__.
+pub(super) fn native_codec_new<'a>(
+    ctx: &mut Context,
+    module: &str,
+    member: &'a str,
+    args: &'a [Id],
+) -> Result<(&'a str, &'a [Id])> {
+    if let Some(owner) = member.strip_suffix(".__new__") {
+        let Some((&class, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{module}.{owner}.__new__(): not enough arguments"),
+            ));
+        };
+        if !ctx.is_type_object(class) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{module}.{owner}.__new__(X): X is not a type object ({})",
+                    ctx.type_name(class)
+                ),
+            ));
+        }
+        if ctx.builtin(&format!("{module}.{owner}")) != class {
+            let name = ctx.class_name(class);
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{module}.{owner}.__new__({name}): {name} is not a subtype of {module}.{owner}"
+                ),
+            ));
+        }
+        Ok((owner, rest))
+    } else {
+        Ok((member, args))
+    }
 }
 
 /// Bind positional and keyword method arguments using Argument Clinic's diagnostics.

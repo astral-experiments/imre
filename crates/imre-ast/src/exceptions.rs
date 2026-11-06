@@ -135,6 +135,7 @@ exception_kinds! {
         BinasciiIncomplete = 70 => "binascii.Incomplete",
         PackageNotFoundError = 71 => "PackageNotFoundError",
         HError = 72 => "socket.herror",
+        ZstdError = 98 => "ZstdError",
         LzmaError = 94 => "LZMAError",
         IllegalMonthError = 96 => "IllegalMonthError",
         IllegalWeekdayError = 97 => "IllegalWeekdayError",

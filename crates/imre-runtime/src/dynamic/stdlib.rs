@@ -44,6 +44,7 @@ pub(super) mod termios;
 pub(super) mod time;
 mod tokenize;
 mod unicodedata;
+pub(super) mod zstd;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{
     CLASS_METHODS as SOCKET_CLASS_METHODS, IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS,
@@ -1976,6 +1977,11 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("zlib.Compress.") {
         return zlib::compressor(ctx, method, args, kwargs);
+    }
+    if let Some(member) = name.strip_prefix("compression.zstd.")
+        && (member.starts_with("ZstdCompressor") || member.starts_with("ZstdDecompressor"))
+    {
+        return zstd::call(ctx, member, args, kwargs);
     }
     if let Some(member) = name.strip_prefix("_bz2.") {
         return bz2::call(ctx, member, args, kwargs);

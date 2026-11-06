@@ -136,6 +136,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5's file wrapper and shared stream reader. See licenses/CPython.txt.
         "lzma" => bundled_source!("lzma.py"),
         "compression" => bundled_source!("compression/__init__.py"),
+        "compression.zstd" => bundled_source!("compression/zstd/__init__.py"),
+        "compression.zstd._zstdfile" => bundled_source!("compression/zstd/_zstdfile.py"),
         "compression._common" => bundled_source!("compression/_common/__init__.py"),
         "compression._common._streams" => bundled_source!("compression/_common/_streams.py"),
         // CPython 3.14.5 Lib/zoneinfo. See licenses/CPython.txt.

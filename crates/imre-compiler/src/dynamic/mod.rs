@@ -883,8 +883,10 @@ pub(crate) fn compile(
             }
             // Late imports can select children of a bundled package without naming them in source.
             if uses_exec || uses_import_builtin || seen.contains("importlib") {
-                if !seen.contains("lzma") {
-                    imports.add(0, "lzma");
+                for name in ["lzma", "compression.zstd"] {
+                    if !seen.contains(name) {
+                        imports.add(0, name);
+                    }
                 }
                 for (parent, child) in [
                     ("email", "email._header_value_parser"),
