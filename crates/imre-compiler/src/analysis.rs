@@ -1709,20 +1709,37 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
         operators: usize,
         child_depth: usize,
         longest_item: usize,
+        enclosing_operators: usize,
+        longest_boolean_operand: usize,
+        boolean_operators: usize,
+        open_lambda_parameters: usize,
         // Replacement fields are siblings in an f-string or template string.
         interpolated_string: bool,
-        // A comma in lambda parameters or a comprehension target does not
-        // separate independent expressions at this delimiter level.
+        // Commas in a comprehension target belong to one assignment target.
         keep_commas: bool,
     }
 
     impl Group {
         fn depth(&self) -> usize {
-            self.longest_item.max(self.operators + self.child_depth)
+            let operand = self.operators + self.child_depth;
+            // A Boolean expression has at most an outer "or" and an inner "and".
+            // Ruff stores the operands of each operator as siblings.
+            let boolean = if self.boolean_operators == 0 {
+                operand
+            } else {
+                2 + self.longest_boolean_operand.max(operand)
+            };
+            // ty tracks a flow branch at each short circuit, even for a flat AST.
+            self.longest_item
+                .max(self.enclosing_operators + boolean)
+                .max(self.boolean_operators)
         }
 
         fn next_item(&mut self) {
             self.longest_item = self.depth();
+            self.enclosing_operators = 0;
+            self.longest_boolean_operand = 0;
+            self.boolean_operators = 0;
             self.operators = 0;
             self.child_depth = 0;
         }
@@ -1774,11 +1791,28 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
                     group = parent;
                 }
             }
-            Comma if !group.keep_commas => group.next_item(),
-            Lambda | For => {
-                group.keep_commas = true;
+            Comma if !group.keep_commas && group.open_lambda_parameters == 0 => group.next_item(),
+            And | Or => {
+                let depth = group.operators + group.child_depth;
+                group.longest_boolean_operand = group.longest_boolean_operand.max(depth);
+                group.boolean_operators += 1;
+                group.operators = 0;
+                group.child_depth = 0;
+            }
+            // These expressions can enclose Boolean operands across the entire item.
+            Lambda => {
+                group.open_lambda_parameters += 1;
+                group.enclosing_operators += 1;
+            }
+            Colon if group.open_lambda_parameters > 0 => {
+                group.open_lambda_parameters -= 1;
                 group.operators += 1;
             }
+            For => {
+                group.keep_commas = true;
+                group.enclosing_operators += 1;
+            }
+            If | Else | Yield | ColonEqual => group.enclosing_operators += 1,
             Identifier | Int | Float | Complex | String | True | False | None | Ellipsis
             | FStringMiddle | TStringMiddle | Comment | NonLogicalNewline => continue,
             _ => group.operators += 1,
@@ -1810,30 +1844,38 @@ fn check_handler_count(tokens: &Tokens) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Rejects ambiguous indentation while preserving whitespace inside string tokens.
+/// Enforce the source-file indentation policy at the beginning of each logical statement.
 pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
-    let mut offset = 0;
-    for (line_number, line) in source.split_inclusive('\n').enumerate() {
-        for (index, character) in line.char_indices() {
-            if !matches!(character, ' ' | '\t' | '\x0c') {
-                break;
+    use TokenKind::*;
+    let mut statement_start = true;
+    let mut formatted_strings = 0;
+    for token in tokens {
+        match token.kind() {
+            Newline => {
+                statement_start = true;
+                continue;
             }
-            if character != ' ' {
-                let position = TextSize::try_from(offset + index)
-                    .map_err(|_| "source exceeds the supported size")?;
-                let in_string = tokens.at_offset(position).any(|token| {
-                    matches!(token.kind(), TokenKind::String | TokenKind::FStringMiddle)
-                        && token.range().contains(position)
-                });
-                if !in_string {
-                    return Err(format!(
-                        "line {}: indentation must use spaces, not tabs or form feeds",
-                        line_number + 1
-                    ));
-                }
+            NonLogicalNewline => {
+                // Replacement expressions in formatted strings also check physical indentation.
+                statement_start |= formatted_strings > 0;
+                continue;
             }
+            Indent | Dedent | Comment | EndOfFile => continue,
+            FStringStart | TStringStart => formatted_strings += 1,
+            FStringEnd | TStringEnd => formatted_strings -= 1,
+            _ => {}
         }
-        offset += line.len();
+        if statement_start {
+            let prefix = &source[..usize::from(token.start())];
+            let indentation = prefix.rsplit_once('\n').map_or(prefix, |(_, line)| line);
+            if indentation.contains(['\t', '\x0c']) {
+                let line = prefix.lines().count();
+                return Err(format!(
+                    "line {line}: indentation must use spaces, not tabs or form feeds"
+                ));
+            }
+            statement_start = false;
+        }
     }
     Ok(())
 }

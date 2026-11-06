@@ -7681,9 +7681,21 @@ impl Emitter<'_, '_> {
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
+            Builtin::Sumprod if returns == Type::Int => {
+                self.output.local_helper(
+                    "imre_tagged_sumprod",
+                    include_str!("llvm/tagged_sumprod.ll"),
+                );
+                self.call_with_effect(
+                    "imre_tagged_sumprod",
+                    Type::Int,
+                    &[&args[0].value, &args[1].value],
+                    true,
+                    false,
+                )
+            }
             Builtin::Sumprod => {
                 let name = match returns {
-                    Type::Int => "imre_sumprod_int_lists",
                     Type::Float => "imre_sumprod_float_lists",
                     Type::ObjectValue => "imre_sumprod_number_lists",
                     _ => unreachable!("checked sumprod result"),

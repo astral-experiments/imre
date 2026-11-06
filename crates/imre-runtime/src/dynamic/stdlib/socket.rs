@@ -54,6 +54,8 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     #[cfg(target_os = "macos")]
     ("MSG_EOF", libc::MSG_EOF),
     ("SOL_TCP", libc::IPPROTO_TCP),
+    #[cfg(target_os = "linux")]
+    ("TCP_QUICKACK", libc::TCP_QUICKACK),
     ("NI_DGRAM", libc::NI_DGRAM),
     ("NI_NAMEREQD", libc::NI_NAMEREQD),
     ("NI_NOFQDN", libc::NI_NOFQDN),
