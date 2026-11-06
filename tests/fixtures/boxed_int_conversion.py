@@ -3,6 +3,14 @@ import warnings
 
 
 def current():
+    for left in (False, True):
+        for right in (False, True):
+            assert (left & right) is (left and right)
+            assert (left | right) is (left or right)
+            assert (left ^ right) is (left != right)
+    assert type(True | 0) is int
+    assert type(1 & False) is int
+
     large = 1 << 140
     assert large == int(str(large))
     assert large != large + 1
