@@ -571,13 +571,13 @@ pub(crate) enum ObjectOperation {
     ClassLayout,
 }
 
-pub(crate) fn compile<const SPLIT: bool>(
-    path: &Path,
-    module_root: Option<&Path>,
+pub(crate) fn compile(
+    (path, module_root): (&Path, Option<&Path>),
     options: &CompileOptions,
     runtime_imports: bool,
     operation: Option<ObjectOperation>,
     typed_graph: Option<&crate::modules::SourceGraph>,
+    layout: crate::BoxedLayout<'_>,
     check_returns: impl FnOnce() -> Result<(), String>,
 ) -> Result<Option<UnitCompilation>, String> {
     let invocation = options.command.as_ref();
@@ -1297,15 +1297,27 @@ pub(crate) fn compile<const SPLIT: bool>(
         .filter(|_| keep_docstrings)
         .and_then(provider_archive::symbols)
         .unwrap_or_default();
-    let (units, used_archive) = emit::emit(
-        &sources,
-        &config.to_string(),
-        keep_docstrings,
-        Path::new(bundled_root),
-        &providers,
-        SPLIT,
-        source_only_provider,
-    )?;
+    let config = config.to_string();
+    let emit = |split| {
+        emit::emit(
+            &sources,
+            &config,
+            keep_docstrings,
+            Path::new(bundled_root),
+            &providers,
+            split,
+            source_only_provider,
+        )
+    };
+    let (mut units, mut used_archive) = emit(!matches!(layout, crate::BoxedLayout::Whole))?;
+    if let crate::BoxedLayout::WholeWithUnits(native) = layout
+        && units.len() > 1
+    {
+        // Both representations use the same resolved source and registration order.
+        let (whole, archived) = emit(false)?;
+        *native = std::mem::replace(&mut units, whole);
+        used_archive |= archived;
+    }
     inputs.boxed_imports = true;
     Ok(Some(UnitCompilation {
         units,
