@@ -656,12 +656,7 @@ impl Context {
                         error = result.clone();
                         error.tracing().instance = Some(normalized);
                     }
-                    let active = self.heap.active_exception();
-                    if active != NONE
-                        && error.trace.as_ref().and_then(|trace| trace.instance) != Some(active)
-                    {
-                        error.context = active;
-                    }
+                    self.chain_raised_instance(&mut error);
                 }
                 Err(error)
             }

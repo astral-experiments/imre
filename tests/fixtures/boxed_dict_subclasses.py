@@ -209,6 +209,37 @@ def ordered_dictionary():
     assert list(dict.keys(moved)) == ["a", "b", "c"]
     assert moved.popitem(last=False) == ("b", 2)
 
+    class DeferredKey:
+        def __hash__(self):
+            raise TypeError("job key has not been resolved")
+
+    pending = OrderedDict()
+    deferred = DeferredKey()
+    for key, args in ((deferred, (deferred,)), (("tenant", 42), ("tenant", 42)), (None, ())):
+        try:
+            pending.move_to_end(key, last=False)
+        except KeyError as error:
+            assert error.args == args
+        else:
+            raise AssertionError("promoted a missing job")
+    pending.update([(("tenant", 7), "retry")])
+    try:
+        pending.move_to_end(deferred)
+    except TypeError as error:
+        assert error.args == ("job key has not been resolved",)
+    else:
+        raise AssertionError("missing hash failure on a populated queue")
+    missing = KeyError("expired")
+    for reason in ("retry", "cancel"):
+        try:
+            raise ValueError(reason)
+        except ValueError as active:
+            try:
+                pending.move_to_end(missing)
+            except KeyError as error:
+                assert error is missing and error.__context__ is active
+            else:
+                raise AssertionError("promoted an expired job")
 
     for method, args in (
         (OrderedDict.__init__, (object(),)),

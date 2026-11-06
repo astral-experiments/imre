@@ -393,16 +393,38 @@ impl Context {
     ) -> Result<()> {
         let entries = self.stored_entries(dict);
         let nodes = entries.ordered_nodes();
-        if (if last { nodes.last() } else { nodes.first() }).is_some_and(|&(node, _)| node == key) {
+        let Some(&(endpoint, _)) = (if last { nodes.last() } else { nodes.first() }) else {
+            return Err(self.missing_move_key(key));
+        };
+        if endpoint == key {
             return Ok(());
         }
-        let (_, dense) = self.find_dictionary_key(dict, key, None)?;
+        let hash = self.dictionary_hash(key)?;
+        let (_, dense) = self.find_dictionary_key(dict, key, Some(hash))?;
         let entries = self.stored_entries(dict);
         let rank = dense
             .and_then(|i| entries.ordered_rank(i))
-            .ok_or_else(|| self.lookup_error("KeyError", key))?;
+            .ok_or_else(|| self.missing_move_key(key))?;
         self.stored_entries_mut(dict).move_to_end(rank, last);
         Ok(())
+    }
+
+    /// move_to_end sets KeyError from the supplied object, including a tuple of arguments.
+    fn missing_move_key(&mut self, key: Id) -> Error {
+        match self.tuple_backing(key) {
+            Value::None => self.exception("KeyError", &[]),
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                let args = items.clone();
+                self.exception("KeyError", &args)
+            }
+            Value::Raised(error) if self.is_builtin_error(error, "KeyError") => {
+                let mut error = error.clone();
+                error.tracing().instance = Some(key);
+                self.chain_raised_instance(&mut error);
+                error
+            }
+            _ => self.exception("KeyError", &[key]),
+        }
     }
 
     /// Detach the node before the backing lookup can run an equality callback.
