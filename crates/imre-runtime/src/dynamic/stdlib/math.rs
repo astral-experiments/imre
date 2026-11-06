@@ -290,6 +290,7 @@ pub(super) fn call(
     }
     let unary: Option<fn(f64) -> f64> = match operation {
         "asinh" => Some(f64::asinh),
+        "atan" => Some(|x| atan(x)),
         // The platform libm retains precision for inputs just above -1.
         "atanh" => Some(|x| atanh(x)),
         "cos" => Some(f64::cos),
@@ -973,6 +974,7 @@ fn ieee_remainder(x: f64, y: f64) -> Result<f64> {
 }
 
 unsafe extern "C" {
+    safe fn atan(x: f64) -> f64;
     safe fn atanh(x: f64) -> f64;
     safe fn erfc(x: f64) -> f64;
     safe fn remainder(x: f64, y: f64) -> f64;

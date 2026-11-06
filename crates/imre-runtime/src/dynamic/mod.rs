@@ -3369,6 +3369,7 @@ impl Context {
             for name in [
                 "asin",
                 "asinh",
+                "atan",
                 "atanh",
                 "cosh",
                 "erfc",

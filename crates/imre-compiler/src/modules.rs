@@ -899,6 +899,7 @@ pub(crate) enum Intrinsic {
     WallTime,
     MathAcos,
     MathAsin,
+    MathAtan,
     MathErfc,
     TimeSleep,
     WarningFilter {
@@ -1168,10 +1169,12 @@ pub(crate) enum Intrinsic {
 
 impl Intrinsic {
     pub(crate) const REGEX_DEBUG: Self = Self::ScopedObjectExport("re.DEBUG");
+
     pub(crate) fn unary_float_math(self) -> Option<(&'static str, Builtin)> {
         match self {
             Self::MathAcos => Some(("math.acos", Builtin::FloatAcos)),
             Self::MathAsin => Some(("math.asin", Builtin::FloatAsin)),
+            Self::MathAtan => Some(("math.atan", Builtin::FloatAtan)),
             Self::MathErfc => Some(("math.erfc", Builtin::FloatErfc)),
             _ => None,
         }
@@ -2299,6 +2302,7 @@ impl IntrinsicModule {
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
             (Self::Math, "asin") => Intrinsic::MathAsin,
             (Self::Math, "asinh") => Intrinsic::ScopedObjectExport("math.asinh"),
+            (Self::Math, "atan") => Intrinsic::MathAtan,
             (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "atanh") => Intrinsic::ScopedObjectExport("math.atanh"),
             (Self::Math, "cosh") => Intrinsic::ScopedObjectExport("math.cosh"),

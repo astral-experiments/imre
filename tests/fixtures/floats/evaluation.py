@@ -1,4 +1,4 @@
-from math import acos, asin, erfc, log2
+from math import acos, asin, atan, erfc, log2
 
 
 def integer(label: str, value: int) -> int:
@@ -92,6 +92,9 @@ try:
     asin(2)
 except ValueError as error:
     print(str(error))
+
+print(atan(floating("arc tangent receiver", -0.0)))
+assert atan(float("inf")) == 2.0 * atan(True)
 
 assert erfc(-0.0) == 1.0
 assert 0.0 < erfc(8) < 1e-28
