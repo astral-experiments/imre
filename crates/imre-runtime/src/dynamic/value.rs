@@ -4599,7 +4599,8 @@ impl Heap {
             traces: &self.traces,
             slot_shapes: &self.slot_shapes,
             next: END,
-            mode: MarkMode::All,
+            // Scalar leaves cannot retain a finalizer or participate in a cycle.
+            mode: MarkMode::CycleEdges,
         };
         self.mark_roots(roots, &mut pending);
         while remaining != 0
