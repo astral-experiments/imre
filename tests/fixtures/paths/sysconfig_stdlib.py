@@ -20,6 +20,17 @@ assert stdlib == sysconfig.get_paths()["stdlib"]
 if sys.implementation.name == "imre":
     version = sysconfig.get_config_var("py_version_short")
     assert stdlib == sys.base_prefix + "/lib/imre" + version
+overrides = {"base": "/tmp/install/../staging", "platbase": "/tmp/platform"}
+paths = sysconfig.get_paths(vars=overrides)
+assert paths["scripts"] == sysconfig.get_path("scripts", vars=overrides)
+assert paths["data"] == "/tmp/staging"
+assert paths["platlib"].startswith("/tmp/platform/")
+assert overrides["base"] == "/tmp/install/../staging" and "prefix" in overrides
+assert sysconfig.get_path("scripts", "posix_user", {"userbase": "/tmp/user"}) == "/tmp/user/bin"
+raw = {}
+assert sysconfig.get_path("scripts", "posix_user", raw, False) == "{userbase}/bin"
+assert raw == {}
+
 variables = sysconfig.get_config_vars()
 assert sysconfig.get_config_vars() is variables
 if sys.platform in ("linux", "darwin"):
