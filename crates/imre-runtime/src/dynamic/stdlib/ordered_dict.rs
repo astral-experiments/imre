@@ -65,8 +65,8 @@ pub(super) fn call(
         ("pop", [key] | [key, _]) => pop_key(ctx, storage, *key, None, args.get(1).copied()),
         ("popitem", [last]) => {
             let last = ctx.truth(*last)?;
-            let nodes = ctx.stored_entries(storage).ordered_nodes();
-            let Some(&(key, hash)) = (if last { nodes.last() } else { nodes.first() }) else {
+            let entries = ctx.stored_entries(storage);
+            let Some((_, key, hash)) = entries.order_entry(entries.order_start(last), last) else {
                 let message = ctx.text("dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
             };
@@ -115,7 +115,7 @@ fn pop_key(
 ) -> Result<Id> {
     let (hash, found) = ctx.find_dictionary_key(storage, key, cached)?;
     let entries = ctx.stored_entries(storage);
-    if found.and_then(|i| entries.ordered_rank(i)).is_none() {
+    if found.and_then(|i| entries.order_node(i)).is_none() {
         return default.ok_or_else(|| ctx.lookup_error("KeyError", key));
     }
     remove_key(ctx, storage, key, Some(hash))?
@@ -125,14 +125,14 @@ fn pop_key(
 
 /// Resolve the node before deleting the backing entry: each lookup can call Python.
 fn remove_key(ctx: &mut Context, storage: Id, key: Id, cached: Option<i64>) -> Result<Option<Id>> {
-    let hash = if ctx.stored_entries(storage).ordered_nodes().is_empty() {
+    let hash = if ctx.stored_entries(storage).order_len() == 0 {
         cached
     } else {
         let (hash, dense) = ctx.find_dictionary_key(storage, key, cached)?;
         if let Some(dense) = dense
-            && let Some(rank) = ctx.stored_entries(storage).ordered_rank(dense)
+            && let Some(node) = ctx.stored_entries(storage).order_node(dense)
         {
-            ctx.unlink_ordered_node(storage, dense, rank);
+            ctx.unlink_ordered_node(storage, dense, node);
         }
         Some(hash)
     };
@@ -143,16 +143,24 @@ fn remove_key(ctx: &mut Context, storage: Id, key: Id, cached: Option<i64>) -> R
 fn keys_equal(ctx: &mut Context, left: Id, right: Id) -> Result<bool> {
     let state = |ctx: &Context, id| {
         let entries = ctx.stored_entries(id);
-        (entries.ordered_nodes().len(), entries.order_state())
+        (entries.order_len(), entries.order_state())
     };
     let original = (state(ctx, left), state(ctx, right));
     let ((left_len, _), (right_len, _)) = original;
     // Mapping equality may have changed a length. Compare the common prefix before testing the ends.
-    for index in 0..left_len.min(right_len) {
-        let first = ctx.stored_entries(left);
-        let second = ctx.stored_entries(right);
-        let a = first.ordered_nodes()[index].0;
-        let b = second.ordered_nodes()[index].0;
+    let mut left_cursor = ctx.stored_entries(left).order_start(false);
+    let mut right_cursor = ctx.stored_entries(right).order_start(false);
+    for _ in 0..left_len.min(right_len) {
+        let (next_left, a, _) = ctx
+            .stored_entries(left)
+            .order_entry(left_cursor, false)
+            .expect("live ordered key");
+        let (next_right, b, _) = ctx
+            .stored_entries(right)
+            .order_entry(right_cursor, false)
+            .expect("live ordered key");
+        left_cursor = next_left;
+        right_cursor = next_right;
         let equal = a == b || ctx.checked_equal(a, b)?;
         if (state(ctx, left), state(ctx, right)) != original {
             return Err(Error::new(

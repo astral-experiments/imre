@@ -6,13 +6,78 @@ use std::ops::{Deref, DerefMut};
 
 use super::{Id, Result};
 
-#[derive(Clone, Default)]
+// No Vec can contain a node at this index.
+const NO_NODE: usize = usize::MAX;
+
+#[derive(Clone, Copy)]
+struct OrderNode {
+    key: Id,
+    hash: i64,
+    previous: usize,
+    next: usize,
+}
+
+#[derive(Clone)]
 struct Order {
-    // Explicit dict descriptors can remove a value while the order node still owns its key.
-    keys: Vec<(Id, i64)>,
-    // Each live base-dict entry may have an associated order node.
-    by_dense: Vec<Option<usize>>,
+    // A dict descriptor can delete the base entry while its order node still owns the key.
+    nodes: Vec<OrderNode>,
+    by_dense: Vec<usize>,
+    first: usize,
+    last: usize,
+    free: usize,
+    len: usize,
     revision: usize,
+}
+
+impl Default for Order {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            by_dense: Vec::new(),
+            first: NO_NODE,
+            last: NO_NODE,
+            free: NO_NODE,
+            len: 0,
+            revision: 0,
+        }
+    }
+}
+
+impl Order {
+    /// Join two neighbors, treating a missing neighbor as the corresponding end.
+    fn join(&mut self, before: usize, after: usize) {
+        if before == NO_NODE {
+            self.first = after;
+        } else {
+            self.nodes[before].next = after;
+        }
+        if after == NO_NODE {
+            self.last = before;
+        } else {
+            self.nodes[after].previous = before;
+        }
+    }
+
+    /// Attach a detached node to either end without moving its key or changing its index.
+    fn attach(&mut self, node: usize, last: bool) {
+        let (before, after) = if last {
+            (self.last, NO_NODE)
+        } else {
+            (NO_NODE, self.first)
+        };
+        self.join(before, node);
+        self.join(node, after);
+    }
+
+    /// Visit only live order nodes, including keys absent from the base dict.
+    fn keys(&self) -> impl Iterator<Item = Id> + '_ {
+        let mut cursor = self.first;
+        std::iter::from_fn(move || {
+            let node = self.nodes.get(cursor)?;
+            cursor = node.next;
+            Some(node.key)
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -121,7 +186,7 @@ impl Entries {
         self.next += 1;
         self.values.push(value);
         if let Some(order) = &mut self.order {
-            order.by_dense.push(None);
+            order.by_dense.push(NO_NODE);
         }
         Ok(())
     }
@@ -165,18 +230,43 @@ impl Entries {
     pub(super) fn order_bytes(&self) -> usize {
         self.order.as_ref().map_or(0, |order| {
             size_of::<Order>()
-                + order.keys.capacity() * size_of::<(Id, i64)>()
-                + order.by_dense.capacity() * size_of::<Option<usize>>()
+                + order.nodes.capacity() * size_of::<OrderNode>()
+                + order.by_dense.capacity() * size_of::<usize>()
         })
     }
 
-    /// The accelerated OrderedDict's key nodes, independent of base dict entries.
-    pub(super) fn ordered_nodes(&self) -> &[(Id, i64)] {
-        self.order.as_ref().map_or(&[], |order| &order.keys)
+    pub(super) fn order_len(&self) -> usize {
+        self.order.as_ref().map_or(0, |order| order.len)
     }
 
-    pub(super) fn ordered_rank(&self, dense: usize) -> Option<usize> {
-        self.order.as_ref().and_then(|order| order.by_dense[dense])
+    /// Return the first node for a forward or reverse traversal of the independent order.
+    pub(super) fn order_start(&self, reverse: bool) -> usize {
+        self.order.as_ref().map_or(
+            NO_NODE,
+            |order| if reverse { order.last } else { order.first },
+        )
+    }
+
+    /// Read a node and its successor without holding a borrow across a Python callback.
+    pub(super) fn order_entry(&self, position: usize, reverse: bool) -> Option<(usize, Id, i64)> {
+        let node = self.order.as_ref()?.nodes.get(position)?;
+        if node.previous == position {
+            return None;
+        } // Vacant node on the free list.
+        Some((
+            if reverse { node.previous } else { node.next },
+            node.key,
+            node.hash,
+        ))
+    }
+
+    pub(super) fn ordered_keys(&self) -> impl Iterator<Item = Id> + '_ {
+        self.order.iter().flat_map(|order| order.keys())
+    }
+
+    pub(super) fn order_node(&self, dense: usize) -> Option<usize> {
+        let node = self.order.as_ref()?.by_dense[dense];
+        (node != NO_NODE).then_some(node)
     }
 
     fn reserve_ordered_node(&mut self) -> Result<()> {
@@ -185,7 +275,7 @@ impl Entries {
             by_dense
                 .try_reserve_exact(self.len())
                 .map_err(|_| crate::Error::memory_error())?;
-            by_dense.resize(self.len(), None);
+            by_dense.resize(self.len(), NO_NODE);
             self.order = Some(
                 allocator_api2::boxed::Box::try_new(Order {
                     by_dense,
@@ -194,54 +284,65 @@ impl Entries {
                 .map_err(|_| crate::Error::memory_error())?,
             );
         }
-        self.order
-            .as_mut()
-            .unwrap()
-            .keys
-            .try_reserve(1)
-            .map_err(|_| crate::Error::memory_error().into())
+        let order = self.order.as_mut().expect("allocated order");
+        if order.free == NO_NODE {
+            order
+                .nodes
+                .try_reserve(1)
+                .map_err(|_| crate::Error::memory_error())?;
+        }
+        Ok(())
     }
 
     fn link_ordered_key(&mut self, dense: usize, key: Id, hash: i64) {
         let order = self.order.as_mut().expect("reserved ordered node");
-        order.by_dense[dense] = Some(order.keys.len());
-        order.keys.push((key, hash));
+        let node = OrderNode {
+            key,
+            hash,
+            previous: NO_NODE,
+            next: NO_NODE,
+        };
+        let index = if order.free == NO_NODE {
+            let index = order.nodes.len();
+            order.nodes.push(node);
+            index
+        } else {
+            let index = order.free;
+            order.free = order.nodes[index].next;
+            order.nodes[index] = node;
+            index
+        };
+        order.by_dense[dense] = index;
+        order.attach(index, true);
+        order.len += 1;
         order.revision = order.revision.wrapping_add(1);
     }
 
-    fn unlink_ordered_node(&mut self, dense: usize, rank: usize) -> Id {
+    fn unlink_ordered_node(&mut self, dense: usize, index: usize) -> Id {
         let order = self.order.as_mut().expect("live ordered node");
-        order.by_dense[dense] = None;
-        let (key, _) = order.keys.remove(rank);
-        for other in order.by_dense.iter_mut().flatten() {
-            if *other > rank {
-                *other -= 1;
-            }
-        }
+        let node = order.nodes[index];
+        order.join(node.previous, node.next);
+        order.by_dense[dense] = NO_NODE;
+        order.nodes[index] = OrderNode {
+            key: super::NONE,
+            hash: 0,
+            previous: index,
+            next: order.free,
+        };
+        order.free = index;
+        order.len -= 1;
         order.revision = order.revision.wrapping_add(1);
-        key
+        node.key
     }
 
-    fn move_to_end(&mut self, rank: usize, last: bool) {
+    fn move_to_end(&mut self, index: usize, last: bool) {
         let order = self.order.as_mut().expect("live ordered key");
-        let end = if last { order.keys.len() - 1 } else { 0 };
-        if rank == end {
+        if index == if last { order.last } else { order.first } {
             return;
         }
-        if last {
-            order.keys[rank..].rotate_left(1);
-        } else {
-            order.keys[..=rank].rotate_right(1);
-        }
-        for other in order.by_dense.iter_mut().flatten() {
-            if *other == rank {
-                *other = end;
-            } else if last && *other > rank {
-                *other -= 1;
-            } else if !last && *other < rank {
-                *other += 1;
-            }
-        }
+        let node = order.nodes[index];
+        order.join(node.previous, node.next);
+        order.attach(index, last);
         order.revision = order.revision.wrapping_add(1);
     }
 

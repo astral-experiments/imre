@@ -42,12 +42,12 @@ fn fields(ctx: &mut Context, object: Id, class: Id, output: &mut Vec<u32>) -> Re
     // A value's __repr__ may remove or replace a later item, or insert new keys.
     let entries = ctx.stored_entries(dictionary);
     let mut keys = Vec::new();
-    keys.try_reserve_exact(entries.len().max(entries.ordered_nodes().len()))
+    keys.try_reserve_exact(entries.len().max(entries.order_len()))
         .map_err(|_| Error::new("MemoryError", ""))?;
-    if entries.ordered_nodes().is_empty() {
+    if entries.order_len() == 0 {
         keys.extend(entries.iter().map(|&(key, _)| key));
     } else {
-        keys.extend(entries.ordered_nodes().iter().map(|&(key, _)| key));
+        keys.extend(entries.ordered_keys());
     }
     ctx.heap.reserve_temporaries(keys.len())?;
     for &key in &keys {
