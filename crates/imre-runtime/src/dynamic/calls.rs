@@ -757,6 +757,18 @@ impl Context {
         input: Id,
         operation: MappingOperation,
     ) -> Result<Id> {
+        // A fresh keyword dictionary can copy a dense table of exact names in one pass.
+        if matches!(operation, MappingOperation::Keywords(_))
+            && matches!(self.heap.get(target), Value::Dict(entries) if entries.is_empty())
+            && let Value::Dict(entries) = self.heap.get(input)
+            && entries
+                .iter()
+                .all(|&(key, _)| matches!(self.heap.get(key), Value::Str(_)))
+            && let Some(copy) = entries.clone_dense()?
+        {
+            *self.heap.get_mut(target) = Value::Dict(copy);
+            return Ok(target);
+        }
         let mapping =
             self.for_each_mapping_item(input, target, operation, |ctx, key, value, hash| {
                 ctx.set_dictionary_key(target, key, value, hash, true)
@@ -3434,6 +3446,9 @@ impl Context {
                 }
             }
             Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
+            Value::Coroutine { frame, .. } if matches!(name, "__name__" | "__qualname__") => {
+                return self.default_get_attr(frame, name);
+            }
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
                 return Ok(self.readonly_member("coroutine", "cr_origin"));
             }
@@ -5342,9 +5357,9 @@ impl Context {
             return result;
         }
         if matches!(name, "__name__" | "__qualname__")
-            && matches!(self.heap.get(obj), Value::Generator { .. })
+            && let Some(frame) = self.generator_name_frame(obj)
         {
-            return self.set_generator_name(obj, name, NONE);
+            return self.set_generator_name(frame, name, NONE);
         }
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
@@ -6296,9 +6311,9 @@ impl Context {
             return result;
         }
         if matches!(name, "__name__" | "__qualname__")
-            && matches!(self.heap.get(obj), Value::Generator { .. })
+            && let Some(frame) = self.generator_name_frame(obj)
         {
-            return self.set_generator_name(obj, name, value);
+            return self.set_generator_name(frame, name, value);
         }
         if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
             return result;

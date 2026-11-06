@@ -3790,6 +3790,11 @@ impl Heap {
         self.frames.last_mut().unwrap().live.insert(mark, value);
     }
 
+    /// Access a reserved operand slot below the current expression's temporaries.
+    pub(super) fn temporary_root(&mut self, index: usize) -> &mut Id {
+        &mut self.frames.last_mut().unwrap().live[index]
+    }
+
     /// Mark temporary roots that must survive the next iteration of a native loop.
     pub fn temporary_mark(&self) -> usize {
         self.frames.last().unwrap().live.len()
