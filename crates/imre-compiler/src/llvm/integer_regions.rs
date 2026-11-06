@@ -1,6 +1,8 @@
-//! Bounded pure integer callees whose comparison result can stay unboxed.
+//! Bounded integer expression graphs for comparisons and adjacent assignments.
 
-use crate::ir::{Binary, Compare, Expr, ExprKind, Function, Module, Statement, Type};
+mod assignments;
+
+use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type};
 
 use super::{Emitter, Value, conditionals};
 
@@ -22,6 +24,7 @@ enum Operation {
     Constant(i64),
     Add(usize, usize),
     Subtract(usize, usize),
+    Multiply(usize, usize),
     Negate(usize),
     Absolute(usize),
 }
@@ -32,10 +35,9 @@ struct Node {
     interval: Interval,
 }
 
-/// Every intermediate fits signed i64 after all incoming integer tags pass.
-/// These values never escape as Python integers: only the final Bool is exposed.
-/// A difference of small inputs can use the full i64 range except MIN, allowing
-/// its absolute value without allocating the otherwise necessary heap integer.
+/// A comparison can use the full signed i64 interval, including the difference
+/// of two tagged inputs. Assignment regions additionally prove that each node
+/// fits in the tagged range before they publish the results as Python integers.
 #[derive(Clone)]
 pub(super) struct Summary {
     nodes: Vec<Node>,
@@ -94,10 +96,10 @@ fn summarize(function: &Function) -> Option<Summary> {
         if function.params.contains(slot) {
             return None;
         }
-        let value = summary.expression(value, &locals)?;
+        let value = summary.expression(value, &mut |slot, _| *locals.get(slot)?)?;
         locals[*slot] = Some(value);
     }
-    summary.result = summary.expression(result, &locals)?;
+    summary.result = summary.expression(result, &mut |slot, _| *locals.get(slot)?)?;
     Some(summary)
 }
 
@@ -119,12 +121,16 @@ impl Summary {
 
     /// Interval arithmetic is wider than the emitted operations. Rejection,
     /// rather than a speculative overflow exit, keeps evaluation non-replaying.
-    fn expression(&mut self, value: &Expr, locals: &[Option<usize>]) -> Option<usize> {
+    fn expression(
+        &mut self,
+        value: &Expr,
+        locals: &mut impl FnMut(usize, &mut Self) -> Option<usize>,
+    ) -> Option<usize> {
         if value.ty != Type::Int {
             return None;
         }
         match &value.kind {
-            ExprKind::Local(slot) => *locals.get(*slot)?,
+            ExprKind::Local(slot) => locals(*slot, self),
             ExprKind::Int(text) => {
                 let value = small_literal(text)?;
                 self.push(
@@ -135,7 +141,11 @@ impl Summary {
                     },
                 )
             }
-            ExprKind::Binary(operation @ (Binary::Add | Binary::Subtract), left, right) => {
+            ExprKind::Binary(
+                operation @ (Binary::Add | Binary::Subtract | Binary::Multiply),
+                left,
+                right,
+            ) => {
                 let left = self.expression(left, locals)?;
                 let right = self.expression(right, locals)?;
                 let a = self.nodes[left].interval;
@@ -155,6 +165,16 @@ impl Summary {
                             max: a.max.checked_sub(b.min)?,
                         },
                     ),
+                    Binary::Multiply => {
+                        let ends = [a.min * b.min, a.min * b.max, a.max * b.min, a.max * b.max];
+                        (
+                            Operation::Multiply(left, right),
+                            Interval {
+                                min: *ends.iter().min()?,
+                                max: *ends.iter().max()?,
+                            },
+                        )
+                    }
                     _ => unreachable!(),
                 };
                 self.push(operation, interval)
@@ -173,24 +193,33 @@ impl Summary {
             ExprKind::Conditional(test, yes, no) => {
                 let input =
                     self.expression(conditionals::absolute_operand(test, yes, no)?, locals)?;
-                let interval = self.nodes[input].interval;
-                let min = if interval.min >= 0 {
-                    interval.min
-                } else if interval.max <= 0 {
-                    interval.max.checked_neg()?
-                } else {
-                    0
-                };
-                self.push(
-                    Operation::Absolute(input),
-                    Interval {
-                        min,
-                        max: interval.min.checked_neg()?.max(interval.max),
-                    },
-                )
+                self.absolute(input)
+            }
+            ExprKind::Builtin(Builtin::Abs, args) => {
+                let [arg] = args.as_slice() else { return None };
+                let input = self.expression(arg, locals)?;
+                self.absolute(input)
             }
             _ => None,
         }
+    }
+
+    fn absolute(&mut self, input: usize) -> Option<usize> {
+        let interval = self.nodes[input].interval;
+        let min = if interval.min >= 0 {
+            interval.min
+        } else if interval.max <= 0 {
+            interval.max.checked_neg()?
+        } else {
+            0
+        };
+        self.push(
+            Operation::Absolute(input),
+            Interval {
+                min,
+                max: interval.min.checked_neg()?.max(interval.max),
+            },
+        )
     }
 }
 
@@ -202,6 +231,57 @@ fn small_literal(text: &str) -> Option<i64> {
 }
 
 impl Emitter<'_, '_> {
+    /// Emit a proven graph in native units for comparisons or in doubled units for
+    /// assignments. Doubled sums restore the integer tag with a single bit operation.
+    fn integer_region_values<'a>(
+        &mut self,
+        summary: &Summary,
+        parameter: impl Fn(usize) -> &'a str,
+        doubled: bool,
+    ) -> Vec<String> {
+        let mut values: Vec<String> = Vec::with_capacity(summary.nodes.len());
+        for node in &summary.nodes {
+            let value = match node.operation {
+                Operation::Parameter(index) => {
+                    let word = parameter(index);
+                    if doubled {
+                        self.instruction(format!("sub i64 {word}, 1"))
+                    } else {
+                        self.instruction(format!("ashr i64 {word}, 1"))
+                    }
+                }
+                Operation::Constant(value) => (if doubled { value * 2 } else { value }).to_string(),
+                Operation::Add(left, right) => {
+                    self.instruction(format!("add nsw i64 {}, {}", values[left], values[right]))
+                }
+                Operation::Subtract(left, right) => {
+                    self.instruction(format!("sub nsw i64 {}, {}", values[left], values[right]))
+                }
+                Operation::Multiply(left, right) => {
+                    let left = if doubled {
+                        self.instruction(format!("ashr i64 {}, 1", values[left]))
+                    } else {
+                        values[left].clone()
+                    };
+                    self.instruction(format!("mul nsw i64 {left}, {}", values[right]))
+                }
+                Operation::Negate(value) => {
+                    self.instruction(format!("sub nsw i64 0, {}", values[value]))
+                }
+                Operation::Absolute(value) => {
+                    let negative = self.instruction(format!("icmp slt i64 {}, 0", values[value]));
+                    let negated = self.instruction(format!("sub nsw i64 0, {}", values[value]));
+                    self.instruction(format!(
+                        "select i1 {negative}, i64 {negated}, i64 {}",
+                        values[value]
+                    ))
+                }
+            };
+            values.push(value);
+        }
+        values
+    }
+
     /// Captures effectful arguments once using ordinary call ownership. Only a
     /// pure local/literal RHS can move before the effect-free callee calculation.
     /// The slow branch reuses the same captures and retains the ordinary owned
@@ -248,34 +328,11 @@ impl Emitter<'_, '_> {
         self.terminated = true;
 
         self.start(&fast);
-        let mut values: Vec<String> = Vec::with_capacity(summary.nodes.len());
-        for node in &summary.nodes {
-            let value = match node.operation {
-                Operation::Parameter(index) => self.instruction(format!(
-                    "ashr i64 {}, 1",
-                    arguments[args.order[index]].value.operand
-                )),
-                Operation::Constant(value) => value.to_string(),
-                Operation::Add(left, right) => {
-                    self.instruction(format!("add nsw i64 {}, {}", values[left], values[right]))
-                }
-                Operation::Subtract(left, right) => {
-                    self.instruction(format!("sub nsw i64 {}, {}", values[left], values[right]))
-                }
-                Operation::Negate(value) => {
-                    self.instruction(format!("sub nsw i64 0, {}", values[value]))
-                }
-                Operation::Absolute(value) => {
-                    let negative = self.instruction(format!("icmp slt i64 {}, 0", values[value]));
-                    let negated = self.instruction(format!("sub nsw i64 0, {}", values[value]));
-                    self.instruction(format!(
-                        "select i1 {negative}, i64 {negated}, i64 {}",
-                        values[value]
-                    ))
-                }
-            };
-            values.push(value);
-        }
+        let values = self.integer_region_values(
+            &summary,
+            |index| arguments[args.order[index]].value.operand.as_str(),
+            false,
+        );
         let right_value = self.instruction(format!("ashr i64 {}, 1", right.value.operand));
         let predicate = match operation {
             Compare::Equal => "eq",

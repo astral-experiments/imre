@@ -2536,17 +2536,21 @@ impl Emitter<'_, '_> {
 
     fn block(&mut self, statements: &[Statement]) {
         let incoming = self.temporaries.clone();
-        let mut statements = statements.iter().peekable();
-        while let Some(statement) = statements.next() {
+        let mut remaining = statements;
+        while let Some((statement, tail)) = remaining.split_first() {
             if self.terminated {
                 break;
             }
-            if let Some(next) = statements.peek()
+            let grouped = self.integer_assignments(remaining);
+            if grouped > 0 {
+                remaining = &remaining[grouped..];
+            } else if let Some((next, after)) = tail.split_first()
                 && (self.move_cleared_local(statement, next) || self.append_pair(statement, next))
             {
-                statements.next();
+                remaining = after;
             } else {
                 self.statement(statement);
+                remaining = tail;
             }
             debug_assert!(
                 self.temporaries
