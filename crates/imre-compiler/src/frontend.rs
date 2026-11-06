@@ -2146,6 +2146,12 @@ fn annotation_with_aliases(
             Ok(types.callable(parameters, nested(returns)?))
         }
         ast::Expr::Subscript(value)
+            if graph.resolve_type(module, &value.value)
+                == Some(Binding::Intrinsic(Intrinsic::Optional)) =>
+        {
+            Ok(types.optional(nested(&value.slice)?))
+        }
+        ast::Expr::Subscript(value)
             if matches!(
                 graph.resolve_type(module, &value.value),
                 Some(Binding::Intrinsic(Intrinsic::Union))
