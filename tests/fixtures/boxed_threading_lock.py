@@ -1,5 +1,6 @@
 import _thread
 import types
+import threading
 from _thread import LockType, error as lock_error
 from threading import Lock, TIMEOUT_MAX, ThreadError
 from weakref import ref
@@ -10,6 +11,14 @@ class MapLock:
 
 
 def factories():
+    assert "Lock" in dir(threading)
+    assert threading.Lock is LockType
+    try:
+        del threading.Lock
+        assert "Lock" not in dir(threading)
+        assert not hasattr(threading, "Lock")
+    finally:
+        threading.Lock = Lock
     assert ThreadError is lock_error is _thread.error is RuntimeError
     try:
         Lock().release()
