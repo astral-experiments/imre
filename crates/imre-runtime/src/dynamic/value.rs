@@ -19,7 +19,7 @@ pub(super) struct CodeObject {
     pub body: Body,
     pub parameters: Id,
     /// Decoded argument metadata is shared by calls using this immutable code object.
-    pub parsed_parameters: std::cell::OnceCell<std::rc::Rc<serde_json::Value>>,
+    pub parsed_parameters: std::cell::OnceCell<std::rc::Rc<super::CallParameters>>,
     pub name: Id,
     pub qualname: Id,
     pub doc: Id,
@@ -958,9 +958,34 @@ impl Scope {
     }
 }
 
+/// Lexical names shared by calls to the same code object until a frame adds a name.
+#[derive(Clone, Debug, Default)]
+pub(super) struct DeclaredLocals(Option<std::rc::Rc<HashSet<String>>>);
+
+impl From<HashSet<String>> for DeclaredLocals {
+    fn from(names: HashSet<String>) -> Self {
+        Self((!names.is_empty()).then(|| std::rc::Rc::new(names)))
+    }
+}
+
+impl std::ops::Deref for DeclaredLocals {
+    type Target = HashSet<String>;
+
+    fn deref(&self) -> &Self::Target {
+        static EMPTY: std::sync::LazyLock<HashSet<String>> = std::sync::LazyLock::new(HashSet::new);
+        self.0.as_deref().unwrap_or_else(|| &EMPTY)
+    }
+}
+
+impl std::ops::DerefMut for DeclaredLocals {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        std::rc::Rc::make_mut(self.0.get_or_insert_with(Default::default))
+    }
+}
+
 #[derive(Clone, Default)]
 pub(super) struct ClosureScope {
-    pub declared: HashSet<String>,
+    pub declared: DeclaredLocals,
     pub declared_complete: bool,
     pub nonlocals: HashSet<String>,
     pub cells: HashMap<String, Id>,

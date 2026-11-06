@@ -91,7 +91,7 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
         unreachable!()
     };
     data.closure.cleared = true;
-    data.closure.declared = names;
+    data.closure.declared = names.into();
     let Value::PythonFrame { scope, .. } = ctx.heap.get_mut(frame) else {
         unreachable!()
     };

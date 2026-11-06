@@ -219,6 +219,75 @@ fn copy_ids<T: Copy>(values: &[T]) -> Result<Vec<T>> {
     Ok(copied)
 }
 
+/// Immutable parameter lists used to bind calls to the same code object.
+#[derive(Debug)]
+struct CallParameters {
+    positional: Vec<String>,
+    positional_only: usize,
+    keyword_only: Vec<String>,
+    locals: value::DeclaredLocals,
+    nonlocals: Vec<String>,
+    locals_complete: bool,
+    class_cell: bool,
+    varargs: Option<String>,
+    kwargs: Option<String>,
+    return_type: Option<String>,
+    types: serde_json::Value,
+}
+
+impl CallParameters {
+    /// Decode both compiled and runtime-created function metadata once per definition.
+    fn from_metadata(mut metadata: serde_json::Value) -> Result<Self> {
+        let names = |key: &str| -> Result<Vec<String>> {
+            let mut result = Vec::new();
+            for name in metadata[key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str())
+            {
+                result
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                result.push(copy_label(name)?);
+            }
+            Ok(result)
+        };
+        let mut positional = names("posonly")?;
+        let positional_only = positional.len();
+        let rest = names("positional")?;
+        positional
+            .try_reserve(rest.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        positional.extend(rest);
+        let local_names = names("scope_locals")?;
+        let mut locals = std::collections::HashSet::new();
+        locals
+            .try_reserve(local_names.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        locals.extend(local_names);
+        Ok(Self {
+            positional,
+            positional_only,
+            keyword_only: names("kwonly")?,
+            locals: locals.into(),
+            nonlocals: names("scope_nonlocals")?,
+            locals_complete: metadata["scope_locals_complete"].as_bool().unwrap_or(false),
+            class_cell: metadata["class_cell"] == true,
+            varargs: metadata["varargs"].as_str().map(copy_label).transpose()?,
+            kwargs: metadata["kwargs"].as_str().map(copy_label).transpose()?,
+            return_type: metadata["return_type"]
+                .as_str()
+                .map(copy_label)
+                .transpose()?,
+            types: metadata
+                .get_mut("types")
+                .map(serde_json::Value::take)
+                .unwrap_or_default(),
+        })
+    }
+}
+
 impl Context {
     fn code_object(&self, id: Id) -> &value::CodeObject {
         let Value::Code(code) = self.heap.get(id) else {
@@ -228,13 +297,14 @@ impl Context {
     }
 
     /// Decode a function's parameter metadata on its first call.
-    fn parsed_parameters(&self, code: Id) -> Result<std::rc::Rc<serde_json::Value>> {
+    fn parsed_parameters(&self, code: Id) -> Result<std::rc::Rc<CallParameters>> {
         let code = self.code_object(code);
         if let Some(parameters) = code.parsed_parameters.get() {
             return Ok(std::rc::Rc::clone(parameters));
         }
         let parameters = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|error| Error::new("SystemError", error.to_string()))?;
+        let parameters = CallParameters::from_metadata(parameters)?;
         Ok(std::rc::Rc::clone(
             code.parsed_parameters
                 .get_or_init(|| std::rc::Rc::new(parameters)),
@@ -1961,7 +2031,7 @@ impl Context {
             unreachable!()
         };
         frame.comprehension = Some(kind);
-        frame.closure.declared = targets;
+        frame.closure.declared = targets.into();
         frame.closure.declared_complete = true;
         scope
     }
