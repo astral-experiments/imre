@@ -5,6 +5,19 @@ def current():
     def f(first=0, /, *rest, second=2, **extras):
         return first, rest, second, extras
 
+    class Keyword(str):
+        pass
+
+    def capture(**kwargs):
+        return kwargs
+
+    key = Keyword("field")
+    original = {key: 1}
+    received = capture(**original)
+    assert next(iter(received)) is key
+    received.clear()
+    assert original == {key: 1}
+
     slot = FunctionType.__call__
     bound = f.__call__
     assert slot is type(f).__call__
