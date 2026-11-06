@@ -29,9 +29,25 @@ pub(super) use text::{
 /// Drop the temporary bound method before a caller uses its result.
 fn call_stream_method(ctx: &mut Context, stream: Id, name: &str) -> Result<Id> {
     let mark = ctx.heap.temporary_mark();
-    let result = ctx
-        .lookup_attr(stream, name)
-        .and_then(|method| ctx.call(method, Vec::new(), Vec::new()));
+    let result = if let Value::Instance {
+        class,
+        fields,
+        namespace: None,
+        ..
+    } = ctx.heap.get(stream)
+        && ctx.heap.get(*class).io_kind().is_some()
+        && !fields.contains_key(name)
+        && ctx.class_attr(*class, "__getattribute__").is_none()
+        && let Some(method) = ctx.class_attr(*class, name)
+        && matches!(ctx.heap.get(method), Value::IoMethod { .. })
+    {
+        // A buffer callback can replace the class member while the call is active.
+        ctx.heap.keep(method);
+        ctx.call(method, vec![stream], Vec::new())
+    } else {
+        ctx.lookup_attr(stream, name)
+            .and_then(|method| ctx.call(method, Vec::new(), Vec::new()))
+    };
     ctx.release_with_result(mark, result)
 }
 

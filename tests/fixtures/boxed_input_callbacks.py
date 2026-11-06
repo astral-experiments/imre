@@ -141,6 +141,23 @@ def check_standard_flush():
             del sys.stdout.__dict__[key]
     assert calls == ["flush", "flush"]
 
+    def fileno():
+        calls.append("fileno")
+        return -1
+
+    def readline():
+        calls.append("readline")
+        return "rebound\n"
+
+    sys.stdin.fileno = fileno
+    sys.stdin.readline = readline
+    try:
+        assert input() == "rebound"
+    finally:
+        del sys.stdin.readline
+        del sys.stdin.fileno
+    assert calls[-2:] == ["fileno", "readline"]
+
 
 if __name__ == "__main__":
     current()
