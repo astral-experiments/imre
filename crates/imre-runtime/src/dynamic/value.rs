@@ -1038,7 +1038,7 @@ pub(super) enum NativeModuleState {
 }
 
 impl NativeModuleState {
-    fn references(self, visit: &mut MarkQueue<'_>) {
+    fn references(self, visit: &mut impl VisitReferences) {
         match self {
             Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => {
                 visit.push(class)
@@ -1740,7 +1740,7 @@ impl Value {
         }
     }
 
-    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut MarkQueue<'_>) {
+    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut impl VisitReferences) {
         for (key, value) in bindings {
             visit.extend([*key, *value]);
         }
@@ -1821,6 +1821,15 @@ impl Value {
     }
 
     fn children(&self, visit: &mut MarkQueue<'_>) {
+        self.try_children(visit)
+            .expect("borrowed native state during collection");
+    }
+
+    /// Visiting an unrooted native object can encounter a borrow held by its caller.
+    fn try_children(
+        &self,
+        visit: &mut impl VisitReferences,
+    ) -> std::result::Result<(), std::cell::BorrowError> {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
             Self::StructUnpackIterator {
@@ -1950,7 +1959,7 @@ impl Value {
                 visit.extend([entry.name, entry.path]);
                 visit.extend(entry.cached_objects());
             }
-            Self::Selector(selector) => selector.borrow().trace(visit),
+            Self::Selector(selector) => selector.try_borrow()?.trace(visit),
             Self::FrameLocalsProxy { class, frame } => visit.extend([*class, *frame]),
             Self::Scope(scope) => {
                 visit.extend(scope.closure.extra_locals);
@@ -2320,10 +2329,10 @@ impl Value {
             | Self::TlsSession(_)
             | Self::TlsListener(_)
             | Self::TlsBioSession(_) => {}
-            Self::LzmaDecompressor(state) => visit.push(state.borrow().unused_data),
+            Self::LzmaDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::ZlibDecompressor { state, dictionary } => {
                 visit.extend(*dictionary);
-                state.borrow().children(visit);
+                state.try_borrow()?.children(visit);
             }
             Self::TextFile(file) => {
                 visit.extend([file.dictionary, file.encoding, file.errors]);
@@ -2334,6 +2343,7 @@ impl Value {
                 visit.push(*name);
             }
         }
+        Ok(())
     }
 }
 
@@ -2703,10 +2713,32 @@ enum MarkMode<'a> {
     Ordered(&'a mut GcOrder),
 }
 
-impl MarkQueue<'_> {
+/// Receives the strong references retained by a heap value or a root.
+pub(super) trait VisitReferences {
+    fn push(&mut self, id: Id);
+
+    fn extend<T: std::borrow::Borrow<Id>>(&mut self, ids: impl IntoIterator<Item = T>) {
+        for id in ids {
+            self.push(*id.borrow());
+        }
+    }
+}
+
+struct FindReferences {
+    targets: [Id; 2],
+    found: bool,
+}
+
+impl VisitReferences for FindReferences {
+    fn push(&mut self, id: Id) {
+        self.found |= self.targets.contains(&id);
+    }
+}
+
+impl VisitReferences for MarkQueue<'_> {
     // An already-marked edge needs only the caller-side trace check.
     #[inline(always)]
-    pub(super) fn push(&mut self, id: Id) {
+    fn push(&mut self, id: Id) {
         let trace = &self.traces[id as usize];
         if trace.get() == UNMARKED {
             match &mut self.mode {
@@ -2733,13 +2765,9 @@ impl MarkQueue<'_> {
             }
         }
     }
+}
 
-    pub(super) fn extend<T: std::borrow::Borrow<Id>>(&mut self, ids: impl IntoIterator<Item = T>) {
-        for id in ids {
-            self.push(*id.borrow());
-        }
-    }
-
+impl MarkQueue<'_> {
     fn pop(&mut self) -> Option<Id> {
         let index = self.next;
         if index == END {
@@ -2837,6 +2865,8 @@ pub(super) struct Heap {
     finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
     /// Last successful (owner, frame, operand) hints for finalizer reachability checks.
     finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 64],
+    // A recently allocated iterator may be the only holder of an unreferenced generator.
+    last_generator_iterator: Option<Id>,
     // Weak handles in direct-base attachment order, pruned before recycling class slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
@@ -3046,6 +3076,7 @@ impl Heap {
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
             finalizer_operands: std::array::from_fn(|_| Cell::new(None)),
+            last_generator_iterator: None,
             classes: Vec::new(),
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
@@ -3426,6 +3457,12 @@ impl Heap {
         }
         self.slots[index].finalization = Finalization::None;
         let id = index as Id;
+        if let Some(Value::LoopIterator { source, .. }) = &self.slots[index].value
+            && matches!(self.get(*source), Value::Generator { .. })
+        {
+            self.last_generator_iterator = Some(id);
+        }
+
         if trace {
             if self.loading_linked_constant {
                 self.allocation_traces.record_linked(id);
@@ -3657,7 +3694,8 @@ impl Heap {
                 if scope.parent.is_some() && scope.class_body.is_none() {
                     self.release_scope_temporary(frame.scope);
                 }
-                self.collect_next_statement |= weak_released;
+                // Recheck the surviving weak roots after publishing the caller's temporaries.
+                self.check_finalizers_next_statement |= weak_released;
             }
         }
         self.keep(value);
@@ -4203,7 +4241,7 @@ impl Heap {
         }
     }
 
-    fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut MarkQueue<'_>) {
+    fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut impl VisitReferences) {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_string_constants.values().copied());
@@ -4424,10 +4462,21 @@ impl Heap {
                     .iter()
                     .take(*budget)
                     .any(|&input| keeps(heap, input, owner, budget)),
-                Value::Instance { fields, .. } => fields
-                    .values()
+                Value::Dict(entries) => entries
+                    .iter()
                     .take(*budget)
-                    .any(|&value| keeps(heap, value, owner, budget)),
+                    .any(|&(_, value)| keeps(heap, value, owner, budget)),
+                Value::Instance {
+                    fields, dictionary, ..
+                } => {
+                    super::stdlib::io::text_descriptor_chain(heap, root)
+                        .is_some_and(|chain| chain.contains(&owner))
+                        || dictionary
+                            .iter()
+                            .chain(fields.values())
+                            .take(*budget)
+                            .any(|&value| keeps(heap, value, owner, budget))
+                }
                 Value::Generator {
                     iterators,
                     protected,
@@ -4515,6 +4564,49 @@ impl Heap {
         false
     }
 
+    /// Revalidate the iterator hint against the current occupants of both slots.
+    pub(super) fn pending_generator_loop(&self) -> Option<(Id, Id)> {
+        if self.full_collection_active() {
+            return None;
+        }
+        let iterator = self.last_generator_iterator?;
+        let Value::LoopIterator { source, peeked } =
+            self.slots.get(iterator as usize)?.value.as_ref()?
+        else {
+            return None;
+        };
+        (self.is_pending_finalizer(*source)
+            && matches!(self.get(*source), Value::Generator { .. })
+            && *peeked != Some(iterator))
+        .then_some((*source, iterator))
+    }
+
+    /// Prove that only the loop iterator can hold the generator and nothing holds the iterator.
+    pub(super) fn generator_loop_is_unowned(
+        &self,
+        generator: Id,
+        iterator: Id,
+        globals: impl Iterator<Item = Id>,
+    ) -> bool {
+        let mut incoming = FindReferences {
+            targets: [generator, iterator],
+            found: false,
+        };
+        self.mark_roots(globals, &mut incoming);
+        for (id, &shape) in self.slot_shapes.iter().enumerate() {
+            if incoming.found {
+                return false;
+            }
+            if shape == SlotShape::Other
+                && id != iterator as usize
+                && self.get(id as Id).try_children(&mut incoming).is_err()
+            {
+                return false;
+            }
+        }
+        !incoming.found
+    }
+
     /// Check each registration against the surviving frame bindings and native stream edges.
     fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, owners: &[Id]) -> bool {
         let chains = self.bound_finalizer_chains();
@@ -4599,7 +4691,8 @@ impl Heap {
             traces: &self.traces,
             slot_shapes: &self.slot_shapes,
             next: END,
-            mode: MarkMode::All,
+            // Scalar leaves cannot retain a finalizer or participate in a cycle.
+            mode: MarkMode::CycleEdges,
         };
         self.mark_roots(roots, &mut pending);
         while remaining != 0

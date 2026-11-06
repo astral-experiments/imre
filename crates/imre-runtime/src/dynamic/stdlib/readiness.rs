@@ -1,7 +1,7 @@
 //! Boxed selectors retain Python keys and wait through their respective native backends.
 use super::super::{
     Context, builtins,
-    value::{Error, Id, MarkQueue, NONE, Result, Value},
+    value::{Error, Id, NONE, Result, Value, VisitReferences},
 };
 use crate::objects::readiness::{Poll, SelectFds};
 use std::{cell::RefCell, rc::Rc, time::Duration};
@@ -230,7 +230,7 @@ fn missing<T>(ctx: &mut Context, fileobj: Id) -> Result<T> {
 }
 
 impl Selector {
-    pub(in crate::dynamic) fn trace(&self, roots: &mut MarkQueue<'_>) {
+    pub(in crate::dynamic) fn trace(&self, roots: &mut impl VisitReferences) {
         roots.extend([self.keys, self.mapping]);
     }
 
@@ -558,5 +558,40 @@ pub(super) fn call(
             close(ctx, &handle)
         }
         _ => Err(bad()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Selector;
+    use crate::dynamic::value::{Heap, NONE, Value};
+    use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn unowned_loop_checks_live_and_borrowed_selector_edges() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let source = heap.alloc(Value::List(Vec::new()));
+        let iterator = heap.alloc(Value::LoopIterator {
+            source,
+            peeked: None,
+        });
+        let selector = Rc::new(RefCell::new(Selector {
+            poll: None,
+            keys: NONE,
+            mapping: NONE,
+        }));
+        heap.alloc(Value::Selector(Rc::clone(&selector)));
+        heap.release_temporaries_since(mark);
+        let unowned = || heap.generator_loop_is_unowned(source, iterator, std::iter::empty());
+
+        assert!(unowned());
+        let mut borrowed = selector.borrow_mut();
+        assert!(!unowned());
+        borrowed.keys = source;
+        drop(borrowed);
+        assert!(!unowned());
+        selector.borrow_mut().keys = NONE;
+        assert!(unowned());
     }
 }

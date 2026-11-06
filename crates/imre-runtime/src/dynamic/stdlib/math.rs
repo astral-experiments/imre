@@ -244,8 +244,13 @@ pub(super) fn call(
             ),
         ));
     };
-    if operation == "log2" {
-        let result = logarithm(ctx, value, f64::log2)?;
+    if matches!(operation, "log2" | "log10") {
+        let log = if operation == "log10" {
+            crate::floats::log10
+        } else {
+            f64::log2
+        };
+        let result = logarithm(ctx, value, log)?;
         return Ok(ctx.alloc(Value::Float(result)));
     }
     if operation == "fsum" {
@@ -290,6 +295,7 @@ pub(super) fn call(
     }
     let unary: Option<fn(f64) -> f64> = match operation {
         "asinh" => Some(f64::asinh),
+        "atan" => Some(|x| atan(x)),
         // The platform libm retains precision for inputs just above -1.
         "atanh" => Some(|x| atanh(x)),
         "cos" => Some(f64::cos),
@@ -764,44 +770,12 @@ fn isclose(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
 /// Take the log of an int's stored value, including those too large for a double.
 /// Other numbers go through the same real conversion as the unary math functions.
 fn logarithm(ctx: &mut Context, value: Id, log: fn(f64) -> f64) -> Result<f64> {
-    match ctx.heap.get(ctx.scalar_value(value)) {
-        Value::Bool(true) => return Ok(0.0),
-        Value::Bool(false) => return Err(Error::new("ValueError", "expected a positive input")),
-        Value::Int(integer) => {
-            let n = integer.big();
-            if n.sign() != num_bigint::Sign::Plus {
-                return Err(Error::new("ValueError", "expected a positive input"));
-            }
-            if let Ok(x) = crate::floats::int_to_float(integer) {
-                return Ok(log(x));
-            }
-            // CPython's loghelper uses a rounded mantissa and a separate exponent
-            // on overflow. Keep one sticky bit so the cast rounds ties correctly.
-            let magnitude = n.magnitude();
-            let mut exponent = magnitude.bits();
-            let shift = exponent - u64::from(u64::BITS);
-            let high = (magnitude >> shift).to_u64().unwrap();
-            let sticky = magnitude.trailing_zeros().unwrap() < shift;
-            let mut mantissa = (high | u64::from(sticky)) as f64 * 2.0_f64.powi(-64);
-            if mantissa == 1.0 {
-                mantissa = 0.5;
-                exponent += 1;
-            }
-            return Ok(log(mantissa) + log(2.0) * exponent as f64);
-        }
-        _ => {}
-    }
-    let x = as_double(ctx, value)?;
-    if x <= 0.0 {
-        return Err(Error::new(
-            "ValueError",
-            format!(
-                "expected a positive input, got {}",
-                crate::floats::render(x)
-            ),
-        ));
-    }
-    Ok(log(x))
+    let result = match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Int(n) => crate::floats::int_logarithm(n, log),
+        Value::Bool(b) => crate::floats::int_logarithm(&crate::Int::from(i64::from(*b)), log),
+        _ => crate::floats::float_logarithm(as_double(ctx, value)?, log),
+    };
+    Ok(result?)
 }
 
 /// Add non-finite inputs in sequence so the target quiets signaling NaNs and
@@ -973,6 +947,7 @@ fn ieee_remainder(x: f64, y: f64) -> Result<f64> {
 }
 
 unsafe extern "C" {
+    safe fn atan(x: f64) -> f64;
     safe fn atanh(x: f64) -> f64;
     safe fn erfc(x: f64) -> f64;
     safe fn remainder(x: f64, y: f64) -> f64;

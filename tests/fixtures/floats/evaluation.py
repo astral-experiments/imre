@@ -1,4 +1,4 @@
-from math import acos, asin, erfc, log2
+from math import acos, asin, atan, erfc, log2, log10
 
 
 def integer(label: str, value: int) -> int:
@@ -69,6 +69,9 @@ print(floating("integer receiver", -0.0).is_integer())
 for value in (2.0, -3.5, 5e-324, 1e308, float("inf"), float("-inf"), float("nan")):
     print(value.is_integer())
 
+print(log10(floating("decimal logarithm receiver", 0.1)))
+assert log10(10**1000) == 1000.0
+
 print(log2(floating("logarithm receiver", 0.125)))
 print(log2(5e-324))
 print(log2(float("inf")))
@@ -92,6 +95,9 @@ try:
     asin(2)
 except ValueError as error:
     print(str(error))
+
+print(atan(floating("arc tangent receiver", -0.0)))
+assert atan(float("inf")) == 2.0 * atan(True)
 
 assert erfc(-0.0) == 1.0
 assert 0.0 < erfc(8) < 1e-28

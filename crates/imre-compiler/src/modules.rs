@@ -807,6 +807,7 @@ pub(crate) enum Intrinsic {
     BuiltinsLen,
     BuiltinsAscii,
     BuiltinsHex,
+    BuiltinsOpen,
     SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
@@ -898,7 +899,9 @@ pub(crate) enum Intrinsic {
     WallTime,
     MathAcos,
     MathAsin,
+    MathAtan,
     MathErfc,
+    MathLog10,
     TimeSleep,
     WarningFilter {
         simple: bool,
@@ -1167,11 +1170,14 @@ pub(crate) enum Intrinsic {
 
 impl Intrinsic {
     pub(crate) const REGEX_DEBUG: Self = Self::ScopedObjectExport("re.DEBUG");
+
     pub(crate) fn unary_float_math(self) -> Option<(&'static str, Builtin)> {
         match self {
             Self::MathAcos => Some(("math.acos", Builtin::FloatAcos)),
             Self::MathAsin => Some(("math.asin", Builtin::FloatAsin)),
+            Self::MathAtan => Some(("math.atan", Builtin::FloatAtan)),
             Self::MathErfc => Some(("math.erfc", Builtin::FloatErfc)),
+            Self::MathLog10 => Some(("math.log10", Builtin::FloatLog10)),
             _ => None,
         }
     }
@@ -1950,6 +1956,7 @@ impl IntrinsicModule {
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
             (Self::Builtins, "bin") => Intrinsic::ScopedObjectExport("builtins.bin"),
             (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
+            (Self::Builtins, "open") => Intrinsic::BuiltinsOpen,
             (Self::Builtins, "oct") => Intrinsic::ScopedObjectExport("builtins.oct"),
             (Self::Builtins, "exec") => Intrinsic::ScopedObjectExport("builtins.exec"),
             (Self::Sys, "argv") => Intrinsic::Argv,
@@ -2297,6 +2304,7 @@ impl IntrinsicModule {
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
             (Self::Math, "asin") => Intrinsic::MathAsin,
             (Self::Math, "asinh") => Intrinsic::ScopedObjectExport("math.asinh"),
+            (Self::Math, "atan") => Intrinsic::MathAtan,
             (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "atanh") => Intrinsic::ScopedObjectExport("math.atanh"),
             (Self::Math, "cosh") => Intrinsic::ScopedObjectExport("math.cosh"),
@@ -2311,6 +2319,7 @@ impl IntrinsicModule {
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
+            (Self::Math, "log10") => Intrinsic::MathLog10,
             (Self::Math, "log2") => Intrinsic::ScopedObjectExport("math.log2"),
             (Self::Math, "ldexp") => Intrinsic::ScopedObjectExport("math.ldexp"),
             (Self::Math, "nextafter") => Intrinsic::ScopedObjectExport("math.nextafter"),

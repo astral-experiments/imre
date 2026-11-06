@@ -405,7 +405,10 @@ impl Wrapper {
         self.buffer.get()
     }
 
-    pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
+    pub(in crate::dynamic) fn children(
+        &self,
+        visit: &mut impl crate::dynamic::value::VisitReferences,
+    ) {
         visit.extend(self.buffer_id());
         visit.extend([
             self.encoding.get(),
