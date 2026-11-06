@@ -19,7 +19,7 @@ unsafe extern "C" {
     fn imre_ssl_protocol_mask(runtime_version: c_ulong) -> c_int;
 }
 
-fn capabilities(version: c_ulong) -> Option<u32> {
+pub(super) fn capabilities(version: c_ulong) -> Option<u32> {
     // SAFETY: the shim reads only its build-time OpenSSL header constants. A
     // missing header or a runtime/header version mismatch returns -1.
     u32::try_from(unsafe { imre_ssl_protocol_mask(version) }).ok()
@@ -119,6 +119,12 @@ impl Context {
 
 pub(in crate::dynamic) fn set(ctx: &mut Vm, handle: Id, minimum: bool, arg: Id) -> Result<()> {
     let value = ctx.index_c_int(arg)?;
+    if super::super::context(ctx, handle)?.borrow().protocol.is_fixed() {
+        return Err(Error::new(
+            "ValueError",
+            "The context's protocol doesn't support modification of highest and lowest version.",
+        ));
+    }
     match value {
         0x300..=0x302 => {
             let name = VERSIONS[(value - SSL3) as usize];

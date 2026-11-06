@@ -438,6 +438,12 @@ fn closed() -> Error {
 
 fn provider_error(ctx: &Context, failure: provider::Failure) -> Error {
     let message = match failure {
+        provider::Failure::UnsupportedProtocol(code) => {
+            return Error::new(
+                "ValueError",
+                format!("invalid or unsupported protocol version {code}"),
+            );
+        }
         provider::Failure::Io(error) => return errno_error(error).into(),
         provider::Failure::Trust { message, .. }
         | provider::Failure::Verify { message, .. }
@@ -461,13 +467,22 @@ pub(super) fn call(
         ));
     }
     match (name, args) {
-        ("context" | "server_context" | "generic_context", []) => {
-            let protocol = match name {
-                "context" => provider::Protocol::Client,
-                "server_context" => provider::Protocol::Server,
-                _ => provider::Protocol::Tls,
+        ("context" | "server_context" | "generic_context", []) | ("context", [_]) => {
+            let code = match (name, args) {
+                ("context", &[value]) => ctx.index_c_int(value)?,
+                ("context", _) => provider::Protocol::Client as i32,
+                ("server_context", _) => provider::Protocol::Server as i32,
+                _ => provider::Protocol::Tls as i32,
             };
-            let handle = provider::Context::new(protocol).map_err(|e| provider_error(ctx, e))?;
+            let method = provider::Method::lookup(code).map_err(|e| provider_error(ctx, e))?;
+            if let Some(name) = method.deprecated {
+                ctx.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::DeprecationWarning,
+                    &format!("ssl.{name} is deprecated"),
+                    3,
+                )?;
+            }
+            let handle = provider::Context::new(method).map_err(|e| provider_error(ctx, e))?;
             Ok(ctx.alloc(Value::TlsContext(Rc::new(RefCell::new(handle)))))
         }
         ("protocol", &[handle]) => {

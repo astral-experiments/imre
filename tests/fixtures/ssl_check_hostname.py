@@ -29,3 +29,26 @@ assert ctx.verify_mode is ssl.CERT_OPTIONAL
 ctx.verify_mode = ssl.CERT_NONE
 ctx.check_hostname = True
 assert ctx.verify_mode is ssl.CERT_REQUIRED
+
+
+with warnings.catch_warnings(record=True) as recorded:
+    warnings.simplefilter("always")
+    try:
+        fixed = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+    except ValueError as exc:
+        # The provider can disable TLS 1.2 or omit its deprecated method.
+        assert type(exc) is ValueError
+        assert exc.args == ("invalid or unsupported protocol version 5",)
+        assert not recorded
+    else:
+        assert getattr(ssl, "HAS_TLSv1_2", True)
+        assert [str(item.message) for item in recorded] == ["ssl.PROTOCOL_TLSv1_2 is deprecated"]
+        assert fixed.protocol is ssl.PROTOCOL_TLSv1_2
+        assert fixed.verify_mode is ssl.CERT_NONE and fixed.check_hostname is False
+        for bound in ("minimum_version", "maximum_version"):
+            try:
+                setattr(fixed, bound, ssl.TLSVersion.TLSv1_2)
+            except ValueError as exc:
+                assert "doesn't support modification" in str(exc)
+            else:
+                raise AssertionError("changed a fixed-version context's protocol bound")
