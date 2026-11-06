@@ -7,6 +7,7 @@ from _imre_dataclasses import (
     slotted_type as _slotted_type,
 )
 import abc
+import inspect
 import types
 from types import GenericAlias, MemberDescriptorType
 
@@ -502,6 +503,12 @@ def _decorate(cls, params):
             super(frozen_owner, self).__delattr__(name)
         install('__setattr__', __setattr__)
         install('__delattr__', __delattr__)
+    if not cls.__doc__:
+        try:
+            text_sig = str(inspect.signature(cls, annotation_format=Format.FORWARDREF)).replace(' -> None', '')
+        except (TypeError, ValueError):
+            text_sig = ''
+        cls.__doc__ = cls.__name__ + text_sig
     if params.slots:
         # Generated methods may retain this frame. The original descriptor snapshot owns the old class.
         own.clear()
