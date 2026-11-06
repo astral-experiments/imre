@@ -4,6 +4,19 @@ import warnings
 
 def current():
     large = 1 << 140
+    assert large == int(str(large))
+    assert large != large + 1
+
+    class ComparisonOverride(int):
+        def __eq__(self, other):
+            return "equal"
+
+        def __ne__(self, other):
+            return "unequal"
+
+    override = ComparisonOverride(large)
+    assert (large == override) == "equal"
+    assert (large != override) == "unequal"
 
     class Plain(int):
         pass

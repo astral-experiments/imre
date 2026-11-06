@@ -4451,6 +4451,11 @@ impl Context {
     }
 
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        if matches!(op, "==" | "!=")
+            && let (Value::Int(left), Value::Int(right)) = (self.heap.get(a), self.heap.get(b))
+        {
+            return Ok(builtins::boolean(left.cmp(right).is_eq() == (op == "==")));
+        }
         if !inplace && op == "|" {
             let weak_proxy = |id| matches!(self.heap.get(id), Value::Weak(wr) if wr.kind != weakref::Kind::Reference);
             if matches!(self.heap.get(a), Value::MappingProxy(_))
