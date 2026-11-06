@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -191,10 +192,12 @@ def main() -> None:
                 checks += 1
         formatter = 'def version(n: int) -> bytes:\n    return b"TZif%d" % n\n'
         invalid = 'def wrong() -> int:\n    return "bad"\n'
+        cli_flags = "\x1f".join(["--runtime", runtime, "--clang", clang, *flags])
         for definitions in ((formatter, invalid), (invalid, formatter)):
             script = temporary / "format_contract.py"
             script.write_text("\n".join((*definitions, "print(version(3))\n")))
-            result = run([compiler, "-B", str(script)], temporary)
+            with patch.dict("os.environ", IMRE_ENCODED_FLAGS=cli_flags):
+                result = run([compiler, "-B", str(script)], temporary)
             assert result.returncode > 0 and not result.stdout, result
             assert "expected int, got str; annotations are enforced contracts" in result.stderr, result
             checks += 1
