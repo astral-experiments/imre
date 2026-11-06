@@ -1,4 +1,7 @@
 def current():
+    nested = [((1, 2), 3), ([4, 5], 6)]
+    assert [(a, b, c) for (a, b), c in nested] == [(1, 2, 3), (4, 5, 6)]
+
     row = [1, 2]
     output = [0]
 

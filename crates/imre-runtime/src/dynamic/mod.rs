@@ -1576,6 +1576,24 @@ impl Context {
         Ok(Some(item))
     }
 
+    /// Retain an immutable tuple or snapshot the values needed by an unpacking assignment.
+    fn unpack_sequence(
+        &mut self,
+        value: Id,
+        count: usize,
+        star: Option<usize>,
+        read_only: bool,
+    ) -> Result<Id> {
+        if read_only
+            && star.is_none()
+            && matches!(self.heap.get(value), Value::Tuple(items) if items.len() == count)
+        {
+            return Ok(value);
+        }
+        let items = self.unpack_items(value, count, star)?;
+        Ok(self.alloc(Value::List(items)))
+    }
+
     /// Consume the values required by an assignment, probing one extra item for fixed targets.
     fn unpack_items(&mut self, value: Id, count: usize, star: Option<usize>) -> Result<Vec<Id>> {
         if star.is_none()
