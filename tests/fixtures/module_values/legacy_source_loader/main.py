@@ -3,6 +3,7 @@ import sys
 import tempfile
 from importlib.machinery import SourceFileLoader
 from importlib.util import decode_source
+from pathlib import Path
 from types import ModuleType
 import warnings
 
@@ -101,6 +102,9 @@ with tempfile.TemporaryDirectory() as root:
     with open(path, "wb") as stream:
         stream.write(data)
     assert loader.get_source("labels") == decode_source(data) == "# coding: latin-1\ntitle = 'café'\n"
+    module = ModuleType("labels")
+    SourceFileLoader("labels", Path(path)).exec_module(module)
+    assert module.title == "café"
     os.remove(path)
     try:
         loader.get_source("labels")
