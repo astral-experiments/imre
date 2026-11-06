@@ -3,7 +3,6 @@ use super::exceptions::{Error, Kind, Result, finish};
 use super::{Object, object};
 use crate::sumprod::{Number, Operands, Side, reduce};
 use crate::{Int, List, integer_binary};
-use std::ffi::c_long;
 
 enum Scalar {
     Int(Int),
@@ -32,8 +31,8 @@ impl<I: Iterator<Item = Scalar>> Operands for Lists<I> {
         }
     }
 
-    fn integer(&mut self, value: c_long) -> Scalar {
-        Scalar::Int(Int::from(value as i64))
+    fn integer(&mut self, value: i64) -> Scalar {
+        Scalar::Int(Int::from(value))
     }
 
     fn float(&mut self, value: f64) -> Scalar {
