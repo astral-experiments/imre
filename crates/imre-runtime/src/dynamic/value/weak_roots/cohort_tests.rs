@@ -16,24 +16,22 @@ fn cached_operand_rechecks_the_frame_and_its_current_edge() {
     heap.release_temporaries_since(0);
     heap.enter(scope, NONE, FrameOwner::Module(NONE));
     heap.keep(iterator);
-    heap.finalizer_operands.push(std::cell::Cell::new(u16::MAX));
-    assert!(heap.operand_keeps_finalizer(owner, 1, 0));
-    assert_ne!(heap.finalizer_operands[0].get(), u16::MAX);
-    assert!(!heap.operand_keeps_finalizer(owner, 0, 0));
+    assert!(heap.operand_keeps_finalizer(owner, 1));
+    assert!(!heap.operand_keeps_finalizer(owner, 0));
 
     heap.enter(scope, NONE, FrameOwner::Module(NONE));
-    assert!(heap.operand_keeps_finalizer(owner, 0, 0));
+    assert!(heap.operand_keeps_finalizer(owner, 0));
     let Value::LoopIterator { source, .. } = heap.get_mut(iterator) else {
         unreachable!()
     };
     *source = other;
-    assert!(!heap.operand_keeps_finalizer(owner, 0, 0));
-    assert!(heap.operand_keeps_finalizer(other, 0, 0));
+    assert!(!heap.operand_keeps_finalizer(owner, 0));
+    assert!(heap.operand_keeps_finalizer(other, 0));
 
     heap.leave(NONE, false);
-    assert!(!heap.operand_keeps_finalizer(other, 0, 0));
+    assert!(!heap.operand_keeps_finalizer(other, 0));
     heap.leave(NONE, false);
-    assert!(!heap.operand_keeps_finalizer(other, usize::MAX, 0));
+    assert!(!heap.operand_keeps_finalizer(other, usize::MAX));
 }
 
 #[test]

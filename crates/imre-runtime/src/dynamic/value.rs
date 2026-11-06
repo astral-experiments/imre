@@ -2863,8 +2863,6 @@ pub(super) struct Heap {
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
     finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
-    /// Operand positions in ordinary-finalizer order, followed by descriptor owners.
-    finalizer_operands: Vec<Cell<u16>>,
     // A recently allocated iterator may be the only holder of an unreferenced generator.
     last_generator_iterator: Option<Id>,
     // Weak handles in direct-base attachment order, pruned before recycling class slots.
@@ -3075,7 +3073,6 @@ impl Heap {
             descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
-            finalizer_operands: Vec::new(),
             last_generator_iterator: None,
             classes: Vec::new(),
             discarded_shutdown_write: None,
@@ -3694,7 +3691,8 @@ impl Heap {
                 if scope.parent.is_some() && scope.class_body.is_none() {
                     self.release_scope_temporary(frame.scope);
                 }
-                self.collect_next_statement |= weak_released;
+                // Recheck the surviving weak roots after publishing the caller's temporaries.
+                self.check_finalizers_next_statement |= weak_released;
             }
         }
         self.keep(value);
@@ -4383,20 +4381,10 @@ impl Heap {
         self.slots[id as usize].value.as_ref()?.finalizer_class()
     }
 
-    /// Reserve one position per pending owner. Each position is revalidated, so
-    /// removing or reordering owners needs no work on this column.
-    fn grow_finalizer_operands(&mut self) {
-        let count = self.ordinary_finalizers.len() + self.descriptor_owners.len();
-        if self.finalizer_operands.len() < count && self.finalizer_operands.try_reserve(1).is_ok() {
-            self.finalizer_operands.push(Cell::new(u16::MAX));
-        }
-    }
-
     pub(super) fn register_finalizer(&mut self, id: Id) {
         if self.slots[id as usize].finalization == Finalization::None {
             self.slots[id as usize].finalization = Finalization::Pending;
             self.ordinary_finalizers.push(id);
-            self.grow_finalizer_operands();
             self.frames.last_mut().unwrap().created_finalizer = true;
         }
     }
@@ -4471,10 +4459,21 @@ impl Heap {
                     .iter()
                     .take(*budget)
                     .any(|&input| keeps(heap, input, owner, budget)),
-                Value::Instance { fields, .. } => fields
-                    .values()
+                Value::Dict(entries) => entries
+                    .iter()
                     .take(*budget)
-                    .any(|&value| keeps(heap, value, owner, budget)),
+                    .any(|&(_, value)| keeps(heap, value, owner, budget)),
+                Value::Instance {
+                    fields, dictionary, ..
+                } => {
+                    super::stdlib::io::text_descriptor_chain(heap, root)
+                        .is_some_and(|chain| chain.contains(&owner))
+                        || dictionary
+                            .iter()
+                            .chain(fields.values())
+                            .take(*budget)
+                            .any(|&value| keeps(heap, value, owner, budget))
+                }
                 Value::Generator {
                     iterators,
                     protected,
@@ -4729,7 +4728,6 @@ impl Heap {
             .map_err(|_| Error::new("MemoryError", ""))?;
         let id = self.alloc(value);
         self.descriptor_owners.push(id);
-        self.grow_finalizer_operands();
         self.frames.last_mut().unwrap().created_finalizer = true;
         Ok(id)
     }
