@@ -955,7 +955,7 @@ pub(super) struct Scope {
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
-    pub names: indexmap::IndexMap<String, Id>,
+    pub names: indexmap::IndexMap<crate::Str, Id>,
     pub closure: ClosureScope,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,

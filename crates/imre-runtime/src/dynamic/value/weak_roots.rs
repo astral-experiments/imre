@@ -44,6 +44,7 @@ enum Members<'a> {
     None,
     Sequence(&'a [Id]),
     Names(&'a IndexMap<String, Id>, Option<Id>),
+    Scope(&'a IndexMap<crate::Str, Id>),
     Keys(&'a [(Id, Id)]),
     Values(&'a [(Id, Id)]),
     Entries(&'a [(Id, Id)]),
@@ -55,7 +56,7 @@ impl<'a> Links<'a> {
             Value::Module { scope, .. } => ([Some(*scope), None], Members::None),
             Value::Scope(scope) => (
                 [scope.namespace, scope.exec_globals.map(|g| g.dict)],
-                Members::Names(&scope.names, None),
+                Members::Scope(&scope.names),
             ),
             Value::Dict(entries) if dict_keys => ([None; 2], Members::Entries(entries)),
             Value::Dict(entries) => ([None; 2], Members::Values(entries)),
@@ -104,6 +105,7 @@ impl<'a> Links<'a> {
             + match self.members {
                 Members::None => 0,
                 Members::Sequence(items) => items.len(),
+                Members::Scope(names) => names.len(),
                 Members::Names(names, buffer) => names.len() + usize::from(buffer.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
                 Members::Entries(entries) => entries.len() * 2,
@@ -124,6 +126,7 @@ impl<'a> Links<'a> {
         match self.members {
             Members::None => None,
             Members::Sequence(items) => items.get(index).copied(),
+            Members::Scope(names) => names.get_index(index).map(|(_, id)| *id),
             Members::Names(names, buffer) if index == names.len() => buffer,
             Members::Names(names, _) => names.get_index(index).map(|(_, id)| *id),
             Members::Keys(entries) => entries.get(index).map(|(key, _)| *key),

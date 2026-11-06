@@ -2316,7 +2316,7 @@ impl Context {
             .class_namespace
             .as_ref()
             .and_then(|ns| ns.annotation_dict_cell);
-        let names: indexmap::IndexMap<String, Id> = self
+        let names: indexmap::IndexMap<crate::Str, Id> = self
             .dict_entries(body)
             .expect("class body dictionary")
             .iter()
@@ -2324,13 +2324,13 @@ impl Context {
                 self.str_value(key)
                     .ok()
                     .filter(|&name| annotation_cell.is_none() || name != "__classdictcell__")
-                    .map(|name| (name.to_owned(), value))
+                    .map(|name| (crate::Str::new(name), value))
             })
             .collect();
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.class_body = Some(names.keys().cloned().collect());
+        frame.class_body = Some(names.keys().map(|name| name.as_str().to_owned()).collect());
         frame.names = names;
         frame.namespace = None;
         frame.class_namespace.as_mut().unwrap().dictionary = None;
@@ -2413,7 +2413,7 @@ impl Context {
 
     /// Bind a parameter in a fresh function scope using checked name and table storage.
     fn bind_argument(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
-        let name = copy_label(name)?;
+        let name = crate::Str::try_new(name).map_err(|_| Error::new("MemoryError", ""))?;
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("function call scope")
         };
@@ -2460,7 +2460,7 @@ impl Context {
             if let Some(order) = &mut s.class_body {
                 order.push(name.to_owned());
             }
-            s.names.insert(name.to_owned(), value);
+            s.names.insert(crate::Str::new(name), value);
             None
         };
         let dictionary = s
