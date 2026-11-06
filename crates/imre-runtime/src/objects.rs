@@ -238,7 +238,6 @@ enum Storage {
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     RegexIterator(regexes::FindIter),
-    RegexPositionIterator(regexes::FindIter, usize),
     Repeat(Repeat<OwnedWord>),
     Accumulate(itertools::Accumulate),
     IntegerAccumulate(itertools::IntegerAccumulate),
@@ -308,6 +307,7 @@ enum Storage {
     JsonDecoder(crate::ObjectOwner),
     PairTable(allocator_api2::boxed::Box<pair_tables::Table>),
     SortedSplitFields(Box<SortedSplitFields>),
+    RegexPositionIterator(regexes::FindIter, usize),
 }
 
 /// Borrows a rooted object for one nonreentrant operation.
