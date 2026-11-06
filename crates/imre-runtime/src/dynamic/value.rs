@@ -2609,6 +2609,8 @@ struct Slot {
     has_gc_header: bool,
     may_have_buffer_views: bool,
     finalization: Finalization,
+    // Frame and operand that last retained this owner, packed into the slot header.
+    finalizer_operand: Cell<u16>,
     generation: u8,
 }
 
@@ -2622,6 +2624,7 @@ impl Slot {
             has_gc_header: false,
             may_have_buffer_views: false,
             finalization: Finalization::None,
+            finalizer_operand: Cell::new(0),
             generation: 0,
         }
     }
@@ -2835,8 +2838,6 @@ pub(super) struct Heap {
     ordinary_finalizers: Vec<Id>,
     // Positions are hints. Each check reads the current binding and native stream edges.
     finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
-    /// Last successful (owner, frame, operand) hints for finalizer reachability checks.
-    finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 64],
     // Weak handles in direct-base attachment order, pruned before recycling class slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
@@ -3045,7 +3046,6 @@ impl Heap {
             descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
             finalizer_bindings: Cell::new([None; 2]),
-            finalizer_operands: std::array::from_fn(|_| Cell::new(None)),
             classes: Vec::new(),
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
@@ -3425,6 +3425,7 @@ impl Heap {
             self.gc_schedule.allocated(&self.gc_settings, collecting);
         }
         self.slots[index].finalization = Finalization::None;
+        self.slots[index].finalizer_operand.set(0);
         let id = index as Id;
         if trace {
             if self.loading_linked_constant {

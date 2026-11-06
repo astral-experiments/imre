@@ -426,19 +426,26 @@ impl Heap {
         let Some(active) = self.frames.len().checked_sub(1) else {
             return false;
         };
-        // The operand and its children can change between releases.
-        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
-        if let Some((last_owner, frame, operand)) = cached.get()
-            && last_owner == owner
-            && (frame < active || operand < retained_current)
-            && let Some(&root) = self.frames.get(frame).and_then(|f| f.live.get(operand))
-            && self.short_path_keeps_owner(root, owner)
-        {
-            return true;
+        const OPERANDS_PER_FRAME: usize = 8;
+        let position = &self.slots[owner as usize].finalizer_operand;
+        if let Some(index) = position.get().checked_sub(1) {
+            let index = usize::from(index);
+            let (frame, operand) = (index / OPERANDS_PER_FRAME, index % OPERANDS_PER_FRAME);
+            // The operand and the path from it to the owner may have changed since the release.
+            if (frame < active || operand < retained_current)
+                && let Some(&root) = self.frames.get(frame).and_then(|f| f.live.get(operand))
+                && self.short_path_keeps_owner(root, owner)
+            {
+                return true;
+            }
         }
 
         const MAX_CALLER_OPERANDS: usize = 192;
-        let active_limit = self.frames[active].live.len().min(retained_current).min(8);
+        let active_limit = self.frames[active]
+            .live
+            .len()
+            .min(retained_current)
+            .min(OPERANDS_PER_FRAME);
         let mut operands = self
             .frames
             .iter()
@@ -446,7 +453,11 @@ impl Heap {
             .rev()
             .take(MAX_CALLER_OPERANDS + 1)
             .flat_map(|(index, frame)| {
-                let limit = if index == active { active_limit } else { 8 };
+                let limit = if index == active {
+                    active_limit
+                } else {
+                    OPERANDS_PER_FRAME
+                };
                 frame
                     .live
                     .iter()
@@ -464,7 +475,9 @@ impl Heap {
             })
             .or_else(|| operands.find(|&(_, _, root)| self.short_path_keeps_owner(root, owner)));
         if let Some((frame, slot, _)) = found {
-            cached.set(Some((owner, frame, slot)));
+            // There are at most eight candidate operands per frame. Deeper stacks still
+            // use the ordinary scan when the packed position is outside the header's range.
+            position.set(u16::try_from(frame * OPERANDS_PER_FRAME + slot + 1).unwrap_or(0));
             return true;
         }
         false
