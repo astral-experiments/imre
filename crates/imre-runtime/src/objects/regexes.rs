@@ -284,14 +284,10 @@ enum Spans {
     Short {
         len: u8,
         slots: [u16; 10],
-        ascii_prefix: Cell<u16>,
+        // An odd length counts the iterator's character position as well as the paired slots.
+        position: Cell<u16>,
     },
-    Scanned {
-        len: u8,
-        slots: [u16; 10],
-        char_start: u16,
-    },
-    // The final word holds the optional character position of group zero.
+    // Iterator matches append their character position after the paired capture slots.
     Long(Box<[Option<NonMaxUsize>]>),
 }
 
@@ -302,25 +298,18 @@ impl Spans {
             for (dst, slot) in short.iter_mut().zip(slots) {
                 *dst = slot.map_or(u16::MAX, |s| s.get() as u16);
             }
-            let len = slots.len() as u8;
-            if let Some(start) = char_start {
-                Self::Scanned {
-                    len,
-                    slots: short,
-                    char_start: start as u16,
-                }
-            } else {
-                Self::Short {
-                    len,
-                    slots: short,
-                    ascii_prefix: Cell::new(0),
-                }
+            Self::Short {
+                len: slots.len() as u8 + u8::from(char_start.is_some()),
+                slots: short,
+                position: Cell::new(char_start.unwrap_or_default() as u16),
             }
-        } else {
+        } else if let Some(start) = char_start {
             let mut snapshot = Vec::with_capacity(slots.len() + 1);
             snapshot.extend_from_slice(slots);
-            snapshot.push(char_start.and_then(NonMaxUsize::new));
+            snapshot.push(NonMaxUsize::new(start));
             Self::Long(snapshot.into_boxed_slice())
+        } else {
+            Self::Long(slots.into())
         }
     }
 
@@ -328,8 +317,8 @@ impl Spans {
     fn get(&self, index: usize) -> Option<Option<(usize, usize)>> {
         let at = index.checked_mul(2)?;
         match self {
-            Self::Short { len, slots, .. } | Self::Scanned { len, slots, .. } => {
-                if at >= usize::from(*len) {
+            Self::Short { len, slots, .. } => {
+                if index >= usize::from(*len / 2) {
                     return None;
                 }
                 Some(
@@ -349,23 +338,27 @@ impl Spans {
     /// Convert engine offsets from a forward scanner's character position.
     /// A standalone short match tracks the ASCII prefix across repeated bounds.
     fn char_offset(&self, text: &str, byte: usize) -> usize {
-        if let Self::Short { ascii_prefix, .. } = self {
-            let seen = ascii_prefix.get();
+        if let Self::Short { len, position, .. } = self
+            && len & 1 == 0
+        {
+            let seen = position.get();
             if seen != u16::MAX {
                 if byte <= usize::from(seen) {
                     return byte;
                 }
                 if text.as_bytes()[usize::from(seen)..byte].is_ascii() {
-                    ascii_prefix.set(byte as u16);
+                    position.set(byte as u16);
                     return byte;
                 }
-                ascii_prefix.set(u16::MAX);
+                position.set(u16::MAX);
             }
         }
         let char_start = match self {
-            Self::Scanned { char_start, .. } => Some(usize::from(*char_start)),
-            Self::Long(slots) => slots.last().copied().flatten().map(NonMaxUsize::get),
-            Self::Short { .. } => None,
+            Self::Short { len, position, .. } if len & 1 != 0 => Some(usize::from(position.get())),
+            Self::Long(slots) if slots.len() & 1 != 0 => {
+                slots.last().copied().flatten().map(NonMaxUsize::get)
+            }
+            _ => None,
         };
         if let Some(index) = char_start {
             let (start, _) = self.get(0).flatten().expect("a match owns group zero");
@@ -907,13 +900,14 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
 pub(super) struct FindIter {
     pattern: crate::ObjectOwner,
     text: StrOwner,
-    offset: Option<usize>,
-    char_offset: usize,
+    // NonMaxUsize leaves room for the exhausted state in the byte offset.
+    position: Option<(NonMaxUsize, usize)>,
 }
 
 impl FindIter {
     pub(super) fn next(&mut self) -> Option<(super::OwnedWord, Option<super::OwnedWord>)> {
-        let offset = self.offset.take()?;
+        let (offset, char_offset) = self.position.take()?;
+        let offset = offset.get();
         // SAFETY: this cursor owns a distinct pattern; a search cannot reenter or mutate the cursor.
         unsafe {
             self.pattern.0.with_mut(|storage| {
@@ -927,12 +921,16 @@ impl FindIter {
                     &mut compiled.slots,
                 )?;
                 let start = compiled.slots[0].unwrap().get();
-                let char_start = self.char_offset + self.text[offset..start].chars().count();
+                let char_start = char_offset + self.text[offset..start].chars().count();
                 let spans = compiled.visible_spans(self.text.len(), Some(char_start));
-                let end = compiled.slots[1].unwrap().get();
-                debug_assert!(start < end);
-                self.char_offset = char_start + self.text[start..end].chars().count();
-                self.offset = (end < self.text.len()).then_some(end);
+                let end = compiled.slots[1].unwrap();
+                debug_assert!(start < end.get());
+                self.position = (end.get() < self.text.len()).then(|| {
+                    (
+                        end,
+                        char_start + self.text[start..end.get()].chars().count(),
+                    )
+                });
                 let found = handle(Storage::RegexMatch(Match {
                     pattern: crate::ObjectOwner::clone(&self.pattern),
                     text: StrOwner::clone(&self.text),
@@ -962,8 +960,7 @@ pub unsafe extern "C" fn imre_regex_finditer(
         pattern: unsafe { crate::ObjectOwner::acquire_word(pattern as usize) },
         // SAFETY: the original text is live through this acquisition.
         text: unsafe { crate::StrOwner::acquire_word(text as usize) },
-        offset: Some(0),
-        char_offset: 0,
+        position: Some((NonMaxUsize::new(0).unwrap(), 0)),
     }))
 }
 
