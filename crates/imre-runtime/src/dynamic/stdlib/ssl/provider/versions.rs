@@ -119,7 +119,11 @@ impl Context {
 
 pub(in crate::dynamic) fn set(ctx: &mut Vm, handle: Id, minimum: bool, arg: Id) -> Result<()> {
     let value = ctx.index_c_int(arg)?;
-    if super::super::context(ctx, handle)?.borrow().protocol.is_fixed() {
+    if super::super::context(ctx, handle)?
+        .borrow()
+        .protocol
+        .is_fixed()
+    {
         return Err(Error::new(
             "ValueError",
             "The context's protocol doesn't support modification of highest and lowest version.",
