@@ -33,6 +33,12 @@ def current():
     assert ahead.search(b"x\xffx", 1, 3).group("byte") == b"\xff"
     assert ahead.fullmatch(b"\xffx") is None
 
+    pair = re.compile(r"(?<=a)(aa)(?=b)")
+    assert pair.search("zaaab", 1, 5).span(1) == (2, 4)
+    assert pair.search("zaaab", 2, 5).span(1) == (2, 4)
+    assert pair.search("zaaab", 1, 4) is None
+    assert pair.match("zaaab", 1, 5) is None
+
     empty = re.compile(r"(?=é)|é")
     assert [m.span() for m in empty.finditer("xé")] == [(1, 1), (1, 2)]
     assert empty.split("xé") == ["x", "", ""]
