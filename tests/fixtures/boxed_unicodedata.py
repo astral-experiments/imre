@@ -1,6 +1,7 @@
 import sys
 import io
 import itertools
+import random
 import struct
 import unicodedata
 from unicodedata import normalize
@@ -15,7 +16,7 @@ def current():
     for ch in (Text("x"), "界", "！", "ｶ", "Ω", "\x00", "\ud800", "\udfff",
                "\U0001fa8a", "\U000323b0", "\U0002fffe"):
         print(unicodedata.east_asian_width(ch))
-    for value in (itertools.count(), itertools.chain(), io.BytesIO(), struct.Struct("I")):
+    for value in (itertools.count(), itertools.chain(), io.BytesIO(), struct.Struct("I"), random.Random(1)):
         try:
             unicodedata.east_asian_width(value)
         except TypeError as error:

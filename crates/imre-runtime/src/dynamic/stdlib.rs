@@ -184,13 +184,25 @@ pub(in crate::dynamic) fn diagnostic_type_name(
         if let Some(name) = ty.io_kind() {
             return format!("_io.{name}").into();
         }
-        if let Some(name) = ty.heap_type() {
+        // Only CPython extension types have these qualified tp_names. A private
+        // implementation tag can also identify a Python class like random.Random.
+        if let Some(
+            name @ (hashlib::md5::CLASS
+            | datetime::isocalendar::CLASS
+            | ssl::provider::bio::CLASS
+            | value::SSL_ERROR_TYPE),
+        ) = ty.heap_type()
+        {
             return name.into();
         }
-        // These native CPython iterator types are implemented in the bundled
-        // itertools module. Use the defining scope, not a user-set __module__.
+        // The bundled itertools module freezes the types that stand in for C types.
         if let Value::Class { scope, .. } = ty
             && ctx.scope_data(*scope).module == "itertools"
+            && ctx
+                .scope_data(*scope)
+                .class_namespace
+                .as_ref()
+                .is_some_and(|ns| ns.immutable_type)
         {
             return format!("itertools.{}", ctx.class_name(class)).into();
         }
