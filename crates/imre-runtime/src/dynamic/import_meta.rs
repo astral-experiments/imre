@@ -15,6 +15,13 @@ impl Context {
     pub(super) fn install_import_registry(&mut self) -> Result<()> {
         let core = self.module("_frozen_importlib")?;
         self.bootstrap_module = core;
+        if let Some(helper) = self.dict_named_item(self.bootstrap_globals, "_module_repr")
+            && let Value::Function { code, .. } = *self.heap.get(helper)
+            && let Value::Code(code) = self.heap.get_mut(code)
+            && let super::value::Body::Native(entry) = code.body
+        {
+            code.body = super::value::Body::FrozenModuleRepr(entry);
+        }
         let external = self.module("_frozen_importlib_external")?;
         let native = self.lookup_attr(core, "_NativeImporter")?;
         let bundled = self.lookup_attr(core, "_BundledImporter")?;

@@ -4071,7 +4071,7 @@ impl Context {
         let kind = match &definition.body {
             Body::Source(program) => program.kind,
             Body::PendingGenerator { .. } => FunctionKind::prelinked(definition),
-            Body::Native(_) => unreachable!("source function"),
+            Body::Native(_) | Body::FrozenModuleRepr(_) => unreachable!("source function"),
         };
         if kind != FunctionKind::Plain {
             let frame = self.new_generator(code, scope, owner);
@@ -4225,7 +4225,7 @@ impl Context {
                 format!("can't send non-None value to a just-started {kind}"),
             ));
         }
-        let next = if matches!(self.code_object(code).body, Body::Native(_)) {
+        let next = if self.code_object(code).body.is_native() {
             self.next_result(generator)?
         } else {
             stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
@@ -5285,7 +5285,7 @@ impl Context {
                 } else if thrown.is_none()
                     && code.kind != FunctionKind::Plain
                     && let Value::Generator { code, .. } = self.heap.get(iter)
-                    && !matches!(self.code_object(*code).body, Body::Native(_))
+                    && !self.code_object(*code).body.is_native()
                 {
                     return Ok(Some(Step::Advance(
                         iter,

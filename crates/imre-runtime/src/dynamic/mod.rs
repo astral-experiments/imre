@@ -1600,7 +1600,9 @@ impl Context {
                 // Delegated generators resume their children on the native stack.
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
                     match self.code_object(code).body {
-                        value::Body::Native(_) => self.next_generator_item(id),
+                        value::Body::Native(_) | value::Body::FrozenModuleRepr(_) => {
+                            self.next_generator_item(id)
+                        }
                         value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
                             self.resume_source(id, NONE)
                         }
@@ -2957,16 +2959,20 @@ impl Context {
         value
     }
     fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let entry = match &self.code_object(code).body {
-            value::Body::Native(entry) => *entry,
+        let (entry, module_repr) = match &self.code_object(code).body {
+            value::Body::Native(entry) => (*entry, false),
+            value::Body::FrozenModuleRepr(entry) => (*entry, true),
             value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
                 return self.call_source(code, scope, owner);
             }
         };
         self.heap.enter(scope, code, owner);
-        // SAFETY: a compiler-generated initializer or function uses this ABI and
-        // returns before this Context can move or outlive the native module.
-        let result = unsafe { entry(self, scope) };
+        let result = if module_repr && let Some(rendered) = self.plain_module_repr(scope) {
+            self.text(rendered)
+        } else {
+            // SAFETY: the compiler-generated body returns before this context can move.
+            unsafe { entry(self, scope) }
+        };
         if matches!(owner, FrameOwner::Module(_)) && self.pending.is_none() {
             self.register_decimal_class(code, entry, scope);
         }

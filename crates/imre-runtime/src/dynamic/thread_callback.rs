@@ -142,7 +142,7 @@ impl Callback {
         let meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         if let Some(receiver) = receiver {
-            if !matches!(code.body, Body::Native(_)) {
+            if !code.body.is_native() {
                 return Ok(None);
             }
             let Some(field) = meta["thread_bound_lock_field"].as_str() else {
@@ -183,7 +183,7 @@ impl Callback {
             && let Value::Cell(Some(id)) = *ctx.heap.get(*cell)
         {
             let entry = match &code.body {
-                Body::Native(entry) if meta["thread_captured_locks"].as_array().is_some_and(|names|
+                Body::Native(entry) | Body::FrozenModuleRepr(entry) if meta["thread_captured_locks"].as_array().is_some_and(|names|
                     matches!(names.as_slice(), [one] if one.as_str() == Some(name.as_str()))) =>
                     Entry::Native(*entry),
                 Body::Source(program) if ["posonly", "positional", "kwonly"].iter().all(|key|
@@ -234,7 +234,7 @@ impl Callback {
                 // Source calls without transferable operands still fall through to normal
                 // target admission. Keep the existing diagnostic for certified native code.
                 let unavailable = || match code.body {
-                    Body::Native(_) => Err(unsupported()),
+                    Body::Native(_) | Body::FrozenModuleRepr(_) => Err(unsupported()),
                     _ => Ok(None),
                 };
                 let [first, last] = names.as_slice() else {
@@ -263,7 +263,7 @@ impl Callback {
             }
             return Ok(None);
         }
-        let Body::Native(entry) = code.body else {
+        let (Body::Native(entry) | Body::FrozenModuleRepr(entry)) = code.body else {
             return Ok(None);
         };
         if closure != NONE

@@ -271,6 +271,70 @@ impl Context {
         self.meta_call(NONE, "_module_repr", vec![module])
     }
 
+    /// Render ordinary module fields when every lookup in the frozen helper is inert.
+    pub(super) fn plain_module_repr(&self, frame: Id) -> Option<String> {
+        // Attribute loads and the missing-file handler can themselves enter Python calls.
+        self.check_call_depth(4).ok()?;
+        let module = self.scope_name(frame, "module")?;
+        let Value::Module {
+            scope,
+            constructor: Some(class),
+            ..
+        } = *self.heap.get(module)
+        else {
+            return None;
+        };
+        let Value::Module {
+            scope: bootstrap_scope,
+            ..
+        } = *self.heap.get(self.bootstrap_module)
+        else {
+            return None;
+        };
+        if self.root_scope(frame) != bootstrap_scope
+            || self.builtins.get("module") != Some(&class)
+            || self.scope_name(scope, "__loader__") != Some(NONE)
+            || self.scope_name(scope, "__spec__") != Some(NONE)
+            || self.scope_name(scope, "__getattr__").is_some()
+        {
+            return None;
+        }
+        let builtins = self
+            .scope_data(bootstrap_scope)
+            .exec_globals
+            .map(|globals| globals.builtins)
+            .or(self.source_builtins)?;
+        let (Value::Dict(globals), Value::Dict(builtins)) = (
+            self.heap.get(self.bootstrap_globals),
+            self.heap.get(builtins),
+        ) else {
+            return None;
+        };
+        let original = |name| {
+            let value = match globals.text_item(&self.heap, name).continue_value()? {
+                Some(value) => value,
+                None => builtins.text_item(&self.heap, name).continue_value()??,
+            };
+            (self.builtins.get(name) == Some(&value)).then_some(())
+        };
+        original("getattr")?;
+        let Value::Str(name) = self.heap.get(self.scope_name(scope, "__name__")?) else {
+            return None;
+        };
+        if let Some(file) = self.scope_name(scope, "__file__") {
+            let Value::Str(file) = self.heap.get(file) else {
+                return None;
+            };
+            return Some(format!(
+                "<module {} from {}>",
+                super::string_repr(name),
+                super::string_repr(file)
+            ));
+        }
+        original("AttributeError")?;
+        Some(format!("<module {}>", super::string_repr(name)))
+    }
+
     /// Apply ModuleType's native slots, including explicit base initialization by subclasses.
     pub(super) fn module_method(
         &mut self,

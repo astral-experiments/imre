@@ -209,6 +209,29 @@ impl Index {
 }
 
 impl Entries {
+    /// Resolve a borrowed string against stored hashes, deferring a custom equality call to Python.
+    pub(in super::super) fn text_item(
+        &self,
+        heap: &Heap,
+        name: &str,
+    ) -> ControlFlow<(), Option<Id>> {
+        let Some(index) = &self.index else {
+            return ControlFlow::Break(());
+        };
+        let hash = normalized(crate::python_hash::text(name));
+        let mut probe = Probe::new(hash, index.slots.len());
+        while let Some((_, dense)) = index.next_candidate(self, &mut probe, hash, None) {
+            let (key, value) = self[dense];
+            let Value::Str(text) = heap.get(key) else {
+                return ControlFlow::Break(());
+            };
+            if text == name {
+                return ControlFlow::Continue(Some(value));
+            }
+        }
+        ControlFlow::Continue(None)
+    }
+
     /// Read an exact string key without invoking Python equality or creating an index.
     pub(in super::super) fn named_item(&self, heap: &Heap, name: &str) -> Option<Id> {
         let value = |&(key, item): &(Id, Id)| {

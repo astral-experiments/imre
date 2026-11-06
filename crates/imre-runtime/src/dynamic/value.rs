@@ -44,11 +44,20 @@ impl CodeObject {
 #[derive(Clone)]
 pub(super) enum Body {
     Native(Code),
+    /// Frozen importlib repr, retaining its Python implementation for observable lookups.
+    FrozenModuleRepr(Code),
     Source(std::rc::Rc<super::source_code::Program>),
     PendingGenerator {
         source: &'static str,
         body_line: u32,
     },
+}
+
+impl Body {
+    /// Whether the body enters through the compiler's native function ABI.
+    pub(super) fn is_native(&self) -> bool {
+        matches!(self, Self::Native(_) | Self::FrozenModuleRepr(_))
+    }
 }
 
 #[derive(Clone, Copy)]

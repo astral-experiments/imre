@@ -2281,7 +2281,7 @@ pub(super) fn call(
                 "_mark_generator expects a code object",
             ));
         };
-        if matches!(original.body, super::value::Body::Native(_)) {
+        if original.body.is_native() {
             return Err(Error::new(
                 "NotImplementedError",
                 "cannot mark this native generator function",
