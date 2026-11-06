@@ -2240,16 +2240,21 @@ impl Context {
         self.discard_temporaries(mark, None);
     }
 
-    /// Release discarded operands and root their result before any weak callbacks or finalizers run.
-    pub(super) fn discard_temporaries(&mut self, mark: usize, result: Option<Id>) {
-        let collect = if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
+    /// Release operand roots and report whether a weak callback or finalizer may become runnable.
+    fn release_operand_roots(&mut self, mark: usize) -> bool {
+        if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
             || self.can_skip_finalizer_sweep(mark)
         {
             self.heap.release_temporaries_since(mark);
             false
         } else {
             self.heap.discard_truth_operands(mark, self.modules)
-        };
+        }
+    }
+
+    /// Release discarded operands and root their result before any weak callbacks or finalizers run.
+    pub(super) fn discard_temporaries(&mut self, mark: usize, result: Option<Id>) {
+        let collect = self.release_operand_roots(mark);
         if let Some(result) = result {
             self.heap.keep(result);
         }
@@ -2260,7 +2265,7 @@ impl Context {
 
     /// Release temporary operands while their return value or raised exception stays live.
     pub(super) fn release_with_result(&mut self, mark: usize, result: Result<Id>) -> Result<Id> {
-        let collect = self.heap.discard_truth_operands(mark, self.modules);
+        let collect = self.release_operand_roots(mark);
         match &result {
             Ok(value) => self.heap.keep(*value),
             Err(error) => {
