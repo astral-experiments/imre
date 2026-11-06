@@ -57,13 +57,24 @@ def main():
             if old['id'] not in ids:
                 continue
             new = rows[old['id']]
-            stat_fields = args.stat and new['id'].endswith('.test_stat')
+            stat_case = args.stat and new['id'].endswith('.test_stat')
+            stat_bridge = (stat_case and new['classification'] == 'host-driven-native-operation'
+                           and old['classification'] != 'native-body-host-fixture')
             byte_errors = args.segments and new['id'].endswith('.test_bytes_exc_message')
             byte_bridge = (byte_errors and new['classification'] == 'host-driven-native-operation'
                            and old['classification'] != 'native-body-host-fixture')
-            driven = stat_fields or byte_bridge or args.samefile
+            driven = stat_bridge or byte_bridge or args.samefile
             body = 'cpython' if driven else 'imre'
             hooks = ['setUp'] if args.segments and new['id'].rsplit('.', 2)[1].startswith('Pure') else ['setUp', 'tearDown']
+            if stat_case and not stat_bridge:
+                expected = {
+                    'operation': 'native stat_result fields',
+                    'fixture': 'CPython module/class/instance hooks; native instance in child',
+                    'method_sha256': old['evidence']['method_sha256'],
+                    'opt_level': level, 'host_fixture_hooks': hooks,
+                }
+                if without_revision(new)['evidence'] != expected:
+                    raise ValueError(f'unverified native stat body: {new["id"]} at O{level}')
             if byte_errors and not byte_bridge:
                 # The pinned method has three unconditional assertRaisesRegex contexts and one
                 # constructor call in each (b, bs, sb). native_method checks its completion
@@ -79,7 +90,7 @@ def main():
             if (new['classification'] != ('host-driven-native-operation' if driven else 'native-body-host-fixture')
                     or new['roles'] != {'body': body, 'assertions': body, 'operation': 'imre',
                                         'fixture': 'cpython' if driven else 'mixed'}
-                    or stat_fields and (new['evidence'].get('calls') != FIELD_CALLS
+                    or stat_bridge and (new['evidence'].get('calls') != FIELD_CALLS
                                         or new['evidence'].get('host_assertions') != FIELD_ASSERTIONS)
                     or byte_bridge and (new['evidence'].get('native_calls') != BYTE_CALLS
                                         or new['evidence'].get('host_calls') != BYTE_ASSERTIONS)
