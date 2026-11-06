@@ -667,7 +667,7 @@ struct Emitter<'a, 'module> {
     forward_cursors: BTreeMap<usize, ForwardCursor>,
     uses_forward_cursors: bool,
     append_windows: BTreeMap<usize, String>,
-    reserved_append_window: Option<usize>,
+    reserved_append_window: Option<(usize, String)>,
     uses_append_windows: bool,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
@@ -1285,7 +1285,7 @@ impl Emitter<'_, '_> {
             if let ExprKind::Builtin(Builtin::ListAllI32 | Builtin::ListPresent, args) = &guard.kind
                 && let ExprKind::Local(slot) = args[0].kind
             {
-                if self.reserved_append_window == Some(slot)
+                if self.reserved_append_tail(slot).is_some()
                     || self.guarded_list_buffer(&args[0]).is_some()
                 {
                     continue;
@@ -2875,12 +2875,15 @@ impl Emitter<'_, '_> {
                         .cloned()
                         .map(|c| (slot, c))
                 });
-                let previous = self.reserved_append_window;
-                if let Some((slot, _)) = &reserve {
-                    self.reserved_append_window = Some(*slot);
+                let previous = self.reserved_append_window.clone();
+                let carried = reserve
+                    .as_ref()
+                    .map(|(slot, _)| (*slot, self.entry_alloca("i64")));
+                if carried.is_some() {
+                    self.reserved_append_window.clone_from(&carried);
                 }
                 let condition = self.expr(test);
-                self.reserved_append_window = previous;
+                self.reserved_append_window.clone_from(&previous);
                 let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
                 let mut guard = condition.operand;
                 let unknown = slots
@@ -2909,11 +2912,22 @@ impl Emitter<'_, '_> {
                     ));
                     let opened = self.instruction(format!("icmp ne i32 {success}, 0"));
                     self.branch(&opened, &yes_label, &no_label);
-                    self.reserved_append_window = Some(slot);
+                    self.reserved_append_window.clone_from(&carried);
                 } else {
                     self.branch(&guard, &yes_label, &no_label);
                 }
                 self.start(&yes_label);
+                if let Some((slot, tail)) = carried {
+                    // Opening the reserved window proves the list has an immediate tail.
+                    let window = self.append_window(slot);
+                    let cursor = self.instruction(format!(
+                        "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+                    ));
+                    let next = self.instruction(format!("load ptr, ptr {cursor}"));
+                    let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
+                    let word = self.instruction(format!("load i64, ptr {last}"));
+                    self.line(format!("store i64 {word}, ptr {tail}"));
+                }
                 let prior = self.guarded_integer_lists.len();
                 self.borrow_guarded_integer_lists(test);
                 for slot in &slots {
@@ -7860,7 +7874,7 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
-            Builtin::ListAllI32 if matches!(expressions[0].kind,ExprKind::Local(slot) if Some(slot)==self.reserved_append_window) => {
+            Builtin::ListAllI32 if matches!(expressions[0].kind,ExprKind::Local(slot) if self.reserved_append_tail(slot).is_some()) => {
                 Value {
                     ty: Type::Bool,
                     operand: "true".to_owned(),
@@ -8870,27 +8884,24 @@ impl Emitter<'_, '_> {
                 self.line(format!("call void @finish_list_appends(ptr {window})"));
                 none()
             }
-            Builtin::AppendInWindow(output) if self.reserved_append_window == Some(*output) => {
+            Builtin::AppendInWindow(output) if self.reserved_append_tail(*output).is_some() => {
                 let window = self.append_window(*output);
                 let cursor = self.instruction(format!(
                     "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
                 ));
                 let next = self.instruction(format!("load ptr, ptr {cursor}"));
                 self.line(format!("store i64 {}, ptr {next}", args[1].value.operand));
+                let tail = self.reserved_append_tail(*output).unwrap();
+                self.line(format!("store i64 {}, ptr {tail}", args[1].value.operand));
                 let after = self.instruction(format!("getelementptr i64, ptr {next}, i64 1"));
                 self.line(format!("store ptr {after}, ptr {cursor}"));
                 none()
             }
             Builtin::GetBoundedInAppendWindow { output, .. }
-                if self.reserved_append_window == Some(*output) =>
+                if self.reserved_append_tail(*output).is_some() =>
             {
-                let window = self.append_window(*output);
-                let cursor = self.instruction(format!(
-                    "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
-                ));
-                let next = self.instruction(format!("load ptr, ptr {cursor}"));
-                let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
-                let word = self.instruction(format!("load i64, ptr {last}"));
+                let tail = self.reserved_append_tail(*output).unwrap();
+                let word = self.instruction(format!("load i64, ptr {tail}"));
                 Value {
                     ty: Type::Int,
                     operand: word,
@@ -9682,6 +9693,12 @@ impl Emitter<'_, '_> {
         let next = self.instruction(format!("ptrtoint ptr {next} to i64"));
         let end = self.instruction(format!("ptrtoint ptr {end} to i64"));
         self.instruction(format!("sub i64 {end}, {next}"))
+    }
+
+    /// Returns the scalar holding the last initialized word of this exclusive window.
+    fn reserved_append_tail(&self, output: usize) -> Option<&str> {
+        let (root, tail) = self.reserved_append_window.as_ref()?;
+        (*root == output).then_some(tail)
     }
 
     /// Keeps one native append window per guarded destination in this activation.
