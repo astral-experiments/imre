@@ -2825,10 +2825,7 @@ impl VisitReferences for MarkQueue<'_> {
                         order.push(index, self.slots);
                     }
                 }
-                // A complete reachability trace needs no pending visit for an exact scalar.
-                MarkMode::SkipScalarLeaves if self.slot_shapes[id as usize].is_scalar_leaf() => {
-                    trace.set(END);
-                }
+                MarkMode::SkipScalarLeaves => self.mark_unmarked_strong(id as usize),
                 _ => {
                     trace.set(self.next);
                     self.next = id as usize;
@@ -2839,6 +2836,31 @@ impl VisitReferences for MarkQueue<'_> {
 }
 
 impl MarkQueue<'_> {
+    /// Record an exact scalar immediately or enqueue a container for a strong trace.
+    fn mark_unmarked_strong(&mut self, index: usize) {
+        let trace = &self.traces[index];
+        if self.slot_shapes[index].is_scalar_leaf() {
+            trace.set(END);
+        } else {
+            trace.set(self.next);
+            self.next = index;
+        }
+    }
+
+    /// Visit ordinary sequence edges directly during a complete reachability trace.
+    fn visit_strong_children(&mut self, value: &Value) {
+        let (Value::List(items) | Value::Tuple(items)) = value else {
+            value.children(self);
+            return;
+        };
+        for &child in items.iter().rev() {
+            let index = child as usize;
+            if self.traces[index].get() == UNMARKED {
+                self.mark_unmarked_strong(index);
+            }
+        }
+    }
+
     fn pop(&mut self) -> Option<Id> {
         let index = self.next;
         if index == END {
@@ -4314,7 +4336,7 @@ impl Heap {
         self.mark_prefetched(&mut pending);
         #[cfg(not(target_arch = "x86_64"))]
         while let Some(id) = pending.pop() {
-            self.get(id).children(&mut pending);
+            pending.visit_strong_children(self.get(id));
         }
     }
 
@@ -4358,7 +4380,7 @@ impl Heap {
                 }
             }
             for &id in &batch[..len] {
-                self.get(id).children(pending);
+                pending.visit_strong_children(self.get(id));
             }
         }
     }
