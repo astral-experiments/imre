@@ -97,4 +97,13 @@ def current():
     assert acquire()
     gc.collect()
     assert original() is None
+    def capture(**keywords):
+        return list(keywords.items())
+
+    bound = {str(i): i for i in range(64)}
+    for offset in (0, 32, 64):
+        supplied = {str(i + offset): -i for i in reversed(range(64))}
+        expected = bound.copy()
+        expected.update(supplied)
+        assert functools.partial(capture, **bound)(**supplied) == list(expected.items())
     print("partial state restored")

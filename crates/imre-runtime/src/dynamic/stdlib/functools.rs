@@ -23,6 +23,49 @@ pub(super) fn placeholder(ctx: &mut Context) -> Id {
     value
 }
 
+/// Group equal keyword names without copying their strings. The first position
+/// keeps its name and the last supplied value wins, as in repeated insertion.
+#[cold]
+pub(in crate::dynamic) fn merge_wide_keywords(
+    bound: &mut Vec<(String, Id)>,
+    supplied: Vec<(String, Id)>,
+) -> Result<()> {
+    let original = bound.len();
+    let mut discard = Vec::new();
+    discard
+        .try_reserve_exact(supplied.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    discard.resize(supplied.len(), false);
+    bound
+        .try_reserve(supplied.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    bound.extend(supplied);
+
+    // Group equal names by their original indices without copying keyword strings.
+    let mut positions = Vec::new();
+    positions
+        .try_reserve_exact(bound.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    positions.extend(0..bound.len());
+    positions.sort_unstable_by(|&a, &b| bound[a].0.cmp(&bound[b].0).then(a.cmp(&b)));
+    let mut first = positions[0];
+    for &index in &positions[1..] {
+        if bound[first].0 != bound[index].0 {
+            first = index;
+        } else if index >= original {
+            bound[first].1 = bound[index].1;
+            discard[index - original] = true;
+        }
+    }
+    let mut index = 0;
+    bound.retain(|_| {
+        let keep = index < original || !discard[index - original];
+        index += 1;
+        keep
+    });
+    Ok(())
+}
+
 /// Preserve the live fields consumed by `partial.__setstate__` without creating an instance dictionary.
 pub(super) fn partial_reduce(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let Value::Partial {

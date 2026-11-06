@@ -7557,11 +7557,15 @@ impl Context {
                 positional.extend(supplied);
                 let mut merged = self.keyword_args(keywords)?;
                 let bound_keyword_count = merged.len();
-                for (key, value) in kwargs {
-                    if let Some((_, previous)) = merged.iter_mut().find(|(k, _)| k == &key) {
-                        *previous = value;
-                    } else {
-                        merged.push((key, value));
+                if kwargs.len() >= 8 && merged.len().saturating_add(kwargs.len()) >= 64 {
+                    stdlib::functools::merge_wide_keywords(&mut merged, kwargs)?;
+                } else {
+                    for (key, value) in kwargs {
+                        if let Some((_, previous)) = merged.iter_mut().find(|(k, _)| k == &key) {
+                            *previous = value;
+                        } else {
+                            merged.push((key, value));
+                        }
                     }
                 }
                 if bound_keyword_count == 0 {
