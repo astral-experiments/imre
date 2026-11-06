@@ -137,3 +137,7 @@ print(text.translate({97: None, 0: None, 127: None}) == "Zb" * 256)
 print(("a" * 1024).translate({97: ""}) == "")
 print((("ab" * 256) + "Z").translate({97: "_", 90: "🛠"}) == "_b" * 256 + "🛠")
 print((("ab" * 256) + "é尾" + ("ab" * 32)).translate({97: "A", 233: None, 23614: "界"}) == ("Ab" * 256) + "界" + ("Ab" * 32))
+
+small = {1 << 130: "unused", 233: "E", 97: "A"}
+del small[97]
+print("éa界".translate(small))

@@ -1140,7 +1140,16 @@ impl Mapping {
         let Tables::Int(table) = &self.tables else {
             return None;
         };
-        let key = Int::small(i64::from(u32::from(ch))).unwrap().into_raw();
+        let ordinal = i64::from(u32::from(ch));
+        if table.entries.len() <= 4 {
+            return table
+                .entries
+                .iter()
+                .flatten()
+                .find(|entry| entry.key.0.to_i64() == Some(ordinal))
+                .map(|entry| (self.value_kind, entry.value));
+        }
+        let key = Int::small(ordinal).unwrap().into_raw();
         // SAFETY: every Unicode ordinal is a tagged immediate of this table's key type.
         unsafe { table.lookup(key) }.map(|entry| (self.value_kind, entry.value))
     }
