@@ -1,13 +1,48 @@
 import os
 import pkgutil
+import sys
 from importlib.util import find_spec
+from io import BytesIO
 from pkgutil import get_data, iter_modules, resolve_name
+
+
+def check_importer(directory):
+    namespace = {'os': 'linux'}
+    exec('from pkgutil import *', namespace)
+    assert namespace['os'] == 'linux'
+    assert namespace['get_importer'] is pkgutil.get_importer
+    assert namespace['read_code'] is pkgutil.read_code
+    finder = pkgutil.get_importer(directory)
+    assert finder is sys.path_importer_cache[directory]
+    assert finder.find_spec(__name__).origin == __file__
+    entry = os.path.join(directory, 'pkgutil-virtual-path')
+    assert pkgutil.get_importer(entry) is None
+    assert entry not in sys.path_importer_cache
+    calls = []
+
+    def hook(path):
+        if path != entry:
+            raise ImportError(path)
+        calls.append(path)
+        return finder
+
+    sys.path_hooks.insert(0, hook)
+    try:
+        assert pkgutil.get_importer(entry) is finder
+        assert pkgutil.get_importer(entry) is sys.path_importer_cache[entry]
+        assert calls == [entry]
+    finally:
+        sys.path_hooks.remove(hook)
+        sys.path_importer_cache.pop(entry, None)
 
 
 def current():
     assert resolve_name(__name__ + ':current') is current
     assert pkgutil.resolve_name(__name__ + '.current') is current
     root = os.path.dirname(__file__)
+    check_importer(root)
+    source = BytesIO(b'print(42)')
+    assert pkgutil.read_code(source) is None and source.tell() == 4
     class Directory:
         def __fspath__(self):
             return root
