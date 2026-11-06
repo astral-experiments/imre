@@ -134,6 +134,59 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
     }
 }
 
+/// Compute a logarithm from the stored integer, retaining its exponent on float overflow.
+pub(crate) fn int_logarithm(integer: &Int, log: fn(f64) -> f64) -> Result<f64> {
+    let n = integer.big();
+    if n.sign() != num_bigint::Sign::Plus {
+        return Err(Error::new(Kind::ValueError, "expected a positive input"));
+    }
+    if let Ok(x) = int_to_float(integer) {
+        return Ok(log(x));
+    }
+    // CPython's loghelper uses a rounded mantissa and a separate exponent
+    // on overflow. Keep one sticky bit so the cast rounds ties correctly.
+    let magnitude = n.magnitude();
+    let mut exponent = magnitude.bits();
+    let shift = exponent - u64::from(u64::BITS);
+    let high = (magnitude >> shift).to_u64().unwrap();
+    let sticky = magnitude.trailing_zeros().unwrap() < shift;
+    let mut mantissa = (high | u64::from(sticky)) as f64 * 2.0_f64.powi(-64);
+    if mantissa == 1.0 {
+        mantissa = 0.5;
+        exponent += 1;
+    }
+    Ok(log(mantissa) + log(2.0) * exponent as f64)
+}
+
+pub(crate) fn float_logarithm(x: f64, log: fn(f64) -> f64) -> Result<f64> {
+    if x <= 0.0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("expected a positive input, got {}", render(x)),
+        ));
+    }
+    Ok(log(x))
+}
+
+/// CPython returns the input NaN, including its signaling bit and payload.
+pub(crate) fn log10(x: f64) -> f64 {
+    if x.is_nan() { x } else { x.log10() }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_log10(value: f64) -> f64 {
+    finish(float_logarithm(value, log10), 0.0)
+}
+
+/// # Safety
+/// `value` is a rooted canonical Int handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_log10(value: usize) -> f64 {
+    // SAFETY: the caller keeps the integer rooted during the call.
+    let value = unsafe { Int::borrow(value) };
+    finish(int_logarithm(&value, log10), 0.0)
+}
+
 /// Validate the common domain of asin and acos, allowing NaN through to libm.
 fn asin_acos_argument(value: f64) -> Result<f64> {
     if value.abs() > 1.0 {

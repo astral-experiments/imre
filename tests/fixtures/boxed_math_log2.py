@@ -18,6 +18,9 @@ class Integer(int):
 
 
 def current():
+    assert math.log10(Integer(10**1000)) == 1000.0
+    assert math.log10(Real()) == math.log10(0.125)
+    assert math.log10(Index()) == math.log10(32)
     assert log2 is math.log2
     for exponent in (0, 1, 52, 53, 1023, 1024, 4096):
         assert log2(Integer(1 << exponent)) == exponent

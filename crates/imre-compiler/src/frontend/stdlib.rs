@@ -17,12 +17,17 @@ pub(super) enum ReverseSequence {
 
 /// Lower a unary math operation when the argument has a native numeric representation.
 pub(super) fn unary_float_builtin(builtin: Builtin, value: Expr) -> Option<Expr> {
-    if !matches!(value.ty, Type::Float | Type::Int | Type::Bool) {
-        return None;
-    }
+    let (builtin, conversion, ty) = match (builtin, value.ty) {
+        // A Python int can have a finite logarithm even when float(int) overflows.
+        (Builtin::FloatLog10, Type::Int | Type::Bool) => {
+            (Builtin::IntLog10, Builtin::Int, Type::Int)
+        }
+        (op, Type::Float | Type::Int | Type::Bool) => (op, Builtin::Float, Type::Float),
+        _ => return None,
+    };
     let number = Expr {
-        ty: Type::Float,
-        kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+        ty,
+        kind: ExprKind::Builtin(conversion, vec![value]),
     };
     Some(Expr {
         ty: Type::Float,
