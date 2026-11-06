@@ -1229,6 +1229,23 @@ ACCEPTED = {
         "stat/__init__.py": "invalid shadow package!\n",
         "stat/S_IRWXU.py": "invalid shadow member!\n",
     },
+    "boxed_frozen_shadow_override": {
+        "main.py": (
+            "import sys\nfrom _imp import _override_frozen_modules_for_tests as override\n"
+            "from importlib import import_module as load\n"
+            "override(1)\nimport __hello__ as frozen\nassert load('__hello__') is frozen\n"
+            "del sys.modules['__hello__']\noverride(-1)\n"
+            "try:\n    from __hello__ import initialized\n"
+            "except SyntaxError as error:\n"
+            "    path = getattr(error, 'filename', None) or str(error)\n"
+            "    assert '__hello__/__init__.py' in path.replace(chr(92), '/')\n"
+            "    print('invalid package')\n"
+            "else:\n    raise AssertionError('expected invalid package')\n"
+            "finally:\n    override(0)\n"
+        ),
+        "__hello__/__init__.py": "invalid shadow package!\n",
+        "__hello__.py": "initialized = 'local'\n",
+    },
     "email_address_parsers": {
         "main.py": (
             "import email\n"
