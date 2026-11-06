@@ -1151,7 +1151,10 @@ pub(super) fn call(
     #[cfg(unix)]
     if matches!(
         name,
-        "_signal.sigpending" | "_imre_signal.make_signals" | "_thread.interrupt_main"
+        "_signal.sigpending"
+            | "_signal.valid_signals"
+            | "_imre_signal.make_signals"
+            | "_thread.interrupt_main"
     ) {
         return signal::call(ctx, name, args, kwargs);
     }
