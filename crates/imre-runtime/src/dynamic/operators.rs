@@ -2313,8 +2313,9 @@ impl Context {
                             {
                                 push_frame(&mut work, Part::Value(file, true))?;
                                 push_frame(&mut work, Part::Text(" from "))?;
-                            } else if let Some(loader) =
-                                ctx.scope_name(*scope, "__loader__").filter(|&id| id != NONE)
+                            } else if let Some(loader) = ctx
+                                .scope_name(*scope, "__loader__")
+                                .filter(|&id| id != NONE)
                             {
                                 push_frame(&mut work, Part::Text(")"))?;
                                 push_frame(&mut work, Part::Value(loader, true))?;
