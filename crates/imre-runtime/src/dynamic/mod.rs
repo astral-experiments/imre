@@ -100,6 +100,7 @@ enum IteratorSlice<'a> {
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
     ReversedBytes(&'a [u8]),
+    Text(&'a str),
     ReversedText(&'a str),
     Codepoints(&'a [u32]),
     ReversedCodepoints(&'a [u32]),
@@ -111,7 +112,7 @@ impl IteratorSlice<'_> {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) | Self::ReversedBytes(bytes) => bytes.len(),
-            Self::ReversedText(text) => text.chars().count(),
+            Self::Text(text) | Self::ReversedText(text) => text.chars().count(),
             Self::Codepoints(points) | Self::ReversedCodepoints(points) => points.len(),
             Self::Array(array, offset) => array.len().saturating_sub(*offset),
         }
@@ -120,7 +121,7 @@ impl IteratorSlice<'_> {
     /// Test the byte boundary directly so each character step stays constant time.
     fn is_empty(&self) -> bool {
         match self {
-            Self::ReversedText(text) => text.is_empty(),
+            Self::Text(text) | Self::ReversedText(text) => text.is_empty(),
             _ => self.len() == 0,
         }
     }
@@ -1066,6 +1067,14 @@ impl Context {
             Value::Array(_) => (id, "array.arrayiterator"),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) | Value::NamedTuple { .. } => (id, "tuple_iterator"),
+            Value::Str(ref text) => {
+                let kind = if self.heap.is_ascii_str(id) || text.is_ascii() {
+                    "str_ascii_iterator"
+                } else {
+                    "str_iterator"
+                };
+                (id, kind)
+            }
             Value::SurrogateStr(_) => (id, "str_iterator"),
             Value::Range(ref range) => {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
@@ -1215,6 +1224,7 @@ impl Context {
             Value::SurrogateStr(points) => IteratorSlice::Codepoints(&points[*offset..]),
             Value::Array(array) => IteratorSlice::Array(array, *offset),
             Value::Str(text) if *reverse => IteratorSlice::ReversedText(&text[..*offset]),
+            Value::Str(text) => IteratorSlice::Text(&text[*offset..]),
             Value::Bytes(bytes) if *reverse => IteratorSlice::ReversedBytes(&bytes[..*offset]),
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
@@ -1660,6 +1670,10 @@ impl Context {
             IteratorSlice::ReversedCodepoints(points) => {
                 (self.text_codepoints(vec![points[points.len() - 1]]), 1)
             }
+            IteratorSlice::Text(text) => {
+                let width = text.chars().next().expect("nonempty iterator").len_utf8();
+                (self.text(crate::Str::new(&text[..width])), width)
+            }
             IteratorSlice::ReversedText(text) => {
                 let ch = text.chars().next_back().expect("nonempty iterator");
                 (self.text(ch.to_string()), ch.len_utf8())
@@ -1672,7 +1686,7 @@ impl Context {
             if *reverse {
                 *offset -= width;
             } else {
-                *offset += 1;
+                *offset += width;
             }
         }
         Ok(Some(item))
@@ -2002,6 +2016,7 @@ impl Context {
                     | IteratorSlice::ReversedBytes(_)
                     | IteratorSlice::Codepoints(_)
                     | IteratorSlice::ReversedCodepoints(_)
+                    | IteratorSlice::Text(_)
                     | IteratorSlice::ReversedText(_) => {
                         while let Some(item) = self.next_item(id)? {
                             values.push(item);
