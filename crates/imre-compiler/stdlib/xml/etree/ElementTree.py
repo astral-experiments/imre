@@ -393,8 +393,28 @@ class Element:
             tag = None
         if tag is None or self.tag == tag:
             yield self
-        for e in self._children:
-            yield from e.iter(tag)
+        # A custom tag may run Python code on every wildcard comparison.
+        if tag is not None and type(tag) is not str:
+            for child in self._children:
+                yield from child.iter(tag)
+            return
+
+        # Keep each parent and its live child iterator until the subtree ends.
+        stack = [(self, iter(self._children))]
+        while stack:
+            child = next(stack[-1][1], _ITER_END)
+            if child is _ITER_END:
+                stack.pop()
+                continue
+            if (type(child) is _Element_Py
+                    and _Element_Py.__getattribute__ is object.__getattribute__
+                    and vars(_Element_Py).get("iter") is _element_iter
+                    and "iter" not in vars(child)):
+                if tag is None or child.tag == tag:
+                    yield child
+                stack.append((child, iter(child._children)))
+            else:
+                yield from child.iter(tag)
 
     def itertext(self):
         """Create text iterator.
@@ -414,6 +434,10 @@ class Element:
             t = e.tail
             if t:
                 yield t
+
+
+_element_iter = Element.iter
+_ITER_END = object()
 
 
 def SubElement(parent, tag, attrib={}, **extra):
