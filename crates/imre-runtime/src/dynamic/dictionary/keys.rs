@@ -4,7 +4,7 @@ use std::ops::ControlFlow;
 
 use smallvec::SmallVec;
 
-use super::Entries;
+use super::{Entries, remove_from_column};
 use crate::dynamic::value::{Heap, NONE};
 use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 
@@ -26,11 +26,16 @@ enum HashFrame {
 #[derive(Clone)]
 pub(super) struct Index {
     slots: Vec<usize>,
-    hashes: Vec<i64>,
+    pub(super) hashes: Vec<i64>,
     generation: usize,
 }
 
 impl Index {
+    /// Maximum insertion position before rebuilding this probe table.
+    pub(super) fn usable(&self) -> usize {
+        self.slots.len() * 2 / 3
+    }
+
     pub(super) fn buffer_bytes(&self) -> usize {
         self.slots.capacity() * size_of::<usize>() + self.hashes.capacity() * size_of::<i64>()
     }
@@ -141,44 +146,48 @@ impl Index {
                 return None;
             }
             if position != DUMMY {
-                let dense = entries.dense(position).expect("live dictionary slot");
-                if self.hashes[dense] == hash || key == Some(entries[dense].0) {
-                    return Some((position, dense));
+                let entry = entries.slot_entry(position);
+                if self.hashes[entry] == hash || key == Some(entries.values[entry].0) {
+                    return Some((position, entry - entries.first));
                 }
             }
         }
         unreachable!("the dictionary probe always yields a bucket")
     }
 
-    fn new(hashes: Vec<i64>, positions: Option<&[usize]>, size: usize) -> Result<Self> {
+    fn new(
+        hashes: Vec<i64>,
+        positions: Option<&[usize]>,
+        first: usize,
+        size: usize,
+    ) -> Result<Self> {
         let mut index = Self {
             slots: Vec::new(),
             hashes,
             generation: 0,
         };
-        index.rebuild(positions, size)?;
+        index.rebuild(positions, first, 0, size)?;
         Ok(index)
     }
 
     /// Reserve the slots before replacing the probe layout so a refusal preserves lookups.
-    fn rebuild(&mut self, positions: Option<&[usize]>, size: usize) -> Result<()> {
+    fn rebuild(
+        &mut self,
+        positions: Option<&[usize]>,
+        first: usize,
+        offset: usize,
+        size: usize,
+    ) -> Result<()> {
         self.slots
             .try_reserve_exact(size.saturating_sub(self.slots.len()))
             .map_err(|_| crate::Error::memory_error())?;
         self.slots.clear();
         self.slots.resize(size, EMPTY);
-        for dense in 0..self.hashes.len() {
-            let position = positions.map_or(dense, |p| p[dense]);
-            self.place(self.hashes[dense], position);
+        for dense in 0..self.hashes.len() - offset {
+            let position = positions.map_or(first + dense, |p| p[dense]);
+            self.place(self.hashes[offset + dense], position);
         }
         Ok(())
-    }
-
-    /// Reserve the next hash before any insertion position becomes visible.
-    pub(super) fn reserve_hash(&mut self) -> Result<()> {
-        self.hashes
-            .try_reserve(1)
-            .map_err(|_| crate::Error::memory_error().into())
     }
 
     fn place(&mut self, hash: i64, position: usize) {
@@ -188,8 +197,8 @@ impl Index {
         self.slots[slot] = position;
     }
 
-    pub(super) fn compact(&mut self, size: usize) -> Result<()> {
-        self.rebuild(None, size)?;
+    pub(super) fn compact(&mut self, first: usize, size: usize) -> Result<()> {
+        self.rebuild(None, 0, first, size)?;
         self.generation += 1;
         Ok(())
     }
@@ -199,8 +208,14 @@ impl Index {
         self.hashes.push(hash);
     }
 
-    pub(super) fn remove(&mut self, dense: usize, position: usize) {
-        let hash = self.hashes.remove(dense);
+    pub(super) fn remove(
+        &mut self,
+        first: usize,
+        dense: usize,
+        position: usize,
+        shift_prefix: bool,
+    ) {
+        let hash = remove_from_column(&mut self.hashes, first, dense, shift_prefix);
         let bucket = Probe::new(hash, self.slots.len())
             .find(|&i| self.slots[i] == position)
             .expect("stored dictionary key");
@@ -224,15 +239,43 @@ impl Entries {
                 return None;
             }
             if position != DUMMY {
-                let dense = self.dense(position).expect("live dictionary slot");
-                if index.hashes[dense] == hash
-                    && let Some(item) = value(&self[dense])
+                let entry = self.slot_entry(position);
+                if index.hashes[entry] == hash
+                    && let Some(item) = value(&self.values[entry])
                 {
                     return Some(item);
                 }
             }
         }
         unreachable!("the dictionary probe always yields a bucket")
+    }
+
+    /// Finish a first-bucket hit or miss without rooting keys for Python callbacks.
+    fn first_probe(&self, heap: &Heap, key: Id, hash: i64) -> ControlFlow<Option<usize>> {
+        let Some(index) = &self.index else {
+            return ControlFlow::Continue(());
+        };
+        let position = index.slots[hash as usize & (index.slots.len() - 1)];
+        if position == EMPTY {
+            return ControlFlow::Break(None);
+        }
+        if position != DUMMY {
+            let entry = self.slot_entry(position);
+            let resident = self.values[entry].0;
+            if resident == key
+                || index.hashes[entry] == hash
+                    && match (heap.get(resident), heap.get(key)) {
+                        (Value::Int(left), Value::Int(right)) => {
+                            matches!((left.as_small(), right.as_small()), (Some(left), Some(right)) if left == right)
+                        }
+                        (Value::Str(left), Value::Str(right)) => left == right,
+                        _ => false,
+                    }
+            {
+                return ControlFlow::Break(Some(entry - self.first));
+            }
+        }
+        ControlFlow::Continue(())
     }
 
     /// Probe an unboxed ordinal. Defer before a resident key could run Python equality.
@@ -272,16 +315,16 @@ impl Entries {
 
     /// Remove all pairs and invalidate lookups suspended in a key comparison.
     pub(in super::super) fn clear(&mut self) -> Vec<(Id, Id)> {
+        self.compact_prefix();
         let old = std::mem::take(self);
         self.order = old.order;
         if let Some(order) = &mut self.order {
             order.by_dense.clear();
         }
         if let Some(index) = old.index {
-            let size = (self.usable + 1).next_power_of_two();
             let mut index = index;
             index.hashes.clear();
-            index.slots.truncate(size);
+            index.slots.truncate(8);
             index.slots.fill(EMPTY);
             index.generation += 1;
             self.index = Some(index);
@@ -301,33 +344,62 @@ impl Entries {
         }
 
         Ok(Self {
-            values: copy(&self.values)?,
-            positions: self.positions.as_deref().map(copy).transpose()?,
+            values: copy(self)?,
+            positions: self
+                .positions
+                .as_ref()
+                .map(|p| copy(&p[self.first..]))
+                .transpose()?,
             index: match &self.index {
                 Some(index) => Some(Index {
                     slots: copy(&index.slots)?,
-                    hashes: copy(&index.hashes)?,
+                    hashes: copy(&index.hashes[self.first..])?,
                     generation: index.generation,
                 }),
                 None => None,
             },
             order: None,
             next: self.next,
-            usable: self.usable,
+            first: 0,
         })
+    }
+
+    /// Resolve a live probe-table position directly to its physical column entry.
+    fn slot_entry(&self, position: usize) -> usize {
+        match &self.positions {
+            Some(positions) => {
+                self.first
+                    + positions[self.first..]
+                        .binary_search(&position)
+                        .expect("live dictionary slot")
+            }
+            None => self.values.len() - (self.next - position),
+        }
     }
 
     fn dense(&self, position: usize) -> Option<usize> {
         if let Some(positions) = &self.positions {
-            positions.binary_search(&position).ok()
+            positions[self.first..].binary_search(&position).ok()
         } else {
-            (position < self.values.len()).then_some(position)
+            let dense = position.wrapping_sub(self.contiguous_start());
+            (dense < self.len()).then_some(dense)
         }
     }
 
     pub(in super::super) fn stored_hash(&self, dense: usize) -> Option<i64> {
-        self.index.as_ref().map(|i| i.hashes[dense])
+        self.index.as_ref().map(|i| i.hashes[self.first + dense])
     }
+}
+
+/// Exact integers, booleans and strings hash without dispatching to Python.
+fn scalar_key_hash(value: &Value) -> Option<i64> {
+    let hash = match value {
+        Value::Int(value) => integer_hash(value),
+        Value::Bool(value) => i64::from(*value),
+        Value::Str(value) => crate::python_hash::text(value),
+        _ => return None,
+    };
+    Some(normalized(hash))
 }
 
 // Python reserves -1 as the error return from a hash slot.
@@ -585,6 +657,9 @@ impl Context {
         key: Id,
         parents: &mut SmallVec<[HashFrame; 2]>,
     ) -> Result<ControlFlow<i64, Id>> {
+        if let Some(hash) = scalar_key_hash(self.heap.get(key)) {
+            return Ok(ControlFlow::Break(hash));
+        }
         if let Value::MappingProxy(mapping) = *self.heap.get(key) {
             return Ok(ControlFlow::Continue(mapping));
         }
@@ -753,8 +828,6 @@ impl Context {
             self.cache_key_hash(key, hash)?
         } else {
             match self.heap.get(key) {
-                Value::Int(n) => integer_hash(n),
-                Value::Bool(b) => i64::from(*b),
                 Value::Float(f) => float_hash(*f, key),
                 Value::Complex(z) => normalized(float_hash(z.real, key))
                     .wrapping_add(IMAG.wrapping_mul(normalized(float_hash(z.imag, key)))),
@@ -769,7 +842,6 @@ impl Context {
                 Value::Native(name) => {
                     crate::python_hash::text(crate::dynamic::builtins::native_implementation(name))
                 }
-                Value::Str(text) => crate::python_hash::text(text),
                 Value::SurrogateStr(points) => {
                     crate::python_hash::codepoints(points.iter().copied())
                 }
@@ -1093,8 +1165,16 @@ impl Context {
             hashes.push(self.dictionary_hash(key)?);
         }
         let entries = self.stored_entries_mut(dict);
-        let size = (entries.usable + 1).next_power_of_two();
-        entries.index = Some(Index::new(hashes, entries.positions.as_deref(), size)?);
+        entries.compact_prefix();
+        let size = (entries.next + entries.next.div_ceil(2))
+            .max(8)
+            .next_power_of_two();
+        entries.index = Some(Index::new(
+            hashes,
+            entries.positions.as_deref(),
+            entries.contiguous_start(),
+            size,
+        )?);
         Ok(())
     }
 
@@ -1104,6 +1184,13 @@ impl Context {
         key: Id,
         known_hash: Option<i64>,
     ) -> Result<(i64, Option<usize>)> {
+        let known_hash = known_hash.or_else(|| scalar_key_hash(self.heap.get(key)));
+        if let Some(hash) = known_hash
+            && let ControlFlow::Break(found) =
+                self.stored_entries(dict).first_probe(&self.heap, key, hash)
+        {
+            return Ok((hash, found));
+        }
         let roots = self.heap.temporary_mark();
         self.heap.keep(dict);
         self.heap.keep(key);
