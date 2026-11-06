@@ -1844,30 +1844,38 @@ fn check_handler_count(tokens: &Tokens) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Rejects ambiguous indentation while preserving whitespace inside string tokens.
+/// Enforce the source-file indentation policy at the beginning of each logical statement.
 pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
-    let mut offset = 0;
-    for (line_number, line) in source.split_inclusive('\n').enumerate() {
-        for (index, character) in line.char_indices() {
-            if !matches!(character, ' ' | '\t' | '\x0c') {
-                break;
+    use TokenKind::*;
+    let mut statement_start = true;
+    let mut formatted_strings = 0;
+    for token in tokens {
+        match token.kind() {
+            Newline => {
+                statement_start = true;
+                continue;
             }
-            if character != ' ' {
-                let position = TextSize::try_from(offset + index)
-                    .map_err(|_| "source exceeds the supported size")?;
-                let in_string = tokens.at_offset(position).any(|token| {
-                    matches!(token.kind(), TokenKind::String | TokenKind::FStringMiddle)
-                        && token.range().contains(position)
-                });
-                if !in_string {
-                    return Err(format!(
-                        "line {}: indentation must use spaces, not tabs or form feeds",
-                        line_number + 1
-                    ));
-                }
+            NonLogicalNewline => {
+                // Replacement expressions in formatted strings also check physical indentation.
+                statement_start |= formatted_strings > 0;
+                continue;
             }
+            Indent | Dedent | Comment | EndOfFile => continue,
+            FStringStart | TStringStart => formatted_strings += 1,
+            FStringEnd | TStringEnd => formatted_strings -= 1,
+            _ => {}
         }
-        offset += line.len();
+        if statement_start {
+            let prefix = &source[..usize::from(token.start())];
+            let indentation = prefix.rsplit_once('\n').map_or(prefix, |(_, line)| line);
+            if indentation.contains(['\t', '\x0c']) {
+                let line = prefix.lines().count();
+                return Err(format!(
+                    "line {line}: indentation must use spaces, not tabs or form feeds"
+                ));
+            }
+            statement_start = false;
+        }
     }
     Ok(())
 }
