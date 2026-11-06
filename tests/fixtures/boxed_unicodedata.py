@@ -1,4 +1,7 @@
 import sys
+import io
+import itertools
+import struct
 import unicodedata
 from unicodedata import normalize
 
@@ -8,6 +11,17 @@ class Text(str):
 
 
 def current():
+    assert unicodedata.unidata_version == "16.0.0"
+    for ch in (Text("x"), "界", "！", "ｶ", "Ω", "\x00", "\ud800", "\udfff",
+               "\U0001fa8a", "\U000323b0", "\U0002fffe"):
+        print(unicodedata.east_asian_width(ch))
+    for value in (itertools.count(), itertools.chain(), io.BytesIO(), struct.Struct("I")):
+        try:
+            unicodedata.east_asian_width(value)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("non-character accepted")
     assert sys.maxunicode == 0x10FFFF
     for value in (Text("\u01FA"), "\u2100", "\uAC00", "\uAC01", "\ud800", chr(sys.maxunicode)):
         print(unicodedata.decomposition(value))

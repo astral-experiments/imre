@@ -60,6 +60,57 @@ pub(super) fn slice_equality(
 
 /// Constructs a fixed signature slot for the shared argument binder.
 impl Checker<'_> {
+    pub(super) fn unicode_east_asian_width(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let ([arg], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return self.one_positional_error(
+                call,
+                "unicodedata.east_asian_width",
+                "chr",
+                Type::Str,
+            );
+        };
+        let value = Self::string_value(self.evaluated_argument(arg)?);
+        self.graph.checked_overload(self.module, call.range());
+        if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Text(TextOperation::EastAsianWidth), vec![value]),
+            });
+        }
+        let actual = match value.ty {
+            Type::None => "None",
+            Type::BuiltinClass => "type",
+            Type::BytesIO => "_io.BytesIO",
+            Type::StringIO => "_io.StringIO",
+            Type::Deque(_) => "collections.deque",
+            Type::RegexPattern => "re.Pattern",
+            Type::RegexMatch => "re.Match",
+            Type::Calendar(ir::CalendarType::Date) => "datetime.date",
+            Type::Calendar(ir::CalendarType::DateTime) => "datetime.datetime",
+            Type::Calendar(ir::CalendarType::Delta) => "datetime.timedelta",
+            Type::Calendar(ir::CalendarType::Zone) => "datetime.timezone",
+            Type::VarTuple(_) => "tuple",
+            ty => self.exact_argument_type_name(ty).ok_or_else(|| {
+                error(
+                    self.source,
+                    arg,
+                    "east_asian_width requires str or an exact argument type",
+                )
+            })?,
+        };
+        let actual = &actual[..actual.floor_char_boundary(50)];
+        let message =
+            format!("east_asian_width() argument must be a unicode character, not {actual}");
+        Ok(calls::type_error(Type::Str, vec![value], message))
+    }
+
     pub(super) fn unicode_normalize(
         &mut self,
         call: &ast::ExprCall,

@@ -179,11 +179,24 @@ pub(in crate::dynamic) fn diagnostic_type_name(
     if let Value::Calendar { value, .. } = ctx.heap.get(value) {
         return format!("datetime.{}", value.class()).into();
     }
-    ctx.heap
-        .get(value)
-        .instance_class()
-        .map(|class| ctx.class_name(class))
-        .or_else(|| ctx.builtin_type_name(value))
+    if let Some(class) = ctx.heap.get(value).instance_class() {
+        let ty = ctx.heap.get(class);
+        if let Some(name) = ty.io_kind() {
+            return format!("_io.{name}").into();
+        }
+        if let Some(name) = ty.heap_type() {
+            return name.into();
+        }
+        // These native CPython iterator types are implemented in the bundled
+        // itertools module. Use the defining scope, not a user-set __module__.
+        if let Value::Class { scope, .. } = ty
+            && ctx.scope_data(*scope).module == "itertools"
+        {
+            return format!("itertools.{}", ctx.class_name(class)).into();
+        }
+        return ctx.class_name(class).into();
+    }
+    ctx.builtin_type_name(value)
         .unwrap_or_else(|| ctx.type_name(value))
         .into()
 }
@@ -509,7 +522,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "gc",
             "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked",
         ) => ctx.builtin(&format!("gc.{name}")),
-        ("unicodedata", "normalize" | "decomposition") => {
+        ("unicodedata", "unidata_version") => ctx.text(imre_ast::UNICODE_DATA_VERSION),
+        ("unicodedata", "normalize" | "decomposition" | "east_asian_width") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
         ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
@@ -1840,6 +1854,9 @@ pub(super) fn call(
     }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
+    }
+    if name == "unicodedata.east_asian_width" {
+        return unicodedata::east_asian_width(ctx, args, !kwargs.is_empty());
     }
     if name == "unicodedata.decomposition" {
         return unicodedata::decomposition(ctx, args, !kwargs.is_empty());
