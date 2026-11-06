@@ -37,6 +37,7 @@ def check():
     second.start()
     try:
         assert z_started.acquire(timeout=3)
+        assert second.native_id != threading.get_native_id()
         second.join(0.01)
         assert second.is_alive()
     finally:
@@ -45,4 +46,9 @@ def check():
     assert not second.is_alive() and a_finish.locked()
 
 
-check()
+if __name__ == "__main__":
+    check()
+    namespace = {"__name__": "loaded_worker"}
+    with open(__file__, encoding="utf-8") as source:
+        exec(source.read(), namespace)
+    namespace["check"]()

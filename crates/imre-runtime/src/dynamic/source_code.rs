@@ -253,7 +253,11 @@ struct Definition {
 
 enum DefinitionKind {
     TypeAlias(Option<Box<ast::TypeParams>>),
-    Function(Box<ast::Parameters>, Option<Box<ast::TypeParams>>),
+    Function {
+        parameters: Box<ast::Parameters>,
+        type_params: Option<Box<ast::TypeParams>>,
+        captured_locks: Option<Box<[String]>>,
+    },
     Class {
         arguments: Option<Box<ast::Arguments>>,
         parameterized: bool,
@@ -265,7 +269,9 @@ enum DefinitionKind {
 impl DefinitionKind {
     fn type_params(&self) -> Option<&ast::TypeParams> {
         match self {
-            Self::Function(_, params) | Self::TypeAlias(params) => params.as_deref(),
+            Self::Function { type_params, .. } | Self::TypeAlias(type_params) => {
+                type_params.as_deref()
+            }
             Self::ClassParameters(params) => Some(params),
             Self::Class { .. } => None,
         }
@@ -1426,7 +1432,7 @@ impl Program {
                         strings.visit_expr(&decorator.expression);
                     }
                     match &definition.kind {
-                        DefinitionKind::Function(parameters, _) => {
+                        DefinitionKind::Function { parameters, .. } => {
                             strings.visit_parameters(parameters)
                         }
                         DefinitionKind::Class {
@@ -1555,7 +1561,11 @@ impl Program {
                         binding: name.to_owned(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::Function(params, None),
+                        kind: DefinitionKind::Function {
+                            parameters: params,
+                            type_params: None,
+                            captured_locks: None,
+                        },
                         annotate: None,
                     },
                 ),
@@ -2435,6 +2445,13 @@ impl Program {
                         s.type_params.is_some(),
                         self.class_attributes.is_some() && s.type_params.is_none(),
                     );
+                    let captured_locks =
+                        if s.is_async || s.returns.is_some() || s.type_params.is_some() {
+                            None
+                        } else {
+                            imre_ast::captured_thread_locks(&s.body, &s.parameters)
+                                .map(|names| names.into_iter().map(str::to_owned).collect())
+                        };
                     let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
                         child.kind = if imre_ast::code_flags::is_generator(&s.body) {
@@ -2459,7 +2476,11 @@ impl Program {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::Function(s.parameters, s.type_params),
+                        kind: DefinitionKind::Function {
+                            parameters: s.parameters,
+                            type_params: s.type_params,
+                            captured_locks,
+                        },
                         annotate,
                     })
                 }
@@ -5498,8 +5519,15 @@ impl Context {
                     "postponed_annotations": child.postponed_annotations,
                 })
             }
-            DefinitionKind::Function(p, params) => {
+            DefinitionKind::Function {
+                parameters: p,
+                type_params: params,
+                captured_locks,
+            } => {
                 let mut sig = serde_json::json!({"posonly":[],"positional":[],"kwonly":[],"varargs":p.vararg.as_ref().map(|x|x.name.as_str()),"kwargs":p.kwarg.as_ref().map(|x|x.name.as_str())});
+                if let Some(locks) = captured_locks {
+                    sig["thread_captured_locks"] = serde_json::json!(locks);
+                }
                 for (group, args) in [
                     ("posonly", &p.posonlyargs),
                     ("positional", &p.args),

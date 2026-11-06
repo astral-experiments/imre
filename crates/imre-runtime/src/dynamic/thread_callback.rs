@@ -207,9 +207,6 @@ impl Callback {
             callback.receiver = Some((copy_label(name)?, receiver));
             return Ok(Some((Operation::Python(Box::new(callback)), roots)));
         }
-        let Body::Native(entry) = code.body else {
-            return Ok(None);
-        };
         if !code.freevars.is_empty() {
             if high_level
                 && pos.is_empty()
@@ -234,17 +231,24 @@ impl Callback {
                     };
                     Some((id, lock))
                 };
-                let [first, last] = names.as_slice() else {
-                    return Err(unsupported());
+                // Source calls without transferable operands still fall through to normal
+                // target admission. Keep the existing diagnostic for certified native code.
+                let unavailable = || match code.body {
+                    Body::Native(_) => Err(unsupported()),
+                    _ => Ok(None),
                 };
-                let (_, release) = operand(first).ok_or_else(unsupported)?;
-                let (id, lock) = operand(last).ok_or_else(unsupported)?;
+                let [first, last] = names.as_slice() else {
+                    return unavailable();
+                };
+                let (Some((_, release)), Some((id, lock))) = (operand(first), operand(last)) else {
+                    return unavailable();
+                };
                 // No other native owner can race this held release before startup completes.
                 if Arc::strong_count(release) != 1
                     || !release.locked()
                     || Arc::ptr_eq(release, lock)
                 {
-                    return Err(unsupported());
+                    return unavailable();
                 }
                 // The prefix has been consumed when the parent resumes. Only the final
                 // receiver must outlive a subsequent replacement of its closure cell.
@@ -259,6 +263,9 @@ impl Callback {
             }
             return Ok(None);
         }
+        let Body::Native(entry) = code.body else {
+            return Ok(None);
+        };
         if closure != NONE
             && !matches!(ctx.heap.get(closure), Value::Tuple(items) if items.is_empty())
         {
