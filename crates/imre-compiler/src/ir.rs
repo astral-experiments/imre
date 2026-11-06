@@ -1997,6 +1997,7 @@ pub(crate) enum TextOperation {
     ZFill {
         copy: bool,
     },
+    EastAsianWidth,
     Normalize,
     Lower,
     Upper,

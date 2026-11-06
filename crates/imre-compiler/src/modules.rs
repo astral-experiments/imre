@@ -1019,6 +1019,7 @@ pub(crate) enum Intrinsic {
     Sha1,
     Sha256,
     NamedHash(&'static str),
+    UnicodeEastAsianWidth,
     UnicodeNormalize {
         check: bool,
     },
@@ -2086,6 +2087,10 @@ impl IntrinsicModule {
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
+            (Self::UnicodeData, "unidata_version") => {
+                Intrinsic::StringConstant(imre_ast::UNICODE_DATA_VERSION)
+            }
+            (Self::UnicodeData, "east_asian_width") => Intrinsic::UnicodeEastAsianWidth,
             (Self::UnicodeData, "decomposition") => {
                 Intrinsic::ObjectRuntimeExport("unicodedata.decomposition")
             }
