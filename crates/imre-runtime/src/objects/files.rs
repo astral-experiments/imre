@@ -1315,6 +1315,21 @@ mod tests {
         take_error(Kind::OSError);
     }
 
+    #[test]
+    fn failed_sized_read_keeps_the_temporary_file_position() {
+        let directory = Directory::new();
+        let mut file = FileState::temporary(directory.0.to_str()).ok().unwrap();
+        file.write_bytes(b"abc").ok().unwrap();
+        file.seek(SeekFrom::Start(0)).ok().unwrap();
+        assert_eq!(file.read_bytes(Some(1)).ok().unwrap(), b"a");
+        file.read_bytes(Some(crate::MAX_BYTES_LEN))
+            .unwrap_err()
+            .raise();
+        take_error(Kind::MemoryError);
+        assert_eq!(file.tell().ok().unwrap(), 1);
+        assert_eq!(file.read_bytes(None).ok().unwrap(), b"bc");
+    }
+
     struct Directory(PathBuf);
 
     #[test]

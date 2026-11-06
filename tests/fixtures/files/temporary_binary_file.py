@@ -17,6 +17,19 @@ with TemporaryDirectory() as directory:
         print(stream.seek(0))
         print(stream.read())
 
+with TemporaryFile() as stream:
+    stream.write(b"abc")
+    stream.seek(0)
+    assert stream.read(1) == b"a"
+    try:
+        stream.read((1 << 63) - 1)
+    except OverflowError as exc:
+        assert str(exc) == "byte string is too large"
+    else:
+        raise AssertionError("oversized read succeeded")
+    assert stream.tell() == 1
+    assert stream.read() == b"bc"
+
 stream = TemporaryFile()
 stream.write(b"x" * 200000)
 print(stream.tell())
