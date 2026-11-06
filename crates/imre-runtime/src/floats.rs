@@ -100,13 +100,10 @@ pub unsafe extern "C" fn imre_int_float(value: usize) -> f64 {
     crate::finish(int_to_float(&value), 0.0)
 }
 
-pub(super) fn int_to_float(value: &Int) -> Result<f64> {
-    if let Some(value) = value.as_small() {
-        return Ok(value as f64);
-    }
-    let value = value.big();
-    let mut digits = value.magnitude().iter_u64_digits().rev();
-    let magnitude = match digits.len() {
+/// Round an unsigned integer magnitude to binary64, returning infinity on overflow.
+fn magnitude_to_float(magnitude: &num_bigint::BigUint) -> f64 {
+    let mut digits = magnitude.iter_u64_digits().rev();
+    match digits.len() {
         0 | 1 => digits.next().unwrap_or(0) as f64,
         2..=16 => {
             let high = u128::from(digits.next().unwrap());
@@ -119,7 +116,15 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
         }
         // More than 1024 magnitude bits always exceed the finite binary64 range.
         _ => f64::INFINITY,
-    };
+    }
+}
+
+pub(super) fn int_to_float(value: &Int) -> Result<f64> {
+    if let Some(value) = value.as_small() {
+        return Ok(value as f64);
+    }
+    let value = value.big();
+    let magnitude = magnitude_to_float(value.magnitude());
     if magnitude.is_infinite() {
         Err(Error::new(
             Kind::OverflowError,
@@ -136,20 +141,33 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
 
 /// Compute a logarithm from the stored integer, retaining its exponent on float overflow.
 pub(crate) fn int_logarithm(integer: &Int, log: fn(f64) -> f64) -> Result<f64> {
+    let domain_error = || Error::new(Kind::ValueError, "expected a positive input");
+    if let Some(small) = integer.as_small() {
+        return if small > 0 {
+            Ok(log(small as f64))
+        } else {
+            Err(domain_error())
+        };
+    }
     let n = integer.big();
     if n.sign() != num_bigint::Sign::Plus {
-        return Err(Error::new(Kind::ValueError, "expected a positive input"));
+        return Err(domain_error());
     }
-    if let Ok(x) = int_to_float(integer) {
+    let magnitude = n.magnitude();
+    let x = magnitude_to_float(magnitude);
+    if x.is_finite() {
         return Ok(log(x));
     }
     // CPython's loghelper uses a rounded mantissa and a separate exponent
     // on overflow. Keep one sticky bit so the cast rounds ties correctly.
-    let magnitude = n.magnitude();
     let mut exponent = magnitude.bits();
     let shift = exponent - u64::from(u64::BITS);
-    let high = (magnitude >> shift).to_u64().unwrap();
-    let sticky = magnitude.trailing_zeros().unwrap() < shift;
+    let mut digits = magnitude.iter_u64_digits().rev();
+    let prefix = (u128::from(digits.next().unwrap()) << 64) | u128::from(digits.next().unwrap());
+    let high = ((prefix << prefix.leading_zeros()) >> 64) as u64;
+    // Lower digits can affect rounding only at a midpoint in the high word.
+    let halfway = 1_u64 << (u64::BITS - f64::MANTISSA_DIGITS - 1);
+    let sticky = high & (2 * halfway - 1) == halfway && magnitude.trailing_zeros().unwrap() < shift;
     let mut mantissa = (high | u64::from(sticky)) as f64 * 2.0_f64.powi(-64);
     if mantissa == 1.0 {
         mantissa = 0.5;
