@@ -2,6 +2,18 @@ def current():
     nested = [((1, 2), 3), ([4, 5], 6)]
     assert [(a, b, c) for (a, b), c in nested] == [(1, 2, 3), (4, 5, 6)]
 
+    import gc
+
+    class ClearRow:
+        def __setitem__(self, key, value):
+            row.clear()
+            gc.collect()
+
+    row = [[17], [29]]
+    sink = ClearRow()
+    for sink[0], right in [row]:
+        assert right == [29]
+
     row = [1, 2]
     output = [0]
 

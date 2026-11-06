@@ -1173,13 +1173,26 @@ pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.unpack_sequence(value, 2, None, true);
-    if let Ok(sequence) = result {
-        let (Value::Tuple(values) | Value::List(values)) = ctx.heap.get(sequence) else {
-            unreachable!("validated unpacking sequence")
-        };
-        items.copy_from_slice(values);
-    }
+    let result = match ctx.heap.get(value) {
+        Value::Tuple(values) if values.len() == 2 => {
+            items.copy_from_slice(values);
+            Ok(value)
+        }
+        Value::List(values) if values.len() == 2 => {
+            items.copy_from_slice(values);
+            // Assigning the first target can mutate the list. Keep both original
+            // items in the current frame; finish roots the second handle.
+            ctx.heap.reserve_temporaries(2).map(|()| {
+                ctx.heap.keep(items[0]);
+                items[1]
+            })
+        }
+        _ => ctx.unpack_items(value, 2, None).map(|values| {
+            // The iterator path roots each handle as it consumes it.
+            items.copy_from_slice(&values);
+            NONE
+        }),
+    };
     finish(ctx, result)
 }
 
