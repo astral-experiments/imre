@@ -2,6 +2,7 @@ import gc
 import weakref
 from dataclasses import FrozenInstanceError, dataclass, field
 from inspect import getattr_static
+from typing import Generic, TypeVar
 
 
 def current():
@@ -126,5 +127,131 @@ def current():
         assert '__dict__' not in late_namespace and '__weakref__' not in late_namespace
     else:
         raise AssertionError('accepted an iterator as an inherited slot declaration')
+
+    T = TypeVar('T')
+
+    class Station:
+        __slots__ = ('name',)
+
+    @dataclass(slots=True, weakref_slot=True)
+    class Reading(Generic[T], Station):
+        name: str
+        value: T
+
+    assert Reading.__bases__ == (Generic, Station)
+    assert Reading.__slots__ == ('value', '__weakref__')
+    reading = Reading[int]('outside', 7)
+    assert (reading.name, reading.value) == ('outside', 7)
+    assert type(reading) is Reading and weakref.ref(reading)() is reading
+
+    events = []
+
+    class BaseAlias:
+        armed = False
+
+        def __mro_entries__(self, bases):
+            events.append('resolve')
+            return (Station,)
+
+        def __eq__(self, other):
+            if other is Generic:
+                events.append('compare')
+                if self.armed:
+                    raise ValueError('alias membership')
+            return NotImplemented
+
+    alias = BaseAlias()
+
+    class Row(alias, Generic[T]):
+        value: T
+
+    assert events == ['resolve', 'compare']
+    alias.armed = True
+    try:
+        dataclass(slots=True)(Row)
+    except ValueError as exc:
+        assert exc.args == ('alias membership',)
+    else:
+        raise AssertionError('replacement skipped alias equality')
+    assert events == ['resolve', 'compare', 'compare']
+
+    class Indirect(Generic[T]):
+        pass
+
+    failure = LookupError('name lookup')
+    fail_lookup = False
+
+    class PublishedName(type):
+        def __eq__(cls, other):
+            if other is Generic:
+                events.append('compare base')
+                return True
+            return NotImplemented
+
+        def __hash__(cls):
+            return hash(Generic)
+
+        @property
+        def __name__(cls):
+            events.append('read name')
+            if fail_lookup:
+                raise failure
+            return 'Protocol'
+
+    class Base(metaclass=PublishedName):
+        pass
+
+    @dataclass
+    class Record(Base, Indirect):
+        value: int
+
+    assert Record(7).value == 7
+    fail_lookup = True
+    events.clear()
+    try:
+        type('Another', (Base, Indirect), {})
+    except LookupError as exc:
+        assert exc is failure
+    else:
+        raise AssertionError('ignored metaclass name lookup')
+    assert events == ['compare base', 'read name']
+
+    import typing
+
+    class RebindGeneric:
+        def __init_subclass__(cls):
+            super().__init_subclass__()
+            typing.Generic = int
+            events.append('rebind')
+
+    events.clear()
+    try:
+        class Rebound(Base, Indirect, RebindGeneric):
+            pass
+    finally:
+        typing.Generic = Generic
+    assert Rebound.__parameters__ == ()
+    assert events == ['rebind']
+
+    # The published module selects the helper. A forwarded Python function still
+    # reads Generic in its defining module when a superclass hook delegates.
+    import sys
+    from types import ModuleType
+
+    view = ModuleType('typing')
+    view.Generic = int
+    view._generic_init_subclass = typing._generic_init_subclass
+
+    class Forward:
+        def __init_subclass__(cls):
+            sys.modules['typing'] = view
+            try:
+                super().__init_subclass__()
+            finally:
+                sys.modules['typing'] = typing
+
+    class Forwarded(Forward, Indirect): pass
+
+    assert Forwarded.__parameters__ == ()
 
     print('replacement slots, class cell, state and initializer annotations')

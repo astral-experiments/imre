@@ -4,11 +4,16 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use ruff_python_stdlib::identifiers::is_identifier;
 
 impl Context {
-    /// Follow stored direct bases without invoking Python before field validation.
-    fn dataclass_slot_ancestors(&mut self, mut class: Id) -> Result<Vec<Id>> {
+    /// Inspect inherited slot layouts in method resolution order, without invoking Python.
+    fn dataclass_slot_ancestors(&mut self, class: Id) -> Result<Vec<Id>> {
         let object = self.builtin("object");
-        let mut ancestors = Vec::new();
-        while class != object {
+        let generic = self.classes.get("typing.Generic").copied();
+        let lineage = self.lineage(class);
+        for &owner in &lineage {
+            // Generic is a bootstrapped base with no instance storage or Python class cell.
+            if owner == object || (owner != class && Some(owner) == generic) {
+                continue;
+            }
             let unsupported = || {
                 Error::new(
                     "NotImplementedError",
@@ -20,7 +25,7 @@ impl Context {
                 metaclass: None,
                 namedtuple_fields: None,
                 ..
-            } = self.heap.get(class)
+            } = self.heap.get(owner)
             else {
                 return Err(unsupported());
             };
@@ -37,15 +42,17 @@ impl Context {
             let Value::Tuple(bases) = self.heap.get(layout.bases) else {
                 return Err(unsupported());
             };
-            let [base] = bases.as_slice() else {
-                return Err(unsupported());
-            };
-            class = *base;
-            if class != object {
-                ancestors.push(class);
+            match bases.as_slice() {
+                [_] => {}
+                [left, right] if Some(*left) == generic || Some(*right) == generic => {}
+                _ => return Err(unsupported()),
             }
         }
-        Ok(ancestors)
+        Ok(lineage
+            .into_iter()
+            .skip(1)
+            .filter(|&base| base != object)
+            .collect())
     }
 
     fn check_inherited_member_storage(&self, bases: &[Id]) -> Result<()> {
@@ -204,7 +211,9 @@ impl Context {
             let key = self.str_value(key)?.to_owned();
             self.bind_local(scope, &key, value);
         }
-        let bases = ancestors.into_iter().take(1).collect();
+        let bases = self
+            .class_bases_tuple(old)
+            .expect("validated dataclass bases");
         let class = self.allocate_class(name, scope, bases)?;
         self.finish_namespace_class(class, scope, cell, None, Vec::new())
     }
