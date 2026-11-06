@@ -313,20 +313,54 @@ impl<T> StorageCell<T> {
 }
 
 /// An opaque, nonmoving list allocation. Only a proven readonly loop borrows its buffer.
-pub struct List(
-    StorageCell<Vec<Int>>,
-    // Capacity charged to this list in the thread's speculative buffer budget.
-    Cell<usize>,
-);
+pub struct List(IntListStorage);
+
+// Lower bits count slots charged to the bounded speculative capacity budget.
+// The high bit proves that every element is a tagged signed 32-bit integer.
+const ALL_I32_LIST_VALUES: usize = 1 << (usize::BITS - 1);
+
+struct IntListStorage {
+    words: StorageCell<Vec<Int>>,
+    flags: Cell<usize>,
+}
+
+impl IntListStorage {
+    #[inline(always)]
+    unsafe fn with<R>(&self, read: impl FnOnce(&Vec<Int>) -> R) -> R {
+        // SAFETY: the caller supplies the nonreentrant storage borrow.
+        unsafe { self.words.with(read) }
+    }
+
+    unsafe fn with_pair<R>(&self, other: &Self, read: impl FnOnce(&Vec<Int>, &Vec<Int>) -> R) -> R {
+        // SAFETY: the caller roots both lists through the read.
+        unsafe { self.words.with_pair(&other.words, read) }
+    }
+
+    #[inline(always)]
+    /// Every mutation, including one through an alias, ends the producer's width proof.
+    unsafe fn with_mut<R>(&self, write: impl FnOnce(&mut Vec<Int>) -> R) -> R {
+        let flags = self.flags.get();
+        if flags & ALL_I32_LIST_VALUES != 0 {
+            self.flags.set(flags & !ALL_I32_LIST_VALUES);
+        }
+        // SAFETY: the caller supplies the exclusive nonreentrant borrow.
+        unsafe { self.words.with_mut(write) }
+    }
+}
 
 impl List {
     fn new(values: Vec<Int>) -> Self {
-        Self(StorageCell::new(values), Cell::new(0))
+        Self(IntListStorage {
+            words: StorageCell::new(values),
+            flags: Cell::new(0),
+        })
     }
 
     fn release_range_hint(&self) {
-        let slots = self.1.replace(0);
+        let flags = self.0.flags.get();
+        let slots = flags & !ALL_I32_LIST_VALUES;
         if slots != 0 {
+            self.0.flags.set(flags & ALL_I32_LIST_VALUES);
             let _ = RANGE_HINT_SLOTS.try_with(|used| used.set(used.get() - slots));
         }
     }
@@ -378,7 +412,7 @@ fn cached_list(values: &mut Vec<Int>) -> Option<ListOwner> {
         .ok()
         .flatten()?;
     let list = ListOwner::get_mut(&mut owner).expect("cached list header is unique");
-    let storage = list.0.0.get_mut();
+    let storage = list.0.words.0.get_mut();
     debug_assert!(storage.is_empty() && storage.capacity() == 0);
     std::mem::swap(storage, values);
     Some(owner)
@@ -390,9 +424,12 @@ fn try_new_list(
     cached_list(&mut values).map_or_else(|| ListOwner::try_new(List::new(values)), Ok)
 }
 
-fn new_list(mut values: Vec<Int>) -> *const List {
-    let owner = cached_list(&mut values).unwrap_or_else(|| ListOwner::new(List::new(values)));
-    ListOwner::into_raw(owner)
+fn new_list_owner(mut values: Vec<Int>) -> ListOwner {
+    cached_list(&mut values).unwrap_or_else(|| ListOwner::new(List::new(values)))
+}
+
+fn new_list(values: Vec<Int>) -> *const List {
+    ListOwner::into_raw(new_list_owner(values))
 }
 
 /// Consumes a list owner, caching at most two headers whose identities can no
@@ -403,9 +440,7 @@ fn recycle_list_header(mut owner: ListOwner) {
     let Some(list) = ListOwner::get_mut(&mut owner) else {
         return;
     };
-    list.release_range_hint();
-    let values = std::mem::take(list.0.0.get_mut());
-    drop(List::new(values));
+    drop(std::mem::replace(list, List::new(Vec::new())));
     let evicted = LIST_HEADERS.try_with(|headers| {
         let Ok(mut headers) = headers.try_borrow_mut() else {
             return Some(owner);
@@ -472,14 +507,15 @@ fn recycle_list_buffer(values: &mut Vec<Int>) {
 }
 
 impl Drop for List {
-    /// A vectorizable tag reduction skips element cleanup when every integer is
+    /// A producer proof or a tag reduction skips cleanup when every integer is
     /// immediate. Any BigInt leaves the ordinary Vec drop path responsible for
     /// releasing all owners, including repeated references to the same integer.
     fn drop(&mut self) {
         self.release_range_hint();
-        let values = self.0.0.get_mut();
-        let common_tags = values.iter().fold(1_usize, |tags, value| tags & value.0);
-        if common_tags & 1 != 0 {
+        let values = self.0.words.0.get_mut();
+        if self.0.flags.get() & ALL_I32_LIST_VALUES != 0
+            || values.iter().fold(1_usize, |tags, value| tags & value.0) & 1 != 0
+        {
             // SAFETY: a low one bit proves each Int owns no allocation, so its
             // destructor has no effect. Exclusive List destruction owns the Vec;
             // clearing its length permits bounded buffer reuse without owners.
@@ -1916,7 +1952,7 @@ pub unsafe extern "C" fn imre_list_borrow_index_proven(list: *const List, at: us
 pub unsafe extern "C" fn imre_list_data_readonly(list: *const List) -> *const usize {
     // SAFETY: the whole-loop proof keeps these initialized elements live and
     // in place. Int is transparent over usize, so the pointer and stride agree.
-    unsafe { (&*(*list).0.0.get()).as_ptr().cast() }
+    unsafe { (&*(*list).0.words.0.get()).as_ptr().cast() }
 }
 
 /// Normalize an index into a rooted fixed-size integer buffer. Zero denotes
@@ -2113,7 +2149,7 @@ pub unsafe extern "C" fn imre_list_append(list: *const List, value: usize) -> i3
         let owner = &*list;
         owner
             .0
-            .with_mut(|list| i32::from(try_append_int(list, &value, &owner.1)))
+            .with_mut(|list| i32::from(try_append_int(list, &value, &owner.0.flags)))
     }
 }
 
@@ -2262,8 +2298,8 @@ pub unsafe extern "C" fn imre_list_append_pair(
             if list.capacity() - list.len() < 2 {
                 // The first source append can fit even if growing for the second fails.
                 return i32::from(
-                    try_append_int(list, &first, &owner.1)
-                        && try_append_int(list, &second, &owner.1),
+                    try_append_int(list, &first, &owner.0.flags)
+                        && try_append_int(list, &second, &owner.0.flags),
                 );
             }
             let length = list.len();
@@ -2475,7 +2511,7 @@ pub unsafe extern "C" fn imre_list_reserve_range(
     // SAFETY: the caller roots the list for this nonreentrant reservation.
     let list = unsafe { &*list };
     let displaced = RANGE_HINT_SLOTS.try_with(|used| {
-        let other_slots = used.get() - list.1.get();
+        let other_slots = used.get() - (list.0.flags.get() & !ALL_I32_LIST_VALUES);
         let available = MAX_LIVE_RANGE_HINT_SLOTS - other_slots;
         if capacity > available {
             return Vec::new();
@@ -2498,7 +2534,7 @@ pub unsafe extern "C" fn imre_list_reserve_range(
                 if slots > available {
                     return buffer;
                 }
-                list.1.set(slots);
+                list.0.flags.set(slots);
                 used.set(other_slots + slots);
                 std::mem::replace(values, buffer)
             })
@@ -2551,9 +2587,14 @@ pub unsafe extern "C" fn imre_list_all_i32(
     let Some(trips) = (unsafe { small_range_trips(start, stop, step) }) else {
         return 0;
     };
+    // SAFETY: the handle is rooted and the null case returned above.
+    let storage = unsafe { &(*list).0 };
+    if storage.flags.get() & ALL_I32_LIST_VALUES != 0 {
+        return 1;
+    }
     // SAFETY: this read cannot reenter or retain a storage reference.
     let valid = unsafe {
-        (&*list).0.with(|values| {
+        storage.with(|values| {
             if values.len().div_ceil(4) > trips {
                 return false;
             }

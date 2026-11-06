@@ -874,11 +874,12 @@ impl<V: Copy> Tables<V> {
     }
 }
 
-/// Borrowed canonical integer words; zero denotes a missing ASCII key. Keeping
-/// the heap-value count lets gathers prove that copying words acquires no owners.
+/// Borrowed canonical integer words, with zero denoting a missing ASCII key.
+/// Each count fits in one byte because there are only 128 slots.
 struct AsciiIntCache {
     values: [usize; 128],
-    heap_values: usize,
+    heap_values: u8,
+    wide_immediates: u8,
 }
 
 impl AsciiIntCache {
@@ -886,6 +887,7 @@ impl AsciiIntCache {
         Self {
             values: [0; 128],
             heap_values: 0,
+            wide_immediates: 0,
         }
     }
 
@@ -914,11 +916,16 @@ impl AsciiIntCache {
         present != 0
     }
 
-    /// Maintains the small-value proof across insertion, replacement, and deletion.
+    /// Keep both bulk-copy proofs current across inserts, replacements, and deletions.
     fn set(&mut self, character: u8, word: usize) {
+        fn wide_immediate(word: usize) -> u8 {
+            u8::from(word & 1 != 0 && i32::try_from((word as isize) >> 1).is_err())
+        }
         let old = std::mem::replace(&mut self.values[usize::from(character)], word);
-        self.heap_values -= usize::from(old != 0 && old & 1 == 0);
-        self.heap_values += usize::from(word != 0 && word & 1 == 0);
+        self.heap_values -= u8::from(old != 0 && old & 1 == 0);
+        self.heap_values += u8::from(word != 0 && word & 1 == 0);
+        self.wide_immediates -= wide_immediate(old);
+        self.wide_immediates += wide_immediate(word);
     }
 }
 
@@ -2548,7 +2555,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
     // SAFETY: exact immutable keys, integer acquisition, and buffer allocation
     // cannot reenter. Only the internal lookup cache changes, and no borrowed
     // key/value or table address escapes this access.
-    let result: Result<Vec<Int>, Error> = unsafe {
+    let result: Result<(Vec<Int>, bool), Error> = unsafe {
         object(value).0.with_mut(|storage| {
             let mapping = storage.dictionary_mut();
             let Tables::Str(table) = &mapping.tables else {
@@ -2608,7 +2615,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 // cache proves all words are small integers, so an earlier
                 // missing key leaves no heap owners in unpublished slots.
                 values.set_len(length);
-                return Ok(values);
+                return Ok((values, ascii.wide_immediates == 0));
             }
             for character in text.chars() {
                 let word = if character.is_ascii() {
@@ -2628,11 +2635,17 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 // the copied owner belongs to the fresh result or its cleanup.
                 values.push((*Int::borrow(word)).clone());
             }
-            Ok(values)
+            Ok((values, false))
         })
     };
     match result {
-        Ok(values) => crate::new_list(values),
+        Ok((values, all_i32)) => {
+            let list = crate::new_list_owner(values);
+            if all_i32 {
+                list.0.flags.set(crate::ALL_I32_LIST_VALUES);
+            }
+            crate::ListOwner::into_raw(list)
+        }
         Err(error) => error.returning(std::ptr::null()),
     }
 }
@@ -3691,6 +3704,51 @@ mod tests {
             empty.0.with(|values| assert!(values.is_empty()));
         }
         assert_eq!(imre_error_pending(), 0);
+    }
+
+    #[test]
+    fn gathered_i32_values_observe_replacement_and_list_aliases() {
+        // SAFETY: every native call receives rooted handles on this thread.
+        unsafe {
+            let dictionary = crate::ObjectOwner::from_raw(imre_dict_new(3, 2));
+            let mapping = crate::ObjectOwner::as_ptr(&dictionary);
+            let key = StrOwner::new(Str::new("a"));
+            let key_word = StrOwner::as_ptr(&key) as usize;
+            let text = Str::new("aaaa");
+            let gather = || crate::ListOwner::from_raw(imre_dict_gather_str_int(&text, mapping));
+            let accepts_i32 =
+                |list| crate::imre_list_all_i32(list, integer(0), integer(4), integer(1));
+            for value in [
+                i64::from(i32::MAX) + 1,
+                i64::from(i32::MAX),
+                i64::from(i32::MIN) - 1,
+                i64::from(i32::MIN),
+            ] {
+                imre_dict_set(mapping, key_word, integer(value));
+                let list = gather();
+                assert_eq!(
+                    accepts_i32(crate::ListOwner::as_ptr(&list)),
+                    u32::from(i32::try_from(value).is_ok())
+                );
+            }
+            let list = gather();
+            let alias = list.clone();
+            let big = crate::wide_owner(BigInt::from(1_u128 << 120));
+            let weak = Shared::downgrade(&big);
+            assert_eq!(
+                crate::imre_list_set_index(
+                    crate::ListOwner::as_ptr(&alias),
+                    0,
+                    Shared::as_ptr(&big) as usize
+                ),
+                1
+            );
+            drop(big);
+            assert_eq!(accepts_i32(crate::ListOwner::as_ptr(&list)), 0);
+            drop(alias);
+            crate::imre_list_release(crate::ListOwner::into_raw(list));
+            assert_eq!(weak.strong_count(), 0);
+        }
     }
 
     #[test]
