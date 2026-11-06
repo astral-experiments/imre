@@ -1436,6 +1436,10 @@ ACCEPTED = {
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
     },
+    "source_loader_external_code": {
+        "main.py": (FIXTURES.parent / "source_loader_external_code.py").read_text(),
+        "local_body.py": "value = 41\n",
+    },
     "bundled_source_loader_data": {
         "main.py": (FIXTURES.parent / "bundled_source_loader_data.py").read_text(),
     },
@@ -1759,7 +1763,7 @@ def main() -> None:
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
-                    "warn_named_helper", "zip_source_spec",
+                    "source_loader_external_code", "warn_named_helper", "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
