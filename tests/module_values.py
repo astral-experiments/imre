@@ -137,6 +137,8 @@ def main() -> None:
             expected_dir.mkdir(parents=True)
             expected = reference(args.python, source, expected_dir, error)
             expected_files = snapshot(expected_dir)
+            # The boxed contextlib fixture can take 13 minutes to compile with a cold ThinLTO cache.
+            thinlto_timeout = 1200 if case.name == "contextdecorator_local" else 300
             modes = [(level, ()) for level in args.opt_levels]
             if case.name == "distribution_version":
                 modes.extend((level, ("--runtime-imports",)) for level in args.opt_levels)
@@ -164,7 +166,7 @@ def main() -> None:
                             *flags,
                         ],
                         temporary,
-                        timeout=300 if args.lto_linker else 60,
+                        timeout=thinlto_timeout if args.lto_linker else 60,
                     )
                 )
                 actual = run([str(binary)], actual_dir)
