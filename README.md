@@ -109,8 +109,8 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 6, 2026, Imre has a paired pass for **12,406 of 16,202 tests (76.6%)** across the 44 standard library module families tracked below.
-The paired pass rate is 75.3% (10,034 of 13,327) for the original 25 families and 82.5% (2,372 of 2,875) for the 19 additional families.
+As of November 6, 2026, Imre has a paired pass for **12,416 of 16,202 tests (76.6%)** across the 44 standard library module families tracked below.
+The paired pass rate is 75.4% (10,044 of 13,327) for the original 25 families and 82.5% (2,372 of 2,875) for the 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -119,7 +119,7 @@ At either optimization level, a test can exercise typed native code, boxed nativ
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
 It passed **15,161**, skipped 1,023, and reported 7 errors.
-Across the Imre revisions tested, **12,357 of those 15,161 stock Linux passes (81.5%)** also passed at both native optimization levels, leaving 1,288 more paired passes to reach 90%.
+Across the Imre revisions tested, **12,367 of those 15,161 stock Linux passes (81.6%)** also passed at both native optimization levels, leaving 1,278 more paired passes to reach 90%.
 The remaining 49 paired tests passed in separate stock runs. In this Linux run, CPython skipped 42 of them and reported errors for seven.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
@@ -127,7 +127,7 @@ The remaining 49 paired tests passed in separate stock runs. In this Linux run, 
 | `argparse` | 1,887 | 1,893 | 6 | All 1,887 eligible originals have paired passes across public revisions. The translations test ran the real pygettext child and produced all 32 expected messages. Six explicitly documented compiled-entry omissions remain in the 1,893-test denominator. A complete run on one revision is tracked separately. |
 | `collections` | 641 | 659 | 9 | The async-generator ABC original passed on public #4804. All 40 originals in that ABC cohort now have a paired result or an individual omission decision. |
 | `csv` | 122 | 128 | 2 | The full suite passed 124/128 on stock and 122/128 at O0 and O3. Four cases skipped on all three engines. Two additional CPython-only cases skipped on Imre. |
-| `dataclasses` | 263 | 276 | 0 | Both TestAbstract methods passed on stock and public Imre at O0 and O3. Generated ordering now satisfies the abstract interface. The other method already passed on an earlier public build and was missing from the ledger. |
+| `dataclasses` | 273 | 276 | 0 | The whole public suite passed 259 of 276 at both native levels. Each run followed TestSlots in the same process and recorded one failure, 14 errors and two skips. The 273 cross-revision passes include 14 absent from this run. Thirteen came from the pending docstring work. Four generic slot tests and six previously unrecorded public passes are new to the ledger. [Public run](https://github.com/astral-experiments/imre/commit/d4a17939f13649914daaea7eb1d8b2a819320cb6) · [Docstring PR](https://github.com/astral-experiments/imre/pull/3578). |
 | `datetime` | 1,043 | 1,098 | 0 | Four unchanged Fast date and datetime constructor parents passed public #4751 at O0 and O3. Stock passed the matching four in its six-parent group. |
 | `fnmatch` | 24 | 24 | 0 | Complete suite on `main`, all 24 passed. |
 | `functools` | 198 | 329 | 2 | At O0 and O3, two placeholder constructor tests already passed on `b9dfd225`, and `TestLRUPy.test_common_signatures` passed after Imre exposed the LRU cache methods on the wrapper class. The focused replay added `TestUpdateWrapper.test_builtin_update` (row 310, occurrence 1), which passed on stock and on public Imre at O0 and O3. Row 312 already had a paired pass. Pinned stock and public Imre at O0 and O3 passed `test_copy`, `test_deepcopy`, `test_pickle` and `test_recursive_pickle` on both `TestPartialPy` and `TestPartialPySubclass`, adding eight distinct occurrences. Public replays added both `test_partial_genericalias` originals (rows 197 and 231) and four `singledispatch` originals. A five-test replay added `TestSingleDispatch.test_annotations` (occurrence 1). The other four already had paired passes. The Python fallback exposes the signatures `(mycmp)` on `cmp_to_key` and `(obj)` on the callable it returns. `TestCmpToKeyPy.test_cmp_to_signature` passed at both native levels. [Replay revision](https://github.com/astral-experiments/imre/commit/e32dffd2936ce6c7654197927a91e3444d85fefe) · [Baseline](https://github.com/astral-experiments/imre/commit/b9dfd225b1f91796c594ac4caf4a84ef3f389f75) · [#5387](https://github.com/astral-experiments/imre/pull/5387) · [#5419](https://github.com/astral-experiments/imre/pull/5419) · [Partial replay revision](https://github.com/astral-experiments/imre/commit/0a3fb32df21e34bc7b862602ab0c970539f7ebeb) · [#5457](https://github.com/astral-experiments/imre/pull/5457) · [#5473](https://github.com/astral-experiments/imre/pull/5473) · [#5506](https://github.com/astral-experiments/imre/pull/5506). |
@@ -149,7 +149,7 @@ The remaining 49 paired tests passed in separate stock runs. In this Linux run, 
 | `typing` | 710 | 712 | 2 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. Upstream-defined CPython-only guards skipped two tests on Imre. Both passed on stock and have [individual omission decisions](docs/stdlib-omissions.md#typing). |
 | `unittest` | 872 | 1,090 | 0 | Stock and public Imre at O0 and O3 passed 46 of 48 `test_break` cases. Two skipped with SIGINT set to `SIG_IGN`. The 34 new interrupt cases include tests that the first SIGINT asks registered results to stop and a second invokes the previous handler. The 35th new pair, `testCatchBreakInstallsHandler`, checks that command-line catch-break mode installs the handler. [Prior ledger](https://github.com/astral-experiments/imre/pull/5550) · [#5569](https://github.com/astral-experiments/imre/pull/5569). |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **10,034** | **13,327** | **41** | **3 complete suites match stock on `main`** |
+| **Total** | **10,044** | **13,327** | **41** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
