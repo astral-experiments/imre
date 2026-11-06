@@ -432,10 +432,7 @@ pub(in super::super) fn set_member(
             frozen: false,
         } = ctx.heap.get(value)
     {
-        ctx.alloc(Value::Set {
-            entries: entries.try_clone()?,
-            frozen: true,
-        })
+        ctx.heap.alloc_materialized_set(entries.try_clone()?, true)
     } else {
         value
     };
@@ -588,6 +585,7 @@ fn intersect_iterable(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> 
 
     // Rebuild the temporary roots without running Python. Dropping the iterator
     // can mutate the receiver in __del__ or a generator's finally clause.
+    ctx.heap.account_set_result(found);
     ctx.heap.release_temporaries_since(roots);
     if let Err(error) = &scan {
         for id in error.roots() {
@@ -1193,7 +1191,7 @@ pub(super) fn method(
                 return Ok(object);
             }
             let entries = ctx.stored_entries(receiver).try_clone()?;
-            Ok(ctx.alloc(Value::Set { entries, frozen }))
+            Ok(ctx.heap.alloc_materialized_set(entries, frozen))
         }
         "set.isdisjoint" | "frozenset.isdisjoint" => {
             let other = super::one_positional_arg(name, args, kwargs)?;
@@ -1319,10 +1317,7 @@ pub(super) fn method(
                     // Retry a mutable set key with its equivalent frozenset's hash.
                     // Equality callbacks and KeyError still receive the original key.
                     let entries = entries.try_clone()?;
-                    let frozen = ctx.alloc(Value::Set {
-                        entries,
-                        frozen: true,
-                    });
+                    let frozen = ctx.heap.alloc_materialized_set(entries, true);
                     let hash = ctx.dictionary_hash(frozen)?;
                     ctx.find_dictionary_key(receiver, key, Some(hash))?.1
                 }

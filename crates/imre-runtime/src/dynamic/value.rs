@@ -2553,8 +2553,8 @@ impl DictIterator {
 const UNMARKED: usize = usize::MAX;
 const END: usize = usize::MAX - 1;
 
-/// Minimum allocation allowance for separately owned Python bytes buffers.
-const BYTE_BUFFER_FLOOR: usize = 8 * 1024 * 1024;
+/// Minimum allocation allowance for buffers owned outside the heap slots.
+const BUFFER_FLOOR: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Finalization {
@@ -2815,7 +2815,7 @@ pub(super) struct Heap {
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
-    byte_buffer_allowance: usize,
+    buffer_allowance: usize,
     pub(super) gc_settings: Arc<GcSettings>,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
@@ -3031,7 +3031,7 @@ impl Heap {
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: FIRST_DYNAMIC_SLOT + 4096,
-            byte_buffer_allowance: BYTE_BUFFER_FLOOR,
+            buffer_allowance: BUFFER_FLOOR,
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
@@ -3312,15 +3312,37 @@ impl Heap {
         id
     }
 
-    /// Charge buffers larger than a slot to the next statement's collection budget.
-    fn alloc_bytes(&mut self, bytes: Vec<u8>, trace: bool) -> Id {
-        if bytes.capacity() > std::mem::size_of::<Slot>() {
-            self.byte_buffer_allowance =
-                self.byte_buffer_allowance.saturating_sub(bytes.capacity());
-            if self.byte_buffer_allowance == 0 && !self.full_collection_active() {
+    /// Schedule a statement-boundary collection when out-of-line storage exhausts the allowance.
+    fn charge_buffer_growth(&mut self, growth: usize) {
+        if growth > size_of::<Slot>() {
+            self.buffer_allowance = self.buffer_allowance.saturating_sub(growth);
+            if self.buffer_allowance == 0 && !self.full_collection_active() {
                 self.collect_next_statement = true;
             }
         }
+    }
+
+    /// Allocate a set with an already-built table and account for its backing buffers.
+    pub(super) fn alloc_materialized_set(
+        &mut self,
+        entries: super::dictionary::Entries,
+        frozen: bool,
+    ) -> Id {
+        self.charge_buffer_growth(entries.table_bytes());
+        self.alloc_slot(Value::Set { entries, frozen })
+    }
+
+    /// Charge the backing buffers once a fresh set has finished growing.
+    pub(super) fn account_set_result(&mut self, set: Id) {
+        let Value::Set { entries, .. } = self.get(set) else {
+            unreachable!("fresh set result");
+        };
+        self.charge_buffer_growth(entries.table_bytes());
+    }
+
+    /// Publish owned bytes with the caller's requested allocation trace.
+    fn alloc_bytes(&mut self, bytes: Vec<u8>, trace: bool) -> Id {
+        self.charge_buffer_growth(bytes.capacity());
         self.alloc_slot_with_trace(Value::Bytes(bytes), trace)
     }
 
@@ -5394,15 +5416,16 @@ impl Heap {
 
     /// Revisit buffer sizes only when the buffers themselves requested a sweep.
     #[cold]
-    fn retained_byte_allowance(&self) -> usize {
+    fn retained_buffer_allowance(&self) -> usize {
         self.slots
             .iter()
             .filter_map(|slot| match &slot.value {
                 Some(Value::Bytes(bytes)) => Some(bytes.capacity()),
+                Some(Value::Set { entries, .. }) => Some(entries.table_bytes()),
                 _ => None,
             })
             .fold(0, usize::saturating_add)
-            .max(BYTE_BUFFER_FLOOR)
+            .max(BUFFER_FLOOR)
     }
 
     fn sweep(&mut self) -> Option<WeakCallbacks> {
@@ -5480,10 +5503,10 @@ impl Heap {
                 self.free_count += 1;
             }
         }
-        self.byte_buffer_allowance = if self.byte_buffer_allowance == 0 {
-            self.retained_byte_allowance()
+        self.buffer_allowance = if self.buffer_allowance == 0 {
+            self.retained_buffer_allowance()
         } else {
-            BYTE_BUFFER_FLOOR
+            BUFFER_FLOOR
         };
         // A refused growth request can lower the usual collection floor.
         let floor = self.next_collection.min(FIRST_DYNAMIC_SLOT + 4096);
@@ -5498,6 +5521,20 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_table_buffers_set_the_next_collection_allowance() {
+        let mut heap = Heap::new();
+        let mut values = Vec::with_capacity(BUFFER_FLOOR * 2 / size_of::<(Id, Id)>());
+        values.push((NONE, NONE));
+        let entries = super::super::dictionary::Entries::from(values);
+        let bytes = entries.table_bytes();
+        let set = heap.alloc_materialized_set(entries, false);
+        assert!(heap.collect_next_statement);
+        assert!(heap.take_sweep_request());
+        heap.collect([set].into_iter());
+        assert_eq!(heap.buffer_allowance, bytes);
+    }
 
     #[test]
     fn small_integer_identity_survives_collection() {
@@ -5536,7 +5573,7 @@ mod tests {
     #[test]
     fn byte_buffer_pressure_tracks_retained_capacity() {
         let mut heap = Heap::new();
-        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        let mut buffer = Vec::with_capacity(BUFFER_FLOOR * 2);
         buffer.extend_from_slice(b"live");
         let capacity = buffer.capacity();
         let live = heap.alloc(Value::Bytes(buffer));
@@ -5544,7 +5581,7 @@ mod tests {
         heap.frames.last_mut().unwrap().live.clear();
         assert!(heap.take_sweep_request());
         heap.collect([live].into_iter());
-        assert_eq!(heap.byte_buffer_allowance, capacity);
+        assert_eq!(heap.buffer_allowance, capacity);
 
         let mut buffer = Vec::with_capacity(capacity);
         buffer.extend_from_slice(b"dead");
@@ -5554,7 +5591,7 @@ mod tests {
         heap.collect([live].into_iter());
         assert!(heap.slots[dead as usize].value.is_none());
         assert!(matches!(heap.get(live), Value::Bytes(bytes) if bytes == b"live"));
-        assert_eq!(heap.byte_buffer_allowance, capacity);
+        assert_eq!(heap.buffer_allowance, capacity);
     }
 
     #[test]
