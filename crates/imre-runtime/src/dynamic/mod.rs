@@ -2343,16 +2343,19 @@ impl Context {
         let Value::Scope(s) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
-        if !s.names.contains_key(name)
-            && let Some(order) = &mut s.class_body
-        {
-            order.push(name.to_owned());
-        }
+        let previous = if let Some(binding) = s.names.get_mut(name) {
+            Some(std::mem::replace(binding, value))
+        } else {
+            if let Some(order) = &mut s.class_body {
+                order.push(name.to_owned());
+            }
+            s.names.insert(name.to_owned(), value);
+            None
+        };
         let dictionary = s
             .class_namespace
             .as_ref()
             .and_then(|class| class.dictionary);
-        let previous = s.names.insert(name.to_owned(), value);
         if let Some(dictionary) = dictionary
             && (s.class_body.is_some() || name != "__qualname__")
         {
