@@ -9,11 +9,13 @@ def _validateCaseMethod(case, methodName):
     else:
         case._testMethodDoc = getattr(method, "__doc__", None)
     case._cleanups = []
-    case._type_equality_funcs = {
-        str: "assertMultiLineEqual",
-        set: "assertSetEqual",
-        frozenset: "assertSetEqual",
-    }
+    case._type_equality_funcs = {}
+    case.addTypeEqualityFunc(dict, "assertDictEqual")
+    case.addTypeEqualityFunc(list, "assertListEqual")
+    case.addTypeEqualityFunc(tuple, "assertTupleEqual")
+    case.addTypeEqualityFunc(set, "assertSetEqual")
+    case.addTypeEqualityFunc(frozenset, "assertSetEqual")
+    case.addTypeEqualityFunc(str, "assertMultiLineEqual")
 
 
 def _boxedCheckFixtures(cls):
