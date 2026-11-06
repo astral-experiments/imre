@@ -2942,8 +2942,8 @@ pub(super) struct Heap {
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
-    // Weak loader identities; the source bytes belong to the executable.
-    pub(super) loader_sources: HashMap<Id, (String, &'static [u8])>,
+    // Weak loader identities. The executable owns the initializer and any embedded bytes.
+    pub(super) loader_sources: HashMap<Id, super::SourceModule>,
     frames: Vec<Frame>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
