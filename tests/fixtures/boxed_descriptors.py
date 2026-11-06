@@ -295,6 +295,31 @@ def current():
     assert bound(number) == 1 << 101
     assert add(number, 0.5) is NotImplemented
 
+    class IntegerItem(int):
+        __eq__ = int.__eq__
+        __le__ = int.__le__
+
+    class Reflected(IntegerItem):
+        def __eq__(self, other):
+            return "reflected"
+
+    item = IntegerItem(1 << 100)
+    peer = Reflected(1 << 100)
+    assert (item == peer) == "reflected"
+    assert (True == Reflected(1)) is True and (1.0 == Reflected(1)) is True
+    assert int.__eq__(item, peer) is True
+    assert int.__dict__["__eq__"] is bool.__eq__ is IntegerItem.__eq__
+    assert int.__eq__.__get__(item, IntegerItem)(1.0) is NotImplemented
+    assert int.__le__(True, item) is True
+    assert int.__le__(item, "large") is NotImplemented
+
+    class Declines(int):
+        def __eq__(self, other):
+            return NotImplemented
+
+    left = Declines(1)
+    assert (left == left) is True and (left == Declines(1)) is False
+
     index = int.__index__
     assert type(index) is type(add) and index.__objclass__ is int
     assert index is Number.__index__ is bool.__index__
