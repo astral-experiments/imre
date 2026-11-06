@@ -950,6 +950,15 @@ pub(crate) fn compile(
             bundled_only = true;
             (String::new(), false, imports)
         };
+        if imports
+            .names
+            .iter()
+            .any(|(level, name)| *level == 0 && name == "importlib.abc.SourceLoader")
+            && let Some(graph) = typed_graph
+            && (owner == "__main__" || graph.modules.iter().any(|m| !m.bundled && m.name == owner))
+        {
+            graph.require_fallback_calls();
+        }
         // A boxed provider can discover further site modules while collecting dependencies.
         // Keep checked machinery diagnostics on the modules in the original program.
         let machinery_graph = typed_graph.filter(|_| {

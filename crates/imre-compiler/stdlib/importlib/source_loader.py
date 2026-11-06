@@ -186,7 +186,15 @@ class FileLoader:
         return FileReader(self)
 
 
-class SourceFileLoader(FileLoader, _LoaderBasics):
+def _code_from_source(loader, path):
+    if not isinstance(path, str):
+        # Validate the source path but keep the original object for loader hooks.
+        _cache_path(path)
+    source = loader.get_data(path)
+    return loader.source_to_code(source, path)
+
+
+class SourceLoader(_LoaderBasics):
     def get_source(self, fullname):
         path = self.get_filename(fullname)
         try:
@@ -194,9 +202,6 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
         except OSError as exc:
             raise ImportError("source not available through get_data()", name=fullname) from exc
         return decode_source(data)
-
-    def path_stats(self, path):
-        return _path_stats(path)
 
     def source_to_code(self, data, path, *, _optimize=-1):
         filename = _fspath(path)
@@ -216,16 +221,20 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
         return compile(data, filename, "exec")
 
     def get_code(self, fullname):
+        return _code_from_source(self, self.get_filename(fullname))
+
+
+class SourceFileLoader(FileLoader, SourceLoader):
+    def path_stats(self, path):
+        return _path_stats(path)
+
+    def get_code(self, fullname):
         path = self.get_filename(fullname)
         if isinstance(path, str):
             code = _registered_code(self, path)
             if code is not None:
                 return code
-        else:
-            # Validate the source path but keep the original object for loader hooks.
-            _cache_path(path)
-        source = self.get_data(path)
-        return self.source_to_code(source, path)
+        return _code_from_source(self, path)
 
 
 def _file_loader_defaults(location=None):
