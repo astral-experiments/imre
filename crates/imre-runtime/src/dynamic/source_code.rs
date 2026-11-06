@@ -4366,7 +4366,9 @@ impl Context {
                     }
                 }
             }
-            self.collect_unreachable();
+            if !self.can_skip_finalizer_sweep(self.heap.temporary_mark()) {
+                self.collect_unreachable();
+            }
         }
         completed.map(Step::Return)
     }

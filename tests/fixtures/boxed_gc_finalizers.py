@@ -196,7 +196,50 @@ def check_star_import_replacement():
     events.clear()
 
 
+def check_generator_frame_release():
+    released = []
+
+    class Resource:
+        def __init__(self, name):
+            self.name = name
+
+        def __del__(self):
+            released.append(self.name)
+
+    def scoped(name):
+        item = Resource(name)
+        yield ref(item)
+        if name == "return":
+            return item
+        if name == "raise":
+            raise ValueError(name)
+
+    held = Resource("held")
+    for name in ("finish", "raise"):
+        iterator = scoped(name)
+        witness = next(iterator)
+        assert witness() is not None
+        try:
+            next(iterator)
+        except (StopIteration, ValueError) as exc:
+            assert type(exc) is (ValueError if name == "raise" else StopIteration)
+        assert witness() is None and released == [name]
+        released.clear()
+
+    iterator = scoped("return")
+    witness = next(iterator)
+    try:
+        next(iterator)
+    except StopIteration as exc:
+        result = exc.value
+    assert witness() is result and released == []
+    del result
+    assert witness() is None and released == ["return"]
+    assert held.name == "held"
+
+
 def current():
+    check_generator_frame_release()
     check_star_import_replacement()
     with open(__file__, encoding="utf-8") as retained:
         released = open(__file__, encoding="utf-8")  # noqa: SIM115

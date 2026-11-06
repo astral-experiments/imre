@@ -2284,7 +2284,7 @@ impl Context {
     }
 
     /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
-    fn can_skip_finalizer_sweep(&self, retained_current: usize) -> bool {
+    pub(super) fn can_skip_finalizer_sweep(&self, retained_current: usize) -> bool {
         if self.heap.full_collection_active() {
             return false;
         }
