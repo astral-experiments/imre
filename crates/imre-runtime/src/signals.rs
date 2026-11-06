@@ -38,7 +38,9 @@ fn queue_wakeup_error(error: i32) {
     let ticket = ERROR_TAIL.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |tail| {
         // Another producer and the reader can both pass this tail snapshot.
         // In that case the CAS must retry, rather than dropping an error.
-        let used = tail.wrapping_sub(ERROR_HEAD.load(Ordering::Acquire)).cast_signed();
+        let used = tail
+            .wrapping_sub(ERROR_HEAD.load(Ordering::Acquire))
+            .cast_signed();
         (used < WAKEUP_ERRORS.len() as isize).then(|| tail.wrapping_add(1))
     });
     if let Ok(ticket) = ticket {
