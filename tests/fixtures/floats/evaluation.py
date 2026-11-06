@@ -1,4 +1,4 @@
-from math import acos, erfc, log2
+from math import acos, asin, erfc, log2
 
 
 def integer(label: str, value: int) -> int:
@@ -83,6 +83,13 @@ print(acos(floating("arc cosine receiver", -0.5)))
 print(acos(True))
 try:
     acos(2)
+except ValueError as error:
+    print(str(error))
+
+print(asin(floating("arc sine receiver", -0.0)))
+assert asin(-1) == -acos(False)
+try:
+    asin(2)
 except ValueError as error:
     print(str(error))
 

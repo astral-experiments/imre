@@ -10220,12 +10220,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Mktime)) => return self.mktime(call),
             Some(Binding::Intrinsic(Intrinsic::StructTime)) => return self.struct_time_new(call),
-            Some(Binding::Intrinsic(op @ (Intrinsic::MathAcos | Intrinsic::MathErfc))) => {
-                let (name, builtin) = if op == Intrinsic::MathErfc {
-                    ("math.erfc", Builtin::FloatErfc)
-                } else {
-                    ("math.acos", Builtin::FloatAcos)
-                };
+            Some(Binding::Intrinsic(op)) if let Some((name, builtin)) = op.unary_float_math() => {
                 self.reject_builtin_keywords(call)?;
                 let [arg] = call.arguments.args.as_ref() else {
                     return Err(error(

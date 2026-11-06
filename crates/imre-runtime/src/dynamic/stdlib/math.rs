@@ -251,8 +251,13 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
     }
-    if operation == "acos" {
-        let result = crate::floats::acos(as_double(ctx, value)?)?;
+    if matches!(operation, "acos" | "asin") {
+        let function = if operation == "asin" {
+            crate::floats::asin
+        } else {
+            crate::floats::acos
+        };
+        let result = function(as_double(ctx, value)?)?;
         return Ok(ctx.alloc(Value::Float(result)));
     }
     if operation == "ulp" {

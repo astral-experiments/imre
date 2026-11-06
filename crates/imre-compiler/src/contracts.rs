@@ -544,8 +544,10 @@ impl Builtin {
             | Self::StringIntList
             | Self::ListAccumulate
             | Self::EnumLookup(_)
-            | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
-            Self::FloatAcos | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
+            | Self::TomlDecode(_)
+            | Self::FloatAcos
+            | Self::FloatAsin
+            | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
             | Self::DictIsOrdered
@@ -954,7 +956,7 @@ impl Builtin {
             }
             Self::IntBitLength => signature(&[Type::Int], Type::Int),
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
-            Self::FloatAcos | Self::FloatErfc | Self::FloatLog2 => {
+            Self::FloatAcos | Self::FloatAsin | Self::FloatErfc | Self::FloatLog2 => {
                 signature(&[Type::Float], Type::Float)
             }
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
@@ -1525,6 +1527,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_parse_hex"
                 | "imre_int_float"
                 | "imre_float_acos"
+                | "imre_float_asin"
                 | "imre_float_int"
                 | "imre_float_parse"
                 | "imre_bytes_float"
