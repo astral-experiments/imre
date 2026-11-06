@@ -8126,7 +8126,7 @@ impl Context {
                 self.call_depth -= 1;
                 let value = result?;
                 if let Some(expected) = sig["return_type"].as_str() {
-                    self.require_scalar(value, expected, &format!("{name} return value"))?;
+                    self.require_scalar(value, expected, format_args!("{name} return value"))?;
                 }
                 Ok(value)
             }
@@ -8179,7 +8179,7 @@ impl Context {
                     self.require_scalar(
                         id,
                         expected.as_str().unwrap_or_default(),
-                        &format!("{name} argument {param:?}"),
+                        format_args!("{name} argument {param:?}"),
                     )?;
                 }
             }
@@ -8187,7 +8187,12 @@ impl Context {
         Ok(())
     }
 
-    fn require_scalar(&self, value: Id, expected: &str, context: &str) -> Result<()> {
+    fn require_scalar(
+        &self,
+        value: Id,
+        expected: &str,
+        context: std::fmt::Arguments<'_>,
+    ) -> Result<()> {
         if matches!(
             (expected, self.heap.get(value)),
             ("None", Value::None)
