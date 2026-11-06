@@ -4106,10 +4106,21 @@ impl Context {
                 return Ok(self.builtin(&format!("tuple.{name}")));
             }
             Value::Native(ref class)
+                if matches!(
+                    class.as_str(),
+                    "filter" | "range" | "range_iterator" | "longrange_iterator"
+                ) && name == "__reduce_ex__" =>
+            {
+                return Ok(self.builtin("object.__reduce_ex__"));
+            }
+            Value::Native(ref class)
                 if matches!(class.as_str(), "map" | "filter" | "memory_iterator") =>
             {
                 match name {
                     "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
+                    "__reduce__" if class == "filter" => {
+                        return Ok(self.builtin("filter.__reduce__"));
+                    }
                     "__name__" | "__qualname__" => return Ok(self.text(class.clone())),
                     "__module__" => return Ok(self.text("builtins")),
                     _ => {}
@@ -4901,7 +4912,7 @@ impl Context {
             Value::Native(ref class)
                 if (class == "range" && super::range::METHODS.contains(&name))
                     || (matches!(class.as_str(), "range_iterator" | "longrange_iterator")
-                        && matches!(name, "__iter__" | "__next__" | "__length_hint__")) =>
+                        && super::range::ITER_METHODS.contains(&name)) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }

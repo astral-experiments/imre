@@ -4189,6 +4189,7 @@ for name in ("md4", "ripemd160"):
             "boxed_zip.py",
             "boxed_map.py",
             "boxed_python_iterators.py",
+            "boxed_filter_reduction.py",
             "boxed_float_sum.py",
             "boxed_complex_sum.py",
             "boxed_enumerate_methods.py",

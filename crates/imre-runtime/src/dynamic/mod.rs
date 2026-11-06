@@ -421,6 +421,7 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("filter", Value::Filter { .. })
             | ("mappingproxy", Value::MappingProxy(_))
             | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
