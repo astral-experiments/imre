@@ -1847,6 +1847,10 @@ fn check_handler_count(tokens: &Tokens) -> Result<(), &'static str> {
 /// Enforce the source-file indentation policy at the beginning of each logical statement.
 pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
     use TokenKind::*;
+    let bytes = source.as_bytes();
+    let Some(first) = memchr::memchr2(b'\t', 0x0c, bytes) else {
+        return Ok(());
+    };
     let mut statement_start = true;
     let mut formatted_strings = 0;
     for token in tokens {
@@ -1866,7 +1870,12 @@ pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), Str
             _ => {}
         }
         if statement_start {
-            let prefix = &source[..usize::from(token.start())];
+            statement_start = false;
+            let start = usize::from(token.start());
+            if start <= first {
+                continue;
+            }
+            let prefix = &source[..start];
             let indentation = prefix.rsplit_once('\n').map_or(prefix, |(_, line)| line);
             if indentation.contains(['\t', '\x0c']) {
                 let line = prefix.lines().count();
@@ -1874,7 +1883,6 @@ pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), Str
                     "line {line}: indentation must use spaces, not tabs or form feeds"
                 ));
             }
-            statement_start = false;
         }
     }
     Ok(())

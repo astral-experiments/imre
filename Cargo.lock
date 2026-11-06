@@ -724,6 +724,7 @@ dependencies = [
  "imre-regex",
  "indexmap",
  "libc",
+ "memchr",
  "notify",
  "num-bigint",
  "object",
