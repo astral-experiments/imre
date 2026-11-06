@@ -430,6 +430,7 @@ pub(in crate::dynamic) fn open(
         return open_raw(ctx, class, raw_arg, raw_mode, binary, owns, opener);
     }
     let update = mode_text.contains('+');
+    let sized_reader = !numeric && buffering > 1 && matches!(mode_text, "rb" | "br");
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
     let text_input = buffering < 0 && matches!(mode_text, "r" | "rt" | "tr");
     if binary && buffering == 1 {
@@ -449,6 +450,7 @@ pub(in crate::dynamic) fn open(
         || fd.is_some()
         || text_output
         || text_input
+        || sized_reader
         || update
         || (binary && (buffering == 1 || warning_options))
         || (binary && !numeric && needs_encoded_path(ctx, raw_arg)?)
@@ -479,7 +481,7 @@ pub(in crate::dynamic) fn open(
         };
         let line_buffering =
             buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
-        let buffer = if fresh.is_some() || (binary && warning_options) {
+        let buffer = if fresh.is_some() || sized_reader || (binary && warning_options) {
             let class = if update {
                 types.random
             } else if reading {
