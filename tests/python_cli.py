@@ -3787,6 +3787,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_hyperbolic.py",
             "boxed_math_hypot.py",
             "boxed_math_prod.py",
+            "boxed_math_sumprod.py",
             "boxed_math_isclose.py",
             "boxed_math_log2.py",
             "boxed_math_ldexp.py",

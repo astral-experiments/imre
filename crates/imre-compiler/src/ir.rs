@@ -609,6 +609,11 @@ impl Expr {
         }
     }
 
+    /// The freshly allocated list has no externally visible alias during argument evaluation.
+    pub(crate) fn is_nonempty_list_literal(&self) -> bool {
+        matches!(&self.kind, ExprKind::List(items) if !items.is_empty())
+    }
+
     /// Return a literal integer that fits the native tagged representation.
     pub(crate) fn tagged_integer_literal(&self) -> Option<i64> {
         let value = match &self.kind {
@@ -1218,6 +1223,7 @@ pub(crate) enum Builtin {
     FloatAcos,
     FloatAsin,
     FloatErfc,
+    Sumprod,
     /// Base-two logarithm after checking the Python domain in the caller.
     FloatLog2,
     IntSignAsFloat,

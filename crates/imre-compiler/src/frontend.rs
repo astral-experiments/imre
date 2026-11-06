@@ -6844,6 +6844,13 @@ impl<'a> Checker<'a> {
                 Intrinsic::Base64Decode => {
                     return Err(self.scoped_builtin_error("base64.b64decode", expression));
                 }
+                Intrinsic::ScopedObjectExport("math.sumprod") => {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "checked math.sumprod requires a direct call",
+                    ));
+                }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
                 }
@@ -9921,6 +9928,9 @@ impl<'a> Checker<'a> {
                     return Ok(self.checked_float_log2(value));
                 }
                 return Err(self.scoped_builtin_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport("math.sumprod"))) => {
+                return self.sumprod_call(call);
             }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.prod"))) => {
                 return self

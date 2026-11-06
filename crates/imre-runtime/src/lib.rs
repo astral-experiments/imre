@@ -43,6 +43,7 @@ mod shared;
 mod signals;
 mod string_cursor;
 mod string_owner;
+mod sumprod;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
 type ListOwner = Shared<List>;
@@ -278,6 +279,25 @@ impl<T> StorageCell<T> {
     unsafe fn with<R>(&self, read: impl for<'a> FnOnce(&'a T) -> R) -> R {
         // SAFETY: the caller guarantees nonoverlapping, nonreentrant access.
         read(unsafe { &*self.0.get() })
+    }
+
+    /// Read two operands, borrowing their storage once if they are aliases.
+    ///
+    /// # Safety
+    /// The same requirements as `with` apply to both cells. In particular,
+    /// `read` must not reenter either cell or let a storage pointer escape.
+    unsafe fn with_pair<R>(&self, other: &Self, read: impl FnOnce(&T, &T) -> R) -> R {
+        // SAFETY: only distinct cells are entered together. For aliases the two
+        // operands share the immutable reference from a single call to with.
+        unsafe {
+            self.with(|left| {
+                if std::ptr::eq(self, other) {
+                    read(left, left)
+                } else {
+                    other.with(|right| read(left, right))
+                }
+            })
+        }
     }
 
     /// # Safety

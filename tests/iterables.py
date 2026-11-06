@@ -9,6 +9,12 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterables"
 
 REJECTED = {
+    "sumprod_unknown_length_unconditional_float_return": (
+        "from math import sumprod\n"
+        "def dot(a: list[float], b: list[float]) -> float:\n"
+        "    return sumprod(a, b)\n"
+        "print(dot([1.0], [2.0]))\n"
+    ),
     "ndiff_escape": 'from difflib import ndiff\nrows = ndiff(["a"], ["b"])\n',
     "ndiff_element_type": 'from difflib import ndiff\nrows = list(ndiff([1], [2]))\n',
     "generator_mapping_alias": 'from collections.abc import Iterator\nclass Example:\n    def __init__(self) -> None:\n        self.rows: dict[str, int] = {"a": 1}\n    def rows_view(self) -> Iterator[tuple[str, int]]:\n        yield from self.rows.items()\nprint(len(list(Example().rows_view())))\n',

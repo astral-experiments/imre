@@ -7595,6 +7595,15 @@ impl Emitter<'_, '_> {
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
+            Builtin::Sumprod => {
+                let name = match returns {
+                    Type::Int => "imre_sumprod_int_lists",
+                    Type::Float => "imre_sumprod_float_lists",
+                    Type::ObjectValue => "imre_sumprod_number_lists",
+                    _ => unreachable!("checked sumprod result"),
+                };
+                self.call(name, returns, &[&args[0].value, &args[1].value])
+            }
             Builtin::FloatAcos => self.call("imre_float_acos", Type::Float, &[&args[0].value]),
             Builtin::FloatAsin => self.call("imre_float_asin", Type::Float, &[&args[0].value]),
             Builtin::FloatErfc => self.call("erfc", Type::Float, &[&args[0].value]),
@@ -10431,6 +10440,9 @@ declare ptr @imre_float_str(double)
 declare void @imre_print_float(double)
 declare i64 @imre_int_bit_length(i64)
 declare double @imre_int_float(i64)
+declare i64 @imre_sumprod_int_lists(ptr, ptr)
+declare double @imre_sumprod_float_lists(ptr, ptr)
+declare ptr @imre_sumprod_number_lists(ptr, ptr)
 declare double @imre_float_acos(double)
 declare double @imre_float_asin(double)
 declare double @erfc(double)

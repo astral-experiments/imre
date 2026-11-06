@@ -273,6 +273,61 @@ impl Checker<'_> {
         self.integer_fold(call, input, start, result, convert, Binary::Add)
     }
 
+    /// Call the shared reducer when the operand storage and successful return type are known.
+    pub(super) fn sumprod_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let ([left, right], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return Err(error(
+                self.source,
+                call,
+                "checked math.sumprod requires two positional arguments",
+            ));
+        };
+        let mut operands = [self.expr(left)?, self.expr(right)?];
+        for value in &mut operands {
+            // A literal tuple's fields are already checked in evaluation order. The reducer
+            // consumes these private values immediately, so no tuple identity is observable.
+            if let ExprKind::Tuple(items) = &mut value.kind
+                && let Some(element) = [Type::Int, Type::Float]
+                    .into_iter()
+                    .find(|ty| items.iter().all(|item| item.ty == *ty))
+            {
+                value.ty = self.types.list(element);
+                value.kind = ExprKind::List(std::mem::take(items));
+            }
+        }
+        let ty = if operands.iter().all(|value| value.ty == Type::ListInt) {
+            Type::Int
+        } else {
+            let floats = self.types.list(Type::Float);
+            for value in &mut operands {
+                if matches!(&value.kind, ExprKind::List(items) if items.is_empty()) {
+                    value.ty = floats;
+                }
+                if value.ty != floats {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "checked math.sumprod requires matching integer or float elements in lists or tuple literals",
+                    ));
+                }
+            }
+            // A fresh nonempty literal proves a successful result is a float. Otherwise
+            // the reducer can also return integer zero; preserve its concrete scalar kind.
+            if operands.iter().any(Expr::is_nonempty_list_literal) {
+                Type::Float
+            } else {
+                Type::ObjectValue
+            }
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::Sumprod, Vec::from(operands)),
+        })
+    }
+
     /// Lowers `math.prod` over exact integers without materializing the source.
     pub(super) fn integer_product(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let [source] = call.arguments.args.as_ref() else {

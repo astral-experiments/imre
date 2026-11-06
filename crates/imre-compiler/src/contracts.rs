@@ -543,6 +543,7 @@ impl Builtin {
             | Self::StringGet
             | Self::StringIntList
             | Self::ListAccumulate
+            | Self::Sumprod
             | Self::EnumLookup(_)
             | Self::TomlDecode(_)
             | Self::FloatAcos
@@ -951,6 +952,14 @@ impl Builtin {
                     || signature(&[Type::ListInt, Type::Int], Type::ListInt)
             }
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::Sumprod => {
+                matches!(args, [left, right] if left.ty == right.ty && match types.element(left.ty) {
+                    Some(Type::Int) => result == Type::Int,
+                    Some(Type::Float) => result == Type::ObjectValue
+                        || result == Type::Float && args.iter().any(Expr::is_nonempty_list_literal),
+                    _ => false,
+                })
+            }
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
@@ -1526,6 +1535,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_parse"
                 | "imre_int_parse_hex"
                 | "imre_int_float"
+                | "imre_sumprod_int_lists"
+                | "imre_sumprod_float_lists"
+                | "imre_sumprod_number_lists"
                 | "imre_float_acos"
                 | "imre_float_asin"
                 | "imre_float_int"

@@ -813,6 +813,49 @@ mod tests {
     }
 
     #[test]
+    fn checks_sumprod_float_result_requires_a_nonempty_list_literal() {
+        let mut module = empty();
+        let floats = module.types.list(Type::Float);
+        module.entry.locals = vec![floats, Type::Float];
+        let unknown = Expr::local(0, floats);
+        let literal = |items| Expr {
+            ty: floats,
+            kind: ExprKind::List(items),
+        };
+        let empty = literal(vec![]);
+        let nonempty = literal(vec![Expr::local(1, Type::Float)]);
+        let exposed = Expr {
+            ty: floats,
+            kind: ExprKind::Bind(0, Box::new(nonempty.clone())),
+        };
+        let mut verify = |left, right, result| {
+            module.entry.body = vec![Statement::Expr(Expr {
+                ty: result,
+                kind: ExprKind::Builtin(Builtin::Sumprod, vec![left, right]),
+            })];
+            super::module(&module)
+        };
+        verify(nonempty.clone(), unknown.clone(), Type::Float).unwrap();
+        verify(unknown.clone(), nonempty.clone(), Type::Float).unwrap();
+        verify(unknown.clone(), unknown.clone(), Type::ObjectValue).unwrap();
+        verify(empty.clone(), empty.clone(), Type::ObjectValue).unwrap();
+
+        let ints = Expr {
+            ty: Type::ListInt,
+            kind: ExprKind::List(vec![Expr::integer(1)]),
+        };
+        for (left, right) in [
+            (unknown.clone(), unknown.clone()),
+            (empty.clone(), empty),
+            (exposed, unknown),
+            (ints, nonempty),
+        ] {
+            let error = verify(left, right, Type::Float).unwrap_err();
+            assert!(error.contains("invalid specialized operation"), "{error}");
+        }
+    }
+
+    #[test]
     fn checks_specialized_shapes_and_bounds_without_reproving_them() {
         let mut module = empty();
         module.entry.locals = vec![Type::ListInt, Type::Int];
