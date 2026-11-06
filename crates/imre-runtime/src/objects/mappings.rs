@@ -610,13 +610,27 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         key
     }
 
+    /// A singleton needs only equality. Larger scalar tables use their stored hashes.
+    fn scalar_position(&self, key: &K) -> Option<usize>
+    where
+        K: InfallibleKey,
+    {
+        if let [Some(entry)] = self.entries.as_slice() {
+            return entry.key.same_key(key).then_some(0);
+        }
+        let Ok(position) = self.key_position(key.table_hash(), key) else {
+            unreachable!("scalar key equality is infallible")
+        };
+        position
+    }
+
     unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>>
     where
         K: InfallibleKey,
     {
         // SAFETY: the caller roots this table's exact key representation.
         let key = unsafe { K::borrow(word) };
-        self.position(key.table_hash(), &*key)
+        self.scalar_position(&key)
             .map(|position| self.entries[position].as_ref().unwrap())
     }
 
@@ -2476,7 +2490,7 @@ pub unsafe extern "C" fn imre_dict_get(value: *const Object, key: usize) -> usiz
     }
 }
 
-/// Read a numeric subscription and retain its dense position across the right side.
+/// Read a subscription and record the entry position for the subsequent store.
 ///
 /// # Safety
 /// The dictionary and key are rooted, the key type is exactly string or integer,
@@ -2494,11 +2508,7 @@ pub unsafe extern "C" fn imre_dict_get_position(
     ) -> Option<(usize, usize)> {
         // SAFETY: the caller roots a key with this table's exact representation.
         let key = unsafe { K::borrow(key) };
-        // Use the same identity shortcut and equality as ordinary subscription.
-        let Ok(position) = table.key_position(key.table_hash(), &key) else {
-            unreachable!("exact string and integer keys have infallible equality")
-        };
-        let index = position?;
+        let index = table.scalar_position(&key)?;
         Some((index, table.entries[index].as_ref().unwrap().value))
     }
 
