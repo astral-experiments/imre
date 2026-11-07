@@ -440,6 +440,8 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         }
     }
 
+    // Infallible scalar keys can eliminate the error slot in their caller.
+    #[inline(always)]
     fn key_position(&self, hash: u64, key: &K) -> Result<Option<usize>, Error> {
         let mut error = None;
         let found = self.index.find(
