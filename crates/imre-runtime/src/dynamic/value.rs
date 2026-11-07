@@ -2733,11 +2733,11 @@ struct Slot {
     has_gc_header: bool,
     may_have_buffer_views: bool,
     finalization: Finalization,
-    generation: u8,
+    birth_epoch: u8,
 }
 
 impl Slot {
-    fn new(value: Value) -> Self {
+    fn new(value: Value, birth_epoch: u8) -> Self {
         Self {
             value: Some(value),
             gc_next: Cell::new(UNMARKED),
@@ -2746,7 +2746,7 @@ impl Slot {
             has_gc_header: false,
             may_have_buffer_views: false,
             finalization: Finalization::None,
-            generation: 0,
+            birth_epoch,
         }
     }
 
@@ -2999,6 +2999,10 @@ pub(super) struct Heap {
     byte_buffer_allowance: usize,
     pub(super) gc_settings: Arc<GcSettings>,
     pub(super) gc_schedule: GcSchedule,
+    // Slots born since the last collection are young. Slots born since the last
+    // middle or full collection survive a young collection in the middle generation.
+    young_epoch: u8,
+    middle_epoch: u8,
     weak: HashMap<Id, Vec<Id>>,
     weak_roots: weak_roots::RootPaths,
     finalizer_roots: weak_roots::RootPaths,
@@ -3180,15 +3184,15 @@ impl Heap {
 
     pub fn new() -> Self {
         let mut slots = vec![
-            Slot::new(Value::None),
-            Slot::new(Value::Bool(false)),
-            Slot::new(Value::Bool(true)),
-            Slot::new(Value::Ellipsis),
-            Slot::new(Value::NotImplemented),
-            Slot::new(Value::Tuple(Vec::new())),
+            Slot::new(Value::None, 1),
+            Slot::new(Value::Bool(false), 1),
+            Slot::new(Value::Bool(true), 1),
+            Slot::new(Value::Ellipsis, 1),
+            Slot::new(Value::NotImplemented, 1),
+            Slot::new(Value::Tuple(Vec::new()), 1),
         ];
         for n in SMALL_INT_MIN..=SMALL_INT_MAX {
-            slots.push(Slot::new(Value::Int(crate::Int::from(n))));
+            slots.push(Slot::new(Value::Int(crate::Int::from(n)), 1));
         }
         let mut heap = Self {
             traces: vec![Cell::new(END); slots.len()],
@@ -3223,6 +3227,8 @@ impl Heap {
             byte_buffer_allowance: BYTE_BUFFER_FLOOR,
             gc_settings: Arc::default(),
             gc_schedule: GcSchedule::default(),
+            young_epoch: 1,
+            middle_epoch: 1,
             weak: HashMap::new(),
             weak_roots: Default::default(),
             finalizer_roots: Default::default(),
@@ -3606,7 +3612,7 @@ impl Heap {
             self.slot_shapes[index] = shape;
             self.slots[index].value = Some(value());
             self.slots[index].may_have_buffer_views = false;
-            self.slots[index].generation = 0;
+            self.slots[index].birth_epoch = self.young_epoch;
             index
         } else {
             if self.reserve_slot().is_err() {
@@ -3618,7 +3624,7 @@ impl Heap {
             }
             self.slot_shapes.push(shape);
             self.traces.push(Cell::new(UNMARKED));
-            self.slots.push(Slot::new(value()));
+            self.slots.push(Slot::new(value(), self.young_epoch));
             self.slots.len() - 1
         };
         // Only objects with children or a Python GC header participate in
@@ -5397,6 +5403,7 @@ impl Heap {
         generation: u8,
         newly_reachable: Option<&[usize]>,
     ) {
+        let oldest = self.minimum_birth_epoch(generation);
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
@@ -5422,7 +5429,7 @@ impl Heap {
                 next: END,
                 mode: MarkMode::Ordered(&mut scan),
             });
-            if slot.generation <= generation
+            if slot.birth_epoch >= oldest
                 && newly_reachable.is_none_or(|cohort| cohort[id] != 0)
                 && !slot.untracked_tuple.get()
                 && let Value::Tuple(items) = self.get(id as Id)
@@ -5530,13 +5537,29 @@ impl Heap {
         (first_finalizer, remaining != 0)
     }
 
-    /// Age participating slots before Python callbacks can allocate into a recycled slot.
+    /// Return the oldest allocation epoch participating in this collection.
+    fn minimum_birth_epoch(&self, generation: u8) -> u8 {
+        match generation {
+            0 => self.young_epoch,
+            1 => self.middle_epoch,
+            _ => 0,
+        }
+    }
+
+    /// Age all survivors before callbacks can allocate into a recycled slot.
     fn promote_generation(&mut self, generation: u8) {
-        let next = (generation + 1).min(2);
-        for slot in &mut self.slots {
-            if slot.generation <= generation {
-                slot.generation = next;
+        if self.young_epoch == u8::MAX {
+            // Fold old slots to zero and both participating generations to one.
+            // The new boundaries below then apply the current promotion.
+            for slot in &mut self.slots {
+                slot.birth_epoch = u8::from(slot.birth_epoch >= self.middle_epoch);
             }
+            self.middle_epoch = 1;
+            self.young_epoch = 1;
+        }
+        self.young_epoch += 1;
+        if generation != 0 {
+            self.middle_epoch = self.young_epoch;
         }
     }
 
@@ -5548,6 +5571,7 @@ impl Heap {
     ) -> Result<WeakCallbacks> {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.gc_schedule.start_collection(generation);
+        let oldest = self.minimum_birth_epoch(generation);
         self.mark_full(globals, &mut cycles.work, generation, None);
         self.identify_cycles(&mut cycles);
         if generation < 2 {
@@ -5557,7 +5581,7 @@ impl Heap {
             for id in cycles.members() {
                 let index = id as usize;
                 let slot = &self.slots[index];
-                if slot.generation > generation && slot.gc_tracked(self) {
+                if slot.birth_epoch < oldest && slot.gc_tracked(self) {
                     self.traces[index].set(END);
                     found_older = true;
                 }
@@ -5585,7 +5609,7 @@ impl Heap {
                 .zip(&self.traces)
                 .filter(|(slot, trace)| {
                     trace.get() != UNMARKED
-                        && slot.generation <= generation
+                        && slot.birth_epoch >= oldest
                         && slot.has_gc_header
                         && slot.gc_tracked(self)
                 })
@@ -6154,7 +6178,7 @@ mod tests {
     fn removing_heap_slots_preserves_collection_order() {
         let original = [4, 2, 0, 3, 1, 5];
         for mask in 0u8..(1 << original.len()) {
-            let slots = original.map(|_| Slot::new(Value::None));
+            let slots = original.map(|_| Slot::new(Value::None, 1));
             let mut order = GcOrder::EMPTY;
             for id in original {
                 order.push(id, &slots);
@@ -6520,6 +6544,33 @@ mod reachability_tests {
     use super::{Heap, Value};
 
     #[test]
+    fn birth_epoch_rollover_preserves_all_three_generations() {
+        for collected in 0..=2 {
+            let mut heap = Heap::new();
+            let old = heap.alloc(Value::None);
+            heap.promote_generation(1);
+            heap.young_epoch = u8::MAX - 1;
+            let middle = heap.alloc(Value::None);
+            heap.promote_generation(0);
+            let young = heap.alloc(Value::None);
+            heap.promote_generation(collected);
+            let fresh = heap.alloc(Value::None);
+
+            let included = |id: super::Id, generation| {
+                heap.slots[id as usize].birth_epoch >= heap.minimum_birth_epoch(generation)
+            };
+            assert!(included(fresh, 0));
+            for id in [middle, young] {
+                assert!(!included(id, 0));
+                assert_eq!(included(id, 1), collected == 0);
+                assert!(included(id, 2));
+            }
+            assert!(!included(old, 1));
+            assert!(included(old, 2));
+        }
+    }
+
+    #[test]
     fn recycled_slot_starts_in_the_young_generation() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -6527,13 +6578,16 @@ mod reachability_tests {
         heap.begin_collection(std::iter::empty(), 2).unwrap();
         heap.finish_full_collection(std::iter::empty());
         heap.end_full_collection();
-        assert_eq!(heap.slots[original as usize].generation, 2);
+        assert!(heap.slots[original as usize].birth_epoch < heap.minimum_birth_epoch(1));
 
         heap.release_temporaries_since(mark);
         heap.collect(std::iter::empty());
         let reused = heap.alloc(Value::List(Vec::new()));
         assert_eq!(original, reused);
-        assert_eq!(heap.slots[reused as usize].generation, 0);
+        assert_eq!(
+            heap.slots[reused as usize].birth_epoch,
+            heap.minimum_birth_epoch(0)
+        );
     }
 
     #[test]
