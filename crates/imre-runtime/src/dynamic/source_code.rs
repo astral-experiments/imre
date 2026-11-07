@@ -3096,21 +3096,19 @@ impl Program {
                     let (body, orelse, guard) = match stmt {
                         Stmt::For(s) => {
                             self.declare_target(&s.target)?;
+                            if s.is_async && !self.kind.is_async() {
+                                return Err(Error::new(
+                                    "SyntaxError",
+                                    "'async for' outside async function",
+                                ));
+                            }
+                            let iterable = self.lower_suspension(*s.iter, line, function)?;
+                            self.instructions
+                                .push((line, Instruction::Iter(iterable, s.is_async)));
                             let guard = if s.is_async {
-                                if !self.kind.is_async() {
-                                    return Err(Error::new(
-                                        "SyntaxError",
-                                        "'async for' outside async function",
-                                    ));
-                                }
-                                let iterable = self.lower_suspension(*s.iter, line, function)?;
-                                self.instructions
-                                    .push((line, Instruction::Iter(iterable, true)));
                                 async_target = Some(*s.target);
                                 Instruction::EnterExcept { handler: 0, end: 0 }
                             } else {
-                                self.instructions
-                                    .push((line, Instruction::Iter(Some(*s.iter), false)));
                                 Instruction::Next(Some(*s.target), 0)
                             };
                             (s.body, s.orelse, guard)

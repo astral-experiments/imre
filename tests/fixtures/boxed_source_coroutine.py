@@ -158,6 +158,7 @@ async def forward(awaitable):
     awaited_binary_operands()
     awaited_conditions()
     awaited_receiver()
+    awaited_loop_iterable()
 
 
 def awaited_call_arguments():
@@ -397,3 +398,23 @@ def awaited_receiver():
     assert task.send(Process()) == 'paused'
     assert events == ['lookup']
     assert completed_send(task, 7) == -7
+
+
+def awaited_loop_iterable():
+    events = []
+
+    def labels():
+        events.append("labels")
+        return ("first", "second")
+
+    async def rows():
+        for key, value in zip(labels(), await Pause(), strict=False):
+            events.append((key, value))
+        else:
+            events.append("done")
+
+    task = rows()
+    assert task.send(None) == "paused"
+    assert events == ["labels"]
+    assert completed_send(task, [7, 8, 9]) is None
+    assert events == ["labels", ("first", 7), ("second", 8), "done"]
