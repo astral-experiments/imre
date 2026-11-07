@@ -255,64 +255,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "importlib._abc" => bundled_source!("importlib/_abc.py"),
         "importlib.abc" => bundled_source!("importlib/abc.py"),
         "importlib.machinery" => bundled_source!("importlib/machinery.py"),
-        "_frozen_importlib" | "importlib._bootstrap" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            let file = if name == "_frozen_importlib" {
-                "_frozen_importlib.py"
-            } else {
-                "importlib/_bootstrap.py"
-            };
-            Some((file, SOURCE.get_or_init(|| {
-                const UPSTREAM: &str = include_str!(
-                    "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap.py"
-                );
-                let section = |start, end| {
-                    let begin = UPSTREAM.find(start).unwrap();
-                    UPSTREAM[begin..].split_once(end).unwrap().0
-                };
-                // The native warning backend is the public warnings module; load it only on emission.
-                let imports = section("def _gcd_import(", "def _builtin_from_name(")
-                    .replace("_warnings.warn(", "_warning_module().warn(");
-                let find = section("def _find_spec(", "def _sanity_check(")
-                    .replace("for finder in meta_path:", "for index, finder in enumerate(meta_path):")
-                    .replace("                spec = find_spec(name, path, target)", concat!(
-                        "                spec = find_spec(name, path, target)\n",
-                        "                if index + 1 < len(meta_path) and meta_path[index + 1] is _BundledImporter:\n",
-                        "                    spec = _prefer_bundled_spec(finder, spec, name, path, target)",
-                    ))
-                    .replace("with _ImportLockContext():", "with _import_lock:")
-                    .replace("_warnings.warn('sys.meta_path is empty', ImportWarning)",
-                             "_import_warning('sys.meta_path is empty', 1254)");
-                let exec = section("def _exec(spec, module):", "def _load_backward_compatible(")
-                    .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 866)");
-                let load = section("def _load_backward_compatible(", "# Loaders")
-                    .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 921)");
-                // The frozen loader reads Imre's registered code objects and module metadata.
-                let frozen = section("class FrozenImporter:", "# Import itself")
-                    .replace("_imp.find_frozen", "_frozen_info")
-                    .replace("_imp.get_frozen_object", "_frozen_code")
-                    .replace("_imp.is_frozen_package", "_frozen_package");
-                let requires_frozen = section("def _requires_frozen(", "def _load_module_shim(")
-                    .replace("not _imp.is_frozen(fullname)", "_frozen_info(fullname) is None");
-                // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
-                [
-                    include_str!("../../stdlib/importlib/legacy_source_loader.py"),
-                    section("def _module_repr(module):", "def _spec_from_module("),
-                    section("def _init_module_attrs(", "def _exec(spec, module):"),
-                    section("def _call_with_frames_removed(", "def _requires_builtin("),
-                    section("def _wrap(", "def _new_module("),
-                    &requires_frozen,
-                    &frozen,
-                    section("def _resolve_name(", "def _find_spec("),
-                    section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
-                    section("def _object_name(", "# Bootstrap-related"),
-                    &find,
-                    &exec,
-                    &load,
-                    &imports,
-                ].join("\n")
-            })))
-        }
+        "_frozen_importlib" => Some((
+            "_frozen_importlib.py",
+            include_str!("../../stdlib/importlib/_bootstrap.py"),
+        )),
+        "importlib._bootstrap" => bundled_source!("importlib/_bootstrap.py"),
         "_frozen_importlib_external" | "importlib._bootstrap_external" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("importlib/_bootstrap_external.py", SOURCE.get_or_init(|| {
