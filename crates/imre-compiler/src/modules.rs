@@ -2715,6 +2715,12 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "HTTPCookieProcessor") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPCookieProcessor")
             }
+            (Self::UrllibRequest, "ProxyHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.ProxyHandler")
+            }
+            (Self::UrllibRequest, "ProxyDigestAuthHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.ProxyDigestAuthHandler")
+            }
             (Self::UrllibRequest, "HTTPDigestAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPDigestAuthHandler")
             }
