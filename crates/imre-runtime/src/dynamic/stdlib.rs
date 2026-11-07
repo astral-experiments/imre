@@ -959,7 +959,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "realpath_parts" | "realpath_parent" | "realpath_kind" | "realpath_readlink"
             | "realpath_notdir" | "realpath_loop",
         )
-        | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
+        | (
+            "_imre_zipimport",
+            "exists" | "isfile" | "index" | "read" | "contains" | "invalidate" | "names",
+        )
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | (
             "struct",

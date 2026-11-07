@@ -34,6 +34,14 @@ pub(super) fn call(
             }
             Ok(TRUE)
         }
+        ("names", [path], []) => {
+            let Some(archive) = ctx.zip_directories.get(ctx.str_value(*path)?) else {
+                return Err(ctx.lookup_error("KeyError", *path));
+            };
+            let mut names = Vec::new();
+            archive.visit_names(|name| names.push(ctx.heap.owned_text(name.as_str().into())));
+            Ok(ctx.alloc(Value::List(names)))
+        }
         ("read" | "contains", [path, key], []) => {
             let path = ctx.str_value(*path)?;
             let key = ctx.str_value(*key)?;
