@@ -1,5 +1,4 @@
 # Linux epoll selector from CPython 3.14.5, Lib/selectors.py.
-import math
 import select
 
 
