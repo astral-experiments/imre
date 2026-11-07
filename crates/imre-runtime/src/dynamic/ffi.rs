@@ -1716,6 +1716,18 @@ pub(super) struct PrelinkedSite {
     body_line: u32,
 }
 
+/// Definition-time scope and flag fields from a compiled function's parameter metadata.
+#[derive(Default, serde::Deserialize)]
+#[serde(default)]
+struct DefinitionMetadata {
+    annotation_class: serde_json::Value,
+    scope_reads: serde_json::Value,
+    scope_complete: serde_json::Value,
+    method_class_cell: serde_json::Value,
+    class_cell: serde_json::Value,
+    code_flags: serde_json::Value,
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_define(
     ctx: *mut Context,
@@ -1869,18 +1881,20 @@ impl Context {
     ) -> Id {
         let (qualname, doc) = metadata_pair;
         let module_definition = self.scope_data(scope).parent.is_none();
-        let metadata: serde_json::Value = self
+        let metadata: DefinitionMetadata = self
             .str_value(parameters)
             .ok()
+            .filter(|v| v.trim_start().starts_with('{'))
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
-        let annotation_class = metadata["annotation_class"] == true;
+        let annotation_class = metadata.annotation_class == true;
         let mut read_class = false;
-        let reads = metadata["scope_reads"]
+        let reads = metadata
+            .scope_reads
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|v| v.as_str())
+            .filter_map(|value| value.as_str())
             .filter(|name| {
                 if annotation_class && *name == "__class__" {
                     read_class = true;
@@ -1894,11 +1908,11 @@ impl Context {
         } else {
             scope
         };
-        let freevars = if metadata["scope_complete"] != true {
+        let freevars = if metadata.scope_complete != true {
             None
-        } else if let Some(captures_class) = metadata["method_class_cell"].as_bool() {
+        } else if let Some(captures_class) = metadata.method_class_cell.as_bool() {
             self.method_freevars(self.scope_data(scope).parent, reads, captures_class)
-        } else if metadata["class_cell"] == true {
+        } else if metadata.class_cell == true {
             None
         } else {
             self.enclosing_freevars(lexical, reads)
@@ -1915,7 +1929,8 @@ impl Context {
         });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
-        let flags = metadata["code_flags"]
+        let flags = metadata
+            .code_flags
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
