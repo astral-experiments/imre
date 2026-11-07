@@ -10247,6 +10247,7 @@ impl Emitter<'_, '_> {
         matches!(list, Type::List(_))
             && match item {
                 Type::Tuple(_) | Type::List(_) | Type::ListInt | Type::Calendar(_) => true,
+                Type::Str => self.module.types.element(list) == Some(Type::Str),
                 Type::Class(class) => {
                     self.module.types.element(list) == Some(item)
                         && !self.module.types.is_value_struct(item)
@@ -13474,6 +13475,15 @@ def total(text: str) -> int:
                 "{observer}"
             );
         }
+    }
+
+    #[test]
+    fn string_lists_take_temporaries_and_retain_borrowed_items() {
+        let body = function_body(
+            "def add(items: list[str], name: str):\n    items.append(name + '!')\n    items.append(name)\n",
+        );
+        assert_eq!(body.matches("call i32 @imre_seq_append_owned(").count(), 1);
+        assert_eq!(body.matches("call i32 @imre_seq_append(").count(), 1);
     }
 
     #[test]
