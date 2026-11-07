@@ -1594,6 +1594,7 @@ pub(super) fn builtin_slot(
             | "__hash__"
             | "__bool__"
             | "__abs__"
+            | "__neg__"
             | "__int__"
             | "__float__"
             | "__iter__"
@@ -1632,6 +1633,9 @@ pub(super) fn builtin_slot(
         }
         if method == "__abs__" {
             return super::absolute_value(ctx, object);
+        }
+        if method == "__neg__" {
+            return ctx.op("neg", storage, NONE, NONE);
         }
         if method == "__int__" {
             return integer::truncate_real(ctx, object);

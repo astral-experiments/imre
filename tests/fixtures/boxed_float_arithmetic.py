@@ -58,3 +58,15 @@ def current():
             return NotImplemented
 
     print(-Declines() is NotImplemented)
+
+    class Named(float):
+        def __float__(self):
+            raise AssertionError("negation converted its receiver")
+
+    class Override(Named):
+        def __neg__(self):
+            return ("override", super().__neg__())
+
+    value = -Named(0.0)
+    print(type(value).__name__, value.hex())
+    print(-Override(2.5), float.__neg__(Override(-2.5)))

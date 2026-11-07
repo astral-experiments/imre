@@ -3622,6 +3622,9 @@ def report(text):
                     "-IB", handshake, certdata,
                     native_args=("run", handshake, "--quiet", "--", certdata), native_timeout=600,
                 )
+                failed_shutdown = fixtures / "ssl_socket_failed_shutdown.py"
+                guarded = run(imre, "run", failed_shutdown, "--quiet", timeout=600)
+                assert guarded.returncode == 0, guarded.stderr
                 object_io = fixtures / "ssl_object_io.py"
                 compare(
                     "-IB", object_io, certdata,
