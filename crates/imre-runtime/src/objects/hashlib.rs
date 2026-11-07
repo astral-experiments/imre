@@ -449,8 +449,6 @@ pub(super) fn clear_algorithms() {
     GUARANTEED.with(RefCell::take);
 }
 
-const HEX: &[u8; 16] = b"0123456789abcdef";
-
 /// Encode each input byte directly into two digits of the final ASCII string.
 pub(crate) fn hex_text(bytes: &[u8]) -> Result<Str> {
     let length = bytes.len().checked_mul(2).ok_or_else(Error::allocation)?;
@@ -488,16 +486,18 @@ fn hex_bytes(input: &[u8], letter_offset: u8) -> Result<Vec<u8>> {
 #[inline(never)]
 fn write_hex_digits(input: &[u8], letter_offset: u8, output: &mut [std::mem::MaybeUninit<u8>]) {
     let (pairs, _) = output.as_chunks_mut::<2>();
-    let digit = |nibble| {
-        if nibble < 10 {
-            b'0' + nibble
-        } else {
-            letter_offset + nibble
-        }
-    };
     for (&byte, pair) in input.iter().zip(pairs) {
-        pair[0].write(digit(byte >> 4));
-        pair[1].write(digit(byte & 15));
+        pair[0].write(hex_digit(byte >> 4, letter_offset));
+        pair[1].write(hex_digit(byte & 15, letter_offset));
+    }
+}
+
+/// Maps one hexadecimal digit to its ASCII byte with the requested letter case.
+fn hex_digit(nibble: u8, letter_offset: u8) -> u8 {
+    if nibble < 10 {
+        b'0' + nibble
+    } else {
+        letter_offset + nibble
     }
 }
 
@@ -520,19 +520,32 @@ pub(crate) fn hex_with_separator(
     result
         .try_reserve_exact(capacity)
         .map_err(|_| Error::allocation())?;
-    let mut next = if group > 0 {
+    let first = if group > 0 {
         (bytes.len() - 1) % step + 1
     } else {
         step
     };
-    for (index, &byte) in bytes.iter().enumerate() {
-        if index == next {
-            result.push(separator);
-            next += step;
+    let output = &mut result.spare_capacity_mut()[..capacity];
+    let (first_output, rest) = output.split_at_mut(2 * first);
+    write_hex_digits(&bytes[..first], b'a' - 10, first_output);
+    let remaining = &bytes[first..];
+    if step == 1 {
+        // One separator and two digits have a fixed stride for every input byte.
+        let (triples, _) = rest.as_chunks_mut::<3>();
+        for (triple, &byte) in triples.iter_mut().zip(remaining) {
+            triple[0].write(separator);
+            triple[1].write(hex_digit(byte >> 4, b'a' - 10));
+            triple[2].write(hex_digit(byte & 15, b'a' - 10));
         }
-        result.push(HEX[(byte >> 4) as usize]);
-        result.push(HEX[(byte & 15) as usize]);
+    } else {
+        for (destination, source) in rest.chunks_mut(2 * step + 1).zip(remaining.chunks(step)) {
+            destination[0].write(separator);
+            write_hex_digits(source, b'a' - 10, &mut destination[1..]);
+        }
     }
+    // SAFETY: the first group writes two digits per byte. Each remaining group
+    // also writes its leading separator, including a shorter last group.
+    unsafe { result.set_len(capacity) };
     Ok(result)
 }
 
