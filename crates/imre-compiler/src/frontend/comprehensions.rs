@@ -414,11 +414,16 @@ impl Checker<'_> {
         node: &impl Ranged,
         async_error: &str,
     ) -> Result<(), String> {
-        if plan
-            .steps
-            .iter()
-            .any(|step| matches!(step, Step::Next { is_async: true, .. }))
-        {
+        let requires_async_iterator = match plan.output {
+            // A single await in a deferred expression gives it the async
+            // generator protocol even if every source is synchronous.
+            Output::Generator(_) => plan.body_suspends(),
+            _ => plan
+                .steps
+                .iter()
+                .any(|step| matches!(step, Step::Next { is_async: true, .. })),
+        };
+        if requires_async_iterator {
             return Err(error(self.source, node, async_error));
         }
         if plan
@@ -448,6 +453,8 @@ impl Checker<'_> {
         )?;
         let input = self.iteration_input(display.outer, None)?;
         if matches!(input, Iteration::Prepared(_))
+            // A typed await uses the enclosing coroutine's task and frame.
+            || display.body_suspends()
             || !narrowing::expression_assignments(expression).is_empty()
             || pipelines::is_pipeline_expression(self, display.outer)
             || !self.local_functions.is_empty()
@@ -981,6 +988,25 @@ impl Checker<'_> {
 mod tests {
     use crate::ir::{Builtin, ExprKind, Statement, Type, walk_expressions};
     use crate::{CompileOptions, check, compile};
+
+    #[test]
+    fn synchronous_consumer_requires_a_synchronous_generator_protocol() {
+        let source = r#"
+async def identity(value: int) -> int:
+    return value
+
+async def invalid(values: list[int]) -> int:
+    return sum(await identity(x) for x in values)
+"#;
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let diagnostic = super::super::lower(&graph)
+            .err()
+            .expect("async generator requires an async iterator");
+        assert!(
+            diagnostic.contains("asynchronous generator expressions are unsupported"),
+            "{diagnostic}"
+        );
+    }
 
     #[test]
     fn unrelated_guard_keeps_context_for_bound_method_inference() {
