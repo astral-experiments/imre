@@ -783,12 +783,37 @@ impl Checker<'_> {
             ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => (old, new, Some(&kw.value)),
             _ => return Err(self.object_builtin_error("str.replace", call)),
         };
-        let old = self
-            .expr_expected(old, Type::Str)
-            .map_err(|_| self.object_builtin_error("str.replace", call))?;
-        let new = self
-            .expr_expected(new, Type::Str)
-            .map_err(|_| self.object_builtin_error("str.replace", call))?;
+        let check_literal = self.graph.check_only
+            && call
+                .func
+                .as_attribute_expr()
+                .is_some_and(|method| method.value.is_string_literal_expr());
+        let mut string_argument = |node: &ast::Expr| {
+            // Only the finished operand's conversion is an error. Its contents
+            // may require Python operations even when its own class is fixed.
+            let fixed_class = match node {
+                ast::Expr::List(_)
+                | ast::Expr::Tuple(_)
+                | ast::Expr::Set(_)
+                | ast::Expr::Dict(_) => true,
+                ast::Expr::UnaryOp(op) => {
+                    matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                        && op.operand.is_number_literal_expr()
+                }
+                _ => node.is_literal_expr() && !node.is_string_literal_expr(),
+            };
+            if check_literal && fixed_class {
+                let value = self
+                    .expr(node)
+                    .map_err(|_| self.object_builtin_error("str.replace", call))?;
+                self.coerce(value, Type::Str, node)
+            } else {
+                self.expr_expected(node, Type::Str)
+                    .map_err(|_| self.object_builtin_error("str.replace", call))
+            }
+        };
+        let old = string_argument(old)?;
+        let new = string_argument(new)?;
         let mut args = vec![receiver, old, new];
         if let Some(count) = count {
             let count = powers::integer(self.expr(count)?);
