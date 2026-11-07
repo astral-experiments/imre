@@ -5063,7 +5063,7 @@ impl Context {
                     }
                     "__module__" => return Ok(self.text("operator")),
                     "__call__" => return Ok(self.builtin(&format!("{owner}.__call__"))),
-                    "__reduce__" if owner != "operator.attrgetter" => {
+                    "__reduce__" => {
                         return Ok(self.builtin(&format!("{owner}.__reduce__")));
                     }
                     _ => {}

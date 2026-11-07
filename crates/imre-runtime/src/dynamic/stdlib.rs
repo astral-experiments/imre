@@ -2765,6 +2765,9 @@ pub(super) fn call(
         if name == "methodcaller" {
             return operator::methodcaller(ctx, args, kwargs);
         }
+        if name == "attrgetter.__reduce__" {
+            return operator::reduce_attrgetter(ctx, args, kwargs);
+        }
         if name == "methodcaller.__reduce__" {
             return operator::reduce_methodcaller(ctx, args, kwargs);
         }
