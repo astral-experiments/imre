@@ -150,7 +150,7 @@ pub(super) struct Error {
     pub message: String,
     pub args: Option<Id>,
     pub decode: Option<Box<DecodeState>>,
-    pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
+    pub os_args: Option<triomphe::Arc<super::os_error::Args>>,
     // Keep the context reachable even if the optional traceback cannot be allocated.
     pub context: Id,
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
@@ -851,7 +851,7 @@ impl From<crate::Error> for Error {
             .map(|args| {
                 super::os_error::Args::new(super::os_error::Args::Native {
                     source: args,
-                    fields: std::cell::Cell::new(None),
+                    fields: std::sync::OnceLock::new(),
                 })
             })
             .transpose()
