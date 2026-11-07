@@ -2,6 +2,8 @@
 //! iterator acquisition, and each pull stay separate so composition preserves
 //! Python's lazy evaluation and mutation checks without escaping iterator values.
 
+use imre_ast::comprehension::{Plan, Step};
+
 use super::*;
 use crate::ir::TextOperation;
 
@@ -307,20 +309,6 @@ pub(super) fn check_range_step(step: Expr) -> Statement {
         vec![raise_value_error("range() arg 3 must not be zero".into())],
         Vec::new(),
     )
-}
-
-/// Collects private binding names without treating stores through attributes or
-/// subscripts as new locals.
-fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
-    if let ast::Expr::Name(name) = target {
-        names.insert(name.id.to_string());
-    } else if let ast::Expr::Starred(starred) = target {
-        target_names(&starred.value, names);
-    } else if let Some(elements) = pattern_elements(target) {
-        for element in elements {
-            target_names(element, names);
-        }
-    }
 }
 
 impl Checker<'_> {
@@ -2232,24 +2220,12 @@ impl Checker<'_> {
         element: Option<Type>,
         zip_sum: Option<&mut Option<zip_sums::Sum>>,
     ) -> Result<Prepared, String> {
-        if generator.generators.iter().any(|clause| clause.is_async) {
-            return Err(error(
-                self.source,
-                generator,
-                "asynchronous generator expressions are unsupported",
-            ));
-        }
-        if generator
-            .generators
-            .iter()
-            .any(|clause| !narrowing::expression_assignments(&clause.iter).is_empty())
-        {
-            return Err(error(
-                self.source,
-                generator,
-                "assignment expressions are forbidden in comprehension iterables",
-            ));
-        }
+        let plan = Plan::generator(generator);
+        self.check_comprehension_inputs(
+            &plan,
+            generator,
+            "asynchronous generator expressions are unsupported",
+        )?;
         if generator
             .generators
             .iter()
@@ -2264,50 +2240,41 @@ impl Checker<'_> {
         let lists = zip_sum
             .as_ref()
             .and_then(|_| zip_sums::lists(self, generator));
-        let first = self.expansion_input(&generator.generators[0].iter, None)?;
+        let first = self.expansion_input(plan.outer, None)?;
         let mut first = self.prepare_iteration(first, generator, false)?;
-        let before = self.local_state();
-        let names = self.names.clone();
-        let class_receiver = self.class_receiver.clone();
-        let targets = self.comprehension_targets.clone();
         let first_private = self.locals.len();
-        let mut private_targets = HashSet::new();
-        for clause in &generator.generators {
-            target_names(&clause.target, &mut private_targets);
-        }
-        for name in &private_targets {
-            self.names.remove(name);
-        }
-        if self
-            .class_receiver
-            .as_ref()
-            .is_some_and(|name| private_targets.contains(name))
-        {
-            self.class_receiver = None;
-        }
-        self.comprehension_targets.extend(private_targets);
-        self.comprehension_depth += 1;
+        let scope = self.enter_comprehension(plan.target_names());
         // Suspended generators can observe later enclosing writes. Facts about
         // those mutable slots must be proved again inside the lazy body.
         self.narrowed = assignments::Narrowed::new();
-        let mut inputs = Vec::new();
-        let mut bindings = Vec::new();
-        let mut filters = Vec::new();
+        // Collapse each pull and its guard chain into one typed resume case.
+        // Store the plan's jump destinations so exhaustion and suspension use
+        // the same backedges as eager iteration.
+        struct Pull {
+            pc: usize,
+            input: Prepared,
+            binding: Vec<Statement>,
+            filters: Vec<Expr>,
+            accepted: usize,
+            exhausted: usize,
+        }
         first.evaluate.append(&mut first.acquire);
-        let mut first = Some(first);
-        for (index, clause) in generator.generators.iter().enumerate() {
-            let input = if index == 0 {
-                first.take().unwrap()
-            } else {
-                // An inner source is constructed immediately under the outer
-                // clause's successful filters, before the first suspension.
-                let input = self.expansion_input(&clause.iter, None)?;
-                self.prepare_iteration(input, clause, false)?
+        let mut input = first;
+        let mut pc = 0;
+        let mut pulls = Vec::with_capacity(plan.depths);
+        let yielded = loop {
+            let Step::Next {
+                depth,
+                target,
+                exhausted,
+                ..
+            } = plan.steps[pc]
+            else {
+                unreachable!("an iterator is followed by its pull");
             };
-            if index != 0 {
-                // Later pulls resume this clause without rechecking its outer
-                // filters. Only private target slots cannot be rebound by a
-                // consumer or a sibling iterator while the generator pauses.
+            if depth != 0 {
+                // Only private target slots remain stable while execution
+                // pauses inside a nested iterator.
                 let stable = self
                     .comprehension_targets
                     .iter()
@@ -2319,43 +2286,44 @@ impl Checker<'_> {
                     }
                 }
             }
-            let repeated_writes = generator.generators[index..]
-                .iter()
-                .flat_map(|clause| std::iter::once(&clause.target).chain(clause.ifs.iter()))
-                .chain([&*generator.elt])
-                .flat_map(narrowing::expression_assignments)
-                .collect::<HashSet<_>>();
-            for name in repeated_writes {
-                if let Some(slot) = self.names.get(&name) {
-                    self.narrowed.remove_mut(slot);
+            self.forget_comprehension_writes(&plan, depth);
+            let binding = self.bind_iterator_pattern(target, input.value)?;
+            let (accepted, filters) = self.comprehension_filters(&plan, pc)?;
+            pulls.push(Pull {
+                pc,
+                input,
+                binding,
+                filters,
+                accepted,
+                exhausted,
+            });
+            match plan.steps[accepted] {
+                Step::Open { iterable, .. } => {
+                    let source = self.expansion_input(iterable, None)?;
+                    input = self.prepare_iteration(source, iterable, false)?;
+                    pc = accepted + 1;
                 }
+                Step::Emit { output, .. } => {
+                    break match element {
+                        Some(ty) => self.expr_expected(output.value(), ty)?,
+                        None => self.expr(output.value())?,
+                    };
+                }
+                _ => unreachable!("a successful guard opens an iterator or emits"),
             }
-            bindings.push(self.bind_iterator_pattern(&clause.target, input.value)?);
-            let mut conditions = Vec::new();
-            for condition in &clause.ifs {
-                conditions.push(self.condition(condition)?);
-                self.apply_facts(condition, true);
-            }
-            filters.push(conditions);
-            inputs.push(input);
-        }
-        let yielded = if let Some(element) = element {
-            self.expr_expected(&generator.elt, element)?
-        } else {
-            self.expr(&generator.elt)?
         };
         let value = self.hidden(yielded.ty);
         if let (Some(out), Some((lists, targets))) = (zip_sum, lists)
             && yielded.ty == Type::Int
         {
             let items = targets.map(|name| self.names[name]);
-            let zip = &inputs[0];
+            let zip = &pulls[0].input;
             let mut next = zip.next.clone();
             Prepared::bind_next(
                 &mut next,
                 self.local(zip.ready),
                 zip.value,
-                bindings[0].clone(),
+                pulls[0].binding.clone(),
             );
             *out = Some(zip_sums::Sum {
                 lists,
@@ -2373,27 +2341,17 @@ impl Checker<'_> {
         }
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
-        let depth = self.hidden(Type::Int);
-        self.comprehension_depth -= 1;
-        self.comprehension_targets = targets;
-        self.names = names;
-        self.class_receiver = class_receiver;
-        for (name, &slot) in &self.comprehension_exports {
-            if !self.comprehension_targets.contains(name) {
-                self.names.insert(name.clone(), slot);
-            }
-        }
-        self.restore_state(before);
-        let mut writes = inputs
+        let resume_pc = self.hidden(Type::Int);
+        self.leave_comprehension(scope);
+        let mut writes = pulls
             .iter()
-            .flat_map(|input| input.writes.iter().copied())
+            .flat_map(|pull| pull.input.writes.iter().copied())
             .collect::<HashSet<_>>();
-        for expression in generator
-            .generators
-            .iter()
-            .flat_map(|clause| clause.ifs.iter())
-            .chain([&*generator.elt])
-        {
+        for expression in plan.steps.iter().filter_map(|step| match step {
+            Step::Filter { test, .. } => Some(*test),
+            Step::Emit { output, .. } => Some(output.value()),
+            _ => None,
+        }) {
             for name in narrowing::expression_assignments(expression) {
                 if let Some(slot) = self.names.get(&name) {
                     self.narrowed.remove_mut(slot);
@@ -2406,60 +2364,62 @@ impl Checker<'_> {
             .values()
             .copied()
             .collect::<HashSet<_>>();
-        let mut clear = inputs[0].clear.clone();
+        let mut clear = pulls[0].input.clear.clone();
         clear.extend((first_private..self.locals.len()).filter(|slot| !exported.contains(slot)));
-        let mut evaluate = std::mem::take(&mut inputs[0].evaluate);
+        let mut evaluate = std::mem::take(&mut pulls[0].input.evaluate);
         evaluate.extend([
-            Statement::Assign(depth, Expr::integer(0)),
+            Statement::Assign(resume_pc, Expr::integer(0)),
             Statement::Assign(done, Expr::boolean(false)),
         ]);
         let mut cases = Vec::new();
-        for index in (0..inputs.len()).rev() {
-            let mut accepted = if index + 1 == inputs.len() {
-                vec![
-                    Statement::Assign(value, yielded.clone()),
-                    Statement::Assign(ready, Expr::boolean(true)),
-                ]
-            } else {
-                let mut initialize = inputs[index + 1].evaluate.clone();
-                initialize.extend(inputs[index + 1].acquire.clone());
-                initialize.push(Statement::Assign(depth, Expr::integer((index + 1) as i64)));
-                initialize
+        for pull in pulls.iter().rev() {
+            let mut accepted = match plan.steps[pull.accepted] {
+                Step::Emit { resume, .. } => {
+                    debug_assert_eq!(resume, pull.pc);
+                    vec![
+                        Statement::Assign(value, yielded.clone()),
+                        Statement::Assign(ready, Expr::boolean(true)),
+                    ]
+                }
+                Step::Open { depth, .. } => {
+                    let child = &pulls[depth];
+                    let mut initialize = child.input.evaluate.clone();
+                    initialize.extend(child.input.acquire.clone());
+                    initialize.push(Statement::Assign(resume_pc, Expr::integer(child.pc as i64)));
+                    initialize
+                }
+                _ => unreachable!("validated when checking this pull"),
             };
-            for condition in filters[index].iter().rev() {
+            for condition in pull.filters.iter().rev() {
                 accepted = vec![Statement::If(condition.clone(), accepted, Vec::new())];
             }
-            let mut available = bindings[index].clone();
-            available.push(Statement::Clear(inputs[index].value));
+            let mut available = pull.binding.clone();
+            available.push(Statement::Clear(pull.input.value));
             available.extend(accepted);
-            // Exhausting the outermost clause destroys the suspended frame
-            // before a surrounding zip can perform its remaining strict probes.
-            let exhausted_roots = if index == 0 {
-                &clear
-            } else {
-                &inputs[index].clear
+            let Step::Close { next, .. } = plan.steps[pull.exhausted] else {
+                unreachable!("exhaustion releases the iterator");
             };
-            let mut exhausted = exhausted_roots
-                .iter()
-                .copied()
-                .map(Statement::Clear)
-                .collect::<Vec<_>>();
-            exhausted.push(if index == 0 {
-                Statement::Assign(done, Expr::boolean(true))
-            } else {
-                Statement::Assign(depth, Expr::integer((index - 1) as i64))
-            });
-            let mut step = inputs[index].next.clone();
+            let (roots, jump) = match plan.steps[next] {
+                Step::End => (&clear, Statement::Assign(done, Expr::boolean(true))),
+                Step::Next { .. } => (
+                    &pull.input.clear,
+                    Statement::Assign(resume_pc, Expr::integer(next as i64)),
+                ),
+                _ => unreachable!("closing returns to the parent pull or finishes"),
+            };
+            let mut exhausted: Vec<_> = roots.iter().copied().map(Statement::Clear).collect();
+            exhausted.push(jump);
+            let mut step = pull.input.next.clone();
             step.push(Statement::If(
-                self.local(inputs[index].ready),
+                self.local(pull.input.ready),
                 self.generator_body(available),
                 exhausted,
             ));
             cases = vec![Statement::If(
                 compare(
                     Compare::Equal,
-                    self.local(depth),
-                    Expr::integer(index as i64),
+                    self.local(resume_pc),
+                    Expr::integer(pull.pc as i64),
                 ),
                 step,
                 cases,
