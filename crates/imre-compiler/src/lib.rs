@@ -455,6 +455,9 @@ fn object_fallback<T>(
         import_failure = None;
         site_probes = modules::SiteProbes::default();
     };
+    // A newly found checked provider can lower normally. If lowering fails, its
+    // dependencies alone do not admit the caller to the object importer.
+    let graph = graph.filter(|graph| !graph.has_checked_only_import);
     // Python invocations and explicit object imports enforce annotated calls in
     // the boxed runtime, where their TypeError can be caught by the program.
     let checked_file = options.python_startup().is_none() && !options.runtime_imports;

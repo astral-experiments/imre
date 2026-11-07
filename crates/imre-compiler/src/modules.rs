@@ -3091,6 +3091,9 @@ pub(crate) struct SourceGraph {
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<Diagnostic>>,
     pub(crate) runtime_initializer: Option<String>,
+    /// Object discovery must establish its own entry when an import was admitted only
+    /// for checked lowering.
+    pub(crate) has_checked_only_import: bool,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<Diagnostic>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
@@ -4248,6 +4251,7 @@ struct Loader<'a> {
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
     runtime_initializer: Option<String>,
+    has_checked_only_import: bool,
     imports_runtime_class: bool,
     wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
@@ -4341,6 +4345,7 @@ impl<'a> Loader<'a> {
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
             runtime_initializer: None,
+            has_checked_only_import: false,
             imports_runtime_class: false,
             wildcard_import: None,
             root,
@@ -4539,6 +4544,7 @@ impl<'a> Loader<'a> {
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
             runtime_initializer: self.runtime_initializer,
+            has_checked_only_import: self.has_checked_only_import,
             deferred_object_error: self.wildcard_import.map(Into::into).into(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
@@ -4585,7 +4591,8 @@ impl<'a> Loader<'a> {
         failure: &mut Option<EntryImportFailure>,
     ) -> Result<(), String> {
         self.scan(id).inspect_err(|_| {
-            if self.import_failure.is_some()
+            if !self.has_checked_only_import
+                && self.import_failure.is_some()
                 && self.modules[id].parsed.has_no_syntax_errors()
                 && self.session.has_valid_semantic_syntax(id)
             {
@@ -5895,33 +5902,45 @@ impl<'a> Loader<'a> {
         })
     }
 
+    /// A declaration supplied by ty can describe a third-party module whose executable
+    /// is on a checked search root. Other sealed names keep their normal precedence.
+    fn checked_import_declaration(&mut self, first: &str) -> Result<Option<String>, String> {
+        let declaration = if INTRINSIC_MODULES.contains(&first) {
+            None
+        } else {
+            let Some(file) = vendored_stdlib_declaration(first) else {
+                return Ok(None);
+            };
+            Some(file)
+        };
+        if (first == "quopri"
+            || imre_ast::providers::is_native_fallback(first)
+            || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
+            && self.has_project_source(first)
+        {
+            return Ok(None);
+        }
+        if IntrinsicModule::named(first).is_none() && imre_ast::providers::provider(first).is_none()
+        {
+            if self.has_installed_source(first) {
+                return Ok(None);
+            }
+            if !ruff_python_stdlib::sys::is_known_standard_library(
+                crate::version::LANGUAGE.minor,
+                first,
+            ) && declaration.is_some()
+            {
+                return Ok(declaration);
+            }
+        }
+        Err(format!(
+            "standard-library imports and shadowing are unsupported: {first:?}"
+        ))
+    }
+
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
-        if stdlib_top_level(first)
-            && !((first == "quopri"
-                || imre_ast::providers::is_native_fallback(first)
-                || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
-                && self.has_project_source(first))
-            && (IntrinsicModule::named(first).is_some()
-                || imre_ast::providers::provider(first).is_some()
-                || !self.has_installed_source(first))
-        {
-            if IntrinsicModule::named(first).is_none()
-                && imre_ast::providers::provider(first).is_none()
-                && !ruff_python_stdlib::sys::is_known_standard_library(
-                    crate::version::LANGUAGE.minor,
-                    first,
-                )
-                && let Some(declaration) = vendored_stdlib_declaration(first)
-            {
-                return Err(format!(
-                    "no checked runtime provider selected for {first:?} (vendored type declaration {declaration:?})"
-                ));
-            }
-            return Err(format!(
-                "standard-library imports and shadowing are unsupported: {first:?}"
-            ));
-        }
+        let declaration = self.checked_import_declaration(first)?;
         let parent = self.package_parent(name)?;
         // Parent initialization can have loaded this child while exposing re-exports.
         if let Some(&id) = self.by_name.get(name) {
@@ -6026,6 +6045,19 @@ impl<'a> Loader<'a> {
             }
             resolved = Some((path, identity, is_package, root_index, archive));
             break;
+        }
+        if let Some(declaration) = declaration {
+            if resolved.is_some() || (!zip_import && !portions.is_empty()) {
+                self.has_checked_only_import = true;
+            } else if let Some(file) = if name == first {
+                Some(declaration)
+            } else {
+                vendored_stdlib_declaration(&relative)
+            } {
+                return Err(format!(
+                    "no checked runtime provider selected for {name:?} (vendored type declaration {file:?})"
+                ));
+            }
         }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
             if zip_import {
@@ -6508,6 +6540,35 @@ fn conditional_export_name(statement: &ast::Stmt) -> Option<&str> {
 mod native_tests {
     use super::SourceGraph;
     use std::fs;
+
+    #[test]
+    fn later_package_imports_are_visible_with_a_separate_type_declaration() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        fs::write(
+            root.join("typing_extensions.py"),
+            "def get_origin(value: int) -> int:\n    return value + 1\n",
+        )
+        .unwrap();
+        fs::create_dir(root.join("helpers")).unwrap();
+        fs::write(root.join("helpers/__init__.py"), "").unwrap();
+        fs::write(
+            root.join("helpers/score.py"),
+            "def twice(value: int) -> int:\n    return value * 2\n",
+        )
+        .unwrap();
+        let entry = root.join("main.py");
+        let external = "from typing_extensions import get_origin";
+        let local = "from helpers.score import twice";
+        for (first, second) in [(external, local), (local, external)] {
+            fs::write(
+                &entry,
+                format!("{first}\n{second}\nprint(get_origin(3), twice(3))\n"),
+            )
+            .unwrap();
+            crate::check_file(&entry, Some(root)).unwrap();
+        }
+    }
 
     #[test]
     fn native_declarations_follow_package_ownership_and_preserve_initializers() {
