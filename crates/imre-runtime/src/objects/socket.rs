@@ -1117,7 +1117,8 @@ unsafe fn copy_host(host: *const libc::hostent, family: i32, length: i32) -> Res
     }
 }
 
-fn reverse_host(addr: IpAddr) -> Result<HostEntry> {
+/// Copy a forward or reverse host-database record with the address family verified by lookup_ip.
+fn host_entry(addr: IpAddr, name: Option<&CStr>) -> Result<HostEntry> {
     let (bytes, family): (&[u8], _) = match addr {
         IpAddr::V4(ip) => (&ip.octets(), libc::AF_INET),
         IpAddr::V6(ip) => (&ip.octets(), libc::AF_INET6),
@@ -1126,6 +1127,14 @@ fn reverse_host(addr: IpAddr) -> Result<HostEntry> {
     #[cfg(target_os = "linux")]
     {
         unsafe extern "C" {
+            fn gethostbyname_r(
+                name: *const libc::c_char,
+                entry: *mut libc::hostent,
+                buffer: *mut libc::c_char,
+                buflen: usize,
+                result: *mut *mut libc::hostent,
+                host_error: *mut libc::c_int,
+            ) -> libc::c_int;
             fn gethostbyaddr_r(
                 addr: *const libc::c_void,
                 len: libc::socklen_t,
@@ -1144,34 +1153,52 @@ fn reverse_host(addr: IpAddr) -> Result<HostEntry> {
         let mut host_error = 0;
         // SAFETY: the caller-owned buffers remain live while copy_host reads the result.
         unsafe {
-            gethostbyaddr_r(
-                bytes.as_ptr().cast(),
-                length as _,
-                family,
-                entry.as_mut_ptr(),
-                buffer.as_mut_ptr().cast(),
-                size_of_val(&buffer) - 1,
-                &raw mut result,
-                &raw mut host_error,
-            );
+            let entry = entry.as_mut_ptr();
+            let size = size_of_val(&buffer) - 1;
+            let buf = buffer.as_mut_ptr().cast();
+            if let Some(name) = name {
+                gethostbyname_r(
+                    name.as_ptr(),
+                    entry,
+                    buf,
+                    size,
+                    &raw mut result,
+                    &raw mut host_error,
+                );
+            } else {
+                gethostbyaddr_r(
+                    bytes.as_ptr().cast(),
+                    length as _,
+                    family,
+                    entry,
+                    buf,
+                    size,
+                    &raw mut result,
+                    &raw mut host_error,
+                );
+            }
             copy_host(result, family, length)
         }
     }
     #[cfg(target_os = "macos")]
     {
         unsafe extern "C" {
+            fn gethostbyname(name: *const libc::c_char) -> *mut libc::hostent;
             fn gethostbyaddr(
                 addr: *const libc::c_void,
                 len: libc::socklen_t,
                 family: libc::c_int,
             ) -> *mut libc::hostent;
         }
-        static REVERSE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = REVERSE.lock().unwrap_or_else(|err| err.into_inner());
+        static HOST_DATABASE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = HOST_DATABASE.lock().unwrap_or_else(|err| err.into_inner());
         // SAFETY: the input bytes live through the call. Darwin returns per-thread
         // resolver storage; copy it before another legacy lookup on this thread.
         unsafe {
-            let result = gethostbyaddr(bytes.as_ptr().cast(), length as _, family);
+            let result = match name {
+                Some(name) => gethostbyname(name.as_ptr()),
+                None => gethostbyaddr(bytes.as_ptr().cast(), length as _, family),
+            };
             copy_host(result, family, length)
         }
     }
@@ -1179,13 +1206,20 @@ fn reverse_host(addr: IpAddr) -> Result<HostEntry> {
     {
         Err(Error::new(
             Kind::NotImplementedError,
-            "reverse host lookup requires Linux or macOS",
+            "host database lookup requires Linux or macOS",
         ))
     }
 }
 
 pub(crate) fn hostbyaddr(host: &[u8]) -> Result<HostEntry> {
-    reverse_host(lookup_ip(host, libc::AF_UNSPEC)?)
+    host_entry(lookup_ip(host, libc::AF_UNSPEC)?, None)
+}
+
+pub(crate) fn hostbyname_ex(host: &[u8]) -> Result<HostEntry> {
+    // CPython first resolves an IPv4 address. Its error takes precedence over h_errno.
+    let addr = lookup_ip(host, libc::AF_INET)?;
+    let name = CString::new(host).map_err(|_| Error::new(Kind::TypeError, "embedded null byte"))?;
+    host_entry(addr, Some(&name))
 }
 
 pub(crate) fn hostname() -> Result<Vec<u8>> {
@@ -1199,24 +1233,17 @@ pub(crate) fn hostname() -> Result<Vec<u8>> {
         .to_vec())
 }
 
-pub(crate) fn fqdn(name: &str) -> Result<String> {
-    let name = match name.trim() {
+pub(crate) fn fqdn_name(name: &str) -> Result<String> {
+    Ok(match name.trim() {
         "" | "0.0.0.0" | "::" => String::from_utf8_lossy(&hostname()?).into_owned(),
         host => host.to_owned(),
-    };
-    if name.as_bytes().contains(&0) {
-        return Err(Error::new(
-            Kind::TypeError,
-            "gethostbyaddr() argument 1 must be encoded string without null bytes",
-        ));
-    }
-    let entry = lookup_ip(name.as_bytes(), libc::AF_UNSPEC)
-        .and_then(|ip| reverse_host(ip).map(|host| (ip, host)));
-    let (_ip, entry) = match entry {
-        Ok(result) => result,
-        Err(e) if e.is_os_error() => return Ok(name),
-        Err(e) => return Err(e),
-    };
+    })
+}
+
+/// Select the canonical name or a qualified alias from the reverse lookup.
+pub(crate) fn fqdn(host: &[u8]) -> Result<String> {
+    let _ip = lookup_ip(host, libc::AF_UNSPEC)?;
+    let entry = host_entry(_ip, None)?;
     if !entry.name.contains('.') {
         for alias in entry.aliases {
             #[cfg(target_vendor = "apple")]
@@ -1233,8 +1260,22 @@ pub(crate) fn fqdn(name: &str) -> Result<String> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_getfqdn(name: &Str) -> *const Str {
+    let result = (|| {
+        let name = fqdn_name(name)?;
+        let host = super::Codec::encode_str(&name, "idna", "strict")?;
+        if host.contains(&0) {
+            return Err(Error::new(
+                Kind::TypeError,
+                "gethostbyaddr() argument 1 must be encoded string without null bytes, not str",
+            ));
+        }
+        match fqdn(&host) {
+            Err(error) if error.is_os_error() => Ok(name),
+            result => result,
+        }
+    })();
     finish(
-        fqdn(name).map(|name| crate::StrOwner::into_raw(crate::StrOwner::new(Str::from(name)))),
+        result.map(|name| crate::StrOwner::into_raw(crate::StrOwner::new(Str::from(name)))),
         ptr::null(),
     )
 }
@@ -1419,8 +1460,23 @@ pub(crate) fn address(host: &[u8], port: i32, name: &str) -> Result<libc::sockad
 unsafe fn unpack(pair: *const usize, name: &str) -> Result<libc::sockaddr_in> {
     // SAFETY: the compiler verified and rooted both fields.
     unsafe {
+        let host = (&**pair.cast::<*const Str>()).as_str();
+        let encoded;
+        let host = if host.is_ascii() {
+            host.as_bytes()
+        } else {
+            encoded = super::Codec::encode_str(host, "idna", "strict")
+                .map_err(|_| Error::new(Kind::TypeError, "encoding of hostname failed"))?;
+            &encoded
+        };
+        if host.contains(&0) {
+            return Err(Error::new(
+                Kind::TypeError,
+                "host name must not contain null character",
+            ));
+        }
         let port = c_int(*pair.add(1)).map_err(|_| port_error(name))?;
-        address((&**pair.cast::<*const Str>()).as_bytes(), port, name)
+        address(host, port, name)
     }
 }
 

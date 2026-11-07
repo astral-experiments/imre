@@ -111,6 +111,8 @@ pub(in super::super) const IMPORTED_FUNCTIONS: &[&str] = &[
     "CMSG_LEN",
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     "CMSG_SPACE",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "gethostbyname_ex",
     "getdefaulttimeout",
     #[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
     "getprotobyname",
@@ -409,16 +411,12 @@ fn internet_address(
     // Convert in CPython's argument order; __index__ may run arbitrary code.
     let host = match ctx.heap.get(ctx.scalar_value(fields[0])) {
         Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(fields[0])?.to_vec(),
-        Value::Str(_) | Value::SurrogateStr(_) => {
-            let text = ctx.str_value(fields[0])?;
-            if ipv6 && !text.is_ascii() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "IPv6 Unicode host names require IDNA encoding",
-                ));
-            }
-            text.as_bytes().to_vec()
-        }
+        Value::Str(_) | Value::SurrogateStr(_) => match ctx.heap.get(fields[0]) {
+            // CPython's sockaddr converter sends compact ASCII strings directly to libc.
+            Value::Str(text) if text.is_ascii() => text.as_bytes().to_vec(),
+            _ => idna_host(ctx, fields[0])
+                .map_err(|_| Error::new("TypeError", "encoding of hostname failed"))?,
+        },
         _ => {
             return Err(Error::new(
                 "TypeError",
@@ -476,6 +474,13 @@ fn unsigned_mask(value: crate::Int) -> u32 {
         .expect("masked uint32")
 }
 
+/// Encode the original Python string through the same text codec as str.encode.
+fn idna_host(ctx: &mut Context, host: Id) -> Result<Vec<u8>> {
+    let encoding = ctx.text("idna");
+    let encoded = super::codecs::encode_text_object(ctx, host, Some(encoding), None)?;
+    Ok(ctx.bytes_like(encoded)?.to_vec())
+}
+
 /// PyArg's "et" conversion IDNA-encodes str and treats bytes/bytearray as already encoded.
 fn host_argument(
     ctx: &mut Context,
@@ -486,44 +491,7 @@ fn host_argument(
     let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
     let bytes = match ctx.heap.get(ctx.scalar_value(arg)) {
         Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(arg)?.to_vec(),
-        Value::Str(_) | Value::SurrogateStr(_) => {
-            let host = ctx.str_value(arg)?;
-            if !host.is_ascii() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "Unicode host names require IDNA encoding",
-                ));
-            }
-            // Match the ASCII fast path in encodings.idna; the final label may be empty.
-            let empty = if host.starts_with('.') {
-                Some(0)
-            } else {
-                host.find("..").map(|i| i + 1)
-            };
-            if let Some(i) = empty {
-                return Err(ctx.string_encoding_error(
-                    arg,
-                    "idna",
-                    "label empty",
-                    u32::from(b'.'),
-                    i..i + 1,
-                ));
-            }
-            let mut offset = 0;
-            for label in host.split('.') {
-                if label.len() >= 64 {
-                    return Err(ctx.string_encoding_error(
-                        arg,
-                        "idna",
-                        "label too long",
-                        0,
-                        offset..offset + label.len(),
-                    ));
-                }
-                offset += label.len() + 1;
-            }
-            host.as_bytes().to_vec()
-        }
+        Value::Str(_) | Value::SurrogateStr(_) => idna_host(ctx, arg)?,
         _ => {
             return Err(Error::new(
                 "TypeError",
@@ -670,27 +638,43 @@ fn public_getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
 }
 
 pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [host, service, family, ty, protocol, flags] = getaddrinfo_args(ctx, args, kwargs)?;
+    let [host_arg, service_arg, family, ty, protocol, flags] = getaddrinfo_args(ctx, args, kwargs)?;
     let family = ctx.index_c_int(family)?;
     let ty = ctx.index_c_int(ty)?;
     let protocol = ctx.index_c_int(protocol)?;
     let flags = ctx.index_c_int(flags)?;
-    let host = match ctx.heap.get(ctx.scalar_value(host)) {
+    let host = match ctx.heap.get(ctx.scalar_value(host_arg)) {
         Value::None => None,
         Value::Bytes(bytes) => Some(bytes.clone()),
-        _ => Some(ctx.str_value(host)?.as_bytes().to_vec()),
+        Value::Str(_) | Value::SurrogateStr(_) => Some(idna_host(ctx, host_arg)?),
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                "getaddrinfo() argument 1 must be string or None",
+            ));
+        }
     };
-    let service = if let Some(index) = ctx.index_value(service)? {
+    let service = if let Some(index) = ctx.index_value(service_arg)? {
         Some(index.to_string().into_bytes())
     } else {
-        match ctx.heap.get(ctx.scalar_value(service)) {
+        match ctx.heap.get(ctx.scalar_value(service_arg)) {
             Value::None => None,
             Value::Bytes(bytes) => Some(bytes.clone()),
             Value::Str(s) => Some(s.as_bytes().to_vec()),
-            Value::SurrogateStr(_) => Some(ctx.encode_utf8_codepoints(service, false, "strict")?),
+            Value::SurrogateStr(_) => {
+                Some(ctx.encode_utf8_codepoints(service_arg, false, "strict")?)
+            }
             _ => return Err(Error::new("OSError", "Int or String expected")),
         }
     };
+    let family_arg = ctx.int(i64::from(family));
+    let type_arg = ctx.int(i64::from(ty));
+    let protocol_arg = ctx.int(i64::from(protocol));
+    super::audit::event(
+        ctx,
+        "socket.getaddrinfo",
+        &[host_arg, service_arg, family_arg, type_arg, protocol_arg],
+    )?;
     // CPython passes the NUL-terminated host and service buffers to libc.
     fn c_string_prefix(value: &[u8]) -> &[u8] {
         value.split(|&byte| byte == 0).next().unwrap_or_default()
@@ -1376,10 +1360,15 @@ pub(super) fn call(
             super::audit::event(ctx, "socket.gethostbyname", args)?;
             return Ok(ctx.text(native::hostbyname(&host)?.to_string()));
         }
-        "gethostbyaddr" => {
+        "gethostbyaddr" | "gethostbyname_ex" => {
             let host = host_argument(ctx, name, args, kwargs)?;
-            super::audit::event(ctx, "socket.gethostbyaddr", args)?;
-            let entry = native::hostbyaddr(&host)?;
+            let entry = if name == "gethostbyaddr" {
+                super::audit::event(ctx, "socket.gethostbyaddr", args)?;
+                native::hostbyaddr(&host)?
+            } else {
+                super::audit::event(ctx, "socket.gethostbyname", args)?;
+                native::hostbyname_ex(&host)?
+            };
             let name = ctx.text(entry.name);
             let aliases = entry.aliases.into_iter().map(|s| ctx.text(s)).collect();
             let aliases = ctx.alloc(Value::List(aliases));
@@ -1393,7 +1382,17 @@ pub(super) fn call(
                 .map(|v| ctx.str_value(v))
                 .transpose()?
                 .unwrap_or("");
-            return Ok(ctx.text(native::fqdn(host)?));
+            let name = ctx.text(native::fqdn_name(host)?);
+            let lookup = (|| {
+                let host = host_argument(ctx, "gethostbyaddr", &[name], &[])?;
+                super::audit::event(ctx, "socket.gethostbyaddr", &[name])?;
+                Ok(native::fqdn(&host)?)
+            })();
+            return match lookup {
+                Ok(result) => Ok(ctx.text(result)),
+                Err(error) if ctx.is_builtin_error(&error, "OSError") => Ok(name),
+                Err(error) => Err(error),
+            };
         }
         _ => {}
     }
