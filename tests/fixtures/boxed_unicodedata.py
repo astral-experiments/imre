@@ -16,6 +16,9 @@ def current():
     for ch in (Text("x"), "界", "！", "ｶ", "Ω", "\x00", "\ud800", "\udfff",
                "\U0001fa8a", "\U000323b0", "\U0002fffe"):
         print(unicodedata.east_asian_width(ch))
+        print(unicodedata.category(ch))
+    assert unicodedata.category.__self__ is unicodedata
+    assert unicodedata.category(Text("x")) is not unicodedata.category("x")
     for value in (itertools.count(), itertools.chain(), io.BytesIO(), struct.Struct("I"), random.Random(1)):
         try:
             unicodedata.east_asian_width(value)

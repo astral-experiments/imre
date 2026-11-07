@@ -168,7 +168,7 @@ impl Builtin {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
                     | TextOperation::ZFill { .. }
-                    | TextOperation::EastAsianWidth
+                    | TextOperation::UnicodeProperty(_)
                     | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
@@ -437,6 +437,7 @@ impl Builtin {
             Self::BytesGet
             | Self::WrapperAttributes(_)
             | Self::Chr
+            | Self::UnicodeCategoryOfOrdinal
             | Self::Ord
             | Self::Random(_)
             | Self::IntegerPower
@@ -1276,6 +1277,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_extend_snapshot"
                 | "imre_list_extend_unhinted"
                 | "imre_chr"
+                | "imre_unicode_category_of_ordinal"
                 | "imre_annotation_ref"
                 | "imre_typing_call_stub"
                 | "imre_random_bits"

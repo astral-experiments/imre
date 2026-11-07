@@ -60,10 +60,12 @@ pub(super) fn slice_equality(
 
 /// Constructs a fixed signature slot for the shared argument binder.
 impl Checker<'_> {
-    pub(super) fn unicode_east_asian_width(
+    pub(super) fn unicode_character_property(
         &mut self,
         call: &ast::ExprCall,
+        property: ir::UnicodeProperty,
     ) -> Result<Expr, String> {
+        let name = property.name();
         calls::reject_unpacking(call, self.source)?;
         let ([arg], []) = (
             call.arguments.args.as_ref(),
@@ -71,7 +73,7 @@ impl Checker<'_> {
         ) else {
             return self.one_positional_error(
                 call,
-                "unicodedata.east_asian_width",
+                &format!("unicodedata.{name}"),
                 "chr",
                 Type::Str,
             );
@@ -79,9 +81,21 @@ impl Checker<'_> {
         let value = Self::string_value(self.evaluated_argument(arg)?);
         self.graph.checked_overload(self.module, call.range());
         if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
+            // chr accepts lone surrogates, which cannot be materialized as native UTF-8.
+            // Its checked ordinal can go straight to the category database.
+            let kind = if property == ir::UnicodeProperty::Category
+                && let ExprKind::Builtin(Builtin::Chr, ordinal) = value.kind
+            {
+                ExprKind::Builtin(Builtin::UnicodeCategoryOfOrdinal, ordinal)
+            } else {
+                ExprKind::Builtin(
+                    Builtin::Text(TextOperation::UnicodeProperty(property)),
+                    vec![value],
+                )
+            };
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Text(TextOperation::EastAsianWidth), vec![value]),
+                kind,
             });
         }
         let actual = match value.ty {
@@ -101,13 +115,12 @@ impl Checker<'_> {
                 error(
                     self.source,
                     arg,
-                    "east_asian_width requires str or an exact argument type",
+                    &format!("{name} requires str or an exact argument type"),
                 )
             })?,
         };
         let actual = &actual[..actual.floor_char_boundary(50)];
-        let message =
-            format!("east_asian_width() argument must be a unicode character, not {actual}");
+        let message = format!("{name}() argument must be a unicode character, not {actual}");
         Ok(calls::type_error(Type::Str, vec![value], message))
     }
 
