@@ -2983,6 +2983,7 @@ pub(super) trait VisitReferences {
 struct RootTrace {
     roots: Vec<Id>,
     next_roots: Vec<Id>,
+    watched_containers: Vec<Id>,
     flags: Vec<u8>,
     covered: Vec<Id>,
     covered_runs: Vec<std::ops::Range<usize>>,
@@ -2995,15 +2996,22 @@ impl RootTrace {
     const COVERED: u8 = 1;
     const FRONTIER: u8 = 2;
     const VOLATILE: u8 = 4;
+    const WATCHED: u8 = 8;
+    // Two bits count completed collection intervals without a write.
+    const QUIET_INTERVAL: u8 = 16;
+    const QUIET_MASK: u8 = 3 * Self::QUIET_INTERVAL;
     const MIN_RUN_MARKS: usize = 64 * 1024;
 
     /// Revisit a mutated value through the ordinary marker on later collections.
     fn changed(&mut self, index: usize) {
-        if let Some(flags) = self.flags.get_mut(index)
-            && *flags & Self::COVERED != 0
-        {
-            self.valid = false;
-            *flags |= Self::VOLATILE;
+        if let Some(flags) = self.flags.get_mut(index) {
+            if *flags & Self::COVERED != 0 {
+                self.valid = false;
+                *flags |= Self::VOLATILE;
+            }
+            if *flags & (Self::WATCHED | Self::QUIET_MASK) != 0 {
+                *flags &= !(Self::WATCHED | Self::QUIET_MASK);
+            }
         }
     }
 
@@ -3063,18 +3071,22 @@ impl RootTrace {
 
     /// Include large containers that the active scopes already keep alive.
     fn add_frame_containers(&mut self, heap: &Heap) {
+        for id in self.watched_containers.drain(..) {
+            let flags = &mut self.flags[id as usize];
+            if *flags & Self::WATCHED != 0 {
+                *flags &= !Self::WATCHED;
+                if *flags & Self::QUIET_MASK == Self::QUIET_MASK {
+                    *flags &= !(Self::VOLATILE | Self::QUIET_MASK);
+                } else {
+                    *flags += Self::QUIET_INTERVAL;
+                }
+            }
+        }
         for frame in &heap.frames {
             let Value::Scope(scope) = heap.get(frame.scope) else {
                 continue;
             };
             for &id in scope.names.values() {
-                if self
-                    .flags
-                    .get(id as usize)
-                    .is_some_and(|flags| flags & Self::VOLATILE != 0)
-                {
-                    continue;
-                }
                 let len = match heap.get(id) {
                     Value::List(items) | Value::Tuple(items) => items.len(),
                     Value::Dict(entries) => entries.len(),
@@ -3082,6 +3094,19 @@ impl RootTrace {
                 };
                 // Small containers are cheaper to walk as ordinary frame roots.
                 if len >= 256 {
+                    if let Some(flags) = self.flags.get_mut(id as usize)
+                        && *flags & Self::VOLATILE != 0
+                    {
+                        // A later write cancels this interval. Readmit the container
+                        // only after four quiet intervals to avoid rebuilding on brief pauses.
+                        if *flags & Self::WATCHED == 0
+                            && self.watched_containers.try_reserve(1).is_ok()
+                        {
+                            *flags |= Self::WATCHED;
+                            self.watched_containers.push(id);
+                        }
+                        continue;
+                    }
                     if self.next_roots.try_reserve(1).is_err() {
                         return;
                     }
@@ -3117,7 +3142,7 @@ impl RootTrace {
     /// Record the reachable values whose outgoing edges change only through the heap.
     fn rebuild(&mut self, heap: &Heap) -> bool {
         for id in self.covered.drain(..).chain(self.frontier.drain(..)) {
-            self.flags[id as usize] &= Self::VOLATILE;
+            self.flags[id as usize] &= !(Self::COVERED | Self::FRONTIER);
         }
         let slots = heap.slots.len();
         if self
@@ -6883,10 +6908,30 @@ mod tests {
         heap.collect(std::iter::empty());
         assert!(heap.slots[latest as usize].value.is_some());
         assert!(!heap.root_trace.roots.contains(&replacement));
+
+        for _ in 0..8 {
+            let Value::List(items) = heap.get_mut(replacement) else {
+                unreachable!();
+            };
+            items[0] = latest;
+            heap.collect(std::iter::empty());
+            assert!(!heap.root_trace.roots.contains(&replacement));
+        }
+        for _ in 0..4 {
+            heap.collect(std::iter::empty());
+        }
+        assert!(heap.root_trace.roots.contains(&replacement));
+        let final_child = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(replacement) = Value::List(vec![final_child; 256]);
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[latest as usize].value.is_none());
+        assert!(heap.slots[final_child as usize].value.is_some());
+        assert!(!heap.root_trace.roots.contains(&replacement));
         heap.frames[0].scope = NONE;
         heap.collect(std::iter::empty());
         assert!(heap.slots[replacement as usize].value.is_none());
-        assert!(heap.slots[latest as usize].value.is_none());
+        assert!(heap.slots[final_child as usize].value.is_none());
     }
 
     #[test]
