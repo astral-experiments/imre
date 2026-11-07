@@ -318,6 +318,7 @@ pub(in crate::dynamic) enum Operation {
     GetItem,
     SetItem,
     DelItem,
+    Call,
     Index,
     LengthHint,
 }
@@ -367,6 +368,10 @@ impl Operation {
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
+        if matches!(self, Self::Call) {
+            let (target, args) = ctx.operator_call_target(super::super::copy_ids(args)?)?;
+            return ctx.call_in_scope(ctx.heap.current_scope(), target, args, kwargs.to_vec());
+        }
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -401,6 +406,7 @@ impl Operation {
         }
         let obj = args[0];
         match self {
+            Self::Call => unreachable!("forwarded before fixed-arity dispatch"),
             Self::Binary(op) => ctx.binary(op, obj, args[1]),
             Self::InPlace(op) => ctx.inplace(op, obj, args[1]),
             Self::Unary(op) => ctx.op(op, obj, NONE, NONE),
@@ -421,7 +427,28 @@ impl Operation {
     }
 }
 
+fn call_missing_target() -> Error {
+    Error::new("TypeError", "call expected at least 1 argument, got 0")
+}
+
 impl Context {
+    /// Forward consecutive operator.call invocations without translating their keyword packet
+    /// or adding a Python frame. Each wrapper consumes one positional argument.
+    pub(in crate::dynamic) fn operator_call_target(
+        &self,
+        mut args: Vec<Id>,
+    ) -> Result<(Id, Vec<Id>)> {
+        let position = args
+            .iter()
+            .position(
+                |&id| !matches!(self.heap.get(id), Value::Native(name) if name == "operator.call"),
+            )
+            .ok_or_else(call_missing_target)?;
+        let callable = args[position];
+        args.drain(..=position);
+        Ok((callable, args))
+    }
+
     pub(in crate::dynamic) fn length_hint(&mut self, value: Id, default: Option<Id>) -> Result<Id> {
         // PyObject_LengthHint parses the default before consulting either protocol.
         let size_overflow = || {

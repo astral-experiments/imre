@@ -7014,6 +7014,13 @@ impl<'a> Checker<'a> {
                 Intrinsic::Fnmatch(ir::FnmatchOperation::Match { normcase }) => {
                     return Ok(fnmatch::function(self.types, normcase));
                 }
+                Intrinsic::OperatorCall => {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "checked operator.call requires a direct call",
+                    ));
+                }
                 Intrinsic::OperatorNot => {
                     return Err(error(
                         self.source,
@@ -10122,6 +10129,37 @@ impl<'a> Checker<'a> {
                 let value = self.expr(arg)?;
                 return stdlib::unary_float_builtin(builtin, value)
                     .ok_or_else(|| self.scoped_builtin_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::OperatorCall)) => {
+                let args = &call.arguments;
+                if let Some(target) = args.args.first()
+                    && !args.args.iter().any(ast::Expr::is_starred_expr)
+                    && args.keywords.iter().all(|kw| kw.arg.is_some())
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "_operator",
+                        "call",
+                    )
+                {
+                    let mut forwarded = call.clone();
+                    forwarded.func = Box::new(forwarded.arguments.args.remove(0));
+                    // Preserve the ordinary checked binder for an exact named function.
+                    if target
+                        .as_name_expr()
+                        .is_some_and(|name| !self.names.contains_key(name.id.as_str()))
+                        && matches!(self.resolve(target), Some(Binding::Definition(id)) if self.functions.contains_key(&id))
+                    {
+                        return self.call(&forwarded);
+                    }
+                    let value = self.expr(target)?;
+                    return self.invoke(&forwarded, value);
+                }
+                return Err(error(
+                    self.source,
+                    call,
+                    "checked operator.call requires a resolved target and explicit arguments",
+                ));
             }
             Some(Binding::Intrinsic(Intrinsic::OperatorNot)) => {
                 if let [arg] = call.arguments.args.as_ref()

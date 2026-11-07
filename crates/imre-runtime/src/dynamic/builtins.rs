@@ -1456,6 +1456,10 @@ impl Context {
     ) -> Result<Id> {
         if let Value::Native(name) = self.heap.get(callable) {
             match name.as_str() {
+                "operator.call" => {
+                    let (target, args) = self.operator_call_target(args)?;
+                    return self.call_in_scope(scope, target, args, kwargs);
+                }
                 "eval" => return self.call_eval_exec(scope, "eval", &args, &kwargs),
                 "exec" => return self.call_eval_exec(scope, "exec", &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
