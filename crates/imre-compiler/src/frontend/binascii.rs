@@ -251,7 +251,7 @@ impl Checker<'_> {
             .map(|v| scope.hold(self, v))
             .collect();
         let input = self.codec_buffer(values[args.order[0]].clone(), decode, false, call)?;
-        let flag = self.truth_value(values[args.order[1]].clone());
+        let flag = self.test_truth(values[args.order[1]].clone(), call)?;
         let op = if decode {
             Builtin::BinasciiDecode
         } else {
@@ -317,7 +317,7 @@ impl Checker<'_> {
             }
         };
         let result = if decode {
-            let flag = self.truth_value(values[args.order[2]].clone());
+            let flag = self.test_truth(values[args.order[2]].clone(), call)?;
             bytes_op(Builtin::BinasciiDecode, vec![data, flag])
         } else {
             data

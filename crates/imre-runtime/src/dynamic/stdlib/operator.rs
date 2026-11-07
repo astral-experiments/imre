@@ -274,9 +274,9 @@ pub(in crate::dynamic) enum Operation {
 }
 
 macro_rules! operator_functions {
-    ($($name:literal => $operation:expr,)* checked { $($plain:literal => $checked:expr),* $(,)? }) => {
+    ($($name:literal => $operation:expr,)* checked { $($plain:literal => ($checked:expr, $with_alias:literal)),* $(,)? }) => {
         impl Operation {
-            const NAMES: &[(&str, bool)] = &[$(($name, true),)* $(($plain, false)),*];
+            const NAMES: &[(&str, bool)] = &[$(($name, true),)* $(($plain, $with_alias)),*];
 
             pub(in crate::dynamic) fn named(name: &str) -> Option<Self> {
                 Some(match name {

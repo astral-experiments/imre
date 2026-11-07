@@ -59,6 +59,16 @@ impl Checker<'_> {
             )
         } else {
             let members = self.types.members(ty).unwrap();
+            // A record stored in the base arm can have any of its concrete layouts.
+            let alternatives = match members[0] {
+                Type::Class(base) => self
+                    .classes
+                    .concrete_layouts(base)
+                    .into_iter()
+                    .map(|class| ir::InstanceType::Exact(Type::Class(class)))
+                    .collect(),
+                ty => vec![ir::InstanceType::Exact(ty)],
+            };
             let project = |ty| Expr {
                 ty,
                 kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
@@ -67,7 +77,7 @@ impl Checker<'_> {
                 Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(
-                        Builtin::IsInstance(vec![ir::InstanceType::Exact(members[0])]),
+                        Builtin::IsInstance(alternatives),
                         vec![self.local(slot)],
                     ),
                 },

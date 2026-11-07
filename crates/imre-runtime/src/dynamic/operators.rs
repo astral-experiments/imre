@@ -441,6 +441,19 @@ impl Context {
         Ok(Some(length as usize))
     }
 
+    /// In nb_bool, an AttributeError during descriptor binding skips that slot.
+    /// The fallback tests the returned length object itself (CPython slot_nb_bool).
+    fn truth_after_missing_bool(&mut self, id: Id) -> Result<bool> {
+        let hook = match self.bound_slot(id, "__len__") {
+            Ok(Some(hook)) => hook,
+            Ok(None) => return Ok(true),
+            Err(error) if self.is_attribute_error(&error) => return Ok(true),
+            Err(error) => return Err(error),
+        };
+        let value = self.call(hook, Vec::new(), Vec::new())?;
+        self.with_slot_depth("maximum recursion depth exceeded", |ctx| ctx.truth(value))
+    }
+
     pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
         let id = self.weak_proxy_target(id)?;
         Ok(match self.heap.get(id) {
@@ -482,8 +495,28 @@ impl Context {
             } => !bindings.is_empty(),
             Value::Array(array) => array.len() != 0,
             Value::Range(range) => range.len.as_small() != Some(0),
-            Value::Instance { .. } | Value::Raised(_) | Value::FrameLocalsProxy { .. } => {
-                if let Some(hook) = self.bound_slot(id, "__bool__")? {
+            Value::Instance { .. }
+            | Value::Class {
+                metaclass: Some(_), ..
+            }
+            | Value::Raised(_)
+            | Value::FrameLocalsProxy { .. } => {
+                let hook = match self.bound_slot(id, "__bool__") {
+                    Err(error) if self.is_attribute_error(&error) => {
+                        return self.truth_after_missing_bool(id);
+                    }
+                    result => result?,
+                };
+                if let Some(hook) = hook {
+                    if hook == NONE {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "'{:.200}' cannot be interpreted as a boolean",
+                                self.type_name(id)
+                            ),
+                        ));
+                    }
                     let value = self.call(hook, Vec::new(), Vec::new())?;
                     let Value::Bool(result) = self.heap.get(value) else {
                         return Err(Error::new(
