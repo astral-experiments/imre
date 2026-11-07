@@ -3,6 +3,16 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph, bundled_s
 
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
+    if let Some(path) = crate::modules::charmap_provider_path(name, true) {
+        return Some((
+            path,
+            concat!(
+                include_str!("../../stdlib/encodings/writer_charmap.py"),
+                "\n",
+                include_str!("../../stdlib/encodings/charmap_factories.py")
+            ),
+        ));
+    }
     match name {
         "types" => {
             const UPSTREAM: &str = include_str!(
@@ -50,10 +60,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 )
             })))
         }
-        "encodings.iso8859_2" => Some((
-            "encodings/iso8859_2.py",
-            include_str!("../../stdlib/encodings/writer_charmap.py"),
-        )),
         "reprlib" => bundled_source!("reprlib.py"),
         // The scalar Decimal stays available for checked serializers.
         "decimal" => Some(("decimal.py", include_str!("../../stdlib/decimal_boxed.py"))),

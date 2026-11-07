@@ -555,7 +555,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo, spelling: Id) -> Result
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     // Keep the pending constructor arguments across Python-visible module lookups.
-    ctx.heap.reserve_temporaries(6)?;
+    ctx.heap.reserve_temporaries(7)?;
     ctx.heap.keep(module);
     let codecs = ctx.lookup_attr(module, "codecs")?;
     let class = ctx.lookup_attr(codecs, "CodecInfo")?;
@@ -586,15 +586,14 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo, spelling: Id) -> Result
         Value::Module { scope, .. } => ctx.lookup(scope, name),
         _ => ctx.lookup_attr(module, name),
     };
-    let encoder = if matches!(
-        codec,
-        Codec::Ascii | Codec::Latin1 | Codec::ShiftJis | Codec::Utf8 { .. }
-    ) {
-        factory(ctx, "IncrementalEncoder")?
+    let encoder = factory(ctx, "IncrementalEncoder")?;
+    ctx.heap.keep(encoder);
+    let reader = if matches!(codec, Codec::CodePage(_)) {
+        factory(ctx, "StreamReader")?
     } else {
         NONE
     };
-    ctx.heap.keep(encoder);
+    ctx.heap.keep(reader);
     let decoder = factory(ctx, "IncrementalDecoder")?;
     let name = ctx.text(codec.name());
     let id = ctx.call(
@@ -606,7 +605,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo, spelling: Id) -> Result
             ("decode".into(), decode),
             ("incrementalencoder".into(), encoder),
             ("incrementaldecoder".into(), decoder),
-            ("streamreader".into(), NONE),
+            ("streamreader".into(), reader),
             ("streamwriter".into(), writer),
         ],
     )?;

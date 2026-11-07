@@ -98,6 +98,22 @@ macro_rules! bundled_source {
 }
 pub(crate) use bundled_source;
 
+/// Module paths using the same single-byte encoding provider.
+pub(crate) fn charmap_provider_path(name: &str, boxed: bool) -> Option<&'static str> {
+    Some(match name {
+        "encodings.cp1251" => "encodings/cp1251.py",
+        "encodings.cp1252" => "encodings/cp1252.py",
+        "encodings.cp424" => "encodings/cp424.py",
+        "encodings.cp437" => "encodings/cp437.py",
+        // Latin-2 is available through the object importer. Exposing its source to
+        // the checked graph would send literal imports through boxed evaluation.
+        "encodings.iso8859_2" if boxed => "encodings/iso8859_2.py",
+        "encodings.iso8859_15" => "encodings/iso8859_15.py",
+        "encodings.koi8_u" => "encodings/koi8_u.py",
+        _ => return None,
+    })
+}
+
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
@@ -362,32 +378,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/utf_32.py",
             include_str!("../stdlib/encodings/utf_wide.py"),
         )),
-        "encodings.cp1251" => Some((
-            "encodings/cp1251.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.cp1252" => Some((
-            "encodings/cp1252.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.cp424" => Some((
-            "encodings/cp424.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
         "encodings.idna" => bundled_source!("encodings/idna.py"),
         "encodings.shift_jis" => bundled_source!("encodings/shift_jis.py"),
-        "encodings.cp437" => Some((
-            "encodings/cp437.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.iso8859_15" => Some((
-            "encodings/iso8859_15.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.koi8_u" => Some((
-            "encodings/koi8_u.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
         "codeop" => bundled_source!("codeop.py"),
         "keyword" => Some((
             "keyword.py",
@@ -591,7 +583,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "optparse" => bundled_source!("optparse.py"),
         "gettext" => bundled_source!("gettext.py"),
         "uuid" => bundled_source!("uuid.py"),
-        _ => None,
+        _ => charmap_provider_path(name, false)
+            .map(|path| (path, include_str!("../stdlib/encodings/writer_charmap.py"))),
     }
 }
 
