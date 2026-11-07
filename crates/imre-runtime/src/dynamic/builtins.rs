@@ -1317,7 +1317,7 @@ pub(super) fn attribute_name(ctx: &Context, value: Id) -> Result<String> {
     ctx.str_value(value).map(str::to_owned).map_err(|_| {
         type_error(format!(
             "attribute name must be string, not '{}'",
-            ctx.type_name(value)
+            super::stdlib::diagnostic_type_name(ctx, value)
         ))
     })
 }
@@ -1328,31 +1328,52 @@ fn set_attribute(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let base = name == "object.__setattr__";
-    if base && args.is_empty() {
-        return Err(type_error(
-            "descriptor '__setattr__' of 'object' object needs an argument",
-        ));
-    }
-    if base && matches!(ctx.heap.get(args[0]), Value::Class { .. }) {
-        return Err(type_error("can't apply this __setattr__ to type object"));
+    let owner = name.strip_suffix(".__setattr__");
+    if let Some(owner) = owner {
+        let Some(&obj) = args.first() else {
+            return Err(type_error(format!(
+                "descriptor '__setattr__' of '{owner}' object needs an argument"
+            )));
+        };
+        if owner == "type" && !ctx.is_type_object(obj) {
+            return Err(type_error(format!(
+                "descriptor '__setattr__' requires a 'type' object but received a '{}'",
+                super::stdlib::diagnostic_type_name(ctx, obj)
+            )));
+        }
     }
     if !kwargs.is_empty() {
-        return Err(type_error(if base {
+        return Err(type_error(if owner.is_some() {
             "wrapper __setattr__() takes no keyword arguments"
         } else {
             "setattr() takes no keyword arguments"
         }));
     }
     let [obj, attr, value] = args else {
-        return Err(type_error(if base {
+        return Err(type_error(if owner.is_some() {
             format!("__setattr__ expected 2 arguments, got {}", args.len() - 1)
         } else {
             format!("setattr expected 3 arguments, got {}", args.len())
         }));
     };
+    if owner == Some("object") && ctx.is_type_object(*obj) {
+        let class = ctx.exact_type(*obj)?;
+        return Err(type_error(format!(
+            "can't apply this __setattr__ to {} object",
+            ctx.class_name(class)
+        )));
+    }
+    if owner == Some("type")
+        && let Some(class) = ctx.immutable_type_name(*obj)
+    {
+        let shown = call(ctx, "repr", &[*attr], &[])?;
+        return Err(type_error(format!(
+            "cannot set {} attribute of immutable type '{class}'",
+            ctx.str_value(shown)?
+        )));
+    }
     let attr_name = attribute_name(ctx, *attr)?;
-    if base {
+    if owner.is_some() {
         ctx.default_set_attr(*obj, &attr_name, *value)?;
     } else {
         ctx.set_named_attr(*obj, &attr_name, Some(*attr), *value)?;
@@ -1722,7 +1743,7 @@ pub(super) fn call(
             ctx.default_get_attr(object, &attr)
         };
     }
-    if matches!(name, "setattr" | "object.__setattr__") {
+    if matches!(name, "setattr" | "object.__setattr__" | "type.__setattr__") {
         return set_attribute(ctx, name, args, kwargs);
     }
     if matches!(name, "delattr" | "object.__delattr__") {

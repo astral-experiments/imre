@@ -5000,6 +5000,7 @@ impl Context {
                     || (matches!(class.as_str(), "BaseExceptionGroup" | "ExceptionGroup")
                         && (super::exception_group::METHODS.contains(&name)
                             || matches!(name, "__class_getitem__" | "message" | "exceptions")))
+                    || (class == "type" && name == "__setattr__")
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "complex" && super::complex::METHODS.contains(&name))
@@ -5164,7 +5165,7 @@ impl Context {
                 {
                     return Ok(value);
                 }
-                if name == "__name__" {
+                if name == "__name__" && metaclass_member.is_none() {
                     let assigned = self
                         .scope_data(scope)
                         .class_namespace
@@ -5467,21 +5468,37 @@ impl Context {
         Ok(())
     }
 
-    /// Subclasses keep their writable namespaces when the defining type is immutable.
-    fn check_immutable_type_write(&self, obj: Id, attr: &str) -> Result<()> {
+    pub(super) fn immutable_type_name(&self, obj: Id) -> Option<String> {
+        if let Some(class) = self.heap.get(obj).heap_type()
+            && class != stdlib::random::instance::CLASS
+        {
+            return Some(class.to_owned());
+        }
         if let Value::Native(class) = self.heap.get(obj)
             && (super::deque::iterator_class(class).is_some()
                 || matches!(
                     class.as_str(),
-                    value::REGEX_SCANNER_TYPE
-                        | value::STRUCT_UNPACK_ITERATOR
+                    value::STRUCT_UNPACK_ITERATOR
+                        | value::REGEX_SCANNER_TYPE
                         | super::thread_handle::CLASS
+                )
+                || builtins::is_static_gc_type(class)
+                || stdlib::itertools::cursor_type(class).is_some()
+                || HashState::is_provider_class(class)
+                || matches!(
+                    class.as_str(),
+                    HashState::CLASS
+                        | HashState::XOF_CLASS
+                        | "datetime.timezone"
+                        | "typing.TypeVar"
+                        | "NoDefaultType"
+                        | KEY_WRAPPER
+                        | stdlib::flags::TYPE
+                        | value::REGEX_PATTERN_TYPE
+                        | value::REGEX_MATCH_TYPE
                 ))
         {
-            return Err(Error::new(
-                "TypeError",
-                format!("cannot set '{attr}' attribute of immutable type '{class}'"),
-            ));
+            return Some(class.to_owned());
         }
         if let Value::Class { name, scope, .. } = self.heap.get(obj) {
             let frame = self.scope_data(*scope);
@@ -5490,14 +5507,18 @@ impl Context {
                 .as_ref()
                 .is_some_and(|ns| ns.immutable_type)
             {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "cannot set '{attr}' attribute of immutable type '{}.{name}'",
-                        frame.module
-                    ),
-                ));
+                return Some(format!("{}.{name}", frame.module));
             }
+        }
+        None
+    }
+
+    fn check_immutable_type_write(&self, obj: Id, attr: &str) -> Result<()> {
+        if let Some(class) = self.immutable_type_name(obj) {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{attr}' attribute of immutable type '{class}'"),
+            ));
         }
         Ok(())
     }
@@ -6625,36 +6646,6 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
-        if let Some(class) = self.heap.get(obj).heap_type()
-            && class != stdlib::random::instance::CLASS
-        {
-            return Err(Error::new(
-                "TypeError",
-                format!("cannot set '{name}' attribute of immutable type '{class}'"),
-            ));
-        }
-        if let Value::Native(class) = self.heap.get(obj)
-            && (builtins::is_static_gc_type(class)
-                || stdlib::itertools::cursor_type(class).is_some()
-                || HashState::is_provider_class(class)
-                || matches!(
-                    class.as_str(),
-                    HashState::CLASS
-                        | HashState::XOF_CLASS
-                        | "datetime.timezone"
-                        | "typing.TypeVar"
-                        | "NoDefaultType"
-                        | KEY_WRAPPER
-                        | stdlib::flags::TYPE
-                        | value::REGEX_PATTERN_TYPE
-                        | value::REGEX_MATCH_TYPE
-                ))
-        {
-            return Err(Error::new(
-                "TypeError",
-                format!("cannot set '{name}' attribute of immutable type '{class}'"),
-            ));
-        }
         self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
@@ -6667,45 +6658,6 @@ impl Context {
         }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_base_local_attribute(obj, name, Some(value));
-        }
-        if name == "__abstractmethods__"
-            && let Value::Class { scope, .. } = *self.heap.get(obj)
-        {
-            return self.set_abstract_methods(scope, value);
-        }
-        if name == "__name__"
-            && let Value::Class { scope, .. } = *self.heap.get(obj)
-        {
-            let text = self.str_value(value).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "can only assign string to {}.__name__, not '{}'",
-                        self.class_name(obj),
-                        self.type_name(value)
-                    ),
-                )
-            })?;
-            if text.contains('\0') {
-                return Err(Error::new(
-                    "ValueError",
-                    "type name must not contain null characters",
-                ));
-            }
-            let Value::Scope(frame) = self.heap.get_mut(scope) else {
-                unreachable!()
-            };
-            let old = frame
-                .class_namespace
-                .get_or_insert_with(Default::default)
-                .name_override
-                .replace(value);
-            if let Some(old) = old
-                && old != value
-            {
-                self.heap.weak_edge_removed(old);
-            }
-            return Ok(());
         }
         if name == "__traceback__" && matches!(self.heap.get(obj), Value::Raised(_)) {
             return self.set_traceback(obj, value);
@@ -6781,10 +6733,54 @@ impl Context {
                 self.call(setter, vec![descriptor, obj, value], Vec::new())?;
                 return Ok(());
             }
-            return Err(Error::new(
-                "AttributeError",
-                format!("attribute {name:?} cannot be set"),
-            ));
+            return Err(Error::new("AttributeError", "__set__"));
+        }
+        if name == "__abstractmethods__"
+            && member.is_none()
+            && let Value::Class { scope, .. } = *self.heap.get(obj)
+        {
+            return self.set_abstract_methods(scope, value);
+        }
+        if (name == "__qualname__" || name == "__name__" && member.is_none())
+            && let Value::Class { scope, .. } = *self.heap.get(obj)
+        {
+            let storage = self.string_storage(value).ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "can only assign string to {}.{name}, not '{}'",
+                        self.class_name(obj),
+                        self.type_name(value)
+                    ),
+                )
+            })?;
+            if name == "__qualname__" {
+                self.bind(scope, name, value);
+                return Ok(());
+            }
+            if matches!(self.heap.get(storage), Value::SurrogateStr(_)) {
+                self.encode_utf8_codepoints(storage, false, "strict")?;
+            }
+            if self.str_value(storage)?.contains('\0') {
+                return Err(Error::new(
+                    "ValueError",
+                    "type name must not contain null characters",
+                ));
+            }
+            let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                unreachable!()
+            };
+            let old = frame
+                .class_namespace
+                .get_or_insert_with(Default::default)
+                .name_override
+                .replace(value);
+            if let Some(old) = old
+                && old != value
+            {
+                self.heap.weak_edge_removed(old);
+            }
+            return Ok(());
         }
         if self.update_syntax_member(obj, name, value) {
             return Ok(());
@@ -6994,11 +6990,22 @@ impl Context {
                 self.update_enum_base(scope, name, Some(value))?;
             }
             Value::Class { scope, .. } => {
-                if name == "__dict__" {
-                    return Err(Error::new(
-                        "AttributeError",
-                        "attribute '__dict__' of 'type' objects is not writable",
-                    ));
+                // A non-data metaclass member shadows the native type descriptor.
+                if member.is_none() {
+                    match name {
+                        "__base__" | "__basicsize__" | "__itemsize__" | "__flags__"
+                        | "__weakrefoffset__" | "__dictoffset__" => {
+                            return Err(Error::new("AttributeError", "readonly attribute"));
+                        }
+                        "__dict__" | "__mro__" | "__text_signature__" => {
+                            return Err(Error::new(
+                                "AttributeError",
+                                format!("attribute '{name}' of 'type' objects is not writable"),
+                            ));
+                        }
+                        "__bases__" => return self.assign_class_bases(obj, value),
+                        _ => {}
+                    }
                 }
                 let scope = *scope;
                 if matches!(name, "__annotations__" | "__annotate__")
@@ -7006,9 +7013,6 @@ impl Context {
                     && self.has_class_annotation_provider(scope)
                 {
                     return self.update_class_annotation_attr(scope, name, Some(value));
-                }
-                if name == "__bases__" {
-                    return self.assign_class_bases(obj, value);
                 }
                 self.bind(scope, name, value);
                 if name == "__del__" {
@@ -7802,6 +7806,7 @@ impl Context {
                         "builtin_function_or_method.__reduce__"
                             | "method.__reduce__"
                             | "type.__init__"
+                            | "type.__setattr__"
                             | "BaseException.add_note"
                             | "float.__format__"
                             | "float.__getformat__"

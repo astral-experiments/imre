@@ -3015,7 +3015,13 @@ impl Context {
                 }
                 &[][..]
             }
-            "type" => &["mro", "__subclasses__", "__prepare__"][..],
+            "type" => &[
+                "mro",
+                "__subclasses__",
+                "__prepare__",
+                "__setattr__",
+                "__text_signature__",
+            ][..],
             "object" => &[
                 "__hash__",
                 "__ne__",
@@ -3096,13 +3102,17 @@ impl Context {
             self.builtin(&format!("{name}.{method}"));
         }
         match name {
-            "dict" | "list" => {
+            "dict" | "list" | "type" => {
                 let mut entries = Vec::new();
-                for member in methods.iter().copied().chain(["__sizeof__"]) {
+                for &member in methods {
                     let key = self.heap.code_name(member);
                     entries.push((key, self.builtin(&format!("{name}.{member}"))));
                 }
-                entries.push((self.heap.code_name("__hash__"), NONE));
+                if name != "type" {
+                    let size = self.builtin(&format!("{name}.__sizeof__"));
+                    entries.push((self.heap.code_name("__sizeof__"), size));
+                    entries.push((self.heap.code_name("__hash__"), NONE));
+                }
                 let dictionary = self.dict(entries);
                 self.native_type_dicts.insert(value, dictionary);
             }
