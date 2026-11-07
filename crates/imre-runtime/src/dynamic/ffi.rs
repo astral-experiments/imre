@@ -2084,6 +2084,13 @@ pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, m
     unsafe { (&mut *ctx).comprehension_step(mark) }
 }
 
+/// Check the result discarded by a compiled expression statement after evaluating it once.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_discard_expression(ctx: *mut Context, value: Id) {
+    // SAFETY: the caller owns the context and the result is live in its current frame.
+    unsafe { (&mut *ctx).heap.note_discarded_coroutine(value) }
+}
+
 /// Release a consumed truth operand on the branch that no longer needs it.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
@@ -2313,6 +2320,7 @@ impl Context {
             if let Some(callbacks) = heap.collect(roots) {
                 self.run_weak_callbacks(callbacks);
             }
+            let _ = self.drain_scheduled_coroutines();
         }
     }
 
@@ -2470,6 +2478,14 @@ impl Context {
         self.heap.release_unbound_finalizers();
     }
 
+    /// Deliver warnings discovered by this sweep before the next Python operation changes filters.
+    fn drain_scheduled_coroutines(&mut self) -> Result<()> {
+        if !self.heap.full_collection_active() && self.heap.take_unawaited_check() {
+            self.drain_acyclic_finalizers()?;
+        }
+        Ok(())
+    }
+
     /// Sweep using the active frames and the context's roots before running callbacks.
     pub(super) fn collect_unreachable(&mut self) {
         if self.drain_acyclic_finalizers().is_err() {
@@ -2479,6 +2495,7 @@ impl Context {
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);
         }
+        let _ = self.drain_scheduled_coroutines();
         let [modules, reference] = self.finalizer_path_roots();
         self.heap.learn_weak_roots(modules, reference);
         let streams = super::stdlib::io::rooted_standard_streams(self);
@@ -2491,11 +2508,17 @@ impl Context {
         if self.heap.full_collection_active() {
             return Ok(0);
         }
+        // A warning hook can resurrect a coroutine whose arguments include a separate cycle.
+        // Resolve unreachable acyclic owners before clearing the cyclic isolate's weakrefs.
+        if self.heap.has_unstarted_coroutines() {
+            self.collect_unreachable();
+        }
         self.drain_acyclic_finalizers()?;
         let mark = self.heap.temporary_mark();
         let (heap, roots) = self.heap_and_roots();
         let callbacks = heap.begin_collection(roots, generation)?;
         if callbacks.is_empty() && self.heap.finish_empty_collection() {
+            self.drain_scheduled_coroutines()?;
             return Ok(0);
         }
         let mut released = 0;
@@ -2522,6 +2545,7 @@ impl Context {
             self.collect_unreachable();
         }
         self.heap.end_full_collection();
+        self.drain_scheduled_coroutines()?;
         Ok(count + released)
     }
 

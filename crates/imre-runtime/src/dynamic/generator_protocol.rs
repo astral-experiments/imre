@@ -427,6 +427,7 @@ impl Context {
             self.heap.publish_statement(&[], location, NONE);
             self.record_exception_frame(&mut error, None);
             self.heap.leave(NONE, false);
+            self.heap.disarm_finalizer(finalizer);
             self.heap.discard_generator_frame(id);
             return Err(error);
         }
@@ -475,6 +476,7 @@ impl Context {
             return Ok(NONE);
         }
         if offset == Some(0) || matches!(self.code_object(code).body, Body::Native(_)) {
+            self.heap.disarm_finalizer(finalizer);
             self.heap.discard_generator_frame(id);
             return Ok(NONE);
         }

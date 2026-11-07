@@ -3014,6 +3014,9 @@ pub(super) struct Heap {
     descriptor_owners: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // These IDs are not roots. A tracing sweep checks the frame state before recycling slots.
+    unstarted_coroutines: Vec<Id>,
+    scheduled_unawaited: bool,
     // Positions are hints. Each check reads the current binding and native stream edges.
     finalizer_bindings: Cell<[Option<(usize, FinalizerBindingSlot)>; 2]>,
     /// Last successful (owner, frame, operand) hints for finalizer reachability checks.
@@ -3233,6 +3236,8 @@ impl Heap {
             check_finalizers_next_statement: false,
             descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            unstarted_coroutines: Vec::new(),
+            scheduled_unawaited: false,
             finalizer_bindings: Cell::new([None; 2]),
             finalizer_operands: std::array::from_fn(|_| Cell::new(None)),
             last_generator_iterator: None,
@@ -3869,14 +3874,22 @@ impl Heap {
             self.frames.last_mut().unwrap().created_finalizer = true;
         }
         let finalizer_released = opened && returning && self.has_unbound_finalizer(value);
-        if (self.has_weak_values || finalizer_released)
+        let check_coroutines = returning && self.has_unstarted_coroutines();
+        if (self.has_weak_values || finalizer_released || check_coroutines)
             && let Value::Scope(scope) = self.get(frame.scope)
         {
+            let coroutine_released = check_coroutines
+                && scope.parent.is_some()
+                && scope.class_body.is_none()
+                && scope
+                    .names
+                    .values()
+                    .any(|&id| id != value && self.is_unstarted_coroutine(id));
             let weak_released = self.has_weak_values
                 && frame.live.iter().chain(scope.names.values()).any(|&id| {
                     id != value && self.weak_edge(id) && !self.bound_in_active_frame(id)
                 });
-            if weak_released || finalizer_released {
+            if weak_released || finalizer_released || coroutine_released {
                 // A normal function allocates its scope in the caller before entering.
                 // Once it returns, only an escaped closure or frame can keep that scope alive.
                 if scope.parent.is_some() && scope.class_body.is_none() {
@@ -3884,6 +3897,7 @@ impl Heap {
                 }
                 // Recheck the surviving weak roots after publishing the caller's temporaries.
                 self.check_finalizers_next_statement |= weak_released;
+                self.collect_next_statement |= coroutine_released;
             }
         }
         self.keep(value);
@@ -4620,11 +4634,62 @@ impl Heap {
         self.slots[id as usize].value.as_ref()?.finalizer_class()
     }
 
+    pub(super) fn is_unstarted_coroutine(&self, id: Id) -> bool {
+        matches!(
+            self.get(id),
+            Value::Coroutine { frame, .. }
+                if matches!(self.get(*frame), Value::Generator { offset: Some(0), .. })
+        )
+    }
+
+    /// An expression statement discarded its result. Trace after its temporary roots are gone.
+    pub(super) fn note_discarded_coroutine(&mut self, value: Id) {
+        self.collect_next_statement |=
+            self.has_unstarted_coroutines() && self.is_unstarted_coroutine(value);
+    }
+
+    /// Remember a new coroutine without activating ordinary deallocation checks on each statement.
+    pub(super) fn watch_unstarted_coroutine(&mut self, id: Id) -> Result<()> {
+        self.unstarted_coroutines
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.unstarted_coroutines.push(id);
+        Ok(())
+    }
+
+    pub(super) fn has_unstarted_coroutines(&self) -> bool {
+        !self.unstarted_coroutines.is_empty()
+    }
+
+    pub(super) fn take_unawaited_check(&mut self) -> bool {
+        std::mem::take(&mut self.scheduled_unawaited)
+    }
+
+    /// Schedule only unreachable, still-created coroutines. Cyclic GC preserves its weakref order.
+    fn schedule_unawaited_coroutines(&mut self, cohort: Option<&CycleSet>) {
+        for index in (0..self.unstarted_coroutines.len()).rev() {
+            let id = self.unstarted_coroutines[index];
+            if self.slots[id as usize].finalization == Finalization::None
+                && self.is_unstarted_coroutine(id)
+            {
+                if self.traces[id as usize].get() != UNMARKED
+                    || cohort.is_some_and(|cycles| cycles.incoming[id as usize] == 0)
+                {
+                    continue;
+                }
+                self.register_finalizer(id);
+            }
+            self.unstarted_coroutines.swap_remove(index);
+        }
+    }
+
     pub(super) fn register_finalizer(&mut self, id: Id) {
         if self.slots[id as usize].finalization == Finalization::None {
             self.slots[id as usize].finalization = Finalization::Pending;
             self.ordinary_finalizers.push(id);
-            self.frames.last_mut().unwrap().created_finalizer = true;
+            if let Some(frame) = self.frames.last_mut() {
+                frame.created_finalizer = true;
+            }
         }
     }
 
@@ -5360,6 +5425,13 @@ impl Heap {
         self.full_collection.is_some()
     }
 
+    pub(super) fn in_full_collection(&self, id: Id) -> bool {
+        self.full_collection
+            .as_ref()
+            .and_then(|cycles| cycles.incoming.get(id as usize))
+            .is_some_and(|&count| count != 0)
+    }
+
     pub(super) fn full_collection_members(&self) -> impl Iterator<Item = Id> + '_ {
         self.full_collection.iter().flat_map(CycleSet::members)
     }
@@ -5596,6 +5668,7 @@ impl Heap {
         // The per-base subclass links are weak references too. A callback or a
         // finalizer can ask for __subclasses__ before the isolated objects are swept.
         self.classes.retain(|&id| cycles.incoming[id as usize] == 0);
+        self.schedule_unawaited_coroutines(Some(&cycles));
         let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
@@ -5821,6 +5894,13 @@ impl Heap {
     }
 
     fn sweep(&mut self) -> Option<WeakCallbacks> {
+        let first = self.ordinary_finalizers.len();
+        self.schedule_unawaited_coroutines(None);
+        if first < self.ordinary_finalizers.len() {
+            self.scheduled_unawaited = true;
+            // The warning hook can retain its source, including the arguments in the frame.
+            self.mark(self.ordinary_finalizers[first..].iter().copied());
+        }
         // Finalizers have had their chance to flush or resurrect the writer. Check its
         // actual buffer before recycling any slot, including its raw stream or class.
         if self.discarded_shutdown_write == Some(false)

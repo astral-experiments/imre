@@ -94,6 +94,49 @@ impl Context {
         )
     }
 
+    /// Use the Python coroutine warning hook so filters, origin tracking and source capture apply.
+    pub(in crate::dynamic) fn warn_unawaited_coroutine(&mut self, coroutine: Id) -> Result<()> {
+        let import_error = self.builtin("ImportError");
+        let hook = match self.module("warnings") {
+            Ok(warnings) => self.optional_attr(warnings, "_warn_unawaited_coroutine"),
+            Err(error) if self.raised_error_matches(&error, import_error) => Ok(None),
+            Err(error) => Err(error),
+        };
+        let result = hook.and_then(|hook| {
+            hook.map(|hook| self.call(hook, vec![coroutine], Vec::new()))
+                .transpose()
+        });
+        match result {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {}
+            Err(error) => {
+                let category = self.builtin("RuntimeWarning");
+                let warned = self.raised_error_matches(&error, category);
+                super::super::unraisable::report(
+                    self,
+                    error,
+                    true,
+                    Some(coroutine),
+                    "Exception ignored while finalizing coroutine",
+                );
+                if warned {
+                    return Ok(());
+                }
+            }
+        }
+        let qualname = self.lookup_attr(coroutine, "__qualname__")?;
+        let message = format!(
+            "coroutine '{}' was never awaited",
+            self.str_value(qualname)?
+        );
+        self.emit_builtin_warning_with_source(
+            crate::objects::exceptions::Kind::RuntimeWarning,
+            &message,
+            1,
+            coroutine,
+        )
+    }
+
     pub(in crate::dynamic) fn emit_builtin_warning(
         &mut self,
         kind: crate::objects::exceptions::Kind,

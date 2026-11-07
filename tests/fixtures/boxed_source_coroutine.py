@@ -1,5 +1,6 @@
 import gc
 import types
+import warnings
 import weakref
 from inspect import getcoroutinelocals
 
@@ -10,7 +11,32 @@ class Pause:
         return result
 
 
+def unawaited_source():
+    async def job():
+        return 37
+
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always", RuntimeWarning)
+        live = job()
+        released = []
+        ref = weakref.ref(live, lambda _: released.append(len(seen)))
+        job().close()
+        gc.collect()
+        assert not seen
+        del live
+        gc.collect()
+        assert released == [0] and ref() is None
+        assert len(seen) == 1
+        assert seen[0].category is RuntimeWarning
+        assert str(seen[0].message) == f"coroutine '{job.__qualname__}' was never awaited"
+        assert completed_send(seen[0].source, None) == 37
+        seen.clear()
+        gc.collect()
+        assert not seen
+
+
 def current():
+    unawaited_source()
     events = []
     error = ValueError("cleanup")
     scope = {"events": events, "pause": Pause(), "error": error}

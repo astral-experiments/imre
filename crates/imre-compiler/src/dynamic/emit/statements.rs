@@ -243,7 +243,10 @@ impl Function<'_, '_> {
             match stmt {
                 ast::Stmt::Expr(v) => {
                     if !matches!(&*v.value, ast::Expr::StringLiteral(_)) {
-                        self.expr(&v.value);
+                        let value = self.expr(&v.value);
+                        self.line(&format!(
+                            "call void @imre_dyn_discard_expression(ptr %ctx, i64 {value})"
+                        ));
                     }
                 }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}

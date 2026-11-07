@@ -3896,6 +3896,7 @@ for name in ("md4", "ripemd160"):
 
         compare("-B", fixtures / "boxed_unittest_result_registry.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
+        compare("-IB", fixtures / "unawaited_coroutine.py")
         async_case = fixtures / "unittest_isolated_asyncio.py"
         compare("-IB", async_case, native_args=("run", async_case, "--quiet"), native_timeout=600)
         compare("-IB", fixtures / "boxed_unittest_patch.py")
