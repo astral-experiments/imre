@@ -43,7 +43,7 @@ class PathEntryFinder(metaclass=abc.ABCMeta):
         pass
 
 
-_register(MetaPathFinder, machinery.BuiltinImporter, machinery.PathFinder)
+_register(MetaPathFinder, machinery.BuiltinImporter, machinery.FrozenImporter, machinery.PathFinder)
 _register(PathEntryFinder, machinery.FileFinder)
 
 
@@ -75,7 +75,7 @@ class InspectLoader(Loader):
     load_module = _bootstrap_external._LoaderBasics.load_module
 
 
-_register(InspectLoader, machinery.BuiltinImporter, machinery.NamespaceLoader)
+_register(InspectLoader, machinery.BuiltinImporter, machinery.FrozenImporter, machinery.NamespaceLoader)
 
 
 class ExecutionLoader(InspectLoader):

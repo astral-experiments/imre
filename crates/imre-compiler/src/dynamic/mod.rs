@@ -401,7 +401,10 @@ impl<'a> Visitor<'a> for Imports {
             self.add(0, "importlib");
         }
         if let Expr::Attribute(attr) = e
-            && matches!(attr.attr.as_str(), "ModuleSpec" | "BuiltinImporter")
+            && matches!(
+                attr.attr.as_str(),
+                "ModuleSpec" | "BuiltinImporter" | "FrozenImporter"
+            )
             && let Some(receiver) = UnqualifiedName::from_expr(&attr.value)
         {
             self.machinery_attributes
@@ -979,7 +982,8 @@ pub(crate) fn compile(
         // A checked caller can request the loader before its other annotated calls are lowered.
         if !options.runtime_imports
             && options.python_startup().is_none()
-            && imports.uses_machinery_export("BuiltinImporter")
+            && (imports.uses_machinery_export("BuiltinImporter")
+                || imports.uses_machinery_export("FrozenImporter"))
             && let Some(graph) = typed_graph
             && (owner == "__main__" || graph.modules.iter().any(|m| !m.bundled && m.name == owner))
         {

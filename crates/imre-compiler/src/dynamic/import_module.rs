@@ -369,12 +369,22 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 866)");
                 let load = section("def _load_backward_compatible(", "# Loaders")
                     .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 921)");
+                // The frozen loader reads Imre's registered code objects and module metadata.
+                let frozen = section("class FrozenImporter:", "# Import itself")
+                    .replace("_imp.find_frozen", "_frozen_info")
+                    .replace("_imp.get_frozen_object", "_frozen_code")
+                    .replace("_imp.is_frozen_package", "_frozen_package");
+                let requires_frozen = section("def _requires_frozen(", "def _load_module_shim(")
+                    .replace("not _imp.is_frozen(fullname)", "_frozen_info(fullname) is None");
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
                 [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
                     section("def _module_repr(module):", "def _spec_from_module("),
                     section("def _init_module_attrs(", "def _exec(spec, module):"),
                     section("def _call_with_frames_removed(", "def _requires_builtin("),
+                    section("def _wrap(", "def _new_module("),
+                    &requires_frozen,
+                    &frozen,
                     section("def _resolve_name(", "def _find_spec("),
                     section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
                     section("def _object_name(", "# Bootstrap-related"),

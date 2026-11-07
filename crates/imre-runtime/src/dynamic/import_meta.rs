@@ -17,6 +17,7 @@ impl Context {
         self.bootstrap_module = core;
         let external = self.module("_frozen_importlib_external")?;
         let builtin = self.lookup_attr(core, "BuiltinImporter")?;
+        let frozen = self.lookup_attr(core, "FrozenImporter")?;
         let native = self.lookup_attr(core, "_NativeImporter")?;
         let bundled = self.lookup_attr(core, "_BundledImporter")?;
         let path = self.lookup_attr(external, "PathFinder")?;
@@ -29,13 +30,13 @@ impl Context {
         }
         hooks.extend([registered_hook, file_hook]);
         let sys = self.module("sys")?;
-        let meta = self.alloc(Value::List(vec![builtin, native, path, bundled]));
+        let meta = self.alloc(Value::List(vec![builtin, frozen, native, path, bundled]));
         let hooks = self.alloc(Value::List(hooks));
         let cache = self.dict(Vec::new());
         self.set_attr(sys, "meta_path", meta)?;
         self.set_attr(sys, "path_hooks", hooks)?;
         self.set_attr(sys, "path_importer_cache", cache)?;
-        let init = self.lookup_attr(core, "_init_builtin_specs")?;
+        let init = self.lookup_attr(core, "_init_startup_specs")?;
         let names = stdlib::SYS_LAZY_FUNCTIONS
             .iter()
             .chain(stdlib::SYS_EAGER_FUNCTIONS)
@@ -112,6 +113,39 @@ impl Context {
         Some((source.path.clone(), SourceBody::Registered(source.code)))
     }
 
+    fn frozen_registration<'a>(&self, name: &'a str) -> Option<(&SourceModule, &'a str)> {
+        if !self.is_frozen(name) {
+            return None;
+        }
+        let original = match name {
+            "_frozen_importlib" => "importlib._bootstrap",
+            "_frozen_importlib_external" => "importlib._bootstrap_external",
+            _ => name,
+        };
+        Some((self.bundled_registration(name)?, original))
+    }
+
+    /// Supply the frozen finder's package flag and original module name without executing code.
+    pub(super) fn frozen_info(&mut self, name: &str) -> Id {
+        let Some((source, original)) = self.frozen_registration(name) else {
+            return NONE;
+        };
+        let package = super::builtins::boolean(source.path.ends_with("__init__.py"));
+        let original = self.text(original);
+        self.alloc(Value::Tuple(vec![NONE, package, original]))
+    }
+
+    pub(super) fn frozen_code(&mut self, name: &str) -> Result<Id> {
+        let (source, original) = self.frozen_registration(name).ok_or_else(|| {
+            Error::new(
+                "ImportError",
+                format!("No such frozen object named {}", string_repr(name)),
+            )
+            .with_import(Some(name), None, None)
+        })?;
+        self.module_code(source.code, Path::new(&format!("<frozen {original}>")))
+    }
+
     fn sealed_native(&self, name: &str) -> bool {
         self.is_frozen(name)
             || (stdlib::is_module(name) && !imre_ast::providers::is_native_fallback(name))
@@ -179,7 +213,10 @@ impl Context {
 
     pub(super) fn native_spec_info(&mut self, name: &str, path: Id, bundled: bool) -> Result<Id> {
         let sealed = self.sealed_native(name);
-        if sealed == bundled || (!bundled && self.is_builtin_module(name)?) {
+        if self.is_frozen(name)
+            || sealed == bundled
+            || (!bundled && self.is_builtin_module(name)?)
+        {
             return Ok(NONE);
         }
         let source = self.bundled_source(name);
@@ -214,9 +251,7 @@ impl Context {
                 .collect();
             self.alloc(Value::List(items))
         };
-        let origin = if self.is_frozen(name) {
-            self.text("frozen")
-        } else if let Some(path) = source {
+        let origin = if let Some(path) = source {
             self.text(path.to_string_lossy())
         } else {
             self.text("built-in")
