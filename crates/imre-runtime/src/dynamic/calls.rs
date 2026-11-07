@@ -551,6 +551,17 @@ impl Context {
         dictionary
     }
 
+    fn replace_partial_dictionary(&mut self, obj: Id, value: Id) {
+        let Value::Partial { dictionary, .. } = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        if let Some(old) = dictionary.replace(value)
+            && old != value
+        {
+            self.heap.weak_edge_removed(old);
+        }
+    }
+
     /// Instance attributes use raw dict storage even when __dict__ was set to a subclass.
     fn dictionary_field(&mut self, dictionary: Option<Id>, name: &str) -> Result<Option<Id>> {
         let Some(dictionary) = dictionary else {
@@ -5983,6 +5994,9 @@ impl Context {
                 }
                 match *self.heap.get(receiver) {
                     Value::Instance { .. } => Ok(self.instance_dictionary(receiver, class)),
+                    Value::Partial { dictionary, .. } => {
+                        Ok(self.partial_dictionary(receiver, dictionary))
+                    }
                     Value::Module { scope, .. } => self.module_globals(scope),
                     Value::Class { scope, .. } => Ok(self.class_dictionary(scope)),
                     Value::Raised(_) => Ok(self.exception_dictionary(receiver)),
@@ -6020,7 +6034,7 @@ impl Context {
                     Value::Module { .. } => {
                         return Err(Error::new("AttributeError", "readonly attribute"));
                     }
-                    Value::Instance { .. } | Value::Raised(_) => {}
+                    Value::Instance { .. } | Value::Raised(_) | Value::Partial { .. } => {}
                     _ => return Err(self.missing_attribute(receiver, name)),
                 }
                 if let Some(dictionary) = value
@@ -6033,6 +6047,17 @@ impl Context {
                             self.type_name(dictionary)
                         ),
                     ));
+                }
+                if matches!(
+                    self.heap.get(self.scalar_value(receiver)),
+                    Value::Partial { .. }
+                ) {
+                    let dictionary =
+                        value.ok_or_else(|| Error::new("TypeError", "cannot delete __dict__"))?;
+                    if matches!(self.heap.get(receiver), Value::Partial { .. }) {
+                        self.replace_partial_dictionary(receiver, dictionary);
+                        return Ok(());
+                    }
                 }
                 if let Value::Raised(error) = self.heap.get_mut(receiver) {
                     let dictionary =
@@ -6562,13 +6587,7 @@ impl Context {
             }
             match self.heap.get_mut(obj) {
                 Value::Raised(error) => error.tracing().dictionary = Some(value),
-                Value::Partial { dictionary, .. } => {
-                    if let Some(old) = dictionary.replace(value)
-                        && old != value
-                    {
-                        self.heap.weak_edge_removed(old);
-                    }
-                }
+                Value::Partial { .. } => self.replace_partial_dictionary(obj, value),
                 Value::Cached { dictionary, .. } => {
                     let old = std::mem::replace(dictionary, value);
                     if old != value {

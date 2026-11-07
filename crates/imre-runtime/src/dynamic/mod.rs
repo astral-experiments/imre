@@ -2774,6 +2774,8 @@ impl Context {
                 let member = self.readonly_member(stdlib::functools::PARTIAL_CLASS, field);
                 entries.push((self.heap.code_name(field), member));
             }
+            let namespace = self.alloc(Value::LayoutDescriptor(value, "__dict__"));
+            entries.push((self.heap.code_name("__dict__"), namespace));
             let repr = self.builtin("functools.partial.__repr__");
             entries.push((self.heap.code_name("__repr__"), repr));
             let module = self.heap.code_name("functools");

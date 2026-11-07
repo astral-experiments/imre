@@ -69,6 +69,13 @@ def current():
         namespace = callback.__dict__
         assert callback.__reduce__()[2][3] is namespace
         callback.label = []
+        try:
+            del callback.__dict__
+        except TypeError as error:
+            assert str(error) == "cannot delete __dict__"
+        else:
+            raise AssertionError("deleted the partial instance dictionary")
+        assert callback.__dict__ is namespace and namespace["label"] is callback.label
         shallow = copy.copy(callback)
         deep = copy.deepcopy(callback)
         assert type(shallow) is type(deep) is cls
@@ -76,6 +83,36 @@ def current():
         assert shallow.label is callback.label
         assert deep.args[0] is not callback.args[0] and deep.keywords is not callback.keywords
         assert deep.label is not callback.label and deep() == 1
+
+    deleted = []
+
+    class CustomDictionary:
+        __slots__ = ()
+
+        @property
+        def __dict__(self):
+            return "custom"
+
+        @__dict__.deleter
+        def __dict__(self):
+            deleted.append(self)
+
+    class CustomFirst(CustomDictionary, functools.partial):
+        pass
+
+    class PartialFirst(functools.partial, CustomDictionary):
+        pass
+
+    first = CustomFirst(len)
+    last = PartialFirst(len)
+    del first.__dict__
+    try:
+        del last.__dict__
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("later mixin shadowed the partial dictionary")
+    assert deleted == [first]
 
     cycle = functools.partial(len)
     cycle.__setstate__((len, (cycle,), {}, None))
