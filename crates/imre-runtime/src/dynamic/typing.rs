@@ -2854,7 +2854,7 @@ impl Context {
                 continue;
             }
             if self.subclass(base, generic)
-                && let Some(marked) = self.class_attr(base, "_is_protocol")
+                && let Some(marked) = self.optional_attr(base, "_is_protocol")?
                 && self.truth(marked)?
             {
                 continue;
