@@ -453,13 +453,7 @@ fn setopt(fd: RawFd, level: i32, name: i32, value: i32) -> io::Result<()> {
     Ok(())
 }
 
-fn handle(
-    raw: RawFd,
-    blocking: bool,
-    family: i32,
-    kind: i32,
-    proto: i32,
-) -> Result<crate::ObjectOwner> {
+fn own_socket_fd(raw: RawFd) -> Result<OwnedFd> {
     // SAFETY: the kernel transferred a new fd; every path now has an owner.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
     #[cfg(not(target_os = "linux"))]
@@ -468,8 +462,28 @@ fn handle(
         checked(unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) })
             .map_err(errno_error)?;
     }
+    Ok(fd)
+}
+
+fn handle(
+    raw: RawFd,
+    blocking: bool,
+    family: i32,
+    kind: i32,
+    proto: i32,
+) -> Result<crate::ObjectOwner> {
+    handle_owned(own_socket_fd(raw)?, blocking, family, kind, proto)
+}
+
+fn handle_owned(
+    fd: OwnedFd,
+    blocking: bool,
+    family: i32,
+    kind: i32,
+    proto: i32,
+) -> Result<crate::ObjectOwner> {
     #[cfg(target_vendor = "apple")]
-    setopt(raw, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1).map_err(errno_error)?;
+    setopt(fd.as_raw_fd(), libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1).map_err(errno_error)?;
     let socket = socket_state(family, kind, proto, blocking)?;
     state(&socket, |s| s.fd = fd.into_raw_fd());
     Ok(socket)
@@ -1714,10 +1728,11 @@ pub unsafe extern "C" fn imre_socket_sockname(
     )
 }
 
-pub(crate) fn accept<E: From<Error>>(
+/// Accept a non-inheritable descriptor without applying Python socket defaults to it.
+pub(crate) fn accept_fd<E: From<Error>>(
     s: &Object,
     check_signals: impl FnMut() -> std::result::Result<(), E>,
-) -> std::result::Result<(crate::ObjectOwner, SocketName), E> {
+) -> std::result::Result<(OwnedFd, SocketName), E> {
     let (child, addr, len) = retry_read(s, check_signals, |until| {
         let raw = fd(s);
         socket_call_interruptible(raw, libc::POLLIN, until, || {
@@ -1736,12 +1751,20 @@ pub(crate) fn accept<E: From<Error>>(
             })
         })
     })?;
-    let child = handle(child, true, family(s), kind(s), proto(s))?;
+    let child = own_socket_fd(child)?;
+    Ok((child, unpack_socket_name(&addr, len)?))
+}
+
+pub(crate) fn accept<E: From<Error>>(
+    s: &Object,
+    check_signals: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<(crate::ObjectOwner, SocketName), E> {
+    let (child, addr) = accept_fd(s, check_signals)?;
+    let child = handle_owned(child, true, family(s), kind(s), proto(s))?;
     if get_timeout(s).is_some_and(|d| !d.is_zero()) {
         // The accepted fd may inherit O_NONBLOCK on BSD, but its Python timeout defaults to None.
         set_blocking(fd(&child), true).map_err(errno_error)?;
     }
-    let addr = unpack_socket_name(&addr, len)?;
     Ok((child, addr))
 }
 

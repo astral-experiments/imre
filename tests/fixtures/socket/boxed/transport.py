@@ -1,5 +1,6 @@
 """Runtime-imported AF_INET operations used by the synchronous WSGI transport."""
 import errno
+import os
 import _socket
 import socket
 
@@ -96,6 +97,15 @@ def run():
             pass
         else:
             raise AssertionError("closed socket still had an endpoint")
+        with socket.socket() as second:
+            second.connect(server)
+            fd, address = _socket.socket._accept(listener)
+            with socket.socket(fileno=fd) as accepted:
+                assert accepted.fileno() == fd and not os.get_inheritable(fd)
+                assert address == second.getsockname() == accepted.getpeername()
+                second.sendall(b"k")
+                assert accepted.recv(1) == b"k"
+            assert second.recv(1) == b""
     assert listener.fileno() == -1 and client.fileno() == -1
     try:
         listener.getsockopt(level, option)

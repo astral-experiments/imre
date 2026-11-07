@@ -7,6 +7,7 @@ use std::time::Duration;
 
 /// Methods available through both the native socket class and its instances.
 pub(in super::super) const CLASS_METHODS: &[&str] = &[
+    "_accept",
     "connect_ex",
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     "sendmsg",
@@ -1403,8 +1404,9 @@ pub(super) fn call(
         ));
     };
     let is_message = matches!(method, "sendmsg" | "recvmsg" | "recvmsg_into");
+    let descriptor = is_message || method == "_accept";
     let (receiver, args) = args.split_first().ok_or_else(|| {
-        if is_message {
+        if descriptor {
             Error::new(
                 "TypeError",
                 format!("unbound method socket.{method}() needs an argument"),
@@ -1414,7 +1416,7 @@ pub(super) fn call(
         }
     })?;
     let Value::Socket(handle) = ctx.heap.get(*receiver) else {
-        if is_message {
+        if descriptor {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -1429,6 +1431,28 @@ pub(super) fn call(
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if is_message {
         return message::call(ctx, &s, *receiver, method, args, kwargs);
+    }
+    if method == "_accept" {
+        use std::os::fd::{AsRawFd, IntoRawFd};
+
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "socket._accept() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("socket._accept() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        let (child, peer) = native::accept_fd(&s, || ctx.dispatch_signals())?;
+        let peer = pack_socket_name(ctx, peer)?;
+        let fd = ctx.int(i64::from(child.as_raw_fd()));
+        let result = ctx.alloc(Value::Tuple(vec![fd, peer]));
+        let _ = child.into_raw_fd();
+        return Ok(result);
     }
     if matches!(method, "connect" | "connect_ex") {
         let peer = super::super::builtins::one_positional_arg(name, args, kwargs)?;
