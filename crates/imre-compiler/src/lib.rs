@@ -163,7 +163,7 @@ impl CompileOptions {
         module_root: Option<&Path>,
         filesystem: watch::FileSystem<'_>,
         import_failure: &mut Option<modules::EntryImportFailure>,
-        site_wheels: &mut modules::SiteWheels,
+        site_probes: &mut modules::SiteProbes,
     ) -> Result<modules::SourceGraph, String> {
         if let Some(command) = &self.command {
             return modules::SourceGraph::command(
@@ -171,7 +171,7 @@ impl CompileOptions {
                 self,
                 filesystem,
                 import_failure,
-                site_wheels,
+                site_probes,
             );
         }
         if let Some((flags, executable)) = &self.script_startup {
@@ -182,7 +182,7 @@ impl CompileOptions {
                 self,
                 filesystem,
                 import_failure,
-                site_wheels,
+                site_probes,
             );
         }
         modules::SourceGraph::load_with(
@@ -239,6 +239,9 @@ pub struct SourceInputs {
     pub relink_site_wheel: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
+    /// File-kind queries that affect import admission without reading a provider's contents.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub file_checks: std::collections::BTreeMap<PathBuf, bool>,
     /// Import search directories and the canonical directories they resolve to.
     #[serde(default)]
     pub directories: Vec<(PathBuf, PathBuf)>,
@@ -249,6 +252,10 @@ impl SourceInputs {
         self.missing
             .iter()
             .all(|p| matches!(p.try_exists(), Ok(false)))
+            && self
+                .file_checks
+                .iter()
+                .all(|(path, expected)| path.is_file() == *expected)
             && self.directories.iter().all(|(p, identity)| {
                 p.is_dir() && p.canonicalize().is_ok_and(|now| &now == identity)
             })
@@ -388,7 +395,7 @@ fn object_fallback<T>(
             .python_startup()
             .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut import_failure = None;
-    let mut site_wheels = modules::SiteWheels::default();
+    let mut site_probes = modules::SiteProbes::default();
     let mut infer_sets = true;
     let (error, graph, checked_entry) = loop {
         let mut graph = match options.load_graph(
@@ -396,12 +403,12 @@ fn object_fallback<T>(
             module_root,
             filesystem.reborrow(),
             &mut import_failure,
-            &mut site_wheels,
+            &mut site_probes,
         ) {
             Ok(graph) => graph,
             Err(error) => break (error.into(), None, false),
         };
-        site_wheels.record(&mut graph.inputs);
+        site_probes.record(&mut graph.inputs);
         if !infer_sets {
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
         }
@@ -446,7 +453,7 @@ fn object_fallback<T>(
         }
         infer_sets = false;
         import_failure = None;
-        site_wheels = modules::SiteWheels::default();
+        site_probes = modules::SiteProbes::default();
     };
     // Python invocations and explicit object imports enforce annotated calls in
     // the boxed runtime, where their TypeError can be caught by the program.
@@ -553,7 +560,7 @@ fn object_fallback<T>(
         check_returns,
     )? {
         Some(mut compilation) => {
-            site_wheels.record(&mut compilation.source_inputs);
+            site_probes.record(&mut compilation.source_inputs);
             Ok(boxed(compilation))
         }
         None => Err(error.to_string()),

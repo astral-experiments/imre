@@ -1,6 +1,6 @@
 //! Loads a closed graph of first-party modules and orders their initialization.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -3665,14 +3665,14 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
-        site_wheels: &mut SiteWheels,
+        site_probes: &mut SiteProbes,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
             &options.python_archive_indices,
-            Some((options, site_wheels)),
+            Some((options, site_probes)),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3708,7 +3708,7 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
-        site_wheels: &mut SiteWheels,
+        site_probes: &mut SiteProbes,
     ) -> Result<Self, String> {
         let filename = std::env::current_dir()
             .map_err(|err| err.to_string())?
@@ -3735,7 +3735,7 @@ impl SourceGraph {
             root,
             &options.extension_paths,
             &options.python_archive_indices,
-            Some((options, site_wheels)),
+            Some((options, site_probes)),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;
@@ -4210,12 +4210,20 @@ pub(crate) enum EntryImportFailure {
 
 /// File probes that affect checked admission, even when the program later uses object imports.
 #[derive(Default)]
-pub(crate) struct SiteWheels {
+pub(crate) struct SiteProbes {
     missing: Vec<PathBuf>,
     selected: bool,
+    file_checks: BTreeMap<PathBuf, bool>,
 }
 
-impl SiteWheels {
+impl SiteProbes {
+    fn is_file(&mut self, fs: &mut FileSystem<'_>, path: PathBuf) -> bool {
+        *self
+            .file_checks
+            .entry(path)
+            .or_insert_with_key(|p| fs.is_file(p))
+    }
+
     fn paired(&mut self, fs: &mut FileSystem<'_>, archive: &Path, stub: &Path) -> bool {
         for file in [archive, stub] {
             if !fs.is_file(file) {
@@ -4229,6 +4237,7 @@ impl SiteWheels {
 
     pub(crate) fn record(&self, inputs: &mut crate::SourceInputs) {
         inputs.missing.extend_from_slice(&self.missing);
+        inputs.file_checks.extend(self.file_checks.clone());
         inputs.relink_site_wheel = self.selected;
     }
 }
@@ -4247,7 +4256,7 @@ struct Loader<'a> {
     root: PathBuf,
     search_roots: Vec<PathBuf>,
     archive_roots: usize,
-    site_wheels: Option<(HashSet<PathBuf>, &'a mut SiteWheels)>,
+    site_probes: Option<(HashSet<PathBuf>, &'a mut SiteProbes)>,
     session: Session,
     modules: Vec<SourceModule>,
     by_name: HashMap<String, ModuleId>,
@@ -4271,7 +4280,7 @@ impl<'a> Loader<'a> {
         root: PathBuf,
         extension_paths: &[PathBuf],
         python_archive_indices: &[usize],
-        python: Option<(&crate::CompileOptions, &'a mut SiteWheels)>,
+        python: Option<(&crate::CompileOptions, &'a mut SiteProbes)>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
@@ -4306,7 +4315,7 @@ impl<'a> Loader<'a> {
         }
         let archive_roots = search_roots.len();
         let mut site_roots = HashSet::new();
-        let mut site_wheels = None;
+        let mut site_probes = None;
         if let Some((options, probes)) = python {
             for dir in options.installed_dirs() {
                 let canonical = fs.canonicalize(dir).map_err(|e| e.to_string())?;
@@ -4318,12 +4327,12 @@ impl<'a> Loader<'a> {
                     search_roots.push(canonical);
                 }
             }
-            site_wheels = Some((site_roots, probes));
+            site_probes = Some((site_roots, probes));
         }
         Ok(Self {
             fs,
             archive_roots,
-            site_wheels,
+            site_probes,
             session: Session::new(&root, &search_roots)?,
             search_roots,
             inputs,
@@ -5873,6 +5882,19 @@ impl<'a> Loader<'a> {
         Ok(Some((id, child)))
     }
 
+    /// A typeshed declaration alone does not supply a runtime provider. Probe only the
+    /// installed roots, even if an earlier source will win the actual import.
+    fn has_installed_source(&mut self, name: &str) -> bool {
+        let Some((_, probes)) = &mut self.site_probes else {
+            return false;
+        };
+        self.search_roots[self.archive_roots..].iter().any(|site| {
+            let path = site.join(name);
+            probes.is_file(&mut self.fs, path.with_extension("py"))
+                || probes.is_file(&mut self.fs, path.join("__init__.py"))
+        })
+    }
+
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
@@ -5882,16 +5904,7 @@ impl<'a> Loader<'a> {
                 && self.has_project_source(first))
             && (IntrinsicModule::named(first).is_some()
                 || imre_ast::providers::provider(first).is_some()
-                || !self
-                    .search_roots
-                    .iter()
-                    .skip(self.archive_roots)
-                    .any(|site| {
-                        // A typeshed declaration alone does not supply an importable module.
-                        let path = site.join(first);
-                        self.fs.is_file(&path.with_extension("py"))
-                            || self.fs.is_file(&path.join("__init__.py"))
-                    }))
+                || !self.has_installed_source(first))
         {
             if IntrinsicModule::named(first).is_none()
                 && imre_ast::providers::provider(first).is_none()
@@ -5960,7 +5973,7 @@ impl<'a> Loader<'a> {
                         exists
                     })
                 } else {
-                    self.site_wheels
+                    self.site_probes
                         .as_mut()
                         .filter(|(sites, _)| sites.contains(root))
                         .and_then(|(_, probes)| {
