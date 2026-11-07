@@ -1152,13 +1152,12 @@ fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Resu
         }
         "close" if is_closed => return Ok(NONE),
         "close" => {
-            let result = ctx
-                .lookup_attr(receiver, "flush")
-                .and_then(|f| ctx.call(f, Vec::new(), Vec::new()));
-            if let Some(current) = state(ctx, receiver) {
-                current.close()?;
-            }
-            return result.map(|_| NONE);
+            return super::buffered_io::flush_and_close(ctx, receiver, |ctx| {
+                if let Some(current) = state(ctx, receiver) {
+                    current.close()?;
+                }
+                Ok(NONE)
+            });
         }
         "__exit__" => {
             let close = ctx.lookup_attr(receiver, "close")?;
