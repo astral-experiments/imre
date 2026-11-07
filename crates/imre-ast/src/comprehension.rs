@@ -220,13 +220,27 @@ impl<'a> Plan<'a> {
     }
 
     pub fn target_names(&self) -> HashSet<String> {
+        self.target_names_with(|_| Ok(()))
+            .expect("collecting names without validation")
+    }
+
+    pub fn try_target_names(&self) -> Result<HashSet<String>, InvalidTarget> {
+        self.target_names_with(Err)
+    }
+
+    /// Declare the targets of all pulls, including an inner clause that may
+    /// never run. Each consumer chooses when to report assignment syntax errors.
+    fn target_names_with(
+        &self,
+        invalid: impl Fn(InvalidTarget) -> Result<(), InvalidTarget>,
+    ) -> Result<HashSet<String>, InvalidTarget> {
         let mut names = HashSet::new();
         for step in &self.steps {
             if let Step::Next { target, .. } = step {
-                collect_target_names(target, &mut names);
+                visit_target_names(target, &mut names, &invalid)?;
             }
         }
-        names
+        Ok(names)
     }
 
     /// Visit the operands of a successful body pass in execution order, including
@@ -278,20 +292,64 @@ pub fn expression_suspends(expression: &ast::Expr) -> bool {
     scan.any()
 }
 
-/// Only names in a binding pattern become local. Attribute and subscript
-/// assignment evaluate their receiver in the comprehension scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvalidTarget {
+    BareStar,
+    MultipleStars,
+    Unsupported,
+}
+
+/// Only names in a binding pattern become local. Analysis can collect names
+/// before its owning compiler reports a malformed assignment pattern.
 pub fn collect_target_names(target: &ast::Expr, names: &mut HashSet<String>) {
-    let mut pending = vec![target];
-    while let Some(target) = pending.pop() {
+    let _ = visit_target_names(target, names, |_| Ok(()));
+}
+
+/// Declare bindings left to right. Attribute and subscript receivers are
+/// expressions, and only an unpacking pattern may contain a starred target.
+pub fn try_collect_target_names(
+    target: &ast::Expr,
+    names: &mut impl Extend<String>,
+) -> Result<(), InvalidTarget> {
+    visit_target_names(target, names, Err)
+}
+
+fn visit_target_names(
+    mut target: &ast::Expr,
+    names: &mut impl Extend<String>,
+    invalid: impl Fn(InvalidTarget) -> Result<(), InvalidTarget>,
+) -> Result<(), InvalidTarget> {
+    let mut pending = Vec::new();
+    loop {
         match target {
-            ast::Expr::Name(name) => {
-                names.insert(name.id.to_string());
+            ast::Expr::Name(name) => names.extend([name.id.to_string()]),
+            ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {}
+            ast::Expr::Starred(star) => {
+                invalid(InvalidTarget::BareStar)?;
+                target = &star.value;
+                continue;
             }
-            ast::Expr::Starred(star) => pending.push(&star.value),
             ast::Expr::Tuple(ast::ExprTuple { elts, .. })
-            | ast::Expr::List(ast::ExprList { elts, .. }) => pending.extend(elts),
-            _ => {}
+            | ast::Expr::List(ast::ExprList { elts, .. }) => {
+                if elts
+                    .iter()
+                    .filter(|elt| elt.is_starred_expr())
+                    .nth(1)
+                    .is_some()
+                {
+                    invalid(InvalidTarget::MultipleStars)?;
+                }
+                pending.extend(elts.iter().rev().map(|item| match item {
+                    ast::Expr::Starred(star) => star.value.as_ref(),
+                    item => item,
+                }));
+            }
+            _ => invalid(InvalidTarget::Unsupported)?,
         }
+        let Some(next) = pending.pop() else {
+            return Ok(());
+        };
+        target = next;
     }
 }
 
@@ -393,6 +451,39 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn target_scopes_declare_unpack_names_in_clause_order() {
+        let parsed = ruff_python_parser::parse_expression(
+            "[item async for (first, *rest), [items[index], box.value] in rows for item in rest]",
+        )
+        .unwrap();
+        let plan = Plan::from_expr(parsed.expr()).unwrap();
+        let expected = HashSet::from(["first".to_owned(), "rest".to_owned(), "item".to_owned()]);
+        assert_eq!(plan.target_names(), expected);
+        assert_eq!(plan.try_target_names(), Ok(expected));
+
+        let pattern = ruff_python_parser::parse_expression("(a, [b, *c], d)").unwrap();
+        let mut declared = Vec::new();
+        try_collect_target_names(pattern.expr(), &mut declared).unwrap();
+        assert_eq!(declared, ["a", "b", "c", "d"]);
+
+        let pattern = ruff_python_parser::parse_expression("(*a, *b)").unwrap();
+        let mut names = HashSet::new();
+        assert_eq!(
+            try_collect_target_names(pattern.expr(), &mut names),
+            Err(InvalidTarget::MultipleStars)
+        );
+        let ast::Expr::Tuple(tuple) = pattern.expr() else {
+            unreachable!()
+        };
+        assert_eq!(
+            try_collect_target_names(&tuple.elts[0], &mut names),
+            Err(InvalidTarget::BareStar)
+        );
+        collect_target_names(pattern.expr(), &mut names);
+        assert_eq!(names, HashSet::from(["a".to_owned(), "b".to_owned()]));
     }
 
     #[test]
