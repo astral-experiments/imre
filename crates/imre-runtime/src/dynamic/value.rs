@@ -4150,6 +4150,7 @@ impl Heap {
             .ok()?;
         let source = source.value.as_ref()?;
         let target = target.value.as_mut()?;
+        self.weak_roots.changed(target_id);
         self.root_trace.changed(target_id);
         self.generator_owners.reconsider(target_id);
         Some((source, target))
@@ -4173,6 +4174,7 @@ impl Heap {
     }
 
     fn prepare_slot_write(&mut self, index: usize) {
+        self.weak_roots.changed(index);
         self.root_trace.changed(index);
         self.invalidate_stream_bindings(index);
         self.generator_owners.reconsider(index);
@@ -6348,6 +6350,7 @@ impl Heap {
                     }
                     self.immutable_hashes.remove(&(id as Id));
                 }
+                self.weak_roots.changed(id);
                 self.root_trace.recycled(id);
                 self.invalidate_stream_bindings(id);
                 let slot = &mut self.slots[id];

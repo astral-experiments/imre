@@ -1,6 +1,7 @@
 use super::{Heap, Id, Value};
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
+use std::cell::Cell;
 use std::collections::{HashSet, VecDeque};
 
 // Retain the small weak-only search when no finalizer paths have been learned.
@@ -34,6 +35,9 @@ pub(super) struct RootPaths {
     // Dictionary slots must be interpreted the same way during discovery and validation.
     dict_keys: bool,
     retry_with_keys: bool,
+    watched_parents: Vec<Id>,
+    dynamic_edges: Vec<(Id, usize, Id)>,
+    edges_current: Cell<bool>,
 }
 
 /// Strong edges in ordinary containers and namespaces. A missing edge merely loses the proof.
@@ -146,7 +150,71 @@ impl<'a> Links<'a> {
     }
 }
 
+/// These path links are stored directly in their parent's heap slot.
+fn watchable_parent(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Module { .. }
+            | Value::Scope(_)
+            | Value::Dict(_)
+            | Value::Set { .. }
+            | Value::List(_)
+            | Value::Tuple(_)
+            | Value::Map { .. }
+            | Value::Zip { .. }
+            | Value::Method { .. }
+    )
+}
+
 impl RootPaths {
+    /// Track parents with explicit heap writes and keep interior-mutable links in path order.
+    fn watch_parents(&mut self, heap: &Heap) {
+        if self.watched_parents.try_reserve(self.edges.len()).is_err()
+            || self.dynamic_edges.try_reserve(self.edges.len()).is_err()
+        {
+            return;
+        }
+        for &edge @ (parent, _, _) in &self.edges {
+            if watchable_parent(heap.get(parent)) {
+                self.watched_parents.push(parent);
+            } else {
+                self.dynamic_edges.push(edge);
+            }
+        }
+        self.watched_parents.sort_unstable();
+        self.watched_parents.dedup();
+    }
+
+    /// A mutable borrow or slot reuse can change a previously verified link.
+    pub(super) fn changed(&self, index: usize) {
+        if self.edges_current.get() && self.watched_parents.binary_search(&(index as Id)).is_ok() {
+            self.edges_current.set(false);
+        }
+    }
+
+    /// Recheck all links after a watched write and only the dynamic links between writes.
+    fn edges_valid(&self, heap: &Heap) -> bool {
+        let intact = |&(parent, slot, child): &(Id, usize, Id)| {
+            Links::from(heap.get(parent), self.dict_keys).get(slot) == Some(child)
+        };
+        if self.edges_current.get() {
+            return self.dynamic_edges.iter().all(intact);
+        }
+        if !self.edges.iter().all(intact) {
+            return false;
+        }
+        // A recycled slot can hold a different kind of parent with the same child.
+        if !self.watched_parents.is_empty()
+            && self
+                .watched_parents
+                .iter()
+                .all(|&id| watchable_parent(heap.get(id)))
+        {
+            self.edges_current.set(true);
+        }
+        true
+    }
+
     fn contains(&self, id: Id) -> bool {
         self.nodes.binary_search(&id).is_ok()
     }
@@ -161,9 +229,7 @@ impl RootPaths {
                     .is_some_and(|frame| frame.scope == root),
                 Root::Global(index) => globals[index] == root,
             })
-            && self.edges.iter().all(|&(parent, slot, child)| {
-                Links::from(heap.get(parent), self.dict_keys).get(slot) == Some(child)
-            })
+            && self.edges_valid(heap)
     }
 
     fn discover(
@@ -395,11 +461,13 @@ impl Heap {
                             .weak_reference()
                             .is_some_and(|wr| wr.hash.is_some())
                 });
-            self.weak_roots = RootPaths {
+            let mut roots = RootPaths {
                 retry: SEARCH_BACKOFF,
                 retry_with_keys,
                 ..paths
             };
+            roots.watch_parents(self);
+            self.weak_roots = roots;
         }
     }
 
@@ -561,6 +629,31 @@ mod cohort_tests;
 mod tests {
     use super::super::{Heap, NONE, TRUE, Value};
     use crate::dynamic::weakref::Kind;
+
+    #[test]
+    fn recycling_a_watched_parent_invalidates_its_cached_edge() {
+        let mut heap = Heap::new();
+        let holder = heap.alloc(Value::List(vec![TRUE]));
+        let links = super::Links::from(heap.get(holder), false);
+        let slot = (0..links.len())
+            .find(|&slot| links.get(slot) == Some(TRUE))
+            .unwrap();
+        let mut paths = super::RootPaths {
+            edges: vec![(holder, slot, TRUE)],
+            ..Default::default()
+        };
+        paths.watch_parents(&heap);
+        heap.weak_roots = paths;
+        assert!(heap.weak_roots.edges_valid(&heap));
+        assert!(heap.weak_roots.edges_current.get());
+
+        heap.release_temporaries_since(0);
+        heap.collect([TRUE].into_iter());
+        assert!(!heap.weak_roots.edges_current.get());
+        let reused = heap.alloc(Value::List(vec![NONE]));
+        assert_eq!(reused, holder);
+        assert!(!heap.weak_roots.edges_valid(&heap));
+    }
 
     #[test]
     fn weak_paths_recheck_both_endpoints_and_every_strong_edge() {
