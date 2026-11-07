@@ -512,6 +512,13 @@ class NonCallableMock(_FixedMock):
         self._adopt(value, "()")
         self._nodes[self._return_index()]._configured_return = value
 
+    def _reset_mock_state(self, return_value, side_effect):
+        self._node._reset_state(return_value, side_effect)
+        if issubclass(type(self), AsyncMockMixin):
+            self._reset_await_state()
+        self.mock_calls = _CallList()
+        self.method_calls = _CallList()
+
     def reset_mock(self, visited=None, *, return_value=False, side_effect=False):
         if visited is None:
             visited = []
@@ -527,11 +534,7 @@ class NonCallableMock(_FixedMock):
                 name = node._mock_name
                 if "__%s__" % name[2:-2] == name:
                     clear_return = False
-            node._reset_state(clear_return, clear_effect)
-            if issubclass(type(current), AsyncMockMixin):
-                current._reset_await_state()
-            current.mock_calls = _CallList()
-            current.method_calls = _CallList()
+            current._reset_mock_state(clear_return, clear_effect)
             if node._result != -1:
                 if isinstance(node, _FunctionMockState):
                     # The wrapper may since have been given a different return value.
@@ -572,6 +575,9 @@ class NonCallableMock(_FixedMock):
         except TypeError as error:
             return error.with_traceback(None)
         return call(name, bound.args, bound.kwargs)
+
+    def _format_mock_call_signature(self, args, kwargs):
+        return _format_recorded_call(_new_call(args, kwargs), str(self._mock_name or "mock"))
 
     def _assert_called_with(self, args, kwargs):
         self._assert_last_with(args, kwargs, self._node.call_args, "call")
@@ -746,6 +752,9 @@ class CallableMixin:
             parent.mock_calls.append(_Call((path, args, kwargs)))
             current = parent._node
 
+        return self._mock_call(*args, **kwargs)
+
+    def _mock_call(self, /, *args, **kwargs):
         return self._execute_mock_call(*args, **kwargs)
 
     def _execute_mock_call(self, /, *args, **kwargs):
