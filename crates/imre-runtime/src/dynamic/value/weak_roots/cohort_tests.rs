@@ -224,6 +224,12 @@ fn weak_dict_key_and_frame_held_target_must_both_survive() {
     ctx.put_item(registry, reference, NONE).unwrap();
     assert!(ctx.heap.weak_values_kept_by(registry, NONE));
 
+    ctx.bind(scope, "saved_result", target);
+    ctx.bind(scope, "result", NONE);
+    assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
+    ctx.heap.learn_weak_roots(registry, NONE);
+    assert!(ctx.heap.weak_values_kept_by(registry, NONE));
+
     ctx.heap.leave(NONE, false);
     assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
     assert_eq!(
