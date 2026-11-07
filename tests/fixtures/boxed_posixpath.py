@@ -192,6 +192,9 @@ def current():
         os.putenv(key, "native only")
         assert os.getenv(key, missing) == ""
         assert posix.environ[key.encode()] == b""
+        assert os.path.expandvars is posixpath.expandvars
+        assert os.path.expandvars(Path("prefix-${" + key + "}-suffix")) == "prefix--suffix"
+        assert os.path.expandvars(b"$" + key.encode() + b"/\xff") == b"/\xff"
         snapshot = os.environ.copy()
         assert type(snapshot) is dict
         assert snapshot[key] == ""
