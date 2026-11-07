@@ -444,6 +444,23 @@ class InheritedSubscription(Subscription):
     pass
 
 
+class FallbackMeta(type):
+    def __getattr__(cls, name):
+        if name == "__class_getitem__":
+            return lambda item: (cls, item)
+        raise AttributeError(name)
+
+
+class VirtualSubscription(metaclass=FallbackMeta):
+    pass
+
+
+class ListSubscription(list, metaclass=FallbackMeta):
+    pass
+
+
+assert VirtualSubscription[int] == (VirtualSubscription, int)
+assert ListSubscription[int].__origin__ is ListSubscription
 assert isinstance(Subscription.__dict__["__class_getitem__"], classmethod)
 assert InheritedSubscription[int] == (InheritedSubscription, int)
 

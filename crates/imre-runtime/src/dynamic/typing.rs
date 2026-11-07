@@ -923,19 +923,14 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             ))
         }));
     }
-    if matches!(ctx.heap.get(target), Value::Class { .. } | Value::Native(_))
-        && ctx.class_attr(target, "__class_getitem__").is_some()
-    {
-        return Some(
-            ctx.lookup_attr(target, "__class_getitem__")
-                .and_then(|method| ctx.call(method, vec![index], vec![])),
-        );
-    }
+    let has_method = matches!(ctx.heap.get(target), Value::Class { .. } | Value::Native(_))
+        && ctx.class_attr(target, "__class_getitem__").is_some();
     let kind = match ctx.heap.get(target) {
+        _ if has_method => None,
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
-            AliasKind::Generic
+            Some(AliasKind::Generic)
         }
-        Value::Native(n) if n == "typing.Callable" => AliasKind::Callable,
+        Value::Native(n) if n == "typing.Callable" => Some(AliasKind::Callable),
         Value::Native(n)
             if matches!(
                 n.as_str(),
@@ -950,7 +945,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     | super::value::REGEX_MATCH_TYPE
             ) =>
         {
-            AliasKind::Builtin
+            Some(AliasKind::Builtin)
         }
         Value::Class { ancestors, .. } => {
             let mut supported = None;
@@ -967,9 +962,26 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     break;
                 }
             }
-            supported?
+            supported
         }
-        _ => return None,
+        _ => None,
+    };
+    let Some(kind) = kind else {
+        if !has_method && !ctx.is_type_object(target) {
+            return None;
+        }
+        return Some(match ctx.optional_attr(target, "__class_getitem__") {
+            Ok(None | Some(NONE)) => {
+                let name = ctx.class_name(target);
+                let name = &name[..name.floor_char_boundary(200)];
+                Err(Error::new(
+                    "TypeError",
+                    format!("type '{name}' is not subscriptable"),
+                ))
+            }
+            Ok(Some(method)) => ctx.call(method, vec![index], Vec::new()),
+            Err(error) => Err(error),
+        });
     };
     if kind == AliasKind::Builtin {
         return Some(Ok(builtin_alias(ctx, target, index)));
