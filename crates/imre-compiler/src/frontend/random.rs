@@ -123,6 +123,9 @@ impl Checker<'_> {
         if let ast::Expr::Call(range) = arg
             && self.unshadowed_builtin(&range.func, "range")
         {
+            if let Some(failure) = self.range_argument_error(range, Type::Int)? {
+                return Ok(failure);
+            }
             self.reject_builtin_keywords(range)?;
             let values = range
                 .arguments

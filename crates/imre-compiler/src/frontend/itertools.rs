@@ -40,10 +40,11 @@ impl Checker<'_> {
 
     pub(super) fn cursor_source_value(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Call(call) = node
-            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
-            && self.resolve(&call.func).is_none()
-            && !self.names.contains_key("range")
+            && self.unshadowed_builtin(&call.func, "range")
         {
+            if let Some(failure) = self.range_argument_error(call, self.types.cursor(Type::Int))? {
+                return Ok(failure);
+            }
             self.reject_builtin_keywords(call)?;
             let args = call
                 .arguments
