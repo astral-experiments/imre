@@ -280,19 +280,107 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn nominal_identity(
+    /// The operand order and polarity used by both expression lowering and flow narrowing.
+    pub(super) fn identity_test<'n>(
+        &self,
+        test: &'n ast::Expr,
+    ) -> Option<(&'n ast::Expr, ast::CmpOp, &'n ast::Expr)> {
+        match test {
+            ast::Expr::Compare(compare) => {
+                let (left, op @ (ast::CmpOp::Is | ast::CmpOp::IsNot), right) =
+                    compare.as_single()?
+                else {
+                    return None;
+                };
+                Some((left, *op, right))
+            }
+            ast::Expr::Call(call) => {
+                let Binding::Intrinsic(Intrinsic::ScopedObjectExport(name)) =
+                    self.resolve(&call.func)?
+                else {
+                    return None;
+                };
+                self.operator_identity_call(call, name)
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn operator_identity_call<'n>(
+        &self,
+        call: &'n ast::ExprCall,
+        name: &str,
+    ) -> Option<(&'n ast::Expr, ast::CmpOp, &'n ast::Expr)> {
+        let (member, op) = match name {
+            "operator.is_" => ("is_", ast::CmpOp::Is),
+            "operator.is_not" => ("is_not", ast::CmpOp::IsNot),
+            _ => return None,
+        };
+        let [left, right] = call.arguments.args.as_ref() else {
+            return None;
+        };
+        (call.arguments.keywords.is_empty()
+            && ["operator", "_operator"].into_iter().any(|owner| {
+                self.graph
+                    .session
+                    .is_stdlib_function(self.module, &call.func, owner, member)
+            }))
+        .then_some((left, op, right))
+    }
+
+    pub(super) fn identity_comparison(
         &mut self,
         left: &ast::Expr,
         right: &ast::Expr,
         op: ast::CmpOp,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if let Some((value, class)) = self.exact_object_type(left, right) {
+            let value = self.expr(value)?;
+            let predicate = match (class, value.ty) {
+                (ty_python_semantic::types::KnownClass::Str, Type::ObjectValue) => {
+                    Builtin::IsInstance(vec![ir::InstanceType::ExactText])
+                }
+                (
+                    ty_python_semantic::types::KnownClass::Tuple,
+                    Type::ObjectValue | Type::VarTuple(_) | Type::Tuple(_),
+                ) => Builtin::IsExactTuple,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        node,
+                        "unsupported value layout for an exact type comparison",
+                    ));
+                }
+            };
+            let test = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(predicate, vec![value]),
+            };
+            return Ok(if op == ast::CmpOp::Is {
+                test
+            } else {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(test)),
+                }
+            });
+        }
+        let classes = (self.class_reference(left), self.class_reference(right));
+        if let (Some(left), Some(right)) = classes {
+            return Ok(Expr::boolean((left == right) == (op == ast::CmpOp::Is)));
+        }
+        if let (ast::Expr::NoneLiteral(_), value) | (value, ast::Expr::NoneLiteral(_)) =
+            (left, right)
+        {
+            return Ok(Self::identity_is_none(self.expr(value)?, op));
+        }
         if let Some(value) = self.context_missing_test(left, right, op == ast::CmpOp::IsNot)? {
             return Ok(value);
         }
-        let (left, right) = match (self.class_reference(left), self.class_reference(right)) {
+        let (left, right) = match classes {
             (Some(class), None) | (None, Some(class)) => {
-                let class_first = self.class_reference(left).is_some();
+                let class_first = classes.0.is_some();
                 let (literal, other) = if class_first {
                     (left, right)
                 } else {
@@ -712,6 +800,7 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types.iter().all(|ty| matches!(ty, Type::VarTuple(_)))
             || types == [Type::NativeModule; 2]
             || types == [Type::ModuleNamespace; 2]
             || types

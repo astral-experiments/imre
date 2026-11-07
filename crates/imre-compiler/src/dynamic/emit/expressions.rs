@@ -100,8 +100,23 @@ impl Function<'_, '_> {
                     return self.expr_inner(&v.value, Some((index, position)));
                 }
                 let object = self.expr(&v.value);
-                let key = self.expr(&v.slice);
                 let span = self.expression_span(expr, &v.value, b'[');
+                if let ast::Expr::Slice(slice) = v.slice.as_ref()
+                    && slice.step.is_none()
+                {
+                    let [start, stop] = [&slice.lower, &slice.upper].map(|bound| {
+                        bound
+                            .as_deref()
+                            .map_or_else(|| "0".into(), |e| self.expr(e))
+                    });
+                    self.take_matching_check();
+                    let position =
+                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
+                    return self.checked(&format!(
+                        "call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {object}, i64 {start}, i64 {stop}, ptr {position})"
+                    ));
+                }
+                let key = self.expr(&v.slice);
                 self.op_at("get", &[&object, &key], span)
             }
             ast::Expr::Slice(slice) => {
@@ -214,7 +229,7 @@ impl Function<'_, '_> {
                         Some(format!(
                             "call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
                         ))
-                    } else if direct && !name.starts_with('_') {
+                    } else if direct && !name.starts_with("__") {
                         let symbol = self.output.data(name.as_bytes());
                         Some(format!(
                             "call i64 @imre_dyn_builtin_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"

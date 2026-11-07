@@ -1,7 +1,9 @@
 _markupbase.py
-html/parser.py
+_pyrepl/__init__.py
+_pyrepl/pager.py
 http/cookies.py
 ipaddress.py
+pydoc.py
 venv/__init__.py
 venv/__main__.py
 venv/scripts/common/Activate.ps1

@@ -1,6 +1,6 @@
 //! OpenSSL's in-memory byte transport, owned by one Python MemoryBIO.
 use std::cell::RefCell;
-use std::ffi::c_void;
+use std::ffi::{CStr, CString, c_void};
 use std::ptr::{self, NonNull};
 use std::rc::Rc;
 
@@ -65,8 +65,10 @@ impl Bio {
 }
 
 pub(in crate::dynamic) struct BioSession {
+    alpn: std::rc::Rc<super::alpn::Alpn>,
     api: &'static Api,
     handle: NonNull<c_void>,
+    hostname: Option<CString>,
     handshake_complete: bool,
     server: bool,
 }
@@ -95,20 +97,36 @@ impl From<Failure> for BioFailure {
 
 impl Api {
     /// Classify the immediately preceding operation, before any other OpenSSL call.
-    fn ssl_failure(&self, ssl: NonNull<c_void>, rc: i32, operation: &str) -> BioFailure {
+    fn ssl_failure(
+        &self,
+        ssl: NonNull<c_void>,
+        hostname: Option<&CStr>,
+        rc: i32,
+        operation: &str,
+    ) -> BioFailure {
         let os_error = std::io::Error::last_os_error();
         // SAFETY: SSL_get_error examines the same thread and live SSL as the failed call.
         let kind = unsafe { (self.SSL_get_error)(ssl.as_ptr(), rc) };
-        if kind == super::SSL_ERROR_SYSCALL && os_error.raw_os_error() != Some(0) {
-            return BioFailure::Tls(Failure::Io(os_error));
+        if let Some(error) = self.syscall_error(kind, os_error) {
+            return BioFailure::Tls(Failure::Io(error));
         }
-        self.ssl_failure_kind(ssl, kind, operation)
+        self.ssl_failure_kind(ssl, hostname, kind, operation)
+    }
+
+    /// A queued OpenSSL error takes precedence over the syscall's saved errno.
+    pub(super) fn syscall_error(&self, kind: i32, error: std::io::Error) -> Option<std::io::Error> {
+        // SAFETY: inspect this thread's error queue without consuming the operation's reason.
+        (kind == super::SSL_ERROR_SYSCALL
+            && error.raw_os_error() != Some(0)
+            && unsafe { (self.ERR_peek_error)() } == 0)
+            .then_some(error)
     }
 
     /// Interpret SSL_get_error after handling syscall errno.
     pub(super) fn ssl_failure_kind(
         &self,
         ssl: NonNull<c_void>,
+        hostname: Option<&CStr>,
         kind: i32,
         operation: &str,
     ) -> BioFailure {
@@ -116,9 +134,7 @@ impl Api {
             super::SSL_ERROR_WANT_READ => BioFailure::WantRead,
             super::SSL_ERROR_WANT_WRITE => BioFailure::WantWrite,
             super::SSL_ERROR_ZERO_RETURN => BioFailure::ZeroReturn,
-            // SAFETY: inspect the current operation's error queue without removing entries.
-            super::SSL_ERROR_SYSCALL if unsafe { (self.ERR_peek_error)() } == 0 => BioFailure::Eof,
-            super::SSL_ERROR_SSL => {
+            super::SSL_ERROR_SSL | super::SSL_ERROR_SYSCALL => {
                 // OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_*).
                 const SHUTDOWN_IN_INIT: std::ffi::c_ulong = (20 << 23) | 407;
                 const PROTOCOL_IS_SHUTDOWN: std::ffi::c_ulong = (20 << 23) | 207;
@@ -128,9 +144,16 @@ impl Api {
                 // handshake. Keep its X509 verification code on both transports.
                 const CERTIFICATE_VERIFY_FAILED: std::ffi::c_ulong = (20 << 23) | 134;
                 if code == CERTIFICATE_VERIFY_FAILED
-                    && let Err(error) = self.verify_peer(ssl.as_ptr(), false)
+                    && let Err(error) = self.verify_peer(ssl.as_ptr(), hostname, false)
                 {
                     return BioFailure::Tls(error);
+                }
+                if kind == super::SSL_ERROR_SYSCALL {
+                    return if code == 0 {
+                        BioFailure::Eof
+                    } else {
+                        BioFailure::Tls(self.error(operation))
+                    };
                 }
                 match code {
                     super::UNEXPECTED_EOF => return BioFailure::UnexpectedEof,
@@ -156,12 +179,25 @@ impl Api {
     pub(super) fn ssl_pending(
         &self,
         ssl: NonNull<c_void>,
+        hostname: Option<&CStr>,
     ) -> std::result::Result<usize, BioFailure> {
         self.clear();
         super::clear_errno();
         // SAFETY: SSL_pending inspects decrypted bytes buffered by this SSL.
         let count = unsafe { (self.SSL_pending)(ssl.as_ptr()) };
-        usize::try_from(count).map_err(|_| self.ssl_failure(ssl, count, "SSL_pending"))
+        usize::try_from(count).map_err(|_| self.ssl_failure(ssl, hostname, count, "SSL_pending"))
+    }
+
+    pub(super) fn finish_handshake(
+        &self,
+        ssl: NonNull<c_void>,
+        hostname: Option<&CStr>,
+        server: bool,
+        result: std::result::Result<(), BioFailure>,
+    ) -> std::result::Result<(), BioFailure> {
+        result?;
+        self.verify_peer(ssl.as_ptr(), hostname, !server)?;
+        Ok(())
     }
 
     pub(super) fn finish_read(
@@ -192,15 +228,17 @@ impl BioSession {
     ) -> std::result::Result<Self, Failure> {
         let api = ctx.api;
         let handle = ctx.new_connection(server)?;
-        let session = Self {
+        let mut session = Self {
+            alpn: ctx.alpn.clone(),
             api,
             handle,
+            hostname: None,
             handshake_complete: false,
             server,
         };
         let ssl = handle.as_ptr();
         if let Some(host) = host {
-            api.set_peer_name(ssl, host, ctx.check_hostname)?;
+            session.hostname = Some(api.set_peer_name(ssl, host, ctx.check_hostname)?);
         }
         // SAFETY: each set0 operation consumes exactly one newly acquired reference,
         // including when incoming and outgoing are the same BIO. SSL_free releases
@@ -214,28 +252,15 @@ impl BioSession {
                 return Err(api.error("BIO_up_ref"));
             }
             (api.SSL_set0_wbio)(ssl, outgoing.handle.as_ptr());
-            // Match CPython's SSL_set_mode: a write retry may use an equivalent
-            // Python buffer at a different address, and reads process control records.
-            const SSL_CTRL_MODE: i32 = 33;
-            const ACCEPT_MOVING_WRITE_BUFFER: std::ffi::c_long = 2;
-            const AUTO_RETRY: std::ffi::c_long = 4;
-            (api.SSL_ctrl)(
-                ssl,
-                SSL_CTRL_MODE,
-                ACCEPT_MOVING_WRITE_BUFFER | AUTO_RETRY,
-                ptr::null_mut(),
-            );
-            if server {
-                (api.SSL_set_accept_state)(ssl);
-            } else {
-                (api.SSL_set_connect_state)(ssl);
-            }
         }
         Ok(session)
     }
 
+    pub(in crate::dynamic) fn selected_alpn_protocol(&self) -> Option<Vec<u8>> {
+        self.alpn.selected(self.handle)
+    }
+
     pub(in crate::dynamic) fn handshake(&mut self) -> std::result::Result<(), BioFailure> {
-        self.handshake_complete = false;
         self.api.clear();
         super::clear_errno();
         // SAFETY: the SSL and both of its memory BIOs remain live across every retry.
@@ -243,13 +268,16 @@ impl BioSession {
         let result = if rc == 1 {
             Ok(())
         } else {
-            Err(self.api.ssl_failure(self.handle, rc, "SSL_do_handshake"))
+            Err(self.api.ssl_failure(
+                self.handle,
+                self.hostname.as_deref(),
+                rc,
+                "SSL_do_handshake",
+            ))
         };
-        if !matches!(result, Err(BioFailure::WantRead | BioFailure::WantWrite)) {
+        let result =
             self.api
-                .verify_peer(self.handle.as_ptr(), !self.server && result.is_ok())
-                .map_err(BioFailure::Tls)?;
-        }
+                .finish_handshake(self.handle, self.hostname.as_deref(), self.server, result);
         self.handshake_complete = result.is_ok();
         result
     }
@@ -271,7 +299,9 @@ impl BioSession {
         if rc == 1 {
             Ok(count)
         } else {
-            Err(self.api.ssl_failure(self.handle, rc, label))
+            Err(self
+                .api
+                .ssl_failure(self.handle, self.hostname.as_deref(), rc, label))
         }
     }
 
@@ -300,7 +330,7 @@ impl BioSession {
     }
 
     pub(in crate::dynamic) fn pending(&self) -> std::result::Result<usize, BioFailure> {
-        self.api.ssl_pending(self.handle)
+        self.api.ssl_pending(self.handle, self.hostname.as_deref())
     }
 
     pub(in crate::dynamic) fn verify_client_post_handshake(
@@ -359,7 +389,11 @@ impl BioSession {
         match rc {
             1 => Ok(()),
             0 => Err(BioFailure::WantRead),
-            _ => Err(self.api.ssl_failure(self.handle, rc, "SSL_shutdown")),
+            _ => {
+                Err(self
+                    .api
+                    .ssl_failure(self.handle, self.hostname.as_deref(), rc, "SSL_shutdown"))
+            }
         }
     }
 }

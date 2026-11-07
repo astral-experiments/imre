@@ -205,6 +205,17 @@ const TYPES: &[&str] = &[
     "zip",
 ];
 
+/// Types supplied by the interpreter before optional modules install their own types.
+pub(super) fn core_types() -> impl Iterator<Item = &'static str> {
+    TYPES
+        .iter()
+        .chain(imre_ast::exceptions::BOXED_BUILTINS)
+        .chain(CORE_RUNTIME_TYPES)
+        .chain(CORE_ITERATOR_TYPES)
+        .copied()
+        .chain(DictIterator::builtin_classes())
+}
+
 pub(super) fn names() -> impl Iterator<Item = &'static str> {
     BUILTIN_FUNCTIONS
         .iter()
@@ -314,6 +325,26 @@ If iterable is specified the tuple is initialized from iterable's items.
 
 If the argument is a tuple, the return value is the same object."#
         }
+        "type" => {
+            r#"type(object) -> the object's type
+type(name, bases, dict, **kwds) -> a new type"#
+        }
+        "function" => {
+            r#"Create a function object.
+
+  code
+    a code object
+  globals
+    the globals dictionary
+  name
+    a string that overrides the name from the code object
+  argdefs
+    a tuple that specifies the default argument values
+  closure
+    a tuple that supplies the bindings for free variables
+  kwdefaults
+    a dictionary that specifies the default keyword argument values"#
+        }
         "frozenset" => r#"Build an immutable unordered collection of unique elements."#,
         "_abc_data" => r#"Internal state held by ABC machinery."#,
         _ => return None,
@@ -393,6 +424,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "dict"
             | "list"
             | "mappingproxy"
+            | "module"
             | "float"
             | "filter"
             | "function"
@@ -469,6 +501,33 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
         )
 }
 
+/// The interpreter owns these primitive type objects independently of stdlib imports.
+pub(super) const CORE_RUNTIME_TYPES: &[&str] = &[
+    "NoneType",
+    "NotImplementedType",
+    "ellipsis",
+    "code",
+    "coroutine",
+    "async_generator",
+    "cell",
+    "function",
+    "module",
+    "method",
+    "builtin_function_or_method",
+    "method-wrapper",
+    "wrapper_descriptor",
+    "classmethod_descriptor",
+    "method_descriptor",
+    "getset_descriptor",
+    "member_descriptor",
+    "dict_keys",
+    "dict_items",
+    "dict_values",
+    "mappingproxy",
+    "traceback",
+    "frame",
+];
+
 pub(super) const STRUCT_METHODS: &[&str] = &[
     "__init__",
     "__repr__",
@@ -499,40 +558,44 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
         )
 }
 
+const CORE_ITERATOR_TYPES: &[&str] = &[
+    "iterator",
+    "generator",
+    "coroutine_wrapper",
+    "anext_awaitable",
+    "async_generator_asend",
+    "async_generator_athrow",
+    "list_iterator",
+    "list_reverseiterator",
+    "str_ascii_iterator",
+    "str_iterator",
+    "tuple_iterator",
+    "generic_alias_iterator",
+    "memory_iterator",
+    "bytes_iterator",
+    "bytearray_iterator",
+    "range_iterator",
+    "longrange_iterator",
+    "callable_iterator",
+];
+
 /// Iterator implementations that CPython does not expose as subclassable types.
 pub(super) fn is_final_iterator_type(name: &str) -> bool {
     if DictIterator::class(name).is_some() {
         return true;
     }
-    matches!(
-        name,
-        "iterator"
-            | "generator"
-            | "coroutine_wrapper"
-            | "anext_awaitable"
-            | "async_generator_asend"
-            | "async_generator_athrow"
-            | "list_iterator"
-            | "list_reverseiterator"
-            | "str_ascii_iterator"
-            | "str_iterator"
-            | "tuple_iterator"
-            | "generic_alias_iterator"
-            | "memory_iterator"
-            | "bytes_iterator"
-            | "bytearray_iterator"
-            | "range_iterator"
-            | "longrange_iterator"
-            | "callable_iterator"
-            | "fieldnameiterator"
-            | "formatteriterator"
-            | "keys"
-            | "values"
-            | "items"
-            | super::deque::ITERATOR
-            | super::deque::REVERSE_ITERATOR
-            | value::STRUCT_UNPACK_ITERATOR
-    )
+    CORE_ITERATOR_TYPES.contains(&name)
+        || matches!(
+            name,
+            "fieldnameiterator"
+                | "formatteriterator"
+                | "keys"
+                | "values"
+                | "items"
+                | super::deque::ITERATOR
+                | super::deque::REVERSE_ITERATOR
+                | value::STRUCT_UNPACK_ITERATOR
+        )
 }
 
 /// Recognize the native classes that provide Enum's member methods.
@@ -623,6 +686,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
         ],
         "float" => &[
             "__abs__",
+            "__bool__",
             "__ceil__",
             "__eq__",
             "__floor__",
@@ -905,34 +969,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Socket(_)
             if matches!(
                 attr,
-                "bind"
-                    | "listen"
-                    | "accept"
-                    | "connect"
-                    | "getsockname"
-                    | "getpeername"
+                "accept"
                     | "detach"
-                    | "fileno"
                     | "close"
-                    | "recv"
-                    | "recvfrom"
-                    | "recvfrom_into"
-                    | "recv_into"
                     | "makefile"
                     | "_decref_socketios"
                     | "dup"
-                    | "send"
-                    | "sendall"
-                    | "sendto"
-                    | "shutdown"
-                    | "getsockopt"
-                    | "setsockopt"
-                    | "setblocking"
-                    | "settimeout"
-                    | "gettimeout"
                     | "get_inheritable"
                     | "set_inheritable"
-                    | "getblocking"
                     | "__enter__"
                     | "__exit__"
             ) || super::stdlib::SOCKET_CLASS_METHODS.contains(&attr) =>
@@ -2238,6 +2282,9 @@ pub(super) fn call(
                     "__add__" | "__bool__" | "__hash__" | "__index__" | "__pow__"
                 ) =>
             {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
+            "float" | "complex" if method == "__bool__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),

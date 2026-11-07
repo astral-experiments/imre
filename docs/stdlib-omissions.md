@@ -48,6 +48,10 @@ The pinned stock suite passed both methods. Public Imre at O0 and O3 took each m
 | [`test.test_csv.MiscTestCase.test_disallow_instantiation`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_csv.py#L1657-L1662) | 1 | The test calls CPython’s private `_csv.Reader` and `_csv.Writer` types directly and through `__new__`. Imre implements the public `csv.reader` and `csv.writer` factories with its own types. | The public writer and reader round-tripped a row containing a quoted comma on stock and at O0 and O3. The native factory types also allowed explicit `__new__`. |
 | [`test.test_csv.MiscTestCase.test_lazy_import`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_csv.py#L1649-L1651) | 1 | The test specifies when CPython loads re during an import of csv. Imre can load parser dependencies independently of its public CSV behavior. | Fresh stock, O0 and O3 processes imported csv, then called `Sniffer.sniff` on a semicolon-delimited sample. All three first loaded re during sniffing and returned the semicolon delimiter. |
 
+### `dataclasses`
+
+Omit `test.test_dataclasses.TestSlots.test_dataclass_slot_dict_ctype`, occurrence 1. This test reads the C instance dictionary offset of two heap types from CPython’s private `_testcapi` extension. On the stock x86-64 build, `HeapCTypeWithDict.__dictoffset__` was 16 and `HeapCTypeWithWeakref.__dictoffset__` was zero. Their slotted dataclass subclasses declared `()` and `('__dict__',)`, respectively. At O0 and O3 the native suite took the CPython-only skip. Calling the body directly reached its second skip when it tried to import the extension. With ordinary Python bases, both native levels inherited an existing instance dictionary and added a dictionary to a weak-referenceable subclass when needed. Writes updated the supplied dictionary and weak references resolved to the instance. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_dataclasses/__init__.py#L3928-L3944) · [Tested Imre revision](https://github.com/astral-experiments/imre/commit/dc33e58dc0b63d8a75677f3a4a62b423b2d98ec9)
+
 ### `datetime`
 
 These 21 omissions cover CPython’s datetime C API. The Fast fixture imports the `datetime.datetime_CAPI` capsule through `_testcapi`. Imre extensions use opaque handles and link as static archives. On a subclass that overrode `year`, stock and Imre read 2042 from the Python property. CPython’s field macro read 2012 from the same object. [Pinned fixture](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/datetimetester.py#L6780-L6789) · [CPython header](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Include/datetime.h#L115-L256) · [Imre extension interface](extensions.md#the-c-boundary).
@@ -210,6 +214,12 @@ The two subclass tests for inconsistent cache lookups remain in scope. A caller 
 
 Omit `test.test_uuid.TestUUIDWithoutExtModule.test_safe_uuid_enum`, occurrence 1. The original calls CPython’s private `enum._test_simple_enum` helper to compare the optimized `SafeUUID` class with an ordinary enum. The helper rejects differences in private class metadata even when lookup returns the same members. Imre supports the public member names and values, lookup by name and value, member identity, and `UUID.is_safe`. Thirteen checks of that behavior passed on stock and at both native optimization levels. The original still errors on the missing private helper. [Original test](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_uuid.py#L80-L85) · [Enum checker](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/enum.py#L2016) · [SafeUUID contract](https://docs.python.org/3.14/library/uuid.html#uuid.SafeUUID).
 
+### `zipfile`
+
+| Original CPython test | Occurrence | Reason for omission | Public behavior checked |
+| --- | ---: | --- | --- |
+| [`test.test_zipfile.test_core.LazyImportTest.test_lazy_import`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_zipfile/test_core.py#L55-L58) | 1 | The upstream `@cpython_only` test checks whether `typing` is absent at startup and after importing `zipfile` in a fresh process with `-S`. Imre can load its dependencies in a different order. [Upstream helper](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/import_helper.py#L316-L334) | Stock passed and Imre took the decorator skip. Both wrote a ZIP containing `src/payload.py`, recovered the exact source bytes and passed the archive CRC check. |
+
 ## Supplemental omissions
 
 ### `decimal`
@@ -245,6 +255,10 @@ Both originals passed on stock and skipped at both native levels in the unchange
 | --- | ---: | --- | --- |
 | `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_weakref_list_is_not_traversed` | 1 | A subclass, a self-referential list and a weak reference go out of scope before collection. A crash would affect ordinary subclass users. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `CPythonOrderedDictSubclassTests.test_reference_loop` |
 | `test.test_ordered_dict.CPythonOrderedDictTests.test_weakref_list_is_not_traversed` | 1 | The body creates a reference cycle containing a weak reference and calls the public collector. A crash in that sequence is observable in an ordinary program. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `CPythonOrderedDictTests.test_reference_loop` |
+
+### `dataclasses` subclass hooks
+
+Keep `test.test_dataclasses.TestSlots.test_slots_with_wrong_init_subclass`, occurrence 1, in scope. Class creation calls Python’s `__init_subclass__` hook. The intact native suite skipped this method under its CPython-only guard. Called separately, the original Python body passed on stock, O0 and O3. The slotted replacement raised the expected `TypeError` for a missing required argument. When the hook supplied a default, it received `"default"` twice, once for the original class and once for the replacement. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_dataclasses/__init__.py#L3946-L3976)
 
 ### `datetime` extension-module tests
 

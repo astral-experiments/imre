@@ -67,27 +67,31 @@ pub fn is_optional_frozen(name: &str) -> bool {
         || (name == "stat" && cfg!(any(target_os = "linux", target_os = "macos")))
 }
 
-/// Optional native libraries are resolved by the runtime on the execution host.
-pub fn provider(name: &str) -> Option<Provider> {
-    #[cfg(unix)]
-    if matches!(name, "_ssl" | "_imre_ssl") {
-        return Some(Provider::Ssl);
-    }
-    if name == "_hashlib" {
-        return Some(Provider::Hashlib);
-    }
-    is_builtin(name).then_some(Provider::Builtin)
+/// Bootstrap modules remain frozen irrespective of the optional frozen-module setting.
+pub fn is_frozen(name: &str, optional: impl FnOnce() -> bool) -> bool {
+    matches!(name, "_frozen_importlib" | "_frozen_importlib_external")
+        || (cfg!(unix) && name == "zipimport")
+        || (is_optional_frozen(name) && optional())
 }
 
-/// Native extension modules that are searched after the application path.
-pub fn is_native_fallback(name: &str) -> bool {
-    matches!(name, "_bz2" | "_zstd")
-        || cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
+// Generate the hot path string match and its enumerable names from one declaration.
+macro_rules! provider_groups {
+    ($(#[$doc:meta])* $vis:vis fn $matches:ident, $groups:ident; $( $(#[$condition:meta])* ($($name:literal)|+) ),+ $(,)?) => {
+        const $groups: &[&[&str]] = &[$( $(#[$condition])* &[$($name),+] ),+];
+
+        $(#[$doc])*
+        $vis fn $matches(name: &str) -> bool {
+            match name {
+                $( $(#[$condition])* $($name)|+ => true, )+
+                _ => false,
+            }
+        }
+    };
 }
 
-fn is_builtin(name: &str) -> bool {
-    matches!(
-        name,
+provider_groups! {
+    fn is_eager, EAGER;
+    (
         "_blake2"
             | "_frozen_importlib"
             | "_frozen_importlib_external"
@@ -130,23 +134,16 @@ fn is_builtin(name: &str) -> bool {
             | "warnings"
             | "_tracemalloc"
             | "_warnings"
-    ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal" | "zipimport"))
-        || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
-        || is_native_fallback(name)
-        || has_lazy_attributes(name)
+    ),
+    #[cfg(unix)] ("_signal" | "_imre_signal" | "zipimport"),
+    #[cfg(any(target_os = "linux", target_os = "macos"))] ("grp" | "pwd"),
 }
 
-/// These providers synthesize attributes on lookup. Their module dictionaries
-/// alone do not enumerate their exports.
-pub fn has_lazy_attributes(name: &str) -> bool {
-    if cfg!(unix) && name == "_imre_zipimport"
-        || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
-        || cfg!(target_os = "linux") && matches!(name, "resource" | "fcntl")
-    {
-        return true;
-    }
-    matches!(
-        name,
+provider_groups! {
+    /// These providers synthesize attributes on lookup. Their dictionaries alone
+    /// do not enumerate their exports.
+    pub fn has_lazy_attributes, LAZY;
+    (
         "sys"
             | "_imp"
             | "_imre_thread"
@@ -212,5 +209,40 @@ pub fn has_lazy_attributes(name: &str) -> bool {
             | "contextvars"
             | "_contextvars"
             | "socket"
-    )
+    ),
+    #[cfg(unix)] ("_imre_zipimport"),
+    #[cfg(all(unix, not(target_os = "linux")))] ("_signal"),
+    #[cfg(target_os = "linux")] ("resource" | "fcntl"),
+}
+
+#[cfg(unix)]
+const SSL: &[&str] = &["_ssl", "_imre_ssl"];
+const HASHLIB: &str = "_hashlib";
+
+/// Candidates for the built-in finder, before applying the executable's source
+/// registrations and checking optional native libraries on this host.
+pub fn builtin_module_candidates() -> impl Iterator<Item = &'static str> {
+    let groups = EAGER.iter().chain(LAZY).copied();
+    #[cfg(unix)]
+    let groups = groups.chain([SSL]);
+    groups.flatten().copied().chain([HASHLIB])
+}
+
+/// Optional native libraries are resolved by the runtime on the execution host.
+pub fn provider(name: &str) -> Option<Provider> {
+    #[cfg(unix)]
+    if SSL.contains(&name) {
+        return Some(Provider::Ssl);
+    }
+    if name == HASHLIB {
+        return Some(Provider::Hashlib);
+    }
+    (is_eager(name) || is_native_fallback(name) || has_lazy_attributes(name))
+        .then_some(Provider::Builtin)
+}
+
+/// Native providers that are searched after the application path.
+pub fn is_native_fallback(name: &str) -> bool {
+    matches!(name, "_bz2" | "_zstd" | "inspect")
+        || cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
 }

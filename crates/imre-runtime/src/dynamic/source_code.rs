@@ -41,6 +41,8 @@ pub(super) struct Program {
     doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
     literals: HashMap<ruff_text_size::TextRange, Id>,
+    // For each capturing OR alternative, its operand slots in first-alternative binding order.
+    alternative_captures: HashMap<ruff_text_size::TextRange, Vec<usize>>,
     pub(super) string_roots: Id,
     first_line: u32,
     kind: FunctionKind,
@@ -2006,6 +2008,7 @@ impl Program {
             doc: None,
             strip_docstrings: false,
             literals: HashMap::new(),
+            alternative_captures: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
             kind: FunctionKind::Plain,
@@ -3199,24 +3202,12 @@ impl Program {
                     };
                     for case in s.cases {
                         let case_line = line_offset(case.pattern.start());
-                        if case.guard.is_none()
-                            && cases.len() + 1 < count
-                            && let Some(irrefutable) = case.pattern.irrefutable_pattern()
-                        {
-                            let reason = match irrefutable.kind {
-                                ast::IrrefutablePatternKind::Name(name) => {
-                                    let name = ast::Identifier::new(name, irrefutable.range);
-                                    format!("name capture '{}'", self.definition_spelling(&name))
-                                }
-                                ast::IrrefutablePatternKind::Wildcard => "wildcard".to_owned(),
-                            };
-                            return Err(Error::new(
-                                "SyntaxError",
-                                format!("{reason} makes remaining patterns unreachable"),
-                            ));
-                        }
                         let mut captures = indexmap::IndexMap::new();
-                        self.validate_pattern(&case.pattern, &mut captures)?;
+                        self.validate_pattern(
+                            &case.pattern,
+                            &mut captures,
+                            case.guard.is_some() || cases.len() + 1 == count,
+                        )?;
                         cases.push(SourceCase {
                             pattern: case.pattern,
                             captures: captures.into_values().collect(),
@@ -3292,6 +3283,7 @@ impl Program {
         &mut self,
         pattern: &ast::Pattern,
         captures: &mut indexmap::IndexMap<String, String>,
+        allow_irrefutable: bool,
     ) -> Result<()> {
         let name = match pattern {
             ast::Pattern::MatchSingleton(_) | ast::Pattern::MatchValue(_) => None,
@@ -3313,14 +3305,62 @@ impl Program {
                     ));
                 }
                 for child in &p.patterns {
-                    self.validate_pattern(child, captures)?;
+                    self.validate_pattern(child, captures, true)?;
+                }
+                None
+            }
+            ast::Pattern::MatchOr(p) => {
+                let mut first = indexmap::IndexMap::new();
+                for (i, arm) in p.patterns.iter().enumerate() {
+                    let mut names = indexmap::IndexMap::new();
+                    self.validate_pattern(
+                        arm,
+                        &mut names,
+                        allow_irrefutable && i + 1 == p.patterns.len(),
+                    )?;
+                    let order = if i == 0 {
+                        first = names;
+                        (0..first.len()).collect()
+                    } else {
+                        let order: Option<Vec<_>> =
+                            first.keys().map(|name| names.get_index_of(name)).collect();
+                        order
+                            .filter(|order| order.len() == names.len())
+                            .ok_or_else(|| {
+                                Error::source_syntax(
+                                    "alternative patterns bind different names",
+                                    p.range(),
+                                )
+                            })?
+                    };
+                    if !order.is_empty() {
+                        self.alternative_captures.insert(arm.range(), order);
+                    }
+                }
+                for (name, binding) in first {
+                    if captures.contains_key(&name) {
+                        return Err(Error::source_syntax(
+                            format!("multiple assignments to name '{name}' in pattern"),
+                            p.range(),
+                        ));
+                    }
+                    captures.insert(name, binding);
                 }
                 None
             }
             ast::Pattern::MatchStar(p) => p.name.as_ref(),
             ast::Pattern::MatchAs(p) => {
                 if let Some(inner) = &p.pattern {
-                    self.validate_pattern(inner, captures)?;
+                    self.validate_pattern(inner, captures, allow_irrefutable)?;
+                } else if !allow_irrefutable {
+                    let reason = match &p.name {
+                        Some(name) => format!("name capture '{}'", self.definition_spelling(name)),
+                        None => "wildcard".to_owned(),
+                    };
+                    return Err(Error::source_syntax(
+                        format!("{reason} makes remaining patterns unreachable"),
+                        p.range(),
+                    ));
                 }
                 p.name.as_ref()
             }
@@ -5535,18 +5575,19 @@ impl Context {
                     self.heap.reserve_temporaries(case.captures.len() + 1)?;
                     let captures = std::iter::repeat_n(NONE, case.captures.len());
                     self.discard_temporaries(live, captures.chain([operand]));
-                    let mut slots = live..live + case.captures.len();
-                    let matched =
-                        self.match_source_pattern(code, scope, &case.pattern, operand, &mut slots)?;
-                    if matched {
+                    if self.match_source_attempt(
+                        code,
+                        scope,
+                        &case.pattern,
+                        operand,
+                        live..live + case.captures.len(),
+                    )? {
                         // A failed guard retains bindings from a successful pattern.
                         for (slot, name) in case.captures.iter().enumerate() {
                             let value = *self.heap.temporary_root(live + slot);
                             self.bind_source_name(scope, name, value)?;
                         }
-                    }
-                    self.discard_truth(live);
-                    if matched {
+                        self.discard_truth(live);
                         if let Some((offset, guard)) = &case.guard {
                             self.heap.set_statement_line(match_line + *offset);
                             if !self.source_condition(code, scope, guard)? {
@@ -6442,6 +6483,39 @@ impl Context {
         unreachable!("comparison has at least one operator")
     }
 
+    /// Try a case or OR alternative with its own tentative capture slots.
+    fn match_source_attempt(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        pattern: &ast::Pattern,
+        subject: Id,
+        mut tentative: std::ops::Range<usize>,
+    ) -> Result<bool> {
+        let mark = tentative.start;
+        let matched = self.match_source_pattern(code, scope, pattern, subject, &mut tentative);
+        if matches!(matched, Ok(true)) {
+            return matched;
+        }
+        // Unread operands unwind from the top, before tentative bindings in
+        // traversal order. Each release can run Python or a weakref callback.
+        let error = matched.as_ref().err();
+        let pending = self.heap.temporary_mark();
+        if self.heap.tracks_finalizers() || self.heap.has_weak_values {
+            for root in error.into_iter().flat_map(|e| e.roots()) {
+                self.heap.keep(root);
+            }
+            let top = self.heap.temporary_mark();
+            for slot in (tentative.end..pending).rev().chain(mark..tentative.start) {
+                let value = std::mem::replace(self.heap.temporary_root(slot), NONE);
+                self.heap.keep(value);
+                self.discard_truth(top);
+            }
+        }
+        self.discard_temporaries(mark, error.into_iter().flat_map(|e| e.roots()));
+        matched
+    }
+
     fn match_source_pattern(
         &mut self,
         code: &Program,
@@ -6465,6 +6539,39 @@ impl Context {
                 let comparison = self.binary("==", subject, value);
                 let comparison = self.release_with_result(operand, comparison)?;
                 self.truth(comparison)
+            }
+            ast::Pattern::MatchOr(p) => {
+                // Each attempt gets its own operand and tentative captures. Dropping a failed
+                // attempt can run finalizers before the next alternative evaluates any Python.
+                let mark = self.heap.temporary_mark();
+                for arm in &p.patterns {
+                    let order = code
+                        .alternative_captures
+                        .get(&arm.range())
+                        .map(Vec::as_slice)
+                        .unwrap_or_default();
+                    self.heap.reserve_temporaries(order.len() + 1)?;
+                    for _ in order {
+                        self.heap.keep(NONE);
+                    }
+                    self.heap.keep(subject);
+                    if self.match_source_attempt(
+                        code,
+                        scope,
+                        arm,
+                        subject,
+                        mark..mark + order.len(),
+                    )? {
+                        for index in order {
+                            let value = *self.heap.temporary_root(mark + index);
+                            let slot = slots.next().expect("validated OR capture");
+                            *self.heap.temporary_root(slot) = value;
+                        }
+                        self.discard_truth(mark);
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
             }
             ast::Pattern::MatchClass(p) => {
                 let class = self.source_expr(code, scope, &p.cls)?;

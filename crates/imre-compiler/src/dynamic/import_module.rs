@@ -3,6 +3,22 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph, bundled_s
 
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
+    if let Some(path) = crate::modules::charmap_provider_path(name, true) {
+        return Some((
+            path,
+            concat!(
+                include_str!("../../stdlib/encodings/writer_charmap.py"),
+                "\n",
+                include_str!("../../stdlib/encodings/charmap_factories.py")
+            ),
+        ));
+    }
+    if let Some((_, path)) = super::FIXED_UTF_PROVIDERS
+        .iter()
+        .find(|(id, _)| *id == name)
+    {
+        return Some((path, include_str!("../../stdlib/encodings/utf_fixed.py")));
+    }
     match name {
         "types" => {
             const UPSTREAM: &str = include_str!(
@@ -50,10 +66,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 )
             })))
         }
-        "encodings.iso8859_2" => Some((
-            "encodings/iso8859_2.py",
-            include_str!("../../stdlib/encodings/writer_charmap.py"),
-        )),
         "reprlib" => bundled_source!("reprlib.py"),
         // The scalar Decimal stays available for checked serializers.
         "decimal" => Some(("decimal.py", include_str!("../../stdlib/decimal_boxed.py"))),
@@ -135,7 +147,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     // Python-visible setter on their type.
                     let descriptors = section(
                         "def ismethoddescriptor(object):",
-                        "if hasattr(types, 'GetSetDescriptorType'):",
+                        "def isfunction(object):",
                     )
                     .replace(
                         "or hasattr(tp, \"__delete__\")",
@@ -168,6 +180,17 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     )
                         .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
                         .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
+                    // A source module can have a spec but no legacy cached attribute.
+                    let main = UPSTREAM[UPSTREAM.find("def _main():").unwrap()..].replace(
+                        "        print('Cached: {}'.format(module.__cached__))",
+                        concat!(
+                            "        try:\n",
+                            "            cached = module.__cached__\n",
+                            "        except AttributeError:\n",
+                            "            cached = module.__spec__.cached\n",
+                            "        print('Cached: {}'.format(cached))",
+                        ),
+                    );
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
@@ -197,6 +220,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def _signature_get_partial(", "def _signature_strip_non_python_syntax("),
                         &text_signatures,
                         section("class _void:", "class BufferFlags("),
+                        &main,
                     ]
                     .join("\n")
                 }),
@@ -340,7 +364,25 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "importlib.resources.abc" => bundled_source!("importlib/resources/abc.py"),
         "importlib.resources._as_file" => bundled_source!("importlib/resources/_as_file.py"),
         "importlib.resources._filesystem" => bundled_source!("importlib/resources/_filesystem.py"),
-        "importlib.util" => bundled_source!("importlib/util.py"),
+        "importlib.util" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            const UPSTREAM: &str = include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/util.py"
+            );
+            Some((
+                "importlib/util.py",
+                SOURCE.get_or_init(|| {
+                    // Keep the native registry's find_spec and use CPython's lazy module protocol.
+                    let start = UPSTREAM.find("class _LazyModule(").unwrap();
+                    let end = UPSTREAM.find("\n__all__ =").unwrap();
+                    format!(
+                        "{}\nimport sys\nimport types\n\n{}",
+                        include_str!("../../stdlib/importlib/util.py"),
+                        &UPSTREAM[start..end]
+                    )
+                }),
+            ))
+        }
         "importlib._abc" => bundled_source!("importlib/_abc.py"),
         "importlib.abc" => bundled_source!("importlib/abc.py"),
         "importlib.machinery" => bundled_source!("importlib/machinery.py"),

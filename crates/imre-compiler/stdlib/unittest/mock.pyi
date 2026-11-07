@@ -1,6 +1,8 @@
 from builtins import dict as _Dict
 from typing import Any, Callable, Iterable
 
+FILTER_DIR: bool
+
 class _ANY(Any): ...
 
 ANY: _ANY
@@ -29,6 +31,7 @@ class _AttributePatch:
     def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]: ...
 
 class _PatchFactory:
+    def stopall(self) -> None: ...
     TEST_PREFIX: str
     def __call__(self, target: str, new: object = ..., spec: Any = ..., create: bool = False, spec_set: Any = ..., autospec: Any = ..., new_callable: Callable[..., Any] | None = None, **kwargs: Any) -> _AttributePatch: ...
     @staticmethod

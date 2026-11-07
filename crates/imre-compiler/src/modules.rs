@@ -11,7 +11,8 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, FallbackCalls, Session};
 use crate::ir::{
-    Builtin, CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, WrapperAttributes,
+    Builtin, CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, UnicodeProperty,
+    WrapperAttributes,
 };
 use crate::watch::FileSystem;
 
@@ -97,6 +98,22 @@ macro_rules! bundled_source {
     };
 }
 pub(crate) use bundled_source;
+
+/// Module paths using the same single-byte encoding provider.
+pub(crate) fn charmap_provider_path(name: &str, boxed: bool) -> Option<&'static str> {
+    Some(match name {
+        "encodings.cp1251" => "encodings/cp1251.py",
+        "encodings.cp1252" => "encodings/cp1252.py",
+        "encodings.cp424" => "encodings/cp424.py",
+        "encodings.cp437" => "encodings/cp437.py",
+        // Latin-2 is available through the object importer. Exposing its source to
+        // the checked graph would send literal imports through boxed evaluation.
+        "encodings.iso8859_2" if boxed => "encodings/iso8859_2.py",
+        "encodings.iso8859_15" => "encodings/iso8859_15.py",
+        "encodings.koi8_u" => "encodings/koi8_u.py",
+        _ => return None,
+    })
+}
 
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
@@ -362,32 +379,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/utf_32.py",
             include_str!("../stdlib/encodings/utf_wide.py"),
         )),
-        "encodings.cp1251" => Some((
-            "encodings/cp1251.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.cp1252" => Some((
-            "encodings/cp1252.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.cp424" => Some((
-            "encodings/cp424.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
         "encodings.idna" => bundled_source!("encodings/idna.py"),
         "encodings.shift_jis" => bundled_source!("encodings/shift_jis.py"),
-        "encodings.cp437" => Some((
-            "encodings/cp437.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.iso8859_15" => Some((
-            "encodings/iso8859_15.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.koi8_u" => Some((
-            "encodings/koi8_u.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
         "codeop" => bundled_source!("codeop.py"),
         "keyword" => Some((
             "keyword.py",
@@ -591,7 +584,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "optparse" => bundled_source!("optparse.py"),
         "gettext" => bundled_source!("gettext.py"),
         "uuid" => bundled_source!("uuid.py"),
-        _ => None,
+        _ => charmap_provider_path(name, false)
+            .map(|path| (path, include_str!("../stdlib/encodings/writer_charmap.py"))),
     }
 }
 
@@ -825,6 +819,7 @@ pub(crate) enum Intrinsic {
     BuiltinsAscii,
     BuiltinsPrint,
     BuiltinsHex,
+    OperatorNot,
     BuiltinsOpen,
     SysDisplayHook,
     ArgumentParser,
@@ -947,6 +942,7 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysVersionInfo,
     SysThreadInfo,
+    SysBuiltinModuleNames,
     SysStdlibModuleNames,
     SysVersion,
     SysHexversion,
@@ -1032,7 +1028,7 @@ pub(crate) enum Intrinsic {
     Sha1,
     Sha256,
     NamedHash(&'static str),
-    UnicodeEastAsianWidth,
+    UnicodeProperty(UnicodeProperty),
     UnicodeNormalize {
         check: bool,
     },
@@ -1990,6 +1986,7 @@ impl IntrinsicModule {
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
             (Self::Sys, "thread_info") => Intrinsic::SysThreadInfo,
+            (Self::Sys, "builtin_module_names") => Intrinsic::SysBuiltinModuleNames,
             (Self::Sys, "stdlib_module_names") => Intrinsic::SysStdlibModuleNames,
             (Self::Sys, "version") => Intrinsic::SysVersion,
             (Self::Sys, "maxunicode") => Intrinsic::IntConstant(0x10FFFF),
@@ -2139,7 +2136,12 @@ impl IntrinsicModule {
             (Self::UnicodeData, "unidata_version") => {
                 Intrinsic::StringConstant(imre_ast::UNICODE_DATA_VERSION)
             }
-            (Self::UnicodeData, "east_asian_width") => Intrinsic::UnicodeEastAsianWidth,
+            (Self::UnicodeData, "category") => {
+                Intrinsic::UnicodeProperty(UnicodeProperty::Category)
+            }
+            (Self::UnicodeData, "east_asian_width") => {
+                Intrinsic::UnicodeProperty(UnicodeProperty::EastAsianWidth)
+            }
             (Self::UnicodeData, "decomposition") => {
                 Intrinsic::ObjectRuntimeExport("unicodedata.decomposition")
             }
@@ -2395,12 +2397,21 @@ impl IntrinsicModule {
             (Self::Operator | Self::OperatorNative, "add" | "__add__") => {
                 Intrinsic::ObjectRuntimeExport("operator.add")
             }
+            (Self::Operator | Self::OperatorNative, "is_") => {
+                Intrinsic::ScopedObjectExport("operator.is_")
+            }
+            (Self::Operator | Self::OperatorNative, "is_not") => {
+                Intrinsic::ScopedObjectExport("operator.is_not")
+            }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator | Self::OperatorNative, "methodcaller") => {
                 Intrinsic::ScopedObjectExport("operator.methodcaller")
             }
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Operator | Self::OperatorNative, "not_") | (Self::Operator, "__not__") => {
+                Intrinsic::OperatorNot
+            }
             (Self::Gc, "is_tracked") => Intrinsic::ScopedObjectExport("gc.is_tracked"),
             (Self::Math, "acos") => Intrinsic::MathAcos,
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
@@ -2715,6 +2726,12 @@ impl IntrinsicModule {
             }
             (Self::UrllibRequest, "HTTPCookieProcessor") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPCookieProcessor")
+            }
+            (Self::UrllibRequest, "ProxyHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.ProxyHandler")
+            }
+            (Self::UrllibRequest, "ProxyDigestAuthHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.ProxyDigestAuthHandler")
             }
             (Self::UrllibRequest, "HTTPDigestAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPDigestAuthHandler")
@@ -3648,7 +3665,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], &[], FileSystem::default())?;
+        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], None, FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
@@ -3669,13 +3686,14 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
+        site_wheels: &mut SiteWheels,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
             &options.python_archive_indices,
-            options.installed_dirs(),
+            Some((options, site_wheels)),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3711,6 +3729,7 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
+        site_wheels: &mut SiteWheels,
     ) -> Result<Self, String> {
         let filename = std::env::current_dir()
             .map_err(|err| err.to_string())?
@@ -3737,7 +3756,7 @@ impl SourceGraph {
             root,
             &options.extension_paths,
             &options.python_archive_indices,
-            options.installed_dirs(),
+            Some((options, site_wheels)),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;
@@ -3825,7 +3844,7 @@ impl SourceGraph {
         let source = fs
             .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root, extension_paths, &[], &[], fs)?;
+        let mut loader = Loader::new(root, extension_paths, &[], None, fs)?;
         loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
@@ -4209,6 +4228,31 @@ pub(crate) enum EntryImportFailure {
     ZipImport,
 }
 
+/// File probes that affect checked admission, even when the program later uses object imports.
+#[derive(Default)]
+pub(crate) struct SiteWheels {
+    missing: Vec<PathBuf>,
+    selected: bool,
+}
+
+impl SiteWheels {
+    fn paired(&mut self, fs: &mut FileSystem<'_>, archive: &Path, stub: &Path) -> bool {
+        for file in [archive, stub] {
+            if !fs.is_file(file) {
+                self.missing.push(file.to_owned());
+                return false;
+            }
+        }
+        self.selected = true;
+        true
+    }
+
+    pub(crate) fn record(&self, inputs: &mut crate::SourceInputs) {
+        inputs.missing.extend_from_slice(&self.missing);
+        inputs.relink_site_wheel = self.selected;
+    }
+}
+
 struct Loader<'a> {
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
@@ -4223,6 +4267,7 @@ struct Loader<'a> {
     root: PathBuf,
     search_roots: Vec<PathBuf>,
     archive_roots: usize,
+    site_wheels: Option<(HashSet<PathBuf>, &'a mut SiteWheels)>,
     session: Session,
     modules: Vec<SourceModule>,
     by_name: HashMap<String, ModuleId>,
@@ -4242,19 +4287,20 @@ struct Loader<'a> {
 }
 
 impl<'a> Loader<'a> {
-    fn new<'p>(
+    fn new(
         root: PathBuf,
         extension_paths: &[PathBuf],
         python_archive_indices: &[usize],
-        installed_dirs: impl IntoIterator<Item = &'p PathBuf>,
+        python: Option<(&crate::CompileOptions, &'a mut SiteWheels)>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
         let mut zip_sources = HashMap::new();
         let mut zip_inputs = crate::SourceInputs::default();
+        let mut inputs = crate::SourceInputs::default();
         for (index, path) in extension_paths.iter().enumerate() {
+            let logical = std::path::absolute(path).map_err(|e| e.to_string())?;
             if python_archive_indices.contains(&index) {
-                let logical = std::path::absolute(path).map_err(|e| e.to_string())?;
                 if let std::collections::hash_map::Entry::Vacant(entry) = zip_sources.entry(logical)
                 {
                     let archive = crate::zip_entry::ZipSources::open(entry.key(), &mut zip_inputs)?;
@@ -4272,25 +4318,31 @@ impl<'a> Loader<'a> {
                     path.display()
                 ));
             }
+            inputs.directories.push((logical, directory.clone()));
             if !search_roots.contains(&directory) {
                 search_roots.push(directory);
             }
         }
         let archive_roots = search_roots.len();
-        let mut inputs = crate::SourceInputs::default();
-        for site in installed_dirs {
-            let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
-            inputs
-                .directories
-                .push((site.to_owned(), canonical.clone()));
-            let site = canonical;
-            if !search_roots.contains(&site) {
-                search_roots.push(site);
+        let mut site_roots = HashSet::new();
+        let mut site_wheels = None;
+        if let Some((options, probes)) = python {
+            for dir in options.installed_dirs() {
+                let canonical = fs.canonicalize(dir).map_err(|e| e.to_string())?;
+                inputs.directories.push((dir.to_owned(), canonical.clone()));
+                if options.site_dirs.contains(dir) {
+                    site_roots.insert(canonical.clone());
+                }
+                if !search_roots.contains(&canonical) {
+                    search_roots.push(canonical);
+                }
             }
+            site_wheels = Some((site_roots, probes));
         }
         Ok(Self {
             fs,
             archive_roots,
+            site_wheels,
             session: Session::new(&root, &search_roots)?,
             search_roots,
             inputs,
@@ -5677,8 +5729,18 @@ impl<'a> Loader<'a> {
             {
                 None
             }
-            "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
+            _ if self.allow_imports
+                && (matches!(name, "_pyio" | "quopri")
+                    || imre_ast::providers::is_native_fallback(name))
+                && self.has_project_source(name) =>
+            {
+                None
+            }
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
+            // Keep the bundled implementation behind inspect's complete stdlib type stub.
+            "inspect" => {
+                bundled_runtime_source(name).map(|(_, source)| ("<imre stdlib>/inspect.py", source))
+            }
             // Keep the public typeshed decorator signatures available alongside this singleton.
             "dataclasses" => Some((
                 "<imre stdlib>/dataclasses.py",
@@ -5892,8 +5954,15 @@ impl<'a> Loader<'a> {
                 self.inputs.missing.push(package);
                 let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
                 let installed = self.search_roots[..self.archive_roots].contains(root);
-                if installed && self.fs.is_file(&archive) {
-                    if !self.fs.is_file(&stub) {
+                let native = if installed {
+                    self.fs.is_file(&archive)
+                } else {
+                    self.site_wheels.as_mut().is_some_and(|(sites, probes)| {
+                        sites.contains(root) && probes.paired(&mut self.fs, &archive, &stub)
+                    })
+                };
+                if native {
+                    if installed && !self.fs.is_file(&stub) {
                         return Err(format!(
                             "native module {name:?} requires a typed declaration at {}",
                             stub.display()
@@ -6507,6 +6576,31 @@ mod native_tests {
                 .unwrap()
                 .contains("cannot resolve first-party module")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changing_an_extension_root_invalidates_the_compiled_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let entry = root.join("main.py");
+        fs::write(&entry, "from helper import value\nprint(value)\n").unwrap();
+        for (name, value) in [("first", 23), ("second", 41)] {
+            let directory = root.join(name);
+            fs::create_dir(&directory).unwrap();
+            fs::write(directory.join("helper.py"), format!("value = {value}\n")).unwrap();
+        }
+        let selected = root.join("selected");
+        std::os::unix::fs::symlink(root.join("first"), &selected).unwrap();
+        let options = crate::CompileOptions {
+            extension_paths: vec![selected.clone()],
+            ..Default::default()
+        };
+        let compilation = crate::compile_file(&entry, Some(&root), &options).unwrap();
+        assert!(compilation.source_inputs.fresh());
+        fs::remove_file(&selected).unwrap();
+        std::os::unix::fs::symlink(root.join("second"), &selected).unwrap();
+        assert!(!compilation.source_inputs.fresh());
     }
 
     #[test]

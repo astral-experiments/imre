@@ -22,6 +22,7 @@ mod descriptor_buffer;
 mod native_random;
 mod native_reader;
 mod native_writer;
+pub(super) use native_writer::overridden_close;
 mod rwpair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
@@ -591,7 +592,11 @@ fn class(
     };
     if wrapper {
         let name = ctx.text("_finalizing");
-        let member = ctx.alloc(Value::SlotMember { owner, name });
+        let member = ctx.alloc(Value::SlotMember {
+            owner,
+            name,
+            module_offset: None,
+        });
         ctx.bind(scope, "_finalizing", member);
     }
     let unsupported = ctx.scope_name(module, "UnsupportedOperation").unwrap();

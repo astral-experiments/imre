@@ -561,6 +561,8 @@ mod truncate;
 mod unlink;
 mod utime;
 #[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod waitid;
+#[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod xattr;
 
 #[cfg(unix)]
@@ -653,6 +655,9 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             && matches!(
                 name,
                 "copy_file_range"
+                    | "setresgid"
+                    | "setresuid"
+                    | "waitid"
                     | "pidfd_open"
                     | "get_terminal_size"
                     | "tcgetpgrp"
@@ -1389,6 +1394,33 @@ pub(super) fn descriptor(
         ));
     }
     #[cfg(target_os = "linux")]
+    if matches!(name, "setresgid" | "setresuid") {
+        let [real, effective, saved] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let group = name == "setresgid";
+        let real = chown::owner_id(ctx, *real, group)?;
+        let effective = chown::owner_id(ctx, *effective, group)?;
+        let saved = chown::owner_id(ctx, *saved, group)?;
+        if group {
+            native::setresgid(
+                real as libc::gid_t,
+                effective as libc::gid_t,
+                saved as libc::gid_t,
+            )?;
+        } else {
+            native::setresuid(
+                real as libc::uid_t,
+                effective as libc::uid_t,
+                saved as libc::uid_t,
+            )?;
+        }
+        return Ok(NONE);
+    }
+    #[cfg(target_os = "linux")]
     if name == "tcsetpgrp" {
         let [fd, pgid] = args else {
             return Err(Error::new(
@@ -1539,6 +1571,10 @@ pub(super) fn descriptor(
     #[cfg(unix)]
     if name == "execv" {
         return execv(ctx, args);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "waitid" {
+        return waitid::call(ctx, args);
     }
     if name == "waitpid" {
         let [pid, options] = args else {

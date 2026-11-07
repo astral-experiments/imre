@@ -9,7 +9,7 @@ pub(crate) use credentials::{
     setreuid,
 };
 #[cfg(target_os = "linux")]
-pub(crate) use credentials::{getresgid, getresuid};
+pub(crate) use credentials::{getresgid, getresuid, setresgid, setresuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
@@ -427,6 +427,21 @@ pub(crate) fn getsid(pid: libc::pid_t) -> Result<libc::pid_t> {
 pub(crate) fn kill(pid: libc::pid_t, signal: libc::c_int) -> Result<()> {
     // SAFETY: kill takes only integers and reports failure through errno.
     checked(unsafe { libc::kill(pid, signal) }).map(|_| ())
+}
+
+/// Wait once, leaving a zero PID when WNOHANG finds no reportable state.
+pub(crate) fn waitid(
+    idtype: libc::idtype_t,
+    id: libc::id_t,
+    options: libc::c_int,
+) -> io::Result<libc::siginfo_t> {
+    let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    // SAFETY: waitid receives writable siginfo storage and retains no pointer.
+    if unsafe { libc::waitid(idtype, id, info.as_mut_ptr(), options) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: all bytes were initialized before the kernel wrote the child status.
+    Ok(unsafe { info.assume_init() })
 }
 
 /// Wait for a child independently of Popen and return its unmodified POSIX status.

@@ -441,6 +441,19 @@ impl Context {
         Ok(Some(length as usize))
     }
 
+    /// In nb_bool, an AttributeError during descriptor binding skips that slot.
+    /// The fallback tests the returned length object itself (CPython slot_nb_bool).
+    fn truth_after_missing_bool(&mut self, id: Id) -> Result<bool> {
+        let hook = match self.bound_slot(id, "__len__") {
+            Ok(Some(hook)) => hook,
+            Ok(None) => return Ok(true),
+            Err(error) if self.is_attribute_error(&error) => return Ok(true),
+            Err(error) => return Err(error),
+        };
+        let value = self.call(hook, Vec::new(), Vec::new())?;
+        self.with_slot_depth("maximum recursion depth exceeded", |ctx| ctx.truth(value))
+    }
+
     pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
         let id = self.weak_proxy_target(id)?;
         Ok(match self.heap.get(id) {
@@ -482,8 +495,28 @@ impl Context {
             } => !bindings.is_empty(),
             Value::Array(array) => array.len() != 0,
             Value::Range(range) => range.len.as_small() != Some(0),
-            Value::Instance { .. } | Value::Raised(_) | Value::FrameLocalsProxy { .. } => {
-                if let Some(hook) = self.bound_slot(id, "__bool__")? {
+            Value::Instance { .. }
+            | Value::Class {
+                metaclass: Some(_), ..
+            }
+            | Value::Raised(_)
+            | Value::FrameLocalsProxy { .. } => {
+                let hook = match self.bound_slot(id, "__bool__") {
+                    Err(error) if self.is_attribute_error(&error) => {
+                        return self.truth_after_missing_bool(id);
+                    }
+                    result => result?,
+                };
+                if let Some(hook) = hook {
+                    if hook == NONE {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "'{:.200}' cannot be interpreted as a boolean",
+                                self.type_name(id)
+                            ),
+                        ));
+                    }
                     let value = self.call(hook, Vec::new(), Vec::new())?;
                     let Value::Bool(result) = self.heap.get(value) else {
                         return Err(Error::new(
@@ -2534,7 +2567,7 @@ impl Context {
                             "(...)",
                             Part::Sequence(storage, 0),
                         ),
-                        Value::SlotMember { owner, name } => {
+                        Value::SlotMember { owner, name, .. } => {
                             let owner = ctx.class_name(*owner);
                             let field = ctx.str_value(*name)?;
                             append_rendered_text(
@@ -3549,6 +3582,28 @@ impl Context {
         }
         Ok(false)
     }
+    /// Read an ordinary sequence slice directly when its bounds need no Python callbacks.
+    pub(super) fn get_slice(&mut self, receiver: Id, start: Id, stop: Id) -> Result<Id> {
+        let parts = [start, stop, NONE];
+        if matches!(
+            self.heap.get(receiver),
+            Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::Tuple(_)
+                | Value::List(_)
+        ) && [start, stop].iter().all(|&id| {
+            matches!(
+                self.heap.get(id),
+                Value::None | Value::Int(_) | Value::Bool(_)
+            )
+        }) {
+            return self.slice(receiver, parts);
+        }
+        let key = self.alloc(Value::Slice(parts));
+        self.get_item(receiver, key)
+    }
+
     fn slice(&mut self, receiver: Id, parts: [Id; 3]) -> Result<Id> {
         let obj = self.scalar_value(receiver);
         if let Value::Range(range) = self.heap.get(obj) {
@@ -3572,6 +3627,7 @@ impl Context {
         }
         let bounds = super::slice::sequence_components(self, parts)?;
         let len = match self.heap.get(obj) {
+            Value::Str(text) if self.heap.is_ascii_str(obj) => text.len(),
             Value::Str(text) => match bounds {
                 // A forward slice with nonnegative bounds only needs to know that
                 // its stop is in range. The iterator's lower bound proves that
@@ -4551,6 +4607,11 @@ impl Context {
     }
 
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        match op {
+            "is" => return Ok(builtins::boolean(a == b)),
+            "is not" => return Ok(builtins::boolean(a != b)),
+            _ => {}
+        }
         if matches!(op, "==" | "!=")
             && let (Value::Int(left), Value::Int(right)) = (self.heap.get(a), self.heap.get(b))
         {
@@ -4573,7 +4634,7 @@ impl Context {
                 return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
             }
         }
-        if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
+        if self.heap.has_weak_values {
             let left = self.weak_proxy_target(a)?;
             let right = self.weak_proxy_target(b)?;
             if left != a || right != b {
@@ -4705,8 +4766,6 @@ impl Context {
                     && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
                 return Ok(truth(equal == (op == "==")));
             }
-            "is" => return Ok(truth(a == b)),
-            "is not" => return Ok(truth(a != b)),
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => return self.order(op, a, b),
@@ -5684,7 +5743,14 @@ impl Context {
                     Value::Int(_) | Value::Bool(_) | Value::Float(_)
                 )
             });
-        if real_pair || native_comparison || (inplace.is_empty() && self.same_sequence_family(a, b))
+        // Once both string equality slots decline, distinct objects compare unequal
+        // even when their underlying spellings are identical.
+        let text_equality =
+            op == "==" && self.string_storage(a).is_some() && self.string_storage(b).is_some();
+        if real_pair
+            || native_comparison
+            || text_equality
+            || (inplace.is_empty() && self.same_sequence_family(a, b))
         {
             let ac = self.exact_type(a)?;
             let bc = self.exact_type(b)?;

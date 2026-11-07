@@ -3,6 +3,16 @@
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use ruff_python_stdlib::identifiers::is_identifier;
 
+/// Python mangles private member names with the name of the declaring class.
+pub(super) fn slot_name(class_name: &str, original: &str) -> String {
+    let owner = class_name.trim_start_matches('_');
+    if original.starts_with("__") && !original.ends_with("__") && !owner.is_empty() {
+        format!("_{owner}{original}")
+    } else {
+        original.to_owned()
+    }
+}
+
 impl Context {
     /// Inspect inherited slot layouts in method resolution order, without invoking Python.
     fn dataclass_slot_ancestors(&mut self, class: Id) -> Result<Vec<Id>> {
@@ -194,9 +204,11 @@ impl Context {
                 "expected an ordinary dataclass type",
             ));
         };
-        let name = self.class_name(old).to_owned();
+        let name = self.lookup_attr(old, "__name__")?;
+        let name_text = self.str_value(name)?.to_owned();
         let module = self.scope_data(original).module.clone();
         let layout = super::value::ClassNamespace {
+            name_override: Some(name),
             member_slots: true,
             provider_annotations: self.has_class_annotation_provider(original),
             ..Default::default()
@@ -214,7 +226,12 @@ impl Context {
         let bases = self
             .class_bases_tuple(old)
             .expect("validated dataclass bases");
-        let class = self.allocate_class(name, scope, bases)?;
+        let class = self.allocate_class(name_text, scope, bases)?;
+        // The initial qualified name is type metadata, outside the __set_name__ member walk.
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.names.insert(crate::Str::new("__qualname__"), name);
         self.finish_namespace_class(class, scope, cell, None, Vec::new())
     }
 
@@ -720,30 +737,14 @@ impl Context {
         class_name: &str,
         scope: Id,
         slots: &[String],
-        ordinary_slots: bool,
     ) -> Result<Vec<String>> {
         let mut members = Vec::new();
         for original in slots {
-            if original == "__dict__" {
-                if ordinary_slots {
-                    // Ordinary instances already supply dictionary storage through their layout.
-                    continue;
-                }
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "dynamic __dict__ slot descriptors are unsupported",
-                ));
-            }
-            if original == "__weakref__" {
+            // Layout getsets supply the dictionary and weak references independently of named slots.
+            if matches!(original.as_str(), "__dict__" | "__weakref__") {
                 continue;
             }
-            let owner = class_name.trim_start_matches('_');
-            let name =
-                if original.starts_with("__") && !original.ends_with("__") && !owner.is_empty() {
-                    format!("_{owner}{original}")
-                } else {
-                    original.clone()
-                };
+            let name = slot_name(class_name, original);
             if self
                 .namespace_binding(self.scope_data(scope), &name)
                 .is_some()
@@ -761,12 +762,19 @@ impl Context {
     }
 
     fn check_slot_receiver(&self, member: Id, receiver: Id) -> Result<(Id, bool)> {
-        let Value::SlotMember { owner, name } = *self.heap.get(member) else {
+        let Value::SlotMember {
+            owner,
+            name,
+            module_offset,
+        } = *self.heap.get(member)
+        else {
             unreachable!()
         };
         let finalizing = self.heap.get(owner).io_kind() == Some("TextIOWrapper")
             && self.str_value(name)? == "_finalizing";
         if matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
+            || module_offset.is_some()
+                && matches!(self.heap.get(receiver), Value::Module { constructor: Some(class), .. } if self.direct_subclass(*class, owner))
         {
             return Ok((name, finalizing));
         }
@@ -794,6 +802,37 @@ impl Context {
 
     pub(super) fn read_slot_member(&self, member: Id, receiver: Id) -> Result<Id> {
         let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
+        if let Value::Module {
+            module_slots,
+            constructor: Some(class),
+            ..
+        } = self.heap.get(receiver)
+            && let Value::SlotMember {
+                module_offset: Some(offset),
+                ..
+            } = self.heap.get(member)
+        {
+            let name = self.str_value(name)?;
+            return module_slots
+                .as_ref()
+                .and_then(|slots| slots.get(offset))
+                .copied()
+                .ok_or_else(|| {
+                    let qualname = self.class_qualname(*class);
+                    let module = self
+                        .own_class_attr(*class, "__module__")
+                        .and_then(|name| self.str_value(name).ok())
+                        .filter(|name| !matches!(*name, "__main__" | "builtins"));
+                    let owner = module.map_or_else(
+                        || qualname.to_owned(),
+                        |module| format!("{module}.{qualname}"),
+                    );
+                    Error::new(
+                        "AttributeError",
+                        format!("'{owner}' object has no attribute '{name}'"),
+                    )
+                });
+        }
         let Value::Instance { member_values, .. } = self.heap.get(receiver) else {
             unreachable!()
         };
@@ -813,6 +852,33 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
+        if let Value::SlotMember {
+            module_offset: Some(offset),
+            ..
+        } = *self.heap.get(member)
+            && let Value::Module { module_slots, .. } = self.heap.get_mut(receiver)
+        {
+            let old = if let Some(value) = value {
+                module_slots
+                    .get_or_insert_with(Default::default)
+                    .insert(offset, value)
+            } else {
+                let previous = module_slots
+                    .as_mut()
+                    .and_then(|slots| slots.remove(&offset));
+                if previous.is_none() {
+                    return Err(Error::new(
+                        "AttributeError",
+                        self.str_value(name)?.to_owned(),
+                    ));
+                }
+                previous
+            };
+            if let Some(old) = old {
+                self.heap.weak_edge_removed(old);
+            }
+            return Ok(());
+        }
         if finalizing {
             let value = value
                 .ok_or_else(|| Error::new("TypeError", "can't delete numeric/char attribute"))?;

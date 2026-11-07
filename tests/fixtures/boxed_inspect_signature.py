@@ -140,6 +140,16 @@ class Published:
         pass
 
 
+class DocumentedFactory:
+    """DocumentedFactory(value, /, *, retries=2)\n--\n\nFactory protocol."""
+
+    __text_signature__ = '(spoof)'
+
+
+class InheritedFactory(DocumentedFactory):
+    pass
+
+
 class ConstructorBase:
     def __init__(self, count: int = 2, *, flag=False) -> None: pass
 
@@ -398,6 +408,14 @@ assert type(inspect._sentinel) is object
 assert inspect.ismodule(inspect)
 assert not inspect.ismodule(inspect.Parameter)
 
+
+DocumentedFactory.__doc__ = 'new documentation'
+assert DocumentedFactory.__text_signature__ == '(value, /, *, retries=2)'
+assert InheritedFactory.__text_signature__ is None
+bound = inspect.signature(InheritedFactory).bind("payload", retries=3)
+assert bound.arguments == {"value": "payload", "retries": 3}
+assert inspect.getattr_static(type, "__text_signature__").__get__(tuple, type) == tuple.__text_signature__
+assert str(inspect.signature(type("Entries", (tuple,), {}))) == "(iterable=(), /)"
 
 print(inspect.signature(ConstructorChild), inspect.signature(NewFirst), inspect.signature(DefaultInit))
 

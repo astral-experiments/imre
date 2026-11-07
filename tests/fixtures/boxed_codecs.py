@@ -214,6 +214,22 @@ def check_utf8_incremental_encoder():
     assert factory("ignore").encode("\ud800Z") == b"Z"
 
 
+def check_charmap_factories():
+    from encodings import cp1252
+    from io import BytesIO
+
+    entry = codecs.lookup("windows-1252")
+    assert entry.incrementalencoder is codecs.getincrementalencoder("cp1252") is cp1252.IncrementalEncoder
+    assert entry.streamreader is codecs.getreader("cp1252") is cp1252.StreamReader
+    encoder = entry.incrementalencoder("replace")
+    assert encoder.encode("€") + encoder.encode("☃", final=True) == b"\x80?"
+    reader = entry.streamreader(BytesIO(b"\x80\x81"), "replace")
+    assert reader.read(1) == "€"
+    assert reader.read() == "\ufffd"
+    reader.seek(0)
+    assert reader.read() == "€\ufffd"
+
+
 def check_incremental_decoder_factory():
     from encodings.utf_8 import IncrementalDecoder
 
@@ -311,10 +327,12 @@ def current():
     check_utf8_error_handler()
     check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
+    check_charmap_factories()
     check_incremental_decoder_factory()
     check_text_encoding_flag()
     check_escape_decode()
     fixed_endian_encoders()
+    fixed_endian_streams()
     utf16_extended_decoder()
     check_shift_jis()
     check_raw_unicode_escape()
@@ -425,6 +443,13 @@ def current():
     assert latin2.decode.__func__ is Latin2.decode
     assert Latin2.__bases__ == (codecs.Codec,)
     assert latin2.decode(b"\xa1") == ("Ą", 1)
+    from encodings.iso8859_2 import IncrementalEncoder, StreamReader
+    from io import BytesIO
+
+    assert codecs.getincrementalencoder("l2") is latin2.incrementalencoder is IncrementalEncoder
+    assert codecs.getreader("latin2") is latin2.streamreader is StreamReader
+    text = StreamReader(BytesIO(wire)).read()
+    assert text[0xA1] == "Ą" and IncrementalEncoder().encode(text, final=True) == wire
 
     entry_koi8 = codecs.lookup("KOI8_U")
     assert entry_koi8.name == "koi8-u"
@@ -554,3 +579,28 @@ def utf16_extended_decoder():
     wire = b"\x00\xdc"
     assert utf_16_ex_decode(wire, "test.utf16_change_input", -1) == ("?BC", 4, -1)
     assert utf_16_ex_decode(wire, "test.utf16_change_input", -1, True) == ("?BC", 2, -1)
+
+
+def fixed_endian_streams():
+    from io import BytesIO
+
+    for name in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
+        entry = codecs.lookup(name)
+        module = __import__("encodings." + name.replace("-", "_"), fromlist=["*"])
+        assert entry.incrementaldecoder is module.IncrementalDecoder
+        text = "\ufeffA🙂"
+        wire = text.encode(name)
+        stream = BytesIO()
+        entry.streamwriter(stream).write(text)
+        assert stream.getvalue() == wire
+        stream.seek(0)
+        assert entry.streamreader(stream).read() == text
+        for split in range(len(wire) + 1):
+            decoder = entry.incrementaldecoder()
+            first = decoder.decode(wire[:split])
+            restored = entry.incrementaldecoder()
+            restored.setstate(decoder.getstate())
+            assert first + restored.decode(wire[split:], True) == text
+        primitive = getattr(codecs, name.replace("-", "_") + "_decode")
+        assert primitive(wire + b"x") == (text, len(wire))
+        assert module.decode(wire + b"x", "replace") == (text + "\ufffd", len(wire) + 1)

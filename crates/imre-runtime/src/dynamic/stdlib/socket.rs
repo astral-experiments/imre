@@ -5,10 +5,30 @@ use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 use crate::objects::socket as native;
 use std::time::Duration;
 
-/// Methods available through both the native socket class and its instances.
+/// Native method descriptors inherited unchanged by the public socket class.
 pub(in super::super) const CLASS_METHODS: &[&str] = &[
     "_accept",
+    "bind",
+    "connect",
     "connect_ex",
+    "fileno",
+    "getblocking",
+    "getpeername",
+    "getsockname",
+    "getsockopt",
+    "gettimeout",
+    "listen",
+    "recv",
+    "recv_into",
+    "recvfrom",
+    "recvfrom_into",
+    "send",
+    "sendall",
+    "sendto",
+    "setblocking",
+    "setsockopt",
+    "settimeout",
+    "shutdown",
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     "sendmsg",
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -81,6 +101,7 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("SCM_RIGHTS", libc::SCM_RIGHTS),
     ("SO_TYPE", libc::SO_TYPE),
     ("SO_ERROR", libc::SO_ERROR),
+    ("SO_LINGER", libc::SO_LINGER),
     ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),
@@ -1132,6 +1153,65 @@ fn receive_into(
     Ok(ctx.alloc(Value::Tuple(vec![count, peer])))
 }
 
+fn setsockopt(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    use native::SocketOption;
+
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "socket.setsockopt() takes no keyword arguments",
+        ));
+    }
+    let wrong_count = || {
+        Error::new(
+            "TypeError",
+            format!(
+                "setsockopt() takes exactly 3 arguments ({} given)",
+                args.len()
+            ),
+        )
+    };
+    if let &[level, name, value, length] = args {
+        // A failed four-argument parse falls through to CPython's three-argument buffer form.
+        let level = ctx.index_c_int(level).map_err(|_| wrong_count())?;
+        let name = ctx.index_c_int(name).map_err(|_| wrong_count())?;
+        if value != NONE {
+            return Err(wrong_count());
+        }
+        let length = unsigned_mask(ctx.index_integer(length).map_err(|_| wrong_count())?);
+        native::set_option(native::fd(socket), level, name, SocketOption::Null(length))?;
+        return Ok(NONE);
+    }
+    let &[level, name, value] = args else {
+        return Err(wrong_count());
+    };
+    let option =
+        |ctx: &mut Context| -> Result<_> { Ok((ctx.index_c_int(level)?, ctx.index_c_int(name)?)) };
+    // PyArg tries "iii" before "iiy*". Converting level and name again on the
+    // buffer path is observable when either implements __index__.
+    let integers = option(ctx).and_then(|(level, name)| Ok((level, name, ctx.index_c_int(value)?)));
+    if let Ok((level, name, flag)) = integers {
+        native::set_option(native::fd(socket), level, name, SocketOption::Integer(flag))?;
+    } else {
+        let (level, name) = option(ctx)?;
+        ctx.with_read_buffer(value, |ctx, view| {
+            let bytes = ctx.native_buffer_bytes(view)?;
+            Ok(native::set_option(
+                native::fd(socket),
+                level,
+                name,
+                SocketOption::Buffer(bytes),
+            )?)
+        })?;
+    }
+    Ok(NONE)
+}
+
 fn getsockopt(
     ctx: &mut Context,
     socket: &crate::objects::Object,
@@ -1276,6 +1356,24 @@ pub(super) fn endpoint_method(
     args: &[Id],
 ) -> Result<Id> {
     match method {
+        "setblocking" => {
+            native::set_blocking_mode(socket, ctx.truth(argument(args, 0)?)?)?;
+            Ok(NONE)
+        }
+        "gettimeout" => Ok(native::get_timeout(socket).map_or(NONE, |duration| {
+            ctx.alloc(Value::Float(duration.as_secs_f64()))
+        })),
+        "settimeout" => {
+            let value = argument(args, 0)?;
+            let timeout = parse_socket_timeout(ctx, value)?;
+            native::set_timeout(socket, timeout)?;
+            Ok(NONE)
+        }
+        "getblocking" => Ok(if native::imre_socket_getblocking(socket) {
+            super::TRUE
+        } else {
+            super::FALSE
+        }),
         "fileno" => Ok(ctx.int(i64::from(native::fd(socket)))),
         "listen" => {
             let backlog = match args {
@@ -1404,7 +1502,7 @@ pub(super) fn call(
         ));
     };
     let is_message = matches!(method, "sendmsg" | "recvmsg" | "recvmsg_into");
-    let descriptor = is_message || method == "_accept";
+    let descriptor = CLASS_METHODS.contains(&method);
     let (receiver, args) = args.split_first().ok_or_else(|| {
         if descriptor {
             Error::new(
@@ -1487,6 +1585,9 @@ pub(super) fn call(
     }
     if method == "getsockopt" {
         return getsockopt(ctx, &s, args, kwargs);
+    }
+    if method == "setsockopt" {
+        return setsockopt(ctx, &s, args, kwargs);
     }
     if method == "sendto" {
         if !kwargs.is_empty() {
@@ -1603,7 +1704,7 @@ pub(super) fn call(
     let max = match method {
         "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
         "recv" | "recvfrom" | "send" | "sendall" => 2,
-        "setsockopt" | "__exit__" => 3,
+        "__exit__" => 3,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
@@ -1612,7 +1713,8 @@ pub(super) fn call(
         "__exit__" | "close" => native::close(&s)?,
         "_decref_socketios" => native::release_socketio(&s).map_err(super::os_error)?,
         "detach" => return Ok(ctx.int(i64::from(native::detach(&s)))),
-        "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
+        "fileno" | "listen" | "accept" | "getsockname" | "getpeername" | "setblocking"
+        | "getblocking" | "gettimeout" | "settimeout" => {
             return endpoint_method(ctx, method, &s, args);
         }
         "dup" => {
@@ -1627,30 +1729,6 @@ pub(super) fn call(
         "bind" => native::bind(
             &s,
             &address(ctx, native::family(&s), argument(args, 0)?, method)?,
-        )?,
-        "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
-        "gettimeout" => {
-            return Ok(native::get_timeout(&s).map_or(NONE, |duration| {
-                ctx.alloc(Value::Float(duration.as_secs_f64()))
-            }));
-        }
-        "settimeout" => {
-            let value = argument(args, 0)?;
-            let timeout = parse_socket_timeout(ctx, value)?;
-            native::set_timeout(&s, timeout)?;
-        }
-        "getblocking" => {
-            return Ok(if native::imre_socket_getblocking(&s) {
-                super::TRUE
-            } else {
-                super::FALSE
-            });
-        }
-        "setsockopt" => native::set_option(
-            &s,
-            integer(ctx, argument(args, 0)?)?,
-            integer(ctx, argument(args, 1)?)?,
-            integer(ctx, argument(args, 2)?)?,
         )?,
         "shutdown" => native::shutdown(&s, integer(ctx, argument(args, 0)?)?)?,
         "recvfrom" => {

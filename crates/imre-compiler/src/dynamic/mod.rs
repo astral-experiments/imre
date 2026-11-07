@@ -214,7 +214,7 @@ fn boxed_unittest_export(name: &str) -> bool {
 
 fn boxed_operator(name: &str) -> bool {
     macro_rules! operator_functions {
-        ($($function:literal => $operation:expr),* $(,)?) => { &[$($function),*] };
+        ($($function:literal => $operation:expr,)* checked { $($plain:literal => $checked:expr),* $(,)? }) => { &[$($function),*] };
     }
     const FUNCTIONS: &[&str] = include!("../../../imre-runtime/native/operator-functions.rs");
     matches!(name, "attrgetter" | "itemgetter")
@@ -1066,7 +1066,19 @@ pub(crate) fn compile(
                 if prefix == "_imp" && !frozen_imports.names.is_empty() {
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
-                let bundled = bundled_module_source(&prefix, startup.is_none());
+                // A standalone executable has no launcher ZIP. Carry the same sources
+                // when its import graph actually requests pydoc or its pager.
+                let member = match (startup.is_none(), prefix.as_str()) {
+                    (true, "pydoc") => Some("pydoc.py"),
+                    (true, "_pyrepl") => Some("_pyrepl/__init__.py"),
+                    (true, "_pyrepl.pager") => Some("_pyrepl/pager.py"),
+                    _ => None,
+                };
+                let bundled = if let Some(member) = member {
+                    Some((member, crate::zip_entry::installed_source(member)?.into()))
+                } else {
+                    bundled_module_source(&prefix, startup.is_none())
+                };
                 let mut installed = if bundled.is_none() {
                     crate::zip_entry::installed_member(&prefix)
                 } else {
@@ -1227,41 +1239,13 @@ pub(crate) fn compile(
             }
         }
     }
-    // Cold imports can use the canonical threading factory when its Python dependencies
-    // are already registered. Check before adding the minimal collections fallback below.
-    let threading = ["_weakrefset", "collections", "warnings"]
-        .into_iter()
-        .all(|required| {
-            sources
-                .iter()
-                .any(|(name, path, _)| name == required && path.starts_with(bundled_root))
-        })
-        .then_some("threading");
-    // Native modules can construct named tuples even without a source-level collections import.
-    if !seen.contains("collections") {
-        sources.push((
-            "collections".into(),
-            Path::new(bundled_root).join("collections/__init__.py"),
-            NAMEDTUPLE_COLLECTIONS.into(),
-        ));
-    }
-    // The sealed io module also needs its Python protocols when imported indirectly.
-    sources.push((
-        "io".into(),
-        Path::new(bundled_root).join("io.py"),
-        SEALED_IO.into(),
-    ));
-    // These modules and their dependencies must be available when selected by name at runtime.
-    for name in RUNTIME_PROVIDERS.iter().copied().chain(threading) {
-        if !seen.contains(name)
-            && let Some((file, source)) = import_module::boxed_source(name)
-        {
-            sources.push((
-                name.into(),
-                Path::new(bundled_root).join(file),
-                source.into(),
-            ));
-        }
+    let threading = source_threading(|required| {
+        sources
+            .iter()
+            .any(|(name, path, _)| name == required && path.starts_with(bundled_root))
+    });
+    for (name, file, body) in runtime_sources(|name| seen.contains(name), threading) {
+        sources.push((name.into(), Path::new(bundled_root).join(file), body.into()));
     }
     if let Some(archive) = &options.stdlib_fallback {
         // Both bootstrap names use this bundled source. One may be supplied only by
@@ -1320,6 +1304,7 @@ pub(crate) fn compile(
         "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
+        "python_hexversion":crate::version::hex(crate::version::components(false)),
         "implementation_version":env!("CARGO_PKG_VERSION"),
         "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
@@ -1383,8 +1368,70 @@ pub(crate) fn compile(
     }))
 }
 
+/// The full threading factory needs these Python dependencies before the startup fallbacks.
+fn source_threading(mut registered: impl FnMut(&str) -> bool) -> Option<&'static str> {
+    ["_weakrefset", "collections", "warnings"]
+        .into_iter()
+        .all(&mut registered)
+        .then_some("threading")
+}
+
+/// Python registrations provided by the launcher even without a direct source import.
+fn runtime_sources(
+    seen: impl Fn(&str) -> bool,
+    threading: Option<&'static str>,
+) -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    let collections = (!seen("collections")).then_some((
+        "collections",
+        "collections/__init__.py",
+        NAMEDTUPLE_COLLECTIONS,
+    ));
+    collections
+        .into_iter()
+        .chain([("io", "io.py", SEALED_IO)])
+        .chain(
+            RUNTIME_PROVIDERS
+                .iter()
+                .copied()
+                .chain(FIXED_UTF_PROVIDERS.iter().map(|(name, _)| *name))
+                .chain(threading)
+                .filter(move |name| !seen(name))
+                .filter_map(|name| {
+                    let (file, source) = import_module::boxed_source(name)?;
+                    Some((name, file, source))
+                }),
+        )
+}
+
+/// Carry the checked program's Python source registrations to the runtime finder classifier.
+pub(crate) fn builtin_inventory_sources(graph: &crate::modules::SourceGraph) -> String {
+    let threading =
+        source_threading(|name| graph.modules.iter().any(|m| m.bundled && m.name == name));
+    let defaults = runtime_sources(
+        |name| graph.modules.iter().any(|m| m.name == name),
+        threading,
+    );
+    let mut names: Vec<_> = graph
+        .modules
+        .iter()
+        .filter(|m| m.bundled)
+        .map(|m| m.name.as_str())
+        .chain(defaults.map(|(name, _, _)| name))
+        .filter(|name| imre_ast::providers::provider(name).is_some())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names.join("\0")
+}
+
 const NAMEDTUPLE_COLLECTIONS: &str = include_str!("../../stdlib/collections/namedtuple_repr.py");
 const SEALED_IO: &str = include_str!("../../stdlib/io.py");
+const FIXED_UTF_PROVIDERS: &[(&str, &str)] = &[
+    ("encodings.utf_16_le", "encodings/utf_16_le.py"),
+    ("encodings.utf_16_be", "encodings/utf_16_be.py"),
+    ("encodings.utf_32_le", "encodings/utf_32_le.py"),
+    ("encodings.utf_32_be", "encodings/utf_32_be.py"),
+];
 const RUNTIME_PROVIDERS: &[&str] = &[
     "__future__",
     "__hello__",

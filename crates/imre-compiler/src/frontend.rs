@@ -112,6 +112,7 @@ pub(crate) use sign_parameters::only_compares_zero;
 mod single_dispatch;
 mod socket;
 mod stdlib;
+pub(crate) use stdlib::literal_replace_mismatch;
 mod string_io;
 mod string_lists;
 mod sys;
@@ -162,6 +163,8 @@ struct ClassInfo {
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
+    /// Declared record types whose truth must be selected by concrete layout.
+    truth_dispatch: HashSet<usize>,
     keyword_copies: HashSet<usize>,
     /// Original base called by a constructor with statically forwarded packs.
     forwarded_initializers: HashMap<usize, DefinitionId>,
@@ -206,21 +209,26 @@ impl ClassInfo {
                 })
                 .collect(),
         );
-        types.set_custom_truth(
-            declarations
-                .definitions
-                .iter()
-                .enumerate()
-                .filter_map(|(id, class)| {
-                    (class.mapping
-                        || class
-                            .methods
-                            .iter()
-                            .any(|method| method.name.as_str() == "__bool__"))
-                    .then_some(id)
-                })
-                .collect(),
-        );
+        let mut custom_truth = HashSet::new();
+        let mut truth_dispatch = HashSet::new();
+        for (id, class) in declarations.definitions.iter().enumerate() {
+            if class.mapping
+                || class
+                    .methods
+                    .iter()
+                    .any(|method| method.name.as_str() == "__bool__")
+            {
+                custom_truth.insert(id);
+                if class.mapping {
+                    truth_dispatch.insert(id);
+                }
+                if class.abstract_methods.is_empty() {
+                    // A concrete subclass can inhabit a variable annotated with any base.
+                    truth_dispatch.extend(class.bases.iter().copied());
+                }
+            }
+        }
+        types.set_custom_truth(custom_truth);
         // Permit forward references while reading field annotations. Refine
         // these candidates once every record's concrete field types are known.
         let mut hashable = declarations
@@ -401,6 +409,7 @@ impl ClassInfo {
         let parsers = argparse::Parsers::collect(graph, types, &mut declarations, &mut fields)?;
         Ok(Self {
             parsers,
+            truth_dispatch,
             methods: vec![HashMap::new(); fields.len()],
             setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
@@ -1149,12 +1158,16 @@ fn lower_graph(
     }
     python_frames.push(true); // The program entry runs a Python module body.
     let mut names = false;
+    let mut uses_builtin_module_names = false;
     let source_functions = python_frames.iter().filter(|&&frame| frame).count();
     let mut generator_sites = 0;
     let mut count = false;
     for function in functions.iter().chain([&entry]) {
         ir::walk_expressions(&function.body, &mut |value| match value.kind {
             ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
+            ExprKind::Builtin(Builtin::SysBuiltinModuleNames, _) => {
+                uses_builtin_module_names = true
+            }
             ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
             ExprKind::Builtin(Builtin::GeneratorFrameEnter(_), _) => generator_sites += 1,
             _ => {}
@@ -1220,6 +1233,8 @@ fn lower_graph(
     }
     let lowered = (
         ir::Module {
+            builtin_module_sources: uses_builtin_module_names
+                .then(|| crate::dynamic::builtin_inventory_sources(graph)),
             command_flags: graph
                 .command_startup
                 .as_ref()
@@ -3762,7 +3777,7 @@ impl<'a> Checker<'a> {
             self.names.get(name).is_some_and(|&slot| {
                 self.types
                     .payload(self.locals[slot])
-                    .is_some_and(|payload| self.types.truthiness(payload) == Some(true))
+                    .is_some_and(|payload| self.known_truth(payload) == Some(true))
             })
         };
         for (name, present) in narrowing::facts(test, truth, &always_truthy) {
@@ -6974,6 +6989,13 @@ impl<'a> Checker<'a> {
                         "checked math.sumprod requires a direct call",
                     ));
                 }
+                Intrinsic::ScopedObjectExport("operator.is_" | "operator.is_not") => {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "checked operator identity functions require a direct call",
+                    ));
+                }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
                 }
@@ -6991,6 +7013,13 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::Fnmatch(ir::FnmatchOperation::Match { normcase }) => {
                     return Ok(fnmatch::function(self.types, normcase));
+                }
+                Intrinsic::OperatorNot => {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "checked operator.not_ requires a direct call",
+                    ));
                 }
                 Intrinsic::BuiltinsHex => {
                     return Err(self.scoped_builtin_error("builtins.hex", expression));
@@ -7095,6 +7124,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysBuiltinModuleNames if self.has_static_namespace_root(expression) => {
+                    return Ok(Expr {
+                        ty: self.types.var_tuple(Type::Str),
+                        kind: ExprKind::Builtin(Builtin::SysBuiltinModuleNames, vec![]),
+                    });
+                }
                 Intrinsic::SysStdlibModuleNames => {
                     return Ok(Expr {
                         ty: Type::FrozenStrings,
@@ -7445,33 +7480,8 @@ impl<'a> Checker<'a> {
                 return self.boolean_value(boolean, None);
             }
             ast::Expr::Compare(compare) => {
-                if let Some((value, class, positive)) = self.exact_object_type(compare) {
-                    let predicate = match class {
-                        ty_python_semantic::types::KnownClass::Str => {
-                            Builtin::IsInstance(vec![ir::InstanceType::ExactText])
-                        }
-                        ty_python_semantic::types::KnownClass::Tuple => Builtin::ObjectIsExactTuple,
-                        _ => unreachable!("only exact str and tuple comparisons"),
-                    };
-                    let test = Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Builtin(predicate, vec![self.expr(value)?]),
-                    };
-                    return Ok(if positive {
-                        test
-                    } else {
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Not(Box::new(test)),
-                        }
-                    });
-                }
-                if let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref()
-                    && let [left, right] = compare.operands.as_ref()
-                    && let (Some(left), Some(right)) =
-                        (self.class_reference(left), self.class_reference(right))
-                {
-                    return Ok(Expr::boolean((left == right) == (*op == ast::CmpOp::Is)));
+                if let Some((left, op, right)) = self.identity_test(expression) {
+                    return self.identity_comparison(left, right, op, expression);
                 }
                 if compare.ops.len() == 1
                     && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
@@ -7525,6 +7535,13 @@ impl<'a> Checker<'a> {
                     if let Some(fields) = self.types.fields(receiver.ty) {
                         return self.tuple_contains(key, receiver, &fields, compare);
                     }
+                    if self.types.var_tuple_element(receiver.ty) == Some(Type::Str)
+                        && matches!(key.ty, Type::Int | Type::None | Type::Bool | Type::Float)
+                    {
+                        let result = Expr::boolean(compare.ops[0] == ast::CmpOp::NotIn);
+                        let result = self.evaluated_receiver(Some(receiver), result);
+                        return Ok(self.evaluated_receiver(Some(key), result));
+                    }
                     let receiver = if receiver.ty == Type::ModuleNamespace {
                         errno::op(ir::ErrnoOperation::Keys, Type::StringKeys, vec![receiver])
                     } else {
@@ -7558,6 +7575,8 @@ impl<'a> Checker<'a> {
                         (ty, Builtin::StructListContains)
                     } else if receiver.ty == Type::ListInt {
                         (self.types.optional(Type::Int), Builtin::IntListContains)
+                    } else if self.types.var_tuple_element(receiver.ty) == Some(Type::Str) {
+                        (Type::Str, Builtin::StringTupleContains)
                     } else if self.types.element(receiver.ty) == Some(Type::Str) {
                         (Type::Str, Builtin::StringListContains)
                     } else {
@@ -7586,20 +7605,6 @@ impl<'a> Checker<'a> {
                         };
                     }
                     return Ok(result);
-                }
-                if compare.ops.len() == 1
-                    && matches!(compare.ops[0], ast::CmpOp::Is | ast::CmpOp::IsNot)
-                {
-                    let value = match compare.operands.as_ref() {
-                        [ast::Expr::NoneLiteral(_), value] | [value, ast::Expr::NoneLiteral(_)] => {
-                            self.expr(value)?
-                        }
-                        [left, right] => {
-                            return self.nominal_identity(left, right, compare.ops[0], expression);
-                        }
-                        _ => unreachable!(),
-                    };
-                    return Ok(Self::identity_is_none(value, compare.ops[0]));
                 }
                 let mut values = Vec::new();
                 let mut exit = None;
@@ -9932,8 +9937,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::WeakProxy)) => {
                 return self.weak_proxy(call);
             }
-            Some(Binding::Intrinsic(Intrinsic::UnicodeEastAsianWidth)) => {
-                return self.unicode_east_asian_width(call);
+            Some(Binding::Intrinsic(Intrinsic::UnicodeProperty(property))) => {
+                return self.unicode_character_property(call, property);
             }
             Some(Binding::Intrinsic(Intrinsic::UnicodeNormalize { check })) => {
                 return self.unicode_normalize(call, check);
@@ -10066,6 +10071,18 @@ impl<'a> Checker<'a> {
                 name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
             ))) => return self.base85_encode(call, name),
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("operator.is_" | "operator.is_not"),
+            ))) => {
+                if let Some((left, op, right)) = self.operator_identity_call(call, name) {
+                    return self.identity_comparison(left, right, op, call);
+                }
+                return Err(error(
+                    self.source,
+                    call,
+                    "checked operator identity functions require two positional arguments",
+                ));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("math.fabs" | "math.log1p"),
             ))) if call.arguments.keywords.is_empty()
                 && let [arg] = call.arguments.args.as_ref() =>
@@ -10085,6 +10102,30 @@ impl<'a> Checker<'a> {
                 let value = self.expr(arg)?;
                 return stdlib::unary_float_builtin(builtin, value)
                     .ok_or_else(|| self.scoped_builtin_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::OperatorNot)) => {
+                if let [arg] = call.arguments.args.as_ref()
+                    && call.arguments.keywords.is_empty()
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "_operator",
+                        "not_",
+                    )
+                {
+                    // A function argument is evaluated as a value before its truth is tested.
+                    let value = self.expr(arg)?;
+                    let truth = self.test_truth(value, arg)?;
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Not(Box::new(truth)),
+                    });
+                }
+                return Err(error(
+                    self.source,
+                    call,
+                    "checked operator.not_ requires a resolved call with one positional argument",
+                ));
             }
             Some(Binding::Intrinsic(Intrinsic::MathPerm)) => return self.math_perm(call),
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
@@ -12348,10 +12389,10 @@ impl<'a> Checker<'a> {
                 );
             }
             "id" if args.len() == 1
-                && args[0].ty == Type::Hash
+                && matches!(args[0].ty, Type::Hash | Type::VarTuple(_))
                 && self.unshadowed_builtin(&call.func, "id") =>
             {
-                (Builtin::HashIdentity, Type::Int)
+                (Builtin::PointerIdentity, Type::Int)
             }
             "id" if args.len() == 1
                 && !self.names.contains_key("id")
@@ -12439,11 +12480,26 @@ impl<'a> Checker<'a> {
                 return Ok(Expr::sequence_len(args));
             }
             "print"
-                if args.len() == 1
-                    && matches!(
-                        args[0].ty,
-                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes | Type::None
-                    ) =>
+                if !args.is_empty()
+                    && (args.len() == 1 || call.arguments.keywords.is_empty())
+                    && args.iter().all(|arg| {
+                        let scalar = |ty| {
+                            matches!(
+                                ty,
+                                Type::Int
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Str
+                                    | Type::Bytes
+                                    | Type::None
+                            )
+                        };
+                        scalar(arg.ty)
+                            || self
+                                .types
+                                .members(arg.ty)
+                                .is_some_and(|members| members.into_iter().all(scalar))
+                    }) =>
             {
                 (Builtin::Print, Type::None)
             }

@@ -249,13 +249,12 @@ pub(crate) fn take_tls_stream(socket: &Object, server: bool) -> Result<(crate::O
         let nonblocking = flags & libc::O_NONBLOCK != 0;
         let supported = match s.timeout_ns {
             -1 => !nonblocking,
-            0 => false,
             _ => connected && nonblocking,
         };
         if !supported {
             return Err(Error::new(
                 Kind::NotImplementedError,
-                "TLS requires a blocking socket or a connected socket with a positive timeout",
+                "TLS requires a blocking socket or a connected socket in the requested timeout mode",
             ));
         }
         let transport = Socket {
@@ -439,17 +438,24 @@ socket_constants! {
     imre_socket_default_backlog = if libc::SOMAXCONN < 128 { libc::SOMAXCONN } else { 128 },
 }
 
-fn setopt(fd: RawFd, level: i32, name: i32, value: i32) -> io::Result<()> {
-    // SAFETY: the kernel reads exactly one initialized c_int from value.
-    checked(unsafe {
-        libc::setsockopt(
-            fd,
-            level,
-            name,
-            (&raw const value).cast(),
-            size_of_val(&value) as _,
-        )
-    })?;
+pub(crate) enum SocketOption<'a> {
+    Integer(i32),
+    Buffer(&'a [u8]),
+    Null(libc::socklen_t),
+}
+
+pub(crate) fn set_option(fd: RawFd, level: i32, name: i32, value: SocketOption<'_>) -> Result<()> {
+    let (data, len) = match &value {
+        SocketOption::Integer(n) => (ptr::from_ref(n).cast(), size_of_val(n) as _),
+        SocketOption::Buffer(bytes) => {
+            let len = libc::socklen_t::try_from(bytes.len())
+                .map_err(|_| Error::new(Kind::OverflowError, "setsockopt option too large"))?;
+            (bytes.as_ptr().cast(), len)
+        }
+        SocketOption::Null(len) => (ptr::null(), *len),
+    };
+    // SAFETY: data is either null or points to len readable bytes throughout the syscall.
+    checked(unsafe { libc::setsockopt(fd, level, name, data, len) }).map_err(errno_error)?;
     Ok(())
 }
 
@@ -483,7 +489,12 @@ fn handle_owned(
     proto: i32,
 ) -> Result<crate::ObjectOwner> {
     #[cfg(target_vendor = "apple")]
-    setopt(fd.as_raw_fd(), libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1).map_err(errno_error)?;
+    set_option(
+        fd.as_raw_fd(),
+        libc::SOL_SOCKET,
+        libc::SO_NOSIGPIPE,
+        SocketOption::Integer(1),
+    )?;
     let socket = socket_state(family, kind, proto, blocking)?;
     state(&socket, |s| s.fd = fd.into_raw_fd());
     Ok(socket)
@@ -577,13 +588,16 @@ pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwne
     let family = if family == -1 { libc::AF_INET } else { family };
     let (flags, kind, blocking) = creation_type(if ty == -1 { libc::SOCK_STREAM } else { ty });
     let proto = if proto == -1 { 0 } else { proto };
-    if !matches!(family, libc::AF_INET | libc::AF_INET6 | libc::AF_UNIX)
-        || !matches!(kind, libc::SOCK_STREAM | libc::SOCK_DGRAM)
-    {
-        return Err(Error::new(
-            Kind::NotImplementedError,
-            "only Internet and Unix stream and datagram sockets are supported",
-        ));
+    match (family, kind) {
+        (libc::AF_INET | libc::AF_INET6 | libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_DGRAM) => {}
+        #[cfg(target_os = "linux")]
+        (libc::AF_UNIX, libc::SOCK_SEQPACKET) => {}
+        _ => {
+            return Err(Error::new(
+                Kind::NotImplementedError,
+                format!("unsupported socket family {family} and type {kind}"),
+            ));
+        }
     }
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
     let raw = checked(unsafe { libc::socket(family, flags, proto) }).map_err(errno_error)?;
@@ -2191,14 +2205,10 @@ pub extern "C" fn imre_socket_setsockopt(s: &Object, level: usize, name: usize, 
                     "a bytes-like object is required, not 'int'",
                 )
             })?;
-            set_option(s, level, name, value)
+            set_option(fd(s), level, name, SocketOption::Integer(value))
         })(),
         (),
     );
-}
-
-pub(crate) fn set_option(s: &Object, level: i32, name: i32, value: i32) -> Result<()> {
-    setopt(fd(s), level, name, value).map_err(errno_error)
 }
 
 #[unsafe(no_mangle)]
@@ -2210,21 +2220,14 @@ pub extern "C" fn imre_socket_setsockopt_bytes(
 ) {
     finish(
         (|| {
-            let len = libc::socklen_t::try_from(value.len())
-                .map_err(|_| Error::new(Kind::OverflowError, "setsockopt option too large"))?;
-            // SAFETY: the exact immutable bytes buffer remains rooted across setsockopt.
-            checked(unsafe {
-                libc::setsockopt(
-                    fd(s),
-                    c_int(level)?,
-                    c_int(name)?,
-                    value.as_ptr().cast(),
-                    len,
-                )
-            })
-            .map_err(errno_error)
+            set_option(
+                fd(s),
+                c_int(level)?,
+                c_int(name)?,
+                SocketOption::Buffer(value),
+            )
         })(),
-        0,
+        (),
     );
 }
 

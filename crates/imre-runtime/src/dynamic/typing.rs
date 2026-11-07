@@ -374,8 +374,9 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
             frozen: false,
         });
         ctx.bind(scope, "__protocol_attrs__", members);
-        let parameters = ctx.alloc(Value::Tuple(Vec::new()));
-        ctx.bind(scope, "__parameters__", parameters);
+        let empty = ctx.alloc(Value::Tuple(Vec::new()));
+        ctx.bind(scope, "__parameters__", empty);
+        ctx.bind(scope, "__slots__", empty);
         let abstract_methods = ctx.alloc(Value::Set {
             entries: Default::default(),
             frozen: true,
@@ -923,19 +924,14 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             ))
         }));
     }
-    if matches!(ctx.heap.get(target), Value::Class { .. } | Value::Native(_))
-        && ctx.class_attr(target, "__class_getitem__").is_some()
-    {
-        return Some(
-            ctx.lookup_attr(target, "__class_getitem__")
-                .and_then(|method| ctx.call(method, vec![index], vec![])),
-        );
-    }
+    let has_method = matches!(ctx.heap.get(target), Value::Class { .. } | Value::Native(_))
+        && ctx.class_attr(target, "__class_getitem__").is_some();
     let kind = match ctx.heap.get(target) {
+        _ if has_method => None,
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
-            AliasKind::Generic
+            Some(AliasKind::Generic)
         }
-        Value::Native(n) if n == "typing.Callable" => AliasKind::Callable,
+        Value::Native(n) if n == "typing.Callable" => Some(AliasKind::Callable),
         Value::Native(n)
             if matches!(
                 n.as_str(),
@@ -950,7 +946,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     | super::value::REGEX_MATCH_TYPE
             ) =>
         {
-            AliasKind::Builtin
+            Some(AliasKind::Builtin)
         }
         Value::Class { ancestors, .. } => {
             let mut supported = None;
@@ -967,9 +963,26 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     break;
                 }
             }
-            supported?
+            supported
         }
-        _ => return None,
+        _ => None,
+    };
+    let Some(kind) = kind else {
+        if !has_method && !ctx.is_type_object(target) {
+            return None;
+        }
+        return Some(match ctx.optional_attr(target, "__class_getitem__") {
+            Ok(None | Some(NONE)) => {
+                let name = ctx.class_name(target);
+                let name = &name[..name.floor_char_boundary(200)];
+                Err(Error::new(
+                    "TypeError",
+                    format!("type '{name}' is not subscriptable"),
+                ))
+            }
+            Ok(Some(method)) => ctx.call(method, vec![index], Vec::new()),
+            Err(error) => Err(error),
+        });
     };
     if kind == AliasKind::Builtin {
         return Some(Ok(builtin_alias(ctx, target, index)));
@@ -1037,7 +1050,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             }
         }
         if kind == AliasKind::Callable {
-            let origin = super::mapping_abc::class(ctx, "Callable")?;
+            let origin = super::mapping_abc::callable(ctx)?;
             return callable_alias(ctx, kind, origin, args);
         }
         alias(ctx, kind, target, args)
@@ -1096,7 +1109,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
         let base_tuple = bases;
         let bases = ctx.items(base_tuple)?;
-        let callable = super::mapping_abc::class(ctx, "Callable")?;
+        let callable = super::mapping_abc::callable(ctx)?;
         let generic = named_class(ctx, "typing", "Generic");
         let mut result = Vec::new();
         let mut has_callable = false;
@@ -1544,7 +1557,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ctx.text("Callable")
         }
         Value::Native(class) if class == "typing.Callable" && name == "__origin__" => {
-            return Some(super::mapping_abc::class(ctx, "Callable"));
+            return Some(super::mapping_abc::callable(ctx));
         }
         Value::Native(class)
             if name == "__reduce__"
@@ -2734,9 +2747,7 @@ pub(super) fn call(
             Value::GenericAlias(a) => a.origin,
             Value::Union(_) => super::union::class(ctx),
             Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(v) => *v,
-            Value::Native(name) if name == "typing.Callable" => {
-                super::mapping_abc::class(ctx, "Callable")?
-            }
+            Value::Native(name) if name == "typing.Callable" => super::mapping_abc::callable(ctx)?,
             _ => NONE,
         }),
         ("get_args", [v]) => Ok(match ctx.heap.get(*v) {
@@ -2865,8 +2876,8 @@ impl Context {
             .get("typing.Protocol")
             .is_some_and(|&protocol| {
                 class != protocol
-                    && self.subclass(class, protocol)
                     && self.class_attr(class, "_is_protocol") == Some(TRUE)
+                    && self.subclass(class, protocol)
             })
     }
 
@@ -2920,7 +2931,7 @@ impl Context {
                 "typing.Any cannot be used with isinstance()",
             )),
             Value::Native(name) if name == "typing.Callable" => {
-                let origin = super::mapping_abc::class(self, "Callable")?;
+                let origin = super::mapping_abc::callable(self)?;
                 self.python_instance_check(value, origin)
             }
             _ => {
@@ -3382,7 +3393,11 @@ impl Context {
         }
         // Calls already resolve __call__ through descriptor binding. Other dunder
         // names can replace special methods or class metadata with their own layout.
-        let ordinary_slots = layout != ClassLayout::Specialized
+        let module_layout = slot_names.as_deref().is_some_and(|slots| !slots.is_empty())
+            && ancestors.iter().any(
+                |&base| matches!(self.heap.get(base), Value::Native(name) if name == "module"),
+            );
+        let ordinary_slots = (layout != ClassLayout::Specialized || module_layout)
             && slot_names.as_deref().is_some_and(|names| {
                 names.iter().all(|name| {
                     !name.starts_with("__")
@@ -3403,12 +3418,7 @@ impl Context {
                 .as_ref()
                 .is_some_and(|ns| ns.member_slots);
         let members = if member_slots {
-            self.prepare_slot_members(
-                &name,
-                scope,
-                slot_names.as_deref().unwrap_or_default(),
-                ordinary_slots,
-            )?
+            self.prepare_slot_members(&name, scope, slot_names.as_deref().unwrap_or_default())?
         } else {
             Vec::new()
         };
@@ -3471,18 +3481,35 @@ impl Context {
         {
             self.bind_local(scope, "__hash__", NONE);
         }
+        let original_doc = self
+            .namespace_binding(self.scope_data(scope), "__doc__")
+            .and_then(|doc| self.string_storage(doc))
+            .filter(|&doc| {
+                self.str_value(doc)
+                    .is_ok_and(|text| text.contains(super::value::TEXT_SIGNATURE_END))
+            });
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         let namespace = fields.class_namespace.get_or_insert_with(Default::default);
+        namespace.original_doc = original_doc;
         namespace.member_slots = member_slots;
         namespace.slot_names = slot_names;
         namespace.bases = bases;
         namespace.supplied_bases = supplied_bases.filter(|&tuple| tuple != bases);
         namespace.mro = mro;
-        for field in members {
+        let module_start = if module_layout && !members.is_empty() {
+            Some(self.module_slot_start(class)?)
+        } else {
+            None
+        };
+        for (index, field) in members.into_iter().enumerate() {
             let name = self.text(&field);
-            let descriptor = self.alloc(Value::SlotMember { owner: class, name });
+            let descriptor = self.alloc(Value::SlotMember {
+                owner: class,
+                name,
+                module_offset: module_start.map(|start| start + index),
+            });
             self.bind_local(scope, &field, descriptor);
         }
         Ok(class)

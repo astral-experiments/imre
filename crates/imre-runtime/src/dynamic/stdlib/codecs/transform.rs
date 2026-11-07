@@ -136,13 +136,11 @@ pub(in crate::dynamic::stdlib) fn transform(
     let encoding = spelling(ctx, encoding, "utf-8")?;
     error_name(ctx, errors)?;
     let key = crate::objects::normalize_codec(&encoding)?;
-    let wide = FixedUnicode::encoding(&key);
-    let native = key == "raw_unicode_escape" || (name == "decode" && wide.is_some());
-    match lookup_transform(ctx, &encoding, native)? {
+    match lookup_transform(ctx, &encoding, key == "raw_unicode_escape")? {
         Some(entry) => apply(ctx, entry, name, input, &encoding, errors, false),
         None if name == "encode" => raw_unicode_escape::encode(ctx, input)
             .map_err(|error| codec_error(ctx, error, name, &encoding)),
-        None => native_decode(ctx, wide, input, errors),
+        None => native_decode(ctx, None, input, errors),
     }
 }
 
@@ -160,11 +158,7 @@ pub(in crate::dynamic) fn encode_text_object(
     let entry = if shortcut(&key) {
         None
     } else {
-        lookup_transform(
-            ctx,
-            &name,
-            raw_escape || FixedUnicode::encoding(&key).is_some(),
-        )?
+        lookup_transform(ctx, &name, raw_escape)?
     };
     let Some(entry) = entry else {
         if raw_escape {
@@ -190,7 +184,7 @@ pub(in crate::dynamic) fn encode_text_object(
     }
 }
 
-/// The default search provider implements wide and raw escape decoding without a CodecInfo.
+/// Decode a native scalar shortcut or the raw escape transform.
 fn native_decode(
     ctx: &mut Context,
     wide: Option<(FixedUnicode, bool)>,
@@ -226,9 +220,8 @@ pub(in crate::dynamic) fn decode_named(
         };
     }
     ctx.with_buffer_export(input, |ctx| {
-        let native = wide.is_some() || key == "raw_unicode_escape";
-        let Some(entry) = lookup_transform(ctx, &name, native)? else {
-            return native_decode(ctx, wide, input, errors);
+        let Some(entry) = lookup_transform(ctx, &name, key == "raw_unicode_escape")? else {
+            return native_decode(ctx, None, input, errors);
         };
         let storage = ctx.scalar_value(input);
         let view = if let Value::ByteArray(bytes) = ctx.heap.get(storage) {

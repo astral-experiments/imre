@@ -5,6 +5,7 @@ use super::builtins::bind;
 use super::value::{Error, Id, Result, Value};
 
 pub(super) const METHODS: &[&str] = &[
+    "__bool__",
     "__complex__",
     "__mul__",
     "__rmul__",

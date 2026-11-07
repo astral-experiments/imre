@@ -1,8 +1,33 @@
 use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a string; the optional doc argument can have any type.";
+pub(super) const METHODS: &[&str] = &[
+    "__new__",
+    "__repr__",
+    "__getattribute__",
+    "__init__",
+    "__dir__",
+];
 
 impl Context {
+    /// Publish the module type's own descriptors in type-dictionary order.
+    pub(super) fn install_module_namespace(&mut self, class: Id) {
+        let mut entries = Vec::new();
+        for &name in METHODS {
+            let key = self.heap.code_name(name);
+            entries.push((key, self.builtin(&format!("module.{name}"))));
+        }
+        let dictionary = self.readonly_member("module", "__dict__");
+        entries.push((self.heap.code_name("__dict__"), dictionary));
+        for name in ["__annotations__", "__annotate__"] {
+            let descriptor = self.alloc(Value::LayoutDescriptor(class, name));
+            entries.push((self.heap.code_name(name), descriptor));
+        }
+        entries.push((self.heap.code_name("__doc__"), self.text(DOC)));
+        let members = self.dict(entries);
+        self.native_type_dicts.insert(class, members);
+    }
+
     /// Copy live exports from a module in their original order. A failing lookup
     /// leaves earlier bindings visible, just like successive assignments.
     pub(super) fn import_star(&mut self, scope: Id, module: Id) -> Result<Id> {
@@ -107,6 +132,15 @@ impl Context {
         match self.default_get_attr(module, name) {
             Err(error) if self.is_attribute_error(&error) => {
                 let Some(hook) = self.scope_name(scope, "__getattr__") else {
+                    // ModuleType reports a failed descriptor lookup in the module's namespace.
+                    if let Value::Module {
+                        constructor: Some(class),
+                        ..
+                    } = *self.heap.get(module)
+                        && self.class_attr(class, name).is_some()
+                    {
+                        return Err(self.missing_module_attribute(scope, name));
+                    }
                     return Err(error);
                 };
                 let attribute = original.unwrap_or_else(|| self.text(name));
@@ -124,61 +158,29 @@ impl Context {
         scope: Id,
         name: &str,
     ) -> Result<Id> {
+        if name == "builtin_module_names" {
+            self.publish_builtin_module_names(scope)?;
+        }
         let field = self.scope_name(scope, name);
         if field.is_some() || self.class_attr(class, name).is_some() {
             return self.instance_attribute(module, class, field, name);
         }
         match name {
-            "__init__" | "__getattribute__" | "__dir__" | "__repr__" => {
-                let method = self.builtin(&format!("module.{name}"));
-                return self.bind_attribute(method, module, class);
-            }
             "__setattr__" | "__str__" => {
                 let method = self.builtin(&format!("object.{name}"));
                 return self.bind_attribute(method, module, class);
             }
             "__doc__" => return Ok(self.text(DOC)),
-            "__annotate__" => {
-                self.bind(scope, name, NONE);
-                return Ok(NONE);
-            }
-            "__annotations__" => {
-                let initializing = match self.scope_name(scope, "__spec__") {
-                    Some(spec) => match self.lookup_attr(spec, "_initializing") {
-                        Ok(flag) => self.truth(flag)?,
-                        Err(error) if self.is_attribute_error(&error) => false,
-                        Err(error) => return Err(error),
-                    },
-                    None => false,
-                };
-                let value = match self.scope_name(scope, "__annotate__") {
-                    Some(annotate) if self.callable(annotate) => {
-                        let format = self.int(1);
-                        let value = self.call(annotate, vec![format], Vec::new())?;
-                        if self.dict_storage(value).is_none() {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!(
-                                    "__annotate__ returned non-dict of type '{}'",
-                                    self.type_name(value)
-                                ),
-                            ));
-                        }
-                        value
-                    }
-                    _ => self.dict(Vec::new()),
-                };
-                if !initializing {
-                    self.bind(scope, name, value);
-                }
-                return Ok(value);
-            }
             _ => {}
         }
         match self.instance_attribute(module, class, None, name) {
             Err(error) if self.is_attribute_error(&error) => {}
             result => return result,
         }
+        Err(self.missing_module_attribute(scope, name))
+    }
+
+    fn missing_module_attribute(&self, scope: Id, name: &str) -> Error {
         let prefix = self
             .scope_name(scope, "__name__")
             .and_then(|value| self.str_value(value).ok());
@@ -186,21 +188,17 @@ impl Context {
             || "module".to_owned(),
             |prefix| format!("module '{prefix}'"),
         );
-        Err(Error::new(
+        Error::new(
             "AttributeError",
             format!("{kind} has no attribute '{name}'"),
-        ))
+        )
     }
 
     pub(super) fn module_dir(&mut self, module: Id, scope: Id) -> Result<Id> {
         if let Some(hook) = self.scope_name(scope, "__dir__") {
             return self.call(hook, vec![], vec![]);
         }
-        if let Value::Module {
-            name,
-            constructor: None,
-            ..
-        } = self.heap.get(module)
+        if let Value::Module { name, .. } = self.heap.get(module)
             && super::stdlib::has_lazy_attributes(name)
         {
             return Err(Error::new(
@@ -216,6 +214,45 @@ impl Context {
             .map(|&(key, _)| key)
             .collect();
         Ok(self.alloc(Value::List(keys)))
+    }
+
+    pub(super) fn module_annotation(&mut self, scope: Id, name: &str) -> Result<Id> {
+        if let Some(value) = self.scope_name(scope, name) {
+            return Ok(value);
+        }
+        if name == "__annotate__" {
+            self.bind(scope, name, NONE);
+            return Ok(NONE);
+        }
+        let initializing = match self.scope_name(scope, "__spec__") {
+            Some(spec) => match self.lookup_attr(spec, "_initializing") {
+                Ok(flag) => self.truth(flag)?,
+                Err(error) if self.is_attribute_error(&error) => false,
+                Err(error) => return Err(error),
+            },
+            None => false,
+        };
+        let value = match self.scope_name(scope, "__annotate__") {
+            Some(annotate) if self.callable(annotate) => {
+                let format = self.int(1);
+                let value = self.call(annotate, vec![format], Vec::new())?;
+                if self.dict_storage(value).is_none() {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "__annotate__ returned non-dict of type '{}'",
+                            self.type_name(value)
+                        ),
+                    ));
+                }
+                value
+            }
+            _ => self.dict(Vec::new()),
+        };
+        if !initializing {
+            self.bind(scope, name, value);
+        }
+        Ok(value)
     }
 
     /// Replacing the annotation function invalidates its cached dictionary, and vice versa.
@@ -251,11 +288,49 @@ impl Context {
         Ok(())
     }
 
+    /// Walk the effective storage bases past subclasses that add no fields.
+    /// ModuleType already provides both the dictionary and weak-reference storage.
+    pub(super) fn module_slot_layout(&mut self, mut class: Id) -> Result<(Id, Vec<String>)> {
+        let unknown = || Error::new("TypeError", "cannot determine module subclass layout");
+        while let Value::Class { name, scope, .. } = self.heap.get(class) {
+            let namespace = self
+                .scope_data(*scope)
+                .class_namespace
+                .as_ref()
+                .ok_or_else(unknown)?;
+            let mut slots: Vec<_> = namespace
+                .slot_names
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|slot| !matches!(slot.as_str(), "__dict__" | "__weakref__"))
+                .map(|slot| super::slot_member::slot_name(name, slot))
+                .collect();
+            let bases = self.class_bases_tuple(class).ok_or_else(unknown)?;
+            class = self.member_layout_base(&bases)?;
+            if !slots.is_empty() {
+                slots.sort_unstable();
+                return Ok((class, slots));
+            }
+        }
+        Ok((class, Vec::new()))
+    }
+
+    /// A new module member follows all named slots in the effective storage base.
+    pub(super) fn module_slot_start(&mut self, class: Id) -> Result<usize> {
+        let (mut base, _) = self.module_slot_layout(class)?;
+        let mut count = 0;
+        while matches!(self.heap.get(base), Value::Class { .. }) {
+            let (parent, slots) = self.module_slot_layout(base)?;
+            count += slots.len();
+            base = parent;
+        }
+        Ok(count)
+    }
+
     /// Allocate an empty module namespace without publishing the module in sys.modules.
     pub(super) fn allocate_module(&mut self, class: Id) -> Id {
         let scope = self.scope("", None);
-        self.builtin("module.__init__");
-        self.builtin("module.__repr__");
         self.alloc(Value::Module {
             name: String::new(),
             scope,
@@ -263,6 +338,7 @@ impl Context {
             initializing: false,
             constructor: Some(class),
             module_state: None,
+            module_slots: None,
         })
     }
 
@@ -281,18 +357,30 @@ impl Context {
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
-                format!("module.{name} requires a receiver"),
+                match name {
+                    "__new__" => "module.__new__(): not enough arguments".to_owned(),
+                    "__dir__" => "unbound method module.__dir__() needs an argument".to_owned(),
+                    _ => format!("descriptor '{name}' of 'module' object needs an argument"),
+                },
             ));
         };
+        if name != "__new__" && !matches!(self.heap.get(receiver), Value::Module { .. }) {
+            let kind = self.type_name(receiver);
+            let message = if name == "__dir__" {
+                format!(
+                    "descriptor '{name}' for 'module' objects doesn't apply to a '{kind}' object"
+                )
+            } else {
+                format!("descriptor '{name}' requires a 'module' object but received a '{kind}'")
+            };
+            return Err(Error::new("TypeError", message));
+        }
         if name == "__init__" {
             return self.init_module(receiver, rest, kwargs);
         }
         if matches!(name, "__dir__" | "__repr__" | "__getattribute__") {
             let Value::Module { scope, .. } = *self.heap.get(receiver) else {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("module.{name} requires a module object"),
-                ));
+                unreachable!("module receiver checked above")
             };
             if !kwargs.is_empty() || rest.len() != usize::from(name == "__getattribute__") {
                 return Err(Error::new(
@@ -323,14 +411,23 @@ impl Context {
             return self.module_dir(receiver, scope);
         }
         let class = self.builtin("module");
-        if matches!(name, "__new__") && self.subclass(receiver, class) {
-            Ok(self.allocate_module(receiver))
-        } else {
-            Err(Error::new(
+        if !self.is_type_object(receiver) {
+            return Err(Error::new(
                 "TypeError",
-                "module.__new__ requires a module subtype",
-            ))
+                format!(
+                    "module.__new__(X): X is not a type object ({})",
+                    self.type_name(receiver)
+                ),
+            ));
         }
+        if !self.subclass(receiver, class) {
+            let actual = self.class_name(receiver);
+            return Err(Error::new(
+                "TypeError",
+                format!("module.__new__({actual}): {actual} is not a subtype of module"),
+            ));
+        }
+        Ok(self.allocate_module(receiver))
     }
 
     pub(super) fn init_module(

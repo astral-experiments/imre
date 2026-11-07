@@ -98,3 +98,62 @@ def current():
     del child
     assert reference() is None
     print("module identity, live namespace, subclass, weak reference")
+
+    class Empty(ModuleType):
+        __slots__ = ()
+
+    class Fee(ModuleType):
+        __slots__ = ("fee",)
+
+    class Standard(Empty):
+        __slots__ = ("price",)
+
+    class Premium(Empty, Fee):
+        __slots__ = ("price",)
+
+    class Reordered(Fee, Empty):
+        __slots__ = ("price",)
+
+    assert type(ModuleType.__repr__).__name__ == "wrapper_descriptor"
+    assert type(ModuleType.__dir__).__name__ == "method_descriptor"
+    assert Standard.__base__ is Empty
+    assert Premium.__base__ is Reordered.__base__ is Fee
+    members = vars(ModuleType)
+    assert members["__new__"] is ModuleType.__new__
+    assert ModuleType.__new__.__self__ is ModuleType
+    assert members["__dict__"].__get__(plugin, ModuleType) is plugin.__dict__
+    annotations = members["__annotations__"]
+    annotations.__set__(plugin, {"price": int})
+    assert annotations.__get__(plugin, ModuleType) is plugin.__annotations__
+    annotations.__delete__(plugin)
+    assert plugin.__annotations__ == {}
+
+    quote = Standard("quote")
+    quote.price = 42
+    quote.__dict__["price"] = 99
+    assert Standard.price.__get__(quote, Standard) == 42
+    try:
+        quote.__class__ = Premium
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted an additional inherited fee slot")
+    assert type(quote) is Standard and quote.price == 42
+    del quote.price
+    try:
+        quote.price
+    except AttributeError as error:
+        assert str(error) == "module 'quote' has no attribute 'price'"
+    else:
+        raise AssertionError("exposed the dictionary shadow after deleting the slot")
+
+
+    wide = Premium("wide")
+    wide.price, wide.fee = 42, 13
+    assert "price" not in wide.__dict__ and "fee" not in wide.__dict__
+    namespace = wide.__dict__
+    ref = _weakref.ref(wide)
+    for target in (Reordered, Premium):
+        wide.__class__ = target
+        assert type(wide) is target and wide.__dict__ is namespace and ref() is wide
+        assert (wide.price, wide.fee) == (42, 13)

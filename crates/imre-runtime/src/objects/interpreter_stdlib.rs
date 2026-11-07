@@ -17,7 +17,8 @@ pub(crate) struct Uname {
     pub(crate) machine: String,
 }
 
-pub(crate) fn uname() -> io::Result<Uname> {
+/// Read all five public utsname fields from one kernel snapshot before decoding them.
+pub(crate) fn with_uname_fields<T>(decode: impl FnOnce([&[u8]; 5]) -> T) -> io::Result<T> {
     let mut output = MaybeUninit::uninit();
     // SAFETY: uname initializes every utsname field before returning success.
     if unsafe { libc::uname(output.as_mut_ptr()) } != 0 {
@@ -25,18 +26,51 @@ pub(crate) fn uname() -> io::Result<Uname> {
     }
     // SAFETY: uname succeeded and returned null-terminated field arrays.
     let output = unsafe { output.assume_init() };
-    let field = |bytes: &[libc::c_char]| {
-        // SAFETY: All callers pass one of the null-terminated utsname fields above.
-        let bytes = unsafe { CStr::from_ptr(bytes.as_ptr()) };
-        bytes.to_str().map(str::to_owned).map_err(io::Error::other)
-    };
+    let fields = [
+        &output.sysname,
+        &output.nodename,
+        &output.release,
+        &output.version,
+        &output.machine,
+    ]
+    .map(|field| {
+        // SAFETY: the field is null-terminated and output lives through decode.
+        unsafe { CStr::from_ptr(field.as_ptr()) }.to_bytes()
+    });
+    Ok(decode(fields))
+}
+
+pub(crate) fn uname() -> io::Result<Uname> {
+    let [system, node, release, version, machine] = with_uname_fields(|fields| {
+        fields.map(|bytes| {
+            std::str::from_utf8(bytes)
+                .map(str::to_owned)
+                .map_err(io::Error::other)
+        })
+    })?;
     Ok(Uname {
-        system: field(&output.sysname)?,
-        node: field(&output.nodename)?,
-        release: field(&output.release)?,
-        version: field(&output.version)?,
-        machine: field(&output.machine)?,
+        system: system?,
+        node: node?,
+        release: release?,
+        version: version?,
+        machine: machine?,
     })
+}
+
+/// Read the controlling terminal name using caller-owned storage.
+#[cfg(target_os = "linux")]
+#[inline(never)] // Keep the PATH_MAX buffer out of the generic builtin dispatcher.
+pub(crate) fn ctermid() -> io::Result<Vec<u8>> {
+    // PATH_MAX exceeds the required L_ctermid on Linux.
+    let mut buffer = [0; libc::PATH_MAX as usize];
+    // SAFETY: ctermid writes a null-terminated pathname into this buffer.
+    if unsafe { libc::ctermid(buffer.as_mut_ptr()) }.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: ctermid succeeded with our caller-owned buffer.
+    Ok(unsafe { CStr::from_ptr(buffer.as_ptr()) }
+        .to_bytes()
+        .to_vec())
 }
 
 /// The product version reported by platform.mac_ver differs from the Darwin kernel release.

@@ -33,4 +33,22 @@ plugin = importlib.import_module("price_plugin")
 assert plugin.quote(3) == 21
 assert BuiltinImporter.exec_module(plugin) is None
 assert plugin.executions == 1
+names = sys.builtin_module_names
+assert names is sys.__dict__["builtin_module_names"] and type(names) is tuple
+assert names == tuple(sorted(set(names)))
+assert name in names and "price_plugin" not in names
+for item in names:
+    assert BuiltinImporter.find_spec(item).origin == "built-in"
+
+sys.builtin_module_names = ("price_plugin",)
+try:
+    assert BuiltinImporter.find_spec(name).loader is BuiltinImporter
+    assert BuiltinImporter.find_spec("price_plugin") is None
+    assert BuiltinImporter.get_code("price_plugin") is None
+    assert BuiltinImporter.create_module(type(spec)("price_plugin", BuiltinImporter)) is None
+    del sys.builtin_module_names
+    assert not hasattr(sys, "builtin_module_names")
+finally:
+    sys.builtin_module_names = names
+
 print("builtin and source imports")

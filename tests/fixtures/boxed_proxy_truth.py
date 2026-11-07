@@ -2,6 +2,7 @@
 
 import functools
 from functools import Placeholder, partial
+from operator import not_
 
 
 def current():
@@ -20,6 +21,29 @@ def current():
     class Broken:
         def __bool__(self):
             raise ValueError("truth failed")
+
+    import _operator
+    import operator
+
+    assert operator.__not__ is not_ is _operator.not_
+    assert not hasattr(_operator, "__not__")
+
+    class MissingTruth:
+        def __get__(self, obj, owner):
+            raise AttributeError("truth unavailable")
+
+    class Meta(type):
+        __bool__ = MissingTruth()
+
+        def __len__(cls):
+            return -1
+
+    class Flag(metaclass=Meta):
+        pass
+
+    # nb_bool tests the fallback result itself when the descriptor cannot bind.
+    assert not_(Flag) is (not Flag) is False
+    assert list(map(not_, [Short(), Precise()])) == [True, False]
 
     class Index:
         def __index__(self):

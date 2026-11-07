@@ -2,6 +2,7 @@
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
 pub(crate) use stdlib::hashlib::digest::State as DigestState;
+pub(crate) use stdlib::provider_available;
 
 mod abstract_class;
 mod allocation_traces;
@@ -180,6 +181,7 @@ pub(crate) struct Context {
     codec_entries: stdlib::codecs::Registry,
     warning_state: Option<stdlib::warnings_accel::State>,
     frozen_override: i32,
+    pending_builtin_names_scope: Option<Id>,
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
     import_missing: Id,
@@ -434,6 +436,7 @@ impl Context {
             | ("float", Value::Float(_))
             | ("filter", Value::Filter { .. })
             | ("mappingproxy", Value::MappingProxy(_))
+            | ("socket.socket", Value::Socket(_))
             | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
@@ -1757,7 +1760,21 @@ impl Context {
         }
         let required = count - usize::from(star.is_some());
         let prefix = star.unwrap_or(count);
-        let iter = self.iterator(value)?;
+        let iter = self.iterator(value).map_err(|error| {
+            // __iter__ may have changed the type's slots before raising.
+            if self.is_builtin_error(&error, "TypeError")
+                && !self.has_iter_slot(value)
+                && !self.is_sequence(value)
+            {
+                let name = stdlib::diagnostic_type_name(self, value);
+                let name = &name[..name.floor_char_boundary(200)];
+                return Error::new(
+                    "TypeError",
+                    format!("cannot unpack non-iterable {name} object"),
+                );
+            }
+            error
+        })?;
         let mut unpacked = Vec::new();
         unpacked
             .try_reserve_exact(count)
@@ -1871,6 +1888,40 @@ impl Context {
             return Ok(self.alloc(Value::Tuple(items)));
         }
         Ok(buffer)
+    }
+
+    /// Test tp_iter without binding a descriptor, including a declaration set to None.
+    fn has_iter_slot(&self, value: Id) -> bool {
+        let native = |kind: &str| {
+            abstract_class::native_collection_method(kind, "__iter__")
+                || matches!(
+                    kind,
+                    "array.array"
+                        | "_contextvars.Context"
+                        | "typing._CallableType"
+                        | "enum.EnumType"
+                )
+        };
+        if let Some(class) = self.heap.get(value).instance_class() {
+            return self
+                .find_in_mro(class, |base| {
+                    (self.own_class_attr(base, "__iter__").is_some()
+                        || matches!(self.heap.get(base), Value::Native(kind) if native(kind)))
+                    .then_some(())
+                })
+                .is_some();
+        }
+        self.is_native_iterator(value)
+            || self.heap.get(value).is_weak_proxy()
+            || matches!(
+                self.heap.get(value),
+                Value::GenericAlias(_)
+                    | Value::TypeAlias { .. }
+                    | Value::TypeVarTuple { .. }
+                    | Value::Template { .. }
+                    | Value::NamedTuple { .. }
+            )
+            || self.builtin_type_name(value).is_some_and(native)
     }
 
     /// Check the Python sequence protocol without consuming iterators.
@@ -2173,7 +2224,8 @@ impl Context {
         if let Some(namespace) = scope.binding_namespace(name) {
             return self.dict_named_item(namespace, name);
         }
-        let bucket = name.len() ^ usize::from(name.as_bytes().first().copied().unwrap_or(0));
+        let middle = name.as_bytes().get(name.len() / 2).copied().unwrap_or(0);
+        let bucket = name.len() ^ usize::from(middle);
         let slot = &self.scope_name_slots[bucket % self.scope_name_slots.len()];
         if let Some((key, value)) = scope.names.get_index(slot.get())
             && key == name
@@ -2397,9 +2449,14 @@ impl Context {
         }))
     }
 
-    /// Materialize once and keep that exact dict as the module's binding storage.
     fn module_globals(&mut self, scope: Id) -> Result<Id> {
         let scope = self.root_scope(scope);
+        self.publish_builtin_module_names(scope)?;
+        self.module_globals_storage(scope)
+    }
+
+    /// Materialize the live binding dictionary without exposing it to Python.
+    fn module_globals_storage(&mut self, scope: Id) -> Result<Id> {
         self.check_thread_reporting_namespace(scope)?;
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
@@ -2719,9 +2776,16 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if self.is_type_object(value) {
+            self.heap.register_native_type(value);
+        }
         if name == "object" {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
             self.builtins.insert("object.__class__".into(), descriptor);
+        } else if name == "type" {
+            let descriptor = self.alloc(Value::LayoutDescriptor(value, "__text_signature__"));
+            self.builtins
+                .insert("type.__text_signature__".into(), descriptor);
         }
         if name == thread_handle::CLASS {
             thread_handle::install(self, value);
@@ -2962,6 +3026,10 @@ impl Context {
                 "__reduce_ex__",
             ],
             "dict" => builtins::DICT_METHODS,
+            "module" => {
+                self.install_module_namespace(value);
+                &[]
+            }
             "function" => &["__call__"],
             "builtin_function_or_method" | "method" => &["__reduce__"],
             defaultdict::CLASS => {
@@ -3719,6 +3787,7 @@ impl Context {
             origin,
             initializing: source.is_some(),
             module_state: None,
+            module_slots: None,
             constructor: None,
         });
         if name == "builtins" {
@@ -3766,6 +3835,11 @@ impl Context {
                 "makedev",
                 "mknod",
                 "pidfd_open",
+                "uname",
+                "uname_result",
+                "getloadavg",
+                "ctermid",
+                "sync",
                 "timerfd_create",
                 "timerfd_gettime",
                 "timerfd_gettime_ns",
@@ -3817,6 +3891,8 @@ impl Context {
             };
             #[cfg(target_os = "linux")]
             stdlib::posix_spawn::initialize(self, scope, posix)?;
+            #[cfg(target_os = "linux")]
+            stdlib::os::waitid::initialize(self, scope, posix)?;
             for attr in [
                 "fchdir",
                 "chown",
@@ -3858,6 +3934,10 @@ impl Context {
                 "getresgid",
                 #[cfg(target_os = "linux")]
                 "getresuid",
+                #[cfg(target_os = "linux")]
+                "setresgid",
+                #[cfg(target_os = "linux")]
+                "setresuid",
             ] {
                 let value = match posix {
                     Some(module) => match self.lookup_attr(module, attr) {
@@ -4185,6 +4265,15 @@ impl Context {
                 self.bind(scope, "devnull", devnull);
             }
             "random" if source.is_none() => stdlib::random::instance::install(self, scope)?,
+            "secrets" if source.is_none() => {
+                let random = self.module("random")?;
+                let class = self.lookup_attr(random, "SystemRandom")?;
+                let instance = self.call(class, Vec::new(), Vec::new())?;
+                let randbits = self.lookup_attr(instance, "getrandbits")?;
+                self.bind(scope, "SystemRandom", class);
+                self.bind(scope, "_sysrand", instance);
+                self.bind(scope, "randbits", randbits);
+            }
             "math" if source.is_none() => {
                 for (name, number) in [
                     ("pi", std::f64::consts::PI),
@@ -4440,6 +4529,10 @@ impl Context {
                     self.bind(scope, "modules", self.modules);
                     let version = stdlib::sys_version(self)?;
                     self.bind(scope, "version", version);
+                    if let Some(hexversion) = self.config["python_hexversion"].as_i64() {
+                        let value = self.int(hexversion);
+                        self.bind(scope, "hexversion", value);
+                    }
                     let names = self.alloc(Value::Set {
                         entries: Default::default(),
                         frozen: true,
@@ -4497,6 +4590,7 @@ impl Context {
                         self.heap.standard_outputs[usize::from(stderr)] = Some(stream);
                         if stderr {
                             self.threads.system_module = Some(module);
+                            self.pending_builtin_names_scope = Some(scope);
                         }
                     }
                 }
@@ -4672,7 +4766,11 @@ impl Context {
             {
                 // Keep the iterator state outside Python attribute lookup, even on subclasses.
                 let name = self.text("_batched_state");
-                let member = self.alloc(Value::SlotMember { owner, name });
+                let member = self.alloc(Value::SlotMember {
+                    owner,
+                    name,
+                    module_offset: None,
+                });
                 self.bind(scope, "_batched_state", member);
             }
             if name == "re"

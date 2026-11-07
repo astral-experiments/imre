@@ -53,6 +53,7 @@ enum Members<'a> {
 }
 
 impl<'a> Links<'a> {
+    #[inline(always)]
     fn from(value: &'a Value, dict_keys: bool) -> Self {
         let (direct, members) = match value {
             Value::Module { scope, .. } => ([Some(*scope), None], Members::None),
@@ -68,6 +69,9 @@ impl<'a> Links<'a> {
                 ([None; 2], Members::Sequence(inputs))
             }
             Value::Generator { iterators, .. } => ([None; 2], Members::Sequence(iterators)),
+            Value::Method {
+                receiver, callable, ..
+            } => ([Some(*receiver), Some(*callable)], Members::None),
             Value::LoopIterator { source, peeked } => ([Some(*source), *peeked], Members::None),
             Value::Instance {
                 fields,
@@ -120,6 +124,7 @@ impl<'a> Links<'a> {
             && (slot - self.direct.len()).is_multiple_of(2)
     }
 
+    #[inline(always)]
     fn get(&self, index: usize) -> Option<Id> {
         if let Some(&edge) = self.direct.get(index) {
             return edge;
@@ -367,10 +372,12 @@ impl Heap {
         {
             return;
         }
-        if !self.weak_roots.search_due() {
+        // A complete proof went stale. Look for the new path before backing off again.
+        let refresh = std::mem::take(&mut self.weak_roots.covers_endpoints);
+        if !refresh && !self.weak_roots.search_due() {
             return;
         }
-        let dict_keys = self.weak_roots.retry_with_keys;
+        let dict_keys = self.weak_roots.retry_with_keys || (refresh && self.weak_roots.dict_keys);
         if let Some(paths) = RootPaths::discover(
             self,
             globals,
@@ -477,6 +484,40 @@ impl Heap {
         false
     }
 
+    /// Learn a newly opened descriptor's path even when all ordinary finalizers are already rooted.
+    pub(in crate::dynamic) fn learn_descriptor_paths(
+        &mut self,
+        globals: [Id; 2],
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+    ) {
+        if self.descriptor_owners.is_empty() {
+            return;
+        }
+        let paths_valid = self.finalizer_roots.valid(self, globals);
+        let retained = self.temporary_mark();
+        if self
+            .descriptor_owners
+            .iter()
+            .any(|&owner| !self.root_keeps_owner(owner, paths_valid, streams, retained))
+        {
+            self.learn_finalizer_paths(globals, streams);
+        }
+    }
+
+    /// Recheck the cached path or a surviving frame binding for a registered owner.
+    fn root_keeps_owner(
+        &self,
+        owner: Id,
+        paths_valid: bool,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+        retained_current: usize,
+    ) -> bool {
+        (paths_valid && self.finalizer_roots.contains(owner))
+            || streams.is_some_and(|roots| roots.contains(&owner))
+            || self.operand_keeps_finalizer(owner, retained_current)
+            || self.bound_in_active_frame(owner)
+    }
+
     /// A pending discard preserves the active frame's operands below its mark. It must also
     /// preserve descriptor owners and weak references before a release can skip its sweep.
     pub(in crate::dynamic) fn cached_finalizers_kept(
@@ -499,10 +540,12 @@ impl Heap {
         let paths_valid = self.finalizer_roots.valid(self, globals);
         let kept = |owner: &Id| {
             except.contains(owner)
-                || (paths_valid && self.finalizer_roots.contains(*owner))
-                || streams.is_some_and(|roots| roots.contains(owner))
-                || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
-                || self.bound_in_active_frame(*owner)
+                || self.root_keeps_owner(
+                    *owner,
+                    paths_valid,
+                    streams,
+                    discard_from.unwrap_or(usize::MAX),
+                )
         };
         self.ordinary_finalizers.iter().all(&kept)
             && (discard_from.is_none()

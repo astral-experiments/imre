@@ -304,6 +304,34 @@ def current():
     class Box:
         pass
 
+    from types import SimpleNamespace
+    for value, name in ((Box(), 'Box'), (SimpleNamespace(), 'types.SimpleNamespace')):
+        try:
+            first, *rest = value
+        except TypeError as error:
+            assert str(error) == f'cannot unpack non-iterable {name} object'
+        else:
+            raise AssertionError('unpacked a plain instance')
+
+    calls = []
+    raised = TypeError('iterator binding failed')
+
+    class ReadIterator:
+        def __get__(self, instance, owner):
+            calls.append(instance)
+            raise raised
+
+    class Items:
+        __iter__ = ReadIterator()
+
+    items = Items()
+    try:
+        first, second = items
+    except TypeError as error:
+        assert error is raised and calls == [items]
+    else:
+        raise AssertionError('lost the iterator descriptor error')
+
     print(list(stored([(1, 2), (3, 4)], Box(), [0, 0])))
     print(list(chained([2, 3], Box())))
     print(list(unpacked([(1, [2, 3]), (4, (5, 6))])))

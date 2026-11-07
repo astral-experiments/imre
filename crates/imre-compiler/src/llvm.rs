@@ -505,15 +505,7 @@ fn emit_program(
             emitter.next_value = 0;
             emitter.next_label = 0;
         }
-        let frame = module
-            .source_frames
-            .get(id)
-            .and_then(Option::as_ref)
-            .or_else(|| {
-                repr_methods
-                    .contains(&id)
-                    .then_some(&ir::SourceFrame::Depth)
-            });
+        let frame = function_source_frame(module, &repr_methods, id);
         let params = emitter.function(function, entry, frame, &borrows[id])?;
         bodies.push((params, std::mem::take(&mut emitter.code)));
     }
@@ -604,7 +596,12 @@ fn emit_program(
         .unwrap();
     }
     json::schemas(module, &emitter.json_schema_roots, emitter.output);
-    record_layouts(module, emitter.output, &emitter.resource_types);
+    record_layouts(
+        module,
+        emitter.output,
+        &emitter.resource_types,
+        &repr_methods,
+    );
     callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
     if emitter.uses_byte_output_windows {
@@ -646,17 +643,14 @@ fn emit_program(
     for (id, bytes) in emitter.strings.iter().enumerate() {
         let name = emitter.output.string_name(id, "str");
         let owner = emitter.output.string_owner(id);
-        let output = emitter.output.global(
-            owner,
-            &name,
-            "unnamed_addr constant",
-            format_args!("[{} x i8]", bytes.len()),
+        emitter.output.byte_constant(owner, &name, bytes);
+    }
+    if let Some(sources) = &module.builtin_module_sources {
+        emitter.output.byte_constant(
+            emitter.output.entry,
+            "imre_builtin_sources",
+            sources.as_bytes(),
         );
-        output.push_str("c\"");
-        for byte in bytes {
-            write!(output, "\\{byte:02X}").unwrap();
-        }
-        output.push_str("\"\n");
     }
     emitter.enum_table();
     emitter.literal_pool();
@@ -670,7 +664,12 @@ fn emit_program(
         } else {
             (emitter.output.entry, "main".to_owned(), "i32")
         };
-        let attrs = if sanitize { " sanitize_address" } else { "" };
+        // Keep native function entries aligned to a cache line as the linked runtime changes.
+        let attrs = if sanitize {
+            " sanitize_address"
+        } else {
+            " align 64"
+        };
         emitter.output.common().push('\n');
         emitter
             .output
@@ -5095,12 +5094,7 @@ impl Emitter<'_, '_> {
             } => {
                 let method_name = self.byte_array(method.bytes().chain([0]).collect());
                 let kind_bytes = self.byte_array(kinds.clone());
-                let words = self.entry_alloca(format!("[{} x i64]", args.len()));
-                for (i, arg) in args.iter().enumerate() {
-                    let word = self.word(&arg.value);
-                    let slot = self.instruction(format!("getelementptr i64, ptr {words}, i64 {i}"));
-                    self.line(format!("store i64 {word}, ptr {slot}"));
-                }
+                let words = self.argument_words(&args);
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_extension_call(ptr @PyInit_{module}, ptr @{method_name}, ptr @{kind_bytes}, ptr {words}, i64 {}, i32 {result_kind})",
                     args.len()
@@ -6241,6 +6235,11 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::UnicodeCategoryOfOrdinal => self.call(
+                "imre_unicode_category_of_ordinal",
+                Type::Str,
+                &[&args[0].value],
+            ),
             Builtin::Random(op) => {
                 use crate::ir::RandomOperation::*;
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
@@ -6472,6 +6471,32 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::StringTupleContains => self.call(
+                "imre_str_tuple_contains",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::SysBuiltinModuleNames => {
+                let sources = self
+                    .module
+                    .builtin_module_sources
+                    .as_ref()
+                    .expect("inventory registration manifest");
+                let names = self.output.global_ref("imre_builtin_sources".to_owned());
+                let frozen = self
+                    .module
+                    .command_flags
+                    .as_ref()
+                    .is_none_or(|flags| flags.frozen_modules);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_sys_builtin_module_names(ptr @{names}, i64 {}, i1 {frozen})",
+                        sources.len()
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::SysStdlibModuleNames => {
                 let names = self.call("imre_sys_stdlib_module_names", returns, &[]);
                 self.check_error();
@@ -7255,7 +7280,9 @@ impl Emitter<'_, '_> {
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Hash, &[&args[0].value]),
             Builtin::HashName => self.call("imre_hash_name", Type::Str, &[&args[0].value]),
             Builtin::HashType => self.call("imre_hash_type", Type::BuiltinClass, &[&args[0].value]),
-            Builtin::HashIdentity => self.call("imre_hash_identity", Type::Int, &[&args[0].value]),
+            Builtin::PointerIdentity => {
+                self.call("imre_pointer_identity", Type::Int, &[&args[0].value])
+            }
             Builtin::HashBlockSize => {
                 self.call("imre_hash_block_size", Type::Int, &[&args[0].value])
             }
@@ -7529,8 +7556,14 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::ObjectIsExactTuple => {
-                self.call("imre_object_is_exact_tuple", returns, &[&args[0].value])
+            Builtin::IsExactTuple => {
+                let value = &args[0].value;
+                let function = if matches!(value.ty, Type::VarTuple(_) | Type::Tuple(_)) {
+                    "imre_record_is_exact_tuple"
+                } else {
+                    "imre_object_is_exact_tuple"
+                };
+                self.call(function, returns, &[value])
             }
             Builtin::ObjectTextProject => {
                 self.call("imre_object_exact_text", returns, &[&args[0].value])
@@ -9461,6 +9494,24 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_stderr_line", &[&args[0].value]);
                 none()
             }
+            Builtin::Print if args.len() > 1 || matches!(args[0].value.ty, Type::Union(_)) => {
+                let kinds = self.byte_array(
+                    args.iter()
+                        .map(|arg| {
+                            u8::try_from(representation_kind(arg.value.ty, &self.module.types))
+                                .expect(
+                                    "checked print operands have non-nullable scalar or union tags",
+                                )
+                        })
+                        .collect(),
+                );
+                let words = self.argument_words(&args);
+                self.checked_line(format!(
+                    "call void @imre_print_scalars(ptr @{kinds}, ptr {words}, i64 {})",
+                    args.len()
+                ));
+                none()
+            }
             Builtin::Print => {
                 match args[0].value.ty {
                     Type::Int => self.void_call("imre_print_int", &[&args[0].value]),
@@ -9487,6 +9538,17 @@ impl Emitter<'_, '_> {
             self.release(field);
         }
         result
+    }
+
+    /// Store evaluated operands in their native word representations for a borrowed ABI call.
+    fn argument_words(&mut self, args: &[Operand]) -> String {
+        let words = self.entry_alloca(format!("[{} x i64]", args.len()));
+        for (i, arg) in args.iter().enumerate() {
+            let word = self.word(&arg.value);
+            let slot = self.instruction(format!("getelementptr i64, ptr {words}, i64 {i}"));
+            self.line(format!("store i64 {word}, ptr {slot}"));
+        }
+        words
     }
 
     /// Read-only lookups never take ownership of the key, even on a miss in a
@@ -10327,6 +10389,23 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
     }
 }
 
+/// The frame emitted in the checked function body also counts indirect calls into it.
+fn function_source_frame<'a>(
+    module: &'a Module,
+    repr_methods: &HashSet<usize>,
+    id: usize,
+) -> Option<&'a ir::SourceFrame> {
+    module
+        .source_frames
+        .get(id)
+        .and_then(Option::as_ref)
+        .or_else(|| {
+            repr_methods
+                .contains(&id)
+                .then_some(&ir::SourceFrame::Depth)
+        })
+}
+
 fn record_name(ty: Type) -> String {
     match ty {
         Type::Range => "range_record".to_owned(),
@@ -10365,7 +10444,12 @@ fn storage_type(ty: Type) -> &'static str {
 /// Emits concrete field layouts and static destruction descriptors. No per-field
 /// runtime tag or presence bitmap is needed: owning fields reserve zero until
 /// initialization, and their exact kinds are shared by every instance.
-fn record_layouts(module: &Module, output: &mut Output, resource_types: &HashSet<Type>) {
+fn record_layouts(
+    module: &Module,
+    output: &mut Output,
+    resource_types: &HashSet<Type>,
+    repr_methods: &HashSet<usize>,
+) {
     // All record descriptors live in the entry unit, including references to
     // checked formatters defined in other source modules.
     output.current = output.entry;
@@ -10414,7 +10498,15 @@ fn record_layouts(module: &Module, output: &mut Output, resource_types: &HashSet
             "@kinds_{name} = private unnamed_addr constant [{kind_count} x i32] [{kinds}]"
         )
         .unwrap();
-        let semantics = records::semantics(module, ty, &fields, &name, output, resource_types);
+        let semantics = records::semantics(
+            module,
+            ty,
+            &fields,
+            &name,
+            output,
+            resource_types,
+            repr_methods,
+        );
         writeln!(
             output.global(
                 output.entry,
@@ -10860,7 +10952,7 @@ declare ptr @imre_sha1_new(ptr)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_name(ptr)
 declare ptr @imre_hash_type(ptr)
-declare i64 @imre_hash_identity(ptr)
+declare i64 @imre_pointer_identity(ptr)
 declare i64 @imre_hash_digest_size(ptr)
 declare i64 @imre_hash_block_size(ptr)
 declare ptr @imre_codec_lookup(ptr)
@@ -10973,6 +11065,7 @@ declare ptr @imre_contextvars_enter(ptr)
 declare void @imre_contextvars_leave(ptr, ptr)
 declare i64 @imre_contextvars_len(ptr)
 declare zeroext i1 @imre_object_is_exact_tuple(ptr)
+declare zeroext i1 @imre_record_is_exact_tuple(ptr)
 declare ptr @imre_object_exact_text(ptr)
 declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
@@ -11212,6 +11305,8 @@ declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
 declare ptr @imre_str_zfill(ptr, i64, i32)
 declare ptr @imre_unicode_east_asian_width(ptr)
+declare ptr @imre_unicode_category(ptr)
+declare ptr @imre_unicode_category_of_ordinal(i64)
 declare ptr @imre_unicode_normalize(ptr, ptr)
 declare ptr @imre_str_case_map(ptr, i32)
 declare ptr @imre_str_lower(ptr)
@@ -11328,6 +11423,8 @@ declare i64 @imre_sys_getrecursionlimit()
 declare void @imre_sys_setrecursionlimit(i64)
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
+declare i1 @imre_str_tuple_contains(ptr, ptr)
+declare ptr @imre_sys_builtin_module_names(ptr, i64, i1)
 declare ptr @imre_sys_stdlib_module_names()
 declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
@@ -11369,6 +11466,7 @@ declare i64 @imre_length_result(i64)
 declare i64 @imre_int_binary(i64, i64, i32)
 declare i32 @imre_int_compare(i64, i64)
 declare void @imre_print_int(i64)
+declare void @imre_print_scalars(ptr, ptr, i64)
 declare void @imre_print_bool(i32)
 declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)

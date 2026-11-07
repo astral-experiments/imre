@@ -12,6 +12,10 @@ def fields(pair: Pair) -> str:
     return pair.right
 
 
+def is_exact_tuple(values: tuple[str, ...]) -> bool:
+    return type(values) is tuple
+
+
 def make_pair(log: list[int]) -> tuple[int, str]:
     log.append(1)
     return 7, "seven"
@@ -50,6 +54,8 @@ print(repr(Single(1)))
 print(repr(Separators(1, 2, 3, 4, e=5)))
 print(isinstance(pair, Pair))
 print(isinstance(pair, Other))
+assert is_exact_tuple(("value",))
+assert not is_exact_tuple(Single("value"))
 print(isinstance(pair, tuple))
 print(pair == (7, "seven"))
 print((7, "seven") == pair)

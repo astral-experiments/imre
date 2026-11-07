@@ -40,6 +40,23 @@ else:
 assert partial.cert_store_stats()["x509"] == 1
 
 
+class DerExport:
+    def __buffer__(self, flags):
+        events.append(("get", flags))
+        self.view = memoryview(der)
+        return self.view
+
+    def __release_buffer__(self, view):
+        events.append(("release", view is self.view, exported.cert_store_stats()["x509"]))
+
+
+exported = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+events = []
+exported.load_verify_locations(cafile=cafile, cadata=DerExport())
+assert events == [("get", 0), ("release", True, 1)]
+assert exported.get_ca_certs(binary_form=True) == [ca_der]
+
+
 class LoadAuthority:
     def __bool__(self):
         partial.load_verify_locations(cafile=cafile)

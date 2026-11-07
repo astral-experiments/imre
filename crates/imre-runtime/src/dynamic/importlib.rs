@@ -291,15 +291,10 @@ impl Context {
 
     /// Bootstrap modules remain available even while ordinary frozen imports are disabled.
     pub(super) fn is_frozen(&self, name: &str) -> bool {
-        match name {
-            "_frozen_importlib" | "_frozen_importlib_external" => true,
-            "zipimport" => cfg!(unix),
-            name if imre_ast::providers::is_optional_frozen(name) => match self.frozen_override {
-                0 => self.config["frozen_modules"].as_bool().unwrap_or(true),
-                override_value => override_value > 0,
-            },
-            _ => false,
-        }
+        imre_ast::providers::is_frozen(name, || match self.frozen_override {
+            0 => self.config["frozen_modules"].as_bool().unwrap_or(true),
+            override_value => override_value > 0,
+        })
     }
 
     pub(super) fn imp_call(

@@ -58,6 +58,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "operator" if stdlib::operator::Operation::named(function).is_some() => {
             Some(("_operator", function))
         }
+        "unicodedata" if function == "category" => Some((module, function)),
         "time" if stdlib::time::is_function(function) => Some((module, function)),
         "sys"
             if matches!(
@@ -76,28 +77,17 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             if !function.contains('.')
                 && !matches!(
                     symbol,
-                    stdlib::os::scandir::ENTRY
-                        | stdlib::os::scandir::ITER
-                        | stdlib::fixed_structseq::SCHED_PARAM
-                        | stdlib::fixed_structseq::TIMES_RESULT
-                ) =>
+                    stdlib::os::scandir::ENTRY | stdlib::os::scandir::ITER
+                )
+                && stdlib::fixed_structseq::fixed_type(symbol).is_none() =>
         {
             Some((module, function))
         }
         "codecs"
             if matches!(
                 function,
-                "encode"
-                    | "decode"
-                    | "register"
-                    | "unregister"
-                    | "lookup"
-                    | "escape_decode"
-                    | "utf_16_ex_decode"
-                    | "utf_32_ex_decode"
-                    | "utf_16_encode"
-                    | "utf_32_encode"
-            ) =>
+                "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode"
+            ) || stdlib::codecs::WideFunction::named(function).is_some() =>
         {
             Some(("_codecs", function))
         }
@@ -385,6 +375,9 @@ impl Context {
                 self.classes
                     .get("typing._Final")
                     .and_then(|&base| self.own_class_attr(base, name))
+            }
+            Value::Native(kind) if kind == "type" && name == "__text_signature__" => {
+                self.builtins.get("type.__text_signature__").copied()
             }
             Value::Native(kind) if kind == "type" && name == "__prepare__" => {
                 self.builtins.get("type.__prepare__").copied()
@@ -1135,10 +1128,6 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
-                            | "module.__init__"
-                            | "module.__dir__"
-                            | "module.__repr__"
-                            | "module.__getattribute__"
                             | "object.__str__"
                             | "bytes.count"
                             | "bytes.decode"
@@ -1261,7 +1250,7 @@ impl Context {
             return Ok(false);
         }
         if matches!(self.heap.get(parent), Value::Native(name) if name == "typing.Callable") {
-            let origin = super::mapping_abc::class(self, "Callable")?;
+            let origin = super::mapping_abc::callable(self)?;
             // Unsubscripted typing aliases use their origins as the candidate class.
             let typing_instance = |name| {
                 self.module_value("typing", name)
@@ -1479,6 +1468,12 @@ impl Context {
     }
 
     pub(super) fn read_member(&mut self, owner: &str, field: &str, receiver: Id) -> Result<Id> {
+        if owner == "module"
+            && field == "__dict__"
+            && let Value::Module { scope, .. } = *self.heap.get(receiver)
+        {
+            return self.module_globals(scope);
+        }
         if owner == "BaseExceptionGroup"
             && let Value::Raised(error) = self.heap.get(receiver)
             && let Some([message, exceptions]) = error.group()
@@ -1622,33 +1617,12 @@ impl Context {
                     || (cfg!(target_os = "linux") && name == "select.epoll")
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
+                    || builtins::CORE_RUNTIME_TYPES.contains(&name.as_str())
                     || matches!(
                         name.as_str(),
-                        "NoneType"
-                            | "NotImplementedType"
-                            | "ellipsis"
-                            | "float"
-                            | "code"
-                            | "coroutine"
-                            | "async_generator"
-                            | "cell"
-                            | "function"
-                            | "module"
-                            | "method"
-                            | "builtin_function_or_method"
-                            | "method-wrapper"
-                            | "wrapper_descriptor"
-                            | "classmethod_descriptor"
-                            | "method_descriptor"
-                            | "getset_descriptor"
-                            | "member_descriptor"
-                            | "dict_keys"
-                            | "dict_items"
-                            | "dict_values"
-                            | "odict_keys"
+                        "odict_keys"
                             | "odict_items"
                             | "odict_values"
-                            | "mappingproxy"
                             | KEY_WRAPPER
                             | "functools._PlaceholderType"
                             | LRU_CACHE_CLASS
@@ -1703,8 +1677,6 @@ impl Context {
                             | value::TEMPLATE_TYPE
                             | value::TEMPLATE_ITER_TYPE
                             | value::INTERPOLATION_TYPE
-                            | "traceback"
-                            | "frame"
                             | "typing.TypeVar"
                             | "typing.ParamSpec"
                             | "typing.ParamSpecArgs"
@@ -2104,13 +2076,19 @@ impl Context {
             | Value::Class {
                 metaclass: Some(class),
                 ..
-            }
-            | Value::Module {
-                constructor: Some(class),
-                ..
             } => class,
             Value::Raised(ref error) if let Some(class) = error.class() => class,
+            Value::Module {
+                constructor: Some(class),
+                ..
+            } if matches!(self.heap.get(class), Value::Class { .. }) => class,
             Value::Module { scope, .. } => {
+                // Exact ModuleType has no data descriptors for ordinary names.
+                if !name.starts_with("__")
+                    && let Some(field) = self.scope_name(scope, name)
+                {
+                    return Ok(field);
+                }
                 return self.module_get_attribute(obj, scope, name, original);
             }
             Value::Super { .. } => return self.super_getattribute(obj, name),
@@ -2419,6 +2397,10 @@ impl Context {
                 metaclass: Some(meta),
                 ..
             } => self.class_attr(meta, name).map(|member| (meta, member)),
+            Value::Class { .. } if name == "__text_signature__" => {
+                let meta = self.builtin("type");
+                self.own_class_attr(meta, name).map(|member| (meta, member))
+            }
             _ => None,
         };
         if let Some((meta, member)) = metaclass_member
@@ -2876,16 +2858,20 @@ impl Context {
                 };
                 return Ok(self.alloc(Value::Int(bound)));
             }
-            Value::Native(ref class) if class == "module" => match name {
-                "__doc__" => return Ok(self.text(module_type::DOC)),
-                "__init__" | "__new__" | "__dir__" | "__repr__" | "__getattribute__" => {
-                    return Ok(self.builtin(&format!("module.{name}")));
+            Value::Native(ref class) if class == "module" => {
+                if let Some(member) = self.own_class_attr(obj, name) {
+                    return Ok(member);
                 }
-                "__name__" | "__qualname__" => return Ok(self.text("module")),
-                "__module__" => return Ok(self.text("builtins")),
-                _ => {}
-            },
-            Value::SlotMember { owner, name: field } => match name {
+                match name {
+                    "__base__" => return Ok(self.builtin("object")),
+                    "__name__" | "__qualname__" => return Ok(self.text("module")),
+                    "__module__" => return Ok(self.text("builtins")),
+                    _ => {}
+                }
+            }
+            Value::SlotMember {
+                owner, name: field, ..
+            } => match name {
                 "__name__" => return Ok(field),
                 "__objclass__" => return Ok(owner),
                 "__doc__" => return Ok(NONE),
@@ -2928,6 +2914,9 @@ impl Context {
             Value::LayoutDescriptor(owner, field) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text(field)),
+                "__doc__" if matches!(field, "__annotations__" | "__annotate__") => {
+                    return Ok(NONE);
+                }
                 "__doc__" => {
                     return Ok(self.text(match field {
                         "__dict__" => "dictionary for instance variables",
@@ -2981,9 +2970,28 @@ impl Context {
             }
             Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
+                    "__text_signature__"
+                        if matches!(symbol.as_str(), "operator.is_" | "operator.is_not") =>
+                    {
+                        return Ok(self.text("($module, a, b, /)"));
+                    }
+                    "__doc__" if symbol == "operator.is_" => {
+                        return Ok(self.text("Same as a is b."));
+                    }
+                    "__doc__" if symbol == "operator.is_not" => {
+                        return Ok(self.text("Same as a is not b."));
+                    }
                     "__text_signature__" if module == "time" => {
                         return Ok(stdlib::time::text_signature(function)
                             .map_or(NONE, |sig| self.text(sig)));
+                    }
+                    "__text_signature__" if symbol == "unicodedata.category" => {
+                        return Ok(self.text("($self, chr, /)"));
+                    }
+                    "__doc__" if symbol == "unicodedata.category" => {
+                        return Ok(self.text(
+                            "Returns the general category assigned to the character chr as string.",
+                        ));
                     }
                     "__self__" if module == "sys" => {
                         if let Some(original) = self.threads.system_module {
@@ -3032,6 +3040,12 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "_typing._idfunc" => {
                         return Ok(self.text("($module, x, /)"));
+                    }
+                    "__doc__" if symbol == "operator.not_" => {
+                        return Ok(self.text("Same as not a."));
+                    }
+                    "__text_signature__" if symbol == "operator.not_" => {
+                        return Ok(self.text("($module, a, /)"));
                     }
                     "__doc__" if symbol == "posix.getgrouplist" => {
                         return Ok(self.text("Returns a list of groups to which a user belongs.\n\n  user\n    username to lookup\n  group\n    base group id of the user"));
@@ -3171,6 +3185,51 @@ impl Context {
                     "__text_signature__" if symbol == "posix.sched_getscheduler" => {
                         return Ok(self.text("($module, pid, /)"));
                     }
+                    "__doc__" if symbol == "posix.waitid" => {
+                        return Ok(self.text(concat!(
+                            "Returns the result of waiting for a process or processes.\n\n",
+                            "  idtype\n    Must be one of be P_PID, P_PGID or P_ALL.\n",
+                            "  id\n    The id to wait on.\n",
+                            "  options\n    Constructed from the ORing of one or more of WEXITED, WSTOPPED\n",
+                            "    or WCONTINUED and additionally may be ORed with WNOHANG or WNOWAIT.\n\n",
+                            "Returns either waitid_result or None if WNOHANG is specified and there are\n",
+                            "no children in a waitable state."
+                        )));
+                    }
+                    "__text_signature__" if symbol == "posix.waitid" => {
+                        return Ok(self.text("($module, idtype, id, options, /)"));
+                    }
+                    "__doc__" if symbol == "posix.uname" => {
+                        return Ok(self.text(concat!(
+                            "Return an object identifying the current operating system.\n\n",
+                            "The object behaves like a named tuple with the following fields:\n",
+                            "  (sysname, nodename, release, version, machine)"
+                        )));
+                    }
+                    "__doc__" if symbol == "posix.getloadavg" => {
+                        return Ok(self.text(concat!(
+                            "Return average recent system load information.\n\n",
+                            "Return the number of processes in the system run queue averaged over\n",
+                            "the last 1, 5, and 15 minutes as a tuple of three floats.\n",
+                            "Raises OSError if the load average was unobtainable."
+                        )));
+                    }
+                    "__doc__" if symbol == "posix.ctermid" => {
+                        return Ok(self.text(
+                            "Return the name of the controlling terminal for this process.",
+                        ));
+                    }
+                    "__doc__" if symbol == "posix.sync" => {
+                        return Ok(self.text("Force write of everything to disk."));
+                    }
+                    "__text_signature__"
+                        if matches!(
+                            symbol.as_str(),
+                            "posix.uname" | "posix.getloadavg" | "posix.ctermid" | "posix.sync"
+                        ) =>
+                    {
+                        return Ok(self.text("($module, /)"));
+                    }
                     "__doc__" if symbol == "posix.getrandom" => {
                         return Ok(self.text("Obtain a series of random bytes."));
                     }
@@ -3262,6 +3321,22 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "posix.setreuid" => {
                         return Ok(self.text("($module, ruid, euid, /)"));
+                    }
+                    "__doc__" if symbol == "posix.setresgid" => {
+                        return Ok(self.text(
+                            "Set the current process's real, effective, and saved group ids.",
+                        ));
+                    }
+                    "__text_signature__" if symbol == "posix.setresgid" => {
+                        return Ok(self.text("($module, rgid, egid, sgid, /)"));
+                    }
+                    "__doc__" if symbol == "posix.setresuid" => {
+                        return Ok(self.text(
+                            "Set the current process's real, effective, and saved user ids.",
+                        ));
+                    }
+                    "__text_signature__" if symbol == "posix.setresuid" => {
+                        return Ok(self.text("($module, ruid, euid, suid, /)"));
                     }
                     "__doc__" if symbol == "posix.getresgid" => {
                         return Ok(self.text("Return a tuple of the current process's real, effective, and saved group ids."));
@@ -3410,6 +3485,15 @@ impl Context {
                 if class == "generator" && super::generator_protocol::generator_method(name) =>
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
+            }
+            Value::Native(ref class) if class == "type" && name == "__text_signature__" => {
+                return Ok(NONE);
+            }
+            Value::Native(ref class) if class == "object" && name == "__text_signature__" => {
+                return Ok(self.text("()"));
+            }
+            Value::Native(ref class) if class == "tuple" && name == "__text_signature__" => {
+                return Ok(self.text("(iterable=(), /)"));
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "classmethod" | "staticmethod")
@@ -5025,10 +5109,16 @@ impl Context {
                 constructor,
                 ..
             } => {
+                if let Some(class) = constructor
+                    && matches!(self.heap.get(class), Value::Class { .. })
+                    && self.class_attr(class, name).is_some()
+                {
+                    return self.module_instance_attribute(obj, class, scope, name);
+                }
                 if name == "__dict__" {
                     return self.module_globals(scope);
                 }
-                if constructor.is_none() && stdlib::has_lazy_attributes(module) {
+                if stdlib::has_lazy_attributes(module) {
                     if let Some(value) = self.scope_name(scope, name) {
                         return Ok(value);
                     }
@@ -5062,6 +5152,12 @@ impl Context {
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
                 }
+                if name == "__base__"
+                    && self.has_base(obj, "module")
+                    && let Some(bases) = self.class_bases_tuple(obj)
+                {
+                    return self.member_layout_base(&bases);
+                }
                 // type.__abstractmethods__ exposes only this class's stored value.
                 if name == "__abstractmethods__" && metaclass_member.is_none() {
                     return self
@@ -5078,6 +5174,13 @@ impl Context {
                     return Ok(self
                         .own_class_attr(obj, name)
                         .unwrap_or_else(|| self.heap.packed_tuple(Vec::new(), false)));
+                }
+                // A type's stored qualified name is metadata even if its str subclass is a descriptor.
+                if name == "__qualname__"
+                    && let Some(value) = self.own_class_attr(obj, name)
+                    && self.string_storage(value).is_some()
+                {
+                    return Ok(value);
                 }
                 if name == "__name__" {
                     let assigned = self
@@ -5661,6 +5764,13 @@ impl Context {
                 super::method_decorator::update_attribute(self, obj, dictionary, name, None)
             }
             Value::Module { scope, .. } => {
+                if name == "builtin_module_names" && self.pending_builtin_names_scope == Some(scope)
+                {
+                    self.pending_builtin_names_scope = None;
+                    if self.scope_name(scope, name).is_none() {
+                        return Ok(());
+                    }
+                }
                 self.update_module_annotations(scope, name, None)?;
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
@@ -5922,6 +6032,18 @@ impl Context {
             let owner = self.builtin("typing.TypeVar");
             return Ok(self.own_class_attr(owner, name));
         }
+        if name == "__text_signature__"
+            && matches!(
+                self.heap.get(obj),
+                Value::Class {
+                    metaclass: None,
+                    ..
+                }
+            )
+        {
+            let meta = self.builtin("type");
+            return Ok(self.own_class_attr(meta, name));
+        }
         let Some(member) = self.slot(obj, name) else {
             return Ok(None);
         };
@@ -6063,6 +6185,23 @@ impl Context {
         }
     }
 
+    /// Read the Argument Clinic header from the original doc using the current type name.
+    fn class_text_signature(&self, class: Id) -> Option<&str> {
+        let Value::Class { scope, .. } = *self.heap.get(class) else {
+            return None;
+        };
+        let doc = self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()?
+            .original_doc?;
+        let doc = self.str_value(doc).ok()?.split('\0').next()?;
+        let name = self.class_name(class).rsplit('.').next()?;
+        let signature = doc.strip_prefix(name)?;
+        let (header, _) = signature.split_once(value::TEXT_SIGNATURE_END)?;
+        (header.starts_with('(') && !header.contains("\n\n")).then(|| &signature[..=header.len()])
+    }
+
     pub(super) fn read_layout_descriptor(
         &mut self,
         owner: Id,
@@ -6070,7 +6209,23 @@ impl Context {
         receiver: Id,
     ) -> Result<Id> {
         match name {
+            "__annotations__" | "__annotate__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                let Value::Module { scope, .. } = *self.heap.get(receiver) else {
+                    return Err(self.missing_attribute(receiver, name));
+                };
+                self.module_annotation(scope, name)
+            }
             "__class__" => self.exact_type(receiver),
+            "__text_signature__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                // Native types publish their existing constructor metadata on the type itself.
+                if matches!(self.heap.get(receiver), Value::Native(_)) {
+                    return Ok(self.optional_attr(receiver, name)?.unwrap_or(NONE));
+                }
+                let text = self.class_text_signature(receiver).map(str::to_owned);
+                Ok(text.map_or(NONE, |text| self.text(text)))
+            }
             "__weakref__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 Ok(self
@@ -6108,6 +6263,13 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         match name {
+            "__text_signature__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                Err(Error::new(
+                    "AttributeError",
+                    "attribute '__text_signature__' of 'type' objects is not writable",
+                ))
+            }
             "__dict__" => {
                 let class = self.layout_receiver_class(owner, name, receiver)?;
                 if let Some((_, set)) = self.native_dictionary_getset(class) {
@@ -6175,6 +6337,20 @@ impl Context {
                         self.layout_owner_name(owner)
                     ),
                 ))
+            }
+            "__annotations__" | "__annotate__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                let Value::Module { scope, .. } = *self.heap.get(receiver) else {
+                    return Err(self.missing_attribute(receiver, name));
+                };
+                self.update_module_annotations(scope, name, value)?;
+                if let Some(value) = value {
+                    self.bind(scope, name, value);
+                } else {
+                    let key = self.text(name);
+                    self.remove_binding(scope, name, key)?;
+                }
+                Ok(())
             }
             "__class__" => self.assign_instance_class(receiver, value),
             _ => unreachable!(),
@@ -6249,18 +6425,42 @@ impl Context {
             let name = self.text("__class__");
             super::stdlib::audit::event(self, "object.__setattr__", &[receiver, name, target])?;
         }
-        let Value::Instance { class: source, .. } = *self.heap.get(receiver) else {
-            return Err(self.immutable_class_assignment(value));
+        let source = match *self.heap.get(receiver) {
+            Value::Instance { class, .. } => class,
+            Value::Module { constructor, .. } => {
+                constructor.unwrap_or_else(|| self.builtin("module"))
+            }
+            _ => return Err(self.immutable_class_assignment(value)),
         };
+        let module = self.builtin("module");
+        let module_pair = self.subclass(source, module) && self.subclass(target, module);
         let mutable_class = |class| {
             matches!(self.heap.get(class), Value::Class { scope, .. }
                 if self.scope_data(*scope).class_cell.is_some()
                     && !self.scope_data(*scope).class_namespace.as_ref().is_some_and(|ns| ns.immutable_type))
         };
-        if !mutable_class(source) || !mutable_class(target) {
+        if !module_pair && (!mutable_class(source) || !mutable_class(target)) {
             return Err(self.immutable_class_assignment(value));
         }
         if source == target {
+            return Ok(());
+        }
+        if matches!(self.heap.get(receiver), Value::Module { .. }) {
+            if !module_pair
+                || self.module_slot_layout(source)? != self.module_slot_layout(target)?
+            {
+                return Err(self.class_layout_mismatch(source, target));
+            }
+            let Value::Module {
+                constructor, name, ..
+            } = self.heap.get_mut(receiver)
+            else {
+                unreachable!()
+            };
+            // Imported base modules keep their native lookup. Independently constructed modules
+            // have no internal import name and continue to carry their constructor.
+            *constructor = (target != module || name.is_empty()).then_some(target);
+            self.finish_class_change(receiver, source, target);
             return Ok(());
         }
         let object = self.builtin("object");
@@ -6274,18 +6474,8 @@ impl Context {
         };
         let old = layout(source);
         let new = layout(target);
-        let differs = || {
-            Error::new(
-                "TypeError",
-                format!(
-                    "__class__ assignment: '{}' object layout differs from '{}'",
-                    self.class_name(target),
-                    self.class_name(source)
-                ),
-            )
-        };
         if old != new {
-            return Err(differs());
+            return Err(self.class_layout_mismatch(source, target));
         }
         let (allocator, dict, weak, member_slots) = old;
         if allocator != Some(object) || member_slots {
@@ -6304,7 +6494,7 @@ impl Context {
             ));
         };
         if source_base != target_base {
-            return Err(differs());
+            return Err(self.class_layout_mismatch(source, target));
         }
         // Inline ordinary fields are keyed by name. Both they and an exposed __dict__
         // keep their storage and identity when the source and target layouts agree.
@@ -6312,13 +6502,28 @@ impl Context {
             unreachable!()
         };
         *class = target;
+        self.finish_class_change(receiver, source, target);
+        Ok(())
+    }
+
+    fn class_layout_mismatch(&self, source: Id, target: Id) -> Error {
+        Error::new(
+            "TypeError",
+            format!(
+                "__class__ assignment: '{}' object layout differs from '{}'",
+                self.class_name(target),
+                self.class_name(source)
+            ),
+        )
+    }
+
+    fn finish_class_change(&mut self, receiver: Id, source: Id, target: Id) {
         self.heap.weak_edge_removed(source);
         if self.class_attr(target, "__del__").is_some() {
             self.heap.register_finalizer(receiver);
         } else if self.heap.is_pending_finalizer(receiver) {
             self.heap.take_finalizer(receiver, false);
         }
-        Ok(())
     }
 
     /// Reject changes through an immutable instance's object.__class__ descriptor.
@@ -6757,7 +6962,10 @@ impl Context {
         }
         if member.is_none()
             && self.exposes_object_class(obj, name)
-            && matches!(self.heap.get(obj), Value::Instance { .. })
+            && matches!(
+                self.heap.get(obj),
+                Value::Instance { .. } | Value::Module { .. }
+            )
         {
             return self.assign_instance_class(obj, Some(value));
         }
@@ -6833,13 +7041,12 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
-                constructor,
                 ..
             } => {
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
-                if constructor.is_none() && module == "sys" && name == "path" {
+                if module == "sys" && name == "path" {
                     self.sys_path = value;
                 }
                 let scope = *scope;
@@ -6924,11 +7131,9 @@ impl Context {
             Value::Native(name) => name != "typing.Any",
             Value::Class { .. } if self.itertools_layout(base).is_some() => true,
             // These bootstrapped classes inherit their allocator from the next base.
-            Value::Class { name, scope, .. } => {
-                let mapping_abc = super::mapping_abc::bootstrapped(name)
-                    && self.classes.get(&format!("collections.abc.{name}")) == Some(&base);
+            Value::Class { scope, .. } => {
                 self.scope_data(*scope).class_cell.is_none()
-                    && !mapping_abc
+                    && self.classes.get("collections.abc.Callable") != Some(&base)
                     && self.classes.get("typing.Generic") != Some(&base)
                     && self.classes.get("typing.Protocol") != Some(&base)
             }
@@ -8900,10 +9105,9 @@ impl Context {
         }
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && ((self.is_abc_metaclass(winner) && self.class_attr(winner, "__init__").is_some())
-                || self
-                    .class_attr(winner, "mro")
-                    .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
+            && (self
+                .class_attr(winner, "mro")
+                .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
                 || ["__getattr__", "__getattribute__"]
                     .iter()
                     .any(|name| self.slot(winner, name).is_some()))
@@ -9041,12 +9245,6 @@ impl Context {
                         .is_some_and(|hook| Some(&hook) != self.builtins.get("type.__prepare__")))
         });
         let prepared = if let Some(meta) = prepares {
-            if self.is_abc_metaclass(meta) {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "custom ABC metaclass namespace preparation is unsupported",
-                ));
-            }
             let bases = self.alloc(Value::Tuple(copy_ids(&bases)?));
             let mapping = self.prepare_class_dictionary(meta, class_name, bases, &keywords)?;
             Some((bases, mapping))
@@ -9387,7 +9585,16 @@ impl Context {
         if module == "_collections_abc"
             && matches!(
                 name.as_str(),
-                "Hashable" | "Awaitable" | "AsyncIterable" | "Buffer"
+                "Hashable"
+                    | "Awaitable"
+                    | "AsyncIterable"
+                    | "Buffer"
+                    | "Iterable"
+                    | "Sized"
+                    | "Container"
+                    | "Collection"
+                    | "Mapping"
+                    | "MutableMapping"
             )
         {
             self.classes

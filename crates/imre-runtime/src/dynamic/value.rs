@@ -925,6 +925,8 @@ impl fmt::Display for Error {
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
+pub(super) const TEXT_SIGNATURE_END: &str = ")\n--\n\n";
+
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
@@ -942,6 +944,8 @@ pub(super) struct ClassNamespace {
     pub defining_module: Option<Id>,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
     pub name_override: Option<Id>,
+    /// Original string storage for a possible Argument Clinic header, independent of later __doc__ writes.
+    pub original_doc: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     /// Slot replacement removed the original type's own instance layout descriptors.
@@ -1226,7 +1230,10 @@ pub(super) enum Value {
     #[cfg(unix)]
     TlsListener(crate::ObjectOwner),
     #[cfg(unix)]
-    TlsBioSession(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>),
+    TlsBioSession {
+        session: std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>,
+        server_hostname: Id,
+    },
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
@@ -1298,7 +1305,10 @@ pub(super) enum Value {
         initializing: bool,
         // Private state retained by this generation of a native module.
         module_state: Option<NativeModuleState>,
-        // Imported modules are resolved separately from independently constructed ones.
+        /// Named Python slots use offsets preserved by compatible module class changes.
+        module_slots: Option<Box<HashMap<usize, Id>>>,
+        // Concrete Python type. Imported base modules use None; a directly constructed
+        // module has an empty internal import name and always carries its constructor.
         constructor: Option<Id>,
     },
     Function {
@@ -1406,6 +1416,7 @@ pub(super) enum Value {
     SlotMember {
         owner: Id,
         name: Id,
+        module_offset: Option<usize>,
     },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
@@ -1668,7 +1679,7 @@ impl Value {
             #[cfg(unix)]
             Self::TlsListener(_) => "_imre_ssl.Listener",
             #[cfg(unix)]
-            Self::TlsBioSession(_) => "_imre_ssl.BioSession",
+            Self::TlsBioSession { .. } => "_imre_ssl.BioSession",
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
@@ -1819,6 +1830,7 @@ impl Value {
     pub(super) fn finalizer_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
         }
@@ -2072,6 +2084,7 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.supplied_bases);
                     visit.extend(class.name_override);
+                    visit.extend(class.original_doc);
                     visit.extend(class.annotation_dict_cell);
                     visit.extend(class.conditional_cell);
                     if let Some((fields, _)) = &class.annotation_scratch {
@@ -2098,9 +2111,13 @@ impl Value {
                 origin,
                 constructor,
                 module_state,
+                module_slots,
                 ..
             } => {
                 visit.push(*scope);
+                if let Some(slots) = module_slots {
+                    visit.extend(slots.values());
+                }
                 if let Some(state) = module_state {
                     state.references(visit);
                 }
@@ -2234,7 +2251,7 @@ impl Value {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);
             }
-            Self::SlotMember { owner, name } => visit.extend([*owner, *name]),
+            Self::SlotMember { owner, name, .. } => visit.extend([*owner, *name]),
             Self::Instance {
                 class,
                 fields,
@@ -2428,8 +2445,11 @@ impl Value {
             Self::MemoryBio(_)
             | Self::TlsContext(_)
             | Self::TlsSession(_)
-            | Self::TlsListener(_)
-            | Self::TlsBioSession(_) => {}
+            | Self::TlsListener(_) => {}
+            #[cfg(unix)]
+            Self::TlsBioSession {
+                server_hostname, ..
+            } => visit.push(*server_hostname),
             Self::ZstdDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::Bz2Decompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::LzmaDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
@@ -2490,11 +2510,15 @@ impl DictIterator {
         classes[usize::from(self.reverse)]
     }
 
-    pub(super) fn class(name: &str) -> Option<&'static str> {
+    pub(super) fn builtin_classes() -> impl Iterator<Item = &'static str> {
         Self::KEYS
             .into_iter()
             .chain(Self::VALUES)
             .chain(Self::ITEMS)
+    }
+
+    pub(super) fn class(name: &str) -> Option<&'static str> {
+        Self::builtin_classes()
             .chain([Self::ORDERED])
             .find(|&class| class == name)
     }
@@ -2909,6 +2933,7 @@ pub(super) type WeakCallbacks = Vec<(Id, Id)>;
 
 /// Nonzero incoming edges identify unreachable cycles and their descendants.
 /// The workspace is reserved before marking, then reused after callbacks.
+#[derive(Default)]
 struct CycleSet {
     incoming: Vec<usize>,
     work: Vec<usize>,
@@ -2917,19 +2942,22 @@ struct CycleSet {
 
 impl CycleSet {
     fn new(len: usize) -> Result<Self> {
-        let mut incoming = Vec::new();
-        let mut work = Vec::new();
-        incoming
+        let mut cycles = Self::default();
+        cycles.prepare(len)?;
+        Ok(cycles)
+    }
+
+    /// Reserve a cycle graph whose incoming counts have already returned to zero.
+    fn prepare(&mut self, len: usize) -> Result<()> {
+        self.incoming
+            .try_reserve_exact(len.saturating_sub(self.incoming.len()))
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.work.clear();
+        self.work
             .try_reserve_exact(len)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        work.try_reserve_exact(len)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        incoming.resize(len, 0);
-        Ok(Self {
-            incoming,
-            work,
-            cyclic_callbacks: 0,
-        })
+        self.incoming.resize(len, 0);
+        Ok(())
     }
 
     fn members(&self) -> impl Iterator<Item = Id> + '_ {
@@ -2964,6 +2992,7 @@ pub(super) struct Heap {
     linked_string_constants: HashMap<i64, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
     full_collection: Option<CycleSet>,
+    prompt_cycles: CycleSet,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
@@ -3191,6 +3220,7 @@ impl Heap {
             loading_linked_constant: false,
             gc_order: GcOrder::EMPTY,
             full_collection: None,
+            prompt_cycles: CycleSet::default(),
             linked_string_constants: HashMap::new(),
             short_bytes: HashMap::new(),
             interned: HashMap::new(),
@@ -4540,12 +4570,13 @@ impl Heap {
         Ok(live)
     }
 
-    fn immediate_bases(&self, class: Id) -> &[Id] {
+    pub(super) fn immediate_bases(&self, class: Id) -> &[Id] {
         let Value::Class {
             scope, ancestors, ..
         } = self.get(class)
         else {
-            unreachable!("class registry entry")
+            // Static types publish their native bases through the context.
+            return &[];
         };
         let Value::Scope(data) = self.get(*scope) else {
             unreachable!()
@@ -4558,6 +4589,14 @@ impl Heap {
             Value::Tuple(bases) => bases,
             _ => &[],
         }
+    }
+
+    pub(super) fn register_native_type(&mut self, class: Id) {
+        self.classes.push(class);
+    }
+
+    pub(super) fn registered_types(&self) -> &[Id] {
+        &self.classes
     }
 
     pub(super) fn immediate_subclasses(&self, class: Id) -> Vec<Id> {
@@ -4575,10 +4614,11 @@ impl Heap {
 
     /// Every live descendant, including unbound local classes, with parents before children.
     pub(super) fn class_hierarchy(&self, class: Id) -> Vec<Id> {
-        let mut affected = Vec::new();
+        // A resurrected owner is live even after its former parent's weak link expired.
+        let mut affected = vec![(0, class)];
         for &id in &self.classes {
             if let Value::Class { ancestors, .. } = self.get(id)
-                && (id == class || ancestors.contains(&class))
+                && ancestors.contains(&class)
             {
                 affected.push((ancestors.len(), id));
             }
@@ -5231,12 +5271,14 @@ impl Heap {
         self.mark_reference_roots(globals, None);
         let small = self.small_unreachable();
         let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
-        let Ok(mut cycles) = CycleSet::new(size) else {
+        let mut cycles = std::mem::take(&mut self.prompt_cycles);
+        if cycles.prepare(size).is_err() {
+            self.prompt_cycles = cycles;
             self.clear_marks();
             self.collect_next_statement = true;
             return None;
-        };
-        if let Some(slots) = small {
+        }
+        let cyclic = if let Some(slots) = small {
             self.mark_cycles(
                 &mut cycles,
                 |index| slots[index],
@@ -5245,10 +5287,15 @@ impl Heap {
                         .binary_search(&slot)
                         .expect("unmarked child is a candidate")
                 },
-            );
+            )
         } else {
-            self.mark_cycles(&mut cycles, std::convert::identity, std::convert::identity);
+            self.mark_cycles(&mut cycles, std::convert::identity, std::convert::identity)
+        };
+        // Peeling an acyclic graph has already cleared every incoming count.
+        if cyclic {
+            cycles.incoming.fill(0);
         }
+        self.prompt_cycles = cycles;
         self.sweep()
     }
 
@@ -5299,7 +5346,7 @@ impl Heap {
         cycles: &mut CycleSet,
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
-    ) {
+    ) -> bool {
         let (_, cyclic) = self.identify_indexed_cycles(cycles, &slot_at, index_of);
         if cyclic {
             for index in cycles.members() {
@@ -5312,6 +5359,7 @@ impl Heap {
                 });
             }
         }
+        cyclic
     }
 
     /// Test a single just-released strong edge. Other pending finalizers, roots and
@@ -5568,6 +5616,9 @@ impl Heap {
             self.gc_schedule.record_survivors(generation, survivors);
         }
         self.promote_generation(generation);
+        // The per-base subclass links are weak references too. A callback or a
+        // finalizer can ask for __subclasses__ before the isolated objects are swept.
+        self.classes.retain(|&id| cycles.incoming[id as usize] == 0);
         let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
@@ -5753,6 +5804,17 @@ impl Heap {
         cycles.incoming.clear();
         self.full_collection = Some(cycles);
         (count, callbacks)
+    }
+
+    /// The initial sweep has already released acyclic garbage. If no callbacks ran
+    /// and the isolate is empty, only the final sweep's byte-buffer budget reset remains.
+    pub(super) fn finish_empty_collection(&mut self) -> bool {
+        if self.full_collection_members().next().is_some() {
+            return false;
+        }
+        self.byte_buffer_allowance = BYTE_BUFFER_FLOOR;
+        self.end_full_collection();
+        true
     }
 
     pub(super) fn end_full_collection(&mut self) {
@@ -5988,6 +6050,25 @@ mod tests {
         heap.alloc(Value::Bytes(buffer));
         assert!(heap.take_finalizer_check());
         assert!(heap.take_sweep_request());
+    }
+
+    #[test]
+    fn an_empty_generation_resets_the_retained_byte_budget() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        ctx.collect_generation(2).unwrap();
+
+        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        buffer.extend_from_slice(b"retained");
+        let owner = ctx.heap.alloc(Value::Bytes(buffer));
+        ctx.heap.keep(owner);
+        assert!(ctx.heap.take_sweep_request());
+        assert_eq!(ctx.collect_generation(2).unwrap(), 0);
+        assert!(matches!(ctx.heap.get(owner), Value::Bytes(bytes) if bytes == b"retained"));
+
+        let mut next = Vec::with_capacity(BYTE_BUFFER_FLOOR);
+        next.extend_from_slice(b"again");
+        ctx.heap.alloc(Value::Bytes(next));
+        assert!(ctx.heap.take_sweep_request());
     }
 
     #[test]
@@ -6242,6 +6323,7 @@ mod tests {
             origin: None,
             initializing: false,
             module_state: None,
+            module_slots: None,
             constructor: None,
         });
         let modules = heap.alloc(Value::Dict(vec![(NONE, module)].into()));

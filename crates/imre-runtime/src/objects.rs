@@ -22,6 +22,7 @@ pub(crate) use binascii::{
 };
 pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
+pub(crate) mod builtin_module_names;
 mod builtins;
 mod bytes;
 pub(crate) use bytes::DecodeIssue;
@@ -139,7 +140,7 @@ pub(crate) use text::{
     python_istitle, python_isupper, split_parts,
 };
 mod typing;
-pub(crate) use text::{chr_scalar, short_string, ucd_character};
+pub(crate) use text::{chr_scalar, general_category, short_string, ucd_character};
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
@@ -309,6 +310,12 @@ enum Storage {
     PairTable(allocator_api2::boxed::Box<pair_tables::Table>),
     SortedSplitFields(Box<SortedSplitFields>),
     RegexPositionIterator(regexes::FindIter, usize),
+}
+
+/// Python identity for a rooted native object represented by its allocation address.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_pointer_identity(value: *const std::ffi::c_void) -> usize {
+    Int::from_usize(value.addr()).into_raw()
 }
 
 /// Borrows a rooted object for one nonreentrant operation.

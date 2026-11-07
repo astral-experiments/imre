@@ -234,7 +234,16 @@ def _spec_async_methods(spec, names):
     return result
 
 
+def _call_state_property(name):
+    return property(lambda self: getattr(self._node, name),
+                    lambda self, value: setattr(self._node, name, value))
+
+
 class NonCallableMock(_FixedMock):
+    called = _call_state_property("called")
+    call_count = _call_state_property("call_count")
+    call_args = _call_state_property("call_args")
+    call_args_list = _call_state_property("call_args_list")
     _mock_sealed = False
     _mock_methods = None
     _mock_strict = False
@@ -380,6 +389,18 @@ class NonCallableMock(_FixedMock):
             spec_part = f" {kind}={self._spec_class.__name__!r}"
         return f"<{type(self).__name__}{name_part}{spec_part} id='{id(self)}'>"
 
+    def __dir__(self):
+        if not FILTER_DIR:
+            return object.__dir__(self)
+        extras = self._mock_methods or []
+        from_type = dir(type(self))
+        from_dict = list(self.__dict__)
+        children = [name for name, value in self._mock_children.items() if value is not _deleted]
+        from_type = [name for name in from_type if not name.startswith("_")]
+        from_dict = [name for name in from_dict
+                     if not name.startswith("_") or "__%s__" % name[2:-2] == name]
+        return sorted(set(extras + from_type + from_dict + children))
+
     def __setattr__(self, name, value):
         if name in _unsupported_magics:
             raise AttributeError(f"Attempting to set unsupported magic method {name!r}.")
@@ -398,10 +419,8 @@ class NonCallableMock(_FixedMock):
             setattr(type(self), name, member)
             object.__setattr__(self, name, stored)
             return
-        if name in ("called", "call_count", "call_args", "call_args_list"):
-            setattr(self._node, name, value)
-            return
         if name not in ("_node", "_nodes", "_mock_sealed", "_mock_parent", "_mock_children",
+                        "called", "call_count", "call_args", "call_args_list",
                         "return_value", "side_effect", "mock_calls", "method_calls"):
             if self._mock_strict and name not in self._mock_methods and name not in self.__dict__:
                 raise AttributeError(f"Mock object has no attribute {name!r}")
@@ -452,8 +471,8 @@ class NonCallableMock(_FixedMock):
         return child
 
     def __getattr__(self, name):
-        if name in ("called", "call_count", "call_args", "call_args_list", "_mock_name"):
-            return getattr(self._node, name)
+        if name == "_mock_name":
+            return self._node._mock_name
         methods = self._mock_methods
         if methods is not None and name not in methods:
             raise AttributeError(f"Mock object has no attribute {name!r}")

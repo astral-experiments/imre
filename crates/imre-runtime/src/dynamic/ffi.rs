@@ -822,6 +822,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         codec_entries: Default::default(),
         warning_state: None,
         frozen_override: 0,
+        pending_builtin_names_scope: None,
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
@@ -864,6 +865,11 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
     // Resolving the handler after an allocation failure must not grow the builtin cache.
     ctx.builtin("MemoryError");
+    // These are already-present runtime types, including the types of singletons,
+    // code, functions and iterators. Publish them before user-defined subclasses.
+    for name in builtins::core_types() {
+        ctx.builtin(name);
+    }
     ctx
 }
 
@@ -1385,6 +1391,24 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
         .map_err(|error| Error::new("UnicodeError", error.to_string()))
         .and_then(|name| ctx.lookup(scope, name));
     finish(ctx, result)
+}
+
+/// Read a contiguous slice and attribute failures to the subscription expression.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_slice_at(
+    ctx: *mut Context,
+    receiver: Id,
+    start: Id,
+    stop: Id,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: generated native code owns its context and supplies a static span or null.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.get_slice(receiver, start, stop);
+    finish_at(ctx, result, span)
 }
 
 #[unsafe(no_mangle)]
@@ -1925,7 +1949,12 @@ impl Context {
         annotation_scope: bool,
     ) -> Id {
         let owner = self.scope_data(scope);
-        let class_cell = owner.class_cell;
+        // A borrowed method only owns its defining class if its code captures __class__.
+        let code_data = self.code_object(code);
+        let class_cell = owner.class_cell.filter(|_| {
+            !code_data.closure_supported
+                || code_data.freevars.iter().any(|name| name == "__class__")
+        });
         let scope = if owner.exec_locals.is_some()
             || ((owner.class_body.is_some() || owner.class_namespace.is_some())
                 && !annotation_scope)
@@ -2453,6 +2482,9 @@ impl Context {
         }
         let [modules, reference] = self.finalizer_path_roots();
         self.heap.learn_weak_roots(modules, reference);
+        let streams = super::stdlib::io::rooted_standard_streams(self);
+        self.heap
+            .learn_descriptor_paths([modules, reference], streams.as_ref());
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.
@@ -2464,8 +2496,9 @@ impl Context {
         let mark = self.heap.temporary_mark();
         let (heap, roots) = self.heap_and_roots();
         let callbacks = heap.begin_collection(roots, generation)?;
-        let check_older_owners = generation < 2
-            && (!callbacks.is_empty() || self.heap.full_collection_members().next().is_some());
+        if callbacks.is_empty() && self.heap.finish_empty_collection() {
+            return Ok(0);
+        }
         let mut released = 0;
         if !callbacks.is_empty() {
             self.run_weak_callbacks(callbacks.iter().copied());
@@ -2485,7 +2518,7 @@ impl Context {
         if let Some(callbacks) = callbacks {
             self.run_weak_callbacks(callbacks);
         }
-        if check_older_owners {
+        if generation < 2 {
             // Even a resurrected cycle can release its last edge to an older acyclic value.
             self.collect_unreachable();
         }

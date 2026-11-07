@@ -161,9 +161,16 @@ impl CompileOptions {
         module_root: Option<&Path>,
         filesystem: watch::FileSystem<'_>,
         import_failure: &mut Option<modules::EntryImportFailure>,
+        site_wheels: &mut modules::SiteWheels,
     ) -> Result<modules::SourceGraph, String> {
         if let Some(command) = &self.command {
-            return modules::SourceGraph::command(command, self, filesystem, import_failure);
+            return modules::SourceGraph::command(
+                command,
+                self,
+                filesystem,
+                import_failure,
+                site_wheels,
+            );
         }
         if let Some((flags, executable)) = &self.script_startup {
             return modules::SourceGraph::script(
@@ -173,6 +180,7 @@ impl CompileOptions {
                 self,
                 filesystem,
                 import_failure,
+                site_wheels,
             );
         }
         modules::SourceGraph::load_with(
@@ -188,7 +196,9 @@ impl CompileOptions {
 
 /// Checks source syntax, ty diagnostics, and Imre's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    let (module, _) = checked_lower(&mut modules::SourceGraph::single(source)?)?;
+    let mut graph = modules::SourceGraph::single(source)?;
+    graph.session.explicit_check = true;
+    let (module, _) = checked_lower(&mut graph)?;
     verify_after(&module, "lowering")
 }
 
@@ -221,9 +231,12 @@ pub struct SourceInputs {
     /// A native run of this image can request Python source modules at runtime.
     #[serde(default)]
     pub boxed_imports: bool,
+    /// Relink a wheel found during checked import resolution, including after object fallback.
+    #[serde(skip)]
+    pub relink_site_wheel: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
-    /// Existing namespace portions and the canonical directories they resolve to.
+    /// Import search directories and the canonical directories they resolve to.
     #[serde(default)]
     pub directories: Vec<(PathBuf, PathBuf)>,
 }
@@ -282,6 +295,7 @@ fn check_file_with(
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     let typed = |graph: &mut modules::SourceGraph| {
+        graph.session.explicit_check = true;
         let (module, _) = checked_lower_with(graph, cache.as_deref_mut())?;
         verify_after(&module, "lowering")
     };
@@ -372,6 +386,7 @@ fn object_fallback<T>(
             .python_startup()
             .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut import_failure = None;
+    let mut site_wheels = modules::SiteWheels::default();
     let mut infer_sets = true;
     let (error, graph, checked_entry) = loop {
         let mut graph = match options.load_graph(
@@ -379,10 +394,12 @@ fn object_fallback<T>(
             module_root,
             filesystem.reborrow(),
             &mut import_failure,
+            &mut site_wheels,
         ) {
             Ok(graph) => graph,
             Err(error) => break (error, None, false),
         };
+        site_wheels.record(&mut graph.inputs);
         if !infer_sets {
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
         }
@@ -406,6 +423,7 @@ fn object_fallback<T>(
             Err(_) if graph.set_layout_hint.get() == modules::SetLayoutHint::Applied => {
                 infer_sets = false;
                 import_failure = None;
+                site_wheels = modules::SiteWheels::default();
             }
             Err(error) => break (error, Some(graph), false),
         }
@@ -514,7 +532,10 @@ fn object_fallback<T>(
         layout,
         check_returns,
     )? {
-        Some(compilation) => Ok(boxed(compilation)),
+        Some(mut compilation) => {
+            site_wheels.record(&mut compilation.source_inputs);
+            Ok(boxed(compilation))
+        }
         None => Err(error),
     }
 }

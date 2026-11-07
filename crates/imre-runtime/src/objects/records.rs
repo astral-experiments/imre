@@ -53,15 +53,40 @@ pub struct RecordSemantics {
     pub fields: *const RecordField,
 }
 
-/// Checked class layouts with bit 8 set append their unary Python repr to the
-/// unchanged semantics prefix. Bit 7 marks a method that consumes its self owner.
+type TextFunction = unsafe extern "C" fn(*const usize) -> *const crate::Str;
+
+/// Bit 8 enables the original checked repr slot. Bit 9 adds a str slot after
+/// it, leaving the repr slot empty for classes that only implement str.
 #[repr(C)]
 struct ClassRepr {
     semantics: RecordSemantics,
-    method: ReprMethod,
+    repr: Option<TextFunction>,
 }
 
-pub(super) type ReprMethod = unsafe extern "C" fn(*const usize) -> *const crate::Str;
+#[repr(C)]
+struct ClassStr {
+    prefix: ClassRepr,
+    text: TextFunction,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct TextMethod {
+    function: TextFunction,
+    consumes_self: bool,
+}
+
+impl TextMethod {
+    /// The receiver must be an owner of a record compatible with this method.
+    pub(super) unsafe fn call(self, receiver: super::words::OwnedWord) -> *const crate::Str {
+        let word = if self.consumes_self {
+            receiver.into_word()
+        } else {
+            receiver.word
+        };
+        // SAFETY: the checked ABI either borrows self during the call or takes its owner.
+        unsafe { (self.function)(word as *const usize) }
+    }
+}
 
 /// A plain Python tuple; excludes named tuples, struct sequences, and private frames.
 pub(super) const EXACT_TUPLE: u32 = 1 << 5;
@@ -73,15 +98,38 @@ impl RecordDescriptor {
         unsafe { self.semantics.as_ref() }.filter(|s| s.kind == 0)
     }
 
-    pub(super) fn repr_method(&self) -> Option<(ReprMethod, bool)> {
+    pub(super) fn repr_method(&self) -> Option<TextMethod> {
         let semantics = self.class_semantics()?;
         if semantics.flags & (1 << 8) == 0 {
             return None;
         }
-        // SAFETY: the descriptor points to the complete immutable extended layout
-        // when its class has a checked repr method.
-        let method = unsafe { (*self.semantics.cast::<ClassRepr>()).method };
-        Some((method, semantics.flags & (1 << 7) != 0))
+        // SAFETY: bit 8 guarantees the repr slot regardless of later extensions.
+        let function = unsafe { (*self.semantics.cast::<ClassRepr>()).repr }?;
+        Some(TextMethod {
+            function,
+            consumes_self: semantics.flags & (1 << 7) != 0,
+        })
+    }
+
+    pub(super) fn str_method(&self) -> Option<(TextMethod, bool)> {
+        let semantics = self.class_semantics()?;
+        if semantics.flags & (1 << 9) == 0 {
+            return None;
+        }
+        // SAFETY: only complete, immutable ClassStr layouts carry bit 9.
+        let function = unsafe { (*self.semantics.cast::<ClassStr>()).text };
+        let method = TextMethod {
+            function,
+            consumes_self: semantics.flags & (1 << 10) != 0,
+        };
+        // Bit 12 marks a method whose compiled body does not count its own frame.
+        Some((method, semantics.flags & (1 << 12) != 0))
+    }
+
+    /// A declared but unsupported str still shadows the inherited repr fallback.
+    pub(super) fn has_uncompiled_str(&self) -> bool {
+        self.class_semantics()
+            .is_some_and(|semantics| semantics.flags & (1 << 11) != 0)
     }
 
     /// Codegen units may own different descriptors for one Python class.
@@ -236,6 +284,17 @@ pub unsafe extern "C" fn imre_record_has_type(
 ) -> u32 {
     // SAFETY: the caller supplies a rooted class and an immutable class descriptor.
     unsafe { u32::from(descriptor(payload).same_class(&*expected)) }
+}
+
+/// Test the original record type even when a tuple annotation has erased its shape.
+///
+/// # Safety
+/// The caller keeps the initialized record and its descriptor alive for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_is_exact_tuple(tuple: *const usize) -> bool {
+    // SAFETY: the live record owns its descriptor and the immutable semantics table.
+    unsafe { descriptor(tuple).semantics.as_ref() }
+        .is_some_and(|semantics| semantics.kind == 1 && semantics.flags & EXACT_TUPLE != 0)
 }
 
 /// Initializes caller-owned scratch for a tuple used only by a read-only lookup.
@@ -630,60 +689,49 @@ pub(super) fn release_table(table: Box<dyn super::mappings::ReleaseEntries>) {
     release(Release::Table(table, 0));
 }
 
+/// Drain nested owners in destruction order without capturing the root owner in a closure.
+#[inline(never)]
 fn release(owner: Release) {
-    PENDING_RELEASES.with(|slot| {
-        // SAFETY: a non-null pointer belongs to the enclosing release on this
-        // thread. The C ABI cannot unwind, and the outer call clears the slot
-        // before returning. No queue borrow spans a field release.
-        if let Some(pending) = unsafe { slot.get().as_ref() } {
-            pending.borrow_mut().push(owner);
-            return;
-        }
-        if let Release::Object(object) = &owner
-            && crate::ObjectOwner::strong_count(object) > 1
-        {
-            return;
-        }
-        if let Release::Record(payload) = &owner {
-            // SAFETY: this entry owns a live record. With no active traversal,
-            // a nonfinal decrement has no children to queue. The last external
-            // function owner must still run the wrapper-cycle check below.
-            let header = unsafe { &*payload.cast::<Header>().sub(1) };
-            let count = header.references.get();
-            if count > 1 && (count != 2 || !wrappers::is_function(header.descriptor())) {
-                header.references.set(count - 1);
-                return;
-            }
-        }
-        let pending = ReleaseQueue::default();
-        slot.set(&pending);
-        let mut current = owner;
-        loop {
-            let siblings = pending.borrow().len();
-            match current {
-                // SAFETY: each entry transfers one live owner of this record.
-                Release::Record(record) => unsafe { release_record_owner(record, &pending) },
-                // SAFETY: an unfinished frame owns the standalone allocation and remaining fields.
-                Release::Fields(record, next) => unsafe {
-                    release_standalone_fields(record, next, &pending);
-                },
-                Release::Object(object) => super::release_object_owner(object),
-                Release::Table(mut table, mut next) => {
-                    if table.release_next(&mut next) {
-                        pending.borrow_mut().push(Release::Table(table, next));
-                    }
+    // SAFETY: a non-null pointer belongs to the enclosing release on this
+    // thread. The C ABI cannot unwind, and the outer call clears the slot
+    // before returning. No queue borrow spans a field release.
+    if let Some(pending) = unsafe { PENDING_RELEASES.get().as_ref() } {
+        pending.borrow_mut().push(owner);
+        return;
+    }
+    if let Release::Object(object) = &owner
+        && crate::ObjectOwner::strong_count(object) > 1
+    {
+        return;
+    }
+    let pending = ReleaseQueue::default();
+    PENDING_RELEASES.set(&pending);
+    let mut current = owner;
+    loop {
+        let siblings = pending.borrow().len();
+        match current {
+            // SAFETY: each entry transfers one live owner of this record.
+            Release::Record(record) => unsafe { release_record_owner(record, &pending) },
+            // SAFETY: an unfinished frame owns the standalone allocation and remaining fields.
+            Release::Fields(record, next) => unsafe {
+                release_standalone_fields(record, next, &pending);
+            },
+            Release::Object(object) => super::release_object_owner(object),
+            Release::Table(mut table, mut next) => {
+                if table.release_next(&mut next) {
+                    pending.borrow_mut().push(Release::Table(table, next));
                 }
-                Release::Sequence(kind, values) => release_sequence_batch(kind, values, &pending),
             }
-            let mut pending = pending.borrow_mut();
-            // Children were enqueued in field or container order. Finish this
-            // subtree in that order before resuming the outstanding siblings.
-            pending[siblings..].reverse();
-            let Some(next) = pending.pop() else { break };
-            current = next;
+            Release::Sequence(kind, values) => release_sequence_batch(kind, values, &pending),
         }
-        slot.set(std::ptr::null());
-    });
+        let mut pending = pending.borrow_mut();
+        // Children were enqueued in field or container order. Finish this
+        // subtree in that order before resuming the outstanding siblings.
+        pending[siblings..].reverse();
+        let Some(next) = pending.pop() else { break };
+        current = next;
+    }
+    PENDING_RELEASES.set(std::ptr::null());
 }
 
 /// # Safety
@@ -870,11 +918,18 @@ unsafe fn release_fields<const PACKED: bool>(
         // SAFETY: each nonzero owning word transfers the field's final reference.
         unsafe {
             let kind = WordKind::new(descriptor.kinds.add(index).read());
+            if kind.is_bitwise_copy() {
+                continue;
+            }
             let word = kind.read_record_field(payload.add(index));
-            if PACKED && kind.raw() & !super::words::NULLABLE == 3 && word != 0 {
-                strings::release(StrOwner::from_raw(word as *const crate::Str));
-            } else {
-                kind.release(word);
+            if word == 0 {
+                continue;
+            }
+            match kind.base() {
+                2 => drop(crate::Int(word)),
+                3 if PACKED => strings::release(StrOwner::from_raw(word as *const crate::Str)),
+                3 | 11 => StrOwner::decrement_strong_count(word as *const crate::Str),
+                _ => kind.release(word),
             }
         }
     }

@@ -346,6 +346,13 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 && !classes.methods[id].contains_key("__post_init__")
                 && !classes.has_concrete_subclasses(id))
             .then(|| classes.methods[id]["__init__"].id),
+            str_method: classes.methods[id]
+                .get("__str__")
+                .filter(|method| !method.asynchronous)
+                .map(|method| method.id),
+            async_str: classes.methods[id]
+                .get("__str__")
+                .is_some_and(|method| method.asynchronous),
             repr_method: classes.methods[id]
                 .get("__repr__")
                 .filter(|method| !method.asynchronous && classes.has_repr_override(id))

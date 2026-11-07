@@ -57,6 +57,7 @@ pickle = ["Encode integers, booleans, strings, `None` and tuples with `dumps` pr
 platform = ["Read `system()`, `machine()`, and the running Python version from `python_version()`.","benchmarks/cpython_stdlib/interpreter_info.py"]
 posix = ["Read and set supported POSIX user and group IDs; the companion suite is counted under `os`.","benchmarks/cpython_stdlib/full/os/CREDENTIALS.md"]
 posixpath = ["POSIX `os.path` operations on strings and bytes; path tests are counted under `os`.","tests/fixtures/paths/os_path.py"]
+pydoc = ["Resolve a runtime-imported class or function by dotted name and render a Python function’s signature and docstring as plain text.","tests/fixtures/boxed_pydoc.py"]
 random = ["Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences.","benchmarks/cpython_stdlib/full/shutil/random.md"]
 secrets = ["Draw an unpredictable item from native strings, bytes, lists, homogeneous tuples, or integer ranges with OS randomness.", "tests/fixtures/iterables/secrets_choice.py"]
 re = ["Fixed regular expressions, captures and replacement escapes in `sub`. [`escape`](../tests/fixtures/boxed_re_escape.py) quotes literal text and byte strings for use in patterns.","benchmarks/cpython_stdlib/README.md"]

@@ -29,8 +29,39 @@ def current():
     except ValueError as error:
         print(str(error))
 
+    for values in ([1, True, 3, 4], (1, True, 3, 4), (2**63, -1, 1), b"abc"):
+        reverse = reversed(values)
+        print(next(reverse), sum(reverse, 5), list(reverse))
+    for start in (2**63 - 1, 2**100, -(2**100)):
+        data = iter(b"\xff\x02")
+        assert sum(data, start) == start + 257
+        assert list(data) == []
+    remaining = iter(bytearray([1, 250, 3]))
+    print(next(remaining), sum(remaining, 2**63 - 100), list(remaining))
+
     class Extra:
         def __radd__(self, value):
             return ('rounded', value)
 
     print(sum([0.1] * 10 + [Extra()]))
+
+    class ConsumeNext:
+        def __radd__(self, prefix):
+            print("prefix", prefix, next(active))
+            return prefix + 100
+
+    class StopSum:
+        def __radd__(self, prefix):
+            raise LookupError(prefix)
+
+    for reverse in (False, True):
+        operands = [1, 2, ConsumeNext(), 7, 11]
+        active = reversed(operands[::-1]) if reverse else iter(operands)
+        print(sum(active, 10), list(active))
+        operands = [1, 2, StopSum(), 7, 11]
+        active = reversed(operands[::-1]) if reverse else iter(operands)
+        try:
+            sum(active)
+        except LookupError as error:
+            print(error.args, list(active))
+    print(sum(iter([1, 2, 2 ** 63 - 1, 4])))

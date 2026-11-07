@@ -35,6 +35,39 @@ fn cached_operand_rechecks_the_frame_and_its_current_edge() {
 }
 
 #[test]
+fn a_bound_method_keeps_its_receiver_alive_until_the_binding_is_removed() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let scope = ctx.scope("sample", None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let class = ctx.builtin("object");
+    let receiver = ctx.instance(class, None);
+    ctx.heap.register_finalizer(receiver);
+    let callable = ctx.builtin("repr");
+    let method = ctx.alloc(Value::Method {
+        callable,
+        receiver,
+        explicit: false,
+    });
+    let globals = ctx.finalizer_path_roots();
+    let heap = &mut ctx.heap;
+    let Value::Scope(bindings) = heap.get_mut(scope) else {
+        unreachable!()
+    };
+    bindings.names.insert("callback".into(), method);
+    heap.release_temporaries_since(0);
+
+    heap.learn_finalizer_paths(globals, None);
+    assert!(heap.finalizer_roots.contains(receiver));
+    assert!(heap.finalizer_roots.valid(heap, globals));
+
+    let Value::Scope(bindings) = heap.get_mut(scope) else {
+        unreachable!()
+    };
+    bindings.names.clear();
+    assert!(!heap.finalizer_roots.valid(heap, globals));
+}
+
+#[test]
 fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let class = ctx.builtin("object");
@@ -224,6 +257,12 @@ fn weak_dict_key_and_frame_held_target_must_both_survive() {
     ctx.put_item(registry, reference, NONE).unwrap();
     assert!(ctx.heap.weak_values_kept_by(registry, NONE));
 
+    ctx.bind(scope, "saved_result", target);
+    ctx.bind(scope, "result", NONE);
+    assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
+    ctx.heap.learn_weak_roots(registry, NONE);
+    assert!(ctx.heap.weak_values_kept_by(registry, NONE));
+
     ctx.heap.leave(NONE, false);
     assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
     assert_eq!(
@@ -386,4 +425,43 @@ fn standard_output_roots_follow_rebinding_and_deletion() {
     let roots = stdlib::io::rooted_standard_streams(&ctx).unwrap();
     assert_eq!(&roots[3..], &[stderr, NONE]);
     assert!(!roots.contains(&stdout));
+}
+
+#[test]
+fn learns_a_descriptor_added_after_the_ordinary_finalizer_paths() {
+    let mut heap = super::Heap::new();
+    let ordinary = heap.alloc(Value::List(Vec::new()));
+    heap.register_finalizer(ordinary);
+    let owners = heap.alloc(Value::List(vec![ordinary]));
+    let globals = [owners, NONE];
+    heap.release_temporaries_since(0);
+    assert!(heap.learn_finalizer_paths(globals, None));
+
+    let file = stdlib::BinaryFile::open(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
+        NONE,
+        "rb",
+        None,
+    )
+    .unwrap()
+    .into_value()
+    .unwrap();
+    let descriptor = heap.alloc_descriptor_owner(file).unwrap();
+    let Value::List(items) = heap.get_mut(owners) else {
+        unreachable!()
+    };
+    items.push(descriptor);
+    heap.release_temporaries_since(0);
+    assert!(heap.cached_finalizers_kept(globals, None, None));
+    assert!(!heap.cached_finalizers_kept(globals, None, Some(0)));
+
+    for _ in 0..=super::SEARCH_BACKOFF {
+        heap.learn_descriptor_paths(globals, None);
+    }
+    assert!(heap.cached_finalizers_kept(globals, None, Some(0)));
+    let Value::List(items) = heap.get_mut(owners) else {
+        unreachable!()
+    };
+    items.pop();
+    assert!(!heap.cached_finalizers_kept(globals, None, Some(0)));
 }

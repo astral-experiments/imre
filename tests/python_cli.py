@@ -1936,7 +1936,7 @@ def main():
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
-        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "io_dict_descriptor.py"):
+        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "boxed_pydoc.py", "io_dict_descriptor.py"):
             script = Path(__file__).with_name("fixtures") / fixture
             expected = run(sys.executable, "-B", script)
             actual = run(imre, "run", script, "--runtime-imports", "--quiet")
@@ -2725,6 +2725,27 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_methodcaller.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
+        (root / "weather_report.py").write_text("def report(temp):\n    return f'{temp} C'\n")
+        compare("-Bm", "inspect", "weather_report:report")
+        (root / "weather_metadata.py").write_text("import weather_report\nprint(weather_report.__spec__.cached)\n")
+        metadata = run(imre, "-Bm", "weather_metadata")
+        details = run(imre, "-Bm", "inspect", "--details", "weather_report:report")
+        assert metadata.returncode == details.returncode == 0, (metadata.stderr, details.stderr)
+        assert details.stdout.splitlines()[2:4] == [b"Cached: " + metadata.stdout.rstrip(b"\n"), b"Line: 0"]
+        (root / "station_cache.py").write_text("__cached__ = 'project cache'\ndef report(): pass\n")
+        compare("-Bm", "inspect", "--details", "station_cache:report")
+        compare("-Bm", "inspect", "sys", status=1, stderr=b"Can't get info for builtin modules.\n")
+        local_inspect = root / "inspect.py"
+        local_inspect.write_text("origin = 'local inspect'\nif __name__ == '__main__': print(origin)\n")
+        try:
+            compare("-Bm", "inspect", "sys")
+            compare("-B", "-c", "import inspect; print(inspect.origin)")
+            (root / "local_inspect_api.py").write_text(
+                "import inspect\nprint(inspect.origin, hasattr(inspect, '_signature_layout'))\n"
+            )
+            compare("-Bm", "local_inspect_api")
+        finally:
+            local_inspect.unlink()
         static_fixture = Path(__file__).with_name("fixtures") / "boxed_getattr_static.py"
         compare("-IB", static_fixture, native_args=("run", static_fixture, "--runtime-imports", "--quiet"))
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
@@ -3423,6 +3444,7 @@ def report(text):
         if Path("/usr/share/zoneinfo/America/New_York").is_file():
             compare("-IB", fixtures / "boxed_zoneinfo.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pyexpat.py", native_timeout=300)
+        compare("-B", fixtures / "html_parser_feed.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pickle_writer.py")
         for first in ("_pickle", "pickle"):
             compare("-IB", fixtures / "pickle_accelerator_writer.py", first, native_timeout=600)
@@ -3552,10 +3574,20 @@ def report(text):
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
                 certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                alpn = fixtures / "ssl_alpn.py"
+                compare(
+                    "-IB", alpn, certdata,
+                    native_args=("run", alpn, "--quiet", "--", certdata), native_timeout=600,
+                )
                 dh_params = fixtures / "ssl_dh_params.py"
                 compare(
                     "-IB", dh_params, certdata,
                     native_args=("run", dh_params, "--quiet", "--", certdata), native_timeout=600,
+                )
+                handshake = fixtures / "ssl_socket_handshake.py"
+                compare(
+                    "-IB", handshake, certdata,
+                    native_args=("run", handshake, "--quiet", "--", certdata), native_timeout=600,
                 )
                 object_io = fixtures / "ssl_object_io.py"
                 compare(
@@ -4040,6 +4072,7 @@ for name in ("md4", "ripemd160"):
             "boxed_tempfile_default_directory.py",
             "boxed_tempfile_mktemp.py",
             "boxed_tempfile_wrapper.py",
+            "boxed_operator_identity.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
@@ -4443,6 +4476,7 @@ for name in ("md4", "ripemd160"):
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
+            "boxed_pydoc.py",
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
@@ -4629,6 +4663,8 @@ else:
             plugin.write_bytes((fixtures / "boxed_os_waitpid.py").read_bytes())
             child = run(imre, "-IB", "-c", imports + "arithmetic.pidfd()")
             assert (child.returncode, child.stdout, child.stderr) == (0, b"", b""), child
+            plugin.write_bytes((fixtures / "boxed_os_system_queries.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             compare("-IB", str(fixtures / "epoll_descriptors.py"))

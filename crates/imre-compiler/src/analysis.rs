@@ -64,6 +64,8 @@ pub(crate) struct Session {
     pub(crate) root: PathBuf,
     extension_roots: Vec<PathBuf>,
     hint_reads: Cell<usize>,
+    /// Explicit checks can report conversions that executables perform at runtime.
+    pub(crate) explicit_check: bool,
 }
 
 impl Session {
@@ -196,14 +198,15 @@ impl Session {
             .fs()
             .write_file_all(SystemPathBuf::from(root).join("http/__init__.pyi"), http)
             .map_err(|e| e.to_string())?;
-        // typeshed omits inspect's private default; preserve all its public signatures.
+        // Only use the augmented stdlib stub when the project did not supply inspect.
+        let stdlib_stubs = intrinsic.join(".stdlib-stubs");
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
             .map_err(|e| e.to_string())?;
         system
             .fs()
             .write_file_all(
-                SystemPathBuf::from(root).join("inspect.pyi"),
+                stdlib_stubs.join("inspect.pyi"),
                 format!("{inspect}\n_sentinel: object\n"),
             )
             .map_err(|e| e.to_string())?;
@@ -255,6 +258,7 @@ impl Session {
                 .map_err(|error| error.to_string())?;
             roots.push(SystemPathBuf::from(path));
         }
+        roots.push(stdlib_stubs);
         settings.search_paths = ty_module_resolver::SearchPathSettings::new(roots)
             .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
             .map_err(|error| error.to_string())?;
@@ -297,6 +301,7 @@ impl Session {
             root: PathBuf::from(root),
             extension_roots: extension_roots.to_vec(),
             hint_reads: Cell::new(0),
+            explicit_check: false,
         })
     }
 
@@ -414,6 +419,7 @@ impl Session {
     pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
         let mut copy =
             Self::with_storage(&self.root, &self.extension_roots, salsa::Storage::default())?;
+        copy.explicit_check = self.explicit_check;
         for &file in &self.files {
             let path = file
                 .path(&self.db)
@@ -750,6 +756,17 @@ impl Session {
         .map(|(_, ty)| ty)
     }
 
+    /// Recognize the canonical tuple[str, ...] type across calls, attributes and names.
+    pub(crate) fn is_string_tuple(&self, module: usize, value: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let file = self.db.program_file(self.files[module]);
+        let env = ProgramEnvironment::from_file(file);
+        let model = SemanticModel::new(&self.db, file);
+        let text = KnownClass::Str.to_instance(&self.db, &env);
+        value.inferred_type(&model) == Some(Ty::homogeneous_tuple(&self.db, &env, text))
+    }
+
     /// Compare an argv expression to the canonical built-in list[str] instance,
     /// as declared for sys.argv in ty's vendored standard library. Equality
     /// (not assignability) rules out Any and lists with a different field ABI.
@@ -812,6 +829,7 @@ impl Session {
                 FileChecks::FallbackCalls,
                 provider,
                 checked_modules.is_some_and(|modules| !modules[entry].bundled),
+                self.explicit_check,
             );
             let errors = file_errors(&self.db, checked);
             if !errors.is_empty() {
@@ -837,6 +855,10 @@ impl Session {
         for name in ["invalid-return-type"]
             .into_iter()
             .chain(arguments.iter().copied())
+            .chain(
+                (self.explicit_check && checked_file && !scoped_builtin)
+                    .then_some("no-matching-overload"),
+            )
             .chain(callee)
             .chain(checked_file.then_some("invalid-assignment"))
         {
@@ -886,6 +908,7 @@ impl Session {
                     checks,
                     runtime_provider,
                     checked_modules.is_some_and(|modules| !modules[index].bundled),
+                    self.explicit_check,
                 );
                 file_errors(&self.db, checked)
             })
@@ -911,7 +934,9 @@ struct CheckedFile<'db> {
     #[returns(copy)]
     runtime_provider: Option<File>,
     #[returns(copy)]
-    scalar_initializers: bool,
+    first_party: bool,
+    #[returns(copy)]
+    explicit_check: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -1123,23 +1148,25 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .iter()
         .filter(|diagnostic| {
             diagnostic.severity() >= Severity::Error
-                && (checks == FileChecks::Full || diagnostic.id().as_str() != "invalid-assignment"
-                    || checked.scalar_initializers(db) && diagnostic.primary_span().and_then(|span| span.range())
+                && (checks == FileChecks::Full
+                    || diagnostic.id().as_str() != "invalid-assignment"
+                    || checked.first_party(db)
+                        && diagnostic
+                            .primary_span()
+                            .and_then(|span| span.range())
                             .is_some_and(|range| scalar_initializer(db, file, range)))
                 && !diagnostic
                     .primary_span()
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (matches!(checks, FileChecks::FallbackCalls | FileChecks::FunctionBodyCalls | FileChecks::NamedFunctionCalls)
+                            || (checks != FileChecks::Full
                                 && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
                                 && runtime_argument(
                                     db,
-                                    file,
+                                    checked,
                                     range,
                                     diagnostic.id().as_str(),
-                                    checked.runtime_provider(db),
-                                    checks,
                                 ))
                             // ty also reports implicit None returns at the annotation span.
                             || (diagnostic.id().as_str() == "invalid-return-type"
@@ -1247,22 +1274,18 @@ fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
 }
 
 /// Leave argument conversion to Python for vendored code and its compiler-supplied adapter.
-fn runtime_argument(
-    db: &dyn Db,
-    file: File,
-    range: TextRange,
-    rule: &str,
-    runtime_provider: Option<File>,
-    checks: FileChecks,
-) -> bool {
+fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rule: &str) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::Type;
-    let file = db.program_file(file);
+    let checks = checked.checks(db);
+    let file = db.program_file(checked.file(db));
     let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
     let root = AnyNodeRef::from(parsed.syntax());
     let local_calls = matches!(
         checks,
-        FileChecks::FunctionBodyCalls | FileChecks::NamedFunctionCalls
+        FileChecks::FallbackReturns
+            | FileChecks::FunctionBodyCalls
+            | FileChecks::NamedFunctionCalls
     );
     if !root.range().contains_range(range) {
         return local_calls;
@@ -1284,6 +1307,16 @@ fn runtime_argument(
     }) else {
         return local_calls;
     };
+    if rule == "no-matching-overload"
+        && checked.explicit_check(db)
+        && checked.first_party(db)
+        && crate::frontend::literal_replace_mismatch(call)
+    {
+        return false;
+    }
+    if checks == FileChecks::FallbackReturns {
+        return true;
+    }
     let model = SemanticModel::new(db, file);
     let Some(callee) = call.func.inferred_type(&model) else {
         return local_calls;
@@ -1339,7 +1372,7 @@ fn runtime_argument(
             .and_then(|definition| definition.definition())
             .is_some_and(|definition| {
                 let file = definition.file(db);
-                file.path(db).is_vendored_path() || Some(file) == runtime_provider
+                file.path(db).is_vendored_path() || Some(file) == checked.runtime_provider(db)
             })
     };
     match callee {

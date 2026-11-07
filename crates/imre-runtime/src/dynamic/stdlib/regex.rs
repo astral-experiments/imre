@@ -309,12 +309,15 @@ impl Pattern {
     // CPython may match an empty alternative with pos past endpos, while a
     // zero-minimum repeat can fail there. Slicing to an empty haystack loses that distinction.
     fn check_reversed_match(&self) -> Result<()> {
-        if regex_automata::util::syntax::parse_with(
-            &self.engine_source,
-            &syntax(self.bytes, self.engine_flags()),
-        )
-        .is_ok_and(|hir| hir.properties().minimum_len() != Some(0))
-        {
+        let consumes_input = match &self.regex {
+            Matcher::Lookahead(matcher) => matcher.requires_input,
+            _ => regex_automata::util::syntax::parse_with(
+                &self.engine_source,
+                &syntax(self.bytes, self.engine_flags()),
+            )
+            .is_ok_and(|hir| hir.properties().minimum_len() != Some(0)),
+        };
+        if consumes_input {
             return Ok(());
         }
         Err(Error::new(

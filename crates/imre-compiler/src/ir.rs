@@ -470,6 +470,8 @@ pub(crate) enum SourceFrame {
 pub(crate) struct Module {
     /// Interpreter settings already selected by the Python-style launcher.
     pub command_flags: Option<crate::CommandFlags>,
+    /// NUL-separated source registrations that mask native providers in this image.
+    pub builtin_module_sources: Option<String>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -509,6 +511,9 @@ pub(crate) struct ClassMetadata {
     pub frozen_initializer: Option<usize>,
     /// Checked instance method used to render a retained value after type erasure.
     pub repr_method: Option<usize>,
+    pub str_method: Option<usize>,
+    /// An explicit async override cannot be called through a synchronous text slot.
+    pub async_str: bool,
     pub value_struct: bool,
     pub field_equality: bool,
     pub dataclass_repr: bool,
@@ -1123,6 +1128,7 @@ pub(crate) enum Builtin {
     LiteralStringView,
     IntListContains,
     StringListContains,
+    StringTupleContains,
     StructListContains,
     StringContains,
     /// Immutable byte subsequence; operands are evaluated needle first.
@@ -1147,6 +1153,7 @@ pub(crate) enum Builtin {
         field: u32,
     },
     SysImplementation,
+    SysBuiltinModuleNames,
     SysStdlibModuleNames,
     SysStreamText {
         descriptor: u8,
@@ -1216,6 +1223,7 @@ pub(crate) enum Builtin {
     InputSelectStdout,
     InputFinish,
     Chr,
+    UnicodeCategoryOfOrdinal,
     Ord,
     IntegerPower,
     ModularPower,
@@ -1269,7 +1277,7 @@ pub(crate) enum Builtin {
     ObjectRecordProject(usize),
     ObjectStreamProject,
     ObjectTextProject,
-    ObjectIsExactTuple,
+    IsExactTuple,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
@@ -1456,7 +1464,7 @@ pub(crate) enum Builtin {
     HashUpdateFile,
     HashName,
     HashType,
-    HashIdentity,
+    PointerIdentity,
     HashDigestSize,
     HashBlockSize,
     HashDigest {
@@ -2000,6 +2008,22 @@ pub(crate) enum PatchOperation {
     HunkText,
 }
 
+/// Character properties shared by checked calls and the native Unicode database.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum UnicodeProperty {
+    Category,
+    EastAsianWidth,
+}
+
+impl UnicodeProperty {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Category => "category",
+            Self::EastAsianWidth => "east_asian_width",
+        }
+    }
+}
+
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
@@ -2009,7 +2033,7 @@ pub(crate) enum TextOperation {
     ZFill {
         copy: bool,
     },
-    EastAsianWidth,
+    UnicodeProperty(UnicodeProperty),
     Normalize,
     Lower,
     Upper,
@@ -2608,7 +2632,7 @@ impl InstanceType {
             Self::Deque => matches!(ty, Type::Deque(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::VarTuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(

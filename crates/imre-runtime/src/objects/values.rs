@@ -881,19 +881,12 @@ unsafe fn write_repr_with(
                         }
                     }
                     let text = match method {
-                        Some((method, true)) => method(receiver.into_word() as *const usize),
-                        Some((method, false)) => method(receiver.word as *const usize),
+                        Some(method) => method.call(receiver),
                         None => {
                             super::exceptions::imre_exception_repr(receiver.word as *const Object)
                         }
                     };
-                    if text.is_null() {
-                        return Err(std::fmt::Error);
-                    }
-                    let text = StrOwner::from_raw(text);
-                    if super::exceptions::imre_error_pending() != 0 {
-                        return Err(std::fmt::Error);
-                    }
+                    let text = super::exceptions::display_result(text)?;
                     output.write_str(&text)?;
                     None
                 }
@@ -927,7 +920,7 @@ enum ReprTask {
     ContextEnd(super::contextvars::ReprEnd, bool),
     Word(usize, WordKind),
     Object(*const Object, usize),
-    Display(OwnedWord, Option<(super::records::ReprMethod, bool)>),
+    Display(OwnedWord, Option<super::records::TextMethod>),
     Record(*const usize, usize, usize),
     KeySeparator,
 }

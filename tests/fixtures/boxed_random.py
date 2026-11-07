@@ -3,6 +3,55 @@ from random import choice, choices, randbytes, randint, random as draw, sample a
 
 
 def current():
+    source = random.Random(41)
+    random.seed(41)
+    assert source.choices("abcd", k=12) == choices("abcd", k=12)
+    assert source.choices("ab", weights=[2, 1], k=7) == choices("ab", weights=[2, 1], k=7)
+    assert source.random() == random.random()
+
+    class Fixed(random.Random):
+        def random(self):
+            return 0.75
+
+    assert Fixed().choices("abcd", k=2) == ["d", "d"]
+
+    import gc
+    events = []
+
+    class Needle:
+        def __lt__(self, other):
+            return True
+
+        def __del__(self):
+            events.append("release")
+
+    class Weight:
+        def __add__(self, zero):
+            return self
+
+        def __le__(self, zero):
+            return False
+
+        def __float__(self):
+            return 2.0
+
+        def __rmul__(self, draw):
+            return Needle()
+
+    class Population:
+        def __len__(self):
+            return 2
+
+        def __getitem__(self, index):
+            gc.collect()
+            events.append("get")
+            return index
+
+    for rng in (random, source):
+        events.clear()
+        assert rng.choices(Population(), cum_weights=[1, Weight()]) == [0]
+        assert events == ["release", "get"]
+
     seed = (1 << 100) + 7
     random.seed(seed)
     first = random.Random(seed)
@@ -318,3 +367,34 @@ def current():
     reference = random.Random(419)
     assert sample_items(range(40), 5) == reference.sample(range(40), 5)
     assert random.getrandbits(32) == reference.getrandbits(32)
+
+    import os
+    import secrets
+    assert secrets.SystemRandom is random.SystemRandom
+    assert secrets.randbits.__self__ is secrets._sysrand
+    assert random._urandom is os.urandom
+
+    calls = []
+    def entropy(n):
+        calls.append(n)
+        return b"\xa5" * n
+
+    source = random.SystemRandom(419)
+    try:
+        random._urandom = entropy
+        assert source.getrandbits(k=0) == 0
+        assert source.getrandbits(9) == 331
+        assert secrets.randbits(8) == 165
+        assert source.random() == (int.from_bytes(b"\xa5" * 7) >> 3) * (2 ** -53)
+        assert source.randbytes(n=3) == b"\xa5" * 3
+        assert calls == [0, 2, 1, 7, 3]
+    finally:
+        random._urandom = os.urandom
+    assert source.seed(object(), extra=True) is None
+    for method in (source.getstate, source.setstate):
+        try:
+            method(None)
+        except NotImplementedError as error:
+            assert str(error) == "System entropy source does not have state."
+        else:
+            raise AssertionError("SystemRandom exposed generator state")

@@ -46,6 +46,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "default_verify_paths",
         "default_verify_flags",
         "set_alpn_protocols",
+        "selected_alpn_protocol",
         "post_handshake_auth",
         "verify_client_post_handshake",
         "get_ciphers",
@@ -56,6 +57,11 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "load_cert_chain",
         "wrap",
         "is_session",
+        "do_handshake",
+        "getblocking",
+        "setblocking",
+        "gettimeout",
+        "settimeout",
         "release_session",
         "read",
         "pending",
@@ -68,6 +74,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "accept",
         "wrap_bio",
         "bio_handshake",
+        "bio_server_hostname",
         "bio_read",
         "bio_write",
         "bio_pending",
@@ -153,7 +160,7 @@ fn memory_bio<'a>(ctx: &'a Context, id: Id, arg: &str) -> Result<&'a RefCell<pro
 
 fn bio_session(ctx: &Context, handle: Id) -> Result<Rc<RefCell<provider::bio::BioSession>>> {
     match ctx.heap.get(handle) {
-        Value::TlsBioSession(session) => Ok(Rc::clone(session)),
+        Value::TlsBioSession { session, .. } => Ok(Rc::clone(session)),
         _ => Err(Error::new("TypeError", "expected a TLS memory BIO session")),
     }
 }
@@ -376,39 +383,45 @@ fn load_cert_chain(
     trust_result(ctx, result)
 }
 
-fn ca_data(ctx: &Context, input: Id) -> Result<provider::CaData<'_>> {
+fn load_ca_data(ctx: &mut Context, handle: Id, input: Id) -> Result<Id> {
     let invalid = || {
         Error::new(
             "TypeError",
             "cadata should be an ASCII string or a bytes-like object",
         )
     };
-    let (bytes, pem) = match ctx.heap.get(ctx.scalar_value(input)) {
-        Value::Str(text) if text.is_ascii() => (text.as_bytes(), true),
+    let load = |ctx: &Context, bytes: &[u8], pem| {
+        if bytes.is_empty() {
+            return Err(Error::new("ValueError", "Empty certificate data"));
+        }
+        if bytes.len() > i32::MAX as usize {
+            return Err(Error::new("OverflowError", "Certificate data is too long."));
+        }
+        let data = if pem {
+            provider::CaData::Pem(bytes)
+        } else {
+            provider::CaData::Der(bytes)
+        };
+        Ok(context(ctx, handle)?
+            .borrow_mut()
+            .load_verify_locations(None, None, Some(data)))
+    };
+    let result = match ctx.heap.get(ctx.scalar_value(input)) {
+        Value::Str(text) if text.is_ascii() => load(ctx, text.as_bytes(), true)?,
         Value::Str(_) | Value::SurrogateStr(_) => return Err(invalid()),
         _ => {
-            ctx.check_buffer_exporter(input)?;
-            let bytes = ctx.native_buffer_bytes(input).map_err(|error| {
-                if error.kind == "TypeError" {
-                    invalid()
-                } else {
-                    error
-                }
-            })?;
-            (bytes, false)
+            // Only non-exporters receive the cadata-specific TypeError.
+            if ctx.buffer_slot(input, "__buffer__").is_none()
+                && matches!(ctx.native_buffer_bytes(input), Err(e) if e.kind == "TypeError")
+            {
+                return Err(invalid());
+            }
+            ctx.with_read_buffer(input, |ctx, view| {
+                load(ctx, ctx.native_buffer_bytes(view)?, false)
+            })?
         }
     };
-    if bytes.is_empty() {
-        return Err(Error::new("ValueError", "Empty certificate data"));
-    }
-    if bytes.len() > i32::MAX as usize {
-        return Err(Error::new("OverflowError", "Certificate data is too long."));
-    }
-    Ok(if pem {
-        provider::CaData::Pem(bytes)
-    } else {
-        provider::CaData::Der(bytes)
-    })
+    trust_result(ctx, result)
 }
 
 fn trust_result(
@@ -660,18 +673,30 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
+        ("selected_alpn_protocol", &[handle]) => {
+            let selected = match ctx.heap.get(handle) {
+                Value::TlsBioSession { session, .. } => session.borrow().selected_alpn_protocol(),
+                Value::TlsSession(session) => session
+                    .borrow()
+                    .as_ref()
+                    .and_then(|s| s.selected_alpn_protocol()),
+                Value::None | Value::TlsListener(_) | Value::Socket(_) => None,
+                _ => return Err(Error::new("TypeError", "expected a TLS connection")),
+            };
+            let Some(bytes) = selected else {
+                return Ok(NONE);
+            };
+            let name = crate::objects::Codec::Utf8 { signature: false }
+                .decode(&bytes, None)
+                .map_err(|err| ctx.decode_error(err))?;
+            Ok(ctx.text(name))
+        }
         ("set_alpn_protocols", &[handle, wire]) => {
             let Value::Bytes(protocols) = ctx.heap.get(ctx.scalar_value(wire)) else {
                 return Err(Error::new("TypeError", "expected ALPN wire bytes"));
             };
-            let mut context = context(ctx, handle)?.borrow_mut();
-            if context.protocol != provider::Protocol::Client && !protocols.is_empty() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "server ALPN selection is unsupported",
-                ));
-            }
-            context
+            context(ctx, handle)?
+                .borrow_mut()
                 .set_alpn_protocols(protocols)
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
@@ -686,7 +711,9 @@ pub(super) fn call(
         }
         ("verify_client_post_handshake", &[handle]) => {
             let result = match ctx.heap.get(handle) {
-                Value::TlsBioSession(ssl) => ssl.borrow().verify_client_post_handshake(),
+                Value::TlsBioSession { session, .. } => {
+                    session.borrow().verify_client_post_handshake()
+                }
                 _ => session(ctx, handle)?
                     .borrow()
                     .as_ref()
@@ -711,11 +738,17 @@ pub(super) fn call(
             let capath = (capath != NONE)
                 .then(|| cert_path(ctx, capath, "capath"))
                 .transpose()?;
-            let cadata = (cadata != NONE).then(|| ca_data(ctx, cadata)).transpose()?;
+            if cadata != NONE {
+                // Release the DER export after installing its certificates and before opening paths.
+                let result = load_ca_data(ctx, handle, cadata)?;
+                if result != NONE || (cafile.is_none() && capath.is_none()) {
+                    return Ok(result);
+                }
+            }
             let result = context(ctx, handle)?.borrow_mut().load_verify_locations(
                 cafile.as_deref(),
                 capath.as_deref(),
-                cadata,
+                None,
             );
             trust_result(ctx, result)
         }
@@ -800,8 +833,17 @@ pub(super) fn call(
                 provider::bio::BioSession::wrap(&handle, &incoming, &outgoing, host, server)
                     .map_err(|e| provider_error(ctx, e))?;
             drop((handle, incoming, outgoing));
-            Ok(ctx.alloc(Value::TlsBioSession(Rc::new(RefCell::new(result)))))
+            Ok(ctx.alloc(Value::TlsBioSession {
+                session: Rc::new(RefCell::new(result)),
+                server_hostname: hostname,
+            }))
         }
+        ("bio_server_hostname", &[handle]) => match ctx.heap.get(handle) {
+            Value::TlsBioSession {
+                server_hostname, ..
+            } => Ok(*server_hostname),
+            _ => Err(Error::new("TypeError", "expected a TLS memory BIO session")),
+        },
         ("bio_getpeercert", &[handle, binary]) => {
             let binary = ctx.truth(binary)?;
             bio_session(ctx, handle)?
@@ -821,12 +863,15 @@ pub(super) fn call(
                 .pending();
             bio_count(ctx, result)
         }
-        ("tls_shutdown", &[handle]) => {
-            let result = session(ctx, handle)?
-                .borrow_mut()
-                .as_mut()
-                .ok_or_else(closed)?
-                .shutdown();
+        ("tls_shutdown" | "do_handshake", &[handle]) => {
+            let mut state = session(ctx, handle)?.borrow_mut();
+            let session = state.as_mut().ok_or_else(closed)?;
+            let result = if name == "do_handshake" {
+                session.handshake()
+            } else {
+                session.shutdown()
+            };
+            drop(state);
             match result {
                 Ok(()) => Ok(NONE),
                 Err(error) => bio_failure(ctx, error),
@@ -937,8 +982,12 @@ pub(super) fn call(
             ctx.heap.get(handle),
             Value::TlsSession(s) if s.borrow().is_some()
         ))),
-        ("fileno" | "getsockname" | "getpeername" | "listen" | "accept", [handle, rest @ ..])
-            if rest.is_empty() || (name == "listen" && rest.len() == 1) =>
+        (
+            "fileno" | "getsockname" | "getpeername" | "listen" | "accept" | "gettimeout"
+            | "settimeout" | "getblocking" | "setblocking",
+            [handle, rest @ ..],
+        ) if rest.is_empty()
+            || (matches!(name, "listen" | "settimeout" | "setblocking") && rest.len() == 1) =>
         {
             let socket = match ctx.heap.get(*handle) {
                 Value::Socket(s) | Value::TlsListener(s) => Some(s.clone()),
@@ -1058,16 +1107,19 @@ pub(super) fn call(
                 }
                 return Err(pending_io_error(ctx, *handle, libc::EPIPE));
             }
-            let sent = {
-                let mut handle = session(ctx, *handle)?.borrow_mut();
-                let session = handle.as_mut().ok_or_else(closed)?;
-                if name == "sendall" {
-                    session.sendall(data).map_err(|e| provider_error(ctx, e))?;
-                    return Ok(NONE);
-                }
-                session.send(data).map_err(|e| provider_error(ctx, e))?
-            };
-            Ok(ctx.int(sent as i64))
+            let mut state = session(ctx, *handle)?.borrow_mut();
+            let session = state.as_mut().ok_or_else(closed)?;
+            if name == "sendall" {
+                let result = session.sendall(data);
+                drop(state);
+                return match result {
+                    Ok(()) => Ok(NONE),
+                    Err(error) => bio_failure(ctx, error),
+                };
+            }
+            let result = session.send(data);
+            drop(state);
+            bio_count(ctx, result)
         }
         ("recv", [handle, size, flags @ ..]) if flags.len() <= 1 => {
             if let Value::Socket(raw) = ctx.heap.get(*handle) {
@@ -1100,10 +1152,15 @@ pub(super) fn call(
         ("close", &[handle]) => {
             if let Value::Socket(s) | Value::TlsListener(s) = ctx.heap.get(handle) {
                 socket::close(s)?;
-            } else {
-                session(ctx, handle)?.borrow_mut().take();
+                return Ok(handle);
             }
-            Ok(NONE)
+            let Some(session) = session(ctx, handle)?.borrow_mut().take() else {
+                return Ok(NONE);
+            };
+            // Preserve socket mode on the closed endpoint without registering another fd.
+            let socket = session.socket().clone();
+            drop(session);
+            Ok(ctx.alloc(Value::TlsListener(socket)))
         }
         _ => Err(Error::new(
             "TypeError",
