@@ -675,6 +675,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 pub(super) const LIST_METHODS: &[&str] = &[
     "__new__",
     "__add__",
+    "__contains__",
     "__getitem__",
     "__iadd__",
     "__init__",
