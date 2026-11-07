@@ -775,7 +775,7 @@ impl Checker<'_> {
         collector: Collector,
         result: usize,
     ) -> Result<(Type, Vec<Statement>), String> {
-        let loops = self.comprehension_step(display, 0, input, collector, result)?;
+        let loops = self.comprehension_step(display, 0, None, input, collector, result)?;
         let ty = self.locals[result];
         let empty = match (collector, display.output) {
             (Collector::Display(_), Output::List(_)) => ExprKind::List(Vec::new()),
@@ -807,22 +807,31 @@ impl Checker<'_> {
         }
     }
 
-    /// Filters rejecting this pull all branch to its next iteration. Their
-    /// accepted path can therefore stay in the same typed basic block.
+    /// Check conditions in source order, carrying each true edge's narrowing
+    /// facts into the following filter and the accepted body.
     pub(super) fn comprehension_filters(
         &mut self,
         plan: &Plan<'_>,
         pull: usize,
+        parent: Option<usize>,
     ) -> Result<(usize, Vec<Expr>), String> {
-        let mut next = pull + 1;
-        let mut conditions = Vec::new();
-        while let Step::Filter { test, reject } = plan.steps[next] {
-            debug_assert_eq!(reject, pull);
+        let filters = plan.loop_filters(pull, parent).ok_or_else(|| {
+            error(
+                self.source,
+                plan.outer,
+                "unsupported comprehension loop edges",
+            )
+        })?;
+        let accepted = filters.end;
+        let mut conditions = Vec::with_capacity(filters.len());
+        for step in &plan.steps[filters] {
+            let Step::Filter { test, .. } = step else {
+                unreachable!("validated filter range")
+            };
             conditions.push(self.condition(test)?);
             self.apply_facts(test, true);
-            next += 1;
         }
-        Ok((next, conditions))
+        Ok((accepted, conditions))
     }
 
     /// Translate a structured loop of the shared plan to typed iteration IR.
@@ -832,6 +841,7 @@ impl Checker<'_> {
         &mut self,
         plan: &Plan<'_>,
         pc: usize,
+        parent: Option<usize>,
         input: Iteration,
         collector: Collector,
         result: usize,
@@ -841,7 +851,7 @@ impl Checker<'_> {
         };
         self.forget_comprehension_writes(plan, depth);
         self.lower_iteration(target, input, &[], |checker| {
-            let (next, conditions) = checker.comprehension_filters(plan, pc)?;
+            let (next, conditions) = checker.comprehension_filters(plan, pc, parent)?;
             let mut body = match plan.steps[next] {
                 Step::Emit { output, .. } => {
                     let guarded = conditions.last().and_then(present_field);
@@ -849,7 +859,14 @@ impl Checker<'_> {
                 }
                 Step::Open { iterable, .. } => {
                     let input = checker.iteration_input(iterable, None)?;
-                    checker.comprehension_step(plan, next + 1, input, collector, result)?
+                    checker.comprehension_step(
+                        plan,
+                        next + 1,
+                        Some(pc),
+                        input,
+                        collector,
+                        result,
+                    )?
                 }
                 _ => unreachable!("a successful guard opens an iterator or emits"),
             };
