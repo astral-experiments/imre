@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 150 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 151 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -241,6 +241,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_contextvars` | Yes | No API example recorded. | — | — | — |
 | `_datetime` | Yes | No API example recorded. | — | — | — |
 | `_frozen_importlib_external` | Yes | No API example recorded. | — | — | — |
+| `_functools` | Yes | No API example recorded. | — | — | — |
 | `_hashlib` | Yes | No API example recorded. | — | — | — |
 | `_imp` | Yes | `is_frozen` reports frozen modules, and `_override_frozen_modules_for_tests` changes their import precedence. [Evidence](../tests/imports.py) | — | — | — |
 | `_io` | Yes | No API example recorded. | — | — | — |
@@ -290,7 +291,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_decimal` |
 | `_elementtree` |
 | `_frozen_importlib` |
-| `_functools` |
 | `_gdbm` |
 | `_heapq` |
 | `_hmac` |
