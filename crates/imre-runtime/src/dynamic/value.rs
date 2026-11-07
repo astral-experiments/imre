@@ -1544,7 +1544,7 @@ pub(super) enum Value {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
-    ZstdCompressor(crate::Shared<std::cell::RefCell<super::stdlib::zstd::streams::Compressor>>),
+    ZstdCompressor(crate::Shared<std::cell::RefCell<crate::zstd_streams::Compressor>>),
     ZstdDecompressor(crate::Shared<std::cell::RefCell<super::stdlib::zstd::Decompressor>>),
     Bz2Compressor(crate::Shared<std::cell::RefCell<super::stdlib::bz2::codec::Compressor>>),
     Bz2Decompressor(crate::Shared<std::cell::RefCell<super::stdlib::bz2::Decompressor>>),

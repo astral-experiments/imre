@@ -1,5 +1,4 @@
-//! Independent member cursors with incremental CRC. Compressed and inflated
-//! buffers are each bounded even when the caller requests the entire member.
+//! Independent member cursors with incremental CRC.
 use crate::StrOwner;
 use flate2::{Crc, Decompress, FlushDecompress, Status};
 use num_bigint::Sign;
@@ -17,7 +16,7 @@ use super::{
     directory::{bad, grow, name, u16_at},
     source::Source,
 };
-use crate::Int;
+use crate::{Int, zstd_streams};
 
 const BLOCK: usize = 64 * 1024;
 
@@ -100,6 +99,33 @@ pub(super) fn read_import_data(path: &str, info: &Info) -> Result<Bytes> {
     }
 }
 
+enum Decoder {
+    Stored,
+    Deflate(Inflate),
+    Zstandard(zstd_streams::Decompressor),
+}
+
+impl Decoder {
+    fn new(method: u16) -> Result<Self> {
+        match method {
+            0 => Ok(Self::Stored),
+            8 => Ok(Self::Deflate(raw_inflater())),
+            93 => Ok(Self::Zstandard(zstd_streams::Decompressor::new()?)),
+            12 | 14 => {
+                let module = if method == 12 { "bz2" } else { "lzma" };
+                Err(Error::new(
+                    Kind::RuntimeError,
+                    format!("Compression requires the (missing) {module} module"),
+                ))
+            }
+            _ => Err(Error::new(
+                Kind::NotImplementedError,
+                "That compression method is not supported",
+            )),
+        }
+    }
+}
+
 pub(in crate::objects) struct Member {
     source: Source,
     info: crate::Shared<Info>,
@@ -107,7 +133,7 @@ pub(in crate::objects) struct Member {
     packed_at: u64,
     packed_left: u64,
     left: u64,
-    inflater: Option<Inflate>,
+    decoder: Decoder,
     packed: Bytes,
     packed_pos: usize,
     buffer: Bytes,
@@ -177,33 +203,13 @@ impl Member {
                 ),
             ));
         }
-        match info.method {
-            0 | 8 => {}
-            12 | 14 | 93 => {
-                let module = match info.method {
-                    12 => "bz2",
-                    14 => "lzma",
-                    _ => "compression.zstd",
-                };
-                return Err(Error::new(
-                    Kind::RuntimeError,
-                    format!("Compression requires the (missing) {module} module"),
-                ));
-            }
-            _ => {
-                return Err(Error::new(
-                    Kind::NotImplementedError,
-                    "That compression method is not supported",
-                ));
-            }
-        }
         Ok(Self {
             source,
             start,
             packed_at: start,
             packed_left: info.compress_size,
             left: info.file_size,
-            inflater: (info.method == 8).then(raw_inflater),
+            decoder: Decoder::new(info.method)?,
             info,
             packed: Vec::new(),
             packed_pos: 0,
@@ -219,9 +225,9 @@ impl Member {
         &self.info.filename
     }
 
-    /// Read no more than one compressed input block. Each cursor supplies its
-    /// own file position; another reader on the same source may run between calls.
-    fn input(&mut self, n: usize) -> Result<()> {
+    /// Each cursor supplies its own file position so another reader on the
+    /// same source may run between calls.
+    fn input(&mut self, n: usize, limit: usize) -> Result<()> {
         let pending = self.packed.len() - self.packed_pos;
         if self.packed_left == 0 || n <= pending {
             return Ok(());
@@ -231,7 +237,7 @@ impl Member {
         self.packed_pos = 0;
         let request = (n - pending)
             .max(self.min_read)
-            .min(BLOCK)
+            .min(limit)
             .min(self.packed_left as usize);
         self.packed
             .try_reserve(request)
@@ -266,11 +272,17 @@ impl Member {
 
     /// Fill the member buffer with one decoded block and advance its logical size.
     fn read_block(&mut self, want: usize) -> Result<()> {
-        let n = want.min(BLOCK);
+        // ZipExtFile reads the full requested Zstandard input before invoking
+        // the codec, even if a bad frame or checksum then makes that read fail.
+        let input_limit = if matches!(self.decoder, Decoder::Zstandard(_)) {
+            usize::MAX
+        } else {
+            BLOCK
+        };
         while !self.eof && self.buffer.is_empty() {
-            self.input(n)?;
-            if let Some(inflater) = &mut self.inflater {
-                let len = n.max(self.min_read).min(BLOCK);
+            self.input(want.min(input_limit), input_limit)?;
+            if let Decoder::Deflate(inflater) = &mut self.decoder {
+                let len = want.max(self.min_read).min(BLOCK);
                 // A small member may produce only a few bytes of a full read buffer.
                 self.buffer
                     .try_reserve(len)
@@ -336,6 +348,18 @@ impl Member {
                         "Error -3 while decompressing data: invalid compressed data",
                     ));
                 }
+            } else if let Decoder::Zstandard(stream) = &mut self.decoder {
+                // ZipExtFile decodes the entire compressed input chunk before
+                // returning a small read, including its EOF and CRC effects.
+                let decoded = stream.decompress(&self.packed, self.left as usize);
+                self.packed.clear();
+                self.buffer = decoded?;
+                // A member can declare a smaller size than its frame expands
+                // to. Validate the rest of this input without retaining it.
+                while !stream.eof && !stream.needs_input {
+                    stream.decompress(&[], BLOCK)?;
+                }
+                self.eof = stream.eof || self.packed_left == 0;
             } else {
                 std::mem::swap(&mut self.buffer, &mut self.packed);
                 self.packed.clear();
@@ -407,7 +431,7 @@ impl Member {
         let pending = self.packed.len() - self.packed_pos;
         while self.packed_left != 0 {
             let before = self.packed_left;
-            let read = self.input(usize::MAX);
+            let read = self.input(usize::MAX, BLOCK);
             self.packed.truncate(pending);
             read?;
             if before - self.packed_left < before.min(BLOCK as u64) {
@@ -429,10 +453,13 @@ impl Member {
                     break;
                 }
                 let remaining = limit - out.len();
-                if size.is_some() && remaining > isize::MAX as usize && self.inflater.is_some() {
+                if size.is_some()
+                    && remaining > isize::MAX as usize
+                    && matches!(self.decoder, Decoder::Deflate(_))
+                {
                     return self.oversized_deflate_read();
                 }
-                self.refill(remaining)?;
+                self.refill(size.map_or(i32::MAX as usize, |_| remaining))?;
                 if self.buffer.is_empty() {
                     break;
                 }
@@ -543,11 +570,12 @@ impl Member {
             self.eof = self.left == 0;
         } else {
             if to < now {
+                let decoder = Decoder::new(self.info.method)?;
                 self.source.position(self.start)?;
                 self.packed_at = self.start;
                 self.packed_left = self.info.compress_size;
                 self.left = self.info.file_size;
-                self.inflater = Some(raw_inflater());
+                self.decoder = decoder;
                 self.crc = Some(Crc::new());
                 self.eof = false;
                 self.packed.clear();
@@ -555,8 +583,13 @@ impl Member {
                 self.buffer.clear();
                 self.pos = 0;
             }
+            let seek_read = if matches!(self.decoder, Decoder::Zstandard(_)) {
+                1 << 24 // ZipExtFile.MAX_SEEK_READ
+            } else {
+                BLOCK
+            };
             while self.tell() < to {
-                let n = (to - self.tell()).min(BLOCK as u64) as usize;
+                let n = (to - self.tell()).min(seek_read as u64) as usize;
                 if self.read(Some(n))?.is_empty() {
                     break;
                 }
@@ -574,6 +607,55 @@ mod tests {
 
     // CPython-generated ZIP_DEFLATED archive containing exactly 4,097 NULs.
     const FIXTURE: &[u8] = b"PK\x03\x04\x14\x00\x00\x00\x08\x00\x00\x00!\x00\x7f\xd3u\xb8\x14\x00\x00\x00\x01\x10\x00\x00\x01\x00\x00\x00p\xed\xc1\x01\x0d\x00\x00\x00\xc2\xa0\xf7Om\x0f\x07\x14\x00\x00\x00poPK\x01\x02\x14\x03\x14\x00\x00\x00\x08\x00\x00\x00!\x00\x7f\xd3u\xb8\x14\x00\x00\x00\x01\x10\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x01\x00\x00\x00\x00pPK\x05\x06\x00\x00\x00\x00\x01\x00\x01\x00/\x00\x00\x003\x00\x00\x00\x00\x00";
+
+    #[test]
+    fn zstandard_read_into_preserves_positions_and_propagates_errors() {
+        // The pinned CPython ZstdBadCrcTests archive, with its directory CRC repaired.
+        let archive = b"PK\x03\x04?\0\0\0]\0\0\0!\0V\xb1\x17J\x14\0\0\0\x0b\0\0\0\x05\0\0\0afile(\
+            \xb5/\xfd\0XY\0\0Hello WorldPK\x01\x02?\x03?\0\0\0]\0\0\0!\0V\xb1\x17J\x14\0\0\0\
+            \x0b\0\0\0\x05\0\0\0\0\0\0\0\0\0\0\0\x80\x01\0\0\0\0afilePK\x05\x06\0\0\0\0\
+            \x01\0\x01\x003\0\0\x007\0\0\0\0\0";
+        let open = |bytes: Vec<u8>| {
+            let input = Source::Borrowed(FileState::memory(crate::BytesOwner::new(bytes)));
+            let archive = Archive::open(input, None).ok().unwrap();
+            FileState::member(archive.member_by_name(&Str::new("afile")).ok().unwrap())
+        };
+        let reader = open(archive.to_vec());
+        // SAFETY: the local owner is the sole accessor throughout these reads.
+        unsafe {
+            reader.0.with_mut(|s| {
+                let file = s.file_mut();
+                let mut buffer = *b"_____";
+                assert_eq!(file.read_into(&mut []).ok(), Some(0));
+                assert_eq!(file.read_into(&mut buffer[1..4]).ok(), Some(3));
+                assert_eq!(&buffer, b"_Hel_");
+                assert_eq!(file.tell().ok(), Some(3));
+                assert_eq!(file.seek(SeekFrom::End(-2)).ok(), Some(9));
+                assert_eq!(file.read_into(&mut buffer).ok(), Some(2));
+                assert_eq!(&buffer, b"ldel_");
+                assert_eq!(file.read_into(&mut buffer).ok(), Some(0));
+                assert_eq!(&buffer, b"ldel_");
+                assert_eq!(file.seek(SeekFrom::Start(0)).ok(), Some(0));
+                assert_eq!(file.read_into(&mut buffer).ok(), Some(5));
+                assert_eq!(&buffer, b"Hello");
+            })
+        }
+        for (offset, kind, position) in [(35, Kind::ZstdError, 0), (72, Kind::BadZipFile, 11)] {
+            let mut bytes = archive.to_vec();
+            bytes[offset] ^= 1; // Frame magic or central directory CRC.
+            let reader = open(bytes);
+            // SAFETY: the local owner is the sole accessor throughout this read.
+            unsafe {
+                reader.0.with_mut(|s| {
+                    let file = s.file_mut();
+                    let mut buffer = *b"___";
+                    assert!(file.read_into(&mut buffer).unwrap_err().is_kind(kind));
+                    assert_eq!(&buffer, b"___");
+                    assert_eq!(file.tell().ok(), Some(position));
+                })
+            }
+        }
+    }
 
     #[test]
     fn stored_zip64_seek_checks_the_absolute_offset() {
