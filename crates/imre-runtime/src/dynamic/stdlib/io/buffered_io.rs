@@ -11,9 +11,14 @@ pub(super) fn flush_and_close(
     close_raw: impl FnOnce(&mut Context) -> Result<Id>,
 ) -> Result<Id> {
     // invoke keeps the exception alive across the raw close callback.
+    let mark = ctx.heap.temporary_mark();
     let flushed = super::text_wrapper::invoke_with(ctx, receiver, "flush", |ctx, method| {
         super::descriptor_buffer::flush_before_close(ctx, receiver, method)
     });
+    if flushed.is_ok() {
+        // The discarded return value can finalize and replace the raw descriptor.
+        ctx.discard_temporaries(mark, [receiver]);
+    }
     match (flushed, close_raw(ctx)) {
         (Err(flush), Err(mut close)) => {
             close.context = ctx.raised_instance(flush);

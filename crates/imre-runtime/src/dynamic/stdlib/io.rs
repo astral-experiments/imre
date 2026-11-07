@@ -38,7 +38,7 @@ pub(super) use file_io::{
     check_binary_options, check_open_string, check_text_options, mode as fileio_mode,
     validate_open_mode,
 };
-pub(in crate::dynamic) use file_io::{open, popen_pipe};
+pub(in crate::dynamic) use file_io::{hand_file_finalization_to_python, open, popen_pipe};
 mod text_wrapper;
 pub(in crate::dynamic) use text_wrapper::flush_standard_outputs;
 

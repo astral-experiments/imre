@@ -142,11 +142,13 @@ impl FileState {
     }
 
     /// Closing the raw view of a buffered pipe discards the outer pending bytes.
-    pub(super) fn close_raw_pipe(&mut self) -> io::Result<()> {
-        match self.stream.take() {
-            Some(Stream::Write(writer)) => close_file(writer.into_file()),
-            stream => stream.map_or(Ok(()), Stream::close),
-        }
+    pub(super) fn take_raw_pipe_fd(&mut self) -> Option<RawFd> {
+        let file = match self.stream.take()? {
+            Stream::Read(input) => input.into_file(),
+            Stream::Write(writer) => writer.into_file(),
+            _ => unreachable!("a subprocess pipe has a reader or writer"),
+        };
+        Some(file.into_raw_fd())
     }
 
     pub(super) fn take_pipe_buffer(&mut self) -> Result<Bytes> {
