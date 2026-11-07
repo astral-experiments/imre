@@ -546,6 +546,7 @@ impl Builtin {
             | Self::ListAccumulate
             | Self::Sumprod
             | Self::MathComb
+            | Self::MathFactorial
             | Self::EnumLookup(_)
             | Self::TomlDecode(_)
             | Self::FloatAcos
@@ -970,7 +971,9 @@ impl Builtin {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
             Self::MathComb => signature(&[Type::Int, Type::Int], Type::Int),
-            Self::IntBitLength | Self::IntHash => signature(&[Type::Int], Type::Int),
+            Self::MathFactorial | Self::IntBitLength | Self::IntHash => {
+                signature(&[Type::Int], Type::Int)
+            }
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
             Self::FloatAcos
             | Self::FloatAsin
@@ -1278,6 +1281,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_random_progression"
                 | "imre_function_get_wrapped"
                 | "imre_math_comb"
+                | "imre_math_factorial"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"

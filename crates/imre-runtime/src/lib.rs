@@ -1167,6 +1167,48 @@ pub unsafe extern "C" fn imre_math_comb(n: usize, k: usize) -> usize {
     finish(integer_comb(&n, &k).map(Int::into_raw), 1)
 }
 
+/// Multiply comparable-sized partial products, keeping a leaf in one word
+/// whenever the bit length of its largest factor guarantees that it fits.
+fn factorial_product(lo: u64, hi: u64) -> BigInt {
+    let count = hi - lo + 1;
+    let bits_per_factor = u64::BITS - hi.leading_zeros();
+    if count <= u64::from(u64::BITS / bits_per_factor) {
+        return BigInt::from((lo..=hi).product::<u64>());
+    }
+    let mid = lo + (hi - lo) / 2;
+    factorial_product(lo, mid) * factorial_product(mid + 1, hi)
+}
+
+fn integer_factorial(n: &Int) -> Result<Int> {
+    let n = n.big();
+    if n.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "factorial() not defined for negative values",
+        ));
+    }
+    let max = std::ffi::c_long::MAX;
+    let n = n
+        .to_u64()
+        .filter(|&value| value <= max as u64)
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                format!("factorial() argument should not exceed {max}"),
+            )
+        })?;
+    Ok(Int::new(factorial_product(1, n.max(1))))
+}
+
+/// # Safety
+/// The caller borrows a live integer handle. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_factorial(n: usize) -> usize {
+    // SAFETY: the generated caller keeps the operand alive across the call.
+    let n = unsafe { Int::borrow(n) };
+    finish(integer_factorial(&n).map(Int::into_raw), 1)
+}
+
 /// Validates the count before zero shortcuts. Unbounded right shifts retain
 /// the infinite sign extension; impossible left shifts follow CPython 3.14's
 /// signed-64-bit bit-count limit without attempting an enormous allocation.

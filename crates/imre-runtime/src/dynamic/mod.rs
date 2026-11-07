@@ -3548,6 +3548,7 @@ impl Context {
                 "cosh",
                 "erfc",
                 "fabs",
+                "factorial",
                 "log10",
                 "nextafter",
                 "remainder",
