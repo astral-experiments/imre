@@ -244,18 +244,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"
             ),
         )),
-        "_py_warnings" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("_py_warnings.py", SOURCE.get_or_init(|| {
-                const UPSTREAM: &str = include_str!(
-                    "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
-                );
-                UPSTREAM
-                    // A promoted warning owns its traceback. Letting its frame keep the
-                    // exception alive would also keep the warning's source until cyclic GC.
-                    .replace("            raise message", "            try:\n                raise message\n            finally:\n                del message")
-            })))
-        }
+        "_py_warnings" => bundled_source!("_py_warnings.py"),
         "re" => bundled_source!("re/__init__.py"),
         "re._constants" => bundled_source!("re/_constants.py"),
         "decimal" => bundled_source!("decimal.py"),
