@@ -20,6 +20,37 @@ slot = list.__iter__
 assert slot is list.__iter__ is SequenceList.__iter__
 assert slot.__objclass__ is list
 assert type(slot).__name__ == "wrapper_descriptor"
+doc = type(slot).__doc__
+assert doc is vars(type(slot))["__doc__"]
+assert doc.__objclass__ is type(slot) and doc.__name__ == "__doc__"
+assert doc.__get__(None, type(slot)) is doc
+assert doc.__get__(object.__hash__) == object.__hash__.__doc__ == "Return hash(self)."
+try:
+    doc.__get__(list.append)
+except TypeError as error:
+    assert str(error) == ("descriptor '__doc__' for 'wrapper_descriptor' objects "
+                          "doesn't apply to a 'method_descriptor' object")
+else:
+    raise AssertionError("accepted a different kind of descriptor")
+try:
+    comparison_doc = object.__eq__.__doc__
+except AttributeError as missing:
+    try:
+        doc.__get__(object.__eq__)
+    except AttributeError as forwarded:
+        assert forwarded.args == missing.args
+    else:
+        raise AssertionError("lost a slot documentation error")
+else:
+    assert doc.__get__(object.__eq__) == comparison_doc
+for change in (lambda: setattr(slot, "__doc__", "changed"), lambda: delattr(slot, "__doc__")):
+    try:
+        change()
+    except AttributeError as error:
+        assert str(error) == "attribute '__doc__' of 'wrapper_descriptor' objects is not writable"
+    else:
+        raise AssertionError("wrote a read-only descriptor")
+
 assert list(SequenceList([1, 2])) == [1, 2]
 
 source = Override([1, 2])
