@@ -24,7 +24,7 @@ pub(super) enum ParseError {
     Usage(String),
     ContextWarnings(&'static str),
     FatalStartup(&'static str),
-    TraceDepthLimit,
+    FatalCore(&'static str),
 }
 
 impl From<String> for ParseError {
@@ -97,7 +97,7 @@ pub(super) fn parse(
                     let option = operand(flags.as_str(), args, "-X")?;
                     match option.split_once('=').unwrap_or((&option, "")) {
                         ("faulthandler", _) => faulthandler = true,
-                        ("tracemalloc", _) => {}
+                        ("tracemalloc" | "frozen_modules", _) => {}
                         ("cpu_count", _) if cfg!(target_os = "linux") => {}
                         ("context_aware_warnings", _) => {
                             context_option.get_or_insert_with(|| option.clone());
@@ -224,12 +224,15 @@ pub(super) fn parse(
     }
     let env_present =
         |key| !ignore_environment && env::var_os(key).is_some_and(|value| !value.is_empty());
-    let tracemalloc =
-        u16::try_from(tracemalloc).map_err(|_| startup_error(ParseError::TraceDepthLimit))?;
+    let frozen_modules = frozen_modules(&xoptions, ignore_environment).map_err(startup_error)?;
+    let tracemalloc = u16::try_from(tracemalloc).map_err(|_| startup_error(ParseError::FatalCore(
+        "Fatal Python error: init_interp_main: can't start tracemalloc\nPython runtime state: core initialized\nValueError: the number of frames must be in range [1; 65535]\n",
+    )))?;
     let flags = CommandFlags {
         isolated,
         ignore_environment,
         context_aware_warnings,
+        frozen_modules,
         cpu_count,
         optimize: optimize.max(env_flag("PYTHONOPTIMIZE")),
         safe_path: isolated || env_present("PYTHONSAFEPATH"),
@@ -359,6 +362,39 @@ fn linux_numeric_option(value: &str, ignore_environment: bool) -> Option<&str> {
     // SAFETY: this call owns the non-null locale, and the trim above has finished using it.
     unsafe { libc::freelocale(locale) };
     (!rest.is_empty()).then_some(rest)
+}
+
+/// CPython reads the first command-line value before initializing the interpreter, then
+/// configures imports again from sys._xoptions, which retains the last value.
+fn frozen_modules(xoptions: &[String], ignore_environment: bool) -> Result<bool, ParseError> {
+    let parse = |s: &str| match s {
+        "on" | "" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    };
+    let mut enabled = true;
+    if !ignore_environment
+        && let Some(value) = env::var_os("PYTHON_FROZEN_MODULES").filter(|s| !s.is_empty())
+    {
+        enabled = value.to_str().and_then(parse).ok_or(ParseError::FatalStartup(
+            "Fatal Python error: bad value for PYTHON_FROZEN_MODULES (expected \"on\" or \"off\")\nPython runtime state: preinitialized\n",
+        ))?;
+    }
+    let mut values = xoptions.iter().filter_map(|option| {
+        let (name, value) = option.split_once('=').unwrap_or((option, ""));
+        (name == "frozen_modules").then_some(value)
+    });
+    if let Some(first) = values.next() {
+        enabled = parse(first).ok_or(ParseError::FatalStartup(
+            "Fatal Python error: bad value for option -X frozen_modules (expected \"on\" or \"off\")\nPython runtime state: preinitialized\n",
+        ))?;
+    }
+    if let Some(last) = values.next_back() {
+        enabled = parse(last).ok_or(ParseError::FatalCore(
+            "Fatal Python error: bad value for option -X frozen_modules (expected \"on\" or \"off\")\nPython runtime state: core initialized\n",
+        ))?;
+    }
+    Ok(enabled)
 }
 
 /// CPython validates the environment first, then uses the first matching -X option.

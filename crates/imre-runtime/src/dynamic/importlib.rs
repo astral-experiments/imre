@@ -94,7 +94,7 @@ impl Context {
         Ok(sys)
     }
 
-    /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
+    /// Enter the selected module in the startup __main__ namespace via the selected runpy.
     pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
         let mark = self.heap.temporary_mark();
         let requested = self.text(&name);
@@ -294,10 +294,10 @@ impl Context {
         match name {
             "_frozen_importlib" | "_frozen_importlib_external" => true,
             "zipimport" => cfg!(unix),
-            "stat" => {
-                cfg!(any(target_os = "linux", target_os = "macos")) && self.frozen_override >= 0
-            }
-            "__hello__" | "runpy" => self.frozen_override >= 0,
+            name if imre_ast::providers::is_optional_frozen(name) => match self.frozen_override {
+                0 => self.config["frozen_modules"].as_bool().unwrap_or(true),
+                override_value => override_value > 0,
+            },
             _ => false,
         }
     }

@@ -60,6 +60,8 @@ pub struct CommandFlags {
     pub isolated: bool,
     pub ignore_environment: bool,
     pub context_aware_warnings: bool,
+    /// Enable the optional frozen modules at startup.
+    pub frozen_modules: bool,
     /// A positive CPU-count override; zero selects the operating system.
     pub cpu_count: i32,
     /// Python's language optimization level; independent of LLVM optimization.

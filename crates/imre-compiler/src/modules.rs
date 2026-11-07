@@ -3634,6 +3634,7 @@ impl SourceGraph {
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
+        loader.frozen_modules = command.flags.frozen_modules;
         loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
         let filename = root.join("<string>.py");
         let entry = loader.add_source(
@@ -3695,6 +3696,7 @@ impl SourceGraph {
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;
+        loader.frozen_modules = flags.frozen_modules;
         let reachable = options.reachable_only || options.entry_profile.is_some();
         loader.reachable_only = reachable;
         let id = loader.add(entry.clone(), entry, "__main__".into(), false, &source)?;
@@ -4186,6 +4188,7 @@ struct Loader<'a> {
     import_depth: usize,
     allow_imports: bool,
     skip_current_root: bool,
+    frozen_modules: bool,
     reachable_only: bool,
     initialization: Vec<(ModuleId, Range<usize>)>,
     pub(crate) errno_names: Vec<String>,
@@ -4261,6 +4264,7 @@ impl<'a> Loader<'a> {
             import_depth: 0,
             allow_imports: true,
             skip_current_root: false,
+            frozen_modules: true,
             reachable_only: false,
             initialization: Vec::new(),
             errno_names: Vec::new(),
@@ -5578,6 +5582,12 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            _ if !self.frozen_modules
+                && imre_ast::providers::is_optional_frozen(name)
+                && self.has_project_source(name) =>
+            {
+                None
+            }
             "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
             // Keep the public typeshed decorator signatures available alongside this singleton.
@@ -5732,7 +5742,9 @@ impl<'a> Loader<'a> {
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
-            && !((first == "quopri" || imre_ast::providers::is_native_fallback(first))
+            && !((first == "quopri"
+                || imre_ast::providers::is_native_fallback(first)
+                || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
                 && self.has_project_source(first))
             && (IntrinsicModule::named(first).is_some()
                 || imre_ast::providers::provider(first).is_some()
