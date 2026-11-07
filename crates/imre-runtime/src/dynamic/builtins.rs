@@ -205,6 +205,17 @@ const TYPES: &[&str] = &[
     "zip",
 ];
 
+/// Types supplied by the interpreter before optional modules install their own types.
+pub(super) fn core_types() -> impl Iterator<Item = &'static str> {
+    TYPES
+        .iter()
+        .chain(imre_ast::exceptions::BOXED_BUILTINS)
+        .chain(CORE_RUNTIME_TYPES)
+        .chain(CORE_ITERATOR_TYPES)
+        .copied()
+        .chain(DictIterator::builtin_classes())
+}
+
 pub(super) fn names() -> impl Iterator<Item = &'static str> {
     BUILTIN_FUNCTIONS
         .iter()
@@ -469,6 +480,33 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
         )
 }
 
+/// The interpreter owns these primitive type objects independently of stdlib imports.
+pub(super) const CORE_RUNTIME_TYPES: &[&str] = &[
+    "NoneType",
+    "NotImplementedType",
+    "ellipsis",
+    "code",
+    "coroutine",
+    "async_generator",
+    "cell",
+    "function",
+    "module",
+    "method",
+    "builtin_function_or_method",
+    "method-wrapper",
+    "wrapper_descriptor",
+    "classmethod_descriptor",
+    "method_descriptor",
+    "getset_descriptor",
+    "member_descriptor",
+    "dict_keys",
+    "dict_items",
+    "dict_values",
+    "mappingproxy",
+    "traceback",
+    "frame",
+];
+
 pub(super) const STRUCT_METHODS: &[&str] = &[
     "__init__",
     "__repr__",
@@ -499,40 +537,44 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
         )
 }
 
+const CORE_ITERATOR_TYPES: &[&str] = &[
+    "iterator",
+    "generator",
+    "coroutine_wrapper",
+    "anext_awaitable",
+    "async_generator_asend",
+    "async_generator_athrow",
+    "list_iterator",
+    "list_reverseiterator",
+    "str_ascii_iterator",
+    "str_iterator",
+    "tuple_iterator",
+    "generic_alias_iterator",
+    "memory_iterator",
+    "bytes_iterator",
+    "bytearray_iterator",
+    "range_iterator",
+    "longrange_iterator",
+    "callable_iterator",
+];
+
 /// Iterator implementations that CPython does not expose as subclassable types.
 pub(super) fn is_final_iterator_type(name: &str) -> bool {
     if DictIterator::class(name).is_some() {
         return true;
     }
-    matches!(
-        name,
-        "iterator"
-            | "generator"
-            | "coroutine_wrapper"
-            | "anext_awaitable"
-            | "async_generator_asend"
-            | "async_generator_athrow"
-            | "list_iterator"
-            | "list_reverseiterator"
-            | "str_ascii_iterator"
-            | "str_iterator"
-            | "tuple_iterator"
-            | "generic_alias_iterator"
-            | "memory_iterator"
-            | "bytes_iterator"
-            | "bytearray_iterator"
-            | "range_iterator"
-            | "longrange_iterator"
-            | "callable_iterator"
-            | "fieldnameiterator"
-            | "formatteriterator"
-            | "keys"
-            | "values"
-            | "items"
-            | super::deque::ITERATOR
-            | super::deque::REVERSE_ITERATOR
-            | value::STRUCT_UNPACK_ITERATOR
-    )
+    CORE_ITERATOR_TYPES.contains(&name)
+        || matches!(
+            name,
+            "fieldnameiterator"
+                | "formatteriterator"
+                | "keys"
+                | "values"
+                | "items"
+                | super::deque::ITERATOR
+                | super::deque::REVERSE_ITERATOR
+                | value::STRUCT_UNPACK_ITERATOR
+        )
 }
 
 /// Recognize the native classes that provide Enum's member methods.

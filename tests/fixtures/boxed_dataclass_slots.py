@@ -1,6 +1,6 @@
 import gc
 import weakref
-from dataclasses import FrozenInstanceError, dataclass, field
+from dataclasses import FrozenInstanceError, dataclass, field, fields
 from inspect import getattr_static
 from typing import Generic, TypeVar
 
@@ -50,6 +50,54 @@ def current():
     clone.__setstate__(obj.__getstate__())
     assert clone == obj
 
+    registrations = []
+
+    class Registry:
+        def __init_subclass__(cls, label='replacement'):
+            registrations.append((cls, cls.__qualname__, label))
+            cls.__qualname__ = 'registered ' + label
+
+    class Registered(Registry, label='original'):
+        pass
+
+    replacement = dataclass(slots=True)(Registered)
+    assert registrations == [(Registered, 'current.<locals>.Registered', 'original'),
+                             (replacement, 'Registered', 'replacement')]
+    assert replacement.__qualname__ == Registered.__qualname__ == 'registered original'
+
+    @dataclass
+    class Schema:
+        shared: int
+
+        def __init_subclass__(cls):
+            if '__slots__' in vars(cls):
+                cls.__annotations__ = {'value': str}
+                dataclass(cls)
+
+    class Row(Schema):
+        value: int
+
+    slotted_row = dataclass(slots=True)(Row)
+    original_fields, replacement_fields = fields(Row), fields(slotted_row)
+    assert original_fields[0] is replacement_fields[0] is fields(Schema)[0]
+    assert original_fields[1] is not replacement_fields[1]
+    assert original_fields[1].type is int and replacement_fields[1].type is str
+
+    class TypeName(str):
+        def __get__(self, obj, owner):
+            raise AssertionError('read type metadata as a descriptor')
+
+        def __set_name__(self, owner, name):
+            raise AssertionError('assigned a member name to type metadata')
+
+    class Named:
+        pass
+
+    Named.__name__ = TypeName('Short')
+    Named.__qualname__ = TypeName('qualified.Short')
+    renamed = dataclass(slots=True)(Named)
+    assert renamed.__name__ is Named.__name__ and renamed.__qualname__ is Named.__qualname__
+
     class Marker:
         pass
     Marker.__wrapped__ = Marker
@@ -65,15 +113,34 @@ def current():
     assert left.count == right.count == 2
     left.xs.append("left")
     assert right.xs == []
+    class WeakBase:
+        __slots__ = ('__weakref__',)
+
+    @dataclass(slots=True)
+    class WithDict(WeakBase):
+        __dict__: dict = {}
+
+    storage = {}
+    with_dict = WithDict(storage)
+    with_dict.reading = 41
+    assert WithDict.__slots__ == ('__dict__',)
+    assert vars(WithDict)['__dict__'].__objclass__ is WithDict
+    assert vars(with_dict) is storage and storage == {'reading': 41}
+
     def discarded():
         class Temporary:
-            x: int
+            x: list[Unresolved]
         replacement = dataclass(frozen=True, slots=True)(Temporary)
-        return weakref.ref(Temporary), weakref.ref(replacement)
+        return weakref.ref(Temporary), replacement
 
-    original_ref, replacement_ref = discarded()
+    original_ref, replacement = discarded()
     gc.collect()
-    assert original_ref() is None and replacement_ref() is None
+    assert original_ref() is None and replacement([41]).x == [41]
+    assert replacement.__dataclass_fields__['x'].type.__args__[0].__owner__ is replacement
+    replacement_ref = weakref.ref(replacement)
+    del replacement
+    gc.collect()
+    assert replacement_ref() is None
     @dataclass(slots=True, weakref_slot=True)
     class Parent:
         x: int

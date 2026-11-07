@@ -178,14 +178,25 @@ impl Context {
     pub(super) fn type_subclasses(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         let class =
             super::builtins::noargs_method_receiver(self, "type", "__subclasses__", args, kwargs)?;
-        if !matches!(self.heap.get(class), Value::Class { .. }) {
-            // The weak class registry does not track the edges between static native types.
-            return Err(Error::new(
-                "NotImplementedError",
-                "__subclasses__ is only supported for heap-defined classes",
-            ));
+        if matches!(self.heap.get(class), Value::Class { .. }) {
+            let children = self.heap.immediate_subclasses(class);
+            return Ok(self.alloc(Value::List(children)));
         }
-        let children = self.heap.immediate_subclasses(class);
+        let mut children = Vec::new();
+        for child in self.heap.registered_types().to_vec() {
+            let bases = if matches!(self.heap.get(child), Value::Native(_)) {
+                let tuple = self.builtin_hierarchy_tuple(child, "__bases__");
+                let Value::Tuple(bases) = self.heap.get(tuple) else {
+                    unreachable!()
+                };
+                bases.as_slice()
+            } else {
+                self.heap.immediate_bases(child)
+            };
+            if bases.contains(&class) {
+                children.push(child);
+            }
+        }
         Ok(self.alloc(Value::List(children)))
     }
 
