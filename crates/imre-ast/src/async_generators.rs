@@ -25,7 +25,7 @@ pub fn check(module: ast::ModRef<'_>) -> Option<Error> {
         ast::ModRef::Expression(expr) => check.visit_expr(&expr.body),
     }
     let error = check.error?;
-    if matches!(module, ast::ModRef::Module(m) if crate::type_alias_error(&m.body).is_some())
+    if matches!(module, ast::ModRef::Module(m) if crate::annotation_scope_error(&m.body).is_some())
         || crate::repeated_keyword(module.into()).is_some_and(|kw| kw.start() < error.range.start())
     {
         return None;

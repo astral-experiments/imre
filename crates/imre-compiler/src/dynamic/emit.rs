@@ -231,6 +231,11 @@ fn parse_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<Pars
     let parsed = imre_ast::indentation::prepare(source)
         .parse_module()
         .map_err(|err| format!("{}: {err}", path.display()))?;
+    if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(&parsed) {
+        let error =
+            crate::frontend::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
+        return Err(format!("{}:{error}", path.display()));
+    }
     crate::analysis::check_scope_syntax(source, parsed.syntax())
         .map_err(|error| format!("{}:{error}", path.display()))?;
     if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
@@ -260,7 +265,7 @@ fn lower_source(
         statements::type_parameters::check_nonlocals(source, body)
             .map_err(|error| format!("{}:{error}", path.display()))?;
     }
-    if let Some((range, reason)) = imre_ast::type_alias_error(body) {
+    if let Some((range, reason)) = imre_ast::annotation_scope_error(body) {
         let error =
             crate::frontend::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));

@@ -3885,24 +3885,37 @@ impl Context {
         }
         let lines: Rc<[usize]> =
             line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
-        if let Some(error) = parsed.errors().first() {
+        let parse_error = parsed
+            .errors()
+            .first()
+            .map(|error| (error.location, format!(": {error}"), true))
+            .or_else(|| {
+                imre_ast::comprehension::dict_unpacking_error(&parsed)
+                    .map(|(range, reason)| (range, reason.to_owned(), false))
+            });
+        if let Some((range, detail, prefix_filename)) = parse_error {
             let position = |offset: ruff_text_size::TextSize| {
                 let byte = offset.to_usize();
                 let row = lines.partition_point(|&start| start <= byte);
                 let column = source[lines[row - 1]..byte].chars().count() + 1;
                 (row, column)
             };
-            let (row, column) = position(error.location.start());
-            let (end_row, end_column) = position(error.location.end());
+            let (row, column) = position(range.start());
+            let (end_row, end_column) = position(range.end());
             let end = lines.get(row).copied().unwrap_or(source.len());
             let mut text = source[lines[row - 1]..end].to_owned();
             if mode == "exec" && !text.ends_with('\n') {
                 text.push('\n');
             }
-            let detail = format!(": {error}");
-            let message = format!("{}{detail}", filename.display);
-            let detail = self.text(detail);
-            let msg = self.concat_strings(filename_id, detail)?;
+            let msg = self.text(&detail);
+            let (msg, message) = if prefix_filename {
+                (
+                    self.concat_strings(filename_id, msg)?,
+                    format!("{}{detail}", filename.display),
+                )
+            } else {
+                (msg, detail)
+            };
             let details = vec![
                 filename_id,
                 self.int(row as i64),
@@ -3957,7 +3970,7 @@ impl Context {
             return Err(self.located_syntax_error(&message, span, filename_id, &lines)?);
         }
         if let ast::Mod::Module(module) = parsed.syntax()
-            && let Some((range, message)) = imre_ast::type_alias_error(&module.body)
+            && let Some((range, message)) = imre_ast::annotation_scope_error(&module.body)
         {
             return Err(self.located_syntax_error(
                 &message,
