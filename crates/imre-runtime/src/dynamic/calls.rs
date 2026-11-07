@@ -3178,6 +3178,37 @@ impl Context {
                     "__text_signature__" if symbol == "posix.waitid" => {
                         return Ok(self.text("($module, idtype, id, options, /)"));
                     }
+                    "__doc__" if symbol == "posix.uname" => {
+                        return Ok(self.text(concat!(
+                            "Return an object identifying the current operating system.\n\n",
+                            "The object behaves like a named tuple with the following fields:\n",
+                            "  (sysname, nodename, release, version, machine)"
+                        )));
+                    }
+                    "__doc__" if symbol == "posix.getloadavg" => {
+                        return Ok(self.text(concat!(
+                            "Return average recent system load information.\n\n",
+                            "Return the number of processes in the system run queue averaged over\n",
+                            "the last 1, 5, and 15 minutes as a tuple of three floats.\n",
+                            "Raises OSError if the load average was unobtainable."
+                        )));
+                    }
+                    "__doc__" if symbol == "posix.ctermid" => {
+                        return Ok(self.text(
+                            "Return the name of the controlling terminal for this process.",
+                        ));
+                    }
+                    "__doc__" if symbol == "posix.sync" => {
+                        return Ok(self.text("Force write of everything to disk."));
+                    }
+                    "__text_signature__"
+                        if matches!(
+                            symbol.as_str(),
+                            "posix.uname" | "posix.getloadavg" | "posix.ctermid" | "posix.sync"
+                        ) =>
+                    {
+                        return Ok(self.text("($module, /)"));
+                    }
                     "__doc__" if symbol == "posix.getrandom" => {
                         return Ok(self.text("Obtain a series of random bytes."));
                     }

@@ -907,9 +907,16 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "Placeholder") => functools::placeholder(ctx),
         ("functools", "_PlaceholderType") => ctx.builtin("functools._PlaceholderType"),
         ("sys", name) if SYS_LAZY_FUNCTIONS.contains(&name) => ctx.builtin(&format!("sys.{name}")),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", name @ ("uname" | "getloadavg" | "ctermid" | "sync")) => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", "uname_result") => ctx.builtin(fixed_structseq::UNAME_RESULT),
+        #[cfg(not(target_os = "linux"))]
+        ("os", "uname") => ctx.builtin("os.uname"),
         ("sysconfig", "_getuserbase" | "get_path_names" | "get_platform")
         | ("site", "getsitepackages")
-        | ("os", "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_base32", "encode" | "decode")
         | ("_imre_base85", "encode")
@@ -1683,7 +1690,12 @@ pub(super) fn call(
             | "posix.getcwd"
             | "posix.getcwdb"
             | "posix._create_environ"
-    ) {
+    ) || (cfg!(target_os = "linux")
+        && matches!(
+            name,
+            "posix.uname" | "posix.getloadavg" | "posix.ctermid" | "posix.sync"
+        ))
+    {
         // Strip the implicit receiver of functions bound to their module.
         let args = if name.starts_with("sys._jit.") || name == "sys.get_int_max_str_digits" {
             args.get(1..).ok_or_else(|| {
@@ -1717,6 +1729,42 @@ pub(super) fn call(
             "_socket.getdefaulttimeout" => {
                 let timeout = *ctx.socket_default_timeout.lock().unwrap();
                 timeout.map_or(NONE, |d| ctx.alloc(Value::Float(d.as_secs_f64())))
+            }
+            #[cfg(target_os = "linux")]
+            "posix.uname" => {
+                let values = system::with_uname_fields(|fields| {
+                    let codec =
+                        crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+                    fields
+                        .into_iter()
+                        .map(|field| Ok(ctx.text_codepoints(codec.decode_filesystem(field)?)))
+                        .collect::<Result<Vec<_>>>()
+                })
+                .map_err(os_error)?;
+                fixed_structseq::record(ctx, fixed_structseq::UNAME_RESULT, values?)
+            }
+            #[cfg(target_os = "linux")]
+            "posix.getloadavg" => {
+                let mut averages = [0.0; 3];
+                // SAFETY: the array has exactly three writable doubles.
+                if unsafe { libc::getloadavg(averages.as_mut_ptr(), 3) } != 3 {
+                    return Err(Error::new("OSError", "Load averages are unobtainable"));
+                }
+                let values = averages.map(|load| ctx.alloc(Value::Float(load)));
+                ctx.alloc(Value::Tuple(values.into()))
+            }
+            #[cfg(target_os = "linux")]
+            "posix.ctermid" => {
+                let bytes = system::ctermid().map_err(os_error)?;
+                let codec =
+                    crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+                ctx.text_codepoints(codec.decode_filesystem(&bytes)?)
+            }
+            #[cfg(target_os = "linux")]
+            "posix.sync" => {
+                // SAFETY: sync takes no arguments and has no error result.
+                unsafe { libc::sync() };
+                NONE
             }
             "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
@@ -3339,6 +3387,7 @@ pub(super) fn call(
             let machine = ctx.text(machine);
             ctx.alloc(Value::Tuple(vec![release, version_info, machine]))
         }
+        #[cfg(not(target_os = "linux"))]
         "os.uname" => {
             let uname = system::uname().map_err(os_error)?;
             let data = [
