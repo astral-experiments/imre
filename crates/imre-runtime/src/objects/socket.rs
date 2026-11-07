@@ -361,6 +361,65 @@ fn retry_read<T, E: From<Error>>(
     }
 }
 
+/// Run the wait and data syscall separately. Only their raw fd and deadline enter a carrier;
+/// the owner dispatches Python signals and resolves the current socket for each attempt.
+pub(crate) fn read_socket<C, T, E: From<Error>>(
+    socket: &Object,
+    context: &mut C,
+    mut check_signals: impl FnMut(&mut C) -> std::result::Result<(), E>,
+    mut poll: impl FnMut(&mut C, RawFd, Deadline) -> std::result::Result<io::Result<()>, E>,
+    mut read: impl FnMut(&mut C, RawFd) -> std::result::Result<io::Result<T>, E>,
+) -> std::result::Result<T, E> {
+    let until = deadline(socket);
+    let mut wait = until;
+    loop {
+        let raw = fd(socket);
+        let result = if let Some(end) = wait
+            && raw >= 0
+        {
+            match poll(context, raw, end)? {
+                Ok(()) => {
+                    wait = None;
+                    continue;
+                }
+                Err(error) => Err(error),
+            }
+        } else {
+            read(context, raw)?
+        };
+        match result {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => check_signals(context)?,
+            Err(error)
+                if wait.is_none()
+                    && error.kind() == io::ErrorKind::WouldBlock
+                    && get_timeout(socket).is_some_and(|timeout| !timeout.is_zero()) =>
+            {
+                // The current socket timeout decides whether to retry. The original timeout
+                // still decides whether to poll and when the operation expires.
+                wait = until;
+            }
+            result => return result.map_err(|error| errno_error(error).into()),
+        }
+        if wait.is_some_and(|end| end.remaining().is_zero()) {
+            return Err(errno_error(timed_out()).into());
+        }
+    }
+}
+
+fn local_read<T, E: From<Error>>(
+    socket: &Object,
+    mut check_signals: impl FnMut() -> std::result::Result<(), E>,
+    mut read: impl FnMut(RawFd) -> io::Result<T>,
+) -> std::result::Result<T, E> {
+    read_socket(
+        socket,
+        &mut check_signals,
+        |check| check(),
+        |_, raw, end| Ok(poll_interruptible(raw, libc::POLLIN, Some(end))),
+        |_, raw| Ok(read(raw)),
+    )
+}
+
 pub(crate) fn deadline(socket: &Object) -> Option<Deadline> {
     get_timeout(socket)
         .filter(|d| !d.is_zero())
@@ -502,14 +561,13 @@ pub(crate) fn set_option(fd: RawFd, level: i32, name: i32, value: SocketOption<'
     Ok(())
 }
 
-fn own_socket_fd(raw: RawFd) -> Result<OwnedFd> {
+fn own_socket_fd(raw: RawFd) -> io::Result<OwnedFd> {
     // SAFETY: the kernel transferred a new fd; every path now has an owner.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
     #[cfg(not(target_os = "linux"))]
     {
         // SAFETY: the fresh descriptor is exclusively owned until setup completes.
-        checked(unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) })
-            .map_err(errno_error)?;
+        checked(unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) })?;
     }
     Ok(fd)
 }
@@ -521,7 +579,8 @@ fn handle(
     kind: i32,
     proto: i32,
 ) -> Result<crate::ObjectOwner> {
-    handle_owned(own_socket_fd(raw)?, blocking, family, kind, proto)
+    let fd = own_socket_fd(raw).map_err(errno_error)?;
+    handle_owned(fd, blocking, family, kind, proto)
 }
 
 fn handle_owned(
@@ -687,7 +746,8 @@ pub(crate) fn open_into(socket: &Object, family: i32, ty: i32, proto: i32) -> Re
     }
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
     let raw = checked(unsafe { libc::socket(family, flags, proto) }).map_err(errno_error)?;
-    install_owned(socket, own_socket_fd(raw)?, blocking, family, kind, proto)
+    let fd = own_socket_fd(raw).map_err(errno_error)?;
+    install_owned(socket, fd, blocking, family, kind, proto)
 }
 
 pub(crate) fn socketpair(
@@ -1832,31 +1892,49 @@ pub unsafe extern "C" fn imre_socket_sockname(
     )
 }
 
+/// Own the accepted descriptor or its setup error, so neither can cause a second accept.
+pub(crate) struct Accepted {
+    child: io::Result<OwnedFd>,
+    address: libc::sockaddr_storage,
+    length: libc::socklen_t,
+}
+
+impl Accepted {
+    pub(crate) fn into_parts(self) -> Result<(OwnedFd, SocketName)> {
+        Ok((
+            self.child.map_err(errno_error)?,
+            unpack_socket_name(&self.address, self.length)?,
+        ))
+    }
+}
+
+pub(crate) fn accept_once(raw: RawFd) -> io::Result<Accepted> {
+    let (child, address, length) = peer_call(|a, n| {
+        // SAFETY: peer_call supplies fresh address storage and its capacity for each attempt.
+        unsafe {
+            #[cfg(target_os = "linux")]
+            {
+                libc::accept4(raw, a, n, libc::SOCK_CLOEXEC)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                libc::accept(raw, a, n)
+            }
+        }
+    })?;
+    Ok(Accepted {
+        child: own_socket_fd(child),
+        address,
+        length,
+    })
+}
+
 /// Accept a non-inheritable descriptor without applying Python socket defaults to it.
 pub(crate) fn accept_fd<E: From<Error>>(
     s: &Object,
     check_signals: impl FnMut() -> std::result::Result<(), E>,
 ) -> std::result::Result<(OwnedFd, SocketName), E> {
-    let (child, addr, len) = retry_read(s, check_signals, |until| {
-        let raw = fd(s);
-        socket_call_interruptible(raw, libc::POLLIN, until, || {
-            peer_call(|a, n| {
-                // SAFETY: peer_call provides a fresh address and resets its capacity on every attempt.
-                unsafe {
-                    #[cfg(target_os = "linux")]
-                    {
-                        libc::accept4(raw, a, n, libc::SOCK_CLOEXEC)
-                    }
-                    #[cfg(not(target_os = "linux"))]
-                    {
-                        libc::accept(raw, a, n)
-                    }
-                }
-            })
-        })
-    })?;
-    let child = own_socket_fd(child)?;
-    Ok((child, unpack_socket_name(&addr, len)?))
+    Ok(local_read(s, check_signals, accept_once)?.into_parts()?)
 }
 
 pub(crate) fn accept<E: From<Error>>(
@@ -1946,9 +2024,9 @@ pub(crate) fn recv_with_signals<E: From<Error>>(
                 .try_reserve_exact(size)
                 .map_err(|_| Error::allocation())?;
         }
-        let received = retry_read(s, check_signals, |until| {
+        let received = local_read(s, check_signals, |raw| {
             // SAFETY: this private allocation has at least size writable bytes.
-            unsafe { receive_until(fd(s), bytes.as_mut_ptr(), size, flags, until) }
+            unsafe { receive_once(raw, bytes.as_mut_ptr(), size, flags) }
         })?;
         let n = received.min(size);
         // SAFETY: the kernel initialized the returned prefix or MSG_TRUNC
@@ -2051,11 +2129,23 @@ unsafe fn receive_until(
     until: Option<Deadline>,
 ) -> io::Result<usize> {
     socket_call_interruptible(fd, libc::POLLIN, until, || {
-        // SAFETY: the caller supplies len writable bytes. Flags can make the
-        // returned count differ from the number of bytes actually copied.
-        let n = unsafe { libc::recv(fd, buffer.cast(), len, flags) };
-        usize::try_from(n).map_err(|_| io::Error::last_os_error())
+        // SAFETY: the caller supplies this buffer for the duration of the operation.
+        unsafe { receive_once(fd, buffer, len, flags) }
     })
+}
+
+/// # Safety
+/// The caller provides len writable bytes. Flags can make the reported count
+/// differ from the number of bytes the kernel initializes.
+pub(crate) unsafe fn receive_once(
+    fd: RawFd,
+    buffer: *mut u8,
+    len: usize,
+    flags: i32,
+) -> io::Result<usize> {
+    // SAFETY: the caller describes the writable destination.
+    let n = unsafe { libc::recv(fd, buffer.cast(), len, flags) };
+    usize::try_from(n).map_err(|_| io::Error::last_os_error())
 }
 
 pub(crate) fn send(socket: &Object, bytes: &[u8], flags: i32) -> Result<usize> {
