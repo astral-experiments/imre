@@ -75,6 +75,18 @@ impl FileSystem<'_> {
         value
     }
 
+    /// Hash a file as it is read, retaining its handle for a seekable ZIP reader.
+    pub(crate) fn open_hashed(&mut self, path: &Path) -> io::Result<(std::fs::File, blake3::Hash)> {
+        let result = std::fs::File::open(path).and_then(|mut file| {
+            let digest = blake3::Hasher::new().update_reader(&mut file)?.finalize();
+            Ok((file, digest))
+        });
+        self.record(path, || {
+            Fact::Bytes(outcome(&result, |(_, digest)| *digest))
+        });
+        result
+    }
+
     pub(crate) fn read(&mut self, path: &Path) -> io::Result<Vec<u8>> {
         let value = std::fs::read(path);
         self.record(path, || Fact::Bytes(outcome(&value, |b| blake3::hash(b))));

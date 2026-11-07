@@ -216,7 +216,7 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     .map_err(|diagnostic| diagnostic.to_string())?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
-    llvm::emit(&module, &ranges, options.address_sanitizer)
+    llvm::emit(&module, &ranges, options.address_sanitizer).map_err(|error| error.0.to_owned())
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -297,18 +297,16 @@ fn check_file_with(
     mut cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
-    let typed = |graph: &mut modules::SourceGraph| {
-        graph.session.explicit_check = true;
-        let (module, _) = checked_lower_with(graph, cache.as_deref_mut())?;
-        Ok(verify_after(&module, "lowering")?)
-    };
     object_fallback(
-        BoxedLayout::Whole,
-        path,
-        module_root,
+        BoxedLayout::Check,
+        (path, module_root),
         options,
         filesystem,
-        typed,
+        |graph| {
+            graph.session.explicit_check = true;
+            checked_lower_with(graph, cache.as_deref_mut())
+        },
+        |_, _| Ok(()),
         |_| (),
     )
 }
@@ -356,6 +354,7 @@ fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
 
 /// Selects the LLVM outputs for a resolved boxed program.
 enum BoxedLayout<'a> {
+    Check,
     Whole,
     Split,
     WholeWithUnits(&'a mut Vec<CodegenUnit>),
@@ -364,16 +363,16 @@ enum BoxedLayout<'a> {
 /// Uses the boxed backend when the checked graph requires Python object operations.
 fn object_fallback<T>(
     layout: BoxedLayout<'_>,
-    path: &Path,
-    module_root: Option<&Path>,
+    (path, module_root): (&Path, Option<&Path>),
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
-    mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<T, LoweringDiagnostic>,
+    mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<CheckedIr, LoweringDiagnostic>,
+    native: impl Fn(&mut modules::SourceGraph, CheckedIr) -> Result<T, llvm::Unsupported>,
     boxed: impl FnOnce(UnitCompilation) -> T,
 ) -> Result<T, String> {
     if options.module_entry.is_some() {
         return dynamic::compile(
-            (path, module_root),
+            (path, module_root, filesystem),
             options,
             true,
             None,
@@ -406,7 +405,7 @@ fn object_fallback<T>(
         if !infer_sets {
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
         }
-        match lower(&mut graph) {
+        let error = match lower(&mut graph) {
             Ok(_) if graph.runtime_initializer.is_some() && !boxed_startup => {
                 // All first-party code lowered successfully. The unresolved import alone
                 // must use the same admission policy as an unresolved module in the loader.
@@ -416,7 +415,20 @@ fn object_fallback<T>(
                     false,
                 );
             }
-            Ok(value) if !boxed_startup => return Ok(value),
+            Ok((mut module, mut owners)) if !boxed_startup => {
+                if matches!(layout, BoxedLayout::Check) {
+                    verify_after(&module, "lowering")?;
+                } else {
+                    for original in specialize(&mut module)? {
+                        owners.push(owners[original]);
+                    }
+                }
+                match native(&mut graph, (module, owners)) {
+                    Ok(value) => return Ok(value),
+                    Err(refusal) => LoweringDiagnostic::plain(refusal.0.to_owned())
+                        .classified(LoweringKind::Object),
+                }
+            }
             // Tracing and startup imports both need the same Python heap as the entry.
             Ok(_) => {
                 break (
@@ -425,15 +437,16 @@ fn object_fallback<T>(
                     true,
                 );
             }
-            // A guessed layout must not turn a working object program into a type error,
-            // or mask a diagnostic that the ordinary checked-file path would have issued.
-            Err(_) if graph.set_layout_hint.get() == modules::SetLayoutHint::Applied => {
-                infer_sets = false;
-                import_failure = None;
-                site_wheels = modules::SiteWheels::default();
-            }
-            Err(error) => break (error, Some(graph), false),
+            Err(error) => error,
+        };
+        // A guessed layout must not turn a working object program into a type error,
+        // or mask a diagnostic that the ordinary checked-file path would have issued.
+        if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
+            break (error, Some(graph), false);
         }
+        infer_sets = false;
+        import_failure = None;
+        site_wheels = modules::SiteWheels::default();
     };
     // Python invocations and explicit object imports enforce annotated calls in
     // the boxed runtime, where their TypeError can be caught by the program.
@@ -530,7 +543,7 @@ fn object_fallback<T>(
         Ok(())
     };
     match dynamic::compile(
-        (path, module_root),
+        (path, module_root, filesystem),
         options,
         runtime_imports,
         operation
@@ -579,13 +592,12 @@ fn compile_file_with_layout(
     options: &CompileOptions,
     layout: BoxedLayout<'_>,
 ) -> Result<Compilation, String> {
-    let typed = |graph: &mut modules::SourceGraph| {
-        let (mut module, _) = checked_lower(graph)?;
-        specialize(&mut module)?;
+    let typed = |graph: &mut modules::SourceGraph, (module, _): CheckedIr| {
         let ranges = ranges::analyze(&module);
+        let llvm_ir = llvm::emit(&module, &ranges, options.address_sanitizer)?;
         let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
         Ok(Compilation {
-            llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
+            llvm_ir,
             extension_archives: graph
                 .modules
                 .iter()
@@ -597,10 +609,10 @@ fn compile_file_with_layout(
     };
     object_fallback(
         layout,
-        path,
-        module_root,
+        (path, module_root),
         options,
         Default::default(),
+        checked_lower,
         typed,
         |mut c| Compilation {
             llvm_ir: c
@@ -718,27 +730,24 @@ fn compile_file_units_with(
     options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |graph: &mut modules::SourceGraph| {
-        let (mut module, mut owners) = checked_lower_with(graph, cache.as_deref_mut())?;
-        for original in specialize(&mut module)? {
-            owners.push(owners[original]);
-        }
+    let typed = |graph: &mut modules::SourceGraph, (module, owners): CheckedIr| {
         let ranges = ranges::analyze(&module);
         let names = graph
             .modules
             .iter()
             .map(|m| m.name.clone())
             .collect::<Vec<_>>();
+        let units = llvm::emit_units(
+            &module,
+            &ranges,
+            options.address_sanitizer,
+            &owners,
+            &names,
+            graph.entry,
+        )?;
         let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
         Ok(UnitCompilation {
-            units: llvm::emit_units(
-                &module,
-                &ranges,
-                options.address_sanitizer,
-                &owners,
-                &names,
-                graph.entry,
-            )?,
+            units,
             extension_archives: graph
                 .modules
                 .iter()
@@ -750,19 +759,19 @@ fn compile_file_units_with(
     };
     object_fallback(
         BoxedLayout::Split,
-        path,
-        module_root,
+        (path, module_root),
         options,
         Default::default(),
+        |graph| checked_lower_with(graph, cache.as_deref_mut()),
         typed,
         |c| c,
     )
 }
 
+type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
+
 /// Reject unsupported operations before ty renders potentially exponential types.
-fn checked_lower(
-    graph: &mut modules::SourceGraph,
-) -> Result<(ir::Module, Vec<modules::ModuleId>), LoweringDiagnostic> {
+fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedIr, LoweringDiagnostic> {
     let lowered = frontend::lower_with_owners(graph)?;
     let (skipped, overloads) = graph.diagnostic_scopes();
     graph.session.check_scopes(skipped.as_deref(), &overloads)?;
@@ -772,7 +781,7 @@ fn checked_lower(
 fn checked_lower_with(
     graph: &mut modules::SourceGraph,
     cache: Option<&mut IncrementalCompiler>,
-) -> Result<(ir::Module, Vec<modules::ModuleId>), LoweringDiagnostic> {
+) -> Result<CheckedIr, LoweringDiagnostic> {
     let Some(compiler) =
         cache.filter(|_| graph.set_layout_hint.get() != modules::SetLayoutHint::Disabled)
     else {
@@ -1122,18 +1131,17 @@ mod tests {
                     ..Default::default()
                 };
                 let ordinary = super::object_fallback(
-                    super::BoxedLayout::Whole,
-                    &path,
-                    None,
+                    super::BoxedLayout::Check,
+                    (&path, None),
                     &options,
                     Default::default(),
                     |graph| {
                         graph
                             .set_layout_hint
                             .set(super::modules::SetLayoutHint::Disabled);
-                        let (module, _) = super::checked_lower(graph)?;
-                        Ok(super::verify_after(&module, "lowering")?)
+                        super::checked_lower(graph)
                     },
+                    |_, _| Ok(()),
                     |_| (),
                 );
                 assert_eq!(

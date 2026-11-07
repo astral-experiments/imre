@@ -588,7 +588,7 @@ pub(crate) enum ObjectOperation {
 }
 
 pub(crate) fn compile(
-    (path, module_root): (&Path, Option<&Path>),
+    (path, module_root, mut filesystem): (&Path, Option<&Path>, crate::watch::FileSystem<'_>),
     options: &CompileOptions,
     runtime_imports: bool,
     operation: Option<ObjectOperation>,
@@ -611,7 +611,7 @@ pub(crate) fn compile(
         if options.script_startup.is_some() && crate::named_bytecode(path) {
             return Ok(None);
         }
-        let Ok(source) = std::fs::read_to_string(path) else {
+        let Ok(source) = filesystem.read_to_string(path) else {
             return Ok(None);
         };
         if options.script_startup.is_some()
@@ -759,7 +759,7 @@ pub(crate) fn compile(
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
     let entry_identity = (!in_memory)
-        .then(|| entry.canonicalize())
+        .then(|| filesystem.canonicalize(&entry))
         .transpose()
         .map_err(|e| e.to_string())?;
     let root = if let Some(root) = module_root {
@@ -775,7 +775,7 @@ pub(crate) fn compile(
         &entry_identity,
         module_root,
     ) {
-        (true, Some(_), Some(_)) => root.canonicalize().unwrap_or(root),
+        (true, Some(_), Some(_)) => filesystem.canonicalize(&root).unwrap_or(root),
         (true, Some(identity), None) => identity.parent().unwrap_or(&root).to_owned(),
         _ => root,
     };
@@ -830,10 +830,11 @@ pub(crate) fn compile(
         .enumerate()
         .filter(|(index, _)| options.python_archive_indices.contains(index))
         .map(|(_, path)| cwd.join(path))
-        .chain((options.path_entry && !entry.is_dir()).then(|| entry.clone()))
+        .chain((options.path_entry && !filesystem.is_dir(&entry)).then(|| entry.clone()))
     {
         if let std::collections::hash_map::Entry::Vacant(entry) = archives.entry(path) {
-            let archive = crate::zip_entry::ZipSources::open(entry.key(), &mut inputs)?;
+            let archive =
+                crate::zip_entry::ZipSources::open(entry.key(), &mut inputs, &mut filesystem)?;
             entry.insert(archive);
         }
     }
@@ -1181,20 +1182,20 @@ pub(crate) fn compile(
                     let stem = root.join(prefix.replace('.', "/"));
                     let file = stem.with_extension("py");
                     let init = stem.join("__init__.py");
-                    let (path, package) = if init.is_file() {
+                    let (path, package) = if filesystem.is_file(&init) {
                         (init, true)
-                    } else if file.is_file() {
+                    } else if filesystem.is_file(&file) {
                         inputs.missing.push(init);
                         (file, false)
                     } else {
                         inputs.missing.extend([init, file]);
-                        if stem.is_dir() {
+                        if filesystem.is_dir(&stem) {
                             if ordered_only {
                                 return Ok(None);
                             }
                             inputs.directories.push((
                                 stem.clone(),
-                                stem.canonicalize().map_err(|e| e.to_string())?,
+                                filesystem.canonicalize(&stem).map_err(|e| e.to_string())?,
                             ));
                             sources.push((prefix.clone(), stem, String::new()));
                         } else {
@@ -1224,12 +1225,14 @@ pub(crate) fn compile(
                         return Ok(None);
                     }
                     installed = None;
-                    let src = std::fs::read_to_string(&path)
+                    let identity = filesystem.canonicalize(&path);
+                    let src = filesystem
+                        .read_to_string(&path)
                         .map_err(|e| format!("{}: {e}", path.display()))?;
                     let imports = imports_for_module(&path, &src)?;
                     inputs.files.push((
                         path.clone(),
-                        path.canonicalize().map_err(|e| e.to_string())?,
+                        identity.map_err(|e| e.to_string())?,
                         blake3::hash(src.as_bytes()).to_hex().to_string(),
                     ));
                     if imports.misplaced_future {
@@ -1348,33 +1351,39 @@ pub(crate) fn compile(
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     check_returns(entry_requests_objects || startup_provider)?;
-    let providers = options
-        .bundled_provider_archive
-        .as_deref()
-        .filter(|_| keep_docstrings)
-        .and_then(provider_archive::symbols)
-        .unwrap_or_default();
-    let config = config.to_string();
-    let emit = |split| {
-        emit::emit(
-            &sources,
-            &config,
-            keep_docstrings,
-            Path::new(bundled_root),
-            &providers,
-            split,
-            &source_initializers,
-        )
+    let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {
+        emit::check(&sources, keep_docstrings, &source_initializers)?;
+        (Vec::new(), false)
+    } else {
+        let providers = options
+            .bundled_provider_archive
+            .as_deref()
+            .filter(|_| keep_docstrings)
+            .and_then(provider_archive::symbols)
+            .unwrap_or_default();
+        let config = config.to_string();
+        let emit = |split| {
+            emit::emit(
+                &sources,
+                &config,
+                keep_docstrings,
+                Path::new(bundled_root),
+                &providers,
+                split,
+                &source_initializers,
+            )
+        };
+        let (mut units, mut used_archive) = emit(!matches!(layout, crate::BoxedLayout::Whole))?;
+        if let crate::BoxedLayout::WholeWithUnits(native) = layout
+            && units.len() > 1
+        {
+            // Both representations use the same resolved source and registration order.
+            let (whole, archived) = emit(false)?;
+            *native = std::mem::replace(&mut units, whole);
+            used_archive |= archived;
+        }
+        (units, used_archive)
     };
-    let (mut units, mut used_archive) = emit(!matches!(layout, crate::BoxedLayout::Whole))?;
-    if let crate::BoxedLayout::WholeWithUnits(native) = layout
-        && units.len() > 1
-    {
-        // Both representations use the same resolved source and registration order.
-        let (whole, archived) = emit(false)?;
-        *native = std::mem::replace(&mut units, whole);
-        used_archive |= archived;
-    }
     inputs.boxed_imports = true;
     Ok(Some(UnitCompilation {
         units,

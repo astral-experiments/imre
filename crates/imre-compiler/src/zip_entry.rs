@@ -6,16 +6,18 @@ use std::path::{Path, PathBuf};
 
 use zip::ZipArchive;
 
+use crate::watch::FileSystem;
+
 /// Locate the archive for a Python CLI operand, including a path inside an archive.
-fn archive_path(path: &Path) -> Option<&Path> {
+fn archive_path<'a>(path: &'a Path, filesystem: &mut FileSystem<'_>) -> Option<&'a Path> {
     let path = path.components().as_path();
-    let archive = path.ancestors().find(|part| part.exists())?;
-    archive.is_file().then_some(archive)
+    let archive = path.ancestors().find(|part| filesystem.exists(part))?;
+    filesystem.is_file(archive).then_some(archive)
 }
 
 /// Test the archive directory itself, so executable stubs and arbitrary suffixes work.
 pub fn is_zip_path(path: &Path) -> bool {
-    archive_path(path)
+    archive_path(path, &mut FileSystem::default())
         .and_then(|path| File::open(path).ok())
         .is_some_and(|file| ZipArchive::new(BufReader::new(file)).is_ok())
 }
@@ -65,19 +67,20 @@ pub(crate) struct ZipSources {
 }
 
 impl ZipSources {
-    pub(crate) fn open(path: &Path, inputs: &mut crate::SourceInputs) -> Result<Self, String> {
-        let archive =
-            archive_path(path).ok_or_else(|| format!("{}: archive not found", path.display()))?;
-        let mut file = File::open(archive).map_err(|e| e.to_string())?;
-        let digest = blake3::Hasher::new()
-            .update_reader(&mut file)
-            .map_err(|e| e.to_string())?
-            .finalize();
+    pub(crate) fn open(
+        path: &Path,
+        inputs: &mut crate::SourceInputs,
+        filesystem: &mut FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let archive = archive_path(path, filesystem)
+            .ok_or_else(|| format!("{}: archive not found", path.display()))?;
+        let identity = filesystem.canonicalize(archive);
+        let (mut file, digest) = filesystem.open_hashed(archive).map_err(|e| e.to_string())?;
         file.rewind().map_err(|e| e.to_string())?;
         let reader = ZipArchive::new(BufReader::new(file)).map_err(|e| e.to_string())?;
         inputs.files.push((
             archive.to_owned(),
-            archive.canonicalize().map_err(|e| e.to_string())?,
+            identity.map_err(|e| e.to_string())?,
             digest.to_hex().to_string(),
         ));
         let prefix = path
