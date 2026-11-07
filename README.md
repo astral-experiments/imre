@@ -184,7 +184,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 47 suites, 3,084 of 5,923 originals have paired passes. The totals include two complete module invocations that stopped during import, before a native test body began.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 47 suites, 3,091 of 5,923 originals have paired passes. The totals include two complete module invocations that stopped during import, before a native test body began.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
@@ -216,7 +216,7 @@ We track these families separately to keep the original 16,202-test baseline com
 | `mmap` | 0 | 51 | 43 passed, 8 skipped | Both complete native invocations stopped at the mmap import before registration. [Measured public revision](https://github.com/astral-experiments/imre/commit/f1bf15d782a620e88ed9de62879c9133e5d94f47) |
 | `operator` | 88 | 110 | 110 passed | Both original operator.call variants now pass. Installed callbacks use ordinary callable dispatch. [Forwarding](https://github.com/astral-experiments/imre/pull/6088) |
 | `optparse` | 151 | 154 | 154 passed | 151 passed, 2 skipped, 1 failure. The upstream `Tools/i18n/pygettext.py` found no messages at the module’s virtual source path. [Public revision](https://github.com/astral-experiments/imre/commit/276f0cbe28c37627fa4d0859dfe439303a208d74). |
-| `pydoc` | 47 | 120 | 117 passed, 3 skipped | Three native exception namespace originals and one class-tree original joined the prior 43. The combined suite had 47 paired passes. [Namespaces](https://github.com/astral-experiments/imre/pull/6077) · [Class trees](https://github.com/astral-experiments/imre/pull/6081) |
+| `pydoc` | 54 | 120 | 117 passed, 3 skipped | Native method and getset documentation added seven paired passes. An installed JsonPointer bound method and property produced exactly the stock text and HTML. [Descriptor documentation](https://github.com/astral-experiments/imre/pull/6106) |
 | `pyexpat` | 34 | 60 | 60 passed | 34 passed, 12 errors, 14 skipped (one during class setup) |
 | `queue` | 33 | 162 | 156 passed, 6 skipped | 33 passed, 85 skipped and 44 raised errors. Of the skips, 82 require the C implementation of _queue and three require a large-memory run. [Public revision](https://github.com/astral-experiments/imre/commit/cda138b4a157dd9d6fefaa21f3e5f6353d13db14). |
 | `quopri` | 11 | 11 | 11 passed | 11 passed. [Public revision](https://github.com/astral-experiments/imre/commit/8c4745e18f48eda34e0b2662493a630404ada941). |
