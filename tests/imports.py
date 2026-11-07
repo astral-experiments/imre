@@ -594,6 +594,14 @@ REJECTED = {
         "main.py": "from helper import bad\nprint(bad())\n",
         "helper.py": "from traceback import format_exc\ndef bad() -> int:\n    return 'wrong'\n",
     }, "expected int, got str"),
+    "traceback_print_list_preserves_typed_call": ({
+        "main.py": (
+            "from traceback import print_list\n"
+            "def typed(n: int) -> int: return n\n"
+            "print_list([])\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "contextmanager_wrong_generator_return": ({
         "main.py": "import helper\nimport sys\nsys.exit(0)\n",
         "helper.py": (
