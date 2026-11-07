@@ -991,6 +991,42 @@ impl BufferedFd {
         self.close(None, false)
     }
 
+    fn is_file_writer(&self) -> bool {
+        self.writing
+            && !self.reading
+            && matches!(*self.buffer.borrow(), Some(Buffer::Writer(_)) | None)
+    }
+
+    fn native_close_handle(&self, ctx: &Context) -> Option<Rc<RawFile>> {
+        if matches!(
+            ctx.heap.get(self.raw),
+            Value::Instance {
+                namespace: None,
+                ..
+            }
+        ) {
+            native_handle(ctx, self.raw, &["close", "flush"])
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn close_after_public_flush(&self, ctx: &mut Context, receiver: Id) -> Result<Id> {
+        if self.is_file_writer() {
+            self.check_reentry(ctx)?;
+            self.callback_active.set(true);
+            let closed = if let Some(raw) = self.native_close_handle(ctx) {
+                raw.close().map(|()| NONE)
+            } else {
+                super::text_wrapper::invoke(ctx, self.raw, "close", vec![])
+            };
+            self.callback_active.set(false);
+            self.buffer.borrow_mut().take();
+            return closed;
+        }
+        self.close_after_flush(ctx, receiver).map(|()| NONE)
+    }
+
     pub(in crate::dynamic) fn call(
         &self,
         ctx: &mut Context,
@@ -1000,6 +1036,24 @@ impl BufferedFd {
     ) -> Result<Id> {
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
             self.check_reentry(ctx)?;
+            if self.is_file_writer() {
+                let closed = self.closed();
+                if let Some(result) =
+                    super::native_writer::overridden_close(ctx, receiver, name, closed, |ctx| {
+                        self.close_after_public_flush(ctx, receiver)
+                    })
+                {
+                    return result;
+                }
+                if closed {
+                    return Ok(NONE);
+                }
+                if self.native_close_handle(ctx).is_none() {
+                    return super::native_writer::flush_and_close(ctx, receiver, |ctx| {
+                        self.close_after_public_flush(ctx, receiver)
+                    });
+                }
+            }
             self.check_raw(ctx, receiver, name)?;
             self.close(Some(ctx), true)?;
             return Ok(NONE);

@@ -185,6 +185,15 @@ impl FileState {
         self.stream.take().map_or(Ok(()), Stream::close)
     }
 
+    /// Explicit BufferedWriter.close has already called its overridable flush.
+    pub(crate) fn close_binary_after_flush(&mut self) -> io::Result<()> {
+        match self.stream.take() {
+            Some(Stream::Write(writer)) => close_file(writer.into_file()),
+            None => Ok(()),
+            _ => unreachable!("expected a binary writer"),
+        }
+    }
+
     pub(super) fn close_standard_buffer(&mut self) -> Result<()> {
         let stderr = self.standard_writer()?;
         self.stream.take();
