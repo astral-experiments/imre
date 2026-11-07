@@ -492,49 +492,6 @@ impl Wrapper {
         Ok(())
     }
 
-    /// Encode a write with the configured codec and advance its stream-start state.
-    fn encode(&self, ctx: &mut Context, translated: Id) -> Result<Vec<u8>> {
-        let encoder = self.encoder.get();
-        let encoded = match encoder.codec {
-            StreamCodec::Wide { format, bom } => {
-                let errors = ctx.str_value(encoder.errors)?.to_owned();
-                let signature = bom && self.seekable && self.write_start.get();
-                let order = if signature { 0 } else { format.byte_order() };
-                codecs::encode_fixed(ctx, translated, format, &errors, order)
-            }
-            StreamCodec::Registered(codec) => {
-                let encoding = if matches!(codec, Codec::Utf8 { signature: true })
-                    && !self.utf8_signature_pending.replace(false)
-                {
-                    ctx.text("utf-8")
-                } else {
-                    ctx.text(codec.name())
-                };
-                codecs::encode_text(ctx, translated, Some(encoding), Some(encoder.errors))
-            }
-        };
-
-        // A fast encoder clears the wrapper's start flag even when the error
-        // handler raises or installs a different encoder.
-        if !matches!(
-            encoder.codec,
-            StreamCodec::Registered(Codec::Utf8 { signature: true } | Codec::CodePage(_))
-        ) {
-            self.write_start.set(false);
-        }
-        encoded
-    }
-
-    /// Append bytes to the pending output without retaining a borrow across a buffer call.
-    fn append_output(&self, encoded: &[u8]) -> Result<usize> {
-        let mut pending = self.output.borrow_mut();
-        pending
-            .try_reserve(encoded.len())
-            .map_err(|_| crate::Error::allocation())?;
-        pending.extend_from_slice(encoded);
-        Ok(pending.len())
-    }
-
     fn write(&self, ctx: &mut Context, receiver: Id, value: Id) -> Result<Id> {
         if !self.writable.get() {
             return Err(Error::new("UnsupportedOperation", "not writable"));
@@ -592,23 +549,47 @@ impl Wrapper {
         } else {
             value
         };
-        let length = if matches!(
-            self.encoder.get().codec,
-            StreamCodec::Registered(Codec::Utf8 { signature: false })
-        ) && translated == value
-            && let Value::Str(text) = ctx.heap.get(storage)
-            && (text.len() < self.chunk_size.get() || self.output.borrow().is_empty())
-        {
-            self.write_start.set(false);
-            self.append_output(text.as_bytes())?
-        } else {
-            let encoded = self.encode(ctx, translated)?;
-            if encoded.len() >= self.chunk_size.get() {
-                while !self.output.borrow().is_empty() {
-                    self.drain(ctx, receiver)?;
-                }
+        let encoder = self.encoder.get();
+        let encoded = match encoder.codec {
+            StreamCodec::Wide { format, bom } => {
+                let errors = ctx.str_value(encoder.errors)?.to_owned();
+                let signature = bom && self.seekable && self.write_start.get();
+                let order = if signature { 0 } else { format.byte_order() };
+                codecs::encode_fixed(ctx, translated, format, &errors, order)
             }
-            self.append_output(&encoded)?
+            StreamCodec::Registered(codec) => {
+                let encoding = if matches!(codec, Codec::Utf8 { signature: true })
+                    && !self.utf8_signature_pending.replace(false)
+                {
+                    ctx.text("utf-8")
+                } else {
+                    ctx.text(codec.name())
+                };
+                codecs::encode_text(ctx, translated, Some(encoding), Some(encoder.errors))
+            }
+        };
+
+        // A fast encoder clears the wrapper's start flag even when the error
+        // handler raises or installs a different encoder.
+        if !matches!(
+            encoder.codec,
+            StreamCodec::Registered(Codec::Utf8 { signature: true } | Codec::CodePage(_))
+        ) {
+            self.write_start.set(false);
+        }
+        let encoded = encoded?;
+        if encoded.len() >= self.chunk_size.get() {
+            while !self.output.borrow().is_empty() {
+                self.drain(ctx, receiver)?;
+            }
+        }
+        let length = {
+            let mut pending = self.output.borrow_mut();
+            pending
+                .try_reserve(encoded.len())
+                .map_err(|_| crate::Error::allocation())?;
+            pending.extend_from_slice(&encoded);
+            pending.len()
         };
         if flush || write_through || length >= self.chunk_size.get() {
             self.drain(ctx, receiver)?;
