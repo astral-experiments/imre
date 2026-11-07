@@ -9,6 +9,7 @@ use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::ops::Range;
 use std::sync::{Arc, Weak};
 
 use super::Context;
@@ -2989,7 +2990,7 @@ struct RootTrace {
     watched_containers: Vec<Id>,
     flags: Vec<u8>,
     covered: Vec<Id>,
-    covered_runs: Vec<std::ops::Range<usize>>,
+    covered_runs: Vec<Range<usize>>,
     checked_runs: bool,
     frontier: Vec<Id>,
     valid: bool,
@@ -3033,6 +3034,9 @@ impl RootTrace {
         self.next_roots.clear();
         while let Some(id) = roots.next() {
             if self.next_roots.try_reserve(1).is_err() {
+                // This pass traces a different root set. Ignore its previous runs until rebuilt.
+                self.covered_runs.clear();
+                self.checked_runs = false;
                 heap.mark_reference_roots(
                     self.next_roots.iter().copied().chain([id]).chain(roots),
                     None,
@@ -3140,6 +3144,19 @@ impl RootTrace {
             }
             start = end;
         }
+    }
+
+    /// Yield the dynamic slots between sorted runs already marked by this collection.
+    fn gaps(runs: &[Range<usize>], slots: usize) -> impl Iterator<Item = Range<usize>> {
+        let mut next = FIRST_DYNAMIC_SLOT;
+        runs.iter()
+            .cloned()
+            .chain(std::iter::once(slots..slots))
+            .map(move |run| {
+                let gap = next..next.max(run.start);
+                next = next.max(run.end);
+                gap
+            })
     }
 
     /// Record the reachable values whose outgoing edges change only through the heap.
@@ -5797,8 +5814,8 @@ impl Heap {
     pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<WeakCallbacks> {
         let mut trace = std::mem::take(&mut self.root_trace);
         trace.mark(self, globals);
+        let small = self.small_unreachable(&trace.covered_runs);
         self.root_trace = trace;
-        let small = self.small_unreachable();
         let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
         let mut cycles = std::mem::take(&mut self.prompt_cycles);
         if cycles.prepare(size).is_err() {
@@ -5825,23 +5842,29 @@ impl Heap {
             cycles.incoming.fill(0);
         }
         self.prompt_cycles = cycles;
-        self.sweep()
+        let runs = std::mem::take(&mut self.root_trace.covered_runs);
+        let callbacks = self.sweep(&runs);
+        self.root_trace.covered_runs = runs;
+        callbacks
     }
 
     /// Keep cycle scratch proportional to the garbage using only containers with outgoing edges.
-    fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
+    fn small_unreachable(&self, runs: &[Range<usize>]) -> Option<smallvec::SmallVec<[usize; 256]>> {
         let mut slots = smallvec::SmallVec::new();
         // A sparse candidate graph avoids allocating and scanning counters for the whole heap.
         let limit = slots.inline_size().max(self.slots.len() / 64);
-        for (id, trace) in self.traces.iter().enumerate() {
-            if trace.get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
-                if slots.len() == limit {
-                    return None;
+        for gap in RootTrace::gaps(runs, self.slots.len()) {
+            let shapes = &self.slot_shapes[gap.clone()];
+            for (offset, (mark, shape)) in self.traces[gap.clone()].iter().zip(shapes).enumerate() {
+                if mark.get() == UNMARKED && *shape == SlotShape::Other {
+                    if slots.len() == limit {
+                        return None;
+                    }
+                    if slots.len() == slots.capacity() {
+                        slots.try_reserve(1).ok()?;
+                    }
+                    slots.push(gap.start + offset);
                 }
-                if slots.len() == slots.capacity() {
-                    slots.try_reserve(1).ok()?;
-                }
-                slots.push(id);
             }
         }
         Some(slots)
@@ -6160,7 +6183,7 @@ impl Heap {
         let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
-        if let Some(acyclic) = self.sweep() {
+        if let Some(acyclic) = self.sweep(&[]) {
             callbacks.extend(acyclic);
         }
         self.full_collection = Some(cycles);
@@ -6336,7 +6359,7 @@ impl Heap {
             .members()
             .filter(|&id| self.slots[id as usize].gc_tracked(self))
             .count();
-        let callbacks = self.sweep();
+        let callbacks = self.sweep(&[]);
         // Slots can now be reused. Keep the collection guard until any callbacks
         // from the final sweep return, without retaining stale candidate IDs.
         cycles.incoming.clear();
@@ -6381,7 +6404,46 @@ impl Heap {
             .max(BYTE_BUFFER_FLOOR)
     }
 
-    fn sweep(&mut self) -> Option<WeakCallbacks> {
+    /// Recycle unmarked slots in a span which can contain unreachable values.
+    fn sweep_slots(&mut self, span: Range<usize>) {
+        // Vacant slots supply their own free-list links. A sweep can therefore
+        // retire the entire unreachable graph even if the allocator refuses growth.
+        for id in span {
+            if self.traces[id].replace(UNMARKED) == UNMARKED
+                && self.slot_shapes[id] != SlotShape::Vacant
+            {
+                let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
+                if self.slots[id].gc_prev.get() != UNMARKED {
+                    self.gc_order.remove(id, &self.slots);
+                }
+                // Only compound values can own a recorded Python hash.
+                if !shape.is_scalar_leaf() {
+                    if self.latest_generator == Some(id as Id) {
+                        self.latest_generator = None;
+                        self.latest_generator_loop = None;
+                    } else if self.latest_generator_loop == Some(id as Id) {
+                        self.latest_generator_loop = None;
+                    }
+                    self.immutable_hashes.remove(&(id as Id));
+                }
+                if self.text_position.get().slot == id as Id {
+                    self.text_position.set(TextPosition::default());
+                }
+                self.root_trace.recycled(id);
+                self.invalidate_stream_bindings(id);
+                let slot = &mut self.slots[id];
+                if slot.has_gc_header {
+                    self.gc_schedule.freed();
+                }
+                slot.value = None;
+                slot.gc_next.set(self.free_head);
+                self.free_head = id;
+                self.free_count += 1;
+            }
+        }
+    }
+
+    fn sweep(&mut self, runs: &[Range<usize>]) -> Option<WeakCallbacks> {
         let first = self.ordinary_finalizers.len();
         self.schedule_unawaited_coroutines(None);
         if first < self.ordinary_finalizers.len() {
@@ -6434,39 +6496,14 @@ impl Heap {
         });
         self.allocation_traces
             .retain_live(|id| self.traces[id as usize].get() != UNMARKED);
-        // Vacant slots supply their own free-list links. A sweep can therefore
-        // retire the entire unreachable graph even if the allocator refuses growth.
-        for id in FIRST_DYNAMIC_SLOT..self.slots.len() {
-            if self.traces[id].replace(UNMARKED) == UNMARKED
-                && self.slot_shapes[id] != SlotShape::Vacant
+        for gap in RootTrace::gaps(runs, self.slots.len()) {
+            self.sweep_slots(gap);
+        }
+        for run in runs {
+            for mark in
+                &self.traces[run.start.max(FIRST_DYNAMIC_SLOT)..run.end.max(FIRST_DYNAMIC_SLOT)]
             {
-                let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
-                if self.slots[id].gc_prev.get() != UNMARKED {
-                    self.gc_order.remove(id, &self.slots);
-                }
-                // Only compound values can own a recorded Python hash.
-                if !shape.is_scalar_leaf() {
-                    if self.latest_generator == Some(id as Id) {
-                        self.latest_generator = None;
-                        self.latest_generator_loop = None;
-                    } else if self.latest_generator_loop == Some(id as Id) {
-                        self.latest_generator_loop = None;
-                    }
-                    self.immutable_hashes.remove(&(id as Id));
-                }
-                if self.text_position.get().slot == id as Id {
-                    self.text_position.set(TextPosition::default());
-                }
-                self.root_trace.recycled(id);
-                self.invalidate_stream_bindings(id);
-                let slot = &mut self.slots[id];
-                if slot.has_gc_header {
-                    self.gc_schedule.freed();
-                }
-                slot.value = None;
-                slot.gc_next.set(self.free_head);
-                self.free_head = id;
-                self.free_count += 1;
+                mark.set(UNMARKED);
             }
         }
         self.byte_buffer_allowance = if self.byte_buffer_allowance == 0 {
@@ -6850,13 +6887,25 @@ mod tests {
     #[test]
     fn cached_mark_runs_follow_changes_to_their_root() {
         let mut heap = Heap::new();
-        let children: Vec<_> = (0..RootTrace::MIN_RUN_MARKS)
+        let mut children: Vec<_> = (0..RootTrace::MIN_RUN_MARKS)
             .map(|_| heap.alloc(Value::List(Vec::new())))
             .collect();
+        let hole = children.remove(children.len() / 2);
         let root = heap.alloc(Value::Tuple(children.clone()));
         heap.release_temporaries_since(0);
         heap.collect([root].into_iter());
+        let middle = heap.alloc(Value::List(Vec::new()));
+        let tail = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(middle, hole);
+        heap.release_temporaries_since(0);
         heap.collect([root].into_iter());
+        assert!(heap.slots[middle as usize].value.is_none());
+        assert!(heap.slots[tail as usize].value.is_none());
+        assert!(
+            heap.traces[FIRST_DYNAMIC_SLOT..]
+                .iter()
+                .all(|mark| mark.get() == UNMARKED)
+        );
         assert!(
             heap.root_trace
                 .covered_runs
