@@ -1,5 +1,6 @@
 //! Bind closed keyword groups in the order used by CALL_FUNCTION_EX.
-use super::{ast, error};
+use super::ast;
+use crate::frontend::diagnostic_message;
 use std::collections::HashSet;
 
 #[derive(Default)]
@@ -43,7 +44,7 @@ pub(super) fn bind<'a>(
                         (false, n.to_string())
                     }
                     _ => {
-                        return Err(error(
+                        return Err(diagnostic_message(
                             source,
                             kw,
                             "import exception keyword displays require fixed string or integer keys",
@@ -69,7 +70,7 @@ pub(super) fn bind<'a>(
                 ast::Expr::BooleanLiteral(_) => "bool",
                 ast::Expr::NoneLiteral(_) => "NoneType",
                 _ => {
-                    return Err(error(
+                    return Err(diagnostic_message(
                         source,
                         kw,
                         "expanded import exception keywords require a fixed dictionary display",

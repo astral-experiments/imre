@@ -854,7 +854,7 @@ impl Checker<'_> {
             .iter()
             .zip(operands)
             .map(|(&slot, node)| self.check_record_value(self.local(slot), node))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         let arguments = Expr {
             ty: self
                 .types

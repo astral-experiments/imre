@@ -698,7 +698,7 @@ impl Checker<'_> {
                                     starred,
                                 )
                             })
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
                         Expr {
                             ty: self.types.list(element),
                             kind: ExprKind::List(elements),

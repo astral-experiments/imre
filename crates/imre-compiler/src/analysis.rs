@@ -346,7 +346,10 @@ impl Session {
             .any(|token| token.kind() == TokenKind::Star)
         {
             tuple_displays::check(&parsed.syntax().body).map_err(|(node, reason)| {
-                format!("{path}:{}", crate::frontend::error(source, node, reason))
+                format!(
+                    "{path}:{}",
+                    crate::frontend::diagnostic_message(source, node, reason)
+                )
             })?
         } else {
             HashMap::new()
@@ -1696,14 +1699,14 @@ pub(crate) fn check_scope_syntax(
     module: &ruff_python_ast::ModModule,
 ) -> Result<(), String> {
     if let Some(range) = imre_ast::misplaced_star_import(&module.body) {
-        return Err(crate::frontend::error(
+        return Err(crate::frontend::diagnostic_message(
             source,
             &range,
             "SyntaxError: import * only allowed at module level",
         ));
     }
     if let Some((range, message)) = imre_ast::async_generators::syntax_error(module) {
-        return Err(crate::frontend::error(
+        return Err(crate::frontend::diagnostic_message(
             source,
             &range,
             &format!("SyntaxError: {message}"),

@@ -23,7 +23,7 @@ pub(super) fn executable_method(
     classes: &Classes,
     graph: &SourceGraph,
     types: &Types,
-) -> Result<ast::StmtFunctionDef, String> {
+) -> std::result::Result<ast::StmtFunctionDef, String> {
     let mut method = method.clone();
     method.decorator_list.clear();
     if classes.definitions[context.class].forwarder.is_some()
@@ -105,7 +105,7 @@ pub(super) fn executable_method(
         let module = classes.definitions[context.class].method_origins[context.index].module;
         let source = &graph.modules[module].source;
         if receiver.default.is_some() {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 &receiver,
                 "a class receiver cannot have a default",
@@ -263,12 +263,12 @@ fn class_receiver_annotation(
     graph: &SourceGraph,
     types: &Types,
     source: &str,
-) -> Result<(), String> {
+) -> std::result::Result<(), String> {
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
         let contents = value.value.to_str();
         let parsed = ruff_python_parser::parse_expression(contents).map_err(|_| {
-            error(
+            diagnostic_message(
                 source,
                 expression,
                 "invalid quoted class receiver annotation",
@@ -283,7 +283,7 @@ fn class_receiver_annotation(
             types,
             contents,
         )
-        .map_err(|message| error(source, expression, &message));
+        .map_err(|message| diagnostic_message(source, expression, &message));
     }
     if let ast::Expr::Subscript(annotation) = expression
         && matches!(&*annotation.value, ast::Expr::Name(name) if name.id == "type")
@@ -299,7 +299,7 @@ fn class_receiver_annotation(
     {
         Ok(())
     } else {
-        Err(error(
+        Err(diagnostic_message(
             source,
             expression,
             "cls must be annotated as type[Self] or type[its class]",
@@ -314,7 +314,7 @@ pub(super) fn factory_defaults(
     class: &crate::classes::Class,
     types: &Types,
     source: &str,
-) -> Result<(), String> {
+) -> std::result::Result<(), String> {
     if !class.generated_initializer {
         return Ok(());
     }
@@ -338,7 +338,7 @@ pub(super) fn field_default(
     ty: Type,
     types: &Types,
     source: &str,
-) -> Result<Option<Expr>, String> {
+) -> std::result::Result<Option<Expr>, String> {
     let Some(default) = &field.default else {
         return Ok(None);
     };
@@ -379,7 +379,7 @@ pub(super) fn field_default(
             values: Vec::new(),
         },
         _ => {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 &field.annotation,
                 "a default factory must match its exact list, dict, set, or Counter field type",
@@ -407,7 +407,7 @@ pub(super) fn record_factories(
     inference: &inference::Inference,
     graph: &SourceGraph,
     types: &Types,
-) -> Result<(), String> {
+) -> std::result::Result<(), String> {
     let mut thunks = HashMap::new();
     for (class, record) in classes.declarations.definitions.iter().enumerate() {
         for (index, field) in record.fields.iter().enumerate() {
@@ -1041,7 +1041,7 @@ impl Checker<'_> {
         name: &str,
         node: &impl Ranged,
         diagnostic: &str,
-    ) -> String {
+    ) -> Failure {
         if name == "quantize" && self.decimal_class(class) {
             return self.scoped_builtin_error("Decimal.quantize", node);
         }
@@ -1127,9 +1127,7 @@ impl Checker<'_> {
                 })?;
                 let mut signature = signature;
                 if let Some(inference) = self.inference {
-                    inference
-                        .callable_signature(&mut signature, 1, None)
-                        .map_err(|message| error(self.source, attribute, message))?;
+                    inference.callable_signature(&mut signature, 1, None, self, attribute)?;
                 }
                 self.calls.insert(signature.id);
                 if let Some(&(ready, value)) = self
@@ -1538,7 +1536,7 @@ impl Checker<'_> {
                 calls: HashSet::from([constructor]),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: error(
+                recursion_error: diagnostic_message(
                     self.source,
                     at,
                     "recursive class constructor callbacks are unsupported",

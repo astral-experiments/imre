@@ -685,7 +685,7 @@ impl Initialization {
         binding_reads: &[HashSet<DefinitionId>],
         callables: &[DefinitionId],
         targets: &HashMap<Type, HashSet<usize>>,
-    ) -> Result<(), String> {
+    ) -> std::result::Result<(), String> {
         let module = &graph.modules[self.module];
         for checkpoint in &self.checkpoints {
             let mut reads = HashSet::new();

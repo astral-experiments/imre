@@ -310,7 +310,13 @@ impl Checker<'_> {
     }
 }
 
-const DEFERRED: &str = "inference is waiting for a function return type";
+enum SignatureUse {
+    Return,
+    Callable {
+        skip: usize,
+        expected: Option<(Vec<Type>, Type)>,
+    },
+}
 
 struct Pending {
     inferred_params: Vec<bool>,
@@ -451,17 +457,25 @@ impl Inference {
         self.revision.set(self.revision.get() + 1);
     }
 
-    /// An exact callback boundary can supply missing formal types. The ordinary
-    /// final body check still enforces every inferred parameter and return.
-    pub(super) fn callable_signature(
+    /// Learn evidence from an expected callable, then answer the requested signature query.
+    /// An ordinary call can use a known return while a first-class callable needs every parameter.
+    fn lookup(
         &self,
-        signature: &mut Signature,
-        skip: usize,
-        expected: Option<(Vec<Type>, Type)>,
-    ) -> Result<(), &'static str> {
-        if let Some((params, returns)) = expected {
+        signature: &Signature,
+        request: SignatureUse,
+        module: ModuleId,
+        range: TextRange,
+    ) -> Result<Type, &'static str> {
+        let needs_parameters = matches!(request, SignatureUse::Callable { .. });
+        if let SignatureUse::Callable {
+            skip,
+            expected: Some((params, returns)),
+        } = request
+        {
             if params.len() + skip != signature.params.len() {
-                return Err("function value does not match its Callable parameter count");
+                return Err(Failure::Diagnostic(Diagnostic::plain(
+                    "function value does not match its Callable parameter count",
+                )));
             }
             for (index, ty) in params.into_iter().enumerate() {
                 self.learn_parameter(signature.id, index + skip, ty);
@@ -472,14 +486,29 @@ impl Inference {
                 self.revision.set(self.revision.get() + 1);
             }
         }
-        let ready = {
-            let pending = self.pending.borrow();
-            pending[signature.id].returns.is_some()
-                && pending[signature.id].params.iter().all(Option::is_some)
-        };
-        if !ready {
-            return Err(DEFERRED);
-        }
+        let pending = self.pending.borrow();
+        let signature = &pending[signature.id];
+        signature
+            .returns
+            .filter(|_| !needs_parameters || signature.params.iter().all(Option::is_some))
+            .ok_or(Failure::PendingSignature { module, range })
+    }
+
+    pub(super) fn callable_signature(
+        &self,
+        signature: &mut Signature,
+        skip: usize,
+        expected: Option<(Vec<Type>, Type)>,
+        checker: &Checker<'_>,
+        site: &impl Ranged,
+    ) -> Result<(), String> {
+        self.lookup(
+            signature,
+            SignatureUse::Callable { skip, expected },
+            checker.module,
+            site.range(),
+        )
+        .map_err(|failure| failure.at(checker.source, site))?;
         self.update(signature);
         Ok(())
     }
@@ -539,7 +568,7 @@ impl Inference {
         signatures: &mut HashMap<DefinitionId, Signature>,
         classes: &mut ClassInfo,
         types: &Types,
-    ) -> Result<(), String> {
+    ) -> std::result::Result<(), Diagnostic> {
         while self.widened.replace(false) || self.unresolved() {
             for (_, _, signature) in definitions.iter_mut() {
                 self.update(signature);
@@ -566,10 +595,7 @@ impl Inference {
                 );
                 checker.inference = Some(self);
                 if let Err(diagnostic) = Initialization::lower(checker, &mut available, range) {
-                    errors.push(format!(
-                        "{}:{diagnostic}",
-                        graph.modules[module].path.display()
-                    ));
+                    errors.push((module, diagnostic));
                 }
             }
             for (module, function, signature) in definitions.iter() {
@@ -625,10 +651,7 @@ impl Inference {
                                 .join(ty, other)
                                 .or_else(|| classes.parsers.common_namespace(ty, other))
                             else {
-                                conflicting_returns.get_or_insert_with(|| {
-                                    let message = "inferred returns require one supported exact or nullable type";
-                                    graph.modules[*module].error(function, message)
-                                });
+                                conflicting_returns.get_or_insert((*module, function.range()));
                                 return Ok(());
                             };
                             ty = joined;
@@ -636,13 +659,10 @@ impl Inference {
                         self.pending.borrow_mut()[signature.id].returns = Some(ty);
                         self.revision.set(self.revision.get() + 1);
                     }
-                    Ok::<_, String>(())
+                    Ok::<_, Failure>(())
                 })();
                 if let Err(diagnostic) = result {
-                    errors.push(format!(
-                        "{}:{diagnostic}",
-                        graph.modules[*module].path.display()
-                    ));
+                    errors.push((*module, diagnostic));
                 }
             }
             let module = &graph.modules[graph.entry];
@@ -663,19 +683,27 @@ impl Inference {
                 .map(|&index| module.parsed.syntax().body[index].clone())
                 .collect::<Vec<_>>();
             if let Err(diagnostic) = checker.block(&statements) {
-                errors.push(format!("{}:{diagnostic}", module.path.display()));
+                errors.push((graph.entry, diagnostic));
             }
             if self.revision.get() == before {
-                if let Some(error) = conflicting_returns {
-                    graph.return_errors.borrow_mut().insert(error.clone());
-                    return Err(error);
+                if let Some((module, range)) = conflicting_returns {
+                    let mut report = Diagnostic::at(
+                        &graph.modules[module].source,
+                        &range,
+                        "inferred returns require one supported exact or nullable type".to_owned(),
+                    );
+                    report.kind = Kind::ReturnType;
+                    return Err(report.in_module(graph, module));
                 }
                 if !self.unresolved() {
                     break;
                 }
-                if let Some(diagnostic) = errors.into_iter().find(|error| !error.contains(DEFERRED))
-                {
-                    return Err(diagnostic);
+                // Only the failure that escaped the checker controls this round.
+                // An alternative may have waited for a signature and been discarded.
+                for (module, failure) in errors {
+                    if let Failure::Diagnostic(report) = failure {
+                        return Err(report.in_module(graph, module));
+                    }
                 }
                 if self.infer_inherited_parameters(definitions, classes) {
                     continue;
@@ -685,18 +713,18 @@ impl Inference {
                     let inferred = &pending[signature.id];
                     if let Some(index) = inferred.params.iter().position(Option::is_none) {
                         let name = &signature.params[index].name;
-                        return Err(graph.modules[*module].error(
+                        return Err(Diagnostic::at(&graph.modules[*module].source,
                             function,
-                            &format!(
+                            format!(
                                 "cannot infer parameter {name:?}; add an annotation or a concrete direct call"
                             ),
-                        ));
+                        ).in_module(graph, *module));
                     }
                     if inferred.returns.is_none() {
-                        return Err(graph.modules[*module].error(
+                        return Err(Diagnostic::at(&graph.modules[*module].source,
                             function,
-                            "cannot infer function return type; add an annotation; recursive calls remain unsupported",
-                        ));
+                            "cannot infer function return type; add an annotation; recursive calls remain unsupported".to_owned(),
+                        ).in_module(graph, *module));
                     }
                 }
                 unreachable!("an unresolved signature has a missing parameter or return");
@@ -899,9 +927,9 @@ impl Checker<'_> {
         )?;
         self.calls.insert(signature.id);
         let returns = match inference {
-            Some(inference) => inference.pending.borrow()[signature.id]
-                .returns
-                .ok_or_else(|| error(self.source, call, DEFERRED))?,
+            Some(inference) => inference
+                .lookup(signature, SignatureUse::Return, self.module, call.range())
+                .map_err(|failure| failure.at(self.source, call))?,
             None => signature.returns,
         };
         Ok((returns, args))

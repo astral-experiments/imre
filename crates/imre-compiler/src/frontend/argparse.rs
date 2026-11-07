@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::classes::{Class, DataclassOptions, Field};
 use crate::modules::SourceModule;
+use std::result::Result;
 
 mod registration;
 
@@ -1509,7 +1510,10 @@ impl Parsers {
 }
 
 impl Checker<'_> {
-    pub(super) fn parse_args(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+    pub(super) fn parse_args(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> phase::Result<Option<Expr>, String> {
         if let Some(error) = self
             .classes
             .parsers

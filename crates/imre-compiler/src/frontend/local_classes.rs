@@ -74,12 +74,9 @@ impl Checker<'_> {
                 base,
                 ty_python_semantic::types::KnownClass::Str,
             ) {
-                let error = self.object_export_error("str subclasses", base);
-                self.graph.require_object_class_layout(format!(
-                    "{}:{error}",
-                    self.graph.modules[self.module].path.display()
-                ));
-                return Err(error);
+                return Err(self
+                    .object_export_error("str subclasses", base)
+                    .classify(Kind::ScopedClassLayout));
             }
             if self
                 .graph
@@ -183,9 +180,7 @@ impl Checker<'_> {
                     if let Some(crate::modules::Binding::Intrinsic(intrinsic)) = self.resolve(base)
                         && let Some(name) = intrinsic.scoped_class_base()
                     {
-                        let error = self.scoped_builtin_error(name, base);
-                        self.graph.class_layout_error.replace(Some(error.clone()));
-                        return Err(error);
+                        return Err(self.scoped_builtin_error(name, base));
                     }
                     if self.graph.session.is_known_class(
                         self.module,

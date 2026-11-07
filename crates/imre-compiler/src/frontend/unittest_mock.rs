@@ -236,7 +236,7 @@ impl Checker<'_> {
             .args
             .iter()
             .map(|expr| self.mock_argument(expr, argument))
-            .collect::<Result<_, _>>()?;
+            .collect::<std::result::Result<_, _>>()?;
         let kwargs = call
             .arguments
             .keywords

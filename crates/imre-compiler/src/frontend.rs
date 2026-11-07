@@ -1,6 +1,7 @@
 //! Enforces the closed typed subset independently of gradual Python typing.
 
 use std::collections::{HashMap, HashSet};
+use std::result::Result as StdResult;
 
 pub(crate) use imre_ast::exceptions::builtin_id as exception_kind;
 use ruff_python_ast as ast;
@@ -11,6 +12,11 @@ use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, RegexCapture, St
 use crate::modules::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
 use crate::narrowing;
 use crate::types::Types;
+
+pub(crate) mod phase;
+// Checkers and their expression modules propagate signature dependencies with errors.
+// Terminal-only validation and the graph driver use the standard Result.
+use phase::{Diagnostic, Failure, Kind, Result};
 
 mod annotations;
 pub(crate) use annotations::{parameter_annotations, spelling as annotation_spelling};
@@ -179,7 +185,7 @@ struct ClassInfo {
 
 impl ClassInfo {
     /// Resolves all nominal field types before checking constructors and methods.
-    fn new(graph: &SourceGraph, types: &Types) -> Result<Self, String> {
+    fn new(graph: &SourceGraph, types: &Types) -> StdResult<Self, Diagnostic> {
         let mut declarations = Classes::collect(graph)?;
         types.set_exception_declarations(declarations.exception_declarations.clone());
         types.set_value_structs(
@@ -270,7 +276,7 @@ impl ClassInfo {
                             if class.dataclass.is_some_and(|d| d.value_struct)
                                 && !matches!(ty, Type::Float | Type::Bool)
                             {
-                                return Err(error(
+                                return Err(diagnostic_message(
                                     &graph.modules[field.module].source,
                                     &field.annotation,
                                     "imre.struct fields must be float or bool",
@@ -278,7 +284,7 @@ impl ClassInfo {
                             }
                             if field.weak_proxy {
                                 let Type::Class(id) = ty else {
-                                    return Err(error(
+                                    return Err(diagnostic_message(
                                         &graph.modules[field.module].source,
                                         &field.annotation,
                                         "a weak proxy field requires a record annotation",
@@ -293,7 +299,7 @@ impl ClassInfo {
                                 &graph.modules[field.module].source,
                             )?;
                             if callables::contains_callable(ty, types) {
-                                Err(error(
+                                Err(diagnostic_message(
                                     &graph.modules[field.module].source,
                                     &field.annotation,
                                     "class fields cannot contain callable values",
@@ -306,9 +312,9 @@ impl ClassInfo {
                             format!("{}:{error}", graph.modules[field.module].path.display())
                         })
                     })
-                    .collect::<Result<Vec<_>, _>>()
+                    .collect::<StdResult<Vec<_>, _>>()
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<StdResult<Vec<_>, _>>()?;
         for (id, class) in declarations.definitions.iter().enumerate() {
             if class.abstract_methods.is_empty() && !class.bases.is_empty() {
                 types.add_concrete_subclass(id, &class.bases);
@@ -316,7 +322,7 @@ impl ClassInfo {
             if let Some(base) = class.storage_base
                 && !fields[id].starts_with(&fields[base])
             {
-                return Err(graph.modules[class.definition.module].error(
+                return Err(graph.modules[class.definition.module].diagnostic(
                     &class.node,
                     "inherited fields must keep their exact types and offsets",
                 ));
@@ -328,7 +334,7 @@ impl ClassInfo {
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {
             let class = &declarations.definitions[id];
-            return Err(graph.modules[class.definition.module].error(&class.node,
+            return Err(graph.modules[class.definition.module].diagnostic(&class.node,
                 "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
         }
         loop {
@@ -372,7 +378,7 @@ impl ClassInfo {
                     .iter()
                     .all(|&ty| matches!(ty, Type::JsonObject | documents::MAP))
                 {
-                    return Err(graph.modules[class.definition.module].error(
+                    return Err(graph.modules[class.definition.module].diagnostic(
                         &class.node,
                         "a TOML hash projection requires exact document object fields",
                     ));
@@ -399,7 +405,7 @@ impl ClassInfo {
         for (class, field_types) in declarations.definitions.iter().zip(&fields) {
             for (field, &ty) in class.fields.iter().zip(field_types) {
                 if !valid_keys(ty, types) {
-                    return Err(graph.modules[field.module].error(
+                    return Err(graph.modules[field.module].diagnostic(
                         &field.annotation,
                         "record keys require a frozen dataclass with immutable comparison fields",
                     ));
@@ -543,20 +549,22 @@ fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
 
 /// Resolves the project-wide call graph without changing source-level namespaces.
 #[cfg(test)]
-pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
-    lower_current(graph, None, &mut HashSet::new()).map(|(module, _)| module)
+pub(crate) fn lower(graph: &SourceGraph) -> StdResult<ir::Module, String> {
+    lower_current(graph, None, &mut HashSet::new())
+        .map(|(module, _)| module)
+        .map_err(|report| report.to_string())
 }
 
 pub(crate) fn lower_with_owners(
     graph: &mut SourceGraph,
-) -> Result<(ir::Module, Vec<ModuleId>), String> {
+) -> StdResult<(ir::Module, Vec<ModuleId>), Diagnostic> {
     lower_with_caller_cache(graph, None)
 }
 
 pub(crate) fn lower_with_caller_cache(
     graph: &mut SourceGraph,
     mut cache: Option<&mut CallerCache>,
-) -> Result<(ir::Module, Vec<ModuleId>), String> {
+) -> StdResult<(ir::Module, Vec<ModuleId>), Diagnostic> {
     let mut key_reprs = HashSet::new();
     loop {
         let before = key_reprs.len();
@@ -576,7 +584,7 @@ fn lower_current(
     graph: &SourceGraph,
     cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
-) -> Result<(ir::Module, Vec<ModuleId>), String> {
+) -> StdResult<(ir::Module, Vec<ModuleId>), Diagnostic> {
     use crate::modules::FloatComponents;
     graph.float_components.set(FloatComponents::Native);
     let result = lower_graph(graph, cache, key_reprs);
@@ -592,7 +600,7 @@ fn lower_graph(
     graph: &SourceGraph,
     mut cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
-) -> Result<(ir::Module, Vec<ModuleId>), String> {
+) -> StdResult<(ir::Module, Vec<ModuleId>), Diagnostic> {
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
@@ -624,7 +632,7 @@ fn lower_graph(
                         )
                 )
             {
-                return Err(module.error(
+                return Err(module.diagnostic(
                     module.parsed.syntax(),
                     "a static binding uses a reserved builtin name",
                 ));
@@ -653,9 +661,8 @@ fn lower_graph(
                     )?;
                     if element.is_some() {
                         if cached.is_some() {
-                            return Err(
-                                module.error(&function, "generator functions cannot be cached")
-                            );
+                            return Err(module
+                                .diagnostic(&function, "generator functions cannot be cached"));
                         }
                         let range = function.returns.as_ref().unwrap().range();
                         function.returns =
@@ -693,7 +700,7 @@ fn lower_graph(
                                     )
                             })
                         {
-                            return Err(module.error(&function, "cached functions require exact immutable positional keys and an annotated synchronous result"));
+                            return Err(module.diagnostic(&function, "cached functions require exact immutable positional keys and an annotated synchronous result"));
                         }
                         classes.cached.insert(signature.id, policy);
                     }
@@ -805,18 +812,18 @@ fn lower_graph(
             .map_err(|error| format!("{}:{error}", module.path.display()))?;
             if method.name.as_str() == "__init__" {
                 if signature.returns != Type::None {
-                    return Err(module.error(&method, "__init__ must return None"));
+                    return Err(module.diagnostic(&method, "__init__ must return None"));
                 }
                 records::factory_defaults(&mut signature, class, &types, &module.source)?;
                 if class.generated_initializer {
                     records::private_initializer_parameters(&mut method, module);
                 }
             } else if method.name.as_str() == "__post_init__" && signature.returns != Type::None {
-                return Err(module.error(&method, "__post_init__ must return None"));
+                return Err(module.diagnostic(&method, "__post_init__ must return None"));
             } else if matches!(method.name.as_str(), "__str__" | "__repr__")
                 && signature.returns != Type::Str
             {
-                return Err(module.error(&method, &format!("{} must return str", method.name)));
+                return Err(module.diagnostic(&method, &format!("{} must return str", method.name)));
             }
             if let Some(base) = forwarded_base {
                 classes.forwarded_initializers.insert(signature.id, base);
@@ -844,11 +851,11 @@ fn lower_graph(
             table.insert(method.name.to_string(), signature.clone());
             if contexts::decorated(&class.methods[index], graph, module_id) {
                 if !contexts::single_yield(&method) {
-                    return Err(module.error(&method, "a context manager requires one bare yield on each successful path and an optional finally suite"));
+                    return Err(module.diagnostic(&method, "a context manager requires one bare yield on each successful path and an optional finally suite"));
                 }
                 if signature.returns != Type::None {
                     return Err(
-                        module.error(&method, "a bare-yield context manager must return None")
+                        module.diagnostic(&method, "a bare-yield context manager must return None")
                     );
                 }
                 classes.contexts.insert(signature.id);
@@ -890,7 +897,7 @@ fn lower_graph(
         {
             let class = &classes.declarations.definitions[id];
             return Err(graph.modules[class.definition.module]
-                .error(&class.node, "__bool__ must return bool"));
+                .diagnostic(&class.node, "__bool__ must return bool"));
         }
     }
     for (module, function, signature) in &definitions {
@@ -914,7 +921,7 @@ fn lower_graph(
             if let Some(definition) = namedtuples::annotation(graph, *module, annotation, &types)
                 && types.namedtuple_definition(ty) != Some(definition)
             {
-                return Err(graph.modules[*module].error(
+                return Err(graph.modules[*module].diagnostic(
                     annotation,
                     "inferred value must be an instance of the annotated namedtuple",
                 ));
@@ -923,7 +930,7 @@ fn lower_graph(
                 == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && !matches!(ty, Type::Class(id) if classes.parsers.namespace(id))
             {
-                return Err(graph.modules[*module].error(
+                return Err(graph.modules[*module].diagnostic(
                     annotation,
                     "argparse.Namespace requires an inferred native parser namespace",
                 ));
@@ -951,7 +958,7 @@ fn lower_graph(
         );
         initializations.push(
             Initialization::lower(checker, &mut available, range)
-                .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
+                .map_err(|failure| failure.terminal_in(graph, module_id))?,
         );
     }
     if let Some(cache) = cache.as_deref_mut() {
@@ -978,7 +985,7 @@ fn lower_graph(
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
         };
-        let (body, sums) = result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        let (body, sums) = result.map_err(|failure| failure.terminal_in(graph, *module_id))?;
         let LoweredBody {
             function,
             calls,
@@ -1041,7 +1048,7 @@ fn lower_graph(
             .collect::<Vec<_>>();
         let (mut body, _) = checker
             .block(&statements)
-            .map_err(|error| format!("{}:{error}", module.path.display()))?;
+            .map_err(|failure| failure.terminal_in(graph, module_id))?;
         if module_id == graph.entry {
             let mut startup = (0..initializations.len())
                 .map(|index| {
@@ -1145,7 +1152,7 @@ fn lower_graph(
         callables::validate_storage(function, &types)?;
     }
     if let Some(id) = recursive_call_root(&call_graph) {
-        return Err(recursion_errors.swap_remove(id));
+        return Err(recursion_errors.swap_remove(id).into());
     }
     for initialization in &initializations {
         initialization.validate(
@@ -1252,16 +1259,13 @@ fn lower_graph(
         owners,
     );
     if needs_object_string_order(&lowered.0) {
-        let error = format!(
-            "{}: Imre: ordering strings from chr() with possible surrogate values requires native Python object operations",
-            graph.modules[graph.entry].path.display()
-        );
         graph.needs_object_runtime.set(true);
-        graph
-            .object_builtin_errors
-            .borrow_mut()
-            .insert(error.clone());
-        return Err(error);
+        let diagnostic = Diagnostic::plain(
+            " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
+        )
+        .with_path(&graph.modules[graph.entry].path)
+        .classified(Kind::ScopedObject);
+        return Err(diagnostic);
     }
     Ok(lowered)
 }
@@ -1364,7 +1368,7 @@ fn lower_body(
                 .params
                 .iter()
                 .map(|p| kind(p.ty))
-                .collect::<Result<_, _>>()?,
+                .collect::<StdResult<_, _>>()?,
             result_kind: kind(signature.returns)?,
         };
         (
@@ -1446,7 +1450,7 @@ fn signature(
     types: &Types,
     method: Option<records::MethodContext>,
     inference: &inference::Inference,
-) -> Result<Signature, String> {
+) -> StdResult<Signature, String> {
     let module = defaults.module;
     let source = &graph.modules[module].source;
     let owner = method.map(|context| context.class);
@@ -1477,7 +1481,7 @@ fn signature(
         }) {
             graph.needs_object_runtime.set(true);
         }
-        return Err(error(
+        return Err(diagnostic_message(
             source,
             function,
             "decorators and type parameters are unsupported",
@@ -1531,7 +1535,7 @@ fn signature(
             if let Some(declared) = parameter.annotation()
                 && annotation_in_class(declared, graph, module, classes, types, owner)? != receiver
             {
-                return Err(error(
+                return Err(diagnostic_message(
                     source,
                     parameter,
                     "self annotation must name its exact class",
@@ -1650,7 +1654,11 @@ fn signature(
                     Ok(inspect::sentinel())
                 } else if let Some(default) = fixed_default {
                     if default.ty != ty {
-                        return Err(error(source, value, "default requires its exact type"));
+                        return Err(diagnostic_message(
+                            source,
+                            value,
+                            "default requires its exact type",
+                        ));
                     }
                     Ok(default)
                 } else {
@@ -1689,7 +1697,7 @@ fn signature(
     }
     if let Some(keyword) = &function.parameters.kwarg {
         let element = keyword.annotation.as_deref().ok_or_else(|| {
-            error(
+            diagnostic_message(
                 source,
                 &**keyword,
                 "keyword rest parameters need an element annotation",
@@ -1778,12 +1786,12 @@ fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
     None
 }
 
-pub(crate) fn error(source: &str, node: &impl Ranged, message: &str) -> String {
-    let offset = usize::from(node.start());
-    let prefix = &source[..offset];
-    let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
-    let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-    format!("{line}:{column}: Imre: {message}")
+fn error(source: &str, node: &impl Ranged, message: &str) -> Failure {
+    Failure::Diagnostic(Diagnostic::at(source, node, message.to_owned()))
+}
+
+pub(crate) fn diagnostic_message(source: &str, node: &impl Ranged, message: &str) -> String {
+    Diagnostic::at(source, node, message).to_string()
 }
 
 fn annotation(
@@ -1792,7 +1800,7 @@ fn annotation(
     module: ModuleId,
     classes: &Classes,
     types: &Types,
-) -> Result<Type, String> {
+) -> StdResult<Type, String> {
     annotation_in_class(expression, graph, module, classes, types, None)
 }
 
@@ -1803,7 +1811,7 @@ fn annotation_in_class(
     classes: &Classes,
     types: &Types,
     owner: Option<usize>,
-) -> Result<Type, String> {
+) -> StdResult<Type, String> {
     annotation_at(
         expression,
         graph,
@@ -1825,7 +1833,7 @@ fn annotation_at(
     types: &Types,
     source: &str,
     owner: Option<usize>,
-) -> Result<Type, String> {
+) -> StdResult<Type, String> {
     annotation_with_aliases(
         expression,
         graph,
@@ -1845,9 +1853,9 @@ fn annotation_with_aliases(
     types: &Types,
     owner: Option<usize>,
     alias_depth: usize,
-) -> Result<Type, String> {
+) -> StdResult<Type, String> {
     if alias_depth >= 32 {
-        return Err(error(
+        return Err(diagnostic_message(
             source,
             expression,
             "type aliases nest more than 32 levels or form a cycle",
@@ -1868,8 +1876,9 @@ fn annotation_with_aliases(
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
         let contents = value.value.to_str();
-        let parsed = ruff_python_parser::parse_expression(contents)
-            .map_err(|_| error(source, expression, "invalid quoted type annotation"))?;
+        let parsed = ruff_python_parser::parse_expression(contents).map_err(|_| {
+            diagnostic_message(source, expression, "invalid quoted type annotation")
+        })?;
         return annotation_with_aliases(
             parsed.expr(),
             graph,
@@ -1880,7 +1889,7 @@ fn annotation_with_aliases(
             alias_depth,
         )
         .map_err(|message| {
-            error(
+            diagnostic_message(
                 source,
                 expression,
                 &format!("invalid quoted annotation: {message}"),
@@ -1927,7 +1936,7 @@ fn annotation_with_aliases(
         }
         Some(Binding::Intrinsic(Intrinsic::SelfType)) => {
             return owner.map(|id| classes.instance(id)).ok_or_else(|| {
-                error(
+                diagnostic_message(
                     source,
                     expression,
                     "Self is supported only inside a fixed class",
@@ -1986,7 +1995,7 @@ fn annotation_with_aliases(
             name @ ("urllib.parse.DefragResult" | "urllib.parse.DefragResultBytes"),
         ))) => {
             graph.needs_object_runtime.set(true);
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 expression,
                 &format!("{name} requires native Python object operations"),
@@ -2025,7 +2034,7 @@ fn annotation_with_aliases(
             "BaseException" | "Exception" => Ok(Type::Exception),
             "ImportError" => Ok(Type::ImportException),
             "object" => Ok(Type::ObjectValue),
-            _ => Err(error(
+            _ => Err(diagnostic_message(
                 source,
                 expression,
                 "unsupported exact type annotation",
@@ -2040,7 +2049,7 @@ fn annotation_with_aliases(
                 && graph.resolve_type(module, &value.value).is_none() =>
         {
             let Type::Class(base) = nested(&value.slice)? else {
-                return Err(error(
+                return Err(diagnostic_message(
                     source,
                     expression,
                     "type[T] requires a fixed record class",
@@ -2048,7 +2057,7 @@ fn annotation_with_aliases(
             };
             let class = &classes.definitions[base];
             let index = class.initializer.ok_or_else(|| {
-                error(
+                diagnostic_message(
                     source,
                     expression,
                     "type[T] requires a declared initializer",
@@ -2056,7 +2065,7 @@ fn annotation_with_aliases(
             })?;
             let params = &class.methods[index].parameters;
             if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
-                return Err(error(
+                return Err(diagnostic_message(
                     source,
                     expression,
                     "class factories require positional parameters",
@@ -2068,7 +2077,7 @@ fn annotation_with_aliases(
                 .skip(1)
                 .map(|p| {
                     let annotation = p.annotation().ok_or_else(|| {
-                        error(
+                        diagnostic_message(
                             source,
                             expression,
                             "class factory parameters require exact annotations",
@@ -2084,7 +2093,7 @@ fn annotation_with_aliases(
                         alias_depth + 1,
                     )
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<StdResult<Vec<_>, _>>()?;
             Ok(types.record_constructor(base, args))
         }
         ast::Expr::Subscript(subscript)
@@ -2102,7 +2111,7 @@ fn annotation_with_aliases(
             {
                 return Ok(Type::ReadOnlyObjectMapping);
             }
-            Err(error(
+            Err(diagnostic_message(
                 source,
                 expression,
                 "read-only mapping annotations currently require Mapping[str, object]",
@@ -2141,7 +2150,11 @@ fn annotation_with_aliases(
             )) = graph.resolve_type(module, &value.value) =>
         {
             if nested(&value.slice)? != Type::Str {
-                return Err(error(source, expression, "regex annotations require str"));
+                return Err(diagnostic_message(
+                    source,
+                    expression,
+                    "regex annotations require str",
+                ));
             }
             Ok(if kind == Intrinsic::RegexPattern {
                 Type::RegexPattern
@@ -2165,7 +2178,7 @@ fn annotation_with_aliases(
                 Type::Str => crate::ir::ProcessCapture::TEXT,
                 Type::Bytes => crate::ir::ProcessCapture::BYTES,
                 _ => {
-                    return Err(error(
+                    return Err(diagnostic_message(
                         source,
                         expression,
                         "CompletedProcess requires str or bytes output",
@@ -2181,14 +2194,14 @@ fn annotation_with_aliases(
             ) =>
         {
             let ast::Expr::Tuple(arguments) = &*value.slice else {
-                return Err(error(
+                return Err(diagnostic_message(
                     source,
                     expression,
                     "Callable requires an exact parameter list and return type",
                 ));
             };
             let [ast::Expr::List(parameters), returns] = arguments.elts.as_slice() else {
-                return Err(error(
+                return Err(diagnostic_message(
                     source,
                     expression,
                     "Callable requires Callable[[T, ...], R]; ellipsis is unsupported",
@@ -2198,7 +2211,7 @@ fn annotation_with_aliases(
                 .elts
                 .iter()
                 .map(nested)
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<StdResult<Vec<_>, _>>()?;
             Ok(types.callable(parameters, nested(returns)?))
         }
         ast::Expr::Subscript(value)
@@ -2218,12 +2231,12 @@ fn annotation_with_aliases(
                     .elts
                     .iter()
                     .map(nested)
-                    .collect::<Result<Vec<_>, _>>()?
+                    .collect::<StdResult<Vec<_>, _>>()?
             } else {
                 vec![nested(&value.slice)?]
             };
             types.union(&members).ok_or_else(|| {
-                error(
+                diagnostic_message(
                     source,
                     expression,
                     "finite unions support str | bytes and nullable exact types",
@@ -2254,7 +2267,7 @@ fn annotation_with_aliases(
                 match nested(&value.slice)? {
                     Type::Str => Ok(Type::TextIO),
                     Type::Bytes => Ok(Type::BinaryIO),
-                    _ => Err(error(
+                    _ => Err(diagnostic_message(
                         source,
                         &*value.slice,
                         "checked IO requires str or bytes",
@@ -2271,7 +2284,7 @@ fn annotation_with_aliases(
             {
                 let key = nested(&value.slice)?;
                 if !types.hashable_key(key) {
-                    return Err(error(
+                    return Err(diagnostic_message(
                         source,
                         &*value.slice,
                         "Counter requires an immutable key type",
@@ -2300,7 +2313,7 @@ fn annotation_with_aliases(
             ast::Expr::Name(name) if name.id == "set" => {
                 let element = nested(&value.slice)?;
                 if !types.hashable_key(element) {
-                    return Err(error(
+                    return Err(diagnostic_message(
                         source,
                         &*value.slice,
                         "set elements must be int, str, bytes, Path, or immutable scalar tuples",
@@ -2318,14 +2331,14 @@ fn annotation_with_aliases(
                     ) =>
             {
                 let ast::Expr::Tuple(arguments) = &*value.slice else {
-                    return Err(error(
+                    return Err(diagnostic_message(
                         source,
                         expression,
                         "dict requires key and value types",
                     ));
                 };
                 let [key, value] = arguments.elts.as_slice() else {
-                    return Err(error(
+                    return Err(diagnostic_message(
                         source,
                         expression,
                         "dict requires key and value types",
@@ -2343,7 +2356,7 @@ fn annotation_with_aliases(
                     });
                 }
                 if !types.hashable_key(key_type) {
-                    return Err(error(
+                    return Err(diagnostic_message(
                         source,
                         key,
                         "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
@@ -2359,7 +2372,7 @@ fn annotation_with_aliases(
                     == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
                 {
                     if types.element(value_type).is_none() {
-                        return Err(error(
+                        return Err(diagnostic_message(
                             source,
                             value,
                             "defaultdict requires a typed list value",
@@ -2385,13 +2398,13 @@ fn annotation_with_aliases(
                         .elts
                         .iter()
                         .map(nested)
-                        .collect::<Result<Vec<_>, _>>()?
+                        .collect::<StdResult<Vec<_>, _>>()?
                 } else {
                     vec![nested(&value.slice)?]
                 };
                 Ok(types.tuple(fields))
             }
-            _ => Err(error(
+            _ => Err(diagnostic_message(
                 source,
                 expression,
                 "only list[T], dict[K, V], set[T], and fixed tuple[T, ...] are supported",
@@ -2412,20 +2425,24 @@ fn annotation_with_aliases(
                 }
             }
             types.union(&members).ok_or_else(|| {
-                error(
+                diagnostic_message(
                     source,
                     expression,
                     "finite unions support str | bytes and nullable exact types",
                 )
             })
         }
-        _ => Err(error(source, expression, "unsupported type annotation")),
+        _ => Err(diagnostic_message(
+            source,
+            expression,
+            "unsupported type annotation",
+        )),
     }
 }
 
 /// Ruff replaces surrogate escapes with U+FFFD in its analysis AST. Reject those
 /// source literals rather than silently compiling a different Python value.
-pub(crate) fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Result<(), String> {
+pub(crate) fn check_string(value: &ast::ExprStringLiteral, source: &str) -> StdResult<(), String> {
     for part in value.value.iter() {
         check_string_literal(part, source)?;
     }
@@ -2433,7 +2450,7 @@ pub(crate) fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Resu
 }
 
 /// Checks each adjacent literal with its own raw prefix and content range.
-fn check_string_literal(value: &ast::StringLiteral, source: &str) -> Result<(), String> {
+fn check_string_literal(value: &ast::StringLiteral, source: &str) -> StdResult<(), String> {
     if matches!(
         value.flags.prefix(),
         ast::str_prefix::StringLiteralPrefix::Raw { .. }
@@ -2445,9 +2462,9 @@ fn check_string_literal(value: &ast::StringLiteral, source: &str) -> Result<(), 
 }
 
 /// Scans only literal bytes; f-string field expressions have independent prefixes.
-fn check_string_escapes(range: TextRange, source: &str) -> Result<(), String> {
+fn check_string_escapes(range: TextRange, source: &str) -> StdResult<(), String> {
     if imre_ast::strings::replacements(&source[range]).any(|point| point != 0xfffd) {
-        return Err(error(
+        return Err(diagnostic_message(
             source,
             &range,
             "surrogate string escapes are unsupported; strings must be valid UTF-8",
@@ -2468,15 +2485,7 @@ enum Iteration {
     Prepared(pipelines::Prepared),
 }
 
-/// Errors that distinguish a runtime operation from a proven type mismatch.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FailureKind {
-    ObjectOperation,
-    ExactType,
-}
-
 struct Checker<'a> {
-    classified_error: std::cell::RefCell<Option<(String, FailureKind)>>,
     /// Doctest prompts share an exec-style namespace until the case ends.
     interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
@@ -2554,7 +2563,6 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
-            classified_error: Default::default(),
             interactive_names: false,
             local_iter: false,
             positional_pack: None,
@@ -2653,11 +2661,8 @@ impl<'a> Checker<'a> {
         Expr::local(slot, self.locals[slot])
     }
 
-    fn classified_error(&self, kind: FailureKind, node: &impl Ranged, message: &str) -> String {
-        let diagnostic = error(self.source, node, message);
-        self.classified_error
-            .replace(Some((diagnostic.clone(), kind)));
-        diagnostic
+    fn classified_error(&self, kind: Kind, node: &impl Ranged, message: &str) -> Failure {
+        error(self.source, node, message).classify(kind)
     }
 
     fn expect(&self, expected: Type, actual: Type, node: &impl Ranged) -> Result<(), String> {
@@ -2665,7 +2670,7 @@ impl<'a> Checker<'a> {
             Ok(())
         } else {
             Err(self.classified_error(
-                FailureKind::ExactType,
+                Kind::ExactType,
                 node,
                 &format!(
                     "expected {}, got {}; annotations are enforced contracts",
@@ -3218,12 +3223,11 @@ impl<'a> Checker<'a> {
         expected: Type,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        self.coerce(value, expected, node).inspect_err(|error| {
-            if self.failure_kind(error) == Some(FailureKind::ExactType) {
-                self.graph.return_errors.borrow_mut().insert(format!(
-                    "{}:{error}",
-                    self.graph.modules[self.module].path.display()
-                ));
+        self.coerce(value, expected, node).map_err(|failure| {
+            if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
+                failure.classify(Kind::ReturnType)
+            } else {
+                failure
             }
         })
     }
@@ -3623,7 +3627,7 @@ impl<'a> Checker<'a> {
                     .elts
                     .iter()
                     .map(|value| self.expr_expected(value, element))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<StdResult<Vec<_>, _>>()?;
                 Expr {
                     ty: concrete,
                     kind: ExprKind::List(values),
@@ -3651,7 +3655,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .zip(fields)
                     .map(|(value, ty)| self.expr_expected(value, ty))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<StdResult<Vec<_>, _>>()?;
                 Expr {
                     ty: concrete,
                     kind: ExprKind::Tuple(values),
@@ -4092,7 +4096,7 @@ impl<'a> Checker<'a> {
                 .args
                 .iter()
                 .map(|argument| self.expr_expected(argument, Type::Int))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<StdResult<Vec<_>, _>>()?;
             return Ok(Iteration::Range(args));
         }
         self.iteration_source(expression)
@@ -4816,27 +4820,20 @@ impl<'a> Checker<'a> {
     }
 
     /// Defer an opaque operation only when its result need not enter typed storage.
-    fn defer_object_error(&self, error: &str) -> bool {
-        if self.failure_kind(error) != Some(FailureKind::ObjectOperation) {
+    fn defer_object_error(&self, error: &Failure) -> bool {
+        let Failure::Diagnostic(diagnostic) = error else {
+            return false;
+        };
+        if !error.is_object() {
             return false;
         }
         if self.inference.is_none() {
             self.graph
                 .deferred_object_error
                 .borrow_mut()
-                .get_or_insert_with(|| {
-                    format!("{}:{error}", self.graph.modules[self.module].path.display())
-                });
+                .get_or_insert_with(|| diagnostic.clone().in_module(self.graph, self.module));
         }
         true
-    }
-
-    fn failure_kind(&self, error: &str) -> Option<FailureKind> {
-        self.classified_error
-            .borrow()
-            .as_ref()
-            .filter(|(diagnostic, _)| diagnostic == error)
-            .map(|(_, kind)| *kind)
     }
 
     fn checked_optional_name(&self, expression: &ast::Expr) -> bool {
@@ -4860,7 +4857,7 @@ impl<'a> Checker<'a> {
             // another function, whether this operation is deferred or stops lowering.
             if self.inference.is_none()
                 && !self.graph.modules[self.module].bundled
-                && self.failure_kind(error) == Some(FailureKind::ObjectOperation)
+                && error.is_object()
             {
                 self.graph.require_fallback_calls();
             }
@@ -5972,7 +5969,7 @@ impl<'a> Checker<'a> {
                             "exception handlers require fixed builtin categories",
                         ))
                     })
-                    .collect::<Result<Vec<_>, _>>()?
+                    .collect::<StdResult<Vec<_>, _>>()?
             } else {
                 if index + 1 != try_.handlers.len() {
                     return Err(error(self.source, handler, "a bare handler must be last"));
@@ -6005,7 +6002,7 @@ impl<'a> Checker<'a> {
                     if !kinds.is_empty() && kinds.iter().all(|kind| *kind == 27) {
                         self.narrowed.insert_mut(slot, Type::TimeoutExpired);
                     }
-                    Ok::<_, String>(slot)
+                    Ok::<_, Failure>(slot)
                 })
                 .transpose()?;
             let before_handler = name.and_then(|_| self.take_breaks());
@@ -6355,7 +6352,14 @@ impl<'a> Checker<'a> {
             {
                 return Err(self.object_runtime_export("date difference", binary));
             }
-            return calendar::binary(first, second, left, right, binary, self.source);
+            return Ok(calendar::binary(
+                first,
+                second,
+                left,
+                right,
+                binary,
+                self.source,
+            )?);
         }
         if binary.op == ast::Operator::Mod
             && matches!(left.ty, Type::Str | Type::StrLiteral(_))
@@ -6576,12 +6580,12 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn object_runtime_export(&self, name: &str, node: &impl Ranged) -> String {
+    fn object_runtime_export(&self, name: &str, node: &impl Ranged) -> Failure {
         self.graph.needs_object_runtime.set(true);
         self.object_export_error(name, node)
     }
 
-    fn object_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
+    fn object_builtin_error(&self, name: &str, node: &impl Ranged) -> Failure {
         self.graph.needs_object_runtime.set(true);
         self.scoped_builtin_error(name, node)
     }
@@ -6592,7 +6596,7 @@ impl<'a> Checker<'a> {
             .find(|name| self.unshadowed_builtin(expression, name))
     }
 
-    fn object_builtin_error_with_checked_calls(&self, name: &str, node: &impl Ranged) -> String {
+    fn object_builtin_error_with_checked_calls(&self, name: &str, node: &impl Ranged) -> Failure {
         self.graph
             .check_fallback_calls
             .set(crate::analysis::FallbackCalls::FunctionBodies);
@@ -6647,21 +6651,14 @@ impl<'a> Checker<'a> {
     }
 
     /// Select the object provider only when this precise diagnostic reaches the driver.
-    fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
-        let error = self.object_export_error(name, node);
-        self.graph
-            .object_builtin_errors
-            .borrow_mut()
-            .insert(format!(
-                "{}:{error}",
-                self.graph.modules[self.module].path.display()
-            ));
-        error
+    fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> Failure {
+        self.object_export_error(name, node)
+            .classify(Kind::ScopedObject)
     }
 
-    fn object_export_error(&self, name: &str, node: &impl Ranged) -> String {
+    fn object_export_error(&self, name: &str, node: &impl Ranged) -> Failure {
         self.classified_error(
-            FailureKind::ObjectOperation,
+            Kind::Object,
             node,
             &format!("{name} requires native Python object operations"),
         )
@@ -7233,7 +7230,7 @@ impl<'a> Checker<'a> {
             {
                 self.graph.needs_object_runtime.set(true);
                 return Err(self.classified_error(
-                    FailureKind::ObjectOperation,
+                    Kind::Object,
                     expression,
                     "a hash constructor used as a type requires native object dispatch",
                 ));
@@ -7381,7 +7378,7 @@ impl<'a> Checker<'a> {
                         .into_iter()
                         .zip(&list.elts)
                         .map(|(item, at)| self.coerce(item, element, at))
-                        .collect::<Result<_, _>>()?;
+                        .collect::<StdResult<_, _>>()?;
                 }
                 (self.types.list(element), ExprKind::List(values))
             }
@@ -7412,7 +7409,7 @@ impl<'a> Checker<'a> {
                     .elts
                     .iter()
                     .map(|value| self.expr(value))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<StdResult<Vec<_>, _>>()?;
                 let values = if values
                     .iter()
                     .all(|value| matches!(value.ty, Type::Document(_)))
@@ -7421,7 +7418,7 @@ impl<'a> Checker<'a> {
                     values
                         .into_iter()
                         .map(|v| self.document_coerce(v, documents::ANY, tuple))
-                        .collect::<Result<Vec<_>, _>>()?
+                        .collect::<StdResult<Vec<_>, _>>()?
                 } else {
                     values
                 };
@@ -7737,7 +7734,7 @@ impl<'a> Checker<'a> {
                             ast::CmpOp::NotEq => Ok(Compare::NotEqual),
                             _ => Err(error(self.source, expression, "ForwardRef has no ordering")),
                         })
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect::<StdResult<Vec<_>, _>>()?;
                     return Ok(Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Compare(values, ops),
@@ -7782,7 +7779,12 @@ impl<'a> Checker<'a> {
                         Type::JsonRoot | Type::JsonValue | Type::JsonObject
                     )
                 }) {
-                    return json::compare(values, &compare.ops, self.source, expression);
+                    return Ok(json::compare(
+                        values,
+                        &compare.ops,
+                        self.source,
+                        expression,
+                    )?);
                 }
                 let uuid_and_scalar = |uuid: Type, other: Type| {
                     matches!(uuid, Type::Class(id) if self.classes.declarations.definitions[id].is_uuid(self.graph))
@@ -10204,7 +10206,7 @@ impl<'a> Checker<'a> {
                         .args
                         .iter()
                         .map(|arg| self.expr(arg).map(powers::integer))
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect::<StdResult<Vec<_>, _>>()?;
                     if args.iter().all(|arg| arg.ty == Type::Int) {
                         return Ok(Expr {
                             ty: Type::Int,
@@ -10292,7 +10294,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .chain(call.arguments.keywords.iter().map(|keyword| &keyword.value))
                     .map(|value| self.expr(value))
-                    .collect::<Result<_, _>>()?;
+                    .collect::<StdResult<_, _>>()?;
                 return Ok(calls::type_error(Type::None, values, message));
             }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
@@ -11911,7 +11913,7 @@ impl<'a> Checker<'a> {
             .args
             .iter()
             .map(|arg| self.expr(arg))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<StdResult<Vec<_>, _>>()?;
         if name == "str" && args.len() == 1 {
             return self.checked_string(args.into_iter().next().unwrap(), call);
         }

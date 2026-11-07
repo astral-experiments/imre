@@ -325,7 +325,7 @@ fn stream_plan(
     graph: &SourceGraph,
     module: ModuleId,
     call: &ast::ExprCall,
-) -> Result<(u32, ProcessCapture), &'static str> {
+) -> std::result::Result<(u32, ProcessCapture), &'static str> {
     let checked_output =
         graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput));
     let run =
@@ -762,7 +762,7 @@ impl Checker<'_> {
             .elts
             .iter()
             .map(|item| self.expr(item))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         let kinds = items
             .iter()
             .map(|e| {
@@ -789,7 +789,7 @@ impl Checker<'_> {
             .into_iter()
             .zip(&display.elts)
             .map(|(value, source)| self.coerce(value, ty, source))
-            .collect::<Result<_, _>>()?;
+            .collect::<std::result::Result<_, _>>()?;
         Ok(Expr {
             ty: self.types.list(ty),
             kind: ExprKind::List(items),

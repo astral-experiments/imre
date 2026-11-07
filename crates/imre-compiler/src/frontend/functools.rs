@@ -37,10 +37,10 @@ fn type_error(message: &str) -> Statement {
 }
 
 impl Checker<'_> {
-    pub(super) fn runtime_attrgetter(&self, node: &impl Ranged) -> String {
+    pub(super) fn runtime_attrgetter(&self, node: &impl Ranged) -> Failure {
         self.graph.needs_object_runtime.set(true);
         self.classified_error(
-            FailureKind::ObjectOperation,
+            Kind::Object,
             node,
             "operator.attrgetter requires native runtime attribute lookup",
         )

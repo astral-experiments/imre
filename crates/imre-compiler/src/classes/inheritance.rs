@@ -8,7 +8,7 @@ pub(super) fn resolve(
     nodes: &[(DefinitionId, &ast::StmtClassDef)],
     ids: &HashMap<DefinitionId, usize>,
     exceptions: &exceptions::Declarations,
-) -> Result<Vec<Class>, String> {
+) -> Result<Vec<Class>, Diagnostic> {
     fn build(
         id: usize,
         graph: &SourceGraph,
@@ -17,14 +17,14 @@ pub(super) fn resolve(
         exceptions: &exceptions::Declarations,
         classes: &mut [Option<Class>],
         path: &mut Vec<usize>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Diagnostic> {
         if classes[id].is_some() {
             return Ok(());
         }
         let (definition, node) = nodes[id];
         let module = &graph.modules[definition.module];
         if path.contains(&id) || path.len() >= 64 {
-            return Err(module.error(node, "cyclic or too deeply nested class lineage"));
+            return Err(module.diagnostic(node, "cyclic or too deeply nested class lineage"));
         }
         path.push(id);
         let mut base: Option<usize> = None;
@@ -34,7 +34,9 @@ pub(super) fn resolve(
             for argument in &args.args {
                 if graph.is_protocol_base(definition.module, argument) {
                     graph.needs_object_runtime.set(true);
-                    return Err(module.error(argument, "Protocol bases require object lowering"));
+                    return Err(
+                        module.diagnostic(argument, "Protocol bases require object lowering")
+                    );
                 }
                 if mapping_base(graph, definition.module, argument)
                     || (args.args.len() == 1
@@ -57,14 +59,14 @@ pub(super) fn resolve(
                     Some(Binding::Intrinsic(Intrinsic::PICKLER)) => {
                         graph.needs_object_runtime.set(true);
                         return Err(
-                            module.error(argument, "pickle.Pickler requires object lowering")
+                            module.diagnostic(argument, "pickle.Pickler requires object lowering")
                         );
                     }
                     Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                         "contextlib.ContextDecorator",
                     ))) => {
                         graph.needs_object_runtime.set(true);
-                        return Err(module.error(
+                        return Err(module.diagnostic(
                             argument,
                             "ContextDecorator subclasses require object lowering",
                         ));
@@ -73,9 +75,8 @@ pub(super) fn resolve(
                         "codecs.IncrementalDecoder" | "codecs.CodecInfo",
                     ))) => {
                         graph.needs_object_runtime.set(true);
-                        return Err(
-                            module.error(argument, "codec base class requires object lowering")
-                        );
+                        return Err(module
+                            .diagnostic(argument, "codec base class requires object lowering"));
                     }
                     Some(Binding::Intrinsic(
                         Intrinsic::IO_BASE
@@ -98,15 +99,13 @@ pub(super) fn resolve(
                         ),
                     )) => {
                         graph.needs_object_runtime.set(true);
-                        return Err(
-                            module.error(argument, "I/O base subclasses require object lowering")
-                        );
+                        return Err(module
+                            .diagnostic(argument, "I/O base subclasses require object lowering"));
                     }
                     Some(Binding::Intrinsic(base)) if base.is_subclassable_calendar() => {
                         graph.needs_object_runtime.set(true);
-                        return Err(
-                            module.error(argument, "calendar subclasses require object lowering")
-                        );
+                        return Err(module
+                            .diagnostic(argument, "calendar subclasses require object lowering"));
                     }
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 && args.keywords.is_empty() => {}
@@ -116,15 +115,14 @@ pub(super) fn resolve(
                             && let Some(name) = graph.modules[source.module].python_subclasses()
                         {
                             graph.needs_object_runtime.set(true);
-                            return Err(
-                                module.error(argument, &format!("{name} require object lowering"))
-                            );
+                            return Err(module
+                                .diagnostic(argument, &format!("{name} require object lowering")));
                         }
                         if source.module == definition.module
                             && source.statement >= definition.statement
                         {
                             return Err(
-                                module.error(argument, "a base class must already be defined")
+                                module.diagnostic(argument, "a base class must already be defined")
                             );
                         }
                         let next = ids[&source];
@@ -149,7 +147,7 @@ pub(super) fn resolve(
                                     continue;
                                 }
                             }
-                            return Err(module.error(
+                            return Err(module.diagnostic(
                                 argument,
                                 "multiple independent base classes are unsupported",
                             ));
@@ -175,16 +173,11 @@ pub(super) fn resolve(
                             )
                         {
                             let error = module
-                                .error(argument, "native base class requires object lowering");
-                            graph
-                                .object_builtin_errors
-                                .borrow_mut()
-                                .insert(error.clone());
-                            return Err(error);
+                                .diagnostic(argument, "native base class requires object lowering");
+                            return Err(error.classified(Kind::ScopedObject));
                         }
-                        return Err(
-                            module.error(argument, "the base must be a known fixed-layout class")
-                        );
+                        return Err(module
+                            .diagnostic(argument, "the base must be a known fixed-layout class"));
                     }
                 }
             }
@@ -217,7 +210,7 @@ pub(super) fn resolve(
                 .iter()
                 .find(|field| exceptions::inherited_descriptor(&field.name, mro))
             {
-                return Err(module.error(
+                return Err(module.diagnostic(
                     node,
                     &format!(
                         "a record field cannot store the inherited exception descriptor '{}'",

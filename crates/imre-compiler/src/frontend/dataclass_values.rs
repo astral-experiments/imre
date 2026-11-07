@@ -1,6 +1,7 @@
 //! Validates generated value behavior without changing the fixed storage model.
 
 use super::*;
+use std::result::Result;
 
 impl Checker<'_> {
     /// An erased record keeps its concrete descriptor and owner. Admit only

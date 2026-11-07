@@ -184,7 +184,7 @@ impl Checker<'_> {
             let values = args
                 .by_ref()
                 .map(|arg| self.expr(arg))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             return Ok(scope.finish(calls::type_error(
                 Type::None,
                 values,

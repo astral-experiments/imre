@@ -93,7 +93,7 @@ impl Checker<'_> {
         }) {
             self.graph.needs_object_runtime.set(true);
             return Err(self.classified_error(
-                FailureKind::ObjectOperation,
+                Kind::Object,
                 call,
                 "BLAKE2 parameter conversion requires native object dispatch",
             ));
