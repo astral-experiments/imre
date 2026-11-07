@@ -469,8 +469,10 @@ impl Context {
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
-                    || (matches!(kind.as_str(), "builtin_function_or_method" | "method")
-                        && name == "__reduce__") =>
+                    || (matches!(
+                        kind.as_str(),
+                        "builtin_function_or_method" | "method" | "method-wrapper"
+                    ) && name == "__reduce__") =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -1576,6 +1578,24 @@ impl Context {
         )
     }
 
+    /// Return the stored name of a slot descriptor that binds as a method wrapper.
+    pub(super) fn wrapper_name(&self, descriptor: Id) -> Option<&'static str> {
+        match self.heap.get(descriptor) {
+            Value::Native(symbol) => BuiltinDescriptor::lookup(symbol)
+                .filter(|slot| !slot.method)
+                .map(|slot| slot.name),
+            Value::IoMethod {
+                name: name @ ("__init__" | "__repr__" | "__iter__" | "__next__" | "__del__"),
+                ..
+            }
+            | Value::HeapTypeMethod {
+                name: name @ ("__repr__" | "__str__"),
+                ..
+            } => Some(*name),
+            _ => None,
+        }
+    }
+
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
         Some(match self.heap.get(obj) {
             Value::Module { .. } => self.type_name(obj),
@@ -1599,19 +1619,7 @@ impl Context {
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
-                Value::Native(symbol)
-                    if BuiltinDescriptor::lookup(symbol).is_some_and(|slot| !slot.method) =>
-                {
-                    "method-wrapper"
-                }
-                Value::IoMethod {
-                    name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
-                    ..
-                } => "method-wrapper",
-                Value::HeapTypeMethod {
-                    name: "__repr__" | "__str__",
-                    ..
-                } => "method-wrapper",
+                _ if self.wrapper_name(*callable).is_some() => "method-wrapper",
                 Value::Native(_)
                 | Value::IoOpen { .. }
                 | Value::IoMethod { .. }
@@ -2627,17 +2635,25 @@ impl Context {
         if let Some(value) = self.os_attribute(obj, name)? {
             return Ok(value);
         }
+        if name == "__name__"
+            && let Some(member) = self.wrapper_name(obj)
+        {
+            return Ok(self.heap.string_literal(member)?);
+        }
         if matches!(name, "__reduce__" | "__reduce_ex__") {
             let class = match self.heap.get(obj) {
                 Value::Native(kind)
-                    if matches!(kind.as_str(), "method" | "builtin_function_or_method") =>
+                    if matches!(
+                        kind.as_str(),
+                        "method" | "builtin_function_or_method" | "method-wrapper"
+                    ) =>
                 {
                     Some(obj)
                 }
                 Value::Method { .. } | Value::Native(_)
                     if matches!(
                         self.builtin_type_name(obj),
-                        Some("method" | "builtin_function_or_method")
+                        Some("method" | "builtin_function_or_method" | "method-wrapper")
                     ) =>
                 {
                     Some(self.exact_type(obj)?)
@@ -7897,6 +7913,7 @@ impl Context {
                         name.as_str(),
                         "builtin_function_or_method.__reduce__"
                             | "method.__reduce__"
+                            | "method-wrapper.__reduce__"
                             | "type.__init__"
                             | "type.__setattr__"
                             | "BaseException.add_note"

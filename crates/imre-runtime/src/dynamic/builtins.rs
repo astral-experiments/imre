@@ -1645,6 +1645,20 @@ pub(super) fn call(
         let name = ctx.lookup_attr(callable, "__name__")?;
         return bound_method_reduction(ctx, receiver, name);
     }
+    if name == "method-wrapper.__reduce__" {
+        let wrapper = noargs_method_receiver(ctx, "method-wrapper", "__reduce__", args, kwargs)?;
+        let Value::Method {
+            callable, receiver, ..
+        } = *ctx.heap.get(wrapper)
+        else {
+            unreachable!("validated method wrapper")
+        };
+        let name = ctx
+            .wrapper_name(callable)
+            .expect("validated slot descriptor");
+        let name = ctx.heap.string_literal(name)?;
+        return bound_method_reduction(ctx, receiver, name);
+    }
     if name == "builtin_function_or_method.__reduce__" {
         let method = noargs_method_receiver(
             ctx,

@@ -3,6 +3,7 @@ import builtins
 import codecs
 import copyreg
 import pickle
+from operator import methodcaller
 from collections import namedtuple
 from typing import ParamSpec
 
@@ -145,6 +146,15 @@ def check_method_descriptors():
         wrapper.__reduce_ex__ = lambda protocol: (int, (protocol,))
         for dumps in (pickle.dumps, pickle._dumps):
             assert pickle.loads(dumps(wrapper, 4)) == 4
+
+
+def check_method_wrapper_reduction():
+    caller = methodcaller("format", title="ok")
+    wrapper = caller.__call__
+    descriptor = type(wrapper).__reduce__
+    for reconstruct, (receiver, name) in (descriptor(wrapper), wrapper.__reduce_ex__(5)):
+        assert reconstruct is getattr and receiver is caller and name is methodcaller.__call__.__name__
+    assert pickle.loads(pickle.dumps(wrapper))("result: {title}") == "result: ok"
 
 
 def check_python_method_reduction():
@@ -723,6 +733,7 @@ def produce():
     check_object_reducer()
     check_builtin_method_reduction()
     check_python_method_reduction()
+    check_method_wrapper_reduction()
     check_method_descriptors()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
