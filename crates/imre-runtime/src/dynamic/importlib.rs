@@ -405,7 +405,7 @@ impl Context {
             let disk = !bundle.as_ref().is_some_and(|dir| root.starts_with(dir))
                 && Path::new(child).file_name() == Some(std::ffi::OsStr::new(child));
             for path in [stem.join("__init__.py"), stem.with_extension("py")] {
-                let entry = choices.iter().find(|m| m.path == path).map(|m| m.code);
+                let entry = self.registered_file(name, &path).map(|source| source.code);
                 if entry.is_some() || (disk && path.is_file()) {
                     locations.clear();
                     if path.ends_with("__init__.py") {
@@ -502,10 +502,21 @@ impl Context {
     }
 
     fn registered_file(&self, name: &str, filename: &Path) -> Option<&super::SourceModule> {
-        self.sources
+        let source = self
+            .sources
             .get(name)?
             .iter()
-            .find(|source| source.path == filename)
+            .find(|source| source.path == filename)?;
+        // Standalone programs carry first-party source for relocation. While the actual
+        // file is present, let SourceFileLoader read it, including after a failed import.
+        // Bundled stdlib origins are virtual, and compiled initializers keep their code.
+        if matches!(source.code, ModuleInitializer::Source(_))
+            && filename.is_absolute()
+            && filename.is_file()
+        {
+            return None;
+        }
+        Some(source)
     }
 
     /// Bind the issued loader to its initializer, including modules compiled without source text.

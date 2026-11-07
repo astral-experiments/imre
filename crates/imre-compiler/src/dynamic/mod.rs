@@ -23,6 +23,7 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     private_names: imre_ast::Names,
+    misplaced_future: bool,
     uses_import_builtin: bool,
     uses_exec: bool,
     computed_import: bool,
@@ -542,8 +543,15 @@ fn scan_imports(
     crate::analysis::check_source_complexity(&input.text).map_err(str::to_owned)?;
     let parsed = input.parse_module()?;
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
-    let mut imports = Imports::default();
     let mut body = parsed.into_syntax().body;
+    if imre_ast::future_import_error(&body).is_some() {
+        // This module fails compilation before any of its imports or path edits execute.
+        return Ok(Imports {
+            misplaced_future: true,
+            ..Imports::default()
+        });
+    }
+    let mut imports = Imports::default();
     imports.private_names = imre_ast::lower(&mut body);
     imports.runtime_imports = body.iter().any(|stmt| {
         matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
@@ -673,6 +681,12 @@ pub(crate) fn compile(
     ) else {
         return Ok(None);
     };
+    if first.misplaced_future && startup.is_none() {
+        // The checked graph can reach object fallback for an unrelated representation
+        // error (e.g. a generic class). Report its owned diagnostics before declining.
+        check_returns(false)?;
+        return Ok(None);
+    }
     // Python entries can import these bundled sources when static lowering cannot handle the entry.
     let imports_provider = |provider: &str| {
         startup_fallback
@@ -689,10 +703,11 @@ pub(crate) fn compile(
         || first.runtime_imports
         || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
         || provider_script;
-    let object_entry = object_hint
-        && (entry_requests_objects
-            || (operation.is_some() && !ordered_command)
-            || (runtime_imports && !first.names.is_empty()));
+    let object_entry = first.misplaced_future
+        || object_hint
+            && (entry_requests_objects
+                || (operation.is_some() && !ordered_command)
+                || (runtime_imports && !first.names.is_empty()));
     // Existing object imports keep their normal project-module lookup. Only a new
     // startup fallback needs to verify that the imported provider is bundled.
     let consider_startup =
@@ -734,7 +749,7 @@ pub(crate) fn compile(
         }
     }
     let registered_imports = typed_graph
-        .filter(|_| runtime_imports)
+        .filter(|_| runtime_imports && !first.misplaced_future)
         .map(import_module::registered_imports)
         .unwrap_or_default();
     first
@@ -838,6 +853,10 @@ pub(crate) fn compile(
             blake3::hash(src.as_bytes()).to_hex().to_string(),
         ));
     }
+    let mut source_initializers = HashSet::new();
+    if first.misplaced_future {
+        source_initializers.insert(sources[0].1.clone());
+    }
     let mut seen = HashSet::new();
     // Keep source hints on the winning regular package's path. The runtime finder
     // can still load a different child if a parent changes its __path__.
@@ -848,7 +867,6 @@ pub(crate) fn compile(
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
     let mut computed_import = registered_imports.computed;
-    let mut source_only_provider = None;
     let mut bundled_only = false;
     let mut getters = VecDeque::new();
     let mut bundled_imports = VecDeque::new();
@@ -879,7 +897,7 @@ pub(crate) fn compile(
             if startup.is_none() && computed_import && !seen.contains("decimal") {
                 // Carry its source for relocation, but leave compilation until the name is chosen.
                 if !seen.contains("_pydecimal") {
-                    source_only_provider = Some("_pydecimal");
+                    source_initializers.insert(Path::new(bundled_root).join("_pydecimal.py"));
                 }
                 imports.add(0, "decimal");
             }
@@ -1214,8 +1232,17 @@ pub(crate) fn compile(
                         path.canonicalize().map_err(|e| e.to_string())?,
                         blake3::hash(src.as_bytes()).to_hex().to_string(),
                     ));
-                    sources.push((prefix.clone(), path, src));
-                    work.push_back((prefix.clone(), package, imports));
+                    if imports.misplaced_future {
+                        // Python starts consult the real file on each import attempt. A closed
+                        // binary retains the source and lets its loader report the error on import.
+                        if startup.is_none() {
+                            source_initializers.insert(path.clone());
+                            sources.push((prefix.clone(), path, src));
+                        }
+                    } else {
+                        sources.push((prefix.clone(), path, src));
+                        work.push_back((prefix.clone(), package, imports));
+                    }
                     entry_sources
                         .entry(prefix.clone())
                         .or_insert_with(|| (root.clone(), package));
@@ -1337,7 +1364,7 @@ pub(crate) fn compile(
             Path::new(bundled_root),
             &providers,
             split,
-            source_only_provider,
+            &source_initializers,
         )
     };
     let (mut units, mut used_archive) = emit(!matches!(layout, crate::BoxedLayout::Whole))?;

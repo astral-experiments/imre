@@ -27,6 +27,8 @@ pub(super) struct Program {
     // All nested code shares a source map. Prelinked suspended suites start in a synthetic header.
     source_lines: Rc<[usize]>,
     linked_body_line: Option<u32>,
+    // Check earlier scope declarations before reporting a misplaced future import.
+    syntax_limit: Option<ruff_text_size::TextRange>,
     pub name: String,
     qualname: String,
     nested_global: bool,
@@ -1972,6 +1974,7 @@ impl Program {
         let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
         child.source_lines = self.source_lines.clone();
         child.linked_body_line = self.linked_body_line;
+        child.syntax_limit = self.syntax_limit;
         child.strip_docstrings = self.strip_docstrings;
         child.scope_flags = self.nested_scope_flags();
         child
@@ -1994,6 +1997,7 @@ impl Program {
             filename,
             source_lines: Rc::default(),
             linked_body_line: None,
+            syntax_limit: None,
             name: name.to_owned(),
             qualname: name.to_owned(),
             nested_global: false,
@@ -2527,13 +2531,21 @@ impl Program {
 
     fn lower_block(
         &mut self,
-        body: ast::Suite,
+        mut body: ast::Suite,
         lines: &[usize],
         function: bool,
         active: Option<&mut LoopJumps>,
         class_top_level: bool,
     ) -> Result<()> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            if let Some(limit) = self.syntax_limit {
+                // Keep enclosing compound statements. A selected wildcard points at its alias.
+                body.truncate(body.partition_point(|stmt| {
+                    stmt.start() < limit.start()
+                        && !(matches!(stmt, ast::Stmt::ImportFrom(_))
+                            && stmt.range().contains_range(limit))
+                }));
+            }
             use ast::visitor::Visitor;
             let mut named = NamedBindings::default();
             if self.has_named_bindings {
@@ -3821,6 +3833,10 @@ impl Context {
         if interactive && let ast::Mod::Module(module) = parsed.syntax() {
             check_single_input(&module.body, parsed.tokens())?;
         }
+        let future_error = match parsed.syntax() {
+            ast::Mod::Module(module) => imre_ast::future_import_error(&module.body),
+            _ => None,
+        };
         let spellings = string_replacements(source, parsed.tokens());
         let async_error = match parsed.syntax() {
             ast::Mod::Module(module) => {
@@ -3909,7 +3925,18 @@ impl Context {
                     code.scope_flags |= code_flags::FUTURE_ANNOTATIONS;
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
+                code.syntax_limit = future_error.map(|(range, _)| range);
                 if let Err(error) = code.lower_namespace(body, &lines, false) {
+                    if error.kind == "NotImplementedError"
+                        && let Some((range, message)) = future_error
+                    {
+                        return Err(self.located_syntax_error(
+                            message,
+                            SyntaxSpan::InFields(range),
+                            filename_id,
+                            &lines,
+                        )?);
+                    }
                     if let Some(span) = error.trace.as_ref().and_then(|trace| trace.pending_syntax)
                     {
                         return Err(self.located_syntax_error(
@@ -3921,13 +3948,16 @@ impl Context {
                     }
                     return Err(error);
                 }
-                let mut module_globals = HashSet::new();
-                code.resolve_directives(&|_| None, &mut module_globals)?;
-                // A global declared by a nested block makes module assignments use the globals dictionary.
-                for name in module_globals {
-                    code.directives
-                        .entry(name)
-                        .or_insert((ScopeDirective::Global, 0.into()));
+                // Closure binding resolution follows symbol collection and future placement.
+                if future_error.is_none() {
+                    let mut module_globals = HashSet::new();
+                    code.resolve_directives(&|_| None, &mut module_globals)?;
+                    // A global declared by a nested block makes module assignments use the globals dictionary.
+                    for name in module_globals {
+                        code.directives
+                            .entry(name)
+                            .or_insert((ScopeDirective::Global, 0.into()));
+                    }
                 }
             }
         }
@@ -3937,6 +3967,14 @@ impl Context {
             &spellings,
             &|offset| lines.partition_point(|n| *n <= offset) as u32,
         )?;
+        if let Some((range, message)) = future_error {
+            return Err(self.located_syntax_error(
+                message,
+                SyntaxSpan::InFields(range),
+                filename_id,
+                &lines,
+            )?);
+        }
         Ok(self.box_source_code(Rc::new(code), None))
     }
 
