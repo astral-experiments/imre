@@ -76,11 +76,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             if !function.contains('.')
                 && !matches!(
                     symbol,
-                    stdlib::os::scandir::ENTRY
-                        | stdlib::os::scandir::ITER
-                        | stdlib::fixed_structseq::SCHED_PARAM
-                        | stdlib::fixed_structseq::TIMES_RESULT
-                ) =>
+                    stdlib::os::scandir::ENTRY | stdlib::os::scandir::ITER
+                )
+                && stdlib::fixed_structseq::fixed_type(symbol).is_none() =>
         {
             Some((module, function))
         }
@@ -3165,6 +3163,20 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "posix.sched_getscheduler" => {
                         return Ok(self.text("($module, pid, /)"));
+                    }
+                    "__doc__" if symbol == "posix.waitid" => {
+                        return Ok(self.text(concat!(
+                            "Returns the result of waiting for a process or processes.\n\n",
+                            "  idtype\n    Must be one of be P_PID, P_PGID or P_ALL.\n",
+                            "  id\n    The id to wait on.\n",
+                            "  options\n    Constructed from the ORing of one or more of WEXITED, WSTOPPED\n",
+                            "    or WCONTINUED and additionally may be ORed with WNOHANG or WNOWAIT.\n\n",
+                            "Returns either waitid_result or None if WNOHANG is specified and there are\n",
+                            "no children in a waitable state."
+                        )));
+                    }
+                    "__text_signature__" if symbol == "posix.waitid" => {
+                        return Ok(self.text("($module, idtype, id, options, /)"));
                     }
                     "__doc__" if symbol == "posix.getrandom" => {
                         return Ok(self.text("Obtain a series of random bytes."));

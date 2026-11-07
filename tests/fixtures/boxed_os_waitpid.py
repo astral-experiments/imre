@@ -2,6 +2,7 @@ import errno
 import os
 import posix
 import select
+import signal
 import subprocess
 
 
@@ -15,7 +16,14 @@ class Index:
 
 def pidfd():
     assert os.pidfd_open is posix.pidfd_open
+    assert vars(os)["waitid"] is vars(posix)["waitid"]
+    cls = os.waitid_result
+    assert cls is posix.waitid_result and isinstance(cls, type)
+    assert cls.__module__ == "posix" and cls.__name__ == "waitid_result"
+    assert (cls.n_fields, cls.n_sequence_fields, cls.n_unnamed_fields) == (5, 5, 0)
+    assert cls.__match_args__ == ("si_pid", "si_uid", "si_signo", "si_status", "si_code")
     with subprocess.Popen(["/bin/cat"], stdin=subprocess.PIPE) as child:
+        assert os.waitid(Index(os.P_PID), Index(child.pid), Index(os.WEXITED | os.WNOHANG)) is None
         try:
             fd = os.pidfd_open(pid=Index(child.pid), flags=Index(0))
         except OSError as error:
@@ -29,7 +37,17 @@ def pidfd():
             assert poller.poll(0) == []
             child.stdin.close()
             assert poller.poll(5000)[0][1] & select.POLLIN
+            result = posix.waitid(posix.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+            assert type(result) is os.waitid_result
+            assert tuple(result) == (child.pid, os.getuid(), signal.SIGCHLD, 0, os.CLD_EXITED)
+            assert result.si_pid == child.pid and result.si_status == 0
             assert child.wait() == 0
+            try:
+                os.waitid(os.P_PID, child.pid, os.WEXITED)
+            except ChildProcessError as error:
+                assert error.errno == errno.ECHILD
+            else:
+                raise AssertionError("waitid returned a reaped child")
         finally:
             os.close(fd)
 

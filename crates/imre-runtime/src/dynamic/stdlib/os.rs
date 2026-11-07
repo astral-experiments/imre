@@ -561,6 +561,8 @@ mod truncate;
 mod unlink;
 mod utime;
 #[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod waitid;
+#[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod xattr;
 
 #[cfg(unix)]
@@ -655,6 +657,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 "copy_file_range"
                     | "setresgid"
                     | "setresuid"
+                    | "waitid"
                     | "pidfd_open"
                     | "get_terminal_size"
                     | "tcgetpgrp"
@@ -1568,6 +1571,10 @@ pub(super) fn descriptor(
     #[cfg(unix)]
     if name == "execv" {
         return execv(ctx, args);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "waitid" {
+        return waitid::call(ctx, args);
     }
     if name == "waitpid" {
         let [pid, options] = args else {

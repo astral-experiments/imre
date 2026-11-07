@@ -215,19 +215,11 @@ impl ChildControl {
         // Sleep without the lock and without consuming status. A signaling
         // thread can still acquire the lock, and two waiters cannot both reap.
         loop {
-            let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::uninit();
-            // SAFETY: waitid writes siginfo into the provided storage. WNOWAIT
-            // leaves it to poll() to consume the status while holding the lock.
-            let result = unsafe {
-                libc::waitid(
-                    libc::P_PID,
-                    self.pid as libc::id_t,
-                    info.as_mut_ptr(),
-                    libc::WEXITED | libc::WNOWAIT,
-                )
-            };
-            if result < 0 {
-                let error = io::Error::last_os_error();
+            if let Err(error) = crate::objects::os::waitid(
+                libc::P_PID,
+                self.pid as libc::id_t,
+                libc::WEXITED | libc::WNOWAIT,
+            ) {
                 match error.raw_os_error() {
                     Some(libc::EINTR) => {
                         check()?;
