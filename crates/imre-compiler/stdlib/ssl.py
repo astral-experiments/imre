@@ -638,6 +638,9 @@ class SSLObject:
 SSLContext.sslobject_class = SSLObject
 
 
+_NO_FLAGS = 0
+
+
 class SSLSocket(_socket.socket):
     """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
 
@@ -797,19 +800,21 @@ class SSLSocket(_socket.socket):
         """Return the certificate chain sent by the peer as a list of DER-encoded certificates."""
         return _call(_imre_ssl.get_unverified_chain, self._session)
 
-    def send(self, data, flags=0):
-        if self._session is None:
+    def send(self, data, flags=_NO_FLAGS):
+        session = self._session
+        if session is None:
             return super().send(data, flags)
-        if _imre_ssl.is_session(self._session) and flags != 0:
+        if flags is not _NO_FLAGS and _imre_ssl.is_session(session) and _imre_ssl.nonzero_flags(flags):
             raise ValueError("non-zero flags not allowed in calls to send() on %s" % self.__class__)
-        return _tls_result(_call(_imre_ssl.send, self._session, data, flags))
+        return _tls_result(_call(_imre_ssl.send, session, data, flags))
 
-    def sendall(self, data, flags=0):
-        if self._session is None:
+    def sendall(self, data, flags=_NO_FLAGS):
+        session = self._session
+        if session is None:
             return super().sendall(data, flags)
-        if _imre_ssl.is_session(self._session) and flags:
+        if flags is not _NO_FLAGS and _imre_ssl.is_session(session) and _imre_ssl.nonzero_flags(flags):
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")
-        return _tls_result(_call(_imre_ssl.sendall, self._session, data, flags))
+        return _tls_result(_call(_imre_ssl.sendall, session, data, flags))
 
     def read(self, len=1024, buffer=None):
         if not _imre_ssl.is_session(self._session):
@@ -821,26 +826,27 @@ class SSLSocket(_socket.socket):
                 return b"" if buffer is None else 0
             raise
 
-    def recv(self, buflen=1024, flags=0):
-        if self._session is None:
+    def recv(self, buflen=1024, flags=_NO_FLAGS):
+        session = self._session
+        if session is None:
             return super().recv(buflen, flags)
-        if _imre_ssl.is_session(self._session):
-            if flags:
+        if _imre_ssl.is_session(session):
+            if flags is not _NO_FLAGS and _imre_ssl.nonzero_flags(flags):
                 raise ValueError("non-zero flags not allowed in calls to recv() on SSLSocket")
             return self.read(buflen)
-        return _call(_imre_ssl.recv, self._session, buflen, flags)
+        return _call(_imre_ssl.recv, session, buflen, flags)
 
-    def recv_into(self, buffer, nbytes=None, flags=0):
+    def recv_into(self, buffer, nbytes=None, flags=_NO_FLAGS):
+        session = self._session
         if nbytes is None:
             nbytes = memoryview(buffer).nbytes or 1024
-        session = self._session
         if session is None:
             return super().recv_into(buffer, nbytes, flags)
         if not _imre_ssl.is_session(session):
             count = _call(_imre_ssl.recv, session, nbytes, flags, buffer)
             if count is not None:
                 return count
-        if flags:
+        if flags is not _NO_FLAGS and _imre_ssl.nonzero_flags(flags):
             raise ValueError("non-zero flags not allowed in calls to recv_into() on %s" % self.__class__)
         return self.read(nbytes, buffer)
 

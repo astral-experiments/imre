@@ -63,6 +63,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "load_cert_chain",
         "wrap",
         "is_session",
+        "nonzero_flags",
         "do_handshake",
         "release_session",
         "transport_shutdown",
@@ -141,14 +142,7 @@ fn inactive_io(ctx: &Context, handle: Id, pending_errno: i32) -> Result<()> {
     let Value::TlsTransport(endpoint) = ctx.heap.get(handle) else {
         return Err(closed());
     };
-    if !endpoint.matches() {
-        return Err(closed());
-    }
-    let errno = if endpoint.fully_shut() {
-        socket::get_option(endpoint.socket(), libc::SOL_SOCKET, libc::SO_ERROR)?
-    } else {
-        pending_errno
-    };
+    let errno = endpoint.inactive_error(pending_errno)?;
     if errno == 0 {
         Ok(())
     } else {
@@ -220,6 +214,21 @@ fn bio_count(
     }
 }
 
+/// Finish Python conversion and release its temporaries before reentering the TLS provider.
+/// The provider acquires the socket's current registration when the operation resumes.
+fn callback_result<T>(
+    ctx: &mut Context,
+    call: impl FnOnce(&mut Context) -> Result<T>,
+) -> Result<T> {
+    let mark = ctx.heap.temporary_mark();
+    let result = call(ctx);
+    ctx.discard_temporaries(
+        mark,
+        result.as_ref().err().into_iter().flat_map(Error::roots),
+    );
+    result
+}
+
 fn read_plaintext(
     ctx: &mut Context,
     handle: Id,
@@ -228,8 +237,11 @@ fn read_plaintext(
     mut read: impl FnMut(&mut [u8]) -> std::result::Result<usize, provider::bio::BioFailure>,
 ) -> Result<Id> {
     // __index__ may resize the destination or reenter the TLS session.
-    let size = ctx
-        .index_integer(size)?
+    let size = match ctx.heap.get(ctx.scalar_value(size)) {
+        Value::Int(_) | Value::Bool(_) => ctx.index_integer(size),
+        _ => callback_result(ctx, |ctx| ctx.index_integer(size)),
+    }?;
+    let size = size
         .to_i64()
         .and_then(|n| isize::try_from(n).ok())
         .ok_or_else(|| {
@@ -1031,7 +1043,9 @@ pub(super) fn call(
             let raw = raw.clone();
             socket::check_tls_mode(&raw, connected)?;
             if !connected {
-                return Ok(ctx.alloc(Value::TlsTransport(Box::new(socket::TlsEndpoint::new(raw)))));
+                return Ok(ctx.alloc(Value::TlsTransport(Box::new(
+                    socket::TlsEndpoint::new(raw).map_err(crate::objects::errno_error)?,
+                ))));
             }
             let host = hostname.map(|id| ctx.str_value(id)).transpose()?;
             let result =
@@ -1043,6 +1057,17 @@ pub(super) fn call(
                 ))),
                 Err(error) => bio_failure(ctx, error),
             }
+        }
+        ("nonzero_flags", &[flags]) => {
+            if matches!(ctx.heap.get(flags), Value::Int(_) | Value::Bool(_)) {
+                return Ok(super::builtins::boolean(ctx.truth(flags)?));
+            }
+            let nonzero = callback_result(ctx, |ctx| {
+                let zero = ctx.int(0);
+                let compared = ctx.binary("!=", flags, zero)?;
+                ctx.truth(compared)
+            })?;
+            Ok(super::builtins::boolean(nonzero))
         }
         ("is_session", &[handle]) => Ok(super::builtins::boolean(matches!(
             ctx.heap.get(handle),
