@@ -1254,7 +1254,7 @@ impl Context {
             return Ok(false);
         }
         if matches!(self.heap.get(parent), Value::Native(name) if name == "typing.Callable") {
-            let origin = super::mapping_abc::class(self, "Callable")?;
+            let origin = super::mapping_abc::callable(self)?;
             // Unsubscripted typing aliases use their origins as the candidate class.
             let typing_instance = |name| {
                 self.module_value("typing", name)
@@ -6903,11 +6903,9 @@ impl Context {
             Value::Native(name) => name != "typing.Any",
             Value::Class { .. } if self.itertools_layout(base).is_some() => true,
             // These bootstrapped classes inherit their allocator from the next base.
-            Value::Class { name, scope, .. } => {
-                let mapping_abc = super::mapping_abc::bootstrapped(name)
-                    && self.classes.get(&format!("collections.abc.{name}")) == Some(&base);
+            Value::Class { scope, .. } => {
                 self.scope_data(*scope).class_cell.is_none()
-                    && !mapping_abc
+                    && self.classes.get("collections.abc.Callable") != Some(&base)
                     && self.classes.get("typing.Generic") != Some(&base)
                     && self.classes.get("typing.Protocol") != Some(&base)
             }
@@ -9328,7 +9326,16 @@ impl Context {
         if module == "_collections_abc"
             && matches!(
                 name.as_str(),
-                "Hashable" | "Awaitable" | "AsyncIterable" | "Buffer"
+                "Hashable"
+                    | "Awaitable"
+                    | "AsyncIterable"
+                    | "Buffer"
+                    | "Iterable"
+                    | "Sized"
+                    | "Container"
+                    | "Collection"
+                    | "Mapping"
+                    | "MutableMapping"
             )
         {
             self.classes

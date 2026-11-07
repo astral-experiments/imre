@@ -697,9 +697,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("typing", "_NamedTuple") => ctx.builtin("typing.NamedTuple"),
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
-        ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
-            super::mapping_abc::class(ctx, abc)?
-        }
+        ("_collections_abc", "Callable") => super::mapping_abc::callable(ctx)?,
         ("_collections_abc", "_CallableGenericAlias") => {
             ctx.builtin("collections.abc._CallableGenericAlias")
         }

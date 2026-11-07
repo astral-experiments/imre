@@ -1036,7 +1036,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             }
         }
         if kind == AliasKind::Callable {
-            let origin = super::mapping_abc::class(ctx, "Callable")?;
+            let origin = super::mapping_abc::callable(ctx)?;
             return callable_alias(ctx, kind, origin, args);
         }
         alias(ctx, kind, target, args)
@@ -1095,7 +1095,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
         let base_tuple = bases;
         let bases = ctx.items(base_tuple)?;
-        let callable = super::mapping_abc::class(ctx, "Callable")?;
+        let callable = super::mapping_abc::callable(ctx)?;
         let generic = named_class(ctx, "typing", "Generic");
         let mut result = Vec::new();
         let mut has_callable = false;
@@ -1543,7 +1543,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ctx.text("Callable")
         }
         Value::Native(class) if class == "typing.Callable" && name == "__origin__" => {
-            return Some(super::mapping_abc::class(ctx, "Callable"));
+            return Some(super::mapping_abc::callable(ctx));
         }
         Value::Native(class)
             if name == "__reduce__"
@@ -2733,9 +2733,7 @@ pub(super) fn call(
             Value::GenericAlias(a) => a.origin,
             Value::Union(_) => super::union::class(ctx),
             Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(v) => *v,
-            Value::Native(name) if name == "typing.Callable" => {
-                super::mapping_abc::class(ctx, "Callable")?
-            }
+            Value::Native(name) if name == "typing.Callable" => super::mapping_abc::callable(ctx)?,
             _ => NONE,
         }),
         ("get_args", [v]) => Ok(match ctx.heap.get(*v) {
@@ -2919,7 +2917,7 @@ impl Context {
                 "typing.Any cannot be used with isinstance()",
             )),
             Value::Native(name) if name == "typing.Callable" => {
-                let origin = super::mapping_abc::class(self, "Callable")?;
+                let origin = super::mapping_abc::callable(self)?;
                 self.python_instance_check(value, origin)
             }
             _ => {
