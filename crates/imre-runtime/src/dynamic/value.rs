@@ -1401,6 +1401,7 @@ pub(super) enum Value {
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
+        socket: Option<crate::ObjectOwner>,
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
         weak_reference: Option<Box<super::weakref::Reference>>,
@@ -1631,13 +1632,27 @@ impl Context {
 }
 
 impl Value {
+    pub(super) fn socket_handle(&self) -> Option<&crate::ObjectOwner> {
+        match self {
+            Self::Socket(s)
+            | Self::Instance {
+                socket: Some(s), ..
+            } => Some(s),
+            _ => None,
+        }
+    }
+
     /// Whether releasing this native value can still flush or close a descriptor.
     fn owns_open_descriptor(&self) -> bool {
         match self {
             Self::File(file) => file.owns_open_descriptor(),
             #[cfg(target_os = "linux")]
             Self::Epoll(epoll) => epoll.fd() >= 0,
-            Self::Socket(socket) => crate::objects::socket::fd(socket) >= 0,
+            Self::Socket(socket)
+            | Self::Instance {
+                socket: Some(socket),
+                ..
+            } => crate::objects::socket::fd(socket) >= 0,
             _ => false,
         }
     }
@@ -2270,6 +2285,7 @@ impl Value {
                 scalar,
                 weak_reference,
                 itertools,
+                socket: _,
                 memory_stream,
                 property,
             } => {
@@ -5045,6 +5061,17 @@ impl Heap {
                 .is_some_and(Value::owns_open_descriptor)
         });
         self.descriptor_owners.len() != previous
+    }
+
+    pub(super) fn track_initialized_descriptor(&mut self, id: Id) -> Result<()> {
+        if !self.descriptor_owners.contains(&id) {
+            self.descriptor_owners
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            self.descriptor_owners.push(id);
+            self.frames.last_mut().unwrap().created_finalizer = true;
+        }
+        Ok(())
     }
 
     /// Track a descriptor whose flush or close is visible when its last owner disappears.

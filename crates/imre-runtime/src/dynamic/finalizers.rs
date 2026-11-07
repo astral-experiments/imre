@@ -126,6 +126,15 @@ impl Context {
         if !found {
             return;
         }
+        // The selected slot owns the implicit close. An override can resurrect the
+        // socket or release its fd through os.close without calling the base slot.
+        if let Value::Instance {
+            socket: Some(socket),
+            ..
+        } = self.heap.get(owner)
+        {
+            crate::objects::socket::hand_finalization_to_python(socket);
+        }
         // Binding a descriptor can itself run Python. Install the once-only bit and
         // root the receiver and current error before resolving the current class slot.
         let mark = self.heap.temporary_mark();

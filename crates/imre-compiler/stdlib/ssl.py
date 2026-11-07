@@ -1,7 +1,6 @@
 """TLS contexts, blocking sockets and in-memory handshakes using system OpenSSL."""
 
 import errno as _errno
-import io as _io
 import _imre_ssl
 import _ssl
 import os
@@ -589,15 +588,11 @@ class SSLObject:
 SSLContext.sslobject_class = SSLObject
 
 
-class SSLSocket:
+class SSLSocket(_socket.socket):
     """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
 
-    __slots__ = ("_session", "_context", "_server_hostname", "server_side", "_io_refs", "_closed",
+    __slots__ = ("_session", "_context", "_server_hostname", "server_side",
                  "do_handshake_on_connect", "suppress_ragged_eofs", "_connected")
-
-    def __new__(cls, *args, **kwargs):
-        # The native wrap call takes ownership of the descriptor after allocation.
-        return object.__new__(cls)
 
     def __init__(self, *args, **kwargs):
         raise TypeError("SSLSocket does not have a public constructor. Instances are returned by SSLContext.wrap_socket().")
@@ -623,31 +618,49 @@ class SSLSocket:
                 raise TypeError("server_hostname must be a string")
             if not server_hostname.isascii():
                 raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the socket")
-        peer = cls.__new__(cls, family=sock.family, type=sock.type, proto=sock.proto, fileno=sock.fileno())
+        sock_timeout = sock.gettimeout()
+        args = dict(family=sock.family, type=sock.type, proto=sock.proto, fileno=sock.fileno())
+        peer = cls.__new__(cls, **args)
         if not issubclass(type(peer), SSLSocket):
             raise TypeError("SSLSocket.__new__ must return an SSLSocket instance")
-        result = _call(_imre_ssl.wrap, context._ctx, sock, server_hostname, bool(server_side))
-        if result is None:
-            reason = "Closed before TLS handshake with data in recv buffer."
-            error = SSLError(_errno.ENOTCONN, reason)
-            error.reason = reason
-            error.library = None
-            raise error
-        result = _tls_result(result)
+        super(SSLSocket, peer).__init__(**args)
+        sock.detach()
         try:
-            peer._io_refs = 0
-            peer._closed = False
-            # Publish the native owner before any subsequent subclass callback.
-            SSLSocket._session.__set__(peer, result)
-        except BaseException:
-            _call(_imre_ssl.close, result)
-            raise
-        try:
+            SSLSocket._session.__set__(peer, None)
             peer._context = context
             SSLSocket._server_hostname.__set__(peer, server_hostname)
             peer.server_side = bool(server_side)
             peer.do_handshake_on_connect = do_handshake_on_connect
             peer.suppress_ragged_eofs = suppress_ragged_eofs
+            try:
+                peer.getpeername()
+            except OSError as exc:
+                if exc.errno != _errno.ENOTCONN or not server_side:
+                    raise
+                connected = False
+                # Reject cleartext queued before wrapping a disconnected server endpoint.
+                blocking = peer.getblocking()
+                peer.setblocking(False)
+                try:
+                    pending = peer.recv(1)
+                except OSError as read_error:
+                    if read_error.errno not in (_errno.ENOTCONN, _errno.EINVAL):
+                        raise
+                    pending = b""
+                peer.setblocking(blocking)
+                if pending:
+                    reason = "Closed before TLS handshake with data in recv buffer."
+                    error = SSLError(_errno.ENOTCONN, reason)
+                    error.reason = reason
+                    error.library = None
+                    raise error
+            else:
+                connected = True
+            peer.settimeout(sock_timeout)
+            result = _call(_imre_ssl.wrap, context._ctx, peer, server_hostname,
+                           bool(server_side), connected)
+            result = _tls_result(result)
+            SSLSocket._session.__set__(peer, result)
             connected = _imre_ssl.is_session(result)
             peer._connected = connected
             if connected and do_handshake_on_connect:
@@ -670,21 +683,6 @@ class SSLSocket:
     def server_hostname(self):
         return SSLSocket._server_hostname.__get__(self)
 
-    def fileno(self):
-        return _imre_ssl.fileno(self._session)
-
-    def getblocking(self):
-        return _imre_ssl.getblocking(self._session)
-
-    def setblocking(self, flag, /):
-        _imre_ssl.setblocking(self._session, flag)
-
-    def gettimeout(self):
-        return _imre_ssl.gettimeout(self._session)
-
-    def settimeout(self, value, /):
-        _imre_ssl.settimeout(self._session, value)
-
     def do_handshake(self, block=False):
         if not _imre_ssl.is_session(self._session):
             self.getpeername()
@@ -697,17 +695,17 @@ class SSLSocket:
         finally:
             self.settimeout(timeout)
 
-    def getsockname(self):
-        return _imre_ssl.getsockname(self._session)
+    def connect(self, addr):
+        if self.server_side:
+            raise ValueError("can't connect in server-side mode")
+        # Client sockets admitted by _create are already connected and wrapped.
+        raise ValueError("attempt to connect already-connected SSLSocket!")
 
-    def getpeername(self):
-        return _imre_ssl.getpeername(self._session)
-
-    def listen(self, backlog=128, /):
-        return _imre_ssl.listen(self._session, backlog)
+    def connect_ex(self, addr):
+        return SSLSocket.connect(self, addr)
 
     def accept(self):
-        child, address = _imre_ssl.accept(self._session)
+        child, address = super().accept()
         try:
             peer = self.context.wrap_socket(
                 child, server_side=True,
@@ -741,11 +739,15 @@ class SSLSocket:
         return _call(_imre_ssl.get_unverified_chain, self._session)
 
     def send(self, data, flags=0):
+        if self._session is None:
+            return super().send(data, flags)
         if _imre_ssl.is_session(self._session) and flags != 0:
             raise ValueError("non-zero flags not allowed in calls to send() on %s" % self.__class__)
         return _tls_result(_call(_imre_ssl.send, self._session, data, flags))
 
     def sendall(self, data, flags=0):
+        if self._session is None:
+            return super().sendall(data, flags)
         if _imre_ssl.is_session(self._session) and flags:
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")
         return _tls_result(_call(_imre_ssl.sendall, self._session, data, flags))
@@ -761,11 +763,49 @@ class SSLSocket:
             raise
 
     def recv(self, buflen=1024, flags=0):
+        if self._session is None:
+            return super().recv(buflen, flags)
         if _imre_ssl.is_session(self._session):
             if flags:
                 raise ValueError("non-zero flags not allowed in calls to recv() on SSLSocket")
             return self.read(buflen)
         return _call(_imre_ssl.recv, self._session, buflen, flags)
+
+    def recv_into(self, buffer, nbytes=None, flags=0):
+        if nbytes is None:
+            nbytes = memoryview(buffer).nbytes or 1024
+        if self._session is None:
+            return super().recv_into(buffer, nbytes, flags)
+        if flags:
+            raise ValueError("non-zero flags not allowed in calls to recv_into() on %s" % self.__class__)
+        return self.read(nbytes, buffer)
+
+    def dup(self):
+        raise NotImplementedError("Can't dup() %s instances" % self.__class__.__name__)
+
+    def sendto(self, data, *args):
+        if self._session is not None:
+            raise ValueError("sendto not allowed on instances of %s" % self.__class__)
+        return super().sendto(data, *args)
+
+    def recvfrom(self, *args):
+        if self._session is not None:
+            raise ValueError("recvfrom not allowed on instances of %s" % self.__class__)
+        return super().recvfrom(*args)
+
+    def recvfrom_into(self, *args):
+        if self._session is not None:
+            raise ValueError("recvfrom_into not allowed on instances of %s" % self.__class__)
+        return super().recvfrom_into(*args)
+
+    def sendmsg(self, *args, **kwargs):
+        raise NotImplementedError("sendmsg not allowed on instances of %s" % self.__class__)
+
+    def recvmsg(self, *args, **kwargs):
+        raise NotImplementedError("recvmsg not allowed on instances of %s" % self.__class__)
+
+    def recvmsg_into(self, *args, **kwargs):
+        raise NotImplementedError("recvmsg_into not allowed on instances of %s" % self.__class__)
 
     def pending(self):
         if not _imre_ssl.is_session(self._session):
@@ -794,73 +834,17 @@ class SSLSocket:
             return None
         return _call(_imre_ssl.channel_binding, self._session, cb_type)
 
-    def makefile(self, mode="r", buffering=None, *, encoding=None, errors=None, newline=None):
-        """Open a binary stream that shares ownership of this socket."""
-        if not set(mode) <= {"r", "w", "b"}:
-            raise ValueError("invalid mode %r (only r, w, b allowed)" % (mode,))
-        if "b" not in mode:
-            raise NotImplementedError("SSLSocket.makefile supports binary streams")
-        if buffering is None or buffering < 0:
-            buffering = _io.DEFAULT_BUFFER_SIZE
-        writing = "w" in mode
-        reading = "r" in mode or not writing
-        raw = _SSLSocketIO(self, ("r" if reading else "") + ("w" if writing else ""))
-        self._io_refs += 1
-        if buffering == 0:
-            return raw
-        try:
-            if reading and writing:
-                return _io.BufferedRWPair(raw, raw, buffering)
-            if writing:
-                return _io.BufferedWriter(raw, buffering)
-            return _io.BufferedReader(raw, buffering)
-        except BaseException:
-            raw.close()
-            raise
-
-    def _decref_socketios(self):
-        if self._io_refs > 0:
-            self._io_refs -= 1
-        if self._closed:
-            self.close()
-
     def shutdown(self, how):
         self._session = _imre_ssl.release_session(self._session)
-        _imre_ssl.shutdown(self._session, how)
+        super().shutdown(how)
 
-    def close(self):
-        self._closed = True
-        if not self._io_refs and self._session is not None:
-            self._session = _call(_imre_ssl.close, self._session)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        self.close()
+    def _real_close(self):
+        _imre_ssl.release_session(getattr(self, "_session", None))
+        SSLSocket._session.__set__(self, None)
+        super()._real_close()
 
 
 SSLContext.sslsocket_class = SSLSocket
-
-
-class _SSLSocketIO(_socket.SocketIO):
-    """SocketIO with reads from the TLS session."""
-
-    def readinto(self, buffer, /):
-        self._checkClosed()
-        self._checkReadable()
-        if self._timeout_occurred:
-            raise OSError("cannot read from timed out object")
-        view = memoryview(buffer).cast("B")
-        if view.readonly:
-            raise TypeError("readinto() argument must be a writable buffer")
-        try:
-            data = self._sock.recv(len(view))
-        except TimeoutError:
-            self._timeout_occurred = True
-            raise
-        view[:len(data)] = data
-        return len(data)
 
 
 def create_default_context(purpose=Purpose.SERVER_AUTH, *, cafile=None, capath=None, cadata=None):

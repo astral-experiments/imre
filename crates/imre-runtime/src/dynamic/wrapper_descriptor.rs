@@ -525,6 +525,7 @@ impl BuiltinDescriptor {
             return Ok(descriptor);
         }
         let accepts = match self.owner {
+            "socket.socket" => ctx.heap.get(receiver).socket_handle().is_some(),
             owner if self.name == "__init__" && builtins::is_exception(owner) => {
                 ctx.instance_of(receiver, ctx.builtins[owner])
             }

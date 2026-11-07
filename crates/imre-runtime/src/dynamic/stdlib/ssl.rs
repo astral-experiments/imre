@@ -58,20 +58,10 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "wrap",
         "is_session",
         "do_handshake",
-        "getblocking",
-        "setblocking",
-        "gettimeout",
-        "settimeout",
         "release_session",
         "read",
         "pending",
         "tls_shutdown",
-        "shutdown",
-        "fileno",
-        "getsockname",
-        "getpeername",
-        "listen",
-        "accept",
         "wrap_bio",
         "bio_handshake",
         "bio_server_hostname",
@@ -89,7 +79,6 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "send",
         "sendall",
         "recv",
-        "close",
     ] {
         let function = ctx.builtin(&format!("_imre_ssl.{name}"));
         ctx.bind(scope, name, function);
@@ -127,10 +116,7 @@ fn session(ctx: &Context, id: Id) -> Result<&RefCell<Option<provider::Session>>>
 }
 
 fn without_session(ctx: &Context, handle: Id) -> bool {
-    matches!(
-        ctx.heap.get(handle),
-        Value::Socket(_) | Value::TlsListener(_) | Value::None
-    )
+    matches!(ctx.heap.get(handle), Value::TlsListener(_) | Value::None)
 }
 
 /// Pending sockets must never consume or emit application bytes before TLS authenticates them.
@@ -912,11 +898,12 @@ pub(super) fn call(
                 Err(error) => bio_failure(ctx, error),
             }
         }
-        ("wrap", &[handle, socket, hostname, side]) => {
-            let server = ctx.truth(side)?;
-            let handle = context_for_role(ctx, handle, server)?;
-            let host = if hostname == NONE {
-                if handle.borrow().check_hostname {
+        ("wrap", [handle, raw, hostname, side, connected]) => {
+            let connected = ctx.truth(*connected)?;
+            let server = ctx.truth(*side)?;
+            let configuration = context_for_role(ctx, *handle, server)?;
+            let hostname = if *hostname == NONE {
+                if configuration.borrow().check_hostname {
                     return Err(Error::new(
                         "ValueError",
                         "check_hostname requires server_hostname",
@@ -930,7 +917,7 @@ pub(super) fn call(
                         "server_hostname can only be specified in client mode",
                     ));
                 }
-                let host = ctx.str_value(hostname)?;
+                let host = ctx.str_value(*hostname)?;
                 if host.is_empty() || host.starts_with('.') || host.contains('\0') {
                     return Err(Error::new("ValueError", "invalid server_hostname"));
                 }
@@ -940,22 +927,19 @@ pub(super) fn call(
                         "TLS requires an ASCII server_hostname",
                     ));
                 }
-                Some(host)
+                Some(*hostname)
             };
-            let Value::Socket(socket) = ctx.heap.get(socket) else {
+            let Some(raw) = ctx.heap.get(*raw).socket_handle() else {
                 return Err(Error::new("TypeError", "expected a socket"));
             };
-            let (transport, connected) = socket::take_tls_stream(socket, server)?;
+            let raw = raw.clone();
+            socket::check_tls_mode(&raw, connected)?;
             if !connected {
-                // Leave the transferred fd owned on every error. The public wrapper turns
-                // queued pre-handshake data into the corresponding structured SSLError.
-                if socket::pending_tls_data(&transport)? {
-                    return Ok(NONE);
-                }
-                return Ok(ctx.alloc(Value::TlsListener(transport)));
+                return Ok(ctx.alloc(Value::TlsListener(raw)));
             }
-            // Provider calls cannot invoke Python. Release the handle borrow before VM allocation.
-            let result = provider::Session::wrap(&handle.borrow(), transport, host, server);
+            let host = hostname.map(|id| ctx.str_value(id)).transpose()?;
+            let result =
+                provider::Session::wrap(&context(ctx, *handle)?.borrow(), raw, host, server);
             match result {
                 Ok(session) => {
                     Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))
@@ -963,64 +947,18 @@ pub(super) fn call(
                 Err(error) => bio_failure(ctx, error),
             }
         }
-        ("release_session", &[handle]) => match ctx.heap.get(handle) {
-            Value::TlsSession(state) => {
-                let state = Rc::clone(state);
-                let mut tls = state.borrow_mut();
-                let Some(session) = tls.as_ref() else {
-                    return Ok(NONE);
-                };
-                // Keep the session intact if registering its returned socket fails.
-                let socket = ctx
-                    .heap
-                    .alloc_descriptor_owner(Value::Socket(session.socket().clone()))?;
-                drop(tls.take().unwrap().into_socket());
-                Ok(socket)
-            }
-            Value::Socket(_) | Value::TlsListener(_) | Value::None => Ok(handle),
-            _ => Err(Error::new("TypeError", "expected a TLS socket")),
-        },
-        ("shutdown", &[handle, how]) => {
-            let how = ctx.index_c_int(how)?;
-            let raw = match ctx.heap.get(handle) {
-                Value::Socket(raw) | Value::TlsListener(raw) => raw,
-                Value::None => return Err(closed()),
-                _ => return Err(Error::new("TypeError", "expected a raw TLS transport")),
-            };
-            socket::shutdown(raw, how)?;
-            Ok(NONE)
-        }
         ("is_session", &[handle]) => Ok(super::builtins::boolean(matches!(
             ctx.heap.get(handle),
             Value::TlsSession(s) if s.borrow().is_some()
         ))),
-        (
-            "fileno" | "getsockname" | "getpeername" | "listen" | "accept" | "gettimeout"
-            | "settimeout" | "getblocking" | "setblocking",
-            [handle, rest @ ..],
-        ) if rest.is_empty()
-            || (matches!(name, "listen" | "settimeout" | "setblocking") && rest.len() == 1) =>
-        {
-            let socket = match ctx.heap.get(*handle) {
-                Value::Socket(s) | Value::TlsListener(s) => Some(s.clone()),
-                Value::TlsSession(session) => {
-                    session.borrow().as_ref().map(|tls| tls.socket().clone())
-                }
-                Value::None => None,
-                _ => return Err(Error::new("TypeError", "expected a TLS socket")),
-            };
-            let Some(socket) = socket else {
-                if let Some(&backlog) = rest.first() {
-                    ctx.index_c_int(backlog)?;
-                }
-                return if name == "fileno" {
-                    Ok(ctx.int(-1))
-                } else {
-                    Err(closed())
-                };
-            };
-            super::socket::endpoint_method(ctx, name, &socket, rest)
-        }
+        ("release_session", &[handle]) => match ctx.heap.get(handle) {
+            Value::TlsSession(state) => {
+                state.borrow_mut().take();
+                Ok(NONE)
+            }
+            Value::TlsListener(_) | Value::None => Ok(NONE),
+            _ => Err(Error::new("TypeError", "expected a TLS socket")),
+        },
         ("hostname_checks_common_name", &[handle]) => Ok(super::builtins::boolean(
             context(ctx, handle)?.borrow().hostname_checks_common_name(),
         )),
@@ -1095,23 +1033,6 @@ pub(super) fn call(
             if flags.len() == 1 || (flags.is_empty() && name == "sendall") =>
         {
             ctx.check_buffer_exporter(*data)?;
-            if let Value::Socket(raw) = ctx.heap.get(*handle) {
-                let raw = raw.clone();
-                ctx.native_buffer_bytes(*data)?;
-                return ctx.with_buffer_export(*data, |ctx| {
-                    let flags = flags
-                        .first()
-                        .map(|&id| ctx.index_c_int(id))
-                        .transpose()?
-                        .unwrap_or(0);
-                    if name == "sendall" {
-                        super::socket::send_all_exported(ctx, &raw, *data, flags)?;
-                        return Ok(NONE);
-                    }
-                    let bytes = ctx.native_buffer_bytes(*data)?;
-                    Ok(ctx.int(socket::send(&raw, bytes, flags)? as i64))
-                });
-            }
             let data = ctx.native_buffer_bytes(*data)?;
             if without_session(ctx, *handle) {
                 if let Some(&flags) = flags.first() {
@@ -1134,20 +1055,6 @@ pub(super) fn call(
             bio_count(ctx, result)
         }
         ("recv", [handle, size, flags @ ..]) if flags.len() <= 1 => {
-            if let Value::Socket(raw) = ctx.heap.get(*handle) {
-                let raw = raw.clone();
-                let length = ctx.index_c_long(*size)?;
-                let flags = flags
-                    .first()
-                    .map(|&id| ctx.index_c_int(id))
-                    .transpose()?
-                    .unwrap_or(0);
-                let length = usize::try_from(length)
-                    .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
-                let bytes =
-                    socket::recv_with_signals(&raw, length, flags, || ctx.dispatch_signals())?;
-                return Ok(ctx.alloc(Value::Bytes(bytes)));
-            }
             if !without_session(ctx, *handle) {
                 return socket_read(ctx, *handle, *size, NONE);
             }
@@ -1160,19 +1067,6 @@ pub(super) fn call(
                 return Ok(ctx.alloc(Value::Bytes(Vec::new())));
             }
             Err(pending_io_error(ctx, *handle, libc::ENOTCONN))
-        }
-        ("close", &[handle]) => {
-            if let Value::Socket(s) | Value::TlsListener(s) = ctx.heap.get(handle) {
-                socket::close(s)?;
-                return Ok(handle);
-            }
-            let Some(session) = session(ctx, handle)?.borrow_mut().take() else {
-                return Ok(NONE);
-            };
-            // Preserve socket mode on the closed endpoint without registering another fd.
-            let socket = session.socket().clone();
-            drop(session);
-            Ok(ctx.alloc(Value::TlsListener(socket)))
         }
         _ => Err(Error::new(
             "TypeError",

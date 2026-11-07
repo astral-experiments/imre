@@ -1227,7 +1227,8 @@ pub(crate) struct Session {
     alpn: Rc<alpn::Alpn>,
     api: &'static Api,
     handle: NonNull<c_void>,
-    socket: Option<crate::ObjectOwner>,
+    socket: crate::ObjectOwner,
+    endpoint: socket::TlsEndpoint,
     hostname: Option<CString>,
     server: bool,
     handshake_complete: bool,
@@ -1246,12 +1247,7 @@ impl Session {
     }
 
     pub(super) fn socket(&self) -> &crate::ObjectOwner {
-        self.socket.as_ref().expect("live TLS transport")
-    }
-
-    /// Free the non-closing TLS BIO and transfer its original socket back to the caller.
-    pub(super) fn into_socket(mut self) -> crate::ObjectOwner {
-        self.socket.take().expect("live TLS transport")
+        &self.socket
     }
 
     pub(crate) fn wrap(
@@ -1266,7 +1262,8 @@ impl Session {
             alpn: Rc::clone(&ctx.alpn),
             api,
             handle,
-            socket: Some(socket),
+            endpoint: socket::TlsEndpoint::new(&socket),
+            socket,
             hostname: None,
             server,
             handshake_complete: false,
@@ -1276,7 +1273,7 @@ impl Session {
                 Some(api.set_peer_name(handle.as_ptr(), host, ctx.check_hostname)?);
         }
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
-        // remains valid for the full lifetime of this SSL object.
+        // is checked against the socket immediately before each I/O operation.
         if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
             return Err(api.error("SSL_set_fd").into());
         }
@@ -1324,6 +1321,11 @@ impl Session {
         until: Option<socket::Deadline>,
         timeout_message: &'static str,
     ) -> Result<usize, bio::BioFailure> {
+        // The BIO retains the original fd number. A base close, detach or reinitializer
+        // must never let a later SSL operation use its replacement.
+        if !self.endpoint.matches(&self.socket) {
+            return Err(Failure::Io(std::io::Error::from_raw_os_error(libc::EBADF)).into());
+        }
         let api = self.api;
         let ssl = self.handle.as_ptr();
         let nonblocking = socket::get_timeout(self.socket()) == Some(std::time::Duration::ZERO);
@@ -1506,11 +1508,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        // SAFETY: free the SSL and its non-closing BIO while the socket is still valid.
+        // SAFETY: free the SSL and its non-closing BIO. The Python socket owns the fd.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
-        // An endpoint operation may still hold a reference across a Python callback.
-        if let Some(socket) = &self.socket {
-            let _ = socket::close(socket);
-        }
     }
 }

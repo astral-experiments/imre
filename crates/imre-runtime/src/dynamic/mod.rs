@@ -2806,6 +2806,9 @@ impl Context {
             self.builtins
                 .insert("type.__text_signature__".into(), descriptor);
         }
+        if name == "socket.socket" {
+            stdlib::install_socket_layout(self, value);
+        }
         if name == thread_handle::CLASS {
             thread_handle::install(self, value);
         }
