@@ -319,36 +319,37 @@ enum SourceAlternatives {
 }
 
 impl SourceAlternatives {
+    /// Read a signed integer pattern without evaluating a Python expression.
+    fn literal(arm: &ast::Pattern) -> Option<i64> {
+        let ast::Pattern::MatchValue(pattern) = arm else {
+            return None;
+        };
+        let (expr, negative) = match pattern.value.as_ref() {
+            ast::Expr::UnaryOp(p) if p.op == ast::UnaryOp::USub => (p.operand.as_ref(), true),
+            expr => (expr, false),
+        };
+        let ast::Expr::NumberLiteral(number) = expr else {
+            return None;
+        };
+        let ast::Number::Int(value) = &number.value else {
+            return None;
+        };
+        let value = value.as_i64()?;
+        if negative {
+            value.checked_neg()
+        } else {
+            Some(value)
+        }
+    }
+
     /// Pack exact integer alternatives into one word when their range permits it.
     fn integers(arms: &[ast::Pattern]) -> Option<Self> {
-        fn literal(arm: &ast::Pattern) -> Option<i64> {
-            let ast::Pattern::MatchValue(pattern) = arm else {
-                return None;
-            };
-            let (expr, negative) = match pattern.value.as_ref() {
-                ast::Expr::UnaryOp(p) if p.op == ast::UnaryOp::USub => (p.operand.as_ref(), true),
-                expr => (expr, false),
-            };
-            let ast::Expr::NumberLiteral(number) = expr else {
-                return None;
-            };
-            let ast::Number::Int(value) = &number.value else {
-                return None;
-            };
-            let value = value.as_i64()?;
-            if negative {
-                value.checked_neg()
-            } else {
-                Some(value)
-            }
-        }
-
         let minimum = arms
             .iter()
-            .try_fold(i64::MAX, |min, arm| Some(min.min(literal(arm)?)))?;
+            .try_fold(i64::MAX, |min, arm| Some(min.min(Self::literal(arm)?)))?;
         let mut bits = 0;
         for arm in arms {
-            let offset = u32::try_from(literal(arm)?.abs_diff(minimum)).ok()?;
+            let offset = u32::try_from(Self::literal(arm)?.abs_diff(minimum)).ok()?;
             bits |= 1u64.checked_shl(offset)?;
         }
         Some(Self::Integers { minimum, bits })
@@ -6586,6 +6587,15 @@ impl Context {
         matched
     }
 
+    /// Read an exact native integer or boolean for literal pattern comparison.
+    fn small_pattern_subject(&self, subject: Id) -> Option<i64> {
+        match self.heap.get(subject) {
+            Value::Int(value) => value.as_small(),
+            Value::Bool(value) => Some(i64::from(*value)),
+            _ => None,
+        }
+    }
+
     fn match_source_pattern(
         &mut self,
         code: &Program,
@@ -6604,6 +6614,11 @@ impl Context {
                 Ok(subject == singleton)
             }
             ast::Pattern::MatchValue(p) => {
+                if let Some(expected) = SourceAlternatives::literal(pattern)
+                    && let Some(actual) = self.small_pattern_subject(subject)
+                {
+                    return Ok(actual == expected);
+                }
                 let operand = self.heap.temporary_mark() - 1;
                 let value = self.source_expr(code, scope, &p.value)?;
                 let comparison = self.binary("==", subject, value);
@@ -6616,12 +6631,7 @@ impl Context {
                 let index = p.node_index.load().as_u32().expect("validated OR pattern");
                 let plan = &code.alternatives[index as usize];
                 if let SourceAlternatives::Integers { minimum, bits } = plan {
-                    let value = match self.heap.get(subject) {
-                        Value::Int(value) => value.as_small(),
-                        Value::Bool(value) => Some(i64::from(*value)),
-                        _ => None,
-                    };
-                    if let Some(value) = value {
+                    if let Some(value) = self.small_pattern_subject(subject) {
                         let offset = value.abs_diff(*minimum);
                         return Ok(value >= *minimum
                             && offset < 64

@@ -951,6 +951,14 @@ def nested_choice(value):
             return a, b
         case _: return None
 """, scope)
+    exec("""
+def single_integer(value):
+    match value:
+        case -7: return True
+        case _: return False
+""", scope)
+    single_integer = scope["single_integer"]
+    assert single_integer(-7) and single_integer(-7.0) and not single_integer(-8)
     integer_choice = scope["integer_choice"]
     for value in (-3, -2, -1, 0, True, False, 1, 4, 58, 59, 60, 2**96, 0.0, 4.0, None):
         assert integer_choice(value) == (value in (-2, 0, 1, 4, 7, 59))
