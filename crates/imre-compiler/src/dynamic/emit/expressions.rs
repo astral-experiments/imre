@@ -100,8 +100,18 @@ impl Function<'_, '_> {
                     return self.expr_inner(&v.value, Some((index, position)));
                 }
                 let object = self.expr(&v.value);
-                let key = self.expr(&v.slice);
                 let span = self.expression_span(expr, &v.value, b'[');
+                if let ast::Expr::Slice(slice) = v.slice.as_ref()
+                    && slice.step.is_none()
+                {
+                    let [start, stop] = [&slice.lower, &slice.upper].map(|bound| {
+                        bound
+                            .as_deref()
+                            .map_or_else(|| "0".into(), |e| self.expr(e))
+                    });
+                    return self.op_at("get_slice", &[&object, &start, &stop], span);
+                }
+                let key = self.expr(&v.slice);
                 self.op_at("get", &[&object, &key], span)
             }
             ast::Expr::Slice(slice) => {

@@ -337,6 +337,7 @@ impl Context {
                 Ok(NONE)
             }
             "get" => self.get_item(a, b),
+            "get_slice" => self.get_slice(a, b, c),
             "delitem" => {
                 self.delete_item(a, b)?;
                 Ok(NONE)
