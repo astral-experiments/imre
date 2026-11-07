@@ -1207,7 +1207,13 @@ pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = match ctx.heap.get(value) {
+    let result = snapshot_pair(ctx, value, items);
+    finish(ctx, result)
+}
+
+/// Snapshot two items and return the handle that must keep them alive during assignment.
+fn snapshot_pair(ctx: &mut Context, value: Id, items: &mut [Id; 2]) -> Result<Id> {
+    match ctx.heap.get(value) {
         Value::Tuple(values) if values.len() == 2 => {
             items.copy_from_slice(values);
             Ok(value)
@@ -1226,8 +1232,65 @@ pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
             items.copy_from_slice(&values);
             NONE
         }),
-    };
+    }
+}
+
+/// Advance a compiled loop whose target unpacks exactly two items.
+///
+/// # Safety
+/// Generated code supplies a live context and space for two handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_next_pair(
+    ctx: *mut Context,
+    iter: Id,
+    items: *mut [Id; 2],
+    has_else: bool,
+) -> Id {
+    // SAFETY: generated code owns these scratch slots in the active frame.
+    let (ctx, items) = unsafe { (&mut *ctx, &mut *items) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = next_loop_pair(ctx, iter, items, has_else);
     finish(ctx, result)
+}
+
+/// Read dictionary entries directly, keeping both values alive across target assignment.
+fn next_loop_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2], has_else: bool) -> Result<Id> {
+    let more = if let Value::LoopIterator {
+        source,
+        peeked: None,
+    } = *ctx.heap.get(iter)
+        && let Value::DictIterator(cursor) = *ctx.heap.get(source)
+        && cursor.is_plain_items()
+    {
+        if let Some(pair) = cursor.next_entry_pair(ctx, source)? {
+            ctx.heap.reserve_temporaries(2)?;
+            for value in pair {
+                ctx.heap.keep(value);
+            }
+            *items = pair;
+            true
+        } else {
+            false
+        }
+    } else if ctx.iterator_has_item(iter)? {
+        let value = ctx
+            .next_item(iter)?
+            .ok_or_else(|| Error::new("StopIteration", ""))?;
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(value);
+        let owner = snapshot_pair(ctx, value, items)?;
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(owner);
+        true
+    } else {
+        false
+    };
+    if !more && has_else {
+        ctx.heap.release_unbound_finalizers();
+    }
+    Ok(flag(more))
 }
 
 /// Construct a fresh sequence using the permanent handles in a linked literal.
