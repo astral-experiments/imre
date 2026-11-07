@@ -111,6 +111,23 @@ def current():
     class Explicit(HasHTML, Sized, Protocol, object):
         pass
 
+    marker_error = ValueError("base marker lookup")
+
+    class MarkerDescriptor:
+        def __get__(self, instance, owner):
+            raise marker_error
+
+    class MarkedBase(typing.Generic[parameter]):
+        _is_protocol = MarkerDescriptor()
+
+    try:
+        class FromMarkedBase(MarkedBase, Protocol):
+            pass
+    except ValueError as error:
+        assert error is marker_error
+    else:
+        raise AssertionError("protocol base lookup skipped its descriptor")
+
     class GenericProtocol(Protocol, typing.Generic[parameter], object):
         pass
 

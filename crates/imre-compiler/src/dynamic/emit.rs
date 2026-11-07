@@ -309,8 +309,9 @@ impl Output {
             _ => file.to_owned(),
         };
         let location = SourceMap {
-            // These CPython providers validate their public arguments in Python.
-            python_annotations: bundled && matches!(name, "_py_warnings" | "tomllib._parser"),
+            // These CPython providers implement their own call semantics in Python.
+            python_annotations: bundled
+                && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
             module_start,
             docs,
             unit,
