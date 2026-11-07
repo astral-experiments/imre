@@ -1,6 +1,9 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
+mod text_positions;
 mod weak_roots;
+
+use text_positions::TextPosition;
 
 use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
@@ -3338,6 +3341,7 @@ pub(super) struct Heap {
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
+    text_position: Cell<TextPosition>,
     // Weak loader identities. The executable owns the initializer and any embedded bytes.
     pub(super) loader_sources: HashMap<Id, super::SourceModule>,
     frames: Vec<Frame>,
@@ -3572,6 +3576,7 @@ impl Heap {
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
+            text_position: Cell::default(),
             loader_sources: HashMap::new(),
             spare_frame_roots: Vec::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
@@ -6389,6 +6394,9 @@ impl Heap {
                         self.latest_generator_loop = None;
                     }
                     self.immutable_hashes.remove(&(id as Id));
+                }
+                if self.text_position.get().slot == id as Id {
+                    self.text_position.set(TextPosition::default());
                 }
                 self.root_trace.recycled(id);
                 self.invalidate_stream_bindings(id);

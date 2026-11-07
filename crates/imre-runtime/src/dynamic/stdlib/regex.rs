@@ -1559,9 +1559,12 @@ impl Match {
         {
             return Ok((span.start as i64, span.end as i64));
         }
-        let text = ctx.str_value(self.subject)?;
-        let start = text[..span.start].chars().count() as i64;
-        let end = start + text[span.range()].chars().count() as i64;
+        let position = |byte| {
+            ctx.heap
+                .string_character_offset(scalar, byte)
+                .expect("regex spans end on UTF-8 boundaries") as i64
+        };
+        let (start, end) = (position(span.start), position(span.end));
         Ok((start, end))
     }
 
@@ -1793,8 +1796,10 @@ pub(super) fn search(
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
             i.min(text.len())
-        } else if i == 0 || ctx.heap.is_ascii_str(ctx.scalar_value(string)) {
-            i
+        } else if subject.projection.is_none() {
+            ctx.heap
+                .string_byte_offset(ctx.scalar_value(string), i)
+                .unwrap_or(text.len())
         } else {
             std::str::from_utf8(text)
                 .expect("text regex subject is UTF-8")
