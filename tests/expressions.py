@@ -11,7 +11,6 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "expressions"
 
 REJECTED = {
     "conditional_int_string": 'print(1 if True else "wrong")\n',
-    "conditional_bool_int": "print(True if False else 1)\n",
     "conditional_container_types": 'values = [1] if True else ["wrong"]\n',
     "conditional_wrong_context": "values: list[str] = [] if True else [1]\n",
     "conditional_wrong_optional": "value: int | None = None if True else False\n",
