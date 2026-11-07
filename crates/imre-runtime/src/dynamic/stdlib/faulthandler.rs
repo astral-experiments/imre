@@ -3,7 +3,16 @@ use super::{Context, Error, Id, NONE, Result, TRUE, builtins, os_error};
 use crate::fault_handler;
 
 pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) {
-    for method in ["enable", "disable", "is_enabled", "dump_traceback"] {
+    for method in [
+        "enable",
+        "disable",
+        "is_enabled",
+        "dump_traceback",
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        "register",
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        "unregister",
+    ] {
         let function = ctx.builtin(&format!("faulthandler.{method}"));
         ctx.bind(scope, method, function);
     }
@@ -71,6 +80,15 @@ fn replace_file(ctx: &mut Context, file: Option<Id>) {
     }
 }
 
+fn argument(args: &[Id], kwargs: &[(String, Id)], index: usize, name: &str) -> Option<Id> {
+    args.get(index).copied().or_else(|| {
+        kwargs
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, id)| *id)
+    })
+}
+
 /// The tuple parser converts truth operands before reporting duplicate or unknown
 /// names, but rejects an excessive total argument count first.
 fn trace_arguments<const N: usize>(
@@ -83,16 +101,30 @@ fn trace_arguments<const N: usize>(
     let mut flags = [true; 2];
     if args.len() + kwargs.len() <= N {
         for (i, &key) in names.iter().enumerate().skip(1) {
-            let value = args
-                .get(i)
-                .or_else(|| kwargs.iter().find(|(k, _)| k == key).map(|(_, v)| v));
-            if let Some(&value) = value {
+            if let Some(value) = argument(args, kwargs, i, key) {
                 flags[i - 1] = ctx.truth(value)?;
             }
         }
     }
     let file = builtins::bind_builtin_arguments(name, args, kwargs, names, 0)?[0];
     Ok((file.unwrap_or(NONE), flags))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn check_signal(signal: i32) -> Result<()> {
+    if matches!(
+        signal,
+        libc::SIGBUS | libc::SIGILL | libc::SIGFPE | libc::SIGABRT | libc::SIGSEGV
+    ) {
+        return Err(Error::new(
+            "RuntimeError",
+            format!("signal {signal} cannot be registered, use enable() instead"),
+        ));
+    }
+    if !(1..crate::signals::nsig()).contains(&signal) {
+        return Err(Error::new("ValueError", "signal number out of range"));
+    }
+    Ok(())
 }
 
 pub(super) fn call(
@@ -110,6 +142,69 @@ pub(super) fn call(
             fault_handler::enable(fd, all_threads, c_stack).map_err(os_error)?;
             ctx.publish_fault_frames();
             Ok(NONE)
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        "register" => {
+            let names = ["signum", "file", "all_threads", "chain"];
+            // PyArg parses known operands in signature order before diagnosing a duplicate
+            // or unknown keyword. Conversion hooks can raise or change the destination.
+            let converted = if args.len() + kwargs.len() <= names.len()
+                && let Some(number) = argument(args, kwargs, 0, names[0])
+            {
+                let signal = ctx.index_c_int(number)?;
+                let all = argument(args, kwargs, 2, names[2])
+                    .map(|id| ctx.truth(id))
+                    .transpose()?
+                    .unwrap_or(true);
+                let chain = argument(args, kwargs, 3, names[3])
+                    .map(|id| ctx.truth(id))
+                    .transpose()?
+                    .unwrap_or(false);
+                Some((signal, all, chain))
+            } else {
+                None
+            };
+            let [_, file, _, _] =
+                builtins::bind_builtin_arguments("register", args, kwargs, names, 1)?;
+            let (signal, all, chain) = converted.expect("successful binding has a signal");
+            check_signal(signal)?;
+            let (fd, file) = destination(ctx, file.unwrap_or(NONE))?;
+            fault_handler::register(signal, fd, all, chain).map_err(os_error)?;
+            let old = match file {
+                Some(id) => ctx.fault_user_files.insert(signal, id),
+                None => ctx.fault_user_files.remove(&signal),
+            };
+            if old.is_some() && old != file && ctx.heap.observes_released_roots() {
+                ctx.collect_unreachable();
+            }
+            ctx.publish_fault_frames();
+            Ok(NONE)
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        "unregister" => {
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "unregister() takes no keyword arguments",
+                ));
+            }
+            let [number] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "unregister() takes exactly 1 argument ({} given)",
+                        args.len()
+                    ),
+                ));
+            };
+            let signal = ctx.index_c_int(*number)?;
+            check_signal(signal)?;
+            let changed = fault_handler::unregister(signal).map_err(os_error)?;
+            if ctx.fault_user_files.remove(&signal).is_some() && ctx.heap.observes_released_roots()
+            {
+                ctx.collect_unreachable();
+            }
+            Ok(builtins::boolean(changed))
         }
         "dump_traceback" => {
             let (file, [all_threads, _]) =

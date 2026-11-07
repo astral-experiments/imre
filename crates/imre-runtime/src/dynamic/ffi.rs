@@ -790,6 +790,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         audit_hooks: Vec::new(),
         fork_hooks: Default::default(),
         fault_file: None,
+        fault_user_files: HashMap::new(),
         exit_callbacks: Vec::new(),
         finalizing: Default::default(),
         contexts: Vec::new(),
@@ -988,6 +989,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         eprintln!("Fatal Python error: init_import_site: Failed to import the site module");
         eprintln!("Python runtime state: initialized");
         stdlib::traceback::report_chain(&mut ctx, error);
+        crate::fault_handler::unregister_all();
         #[cfg(unix)]
         crate::signals::finalize();
         return 1;
@@ -1072,6 +1074,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         );
     }
     stdlib::io::prepare_writer_shutdown(&ctx);
+    crate::fault_handler::unregister_all();
     crate::fault_handler::disable();
     #[cfg(unix)]
     crate::signals::finalize();
@@ -2150,6 +2153,7 @@ impl Context {
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.fault_file)
+                .chain(self.fault_user_files.values().copied())
                 .chain(self.contexts.iter().copied())
                 .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))

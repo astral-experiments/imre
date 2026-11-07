@@ -7,6 +7,13 @@ pub(crate) const MAX_FRAMES: usize = 100;
 unsafe extern "C" {
     fn imre_fault_enable(fd: c_int, all_threads: c_int, c_stack: c_int) -> c_int;
     fn imre_fault_disable() -> c_int;
+    fn imre_fault_enabled() -> c_int;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn imre_fault_register(signal: c_int, fd: c_int, all_threads: c_int, chain: c_int) -> c_int;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn imre_fault_unregister(signal: c_int) -> c_int;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn imre_fault_unregister_all();
     fn imre_fault_generation() -> u32;
     fn imre_fault_frame(
         index: usize,
@@ -44,7 +51,35 @@ pub(crate) fn generation() -> u32 {
 }
 
 pub(crate) fn is_enabled() -> bool {
-    generation() != 0
+    // SAFETY: This reads the fatal-handler flag, independently of user registrations.
+    unsafe { imre_fault_enabled() != 0 }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn register(signal: i32, fd: i32, all_threads: bool, chain: bool) -> io::Result<()> {
+    // SAFETY: Only integer settings cross this boundary. The descriptor is borrowed.
+    if unsafe { imre_fault_register(signal, fd, all_threads.into(), chain.into()) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn unregister(signal: i32) -> io::Result<bool> {
+    // SAFETY: The native registry restores the saved disposition under its configuration lock.
+    match unsafe { imre_fault_unregister(signal) } {
+        -1 => Err(io::Error::last_os_error()),
+        changed => Ok(changed != 0),
+    }
+}
+
+pub(crate) fn unregister_all() {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    // SAFETY: Called at interpreter teardown before its signal dispositions are finalized.
+    unsafe {
+        imre_fault_unregister_all();
+    }
 }
 
 pub(crate) fn frame(index: usize, filename: &str, function: &str, line: u32) {

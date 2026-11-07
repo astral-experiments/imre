@@ -1309,6 +1309,26 @@ def check_faulthandler(imre, root, env):
             # The signal may arrive during the PID write or the blocking input.
             assert any(f'File "{source}", line {n} in wait_for_signal\n'.encode() in err for n in (7, 8)), err
 
+    source = root / "user-fault.py"
+    source.write_text(
+        "import faulthandler, os, signal\n"
+        "calls = []\n"
+        "def previous(sig, frame): calls.append(sig)\n"
+        "def deliver(): os.kill(os.getpid(), signal.SIGUSR1)\n"
+        "signal.signal(signal.SIGUSR1, previous)\n"
+        "faulthandler.register(signal.SIGUSR1, all_threads=False, chain=True)\n"
+        "assert not faulthandler.is_enabled()\n"
+        "deliver()\n"
+        "assert faulthandler.unregister(signal.SIGUSR1)\n"
+        "assert not faulthandler.unregister(signal.SIGUSR1)\n"
+        "deliver()\n"
+        "assert calls == [signal.SIGUSR1, signal.SIGUSR1]\n"
+    )
+    user = subprocess.run([imre, "-I", source], cwd=root, env=env, capture_output=True, timeout=600)
+    assert user.returncode == 0 and not user.stdout, user
+    assert user.stderr.count(b"Stack (most recent call first):") == 1, user.stderr
+    assert f'File "{source}", line 4 in deliver\n'.encode() in user.stderr, user.stderr
+
 
 def check_forked_fault_frames(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "fork_fault_frames.c"
@@ -1325,6 +1345,15 @@ def check_forked_fault_frames(imre, root, run):
         b'  File "parent.py", line 10 in outer\n',
         b"",
     ), result
+
+    fixture = fixture.with_name("fork_fault_registration.c")
+    probe = root / "fork_fault_registration"
+    subprocess.run(
+        ["cc", fixture, imre.with_name("libimre_runtime.a"), "-pthread", "-Wl,--wrap=sigaction", "-o", probe],
+        check=True,
+    )
+    result = run(probe)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b""), result
 
 
 def check_pending_signals(imre, root, env):
