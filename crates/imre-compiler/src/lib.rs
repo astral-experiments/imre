@@ -380,6 +380,11 @@ fn object_fallback<T>(
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
         }
         match lower(&mut graph) {
+            Ok(_) if graph.runtime_initializer.is_some() && !boxed_startup => {
+                // All first-party code lowered successfully. The unresolved import alone
+                // must use the same admission policy as an unresolved module in the loader.
+                break (graph.runtime_initializer.take().unwrap(), None, false);
+            }
             Ok(value) if !boxed_startup => return Ok(value),
             // Tracing and startup imports both need the same Python heap as the entry.
             Ok(_) => {

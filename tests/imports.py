@@ -25,6 +25,10 @@ LOCALE_FORMAT = (
 )
 
 REJECTED = {
+    "futures_does_not_activate_unused_calendar": ({
+        "features.py": "import calendar\nimport concurrent.futures\n",
+        "main.py": "import features\ndef scale(x: float) -> float: return 1.5 * x\nprint(scale(2.5))\n",
+    }, "requires runtime import initialization"),
     "futures_requires_initializer": ({
         "main.py": "from concurrent.futures import Future\nprint(7)\n",
     }, "concurrent.futures requires runtime import initialization"),

@@ -3043,6 +3043,7 @@ pub(crate) struct SourceGraph {
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
     pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
+    pub(crate) runtime_initializer: Option<String>,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
     pub(crate) return_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) entry_profile: entry_profile::Profile,
@@ -4111,7 +4112,8 @@ struct Loader<'a> {
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
-    deferred_object_error: Option<String>,
+    runtime_initializer: Option<String>,
+    wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
     zip_sources: HashMap<PathBuf, crate::zip_entry::ZipSources>,
@@ -4192,7 +4194,8 @@ impl<'a> Loader<'a> {
             zip_files: zip_inputs.files,
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
-            deferred_object_error: None,
+            runtime_initializer: None,
+            wildcard_import: None,
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -4375,14 +4378,19 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             float_components: Default::default(),
-            needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
+            // An import that cannot be initialized here must not turn an unused
+            // object-capable namespace into a reason to box the caller.
+            needs_object_runtime: std::cell::Cell::new(
+                self.needs_object_imports && self.runtime_initializer.is_none(),
+            ),
             has_native_bytearray: Default::default(),
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
             object_builtin_errors: Default::default(),
-            deferred_object_error: self.deferred_object_error.into(),
+            runtime_initializer: self.runtime_initializer,
+            deferred_object_error: self.wildcard_import.into(),
             return_errors: Default::default(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
@@ -4852,7 +4860,7 @@ impl<'a> Loader<'a> {
         if let Binding::IntrinsicModule(IntrinsicModule::RuntimeSource(owner))
         | Binding::Intrinsic(Intrinsic::RuntimeImport(owner)) = binding
         {
-            self.deferred_object_error.get_or_insert_with(|| {
+            self.runtime_initializer.get_or_insert_with(|| {
                 self.modules[module].error(
                     node,
                     &format!("{owner} requires runtime import initialization"),
@@ -4929,9 +4937,17 @@ impl<'a> Loader<'a> {
                     if module.is_none() {
                         self.load_module(&name)?;
                     }
-                    self.needs_object_imports |=
-                        !matches!(module, Some(IntrinsicModule::RuntimeSource(_)));
-                    self.deferred_object_error.get_or_insert_with(|| {
+                    if let Some(IntrinsicModule::RuntimeSource(owner)) = module {
+                        self.runtime_initializer.get_or_insert_with(|| {
+                            self.modules[id].error(
+                                import,
+                                &format!("{owner} requires runtime import initialization"),
+                            )
+                        });
+                        return Ok(());
+                    }
+                    self.needs_object_imports = true;
+                    self.wildcard_import.get_or_insert_with(|| {
                         self.modules[id].error(import, "wildcard imports require runtime binding")
                     });
                     return Ok(());
