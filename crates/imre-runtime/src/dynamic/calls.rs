@@ -3263,6 +3263,22 @@ impl Context {
                     "__text_signature__" if symbol == "posix.setreuid" => {
                         return Ok(self.text("($module, ruid, euid, /)"));
                     }
+                    "__doc__" if symbol == "posix.setresgid" => {
+                        return Ok(self.text(
+                            "Set the current process's real, effective, and saved group ids.",
+                        ));
+                    }
+                    "__text_signature__" if symbol == "posix.setresgid" => {
+                        return Ok(self.text("($module, rgid, egid, sgid, /)"));
+                    }
+                    "__doc__" if symbol == "posix.setresuid" => {
+                        return Ok(self.text(
+                            "Set the current process's real, effective, and saved user ids.",
+                        ));
+                    }
+                    "__text_signature__" if symbol == "posix.setresuid" => {
+                        return Ok(self.text("($module, ruid, euid, suid, /)"));
+                    }
                     "__doc__" if symbol == "posix.getresgid" => {
                         return Ok(self.text("Return a tuple of the current process's real, effective, and saved group ids."));
                     }

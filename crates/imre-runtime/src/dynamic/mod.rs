@@ -3907,6 +3907,10 @@ impl Context {
                 "getresgid",
                 #[cfg(target_os = "linux")]
                 "getresuid",
+                #[cfg(target_os = "linux")]
+                "setresgid",
+                #[cfg(target_os = "linux")]
+                "setresuid",
             ] {
                 let value = match posix {
                     Some(module) => match self.lookup_attr(module, attr) {

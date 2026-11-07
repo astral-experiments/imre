@@ -71,7 +71,7 @@ if sys.platform == "linux":
 
 
 import posix as _posix
-for _name in ("getegid", "getresgid", "getresuid", "setgroups", "setregid", "setreuid"):
+for _name in ("getegid", "getresgid", "getresuid", "setgroups", "setregid", "setresgid", "setresuid", "setreuid"):
     if _name in vars(_posix):
         globals()[_name] = getattr(_posix, _name)
 del _name, _posix
