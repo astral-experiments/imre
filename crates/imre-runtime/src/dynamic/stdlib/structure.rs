@@ -30,6 +30,8 @@ pub(in super::super) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         class
     };
     ctx.bind(scope, "error", class);
+    let clearcache = ctx.builtin("_struct._clearcache");
+    ctx.bind(scope, "_clearcache", clearcache);
     Ok(())
 }
 
