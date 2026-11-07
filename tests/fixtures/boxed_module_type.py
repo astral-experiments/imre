@@ -114,6 +114,18 @@ def current():
     class Reordered(Fee, Empty):
         __slots__ = ("price",)
 
+    assert Standard.__base__ is Empty
+    assert Premium.__base__ is Reordered.__base__ is Fee
+    members = vars(ModuleType)
+    assert members["__new__"] is ModuleType.__new__
+    assert ModuleType.__new__.__self__ is ModuleType
+    assert members["__dict__"].__get__(plugin, ModuleType) is plugin.__dict__
+    annotations = members["__annotations__"]
+    annotations.__set__(plugin, {"price": int})
+    assert annotations.__get__(plugin, ModuleType) is plugin.__annotations__
+    annotations.__delete__(plugin)
+    assert plugin.__annotations__ == {}
+
     quote = Standard("quote")
     quote.price = 42
     try:

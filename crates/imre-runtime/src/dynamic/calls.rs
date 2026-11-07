@@ -1480,6 +1480,12 @@ impl Context {
     }
 
     pub(super) fn read_member(&mut self, owner: &str, field: &str, receiver: Id) -> Result<Id> {
+        if owner == "module"
+            && field == "__dict__"
+            && let Value::Module { scope, .. } = *self.heap.get(receiver)
+        {
+            return self.module_globals(scope);
+        }
         if owner == "BaseExceptionGroup"
             && let Value::Raised(error) = self.heap.get(receiver)
             && let Some([message, exceptions]) = error.group()
@@ -2864,15 +2870,17 @@ impl Context {
                 };
                 return Ok(self.alloc(Value::Int(bound)));
             }
-            Value::Native(ref class) if class == "module" => match name {
-                "__doc__" => return Ok(self.text(module_type::DOC)),
-                method if module_type::METHODS.contains(&method) => {
-                    return Ok(self.builtin(&format!("module.{name}")));
+            Value::Native(ref class) if class == "module" => {
+                if let Some(member) = self.own_class_attr(obj, name) {
+                    return Ok(member);
                 }
-                "__name__" | "__qualname__" => return Ok(self.text("module")),
-                "__module__" => return Ok(self.text("builtins")),
-                _ => {}
-            },
+                match name {
+                    "__base__" => return Ok(self.builtin("object")),
+                    "__name__" | "__qualname__" => return Ok(self.text("module")),
+                    "__module__" => return Ok(self.text("builtins")),
+                    _ => {}
+                }
+            }
             Value::SlotMember { owner, name: field } => match name {
                 "__name__" => return Ok(field),
                 "__objclass__" => return Ok(owner),
@@ -5137,6 +5145,12 @@ impl Context {
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
                 }
+                if name == "__base__"
+                    && self.has_base(obj, "module")
+                    && let Some(bases) = self.class_bases_tuple(obj)
+                {
+                    return self.member_layout_base(&bases);
+                }
                 // type.__abstractmethods__ exposes only this class's stored value.
                 if name == "__abstractmethods__" && metaclass_member.is_none() {
                     return self
@@ -6181,6 +6195,13 @@ impl Context {
         receiver: Id,
     ) -> Result<Id> {
         match name {
+            "__annotations__" | "__annotate__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                let Value::Module { scope, .. } = *self.heap.get(receiver) else {
+                    return Err(self.missing_attribute(receiver, name));
+                };
+                self.module_annotation(scope, name)
+            }
             "__class__" => self.exact_type(receiver),
             "__text_signature__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
@@ -6302,6 +6323,20 @@ impl Context {
                         self.layout_owner_name(owner)
                     ),
                 ))
+            }
+            "__annotations__" | "__annotate__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                let Value::Module { scope, .. } = *self.heap.get(receiver) else {
+                    return Err(self.missing_attribute(receiver, name));
+                };
+                self.update_module_annotations(scope, name, value)?;
+                if let Some(value) = value {
+                    self.bind(scope, name, value);
+                } else {
+                    let key = self.text(name);
+                    self.remove_binding(scope, name, key)?;
+                }
+                Ok(())
             }
             "__class__" => self.assign_instance_class(receiver, value),
             _ => unreachable!(),
