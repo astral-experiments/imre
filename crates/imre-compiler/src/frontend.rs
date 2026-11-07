@@ -10132,7 +10132,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::OperatorCall)) => {
                 let args = &call.arguments;
-                if let Some(target) = args.args.first()
+                if let Some((target, arguments)) = args.args.split_first()
                     && !args.args.iter().any(ast::Expr::is_starred_expr)
                     && args.keywords.iter().all(|kw| kw.arg.is_some())
                     && self.graph.session.is_stdlib_function(
@@ -10142,8 +10142,17 @@ impl<'a> Checker<'a> {
                         "call",
                     )
                 {
-                    let mut forwarded = call.clone();
-                    forwarded.func = Box::new(forwarded.arguments.args.remove(0));
+                    let forwarded = ast::ExprCall {
+                        node_index: call.node_index.clone(),
+                        range_start: call.range_start,
+                        func: Box::new(target.clone()),
+                        arguments: ast::Arguments {
+                            node_index: args.node_index.clone(),
+                            range: args.range,
+                            args: arguments.iter().cloned().collect(),
+                            keywords: args.keywords.clone(),
+                        },
+                    };
                     // Preserve the ordinary checked binder for an exact named function.
                     if target
                         .as_name_expr()
