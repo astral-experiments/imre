@@ -88,7 +88,7 @@ fn select(ctx: &mut Context, args: &[Id]) -> Result<Id> {
             items.push((obj, n));
         }
     }
-    let any_ready = sets.wait(timeout)?;
+    let any_ready = sets.wait(timeout, || ctx.dispatch_signals())?;
     let mut lists = Vec::new();
     lists
         .try_reserve_exact(3)

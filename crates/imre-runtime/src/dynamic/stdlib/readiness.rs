@@ -244,7 +244,11 @@ impl Selector {
                 }
             }
             let mut results = Vec::new();
-            if sets.wait(timeout)? {
+            let ready = match sets.wait(timeout, || ctx.dispatch_signals()) {
+                Err(error) if ctx.is_builtin_error(&error, "InterruptedError") => false,
+                result => result?,
+            };
+            if ready {
                 for i in 0..ctx.dict_entries(keys).unwrap().len() {
                     let (fd, entry) = ctx.dict_entries(keys).unwrap()[i];
                     let key = Registration::unpack(ctx, entry);
@@ -255,7 +259,7 @@ impl Selector {
                         results
                             .try_reserve(1)
                             .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-                        let mask = ctx.int(events);
+                        let mask = ctx.int(events & key.interests);
                         results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
                     }
                 }
