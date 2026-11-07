@@ -3823,6 +3823,7 @@ impl Context {
                 "cosh",
                 "degrees",
                 "erfc",
+                "fmod",
                 "fabs",
                 "factorial",
                 "perm",

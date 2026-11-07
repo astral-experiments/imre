@@ -552,6 +552,7 @@ impl Builtin {
             | Self::EnumLookup(_)
             | Self::TomlDecode(_)
             | Self::FloatAcos
+            | Self::FloatFmod
             | Self::FloatAsin
             | Self::FloatLog10
             | Self::FloatLog1p
@@ -982,6 +983,13 @@ impl Builtin {
                 signature(&[Type::Int], Type::Int)
             }
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
+            Self::FloatFmod => {
+                result == Type::Float
+                    && args.len() == 2
+                    && args
+                        .iter()
+                        .all(|arg| matches!(arg.ty, Type::Int | Type::Float))
+            }
             Self::FloatAcos
             | Self::FloatAsin
             | Self::FloatAtan
@@ -1567,6 +1575,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_sumprod_float_lists"
                 | "imre_sumprod_number_lists"
                 | "imre_float_acos"
+                | "imre_float_fmod"
                 | "imre_float_asin"
                 | "imre_float_log10"
                 | "imre_float_log1p"

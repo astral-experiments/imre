@@ -186,6 +186,20 @@ pub(crate) fn float_logarithm(x: f64, log: fn(f64) -> f64) -> Result<f64> {
     Ok(log(x))
 }
 
+/// C-style remainder retains the dividend's sign, including exact zero.
+pub(crate) fn fmod(dividend: f64, divisor: f64) -> Result<f64> {
+    let remainder = dividend % divisor;
+    if remainder.is_nan() && !dividend.is_nan() && !divisor.is_nan() {
+        return Err(Error::new(Kind::ValueError, "math domain error"));
+    }
+    Ok(remainder)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_fmod(dividend: f64, divisor: f64) -> f64 {
+    finish(fmod(dividend, divisor), 0.0)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_degrees(value: f64) -> f64 {
     value.to_degrees()

@@ -4068,6 +4068,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_acosh.py",
             "boxed_math_asin.py",
             "boxed_math_angles.py",
+            "boxed_math_fmod.py",
             "boxed_math_atan.py",
             "boxed_math_comb.py",
             "boxed_math_factorial.py",

@@ -1244,6 +1244,7 @@ pub(crate) enum Builtin {
     FloatAsin,
     FloatAtan,
     FloatDegrees,
+    FloatFmod,
     FloatRadians,
     FloatErfc,
     Sumprod,
