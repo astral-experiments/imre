@@ -22,12 +22,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
     std::fs::write(out.join("imre-stdlib-members.txt"), members.join("\n"))?;
     for name in members {
-        let path = match name {
-            "shlex.py" => {
-                PathBuf::from("../../benchmarks/cpython_stdlib/full/shlex/upstream/Lib/shlex.py")
-            }
-            _ => Path::new("stdlib").join(name),
+        let root = match name {
+            "http/cookies.py" => "../../benchmarks/cpython_stdlib/full/http/upstream/Lib",
+            "shlex.py" => "../../benchmarks/cpython_stdlib/full/shlex/upstream/Lib",
+            _ => "stdlib",
         };
+        let path = Path::new(root).join(name);
         println!("cargo:rerun-if-changed={}", path.display());
         archive.start_file(name, options)?;
         io::copy(&mut File::open(path)?, &mut archive)?;

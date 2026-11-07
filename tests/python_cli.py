@@ -105,12 +105,16 @@ def check_installed_site(imre, root, run):
         "assert importlib.import_module(sys.argv[6]).Wave_read.__name__ == 'Wave_read'\n"
         "address = importlib.import_module(sys.argv[7]).ip_address('2001:0db8::1')\n"
         "assert str(address) == '2001:db8::1'\n"
+        "cookie = importlib.import_module(sys.argv[8]).SimpleCookie('session=abc; Path=/')\n"
+        "assert cookie['session'].value == 'abc' and cookie['session']['path'] == '/'\n"
+        "cookie['note'] = 'a,b'\n"
+        "assert cookie['note'].coded_value == r'\"a\\054b\"'\n"
         "assert list(sorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
         "    with tar.extractfile('payload') as member:\n"
         "        assert member.read() == b'archive member'\n"
     )
-    source_args = (name, sample, "graphlib", "statistics", "html", "wave", "ipaddress")
+    source_args = (name, sample, "graphlib", "statistics", "html", "wave", "ipaddress", "http.cookies")
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
     bare = run(launcher, "-IB", "-c", use_sources, *source_args, timeout=300)
