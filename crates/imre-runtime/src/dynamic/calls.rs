@@ -9229,7 +9229,7 @@ impl Context {
         let enum_namespace = if typed_dict_meta.is_some() {
             None
         } else {
-            self.enum_namespace(&bases)
+            self.enum_namespace(&bases)?
         };
         let explicit_metaclass = keywords
             .iter()
@@ -9425,11 +9425,12 @@ impl Context {
             }
             return Ok(class);
         }
-        if let Some(kind) = enum_kind
-            && let Some(index) = keywords.iter().position(|(name, _)| name == "boundary")
-        {
-            let (_, boundary) = keywords.remove(index);
-            self.bind_enum_boundary(scope, kind, boundary)?;
+        if enum_kind.is_some() {
+            let boundary = keywords
+                .iter()
+                .position(|(name, _)| name == "boundary")
+                .map_or(NONE, |index| keywords.remove(index).1);
+            self.bind_enum_boundary(scope, &bases, boundary)?;
         }
         let exposed_body = self.finish_class_namespace(scope)?;
         // NamedTupleMeta visits the original values, including defaults replaced by tuple getters.

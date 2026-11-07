@@ -432,6 +432,7 @@ impl Context {
         }
         // Descriptors see the new type and its empty member map. Each member
         // becomes visible only after its constructor returns.
+        self.bind_enum_boundary(scope, &[*base], NONE)?;
         let maps = self.enum_member_maps(scope);
         let class = self.allocate_enum_class(name, scope, *base)?;
         self.install_enum_members(class, Some(*base), maps, declarations, true)?;
@@ -565,7 +566,8 @@ impl Context {
             self.bind(scope, &name, canonical);
         }
         if flag {
-            if let Some(boundary) = self.class_attr(class, "_boundary_") {
+            // Native module providers construct their single-base enums directly.
+            if !classified && let Some(boundary) = self.class_attr(class, "_boundary_") {
                 self.bind(scope, "_boundary_", boundary);
             }
             let full = self.alloc(Value::Int(crate::Int::new(flag_mask)));

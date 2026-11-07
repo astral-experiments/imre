@@ -34,8 +34,7 @@ impl Context {
         } else {
             module
         };
-        let namespace = self.enum_namespace(&[base]).expect("native enum base");
-        let kind = namespace.kind;
+        let namespace = self.enum_namespace(&[base])?.expect("native enum base");
         let scalar = namespace.kind.scalar_base().map(|base| self.builtin(base));
         let scope = self.scope(&caller_module, None);
         self.heap.keep(scope);
@@ -65,7 +64,7 @@ impl Context {
             self.bind(scope, &key, value);
         }
         self.bind(scope, "__module__", module);
-        self.bind_enum_boundary(scope, kind, boundary)?;
+        self.bind_enum_boundary(scope, &[base], boundary)?;
         if qualname != NONE {
             self.bind(scope, "__qualname__", qualname);
         }
@@ -75,14 +74,23 @@ impl Context {
         Ok(class)
     }
 
+    /// Snapshot the controlling enum base's policy before descriptors and members see the class.
     pub(in crate::dynamic) fn bind_enum_boundary(
         &mut self,
         scope: Id,
-        kind: auto::EnumKind,
+        bases: &[Id],
         boundary: Id,
     ) -> Result<()> {
-        if self.truth(boundary)? && matches!(kind, auto::EnumKind::Flag | auto::EnumKind::IntFlag) {
-            self.bind(scope, "_boundary_", boundary);
+        let explicit = self.truth(boundary)?;
+        let flag = self.builtin("enum.Flag");
+        if bases.iter().any(|&base| self.direct_subclass(base, flag)) {
+            let policy = if explicit {
+                boundary
+            } else {
+                let base = *bases.last().expect("enum has a base");
+                self.optional_attr(base, "_boundary_")?.unwrap_or(NONE)
+            };
+            self.bind(scope, "_boundary_", policy);
         }
         Ok(())
     }
