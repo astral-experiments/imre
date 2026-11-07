@@ -247,6 +247,26 @@ impl Schemas<'_> {
                     ));
                 }
                 let count = fields.len();
+                // A narrow record needs only a few comparisons on a name miss. Wider
+                // records carry declaration indices in name order for binary search.
+                let name_order = record
+                    .filter(|_| count >= 8 && u32::try_from(count).is_ok())
+                    .map(|record| {
+                        let name = format!("{name}_field_order");
+                        let mut order: Vec<_> = (0..count).collect();
+                        order.sort_unstable_by(|&a, &b| {
+                            record.fields[a].name.cmp(&record.fields[b].name)
+                        });
+                        let indices: Vec<_> = order.iter().map(|i| format!("i32 {i}")).collect();
+                        writeln!(
+                            self.output.entry_buffer(),
+                            "@{name} = private constant [{count} x i32] [{}]",
+                            indices.join(", ")
+                        )
+                        .unwrap();
+                        name
+                    });
+
                 let fields_name = format!("json_fields_{class}");
                 writeln!(
                     self.output.entry_buffer(),
@@ -256,7 +276,7 @@ impl Schemas<'_> {
                 .unwrap();
                 (
                     7,
-                    None,
+                    name_order,
                     Some(self.output.record_layout(Type::Class(class))),
                     count,
                     Some(fields_name),
