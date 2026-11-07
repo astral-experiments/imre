@@ -3,6 +3,7 @@
 //! property dispatch has selected the concrete class.
 
 use super::*;
+use std::result::Result;
 
 pub(super) type Slots = HashMap<(usize, usize), (usize, usize)>;
 

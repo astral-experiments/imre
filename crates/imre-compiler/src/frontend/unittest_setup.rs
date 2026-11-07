@@ -119,7 +119,7 @@ pub(super) fn slots(
     types: &Types,
     classes: &mut Classes,
     fields: &mut [Vec<Type>],
-) -> Result<Slots, String> {
+) -> std::result::Result<Slots, String> {
     let mut slots = vec![HashMap::new(); fields.len()];
     let Some(case) = classes.definitions.iter().position(|c| {
         let m = &graph.modules[c.definition.module];

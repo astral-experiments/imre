@@ -65,7 +65,7 @@ pub(super) fn scalar_default(
     expected: Type,
     types: &Types,
     source: &str,
-) -> Result<Expr, String> {
+) -> std::result::Result<Expr, String> {
     let mut value = scalar_literal(expression, source)?;
     let ty = value.ty;
     let concrete = types.payload(expected).unwrap_or(expected);
@@ -102,7 +102,7 @@ pub(super) fn scalar_default(
             return Ok(Expr { ty: expected, kind });
         }
     }
-    Err(error(
+    Err(diagnostic_message(
         source,
         expression,
         &format!("default requires exact type {expected}, got {ty}"),
@@ -110,7 +110,10 @@ pub(super) fn scalar_default(
 }
 
 /// A scalar default also supplies an exact type for an unannotated parameter.
-pub(crate) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
+pub(crate) fn scalar_literal(
+    expression: &ast::Expr,
+    source: &str,
+) -> std::result::Result<Expr, String> {
     let (ty, kind) = match expression {
         ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
             value: ast::Number::Int(value),
@@ -149,7 +152,7 @@ pub(crate) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Exp
         }
         ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
         _ => {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 expression,
                 "defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign",

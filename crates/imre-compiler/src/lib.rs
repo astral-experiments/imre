@@ -10,6 +10,8 @@ mod effects;
 use imre_regex as fixed_regex;
 mod case_membership;
 mod frontend;
+use frontend::phase::{Diagnostic as LoweringDiagnostic, Kind as LoweringKind};
+
 mod guarded_text;
 mod ir;
 mod list_bounds;
@@ -198,7 +200,7 @@ impl CompileOptions {
 pub fn check(source: &str) -> Result<(), String> {
     let mut graph = modules::SourceGraph::single(source)?;
     graph.session.explicit_check = true;
-    let (module, _) = checked_lower(&mut graph)?;
+    let (module, _) = checked_lower(&mut graph).map_err(|diagnostic| diagnostic.to_string())?;
     verify_after(&module, "lowering")
 }
 
@@ -210,7 +212,8 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     let (mut module, _) = checked_lower(&mut modules::SourceGraph::single_with_mode(
         source,
         options.reachable_only,
-    )?)?;
+    )?)
+    .map_err(|diagnostic| diagnostic.to_string())?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     llvm::emit(&module, &ranges, options.address_sanitizer)
@@ -297,7 +300,7 @@ fn check_file_with(
     let typed = |graph: &mut modules::SourceGraph| {
         graph.session.explicit_check = true;
         let (module, _) = checked_lower_with(graph, cache.as_deref_mut())?;
-        verify_after(&module, "lowering")
+        Ok(verify_after(&module, "lowering")?)
     };
     object_fallback(
         BoxedLayout::Whole,
@@ -365,7 +368,7 @@ fn object_fallback<T>(
     module_root: Option<&Path>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
-    mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<T, String>,
+    mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<T, LoweringDiagnostic>,
     boxed: impl FnOnce(UnitCompilation) -> T,
 ) -> Result<T, String> {
     if options.module_entry.is_some() {
@@ -397,7 +400,7 @@ fn object_fallback<T>(
             &mut site_wheels,
         ) {
             Ok(graph) => graph,
-            Err(error) => break (error, None, false),
+            Err(error) => break (error.into(), None, false),
         };
         site_wheels.record(&mut graph.inputs);
         if !infer_sets {
@@ -407,13 +410,17 @@ fn object_fallback<T>(
             Ok(_) if graph.runtime_initializer.is_some() && !boxed_startup => {
                 // All first-party code lowered successfully. The unresolved import alone
                 // must use the same admission policy as an unresolved module in the loader.
-                break (graph.runtime_initializer.take().unwrap(), None, false);
+                break (
+                    graph.runtime_initializer.take().unwrap().into(),
+                    None,
+                    false,
+                );
             }
             Ok(value) if !boxed_startup => return Ok(value),
             // Tracing and startup imports both need the same Python heap as the entry.
             Ok(_) => {
                 break (
-                    "Python startup requires a boxed entry".to_owned(),
+                    "Python startup requires a boxed entry".into(),
                     Some(graph),
                     true,
                 );
@@ -434,21 +441,21 @@ fn object_fallback<T>(
     if options.entry_profile.is_some()
         || (checked_file
             && graph.as_ref().is_some_and(|g| {
-                g.return_errors.borrow().contains(&error) || g.imports_struct_decorator()
+                error.kind == LoweringKind::ReturnType || g.imports_struct_decorator()
             }))
     {
-        return Err(error);
+        return Err(error.to_string());
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
             Some(dynamic::ObjectOperation::CheckedEntry)
-        } else if g.class_layout_error.borrow().as_ref() == Some(&error) {
+        } else if error.kind.is_class_layout() {
             Some(dynamic::ObjectOperation::ClassLayout)
         } else {
-            (g.object_builtin_errors.borrow().contains(&error)
+            (error.kind.checks_object_calls()
                 || g.has_object_constructor_fallback.get()
-                    && !g.return_errors.borrow().contains(&error))
-            .then_some(dynamic::ObjectOperation::Builtin)
+                    && error.kind != LoweringKind::ReturnType)
+                .then_some(dynamic::ObjectOperation::Builtin)
         }
     });
     let ordered_command_import = options.command.is_some()
@@ -488,8 +495,7 @@ fn object_fallback<T>(
                 || checked_file && graph.has_object_constructor_fallback.get()
                 || !entry.optional_imports.is_empty()
                 || compound_probe
-                || !graph.needs_object_runtime.get()
-                    && graph.object_builtin_errors.borrow().contains(&error)
+                || !graph.needs_object_runtime.get() && error.kind.checks_object_calls()
                 || checked_file && graph.uses_source_loader();
             let checked_calls = if !checked_file {
                 if check_class_import
@@ -537,7 +543,7 @@ fn object_fallback<T>(
             site_wheels.record(&mut compilation.source_inputs);
             Ok(boxed(compilation))
         }
-        None => Err(error),
+        None => Err(error.to_string()),
     }
 }
 
@@ -756,7 +762,7 @@ fn compile_file_units_with(
 /// Reject unsupported operations before ty renders potentially exponential types.
 fn checked_lower(
     graph: &mut modules::SourceGraph,
-) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
+) -> Result<(ir::Module, Vec<modules::ModuleId>), LoweringDiagnostic> {
     let lowered = frontend::lower_with_owners(graph)?;
     let (skipped, overloads) = graph.diagnostic_scopes();
     graph.session.check_scopes(skipped.as_deref(), &overloads)?;
@@ -766,7 +772,7 @@ fn checked_lower(
 fn checked_lower_with(
     graph: &mut modules::SourceGraph,
     cache: Option<&mut IncrementalCompiler>,
-) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
+) -> Result<(ir::Module, Vec<modules::ModuleId>), LoweringDiagnostic> {
     let Some(compiler) =
         cache.filter(|_| graph.set_layout_hint.get() != modules::SetLayoutHint::Disabled)
     else {
@@ -977,6 +983,65 @@ mod tests {
     use super::{CompileOptions, compile};
 
     #[test]
+    fn inference_outcomes_survive_a_directory_rename() {
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("ordinary");
+        let renamed = root
+            .path()
+            .join("inference is waiting for a function return type");
+        std::fs::create_dir(&original).unwrap();
+        std::fs::write(
+            original.join("display.py"),
+            "def unresolved(arg):\n    return arg\n\ndef display() -> str:\n    return (1.25).hex()\n\nprint(display())\n",
+        )
+        .unwrap();
+        std::fs::write(
+            original.join("saved.py"),
+            "def waiting():\n    return waiting()\n\ndef witness() -> bool:\n    return isinstance(3, waiting())\n\nprint('steady')\n",
+        )
+        .unwrap();
+        std::fs::write(
+            original.join("recursive.py"),
+            "def waiting():\n    return waiting()\n\nwaiting()\n",
+        )
+        .unwrap();
+
+        // An operand may wait even though the enclosing expression replaces its result.
+        std::fs::write(
+            original.join("replace.py"),
+            "def waiting():\n    return waiting()\n\ndef witness() -> str:\n    return 'x'.replace(waiting(), 'y')\n\nprint('steady')\n",
+        )
+        .unwrap();
+        let check = |directory: &std::path::Path| {
+            let program = super::compile_file(
+                &directory.join("display.py"),
+                None,
+                &CompileOptions::default(),
+            )
+            .unwrap();
+            assert!(program.llvm_ir.contains("call ptr @imre_dyn_new("));
+            super::check_file(&directory.join("replace.py"), None).unwrap();
+            for (file, diagnostic) in [
+                (
+                    "saved.py",
+                    "5:26: Imre: isinstance requires supported static classes",
+                ),
+                (
+                    "recursive.py",
+                    "1:1: Imre: cannot infer function return type; add an annotation; recursive calls remain unsupported",
+                ),
+            ] {
+                let path = directory.join(file);
+                let error = super::check_file(&path, None).unwrap_err();
+                assert_eq!(error, format!("{}:{diagnostic}", path.display()));
+            }
+        };
+        check(&original);
+        std::fs::rename(&original, &renamed).unwrap();
+        check(&renamed);
+    }
+
+    #[test]
     fn dictionary_set_construction_preserves_object_fallback() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
@@ -1051,7 +1116,7 @@ mod tests {
                             .set_layout_hint
                             .set(super::modules::SetLayoutHint::Disabled);
                         let (module, _) = super::checked_lower(graph)?;
-                        super::verify_after(&module, "lowering")
+                        Ok(super::verify_after(&module, "lowering")?)
                     },
                     |_| (),
                 );

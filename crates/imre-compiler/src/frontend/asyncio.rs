@@ -43,7 +43,7 @@ impl Checker<'_> {
                 let values = args
                     .iter()
                     .map(|arg| self.expr(arg))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
                 let first = values.first().ok_or_else(|| {
                     error(
                         self.source,

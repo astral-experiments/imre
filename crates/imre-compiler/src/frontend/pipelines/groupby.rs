@@ -1,6 +1,7 @@
 //! A directly consumed group shares one live source cursor and keyed lookahead.
 
 use super::*;
+use crate::frontend::phase::Result;
 
 /// Recognize an immediate list assignment that consumes the private grouper.
 fn materialization<'a>(statement: &'a ast::Stmt, group: &str) -> Option<&'a ast::ExprName> {

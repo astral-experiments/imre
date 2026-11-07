@@ -80,7 +80,7 @@ impl Checker<'_> {
             .args
             .iter()
             .map(|node| self.integer_index(node))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         match args.as_slice() {
             [stop] => Ok(vec![Expr::integer(0), stop.clone(), Expr::integer(1)]),
             [start, stop] => Ok(vec![start.clone(), stop.clone(), Expr::integer(1)]),

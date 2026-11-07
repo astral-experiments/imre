@@ -44,7 +44,10 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
 }
 
 /// Checks inferred displays as well as annotations, including discarded values.
-pub(super) fn validate_storage(function: &ir::Function, types: &Types) -> Result<(), String> {
+pub(super) fn validate_storage(
+    function: &ir::Function,
+    types: &Types,
+) -> std::result::Result<(), String> {
     let mut invalid = invalid_aggregate(function.returns, types)
         || function
             .locals
@@ -94,7 +97,7 @@ pub(super) fn targets(
     functions: &[ir::Function],
     entry: &ir::Function,
     types: &Types,
-) -> Result<HashMap<Type, HashSet<usize>>, String> {
+) -> std::result::Result<HashMap<Type, HashSet<usize>>, String> {
     let mut targets = HashMap::<Type, HashSet<usize>>::new();
     for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -159,7 +162,11 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: error(self.source, node, "recursive native method adapter"),
+                recursion_error: diagnostic_message(
+                    self.source,
+                    node,
+                    "recursive native method adapter",
+                ),
             },
         );
         Expr {
@@ -271,22 +278,22 @@ impl Checker<'_> {
             && method_site.is_none()
         {
             let asynchronous = signature.asynchronous;
-            inference
-                .callable_signature(
-                    &mut signature,
-                    skip,
-                    expected
-                        .and_then(|ty| self.types.signature(ty))
-                        .map(|(params, result)| {
-                            let returns = if asynchronous {
-                                self.types.awaited(result).unwrap_or(result)
-                            } else {
-                                result
-                            };
-                            (params, returns)
-                        }),
-                )
-                .map_err(|message| error(self.source, node, message))?;
+            inference.callable_signature(
+                &mut signature,
+                skip,
+                expected
+                    .and_then(|ty| self.types.signature(ty))
+                    .map(|(params, result)| {
+                        let returns = if asynchronous {
+                            self.types.awaited(result).unwrap_or(result)
+                        } else {
+                            result
+                        };
+                        (params, returns)
+                    }),
+                self,
+                node,
+            )?;
         }
         let ty = self.types.callable(
             signature.params[skip..]
@@ -613,7 +620,7 @@ impl Checker<'_> {
                     self.expr_expected(argument, ty)
                 }
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         if let Type::Coroutine(_) = returns {
             return Ok(self.indirect_coroutine(callable, values, returns));
         }

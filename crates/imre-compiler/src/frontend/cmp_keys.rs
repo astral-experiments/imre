@@ -100,7 +100,7 @@ impl Checker<'_> {
         name: &str,
         param: &str,
         ty: Type,
-    ) -> Result<Result<&'e ast::Expr, Expr>, String> {
+    ) -> Result<std::result::Result<&'e ast::Expr, Expr>, String> {
         let args = &call.arguments;
         if args.args.is_empty() || !args.keywords.is_empty() {
             self.graph
@@ -140,7 +140,7 @@ impl Checker<'_> {
             .iter()
             .chain(args.keywords.iter().map(|kw| &kw.value))
             .map(|arg| self.cmp_callback_value(arg).map(|(value, _)| value))
-            .collect::<Result<_, _>>()?;
+            .collect::<std::result::Result<_, _>>()?;
         Ok(Err(raised(ty, "TypeError", &message, used)))
     }
 

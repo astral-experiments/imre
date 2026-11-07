@@ -458,7 +458,12 @@ class Item:
         )
         .unwrap();
         let error = Classes::collect(&graph).err().unwrap();
-        assert!(error.contains("unparenthesized name annotation"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("unparenthesized name annotation"),
+            "{error}"
+        );
     }
 
     #[test]

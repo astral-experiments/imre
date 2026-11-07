@@ -1,5 +1,6 @@
 //! Validate forbidden bindings before omitting an optimized assertion.
-use super::{ast, error};
+use super::ast;
+use crate::frontend::diagnostic_message;
 use ast::visitor::{Visitor, walk_expr, walk_parameter};
 
 pub(super) fn validate(source: &str, assertion: &ast::StmtAssert) -> Result<(), String> {
@@ -19,14 +20,22 @@ pub(super) fn validate(source: &str, assertion: &ast::StmtAssert) -> Result<(), 
                 _ => false,
             };
             if forbidden {
-                self.error = Some(error(self.source, expr, "cannot assign to __debug__"));
+                self.error = Some(diagnostic_message(
+                    self.source,
+                    expr,
+                    "cannot assign to __debug__",
+                ));
             } else if self.error.is_none() {
                 walk_expr(self, expr);
             }
         }
         fn visit_parameter(&mut self, parameter: &'ast ast::Parameter) {
             if parameter.name.as_str() == "__debug__" {
-                self.error = Some(error(self.source, parameter, "cannot assign to __debug__"));
+                self.error = Some(diagnostic_message(
+                    self.source,
+                    parameter,
+                    "cannot assign to __debug__",
+                ));
             } else if self.error.is_none() {
                 walk_parameter(self, parameter);
             }

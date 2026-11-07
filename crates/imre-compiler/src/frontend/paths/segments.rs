@@ -72,7 +72,7 @@ impl Checker<'_> {
             .args
             .iter()
             .map(|arg| self.expr(arg))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         let check = inputs.iter().any(|value| !exact_segment(value.ty));
         let mut scope = calls::ArgumentScope::default();
         let base = receiver.and_then(|(value, append)| {

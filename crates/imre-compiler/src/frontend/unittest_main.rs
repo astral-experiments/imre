@@ -533,13 +533,16 @@ impl Checker<'_> {
                 // loader. Do not silently execute one with unsupported hooks.
                 if !methods.is_empty()
                     && !checker.graph.modules[class.definition.module].is_bundled("unittest")
-                    && let Err(reason) = checker.validate_unittest_case(call, id)
+                    && let Err(failure) = checker.validate_unittest_case(call, id)
                 {
+                    let Failure::Diagnostic(reason) = failure else {
+                        return Err(failure);
+                    };
                     return checker.record_slot(
                         class_id,
                         checker.local(runner_slot),
                         "_unsupportedCase",
-                        &[unpacking::string(reason)],
+                        &[unpacking::string(reason.to_string())],
                         call,
                     );
                 }

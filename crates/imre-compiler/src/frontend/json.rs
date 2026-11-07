@@ -75,9 +75,9 @@ pub(super) fn compare(
     ops: &[ast::CmpOp],
     source: &str,
     node: &ast::Expr,
-) -> Result<Expr, String> {
+) -> std::result::Result<Expr, String> {
     let invalid = || {
-        error(
+        diagnostic_message(
             source,
             node,
             "JSON comparisons require == or != with another parsed value or a literal string",
@@ -335,7 +335,7 @@ impl Checker<'_> {
     /// is always a table rather than an arbitrary JSON value.
     pub(super) fn toml_decode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.typed_decode(call, true)
-            .map_err(|message| message.replace("JSON", "TOML"))
+            .map_err(|message| message.map_message(|text| text.replace("JSON", "TOML")))
     }
 
     /// The schema is a static type expression; no runtime type object is created.
@@ -446,7 +446,7 @@ impl Checker<'_> {
                                 .elts
                                 .iter()
                                 .map(|value| self.json_schema(value))
-                                .collect::<Result<Vec<_>, _>>()?
+                                .collect::<std::result::Result<Vec<_>, _>>()?
                         } else {
                             vec![self.json_schema(&value.slice)?]
                         };
@@ -592,7 +592,7 @@ impl Checker<'_> {
                             .elts
                             .iter()
                             .map(|item| self.expr(item))
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
                         Expr {
                             ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
                             kind: ExprKind::Tuple(values),
@@ -693,7 +693,7 @@ fn needs_document(display: &ast::Expr) -> bool {
     }
 }
 
-fn check_standard_encoding(ty: Type, types: &Types) -> Result<(), &'static str> {
+fn check_standard_encoding(ty: Type, types: &Types) -> std::result::Result<(), &'static str> {
     if let Some(child) = types.payload(ty).or_else(|| types.element(ty)) {
         return check_standard_encoding(child, types);
     }
@@ -735,7 +735,7 @@ pub(super) fn schemas(
     types: &Types,
     functions: &[ir::Function],
     entry: &ir::Function,
-) -> Result<Vec<JsonRecordSchema>, String> {
+) -> std::result::Result<Vec<JsonRecordSchema>, String> {
     let mut decoded = Vec::new();
     let mut encoded = Vec::new();
     for function in functions.iter().chain([entry]) {
@@ -873,7 +873,11 @@ pub(super) fn schemas(
     Ok(schemas)
 }
 
-fn check_type(ty: Type, types: &Types, pending: &mut Vec<usize>) -> Result<(), &'static str> {
+fn check_type(
+    ty: Type,
+    types: &Types,
+    pending: &mut Vec<usize>,
+) -> std::result::Result<(), &'static str> {
     if types.is_default_list_dict(ty) || types.is_counter(ty) || types.is_ordered_dict(ty) {
         return Err("JSON schemas require ordinary dictionaries");
     }
@@ -928,7 +932,7 @@ fn is_none_default(value: &Expr) -> bool {
     }
 }
 
-fn scalar_default(value: &Expr) -> Result<JsonDefault, &'static str> {
+fn scalar_default(value: &Expr) -> std::result::Result<JsonDefault, &'static str> {
     Ok(match &value.kind {
         ExprKind::Int(value) => JsonDefault::Int(value.clone()),
         ExprKind::Float(value) if value.is_finite() => JsonDefault::Float(*value),
@@ -950,7 +954,7 @@ fn scalar_default(value: &Expr) -> Result<JsonDefault, &'static str> {
 mod tests {
     use super::*;
 
-    fn lower(source: &str) -> Result<ir::Module, String> {
+    fn lower(source: &str) -> std::result::Result<ir::Module, String> {
         super::super::lower(&SourceGraph::single(source)?)
     }
 

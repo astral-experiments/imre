@@ -238,7 +238,7 @@ impl Output {
         if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
             let name = keyword.arg.as_ref().expect("repeated named argument");
             let reason = format!("SyntaxError: keyword argument repeated: {name}");
-            let error = crate::frontend::error(source, keyword, &reason);
+            let error = crate::frontend::diagnostic_message(source, keyword, &reason);
             return Err(format!("{}:{error}", path.display()));
         }
         let replacements = strings::literal_replacements(source, parsed.tokens());
@@ -292,12 +292,16 @@ impl Output {
                 .map_err(|error| format!("{}:{error}", path.display()))?;
         }
         if let Some((range, reason)) = imre_ast::type_alias_error(&body) {
-            let error = crate::frontend::error(source, &range, &format!("SyntaxError: {reason}"));
+            let error = crate::frontend::diagnostic_message(
+                source,
+                &range,
+                &format!("SyntaxError: {reason}"),
+            );
             return Err(format!("{}:{error}", path.display()));
         }
         if let Some(param) = &private_names.duplicate_type_parameter {
             let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
-            let error = crate::frontend::error(source, param, &reason);
+            let error = crate::frontend::diagnostic_message(source, param, &reason);
             return Err(format!("{}:{error}", path.display()));
         }
         // Frozen code exposes its origin independently of the module's registered source path.

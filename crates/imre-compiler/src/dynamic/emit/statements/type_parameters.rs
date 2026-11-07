@@ -76,7 +76,11 @@ pub(in super::super) fn check_nonlocals(source: &str, body: &[ast::Stmt]) -> Res
                             }
                             None => continue,
                         };
-                        self.error = Some(crate::frontend::error(self.source, statement, &message));
+                        self.error = Some(crate::frontend::diagnostic_message(
+                            self.source,
+                            statement,
+                            &message,
+                        ));
                         break;
                     }
                 }

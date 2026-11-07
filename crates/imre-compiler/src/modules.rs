@@ -10,6 +10,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, FallbackCalls, Session};
+use crate::frontend::phase::Diagnostic;
 use crate::ir::{
     Builtin, CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, UnicodeProperty,
     WrapperAttributes,
@@ -3098,11 +3099,16 @@ impl SourceModule {
         (self.archive.is_none() || matches!(binding, Binding::Definition(_))).then_some(binding)
     }
 
+    pub(crate) fn diagnostic(&self, node: &impl Ranged, message: &str) -> Diagnostic {
+        Diagnostic::at(&self.source, node, message.to_owned()).with_path(&self.path)
+    }
+
     pub(crate) fn error(&self, node: &impl Ranged, message: &str) -> String {
-        let prefix = &self.source[..usize::from(node.start())];
-        let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
-        let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-        format!("{}:{line}:{column}: Imre: {message}", self.path.display())
+        format!(
+            "{}:{}",
+            self.path.display(),
+            Diagnostic::at(&self.source, node, message)
+        )
     }
 }
 
@@ -3138,11 +3144,9 @@ pub(crate) struct SourceGraph {
     pub(crate) check_fallback_calls: std::cell::Cell<FallbackCalls>,
     pub(crate) imports_runtime_class: bool,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
-    pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
-    pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
+    pub(crate) class_layout_error: std::cell::RefCell<Option<Diagnostic>>,
     pub(crate) runtime_initializer: Option<String>,
-    pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
-    pub(crate) return_errors: std::cell::RefCell<HashSet<String>>,
+    pub(crate) deferred_object_error: std::cell::RefCell<Option<Diagnostic>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
@@ -3169,15 +3173,6 @@ impl SourceGraph {
         if matches!(self.check_fallback_calls.get(), FallbackCalls::None) {
             self.check_fallback_calls.set(FallbackCalls::All);
         }
-    }
-
-    /// Select object class construction while preserving checked calls and typed module layouts.
-    pub(crate) fn require_object_class_layout(&self, error: String) -> String {
-        self.class_layout_error.replace(Some(error.clone()));
-        self.object_builtin_errors
-            .borrow_mut()
-            .insert(error.clone());
-        error
     }
 
     /// The native value-struct decorator has no corresponding Python object runtime export.
@@ -4587,10 +4582,8 @@ impl<'a> Loader<'a> {
             imports_runtime_class: self.imports_runtime_class,
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
-            object_builtin_errors: Default::default(),
             runtime_initializer: self.runtime_initializer,
-            deferred_object_error: self.wildcard_import.into(),
-            return_errors: Default::default(),
+            deferred_object_error: self.wildcard_import.map(Into::into).into(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?

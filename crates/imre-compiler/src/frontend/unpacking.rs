@@ -657,7 +657,7 @@ impl Checker<'_> {
                     let values = values
                         .into_iter()
                         .map(|item| self.coerce(item, element, value))
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
                     return Ok(Expr {
                         ty: self.types.list(element),
                         kind: ExprKind::List(values),
@@ -703,7 +703,7 @@ impl Checker<'_> {
                                 self.expr_expected(value, element)
                                     .map(assignments::unpromoted)
                             })
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
                         let mut actual = values.first().map_or(element, |value| value.ty);
                         for value in &values {
                             actual = self.types.join(actual, value.ty).ok_or_else(|| {
@@ -717,7 +717,7 @@ impl Checker<'_> {
                         let values = values
                             .into_iter()
                             .map(|value| self.coerce(value, actual, list))
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
                         return Ok(Expr {
                             ty: self.types.list(actual),
                             kind: ExprKind::List(values),
@@ -946,7 +946,7 @@ impl Checker<'_> {
                     target,
                 )
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(Expr {
             ty: self.types.list(element),
             kind: ExprKind::List(values),

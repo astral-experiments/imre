@@ -2907,7 +2907,7 @@ impl Checker<'_> {
                 .args
                 .iter()
                 .map(|arg| self.expr_expected(arg, Type::Int))
-                .collect::<Result<_, _>>()?;
+                .collect::<std::result::Result<_, _>>()?;
             return Ok(Expr {
                 ty: Type::Int,
                 kind: ExprKind::Builtin(Builtin::IntExtremum { minimum }, args),

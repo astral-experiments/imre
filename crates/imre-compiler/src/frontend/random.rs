@@ -132,7 +132,7 @@ impl Checker<'_> {
                 .args
                 .iter()
                 .map(|v| self.expr_expected(v, Type::Int))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             let bounds = match values.as_slice() {
                 [stop] => vec![Expr::integer(0), stop.clone(), Expr::integer(1)],
                 [start, stop] => vec![start.clone(), stop.clone(), Expr::integer(1)],

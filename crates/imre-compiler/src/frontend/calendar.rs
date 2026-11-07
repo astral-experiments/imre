@@ -65,7 +65,7 @@ pub(super) fn binary(
     right: Expr,
     node: &ast::ExprBinOp,
     source: &str,
-) -> Result<Expr, String> {
+) -> std::result::Result<Expr, String> {
     use ast::Operator::{Add, Sub};
     let (kind, reverse, subtract) = match (a, b, node.op) {
         (kind @ (C::Date | C::DateTime | C::Delta), C::Delta, Add | Sub) => {
@@ -73,7 +73,7 @@ pub(super) fn binary(
         }
         (C::Delta, date @ (C::Date | C::DateTime), Add) => (date, true, false),
         _ => {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 node,
                 "unsupported arithmetic between these datetime values",
@@ -215,8 +215,8 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         max_positional: usize,
-        error: String,
-    ) -> String {
+        error: Failure,
+    ) -> Failure {
         if let [state, ..] = call.arguments.args.as_ref()
             && call.arguments.args.len() <= max_positional
             && self.expr(state).is_ok_and(|value| {

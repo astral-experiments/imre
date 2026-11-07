@@ -964,7 +964,7 @@ impl Checker<'_> {
 mod tests {
     const PREFIX: &str = "from enum import StrEnum, auto\nclass State(StrEnum):\n    OPEN = auto()\n    ALIAS = OPEN\n    SAME = 'open'\n    CLOSED = 'off'\n";
 
-    fn check(body: &str) -> Result<(), String> {
+    fn check(body: &str) -> std::result::Result<(), String> {
         crate::check(&format!("{PREFIX}{body}"))
     }
 

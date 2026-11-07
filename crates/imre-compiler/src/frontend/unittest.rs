@@ -927,7 +927,7 @@ impl Checker<'_> {
             forwarded.args = args[2..]
                 .iter()
                 .map(|arg| self.unittest_argument(arg, &mut body, &mut locals, discarded))
-                .collect::<Result<_, _>>()?;
+                .collect::<std::result::Result<_, _>>()?;
             let mut duplicate = false;
             for kw in &mut forwarded.keywords {
                 if kw.arg.as_deref() == Some("expected_exception") {
