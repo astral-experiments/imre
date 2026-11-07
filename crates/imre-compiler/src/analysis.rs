@@ -790,6 +790,7 @@ impl Session {
         let checks = match calls {
             FallbackCalls::All | FallbackCalls::DecoratorFactories => FileChecks::FallbackCalls,
             FallbackCalls::FunctionBodies => FileChecks::FunctionBodyCalls,
+            FallbackCalls::NamedFunctions => FileChecks::NamedFunctionCalls,
             FallbackCalls::None | FallbackCalls::Entry(_) => FileChecks::FallbackReturns,
         };
         self.set_fallback_rules(
@@ -918,6 +919,7 @@ enum FileChecks {
     Full,
     FallbackReturns,
     FunctionBodyCalls,
+    NamedFunctionCalls,
     FallbackCalls,
 }
 
@@ -928,6 +930,8 @@ pub(crate) enum FallbackCalls {
     None,
     /// Local annotated calls in function bodies when a Python script needs a boxed operation.
     FunctionBodies,
+    /// Direct calls to annotated source functions while an import uses runtime classes.
+    NamedFunctions,
     Entry(usize),
     All,
     /// A factory must return a callable to decorate the method.
@@ -1127,7 +1131,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (matches!(checks, FileChecks::FallbackCalls | FileChecks::FunctionBodyCalls)
+                            || (matches!(checks, FileChecks::FallbackCalls | FileChecks::FunctionBodyCalls | FileChecks::NamedFunctionCalls)
                                 && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
                                 && runtime_argument(
                                     db,
@@ -1135,7 +1139,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                                     range,
                                     diagnostic.id().as_str(),
                                     checked.runtime_provider(db),
-                                    checks == FileChecks::FunctionBodyCalls,
+                                    checks,
                                 ))
                             // ty also reports implicit None returns at the annotation span.
                             || (diagnostic.id().as_str() == "invalid-return-type"
@@ -1249,15 +1253,19 @@ fn runtime_argument(
     range: TextRange,
     rule: &str,
     runtime_provider: Option<File>,
-    function_bodies: bool,
+    checks: FileChecks,
 ) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::Type;
     let file = db.program_file(file);
     let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
     let root = AnyNodeRef::from(parsed.syntax());
+    let local_calls = matches!(
+        checks,
+        FileChecks::FunctionBodyCalls | FileChecks::NamedFunctionCalls
+    );
     if !root.range().contains_range(range) {
-        return function_bodies;
+        return local_calls;
     }
     let nodes = covering_node(root, range);
     // ty points to the entire call for missing arguments and overload mismatches.
@@ -1274,20 +1282,35 @@ fn runtime_argument(
         };
         owns_range.then_some(call)
     }) else {
-        return function_bodies;
+        return local_calls;
     };
     let model = SemanticModel::new(db, file);
     let Some(callee) = call.func.inferred_type(&model) else {
-        return function_bodies;
+        return local_calls;
     };
     if matches!(callee, Type::FunctionLiteral(_))
         && let Some(ty_python_semantic::types::TypeDefinition::Function(definition)) =
             callee.definition(db, &model.program_environment())
-        && definition.file(db) == file.file(db)
+        && (definition.file(db) == file.file(db) || checks == FileChecks::NamedFunctionCalls)
         && let ty_python_core::definition::DefinitionKind::Function(function) = definition.kind(db)
     {
+        if checks == FileChecks::NamedFunctionCalls {
+            // Dynamic methods retain their Python call semantics. A direct name still
+            // resolves to its annotated source declaration, including across an import.
+            let owner = definition.file(db);
+            if !call.func.is_name_expr() || owner.path(db).is_vendored_path() {
+                return true;
+            }
+            let source =
+                ruff_db::parsed::parsed_module(db, db.program_file(owner).python_file(db)).load(db);
+            return !function
+                .node(&source)
+                .parameters
+                .iter()
+                .any(|p| p.annotation().is_some());
+        }
         let function = function.node(&parsed);
-        if function_bodies {
+        if checks == FileChecks::FunctionBodyCalls {
             // A Python entry binds dynamic calls at runtime. Preserve the contracts
             // typed lowering checks in first-party function bodies before a fallback.
             let in_body = nodes.ancestors().any(|node| {
@@ -1308,7 +1331,7 @@ fn runtime_argument(
             }
         }
     }
-    if function_bodies {
+    if local_calls {
         return true;
     }
     let uses_runtime_provider = |ty: Type<'_>| {
@@ -2002,6 +2025,39 @@ impl Db for Database {
 #[cfg(test)]
 mod diagnostic_mode_tests {
     use super::*;
+
+    #[test]
+    fn named_calls_check_imported_functions_and_leave_method_dispatch_to_the_provider() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root, &[]).unwrap();
+        session
+            .add(
+                &root.join("scores.py"),
+                "def take(n: int) -> int: return n\n",
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        session
+            .add(
+                &root.join("main.py"),
+                concat!(
+                    "from scores import take\n",
+                    "class Receiver:\n    def method(self, n: int) -> int: return n\n",
+                    "Receiver().method('object')\ntake('x')\n",
+                ),
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        let errors = session
+            .check_fallback_contracts(None, &[], FallbackCalls::NamedFunctions, None, None)
+            .unwrap_err();
+        assert_eq!(
+            errors.matches("error[invalid-argument-type]").count(),
+            1,
+            "{errors}"
+        );
+        assert!(errors.contains("function `take`"), "{errors}");
+    }
 
     #[test]
     fn data_module_skips_only_fallback_contracts() {

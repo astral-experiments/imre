@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 151 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 152 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -56,6 +56,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `genericpath` | Yes | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
 | `getopt` | Yes | No API example recorded. | — | — | — |
 | `gettext` | Yes | Translate singular, plural and contextual messages from GNU MO catalogs selected by domain and language, with source-text fallback. [Evidence](../tests/fixtures/text/gettext_catalog.py) | [18 / 73](../benchmarks/cpython_stdlib/full/gettext/) | 6 | 0 |
+| `glob` | Yes | No API example recorded. | — | — | — |
 | `grp` | Yes | No API example recorded. | — | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
 | `hashlib` | Yes | SHAKE-128 and SHAKE-256 extendable-output digests. MD5, SHA-1, SHA-2 and SHA-3 (224, 256, 384 and 512) construction, incremental updates, copy, digest and hexdigest. [BLAKE2b and BLAKE2s](../tests/fixtures/bytes/hashlib_blake2.py) support keyed hashing, configurable digest sizes and tree parameters. [Evidence](../benchmarks/cpython_stdlib/full/hashlib/README.md) | [0 / 82](../benchmarks/cpython_stdlib/full/hashlib/) | 2 | 0 |
@@ -161,7 +162,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `fileinput` |
 | `ftplib` |
 | `getpass` |
-| `glob` |
 | `graphlib` |
 | `imaplib` |
 | `mailbox` |

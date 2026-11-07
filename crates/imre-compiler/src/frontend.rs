@@ -6865,6 +6865,9 @@ impl<'a> Checker<'a> {
             });
         }
         let binding = self.resolve(expression);
+        if binding == Some(Binding::RuntimeClass) {
+            return Err(self.object_export_error("a class defined in a module guard", expression));
+        }
         if binding == Some(Binding::ConditionalValue) {
             let operation = "a value selected by a module guard";
             if self.checked_optional_name(expression) {

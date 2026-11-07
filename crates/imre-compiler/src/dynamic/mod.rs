@@ -586,7 +586,7 @@ pub(crate) fn compile(
     operation: Option<ObjectOperation>,
     typed_graph: Option<&crate::modules::SourceGraph>,
     layout: crate::BoxedLayout<'_>,
-    check_returns: impl FnOnce() -> Result<(), String>,
+    check_returns: impl FnOnce(bool) -> Result<(), String>,
 ) -> Result<Option<UnitCompilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -685,27 +685,31 @@ pub(crate) fn compile(
     let ftp_script = imports_provider("ftplib");
     let argparse_script = imports_provider("argparse");
     let provider_script = request_script || ftp_script || argparse_script;
+    let entry_requests_objects = module_entry.is_some()
+        || first.runtime_imports
+        || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
+        || provider_script;
     let object_entry = object_hint
-        && (module_entry.is_some()
-            || first.runtime_imports
+        && (entry_requests_objects
             || (operation.is_some() && !ordered_command)
-            || (runtime_imports && !first.names.is_empty())
-            || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
-            || provider_script);
+            || (runtime_imports && !first.names.is_empty()));
     // Existing object imports keep their normal project-module lookup. Only a new
     // startup fallback needs to verify that the imported provider is bundled.
-    let logging_script = !object_entry && startup_fallback && first.imports_logging;
-    let tokenize_script = !object_entry && imports_provider("tokenize");
-    let configparser_script = !object_entry && imports_provider("configparser");
-    let pyio_script = !object_entry && imports_provider("_pyio");
-    let installed_script = !object_entry
+    let consider_startup =
+        !object_entry || typed_graph.is_some_and(|graph| graph.imports_runtime_class);
+    let logging_script = consider_startup && startup_fallback && first.imports_logging;
+    let tokenize_script = consider_startup && imports_provider("tokenize");
+    let configparser_script = consider_startup && imports_provider("configparser");
+    let pyio_script = consider_startup && imports_provider("_pyio");
+    let installed_script = consider_startup
         && startup_fallback
         && first
             .names
             .iter()
             .any(|(level, name)| *level == 0 && crate::zip_entry::installed_member(name).is_some());
-    let fallback_script =
+    let startup_provider =
         logging_script || tokenize_script || configparser_script || pyio_script || installed_script;
+    let fallback_script = !object_entry && startup_provider;
     let ordered_only = !object_entry && !fallback_script;
     if ordered_only
         && (!ordered_command
@@ -1186,10 +1190,11 @@ pub(crate) fn compile(
                         && ((request_script && prefix == "urllib")
                             || (ftp_script && prefix == "ftplib")
                             || (argparse_script && prefix == "argparse")
-                            || (logging_script && prefix == "logging")
-                            || (tokenize_script && prefix == "tokenize")
-                            || (configparser_script && prefix == "configparser")
-                            || (pyio_script && prefix == "_pyio"))
+                            || (fallback_script
+                                && ((logging_script && prefix == "logging")
+                                    || (tokenize_script && prefix == "tokenize")
+                                    || (configparser_script && prefix == "configparser")
+                                    || (pyio_script && prefix == "_pyio"))))
                     {
                         return Ok(None);
                     }
@@ -1325,7 +1330,7 @@ pub(crate) fn compile(
         "command_source":command,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
-    check_returns()?;
+    check_returns(entry_requests_objects || startup_provider)?;
     let providers = options
         .bundled_provider_archive
         .as_deref()

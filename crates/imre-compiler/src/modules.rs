@@ -640,6 +640,8 @@ pub(crate) enum Binding {
     Definition(DefinitionId),
     /// The module initializer establishes this binding when its guard executes.
     ConditionalValue,
+    /// A class defined by the runtime arm of a TYPE_CHECKING guard.
+    RuntimeClass,
     Value(DefinitionId),
     TypeAlias(ModuleId, usize),
     IntrinsicModule(IntrinsicModule),
@@ -705,6 +707,7 @@ pub(crate) enum IntrinsicModule {
     Calendar,
     Fractions,
     Fnmatch,
+    Glob,
     Time,
     Warnings,
     WarningsNative,
@@ -1295,6 +1298,7 @@ impl IntrinsicModule {
             "calendar" => Some(Self::Calendar),
             "fractions" => Some(Self::Fractions),
             "fnmatch" => Some(Self::Fnmatch),
+            "glob" => Some(Self::Glob),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
             "_warnings" => Some(Self::WarningsNative),
@@ -1857,6 +1861,10 @@ impl IntrinsicModule {
             (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
             (Self::Functools, "update_wrapper") => Intrinsic::UpdateWrapper,
             (Self::Functools, "wraps") => Intrinsic::Wraps,
+            (Self::Glob, "glob") => Intrinsic::ObjectOnlyExport("glob.glob"),
+            (Self::Glob, "iglob") => Intrinsic::ObjectOnlyExport("glob.iglob"),
+            (Self::Glob, "escape") => Intrinsic::ObjectOnlyExport("glob.escape"),
+            (Self::Glob, "translate") => Intrinsic::ObjectOnlyExport("glob.translate"),
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",
@@ -3069,6 +3077,7 @@ pub(crate) struct SourceGraph {
     /// A reachable bytearray constructor keeps its object implementation available on typed failure.
     pub(crate) has_native_bytearray: std::cell::Cell<bool>,
     pub(crate) check_fallback_calls: std::cell::Cell<FallbackCalls>,
+    pub(crate) imports_runtime_class: bool,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
     pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
@@ -4092,6 +4101,7 @@ fn resolve_binding(
                 }
                 Binding::Definition(_)
                 | Binding::ConditionalValue
+                | Binding::RuntimeClass
                 | Binding::Value(_)
                 | Binding::TypeAlias(..)
                 | Binding::Intrinsic(_) => None,
@@ -4184,6 +4194,7 @@ struct Loader<'a> {
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
     runtime_initializer: Option<String>,
+    imports_runtime_class: bool,
     wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
@@ -4267,6 +4278,7 @@ impl<'a> Loader<'a> {
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
             runtime_initializer: None,
+            imports_runtime_class: false,
             wildcard_import: None,
             root,
             modules: Vec::new(),
@@ -4459,6 +4471,7 @@ impl<'a> Loader<'a> {
             has_native_bytearray: Default::default(),
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
+            imports_runtime_class: self.imports_runtime_class,
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
             object_builtin_errors: Default::default(),
@@ -4581,6 +4594,7 @@ impl<'a> Loader<'a> {
         let mut segment = 0;
         let mut definition_prefix = false;
         let mut field_separators = Vec::new();
+        let mut runtime_classes = Vec::new();
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
                 return Err(self.modules[id].error(statement,
@@ -4785,7 +4799,9 @@ impl<'a> Loader<'a> {
                         && otherwise.test.is_none()
                     {
                         for runtime_statement in &otherwise.body {
-                            if let Some(name) = value_name(runtime_statement)
+                            if let ast::Stmt::ClassDef(class) = runtime_statement {
+                                runtime_classes.push(class.name.as_str());
+                            } else if let Some(name) = value_name(runtime_statement)
                                 && module_value(runtime_statement).is_some()
                             {
                                 self.bind(id, name, Binding::ConditionalValue, runtime_statement)?;
@@ -4877,6 +4893,14 @@ impl<'a> Loader<'a> {
                     self.modules[id].executable.push(index);
                 }
             }
+        }
+        // Expose otherwise unbound classes after module initialization. Preserve the
+        // existing resolution of names assigned or imported elsewhere in the module.
+        for name in runtime_classes {
+            self.modules[id]
+                .bindings
+                .entry(name.to_owned())
+                .or_insert(Binding::RuntimeClass);
         }
         if !field_separators.is_empty() {
             let module = &mut self.modules[id];
@@ -5246,7 +5270,7 @@ impl<'a> Loader<'a> {
                                     ready
                                 }
                                 Binding::Value(def) => package && self.initialized(def),
-                                Binding::ConditionalValue => false,
+                                Binding::ConditionalValue | Binding::RuntimeClass => false,
                                 _ => package,
                             };
                             if !available {
@@ -5303,6 +5327,7 @@ impl<'a> Loader<'a> {
                         self.checked_builtin_imports.push((id, alias.range()));
                     }
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
+                    self.imports_runtime_class |= binding == Binding::RuntimeClass;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
                     self.bind(id, local.as_str(), binding, alias)?;
                 }

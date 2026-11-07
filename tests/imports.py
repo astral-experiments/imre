@@ -412,6 +412,10 @@ REJECTED = {
     "wildcard_keeps_missing_import": ({
         "main.py": "from helper import *\nimport absent\n", "helper.py": HELPER,
     }, "cannot resolve first-party"),
+    "glob_preserves_typed_call": ({
+        "main.py": "import glob\nfrom scores import score\nprint(glob.translate('*.py'), score)\n",
+        "scores.py": "def take(n: int) -> int: return 7\nscore = take('x')\n",
+    }, "expected int, got str"),
     "type_checking_only_export": ({
         "main.py": "from helper import token\n",
         "helper.py": "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    token = 3\n",
@@ -1193,16 +1197,20 @@ ACCEPTED = {
         "broken.py": "earlier = 1\n__all__ = ['earlier', 'absent']\n",
         "invalid.py": "__all__ = [3]\n",
     },
+    "unused_glob_module": {
+        "main.py": "import glob\ndef weight(n: int) -> int: return n * 3 + 2\nprint(weight(13))\n",
+    },
     "type_checking_runtime_export": {
         "main.py": (
-            "import helper\nfrom helper import token as selected\n"
+            "import helper\nfrom helper import Layer, token as selected\n"
             "print(selected is helper.token, selected[0])\n"
+            "print(Layer is helper.Layer, Layer.__name__)\n"
         ),
         "helper.py": (
             "import typing as t\n"
             "def initialize():\n    print('initialized')\n    return [41]\n"
             "if t.TYPE_CHECKING:\n    from unavailable_at_runtime import token\n"
-            "else:\n    token = initialize()\n"
+            "else:\n    token = initialize()\n    class Layer(dict): pass\n"
         ),
     },
     "record_warnings": {
