@@ -7924,6 +7924,15 @@ impl Context {
                         },
                     );
                 }
+                if let [input] = args.as_slice()
+                    && kwargs.is_empty()
+                    && self.itertools_layout(callable) == Some("itertools.pairwise")
+                {
+                    let source = self.iterator(*input)?;
+                    return Ok(stdlib::itertools::pairwise_cursor(
+                        self, callable, callable, source,
+                    ));
+                }
                 let (mut args, mut kwargs) = (args, kwargs);
                 let value = match (&mut args[..], &mut kwargs[..]) {
                     ([value], []) => Some(value),
