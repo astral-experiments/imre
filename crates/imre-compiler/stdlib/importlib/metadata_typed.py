@@ -4,8 +4,12 @@ from textwrap import dedent
 from zipfile import ZipFile
 
 
-def _paths() -> list[str]:
-    return _search_path
+# Supplied by the checked import resolver.
+_filesystem_roots: tuple[str, ...]
+
+
+def _paths() -> tuple[str, ...]:
+    return _filesystem_roots
 
 
 def _normalize_separators(name: str) -> str:

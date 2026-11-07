@@ -504,7 +504,9 @@ impl Initialization {
                 module: checker.module,
                 statement: index,
             };
-            if checker.graph.unused_literal_global(definition) {
+            if module.import_config_slot(statement).is_some()
+                || checker.graph.unused_literal_global(definition)
+            {
                 continue;
             }
             let mut imports = HashSet::new();
