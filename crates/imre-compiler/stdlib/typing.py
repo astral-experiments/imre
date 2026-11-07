@@ -345,7 +345,7 @@ Text = str
 
 
 # Protocol introspection from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
-def is_protocol(tp: type, /) -> _builtins.bool:
+def is_protocol(tp: type, /) -> bool:
     """Return True if the given type is a Protocol.
 
     Example::
