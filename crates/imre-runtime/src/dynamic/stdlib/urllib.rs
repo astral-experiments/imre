@@ -147,8 +147,10 @@ fn codec_option<'a>(
 }
 
 fn unquote(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<Id> {
+    let storage = ctx.scalar_value(id);
     let source = match input(ctx, id) {
         Ok(source) => source,
+        Err(_) if matches!(ctx.heap.get(storage), Value::Bytes(_)) => input(ctx, storage)?,
         Err(_) => {
             // CPython first checks for '%' in a non-bytes input and then its split attribute.
             let percent = ctx.text("%");
@@ -178,39 +180,60 @@ fn unquote(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) 
                 })?;
                 return Ok(id);
             }
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "expected string or bytes-like object, got '{}'",
-                    ctx.type_name(id)
-                ),
-            ));
+            input(ctx, storage).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "expected string or bytes-like object, got '{}'",
+                        ctx.type_name(id)
+                    ),
+                )
+            })?
         }
     };
     // CPython returns unescaped text before inspecting its codec options.
-    if source.is_unescaped_text() {
+    if storage == id && source.is_unescaped_text() {
         return Ok(id);
     }
+    let error_policy = errors;
     let encoding = codec_option(ctx, encoding, "utf-8", "encoding")?;
     let errors = codec_option(ctx, errors, "replace", "errors")?;
-    let text = if errors.is_some_and(|name| super::codecs::uses_python_handler(ctx, name)) {
+    if errors.is_some_and(|name| {
+        name == "surrogateescape" || super::codecs::uses_python_handler(ctx, name)
+    }) {
         // A Python callback can allocate and move the boxed heap.
         let options = (encoding.map(str::to_owned), errors.map(str::to_owned));
-        let owned = ctx.heap.get(id).clone();
+        let owned = ctx.heap.get(storage).clone();
         let input = match &owned {
             Value::Str(s) => UrlInput::Text(s),
             Value::Bytes(b) => UrlInput::Bytes(b),
             _ => unreachable!(),
         };
-        urlquote::decode_component_with(
-            input,
-            options.0.as_deref(),
-            options.1.as_deref(),
-            |codec, data, policy| super::codecs::decode_slice(ctx, codec, data, policy),
-        )?
-    } else {
-        urlquote::decode_component(source, encoding, errors).map_err(|e| ctx.decode_error(e))?
-    };
+        let mut points = Vec::new();
+        urlquote::visit_unquoted(input, options.0.as_deref(), options.1.as_deref(), |part| {
+            match part {
+                urlquote::UnquotedPart::Literal(text) => {
+                    points
+                        .try_reserve(text.len())
+                        .map_err(|_| crate::Error::allocation())?;
+                    points.extend(text.chars().map(u32::from));
+                }
+                urlquote::UnquotedPart::Encoded(codec, data, _) => {
+                    let bytes = ctx.alloc(Value::Bytes(data.to_vec()));
+                    let text = super::codecs::decode_bytes(ctx, codec, bytes, error_policy)?;
+                    let span = ctx.string_codepoints(text)?;
+                    points
+                        .try_reserve(span.len())
+                        .map_err(|_| crate::Error::allocation())?;
+                    points.extend_from_slice(&span);
+                }
+            }
+            Ok::<_, Error>(())
+        })?;
+        return Ok(ctx.text_codepoints(points));
+    }
+    let text =
+        urlquote::decode_component(source, encoding, errors).map_err(|e| ctx.decode_error(e))?;
     Ok(ctx.text(text))
 }
 

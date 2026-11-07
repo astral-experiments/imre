@@ -883,33 +883,6 @@ pub(super) fn uses_python_handler(ctx: &Context, name: &str) -> bool {
 }
 
 /// URL decoding creates bytes for a single percent-decoded portion of a component.
-pub(super) fn decode_slice(
-    ctx: &mut Context,
-    codec: Codec,
-    data: &[u8],
-    errors: &str,
-) -> Result<String> {
-    if let Codec::Utf8 { signature } = codec
-        && uses_python_handler(ctx, errors)
-    {
-        if let Ok(valid) = std::str::from_utf8(data) {
-            return Ok(if signature {
-                valid.strip_prefix('\u{feff}').unwrap_or(valid)
-            } else {
-                valid
-            }
-            .to_owned());
-        }
-        let input = ctx.alloc(Value::Bytes(data.to_vec()));
-        let result = registered_utf8(ctx, input, errors, signature)?;
-        Ok(ctx.str_value(result)?.to_owned())
-    } else {
-        codec
-            .decode(data, Some(errors))
-            .map_err(|e| ctx.decode_error(e))
-    }
-}
-
 fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) -> Result<Id> {
     stateful_utf8(ctx, input, name, signature, true).map(|(text, _)| text)
 }
