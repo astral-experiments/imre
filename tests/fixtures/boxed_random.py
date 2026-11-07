@@ -318,3 +318,34 @@ def current():
     reference = random.Random(419)
     assert sample_items(range(40), 5) == reference.sample(range(40), 5)
     assert random.getrandbits(32) == reference.getrandbits(32)
+
+    import os
+    import secrets
+    assert secrets.SystemRandom is random.SystemRandom
+    assert secrets.randbits.__self__ is secrets._sysrand
+    assert random._urandom is os.urandom
+
+    calls = []
+    def entropy(n):
+        calls.append(n)
+        return b"\xa5" * n
+
+    source = random.SystemRandom(419)
+    try:
+        random._urandom = entropy
+        assert source.getrandbits(k=0) == 0
+        assert source.getrandbits(9) == 331
+        assert secrets.randbits(8) == 165
+        assert source.random() == (int.from_bytes(b"\xa5" * 7) >> 3) * (2 ** -53)
+        assert source.randbytes(n=3) == b"\xa5" * 3
+        assert calls == [0, 2, 1, 7, 3]
+    finally:
+        random._urandom = os.urandom
+    assert source.seed(object(), extra=True) is None
+    for method in (source.getstate, source.setstate):
+        try:
+            method(None)
+        except NotImplementedError as error:
+            assert str(error) == "System entropy source does not have state."
+        else:
+            raise AssertionError("SystemRandom exposed generator state")

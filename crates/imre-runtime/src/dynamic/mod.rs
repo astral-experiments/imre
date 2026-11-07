@@ -4234,6 +4234,15 @@ impl Context {
                 self.bind(scope, "devnull", devnull);
             }
             "random" if source.is_none() => stdlib::random::instance::install(self, scope)?,
+            "secrets" if source.is_none() => {
+                let random = self.module("random")?;
+                let class = self.lookup_attr(random, "SystemRandom")?;
+                let instance = self.call(class, Vec::new(), Vec::new())?;
+                let randbits = self.lookup_attr(instance, "getrandbits")?;
+                self.bind(scope, "SystemRandom", class);
+                self.bind(scope, "_sysrand", instance);
+                self.bind(scope, "randbits", randbits);
+            }
             "math" if source.is_none() => {
                 for (name, number) in [
                     ("pi", std::f64::consts::PI),
