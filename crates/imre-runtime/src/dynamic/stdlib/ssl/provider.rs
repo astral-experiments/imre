@@ -184,8 +184,6 @@ functions! {
     X509_VERIFY_PARAM_set1_ip(Handle, *const u8, usize) -> c_int;
     SSL_set1_host(Handle, *const c_char) -> c_int;
     SSL_ctrl(Handle, c_int, c_long, Handle) -> c_long;
-    SSL_accept(Handle) -> c_int;
-    SSL_connect(Handle) -> c_int;
     SSL_get_verify_mode(Handle) -> c_int;
     SSL_get_verify_result(Handle) -> c_long;
     SSL_get0_peer_certificate(Handle) -> Handle;
@@ -301,7 +299,12 @@ impl Api {
         unsafe { (self.ERR_clear_error)() };
     }
 
-    fn set_peer_name(&self, ssl: Handle, host: &str, verify_hostname: bool) -> Result<(), Failure> {
+    fn set_peer_name(
+        &self,
+        ssl: Handle,
+        host: &str,
+        verify_hostname: bool,
+    ) -> Result<CString, Failure> {
         if host.is_empty() || host.starts_with('.') || !host.is_ascii() {
             return Err(Failure::Other(
                 "invalid or unsupported server hostname".into(),
@@ -357,7 +360,7 @@ impl Api {
                 }
             }
         }
-        Ok(())
+        Ok(name)
     }
 
     fn encode_certificate(&self, certificate: Handle) -> Result<Vec<u8>, Failure> {
@@ -379,7 +382,12 @@ impl Api {
         Ok(der)
     }
 
-    fn verify_peer(&self, ssl: Handle, client_handshake_complete: bool) -> Result<(), Failure> {
+    fn verify_peer(
+        &self,
+        ssl: Handle,
+        hostname: Option<&CStr>,
+        client_handshake_complete: bool,
+    ) -> Result<(), Failure> {
         // SAFETY: read the mode copied into this SSL by SSL_new, even if the context
         // was reconfigured between retries on a memory BIO.
         if unsafe { (self.SSL_get_verify_mode)(ssl) } & SSL_VERIFY_PEER == 0 {
@@ -392,10 +400,18 @@ impl Api {
             let msg = unsafe { CStr::from_ptr((self.X509_verify_cert_error_string)(code)) };
             #[allow(clippy::useless_conversion, reason = "OpenSSL returns a C long")]
             let code = i64::from(code);
-            return Err(Failure::Verify {
-                code,
-                message: msg.to_string_lossy().into_owned(),
-            });
+            let message = match (code, hostname) {
+                (62, Some(name)) => format!(
+                    "Hostname mismatch, certificate is not valid for '{}'.",
+                    name.to_string_lossy()
+                ),
+                (64, Some(name)) => format!(
+                    "IP address mismatch, certificate is not valid for '{}'.",
+                    name.to_string_lossy()
+                ),
+                _ => msg.to_string_lossy().into_owned(),
+            };
+            return Err(Failure::Verify { code, message });
         }
         // A user-selected anonymous TLS 1.2 cipher can omit the certificate and
         // still yield X509_V_OK. This client requires an authenticated peer.
@@ -863,8 +879,27 @@ impl Context {
         // SAFETY: SSL_new acquires a reference to this live context.
         let handle = NonNull::new(unsafe { (api.SSL_new)(self.handle.as_ptr()) })
             .ok_or_else(|| api.error("SSL_new"))?;
+        let ssl = handle.as_ptr();
+        // SAFETY: configure the new SSL before attaching either kind of BIO.
+        unsafe {
+            // Match CPython's SSL_set_mode: a write retry may use an equivalent
+            // Python buffer at a different address, and reads process control records.
+            const SSL_CTRL_MODE: i32 = 33;
+            const ACCEPT_MOVING_WRITE_BUFFER: std::ffi::c_long = 2;
+            const AUTO_RETRY: std::ffi::c_long = 4;
+            (api.SSL_ctrl)(
+                ssl,
+                SSL_CTRL_MODE,
+                ACCEPT_MOVING_WRITE_BUFFER | AUTO_RETRY,
+                ptr::null_mut(),
+            );
+            if server {
+                (api.SSL_set_accept_state)(ssl);
+            } else {
+                (api.SSL_set_connect_state)(ssl);
+            }
+        }
         if self.post_handshake_auth {
-            let ssl = handle.as_ptr();
             // SAFETY: configure only the new SSL. A client advertises PHA in its
             // ClientHello. A server defers an already configured peer check.
             unsafe {
@@ -1184,12 +1219,13 @@ pub(crate) struct Session {
     api: &'static Api,
     handle: NonNull<c_void>,
     socket: Option<crate::ObjectOwner>,
+    hostname: Option<CString>,
     server: bool,
+    handshake_complete: bool,
 }
 
 enum Operation<'a> {
-    Accept,
-    Connect,
+    Handshake,
     Read(&'a mut [u8]),
     Write(&'a [u8]),
     Shutdown,
@@ -1213,43 +1249,71 @@ impl Session {
     ) -> Result<Self, bio::BioFailure> {
         let api = ctx.api;
         let handle = ctx.new_connection(server)?;
-        let session = Self {
+        let mut session = Self {
             alpn: Rc::clone(&ctx.alpn),
             api,
             handle,
             socket: Some(socket),
+            hostname: None,
             server,
+            handshake_complete: false,
         };
         if let Some(host) = host {
-            api.set_peer_name(handle.as_ptr(), host, ctx.check_hostname)?;
+            session.hostname =
+                Some(api.set_peer_name(handle.as_ptr(), host, ctx.check_hostname)?);
         }
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
         if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
             return Err(api.error("SSL_set_fd").into());
         }
-        let handshake = session.blocking_io(
-            if server {
-                Operation::Accept
-            } else {
-                Operation::Connect
-            },
-            Api::ssl_failure_kind,
-        );
-        api.verify_peer(handle.as_ptr(), !server && handshake.is_ok())?;
-        handshake?;
         Ok(session)
     }
 
-    /// Retry a blocking socket BIO operation with the same buffer and length.
-    fn blocking_io<E: From<Failure>>(
+    pub(super) fn handshake(&mut self) -> Result<(), bio::BioFailure> {
+        self.handshake_until(
+            socket::deadline(self.socket()),
+            "The handshake operation timed out",
+        )
+    }
+
+    fn handshake_until(
+        &mut self,
+        until: Option<socket::Deadline>,
+        timeout_message: &'static str,
+    ) -> Result<(), bio::BioFailure> {
+        let result = self
+            .socket_io(Operation::Handshake, until, timeout_message)
+            .map(|_| ());
+        let result =
+            self.api
+                .finish_handshake(self.handle, self.hostname.as_deref(), self.server, result);
+        self.handshake_complete = result.is_ok();
+        result
+    }
+
+    /// Implicit handshakes must authenticate the peer before application bytes are sent or read.
+    fn transfer(
+        &mut self,
+        operation: Operation<'_>,
+        timeout_message: &'static str,
+    ) -> Result<usize, bio::BioFailure> {
+        let until = socket::deadline(self.socket());
+        if !self.handshake_complete {
+            self.handshake_until(until, timeout_message)?;
+        }
+        self.socket_io(operation, until, timeout_message)
+    }
+
+    fn socket_io(
         &self,
         mut operation: Operation<'_>,
-        failure: impl FnOnce(&Api, NonNull<c_void>, i32, &str) -> E,
-    ) -> Result<usize, E> {
+        until: Option<socket::Deadline>,
+        timeout_message: &'static str,
+    ) -> Result<usize, bio::BioFailure> {
         let api = self.api;
         let ssl = self.handle.as_ptr();
-        let until = socket::deadline(self.socket());
+        let nonblocking = socket::get_timeout(self.socket()) == Some(std::time::Duration::ZERO);
         let mut sent_shutdown = false;
         loop {
             api.clear();
@@ -1260,8 +1324,7 @@ impl Session {
             let (rc, label) = unsafe {
                 match &mut operation {
                     Operation::Shutdown => ((api.SSL_shutdown)(ssl), "SSL_shutdown"),
-                    Operation::Accept => ((api.SSL_accept)(ssl), "SSL_accept"),
-                    Operation::Connect => ((api.SSL_connect)(ssl), "SSL_connect"),
+                    Operation::Handshake => ((api.SSL_do_handshake)(ssl), "SSL_do_handshake"),
                     Operation::Read(buf) => (
                         (api.SSL_read_ex)(ssl, buf.as_mut_ptr().cast(), buf.len(), &mut n),
                         "SSL_read",
@@ -1290,14 +1353,21 @@ impl Session {
             let os_error = std::io::Error::last_os_error();
             // SAFETY: classify this exact return value immediately on the same thread.
             let kind = unsafe { (api.SSL_get_error)(ssl, rc) };
-            let events = match kind {
-                SSL_ERROR_WANT_READ => Some(libc::POLLIN),
-                SSL_ERROR_WANT_WRITE => Some(libc::POLLOUT),
-                SSL_ERROR_SYSCALL if os_error.kind() == io::ErrorKind::Interrupted => None,
-                SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
-                    return Err(Failure::Io(os_error).into());
+            let events = match (kind, api.syscall_error(kind, os_error)) {
+                (SSL_ERROR_WANT_READ, _) if nonblocking => return Err(bio::BioFailure::WantRead),
+                (SSL_ERROR_WANT_WRITE, _) if nonblocking => return Err(bio::BioFailure::WantWrite),
+                (SSL_ERROR_WANT_READ, _) => Some(libc::POLLIN),
+                (SSL_ERROR_WANT_WRITE, _) => Some(libc::POLLOUT),
+                (_, Some(error)) if error.kind() == io::ErrorKind::Interrupted => None,
+                (_, Some(error)) => return Err(Failure::Io(error).into()),
+                _ => {
+                    return Err(api.ssl_failure_kind(
+                        self.handle,
+                        self.hostname.as_deref(),
+                        kind,
+                        label,
+                    ));
                 }
-                _ => return Err(failure(api, self.handle, kind, label)),
             };
             let wait = match events {
                 _ if until.is_some_and(|end| end.remaining().is_zero()) => {
@@ -1310,14 +1380,12 @@ impl Session {
                 if error.kind() != io::ErrorKind::TimedOut {
                     return Err(Failure::Io(error).into());
                 }
-                let message = match operation {
-                    Operation::Accept | Operation::Connect => "The handshake operation timed out",
-                    Operation::Write(_) => "The write operation timed out",
-                    Operation::Shutdown if kind == SSL_ERROR_WANT_WRITE => {
+                let message =
+                    if matches!(operation, Operation::Shutdown) && kind == SSL_ERROR_WANT_WRITE {
                         "The write operation timed out"
-                    }
-                    Operation::Read(_) | Operation::Shutdown => "The read operation timed out",
-                };
+                    } else {
+                        timeout_message
+                    };
                 return Err(Failure::Io(io::Error::new(io::ErrorKind::TimedOut, message)).into());
             }
         }
@@ -1329,7 +1397,7 @@ impl Session {
 
     pub(crate) fn channel_binding(&self) -> Option<Vec<u8>> {
         let ssl = self.handle.as_ptr();
-        // SAFETY: this SSL completed its handshake. On a full handshake the client
+        // SAFETY: this SSL is live. On a full handshake the client
         // sends the first Finished; on resumption the server sends it first.
         let resumed = unsafe { (self.api.SSL_session_reused)(ssl) } != 0;
         let finished = if resumed == self.server {
@@ -1384,15 +1452,15 @@ impl Session {
         Ok(certificates)
     }
 
-    pub(crate) fn send(&mut self, bytes: &[u8]) -> Result<usize, Failure> {
-        let n = self.blocking_io(Operation::Write(bytes), |api, _, _, label| api.error(label))?;
+    pub(crate) fn send(&mut self, bytes: &[u8]) -> Result<usize, bio::BioFailure> {
+        let n = self.transfer(Operation::Write(bytes), "The write operation timed out")?;
         if (n == 0 && !bytes.is_empty()) || n > bytes.len() {
-            return Err(Failure::Other("invalid SSL_write byte count".into()));
+            return Err(Failure::Other("invalid SSL_write byte count".into()).into());
         }
         Ok(n)
     }
 
-    pub(crate) fn sendall(&mut self, mut bytes: &[u8]) -> Result<(), Failure> {
+    pub(crate) fn sendall(&mut self, mut bytes: &[u8]) -> Result<(), bio::BioFailure> {
         while !bytes.is_empty() {
             let n = self.send(bytes)?;
             bytes = &bytes[n..];
@@ -1404,17 +1472,21 @@ impl Session {
         if out.is_empty() {
             return Ok(0);
         }
-        let result = self.blocking_io(Operation::Read(out), Api::ssl_failure_kind);
+        let result = self.transfer(Operation::Read(out), "The read operation timed out");
         self.api.finish_read(self.handle, result)
     }
 
     pub(in crate::dynamic) fn pending(&self) -> Result<usize, bio::BioFailure> {
-        self.api.ssl_pending(self.handle)
+        self.api.ssl_pending(self.handle, self.hostname.as_deref())
     }
 
     /// Exchange close notifications while the session still owns the socket.
     pub(in crate::dynamic) fn shutdown(&mut self) -> Result<(), bio::BioFailure> {
-        self.blocking_io(Operation::Shutdown, Api::ssl_failure_kind)?;
+        self.socket_io(
+            Operation::Shutdown,
+            socket::deadline(self.socket()),
+            "The read operation timed out",
+        )?;
         Ok(())
     }
 }

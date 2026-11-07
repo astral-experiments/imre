@@ -3562,6 +3562,11 @@ def report(text):
                     "-IB", dh_params, certdata,
                     native_args=("run", dh_params, "--quiet", "--", certdata), native_timeout=600,
                 )
+                handshake = fixtures / "ssl_socket_handshake.py"
+                compare(
+                    "-IB", handshake, certdata,
+                    native_args=("run", handshake, "--quiet", "--", certdata), native_timeout=600,
+                )
                 object_io = fixtures / "ssl_object_io.py"
                 compare(
                     "-IB", object_io, certdata,

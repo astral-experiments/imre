@@ -249,13 +249,12 @@ pub(crate) fn take_tls_stream(socket: &Object, server: bool) -> Result<(crate::O
         let nonblocking = flags & libc::O_NONBLOCK != 0;
         let supported = match s.timeout_ns {
             -1 => !nonblocking,
-            0 => false,
             _ => connected && nonblocking,
         };
         if !supported {
             return Err(Error::new(
                 Kind::NotImplementedError,
-                "TLS requires a blocking socket or a connected socket with a positive timeout",
+                "TLS requires a blocking socket or a connected socket in the requested timeout mode",
             ));
         }
         let transport = Socket {

@@ -1226,7 +1226,10 @@ pub(super) enum Value {
     #[cfg(unix)]
     TlsListener(crate::ObjectOwner),
     #[cfg(unix)]
-    TlsBioSession(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>),
+    TlsBioSession {
+        session: std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>,
+        server_hostname: Id,
+    },
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
@@ -1668,7 +1671,7 @@ impl Value {
             #[cfg(unix)]
             Self::TlsListener(_) => "_imre_ssl.Listener",
             #[cfg(unix)]
-            Self::TlsBioSession(_) => "_imre_ssl.BioSession",
+            Self::TlsBioSession { .. } => "_imre_ssl.BioSession",
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
@@ -2428,8 +2431,11 @@ impl Value {
             Self::MemoryBio(_)
             | Self::TlsContext(_)
             | Self::TlsSession(_)
-            | Self::TlsListener(_)
-            | Self::TlsBioSession(_) => {}
+            | Self::TlsListener(_) => {}
+            #[cfg(unix)]
+            Self::TlsBioSession {
+                server_hostname, ..
+            } => visit.push(*server_hostname),
             Self::ZstdDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::Bz2Decompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::LzmaDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
