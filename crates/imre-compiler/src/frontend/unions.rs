@@ -865,7 +865,7 @@ impl Checker<'_> {
                 )])
             }
             ast::Expr::Call(call)
-                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance")
+                if self.unshadowed_builtin(&call.func, "isinstance")
                     && call.arguments.args.len() == 2
                     && call.arguments.keywords.is_empty() =>
             {

@@ -497,6 +497,10 @@ const RESERVED: &[&str] = &[
     "__file__",
 ];
 
+pub(crate) fn reserved_builtin_function(name: &str) -> bool {
+    RESERVED.contains(&name) && imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+}
+
 fn reserved(name: &str) -> bool {
     RESERVED.contains(&name) || exception_kind(name).is_some()
 }
@@ -564,6 +568,7 @@ fn lower_graph(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
+                && graph.builtin_function_shadow(name, *binding).is_none()
                 && !matches!(
                     (name.as_str(), binding),
                     (
@@ -573,10 +578,13 @@ fn lower_graph(
                                 | Intrinsic::GzipOpen
                                 | Intrinsic::Fd(ir::FdOperation::Open)
                         )
-                    ) | (
-                        "filter",
-                        Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Filter { .. }))
-                    )
+                    ) | ("print", Binding::Intrinsic(Intrinsic::BuiltinsPrint))
+                        | (
+                            "filter",
+                            Binding::Intrinsic(Intrinsic::Fnmatch(
+                                ir::FnmatchOperation::Filter { .. }
+                            ))
+                        )
                 )
             {
                 return Err(module.error(
@@ -827,7 +835,7 @@ fn lower_graph(
         inference.discover_packed_arguments();
     }
     for (module, function, _) in &mut definitions {
-        assignments::alias_builtin_parameters(function, &graph.modules[*module].bindings);
+        assignments::alias_builtin_parameters(function, graph, *module);
         if closed_calls::prepare(function, graph, *module) {
             inference.discover_packed_arguments();
         }
@@ -3453,7 +3461,8 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Call(call)
                 if self.types.element(concrete).is_some()
-                    && matches!(&*call.func, ast::Expr::Name(name) if matches!(name.id.as_str(), "list" | "sorted")) =>
+                    && (self.unshadowed_builtin(&call.func, "list")
+                        || self.unshadowed_builtin(&call.func, "sorted")) =>
             {
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "sorted") {
                     self.sorted_call(call, self.types.element(concrete))?
@@ -10594,16 +10603,19 @@ impl<'a> Checker<'a> {
                 return Ok(answer);
             }
         }
-        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
+        if self.unshadowed_builtin(&call.func, "isinstance") {
             return self.isinstance(call);
         }
-        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass") {
+        if self.unshadowed_builtin(&call.func, "issubclass") {
             return self.issubclass(call);
         }
         if let Some(kind) = self.exception_category(&call.func) {
             return self.simple_exception(call, kind);
         }
         if let Some(binding) = self.resolve(&call.func) {
+            if binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint) {
+                return self.named_builtin_call(call, "print");
+            }
             if let Binding::Value(_) = binding {
                 let callable = self.expr(&call.func)?;
                 return self.invoke(call, callable);
@@ -11441,17 +11453,19 @@ impl<'a> Checker<'a> {
                 "only statically bound direct calls are supported",
             ));
         };
+        self.named_builtin_call(call, name.id.as_str())
+    }
+
+    fn named_builtin_call(&mut self, call: &ast::ExprCall, name: &str) -> Result<Expr, String> {
         // Passing stderr as a positional value displays the open text stream.
-        if matches!(name.id.as_str(), "print" | "repr" | "str")
-            && !self.names.contains_key(name.id.as_str())
-            && self.resolve(&call.func).is_none()
+        if matches!(name, "print" | "repr" | "str")
             && call.arguments.keywords.is_empty()
             && call
                 .arguments
                 .args
                 .iter()
                 .any(|arg| self.resolve(arg) == Some(Binding::Intrinsic(Intrinsic::Stderr)))
-            && (name.id == "print" || call.arguments.args.len() == 1)
+            && (name == "print" || call.arguments.args.len() == 1)
         {
             let mut pieces = Vec::new();
             for arg in &call.arguments.args {
@@ -11484,7 +11498,7 @@ impl<'a> Checker<'a> {
                 );
             }
             let text = pieces.into_iter().reduce(unpacking::concat).unwrap();
-            return Ok(if name.id == "print" {
+            return Ok(if name == "print" {
                 Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Print, vec![text]),
@@ -11493,7 +11507,7 @@ impl<'a> Checker<'a> {
                 text
             });
         }
-        if name.id == "print"
+        if name == "print"
             && let [field] = call.arguments.keywords.as_slice()
             && field
                 .arg
@@ -11511,7 +11525,7 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::StderrLine, vec![text]),
             });
         }
-        match name.id.as_str() {
+        match name {
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
@@ -11519,8 +11533,8 @@ impl<'a> Checker<'a> {
             "next" => return self.next_cursor(call),
             "iter" if call.arguments.args.len() == 1 => return self.iter_cursor(call),
             "sum" => return self.sum_call(call),
-            "min" | "max" => return self.extremum_call(call, name.id == "min"),
-            "any" | "all" => return self.quantifier_call(call, name.id == "all"),
+            "min" | "max" => return self.extremum_call(call, name == "min"),
+            "any" | "all" => return self.quantifier_call(call, name == "all"),
             "map" | "filter" | "zip" | "reversed" | "enumerate" | "range" => {
                 return Err(error(
                     self.source,
@@ -11530,18 +11544,17 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        if name.id == "ord" && !self.names.contains_key("ord") && self.resolve(&call.func).is_none()
-        {
+        if name == "ord" && !self.names.contains_key("ord") && self.resolve(&call.func).is_none() {
             return self.ordinal_call(call);
         }
-        if name.id == "ascii"
+        if name == "ascii"
             && !self.names.contains_key("ascii")
             && self.resolve(&call.func).is_none()
         {
             return self.ascii_call(call);
         }
         self.reject_builtin_keywords(call)?;
-        if name.id == "bool" {
+        if name == "bool" {
             return match call.arguments.args.as_ref() {
                 [] => Ok(Expr::boolean(false)),
                 [value] => self.condition(value),
@@ -11552,7 +11565,7 @@ impl<'a> Checker<'a> {
                 )),
             };
         }
-        if name.id == "bytes" {
+        if name == "bytes" {
             let value = match call.arguments.args.as_ref() {
                 [] => {
                     return Ok(Expr {
@@ -11619,7 +11632,7 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
-        if name.id == "str" && args.len() == 1 {
+        if name == "str" && args.len() == 1 {
             return self.checked_string(args.into_iter().next().unwrap(), call);
         }
         if tuple_dir && self.types.is_plain_or_declared_tuple(args[0].ty) {
@@ -11644,7 +11657,7 @@ impl<'a> Checker<'a> {
         }
         if let [proxy] = args.as_slice()
             && matches!(proxy.ty, Type::WeakProxy(_))
-            && let Some(value) = self.weak_proxy_builtin(name.id.as_str(), proxy.clone())
+            && let Some(value) = self.weak_proxy_builtin(name, proxy.clone())
         {
             return Ok(value);
         }
@@ -11654,7 +11667,7 @@ impl<'a> Checker<'a> {
         {
             return Ok(tuple);
         }
-        if name.id == "tuple"
+        if name == "tuple"
             && self.unshadowed_builtin(&call.func, "tuple")
             && let [value] = args.as_slice()
             && let Some(fields) = self.types.library_tuple_fields(value.ty)
@@ -11677,7 +11690,7 @@ impl<'a> Checker<'a> {
         if let [value] = args.as_slice()
             && let Type::Placeholder(kind) = value.ty
         {
-            let result = match name.id.as_str() {
+            let result = match name {
                 "type" if kind == ir::PlaceholderKind::Value => {
                     Some(partials::singleton(ir::PlaceholderKind::Class))
                 }
@@ -11691,16 +11704,16 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1
             && matches!(args[0].ty, Type::Calendar(_))
-            && matches!(name.id.as_str(), "print" | "repr")
+            && matches!(name, "print" | "repr")
         {
-            return Ok(calendar::format_builtin(name.id.as_str(), args));
+            return Ok(calendar::format_builtin(name, args));
         }
         if let [value] = args.as_slice()
-            && let Some(result) = self.patch_builtin(name.id.as_str(), value)
+            && let Some(result) = self.patch_builtin(name, value)
         {
             return Ok(result);
         }
-        if name.id == "hash" {
+        if name == "hash" {
             let [value] = args.as_slice() else {
                 return Err(error(self.source, call, "hash requires one argument"));
             };
@@ -11745,8 +11758,8 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1
             && (((args[0].ty.is_path() || self.types.payload(args[0].ty) == Some(Type::Str))
-                && name.id == "print")
-                || (args[0].ty == Type::PathInfo && matches!(name.id.as_str(), "repr" | "print")))
+                && name == "print")
+                || (args[0].ty == Type::PathInfo && matches!(name, "repr" | "print")))
         {
             let text = if self.types.payload(args[0].ty) == Some(Type::Str) {
                 self.optional_text(args.into_iter().next().unwrap())
@@ -11758,7 +11771,7 @@ impl<'a> Checker<'a> {
                 };
                 paths::operation(op, Type::Str, args)
             };
-            return Ok(if name.id != "print" {
+            return Ok(if name != "print" {
                 text
             } else {
                 Expr {
@@ -11767,19 +11780,19 @@ impl<'a> Checker<'a> {
                 }
             });
         }
-        if name.id == "int"
+        if name == "int"
             && args.len() == 1
             && matches!(args[0].ty, Type::Union(_))
             && let Some(value) = self.int_enum_union_value(args[0].clone())
         {
             return Ok(value);
         }
-        if args.len() == 1 && matches!(args[0].ty, Type::IntEnum(_)) && name.id == "int" {
+        if args.len() == 1 && matches!(args[0].ty, Type::IntEnum(_)) && name == "int" {
             return Ok(Self::enum_integer(args.into_iter().next().unwrap()));
         }
         if let [class] = args.as_slice()
             && class.ty == Type::BuiltinClass
-            && name.id == "type"
+            && name == "type"
         {
             return Ok(
                 self.evaluated_receiver(Some(class.clone()), annotations::class_value("type"))
@@ -11787,7 +11800,7 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1
             && matches!(args[0].ty, Type::Enum(_) | Type::BuiltinClass)
-            && (name.id == "print" || (args[0].ty == Type::BuiltinClass && name.id == "repr"))
+            && (name == "print" || (args[0].ty == Type::BuiltinClass && name == "repr"))
         {
             let builtin = if args[0].ty == Type::BuiltinClass {
                 Builtin::Repr
@@ -11798,7 +11811,7 @@ impl<'a> Checker<'a> {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(builtin, args),
             };
-            return Ok(if name.id != "print" {
+            return Ok(if name != "print" {
                 text
             } else {
                 Expr {
@@ -11808,15 +11821,14 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1
-            && (matches!(args[0].ty, Type::StrEnum(_))
-                && matches!(name.id.as_str(), "print" | "len")
-                || matches!(args[0].ty, Type::IntEnum(_)) && name.id == "print")
+            && (matches!(args[0].ty, Type::StrEnum(_)) && matches!(name, "print" | "len")
+                || matches!(args[0].ty, Type::IntEnum(_)) && name == "print")
         {
             let text = Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::StrEnumValue, args),
             };
-            return Ok(match name.id.as_str() {
+            return Ok(match name {
                 "print" => Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Print, vec![text]),
@@ -11827,13 +11839,13 @@ impl<'a> Checker<'a> {
                 },
             });
         }
-        if name.id == "frozenset"
+        if name == "frozenset"
             && let [value] = args.as_slice()
             && value.ty == Type::FrozenStrings
         {
             return Ok(value.clone());
         }
-        if name.id == "frozenset"
+        if name == "frozenset"
             && args.len() == 1
             && self.types.element(args[0].ty) == Some(Type::Str)
         {
@@ -11842,7 +11854,7 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::FreezeStrings, args),
             });
         }
-        if name.id == "divmod" && args.len() == 2 {
+        if name == "divmod" && args.len() == 2 {
             if args.iter().any(|arg| arg.ty == Type::Float) {
                 if args
                     .iter()
@@ -11894,7 +11906,7 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1 && args[0].ty == Type::ObjectValue {
-            let op = match name.id.as_str() {
+            let op = match name {
                 "repr" => Some((Type::Str, Builtin::ExceptionFieldRepr)),
                 "len" => Some((Type::Int, Builtin::ExceptionFieldLen)),
                 _ => None,
@@ -11906,7 +11918,7 @@ impl<'a> Checker<'a> {
                 });
             }
         }
-        if name.id == "print" && args.len() == 1 && args[0].ty == Type::ObjectValue {
+        if name == "print" && args.len() == 1 && args[0].ty == Type::ObjectValue {
             let text = Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::Str, args),
@@ -11916,7 +11928,7 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::Print, vec![text]),
             });
         }
-        if name.id == "print"
+        if name == "print"
             && args.len() == 1
             && matches!(
                 args[0].ty,
@@ -11944,7 +11956,7 @@ impl<'a> Checker<'a> {
         {
             return Err(self.scoped_builtin_error("subprocess.Popen repr", call));
         }
-        if name.id == "repr"
+        if name == "repr"
             && args.len() == 1
             && matches!(
                 args[0].ty,
@@ -11956,12 +11968,9 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::ExceptionRepr, args),
             });
         }
-        if args.len() == 1
-            && args[0].ty == Type::LogRecord
-            && matches!(name.id.as_str(), "repr" | "print")
-        {
+        if args.len() == 1 && args[0].ty == Type::LogRecord && matches!(name, "repr" | "print") {
             let text = logging_records::op(ir::LogRecordOperation::Repr, Type::Str, args);
-            return Ok(if name.id == "print" {
+            return Ok(if name == "print" {
                 Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Print, vec![text]),
@@ -11971,7 +11980,7 @@ impl<'a> Checker<'a> {
             });
         }
         if let [value] = args.as_slice()
-            && name.id == "repr"
+            && name == "repr"
             && let Some(rendered) = self.mock_call_repr(value, call)?
         {
             return Ok(rendered);
@@ -11981,13 +11990,13 @@ impl<'a> Checker<'a> {
                 args[0].ty,
                 Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
             )
-            && matches!(name.id.as_str(), "repr" | "print")
+            && matches!(name, "repr" | "print")
         {
             let rendered = Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::Repr, args),
             };
-            return Ok(if name.id == "print" {
+            return Ok(if name == "print" {
                 Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Print, vec![rendered]),
@@ -11996,7 +12005,7 @@ impl<'a> Checker<'a> {
                 rendered
             });
         }
-        if name.id == "hasattr"
+        if name == "hasattr"
             && let [receiver, key] = args.as_slice()
             && receiver.ty == Type::SysImplementation
             && self.resolve(&call.func).is_none()
@@ -12007,9 +12016,9 @@ impl<'a> Checker<'a> {
             return Ok(self.implementation_hasattr(receiver.clone(), key));
         }
         if matches!(
-            (name.id.as_str(), args.len()),
+            (name, args.len()),
             ("getattr", 2 | 3) | ("hasattr" | "delattr", 2) | ("setattr", 3)
-        ) && self.unshadowed_builtin(&call.func, name.id.as_str())
+        ) && self.unshadowed_builtin(&call.func, name)
             && matches!(args[0].ty, Type::Coroutine(_))
             && matches!(&args[1].kind, ExprKind::Str(member) if member == "cr_origin")
         {
@@ -12025,33 +12034,33 @@ impl<'a> Checker<'a> {
         {
             return Err(self.object_runtime_export("datetime instance member", call));
         }
-        if matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
+        if matches!(name, "getattr" | "hasattr" | "vars")
             && args.first().is_some_and(|arg| arg.ty == Type::NativeModule)
             && self.resolve(&call.func).is_none()
-            && !self.names.contains_key(name.id.as_str())
+            && !self.names.contains_key(name)
         {
-            return self.errno_builtin(name.id.as_str(), call, &args);
+            return self.errno_builtin(name, call, &args);
         }
-        if matches!(name.id.as_str(), "vars" | "hasattr" | "getattr")
-            && self.unshadowed_builtin(&call.func, name.id.as_str())
-            && let Some(value) = self.record_namespace_builtin(name.id.as_str(), &args, call)?
+        if matches!(name, "vars" | "hasattr" | "getattr")
+            && self.unshadowed_builtin(&call.func, name)
+            && let Some(value) = self.record_namespace_builtin(name, &args, call)?
         {
             return Ok(value);
         }
-        if name.id == "vars"
+        if name == "vars"
             && let [receiver] = args.as_slice()
             && let Type::SimpleNamespace(id) = receiver.ty
         {
             return Ok(namespaces::backing(receiver.clone(), id));
         }
-        if name.id == "repr" && args.len() == 1 && matches!(args[0].ty, Type::Class(_)) {
+        if name == "repr" && args.len() == 1 && matches!(args[0].ty, Type::Class(_)) {
             return self.record_repr(args.into_iter().next().unwrap(), call);
         }
-        if matches!(name.id.as_str(), "print" | "repr")
+        if matches!(name, "print" | "repr")
             && let [value] = args.as_slice()
-            && let Some(text) = self.structured_display(name.id.as_str(), value, call)?
+            && let Some(text) = self.structured_display(name, value, call)?
         {
-            return Ok(if name.id == "print" {
+            return Ok(if name == "print" {
                 Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Print, vec![text]),
@@ -12060,33 +12069,31 @@ impl<'a> Checker<'a> {
                 text
             });
         }
-        if name.id == "len"
+        if name == "len"
             && let [value] = args.as_slice()
             && self.mock_call_record(value.ty)
         {
             return Err(self.object_runtime_export("unittest.mock call tuple", call));
         }
-        if name.id == "len"
+        if name == "len"
             && let [value] = args.as_slice()
             && self.mapping_class(value.ty).is_some()
         {
             return self.mapping_length(value.clone(), call);
         }
-        if name.id.as_str() == "len"
-            && matches!(args.as_slice(), [m] if m.ty == Type::ReadOnlyObjectMapping)
-        {
+        if name == "len" && matches!(args.as_slice(), [m] if m.ty == Type::ReadOnlyObjectMapping) {
             return Ok(Expr {
                 ty: Type::Int,
                 kind: ExprKind::Builtin(Builtin::Len, args),
             });
         }
-        if name.id.as_str() == "len"
+        if name == "len"
             && let ([source], [set]) = (call.arguments.args.as_ref(), args.as_slice())
             && let Some(length) = self.short_set_len(source, set)
         {
             return Ok(length);
         }
-        let (builtin, ty) = match name.id.as_str() {
+        let (builtin, ty) = match name {
             "bytearray" if self.unshadowed_builtin(&call.func, "bytearray") => {
                 if !args.is_empty() || !call.arguments.keywords.is_empty() {
                     return Err(self.object_builtin_error("bytearray", call));
@@ -12243,8 +12250,8 @@ impl<'a> Checker<'a> {
             {
                 return Err(self.scoped_builtin_error("complex constructor", call));
             }
-            "set" | "frozenset" if self.unshadowed_builtin(&call.func, name.id.as_str()) => {
-                return Err(self.object_builtin_error(name.id.as_str(), call));
+            "set" | "frozenset" if self.unshadowed_builtin(&call.func, name) => {
+                return Err(self.object_builtin_error(name, call));
             }
             _ => {
                 return Err(error(

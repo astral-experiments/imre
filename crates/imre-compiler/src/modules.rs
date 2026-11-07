@@ -816,6 +816,7 @@ pub(crate) enum Intrinsic {
     BuiltinsLast,
     BuiltinsLen,
     BuiltinsAscii,
+    BuiltinsPrint,
     BuiltinsHex,
     BuiltinsOpen,
     SysDisplayHook,
@@ -1998,6 +1999,7 @@ impl IntrinsicModule {
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
+            (Self::Builtins, "print") => Intrinsic::BuiltinsPrint,
             (Self::Builtins, "bin") => Intrinsic::ScopedObjectExport("builtins.bin"),
             (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
             (Self::Builtins, "open") => Intrinsic::BuiltinsOpen,
@@ -3784,7 +3786,47 @@ impl SourceGraph {
         if let Some(import) = self.local_static_binding(module, expression) {
             return self.local_import_value(module, expression, import);
         }
-        resolve_binding(&self.modules, module, expression)
+        let binding = resolve_binding(&self.modules, module, expression)?;
+        if let Binding::Definition(id) = binding
+            && self.builtin_before_function(module, expression, id)
+        {
+            return None;
+        }
+        Some(binding)
+    }
+
+    pub(crate) fn builtin_function_shadow(
+        &self,
+        name: &str,
+        binding: Binding,
+    ) -> Option<&ast::StmtFunctionDef> {
+        let Binding::Definition(id) = binding else {
+            return None;
+        };
+        if !crate::frontend::reserved_builtin_function(name) {
+            return None;
+        }
+        self.modules[id.module].parsed.syntax().body[id.statement].as_function_def_stmt()
+    }
+
+    /// A bare read during module initialization can still reach the builtin before a local def.
+    fn builtin_before_function(
+        &self,
+        module: ModuleId,
+        expression: &ast::Expr,
+        id: DefinitionId,
+    ) -> bool {
+        let ast::Expr::Name(name) = expression else {
+            return false;
+        };
+        let statement = &self.modules[id.module].parsed.syntax().body[id.statement];
+        id.module == module
+            && name.start() < statement.end()
+            && statement
+                .as_function_def_stmt()
+                .is_some_and(|function| function.name.id == name.id)
+            && crate::frontend::reserved_builtin_function(name.id.as_str())
+            && self.session.is_unbound_module_read(module, expression)
     }
 
     /// Recognize Protocol and Protocol[T] at the point where the class is defined.
@@ -4480,6 +4522,18 @@ impl<'a> Loader<'a> {
                 ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
             )
         });
+        let mut pending_builtin_functions = HashSet::new();
+        if id == 0 {
+            pending_builtin_functions.extend(
+                parsed
+                    .syntax()
+                    .body
+                    .iter()
+                    .filter_map(ast::Stmt::as_function_def_stmt)
+                    .map(|function| function.name.as_str())
+                    .filter(|name| crate::frontend::reserved_builtin_function(name)),
+            );
+        }
         let mut executable = false;
         let mut segment = 0;
         let mut definition_prefix = false;
@@ -4535,6 +4589,7 @@ impl<'a> Loader<'a> {
                         ));
                     }
                     let name = function.name.as_str();
+                    pending_builtin_functions.remove(name);
                     let current = Binding::Definition(DefinitionId {
                         module: id,
                         statement: index,
@@ -4744,7 +4799,12 @@ impl<'a> Loader<'a> {
                             continue;
                         }
                         if module_attribute_guard(&self.modules, id, statement)
-                            || imported_function_call(&self.modules, id, statement)
+                            || entry_prefix_call(
+                                &self.modules,
+                                id,
+                                statement,
+                                &pending_builtin_functions,
+                            )
                         {
                             self.modules[id].entry_globals.push(index);
                             continue;
@@ -6024,18 +6084,32 @@ fn single_import_binding(body: &[ast::Stmt]) -> Option<&str> {
 }
 
 /// Resolve a standalone call before adding subsequent definitions to the entry namespace.
-fn imported_function_call(modules: &[SourceModule], id: ModuleId, statement: &ast::Stmt) -> bool {
+fn entry_prefix_call(
+    modules: &[SourceModule],
+    id: ModuleId,
+    statement: &ast::Stmt,
+    pending_builtin_functions: &HashSet<&str>,
+) -> bool {
     let ast::Stmt::Expr(expr) = statement else {
         return false;
     };
     let Some(call) = expr.value.as_call_expr() else {
         return false;
     };
-    let Some(Binding::Definition(def)) = resolve_binding(modules, id, &call.func) else {
-        return false;
-    };
-    def.module != id
-        && modules[def.module].parsed.syntax().body[def.statement].is_function_def_stmt()
+    match resolve_binding(modules, id, &call.func) {
+        Some(Binding::Definition(def)) => {
+            modules[def.module].parsed.syntax().body[def.statement].is_function_def_stmt()
+                && (def.module != id || !pending_builtin_functions.is_empty())
+        }
+        Some(Binding::Intrinsic(Intrinsic::BuiltinsPrint)) => {
+            pending_builtin_functions.contains("print")
+        }
+        None => call
+            .func
+            .as_name_expr()
+            .is_some_and(|name| pending_builtin_functions.contains(name.id.as_str())),
+        _ => false,
+    }
 }
 
 /// Recognize a module attribute test whose only branch raises.

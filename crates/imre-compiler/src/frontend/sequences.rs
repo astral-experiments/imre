@@ -165,6 +165,7 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
             }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "len")
+                    && self.graph.resolve(self.module, &call.func).is_none()
                     && let [arg] = call.arguments.args.as_ref() =>
             {
                 self.allow(arg);
