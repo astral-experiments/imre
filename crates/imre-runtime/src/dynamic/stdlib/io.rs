@@ -212,17 +212,20 @@ pub(in crate::dynamic) fn rooted_standard_streams(ctx: &Context) -> Option<Stand
     let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
         return None;
     };
-    let [input, buffer, raw] = ctx
-        .scope_name(scope, "__stdin__")
-        .and_then(|stream| text_descriptor_chain(&ctx.heap, stream))
-        .unwrap_or([NONE; 3]);
-    Some([
-        input,
-        buffer,
-        raw,
-        ctx.scope_name(scope, "__stdout__").unwrap_or(NONE),
-        ctx.scope_name(scope, "__stderr__").unwrap_or(NONE),
-    ])
+    let [stdin, stdout, stderr] = if let Some(streams) = ctx.heap.standard_stream_bindings(scope) {
+        streams
+    } else {
+        let streams = ["__stdin__", "__stdout__", "__stderr__"]
+            .map(|name| ctx.scope_name(scope, name).unwrap_or(NONE));
+        let bindings = ctx.scope_data(scope);
+        // Exposed namespace dictionaries and cells can change independently of the scope.
+        if bindings.namespace.is_none() && bindings.closure.cells.is_empty() {
+            ctx.heap.cache_standard_stream_bindings(scope, streams);
+        }
+        streams
+    };
+    let [input, buffer, raw] = text_descriptor_chain(&ctx.heap, stdin).unwrap_or([NONE; 3]);
+    Some([input, buffer, raw, stdout, stderr])
 }
 
 /// A text wrapper and its buffered descriptor retain the next layer through these native edges.

@@ -3288,6 +3288,9 @@ pub(super) struct Heap {
     descriptor_owners: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // The unmaterialized sys scope owns these three handles until its next mutation.
+    stream_binding_scope: Cell<Id>,
+    standard_stream_bindings: Cell<[Id; 3]>,
     // These IDs are not roots. A tracing sweep checks the frame state before recycling slots.
     unstarted_coroutines: Vec<Id>,
     scheduled_unawaited: bool,
@@ -3512,6 +3515,8 @@ impl Heap {
             check_finalizers_next_statement: false,
             descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            stream_binding_scope: Cell::new(NONE),
+            standard_stream_bindings: Cell::new([NONE; 3]),
             unstarted_coroutines: Vec::new(),
             scheduled_unawaited: false,
             finalizer_bindings: Cell::new([None; 2]),
@@ -4100,6 +4105,7 @@ impl Heap {
         target: Id,
     ) -> Option<(&Value, &mut Value)> {
         let target_id = target as usize;
+        self.invalidate_stream_bindings(target_id);
         if source != target && self.slot_shapes.get(target_id)?.is_scalar_leaf() {
             self.slots.get(source as usize)?.value.as_ref()?;
             self.prepare_slot_write(target_id);
@@ -4115,8 +4121,26 @@ impl Heap {
         Some((source, target))
     }
 
+    /// Return the most recently observed bindings while this scope's values remain unchanged.
+    pub(super) fn standard_stream_bindings(&self, scope: Id) -> Option<[Id; 3]> {
+        (self.stream_binding_scope.get() == scope).then(|| self.standard_stream_bindings.get())
+    }
+
+    /// Remember the owning scope separately so a borrowed or recycled slot invalidates all three IDs.
+    pub(super) fn cache_standard_stream_bindings(&self, scope: Id, streams: [Id; 3]) {
+        self.standard_stream_bindings.set(streams);
+        self.stream_binding_scope.set(scope);
+    }
+
+    fn invalidate_stream_bindings(&self, index: usize) {
+        if self.stream_binding_scope.get() as usize == index {
+            self.stream_binding_scope.set(NONE);
+        }
+    }
+
     fn prepare_slot_write(&mut self, index: usize) {
         self.root_trace.changed(index);
+        self.invalidate_stream_bindings(index);
         self.generator_owners.reconsider(index);
         if !self.slot_shapes[index].is_scalar_leaf() {
             return;
@@ -6291,6 +6315,7 @@ impl Heap {
                     self.immutable_hashes.remove(&(id as Id));
                 }
                 self.root_trace.recycled(id);
+                self.invalidate_stream_bindings(id);
                 let slot = &mut self.slots[id];
                 if slot.has_gc_header {
                     self.gc_schedule.freed();
@@ -6411,6 +6436,34 @@ mod tests {
             assert!(matches!(heap.get(id), Value::Int(value) if value.as_small() == Some(n)));
             assert_eq!(heap.alloc(Value::Int(crate::Int::from(n))), id);
         }
+    }
+
+    #[test]
+    fn standard_stream_bindings_expire_on_scope_writes_and_recycling() {
+        let mut heap = Heap::new();
+        let source = heap.alloc(Value::List(Vec::new()));
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(Scope::new(
+            String::new(),
+            None,
+        ))));
+        let streams = [source, NONE, source];
+        heap.cache_standard_stream_bindings(scope, streams);
+        assert_eq!(heap.standard_stream_bindings(scope), Some(streams));
+        assert_eq!(heap.standard_stream_bindings(source), None);
+        heap.get_mut(source);
+        assert_eq!(heap.standard_stream_bindings(scope), Some(streams));
+
+        heap.get_mut(scope);
+        assert_eq!(heap.standard_stream_bindings(scope), None);
+        heap.cache_standard_stream_bindings(scope, streams);
+        heap.source_and_target(source, scope).unwrap();
+        assert_eq!(heap.standard_stream_bindings(scope), None);
+
+        heap.cache_standard_stream_bindings(scope, streams);
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert_eq!(heap.alloc(Value::List(Vec::new())), scope);
+        assert_eq!(heap.standard_stream_bindings(scope), None);
     }
 
     #[test]
