@@ -900,8 +900,10 @@ class SSLSocket(_socket.socket):
         return _call(_imre_ssl.channel_binding, self._session, cb_type)
 
     def shutdown(self, how):
-        self._session = _imre_ssl.release_session(self._session)
+        session = SSLSocket._session.__get__(self)
         super().shutdown(how)
+        if SSLSocket._session.__get__(self) is session:
+            SSLSocket._session.__set__(self, _imre_ssl.release_session(session))
 
     def _real_close(self):
         _imre_ssl.release_session(getattr(self, "_session", None))
