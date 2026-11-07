@@ -855,7 +855,8 @@ fn initialize_file(
         let raw = Rc::new(RawFile {
             fd: Cell::new(None),
             closefd: Cell::new(true),
-            python_finalized: Cell::new(false),
+            // A resurrected FileIO may receive its first descriptor after __del__.
+            python_finalized: Cell::new(ctx.heap.finalizer_ran(receiver)),
             pipe: RefCell::new(pipe),
             mode: Cell::new(RawMode::default()),
             blksize: Cell::new(super::DEFAULT_BUFFER_SIZE),

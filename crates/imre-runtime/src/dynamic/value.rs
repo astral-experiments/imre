@@ -5202,6 +5202,10 @@ impl Heap {
         None
     }
 
+    pub(super) fn finalizer_ran(&self, id: Id) -> bool {
+        self.slots[id as usize].finalization == Finalization::Done
+    }
+
     pub(super) fn take_finalizer(&mut self, id: Id, found: bool) {
         let index = self
             .ordinary_finalizers
