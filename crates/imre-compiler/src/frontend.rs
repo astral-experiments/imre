@@ -2624,12 +2624,19 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn parameter_shadows_binding(&self, name: &str, ty: Type) -> bool {
+        self.mapping_class_import(name)
+            || matches!(ty, Type::Callable(_))
+                && matches!(self.graph.modules[self.module].bindings.get(name),
+                    Some(Binding::Definition(definition)) if self.functions.contains_key(definition))
+    }
+
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
         if (name != "__doc__" && reserved(name))
             || (self.graph.modules[self.module].bindings.contains_key(name)
                 && (self.module_scope
-                    || !self.mapping_class_import(name)
+                    || !self.parameter_shadows_binding(name, ty)
                     || (self.block_depth != 0 && !self.names.contains_key(name))))
             || self.local_functions.contains_key(name)
             || self.local_classes.contains_key(name)
