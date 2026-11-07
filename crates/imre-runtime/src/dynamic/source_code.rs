@@ -170,7 +170,7 @@ enum BranchUse {
     Operand,
 }
 
-/// Source locations of supported awaits within one expression. The plan is discarded
+/// Suspension sites among the supported operands of one expression. The plan is discarded
 /// after lowering; untouched subtrees stay in the ordinary expression evaluator.
 struct OperandPlan {
     sites: smallvec::SmallVec<[ruff_text_size::TextSize; 1]>,
@@ -189,6 +189,14 @@ impl OperandPlan {
                     ast::Expr::Await(a) if kind.is_async() => {
                         sites.push(a.start());
                         work.push(&a.value);
+                    }
+                    ast::Expr::Yield(y) => {
+                        sites.push(y.start());
+                        work.extend(y.value.as_deref());
+                    }
+                    ast::Expr::YieldFrom(y) => {
+                        sites.push(y.start());
+                        work.push(&y.value);
                     }
                     expr if let Some(comp) = Plan::from_expr(expr) => {
                         if comp.suspends() {
@@ -2103,24 +2111,16 @@ impl Program {
 
     fn emit_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<Option<ast::Expr>> {
         let line = plan.line;
-        if !plan.suspends(&expr) {
-            let op = match expr {
-                ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) if !plan.function => {
-                    return Err(Error::new("SyntaxError", "'yield' outside function"));
-                }
-                ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
-                ast::Expr::YieldFrom(y) => {
-                    self.instructions
-                        .push((line, Instruction::Iter(Some(*y.value), false)));
-                    Instruction::Delegate
-                }
-                value => return Ok(Some(value)),
-            };
+        if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
+            if !plan.function {
+                return Err(Error::new("SyntaxError", "'yield' outside function"));
+            }
             if self.kind != FunctionKind::AsyncGenerator {
                 self.kind = FunctionKind::Generator;
             }
-            self.instructions.push((line, op));
-            return Ok(None);
+        }
+        if !plan.suspends(&expr) {
+            return Ok(Some(expr));
         }
         if let ast::Expr::Generator(genexpr) = &expr {
             if let Some(outer) = self.lower_suspension(
@@ -2140,6 +2140,22 @@ impl Program {
             return Ok(None);
         }
         match expr {
+            ast::Expr::Yield(y) => {
+                let op = match y.value {
+                    None => Instruction::Yield(None),
+                    Some(value) => match self.lower_operand(*value, plan)? {
+                        Some(expr) => Instruction::Yield(Some(expr)),
+                        None => Instruction::YieldResult,
+                    },
+                };
+                self.instructions.push((line, op));
+            }
+            ast::Expr::YieldFrom(y) => {
+                let iterable = self.lower_operand(*y.value, plan)?;
+                self.instructions
+                    .push((line, Instruction::Iter(iterable, false)));
+                self.instructions.push((line, Instruction::Delegate));
+            }
             ast::Expr::Await(a) => {
                 let value = self.lower_operand(*a.value, plan)?;
                 self.instructions.push((line, Instruction::Await(value)));
@@ -2251,7 +2267,7 @@ impl Program {
                     program.lower_result(arm, plan)
                 })?;
             }
-            _ => unreachable!("operand with a supported await"),
+            _ => unreachable!("operand with a supported suspension"),
         }
         Ok(None)
     }
