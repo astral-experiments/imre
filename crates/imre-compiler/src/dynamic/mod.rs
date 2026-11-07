@@ -1328,7 +1328,6 @@ pub(crate) fn compile(
         "python_version":crate::PYTHON_VERSION.to_string(),
         "python_hexversion":crate::version::hex(crate::version::components(false)),
         "implementation_version":env!("CARGO_PKG_VERSION"),
-        "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
         "no_site":startup.is_some_and(|(flags, _)| flags.no_site),
         "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),

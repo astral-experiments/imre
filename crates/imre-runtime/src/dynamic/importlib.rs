@@ -319,12 +319,11 @@ impl Context {
                     ),
                 ));
             }
-            let suffix = self.config["archive_suffix"]
-                .as_str()
-                .unwrap_or(".imre.a")
-                .to_owned();
-            let suffix = self.text(suffix);
-            return Ok(self.alloc(Value::List(vec![suffix])));
+            let suffixes = imre_ast::NATIVE_ARCHIVE_EXTENSIONS
+                .iter()
+                .map(|ext| self.text(format!(".{ext}")))
+                .collect();
+            return Ok(self.alloc(Value::List(suffixes)));
         }
         let [arg] = args else {
             return Err(Error::new(
