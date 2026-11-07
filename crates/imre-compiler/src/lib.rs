@@ -362,7 +362,7 @@ fn object_fallback<T>(
             None,
             None,
             layout,
-            || Ok(()),
+            |_| Ok(()),
         )?
         .map(boxed)
         .ok_or_else(|| "could not compile the module entry".to_owned());
@@ -442,10 +442,15 @@ fn object_fallback<T>(
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
-    let check_returns = || {
+    let check_returns = |entry_requests_objects: bool| {
         if let Some(graph) = &graph {
             let requested = graph.check_fallback_calls.get();
+            // A runtime class export can admit a new import graph. Keep direct source-call
+            // diagnostics unless this entry already requested Python object semantics.
+            let check_class_import =
+                graph.imports_runtime_class && !options.runtime_imports && !entry_requests_objects;
             if !checked_file
+                && !check_class_import
                 && (options.runtime_imports
                     || !matches!(requested, analysis::FallbackCalls::FunctionBodies))
             {
@@ -468,11 +473,19 @@ fn object_fallback<T>(
                     && graph.object_builtin_errors.borrow().contains(&error)
                 || checked_file && graph.uses_source_loader();
             let checked_calls = if !checked_file {
-                requested
+                if check_class_import
+                    && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
+                {
+                    analysis::FallbackCalls::NamedFunctions
+                } else {
+                    requested
+                }
             } else if graph.check_method_factories.get() {
                 analysis::FallbackCalls::DecoratorFactories
             } else if all_calls {
                 analysis::FallbackCalls::All
+            } else if check_class_import {
+                analysis::FallbackCalls::NamedFunctions
             } else if entry.has_entry_guard() {
                 analysis::FallbackCalls::Entry(graph.entry)
             } else {
