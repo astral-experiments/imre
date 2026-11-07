@@ -116,6 +116,8 @@ pub(super) struct Trace {
     pub instance: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
+    /// Location of a compiler error before its Python exception can be built.
+    pub pending_syntax: Option<ruff_text_size::TextRange>,
     /// Live members belong to the exception instance across traceback clones.
     pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
     pub import_names: Option<[Id; 3]>,
@@ -178,6 +180,18 @@ impl Error {
             exit_code: NONE,
             import: None,
         }
+    }
+
+    pub(super) fn source_syntax(
+        message: impl Into<String>,
+        span: ruff_text_size::TextRange,
+    ) -> Self {
+        let mut error = Self::new("SyntaxError", message);
+        let Some(trace) = error.try_tracing() else {
+            return Self::new("MemoryError", "");
+        };
+        trace.pending_syntax = Some(span);
+        error
     }
 
     /// Construct an error without copying a static exception name.

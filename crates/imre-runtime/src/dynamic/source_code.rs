@@ -3242,37 +3242,51 @@ impl Program {
         pattern: &ast::Pattern,
         captures: &mut indexmap::IndexMap<String, String>,
     ) -> Result<()> {
-        match pattern {
-            ast::Pattern::MatchSingleton(_) | ast::Pattern::MatchValue(_) => {}
+        let name = match pattern {
+            ast::Pattern::MatchSingleton(_) | ast::Pattern::MatchValue(_) => None,
             ast::Pattern::MatchClass(p)
-                if p.arguments.patterns.is_empty() && p.arguments.keywords.is_empty() => {}
+                if p.arguments.patterns.is_empty() && p.arguments.keywords.is_empty() =>
+            {
+                None
+            }
             ast::Pattern::MatchSequence(p) => {
+                if p.patterns
+                    .iter()
+                    .filter(|p| matches!(p, ast::Pattern::MatchStar(_)))
+                    .count()
+                    > 1
+                {
+                    return Err(Error::source_syntax(
+                        "multiple starred names in sequence pattern",
+                        p.range(),
+                    ));
+                }
                 for child in &p.patterns {
                     self.validate_pattern(child, captures)?;
                 }
+                None
             }
+            ast::Pattern::MatchStar(p) => p.name.as_ref(),
             ast::Pattern::MatchAs(p) => {
                 if let Some(inner) = &p.pattern {
                     self.validate_pattern(inner, captures)?;
                 }
-                if let Some(name) = &p.name {
-                    let spelling = self.definition_spelling(name);
-                    if spelling == "__debug__" {
-                        return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
-                    }
-                    if captures
-                        .insert(spelling.to_owned(), name.to_string())
-                        .is_some()
-                    {
-                        return Err(Error::new(
-                            "SyntaxError",
-                            format!("multiple assignments to name '{spelling}' in pattern"),
-                        ));
-                    }
-                    self.locals.insert(name.to_string());
-                }
+                p.name.as_ref()
             }
             _ => return Err(unsupported("match pattern")),
+        };
+        if let Some(name) = name {
+            let spelling = self.definition_spelling(name);
+            if captures
+                .insert(spelling.to_owned(), name.to_string())
+                .is_some()
+            {
+                return Err(Error::source_syntax(
+                    format!("multiple assignments to name '{spelling}' in pattern"),
+                    pattern.range(),
+                ));
+            }
+            self.locals.insert(name.to_string());
         }
         Ok(())
     }
@@ -3340,6 +3354,45 @@ impl Program {
     }
 }
 
+/// CPython symbol analysis and code generation expose source ranges differently.
+#[derive(Clone, Copy, Debug)]
+enum SyntaxSpan {
+    /// Code generation includes the location tuple in SyntaxError.args.
+    InArgs(ruff_text_size::TextRange),
+    /// Symbol analysis only sets the location attributes.
+    InFields(ruff_text_size::TextRange),
+}
+
+/// Reserved captures are symbol errors, before code generation checks sequence shapes or duplicates.
+fn reserved_pattern_capture(body: &[ast::Stmt]) -> Option<ruff_text_size::TextRange> {
+    use ast::visitor::{self, Visitor};
+
+    struct Check(Option<ruff_text_size::TextRange>);
+    impl<'a> Visitor<'a> for Check {
+        fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+            if self.0.is_some() {
+                return;
+            }
+            visitor::walk_pattern(self, pattern);
+            let name = match pattern {
+                ast::Pattern::MatchAs(p) => &p.name,
+                ast::Pattern::MatchStar(p) => &p.name,
+                ast::Pattern::MatchMapping(p) => &p.rest,
+                _ => return,
+            };
+            if self.0.is_none() && name.as_ref().is_some_and(|name| name == "__debug__") {
+                self.0 = Some(pattern.range());
+            }
+        }
+
+        fn visit_expr(&mut self, _: &'a ast::Expr) {}
+    }
+
+    let mut check = Check(None);
+    check.visit_body(body);
+    check.0
+}
+
 pub(super) fn syntax_member(name: &str) -> Option<usize> {
     [
         "msg",
@@ -3380,6 +3433,48 @@ impl Context {
         }
         error.tracing().source_syntax = Some(fields);
         Ok(())
+    }
+
+    fn located_syntax_error(
+        &mut self,
+        message: &str,
+        span: SyntaxSpan,
+        filename: Id,
+        lines: &[usize],
+    ) -> Result<Error> {
+        let (SyntaxSpan::InArgs(range) | SyntaxSpan::InFields(range)) = span;
+        let position = |offset: ruff_text_size::TextSize| {
+            let offset = offset.to_usize();
+            let line = lines.partition_point(|start| *start <= offset);
+            (line as i64, (offset - lines[line - 1] + 1) as i64)
+        };
+        let (line, column) = position(range.start());
+        let (end_line, end_column) = position(range.end());
+        let msg = self.text(message);
+        let line = self.int(line);
+        let location = [
+            filename,
+            line,
+            self.int(column),
+            NONE,
+            self.int(end_line),
+            self.int(end_column),
+        ];
+        let mut error = match span {
+            SyntaxSpan::InArgs(_) => {
+                let details = self.alloc(Value::Tuple(location.to_vec()));
+                self.exception("SyntaxError", &[msg, details])
+            }
+            SyntaxSpan::InFields(_) => {
+                let mut error = self.exception("SyntaxError", &[msg]);
+                error.message.push_str(&self.syntax_suffix(filename, line)?);
+                error
+            }
+        };
+        let mut fields = self.syntax_fields(&[msg]);
+        fields[1..7].copy_from_slice(&location);
+        self.retain_syntax_fields(&mut error, fields)?;
+        Ok(error)
     }
 
     pub(super) fn update_syntax_member(&self, object: Id, name: &str, value: Id) -> bool {
@@ -3575,58 +3670,32 @@ impl Context {
                 ))
             });
         if let Some((range, message)) = invalid {
-            let position = |offset: usize| {
-                let mut line = 1;
-                let mut line_start = 0;
-                for (at, newline) in source[..offset].match_indices(['\r', '\n']) {
-                    if newline == "\n" || !source[at + 1..].starts_with('\n') {
-                        line += 1;
-                        line_start = at + 1;
-                    }
-                }
-                (line, offset - line_start + 1)
-            };
-            let (line, column) = position(range.start().to_usize());
-            let (end_line, end_column) = position(range.end().to_usize());
-            let msg = self.text(&message);
-            let details = vec![
+            return Err(self.located_syntax_error(
+                &message,
+                SyntaxSpan::InArgs(range),
                 filename_id,
-                self.int(line as i64),
-                self.int(column as i64),
-                NONE,
-                self.int(end_line as i64),
-                self.int(end_column as i64),
-            ];
-            let location = self.alloc(Value::Tuple(details));
-            let args = [msg, location];
-            let mut error = self.exception("SyntaxError", &args);
-            self.retain_syntax_fields(&mut error, self.syntax_fields(&args))?;
-            return Err(error);
+                &lines,
+            )?);
         }
         if let ast::Mod::Module(module) = parsed.syntax()
             && let Some((range, message)) = imre_ast::type_alias_error(&module.body)
         {
-            let position = |offset: ruff_text_size::TextSize| {
-                let offset = offset.to_usize();
-                let line = lines.partition_point(|start| *start <= offset);
-                (line as i64, (offset - lines[line - 1] + 1) as i64)
-            };
-            let (line, column) = position(range.start());
-            let (end_line, end_column) = position(range.end());
-            let msg = self.text(message);
-            let line = self.int(line);
-            let mut fields = self.syntax_fields(&[msg]);
-            fields[1] = filename_id;
-            fields[2] = line;
-            fields[3] = self.int(column);
-            fields[5] = self.int(end_line);
-            fields[6] = self.int(end_column);
-            let mut error = self.exception("SyntaxError", &[msg]);
-            error
-                .message
-                .push_str(&self.syntax_suffix(filename_id, line)?);
-            self.retain_syntax_fields(&mut error, fields)?;
-            return Err(error);
+            return Err(self.located_syntax_error(
+                &message,
+                SyntaxSpan::InFields(range),
+                filename_id,
+                &lines,
+            )?);
+        }
+        if let ast::Mod::Module(module) = parsed.syntax()
+            && let Some(range) = reserved_pattern_capture(&module.body)
+        {
+            return Err(self.located_syntax_error(
+                "cannot assign to __debug__",
+                SyntaxSpan::InFields(range),
+                filename_id,
+                &lines,
+            )?);
         }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
         code.scope_flags = inherited;
@@ -3664,7 +3733,18 @@ impl Context {
                     code.scope_flags |= code_flags::FUTURE_ANNOTATIONS;
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
-                code.lower_namespace(body, &lines, false)?;
+                if let Err(error) = code.lower_namespace(body, &lines, false) {
+                    if let Some(span) = error.trace.as_ref().and_then(|trace| trace.pending_syntax)
+                    {
+                        return Err(self.located_syntax_error(
+                            &error.message,
+                            SyntaxSpan::InArgs(span),
+                            filename_id,
+                            &lines,
+                        )?);
+                    }
+                    return Err(error);
+                }
                 let mut module_globals = HashSet::new();
                 code.resolve_directives(&|_| None, &mut module_globals)?;
                 // A global declared by a nested block makes module assignments use the globals dictionary.
@@ -4423,6 +4503,9 @@ impl Context {
         let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
         };
+        if reserved_pattern_capture(&def.body).is_some() {
+            return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+        }
         #[derive(serde::Deserialize)]
         struct Signature<'a> {
             #[serde(borrow)]
@@ -6252,14 +6335,47 @@ impl Context {
                 if !self
                     .pattern_flags(subject)
                     .has(collection_pattern::PatternFlags::SEQUENCE)
-                    || self.sequence_len(subject)? != patterns.len()
                 {
                     return Ok(false);
                 }
-                if patterns.iter().all(imre_ast::wildcard_pattern) {
-                    return Ok(true);
+                let plan = imre_ast::sequence_pattern_plan(patterns);
+                if let Some((op, required)) = plan.length {
+                    let length = self.sequence_len(subject)?;
+                    if length < required || (op == ast::CmpOp::Eq && length != required) {
+                        return Ok(false);
+                    }
                 }
-                let items = self.unpack_items(subject, patterns.len(), None)?;
+                let star = match plan.items {
+                    imre_ast::SequencePatternItems::Ignore => return Ok(true),
+                    imre_ast::SequencePatternItems::IndexAround(star) => {
+                        // A starred wildcard indexes only the inspected elements. Each suffix
+                        // sees the length after any earlier comparison or item lookup.
+                        let mark = operand + 1;
+                        for (i, child) in patterns
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, p)| !imre_ast::wildcard_pattern(p))
+                        {
+                            let index = if i < star {
+                                i as i64
+                            } else {
+                                self.sequence_len(subject)? as i64 - (patterns.len() - i) as i64
+                            };
+                            let index = self.int(index);
+                            let item = self.get_item(subject, index);
+                            let item = self.release_with_result(mark, item)?;
+                            let matched =
+                                self.match_source_pattern(code, scope, child, item, slots)?;
+                            self.discard_truth(mark);
+                            if !matched {
+                                return Ok(false);
+                            }
+                        }
+                        return Ok(true);
+                    }
+                    imre_ast::SequencePatternItems::Unpack(star) => star,
+                };
+                let items = self.unpack_items(subject, patterns.len(), star)?;
                 // Unpacking consumes this subject. Keep the next subpattern's operand on top.
                 self.discard_temporaries(operand, items.iter().rev().copied());
                 for (pattern, item) in patterns.iter().zip(items) {
@@ -6272,15 +6388,18 @@ impl Context {
                 }
                 Ok(true)
             }
-            ast::Pattern::MatchAs(p) => {
-                if let Some(inner) = &p.pattern {
+            ast::Pattern::MatchAs(ast::PatternMatchAs { name, .. })
+            | ast::Pattern::MatchStar(ast::PatternMatchStar { name, .. }) => {
+                if let ast::Pattern::MatchAs(p) = pattern
+                    && let Some(inner) = &p.pattern
+                {
                     // The alias retains the subject while its inner pattern consumes a copy.
                     self.heap.keep(subject);
                     if !self.match_source_pattern(code, scope, inner, subject, slots)? {
                         return Ok(false);
                     }
                 }
-                if p.name.is_some() {
+                if name.is_some() {
                     // Validation records captures in the same left-to-right, inner-before-alias order.
                     let slot = slots.next().expect("validated capture");
                     *self.heap.temporary_root(slot) = subject;
