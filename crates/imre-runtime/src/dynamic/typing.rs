@@ -3200,8 +3200,14 @@ impl Context {
             let fields =
                 super::namedtuple::bind_field_metadata(self, scope, &named_fields, &defaults);
             let defaults = self.alloc(Value::Tuple(defaults));
-            let new =
-                super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
+            let new = super::namedtuple::bind_new(
+                self,
+                scope,
+                name,
+                &named_fields,
+                fields,
+                Some(defaults),
+            )?;
             self.bind_local(scope, "__annotate_func__", annotate);
             self.set_attr(new, "__annotate__", annotate)?;
             let name = self.text(name);

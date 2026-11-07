@@ -3573,7 +3573,7 @@ impl Program {
 
 /// CPython symbol analysis and code generation expose source ranges differently.
 #[derive(Clone, Copy, Debug)]
-enum SyntaxSpan {
+pub(super) enum SyntaxSpan {
     /// Code generation includes the location tuple in SyntaxError.args.
     InArgs(ruff_text_size::TextRange),
     /// Symbol analysis only sets the location attributes.
@@ -3652,7 +3652,7 @@ impl Context {
         Ok(())
     }
 
-    fn located_syntax_error(
+    pub(super) fn located_syntax_error(
         &mut self,
         message: &str,
         span: SyntaxSpan,
@@ -4185,6 +4185,7 @@ impl Context {
             .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
+            varnames: NONE,
             name,
             qualname,
             doc,
