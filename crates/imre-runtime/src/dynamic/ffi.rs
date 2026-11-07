@@ -1392,6 +1392,24 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     finish(ctx, result)
 }
 
+/// Read a contiguous slice and attribute failures to the subscription expression.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_slice_at(
+    ctx: *mut Context,
+    receiver: Id,
+    start: Id,
+    stop: Id,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: generated native code owns its context and supplies a static span or null.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.get_slice(receiver, start, stop);
+    finish_at(ctx, result, span)
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_op_at(
     ctx: *mut Context,

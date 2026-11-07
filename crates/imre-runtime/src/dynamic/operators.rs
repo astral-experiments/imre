@@ -3549,6 +3549,28 @@ impl Context {
         }
         Ok(false)
     }
+    /// Read an ordinary sequence slice directly when its bounds need no Python callbacks.
+    pub(super) fn get_slice(&mut self, receiver: Id, start: Id, stop: Id) -> Result<Id> {
+        let parts = [start, stop, NONE];
+        if matches!(
+            self.heap.get(receiver),
+            Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::Tuple(_)
+                | Value::List(_)
+        ) && [start, stop].iter().all(|&id| {
+            matches!(
+                self.heap.get(id),
+                Value::None | Value::Int(_) | Value::Bool(_)
+            )
+        }) {
+            return self.slice(receiver, parts);
+        }
+        let key = self.alloc(Value::Slice(parts));
+        self.get_item(receiver, key)
+    }
+
     fn slice(&mut self, receiver: Id, parts: [Id; 3]) -> Result<Id> {
         let obj = self.scalar_value(receiver);
         if let Value::Range(range) = self.heap.get(obj) {
