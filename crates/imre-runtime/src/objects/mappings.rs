@@ -175,30 +175,30 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<()
     }
 }
 
-/// Widen a failed key comparison only at operations that can raise other exceptions.
-trait KeyEqualityError {
+/// Convert a key error at the boundary of a fallible table operation.
+trait TableKeyError {
     fn into_error(self) -> Error;
 }
 
-impl KeyEqualityError for std::convert::Infallible {
+impl TableKeyError for std::convert::Infallible {
     fn into_error(self) -> Error {
         match self {}
     }
 }
 
-impl KeyEqualityError for Error {
+impl TableKeyError for Error {
     fn into_error(self) -> Error {
         self
     }
 }
 
 trait TableKey {
-    /// Scalar lookups cannot raise, so their probe returns only the optional position.
-    type EqualityError: KeyEqualityError;
+    /// Exact scalar keys can be hashed and compared without raising a Python exception.
+    type Error: TableKeyError;
 
-    fn try_hash(&self) -> Result<u64, Error>;
+    fn try_hash(&self) -> Result<u64, Self::Error>;
 
-    fn try_eq(&self, other: &Self) -> Result<bool, Self::EqualityError>;
+    fn try_eq(&self, other: &Self) -> Result<bool, Self::Error>;
 }
 
 /// Infallible table keys may choose how they feed the process-keyed hasher.
@@ -261,28 +261,28 @@ fn string_hash(key: &str) -> u64 {
 }
 
 impl<T: InfallibleKey> TableKey for T {
-    type EqualityError = std::convert::Infallible;
+    type Error = std::convert::Infallible;
 
-    fn try_hash(&self) -> Result<u64, Error> {
+    fn try_hash(&self) -> Result<u64, Self::Error> {
         Ok(self.table_hash())
     }
 
-    fn try_eq(&self, other: &Self) -> Result<bool, Self::EqualityError> {
+    fn try_eq(&self, other: &Self) -> Result<bool, Self::Error> {
         Ok(self.same_key(other))
     }
 }
 
 impl TableKey for TupleKey {
-    type EqualityError = Error;
+    type Error = Error;
 
-    fn try_hash(&self) -> Result<u64, Error> {
+    fn try_hash(&self) -> Result<u64, Self::Error> {
         let mut state = HASHER.build_hasher();
         // SAFETY: the key roots an immutable checked tuple throughout hashing.
         unsafe { hash_tuple(self.0, &mut state) }?;
         Ok(state.finish())
     }
 
-    fn try_eq(&self, other: &Self) -> Result<bool, Self::EqualityError> {
+    fn try_eq(&self, other: &Self) -> Result<bool, Self::Error> {
         // SAFETY: both keys root immutable records of the checked key type.
         unsafe { super::values::try_equal(self.0 as usize, other.0 as usize, WordKind::new(6)) }
     }
@@ -451,7 +451,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         entries: &'a [Option<Entry<K, V>>],
         hash: u64,
         key: &'a K,
-        error: &'a mut Option<K::EqualityError>,
+        error: &'a mut Option<K::Error>,
     ) -> impl FnMut(&usize) -> bool + 'a {
         move |&position| {
             let entry = entries[position].as_ref().unwrap();
@@ -464,7 +464,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         }
     }
 
-    fn key_position(&self, hash: u64, key: &K) -> Result<Option<usize>, K::EqualityError> {
+    fn key_position(&self, hash: u64, key: &K) -> Result<Option<usize>, K::Error> {
         let mut error = None;
         let found = self.index.find(
             hash,
@@ -496,10 +496,10 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     /// Preserves first-insertion position and returns owners displaced by an update.
     fn insert(&mut self, key: K, value: V) -> Result<Option<(K, V)>, Error> {
-        let hash = key.try_hash()?;
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
         if let Some(position) = self
             .key_position(hash, &key)
-            .map_err(KeyEqualityError::into_error)?
+            .map_err(TableKeyError::into_error)?
         {
             let entry = self.entries[position].as_mut().unwrap();
             return Ok(Some((key, std::mem::replace(&mut entry.value, value))));
@@ -517,10 +517,10 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     ) -> Result<(V, bool), Error> {
         // SAFETY: the caller roots an exact key of this table's representation.
         let key = unsafe { K::borrow(word) };
-        let hash = key.try_hash()?;
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
         if let Some(index) = self
             .key_position(hash, &key)
-            .map_err(KeyEqualityError::into_error)?
+            .map_err(TableKeyError::into_error)?
         {
             let slot = &mut self.entries[index].as_mut().unwrap().value;
             let old = *slot;
@@ -535,7 +535,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     /// Transfers the removed key and value so they can drop outside the mutation.
     fn remove(&mut self, key: &K) -> Result<Option<Entry<K, V>>, Error> {
-        let hash = key.try_hash()?;
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
         let mut error = None;
         let found = self.index.find_entry(
             hash,
@@ -612,7 +612,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         for entry in self.entries.iter().flatten() {
             if result
                 .key_position(entry.hash, &entry.key)
-                .map_err(KeyEqualityError::into_error)?
+                .map_err(TableKeyError::into_error)?
                 .is_none()
             {
                 result.insert_absent(entry.hash, entry.key.clone(), ())?;
@@ -659,7 +659,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     unsafe fn promote(&mut self, word: usize) -> Result<bool, Error> {
         // SAFETY: the caller roots a word of this table's key kind.
         let key = unsafe { K::borrow(word) };
-        let hash = key.try_hash()?;
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
         let mut error = None;
         let found = self.index.find_mut(
             hash,
@@ -710,10 +710,10 @@ impl<K: ScalarKey> Table<K, usize> {
     ) -> Result<Option<OwnedWord>, Error> {
         // SAFETY: the incoming key remains rooted for this whole operation.
         let key = unsafe { K::borrow(word) };
-        let hash = key.try_hash()?;
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
         if let Some(position) = self
             .key_position(hash, &*key)
-            .map_err(KeyEqualityError::into_error)?
+            .map_err(TableKeyError::into_error)?
         {
             let value = self.entries[position].as_ref().unwrap().value;
             // SAFETY: the table roots the stored value of the declared kind.
@@ -830,7 +830,7 @@ impl<V: Copy> Tables<V> {
                 if !left
                     .key
                     .try_eq(&right.key)
-                    .map_err(KeyEqualityError::into_error)?
+                    .map_err(TableKeyError::into_error)?
                 {
                     return Ok(false);
                 }
@@ -862,8 +862,8 @@ impl<V: Copy> Tables<V> {
             // SAFETY: the caller roots the exact key kind of the dispatched table.
             let key = unsafe { K::borrow(word) };
             let position = table
-                .key_position(key.try_hash()?, &key)
-                .map_err(KeyEqualityError::into_error)?;
+                .key_position(key.try_hash().map_err(TableKeyError::into_error)?, &key)
+                .map_err(TableKeyError::into_error)?;
             Ok(position.map(|index| table.entries[index].as_ref().unwrap().value))
         }
         // SAFETY: each table borrows its exact rooted key kind.
