@@ -92,6 +92,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
 | `pwd` | Yes | No API example recorded. | — | — | — |
 | `py_compile` | Yes | No API example recorded. | — | — | — |
+| `pydoc` | Rejected | Resolve a runtime-imported class or function by dotted name and render a Python function’s signature and docstring as plain text. [Evidence](../tests/fixtures/boxed_pydoc.py) | — | — | — |
 | `pyexpat` | Yes | No API example recorded. | — | — | — |
 | `queue` | Yes | No API example recorded. | — | — | — |
 | `quopri` | Yes | No API example recorded. | — | — | — |
@@ -181,7 +182,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `pstats` |
 | `pty` |
 | `pyclbr` |
-| `pydoc` |
 | `pydoc_data` |
 | `readline` |
 | `reprlib` |

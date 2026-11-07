@@ -1936,7 +1936,7 @@ def main():
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
-        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "io_dict_descriptor.py"):
+        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "boxed_pydoc.py", "io_dict_descriptor.py"):
             script = Path(__file__).with_name("fixtures") / fixture
             expected = run(sys.executable, "-B", script)
             actual = run(imre, "run", script, "--runtime-imports", "--quiet")
@@ -4476,6 +4476,7 @@ for name in ("md4", "ripemd160"):
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
+            "boxed_pydoc.py",
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
