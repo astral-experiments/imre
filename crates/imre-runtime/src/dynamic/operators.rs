@@ -5684,7 +5684,14 @@ impl Context {
                     Value::Int(_) | Value::Bool(_) | Value::Float(_)
                 )
             });
-        if real_pair || native_comparison || (inplace.is_empty() && self.same_sequence_family(a, b))
+        // Once both string equality slots decline, distinct objects compare unequal
+        // even when their underlying spellings are identical.
+        let text_equality =
+            op == "==" && self.string_storage(a).is_some() && self.string_storage(b).is_some();
+        if real_pair
+            || native_comparison
+            || text_equality
+            || (inplace.is_empty() && self.same_sequence_family(a, b))
         {
             let ac = self.exact_type(a)?;
             let bc = self.exact_type(b)?;
