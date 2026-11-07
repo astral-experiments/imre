@@ -686,9 +686,7 @@ impl Context {
 // until main returns. The context is accessed on one execution thread.
 unsafe fn cstr<'a>(ptr: *const c_char) -> &'a str {
     // SAFETY: the LLVM emitter passes a NUL-terminated UTF-8 constant.
-    unsafe { CStr::from_ptr(ptr) }
-        .to_str()
-        .expect("compiler UTF-8 constant")
+    unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(ptr).to_bytes()) }
 }
 
 /// Recover the native filename constant emitted from OsStr::as_encoded_bytes.
