@@ -2,6 +2,38 @@ use super::super::{FrameOwner, NONE, Value};
 use crate::dynamic::{ffi, stdlib, weakref};
 
 #[test]
+fn a_frame_binding_must_still_own_the_finalizer() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let scope = ctx.scope("sample", None);
+    let class = ctx.builtin("object");
+    let reader = ctx.instance(class, None);
+    let owner = ctx.instance(class, None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    ctx.bind(scope, "reader", reader);
+    ctx.heap.release_temporaries_since(0);
+
+    let Value::Instance { fields, .. } = ctx.heap.get_mut(reader) else {
+        unreachable!()
+    };
+    fields.insert("stream".into(), owner);
+    assert!(ctx.heap.root_keeps_owner(owner, false, None, 0));
+
+    let Value::Instance { fields, .. } = ctx.heap.get_mut(reader) else {
+        unreachable!()
+    };
+    fields.insert("stream".into(), NONE);
+    assert!(!ctx.heap.root_keeps_owner(owner, false, None, 0));
+
+    let namespace = ctx.instance_dictionary(reader, class);
+    let key = ctx.text("stream");
+    ctx.put_item(namespace, key, owner).unwrap();
+    ctx.heap.release_temporaries_since(0);
+    assert!(ctx.heap.root_keeps_owner(owner, false, None, 0));
+    ctx.delete_item(namespace, key).unwrap();
+    assert!(!ctx.heap.root_keeps_owner(owner, false, None, 0));
+}
+
+#[test]
 fn cached_operand_rechecks_the_frame_and_its_current_edge() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let class = ctx.builtin("object");

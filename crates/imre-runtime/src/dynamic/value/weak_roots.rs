@@ -537,6 +537,37 @@ impl Heap {
         }
     }
 
+    /// A live local instance can keep an owner alive through its current fields.
+    fn bound_instance_keeps_owner(&self, owner: Id) -> bool {
+        const FIELD_LIMIT: usize = 16;
+        let mut instances = 8;
+        self.active_binding_matches(|bound| {
+            if instances == 0 {
+                return false;
+            }
+            let Value::Instance {
+                fields, namespace, ..
+            } = self.get(bound)
+            else {
+                return false;
+            };
+            instances -= 1;
+            fields
+                .values()
+                .take(FIELD_LIMIT)
+                .any(|&value| value == owner)
+                || namespace.is_some_and(|namespace| {
+                    namespace == owner
+                        || self.dict_entries(namespace).is_some_and(|entries| {
+                            entries
+                                .iter()
+                                .take(FIELD_LIMIT)
+                                .any(|&(_, value)| value == owner)
+                        })
+                })
+        })
+    }
+
     /// Recheck the cached path or a surviving frame binding for a registered owner.
     fn root_keeps_owner(
         &self,
@@ -549,6 +580,7 @@ impl Heap {
             || streams.is_some_and(|roots| roots.contains(&owner))
             || self.operand_keeps_finalizer(owner, retained_current)
             || self.bound_in_active_frame(owner)
+            || self.bound_instance_keeps_owner(owner)
     }
 
     /// A pending discard preserves the active frame's operands below its mark. It must also
