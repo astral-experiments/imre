@@ -7964,11 +7964,23 @@ impl Emitter<'_, '_> {
             Builtin::FloatAcos => self.call("imre_float_acos", Type::Float, &[&args[0].value]),
             Builtin::FloatAsin => self.call("imre_float_asin", Type::Float, &[&args[0].value]),
             Builtin::FloatAtan => self.call("atan", Type::Float, &[&args[0].value]),
-            Builtin::FloatDegrees => {
-                self.call("imre_float_degrees", Type::Float, &[&args[0].value])
-            }
-            Builtin::FloatRadians => {
-                self.call("imre_float_radians", Type::Float, &[&args[0].value])
+            Builtin::FloatDegrees | Builtin::FloatRadians => {
+                // Use the same rounded scale as the Rust runtime, keeping the multiplication
+                // visible to LLVM after the argument's Python float conversion.
+                let scale = if matches!(builtin, Builtin::FloatDegrees) {
+                    1.0_f64.to_degrees()
+                } else {
+                    1.0_f64.to_radians()
+                };
+                Value {
+                    ty: Type::Float,
+                    operand: self.instruction(format!(
+                        "fmul double {}, 0x{:016X}",
+                        args[0].value.operand,
+                        scale.to_bits()
+                    )),
+                    small_integer: false,
+                }
             }
             Builtin::FloatErfc => self.call("erfc", Type::Float, &[&args[0].value]),
             Builtin::FloatLog1p => self.call("imre_float_log1p", Type::Float, &[&args[0].value]),
@@ -10921,8 +10933,6 @@ declare double @imre_int_float(i64)
 declare i64 @imre_sumprod_int_lists(ptr, ptr)
 declare double @imre_sumprod_float_lists(ptr, ptr)
 declare ptr @imre_sumprod_number_lists(ptr, ptr)
-declare double @imre_float_degrees(double)
-declare double @imre_float_radians(double)
 declare double @imre_float_acos(double)
 declare double @imre_float_asin(double)
 declare double @atan(double)
