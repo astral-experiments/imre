@@ -47,7 +47,13 @@ impl Context {
             let layout = frame
                 .class_namespace
                 .as_deref()
-                .filter(|_| frame.class_cell.is_some())
+                .filter(|layout| {
+                    // A storage-free ancestor using object's allocator needs no cell of its own.
+                    frame.class_cell.is_some()
+                        || (owner != class
+                            && layout.slot_names.as_deref() == Some(&[])
+                            && self.allocation_base(owner) == Some(object))
+                })
                 .ok_or_else(unsupported)?;
             let Value::Tuple(bases) = self.heap.get(layout.bases) else {
                 return Err(unsupported());
