@@ -311,6 +311,19 @@ socket_constants! {
     imre_socket_default_backlog = if libc::SOMAXCONN < 128 { libc::SOMAXCONN } else { 128 },
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+socket_constants! {
+    imre_socket_ipv6_recvhoplimit = libc::IPV6_RECVHOPLIMIT,
+    imre_socket_ipv6_hoplimit = libc::IPV6_HOPLIMIT,
+    imre_socket_ipv6_recvtclass = libc::IPV6_RECVTCLASS,
+    imre_socket_ipv6_tclass = libc::IPV6_TCLASS,
+}
+
+#[cfg(target_os = "linux")]
+socket_constants! {
+    imre_socket_ipproto_udplite = libc::IPPROTO_UDPLITE,
+}
+
 pub(crate) enum SocketOption<'a> {
     Integer(i32),
     Buffer(&'a [u8]),

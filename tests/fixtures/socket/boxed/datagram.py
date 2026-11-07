@@ -1,5 +1,6 @@
 """Exchange UDP datagrams and preserve socket type after close."""
 import errno
+import struct
 import socket
 from _socket import MSG_PEEK as raw_peek, MSG_TRUNC as raw_trunc
 from socket import MSG_PEEK, MSG_TRUNC, MsgFlag
@@ -12,6 +13,17 @@ def check(family, host):
         receiver.bind((host, 0))
         source = sender.getsockname()
         target = receiver.getsockname()
+        if family == socket.AF_INET6:
+            receiver.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_RECVHOPLIMIT, 1)
+            receiver.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_RECVTCLASS, 1)
+            hop = struct.pack("i", 37)
+            traffic = struct.pack("i", 32)
+            controls = [(socket.IPPROTO_IPV6, socket.IPV6_HOPLIMIT, hop),
+                        (socket.IPPROTO_IPV6, socket.IPV6_TCLASS, traffic)]
+            assert sender.sendmsg([b"v6"], controls, 0, target) == 2
+            data, ancillary, flags, peer = receiver.recvmsg(2, 2 * socket.CMSG_SPACE(len(hop)))
+            assert data == b"v6" and peer == source and not flags & socket.MSG_CTRUNC
+            assert sorted(ancillary) == sorted(controls)
         args = (b"extra", 0, target, 4)
         for kwargs, expected in (
             ({}, "sendto() takes 2 or 3 arguments (4 given)"),
