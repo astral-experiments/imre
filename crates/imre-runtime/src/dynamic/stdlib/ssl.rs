@@ -46,6 +46,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "default_verify_paths",
         "default_verify_flags",
         "set_alpn_protocols",
+        "selected_alpn_protocol",
         "post_handshake_auth",
         "verify_client_post_handshake",
         "get_ciphers",
@@ -660,18 +661,30 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
+        ("selected_alpn_protocol", &[handle]) => {
+            let selected = match ctx.heap.get(handle) {
+                Value::TlsBioSession(session) => session.borrow().selected_alpn_protocol(),
+                Value::TlsSession(session) => session
+                    .borrow()
+                    .as_ref()
+                    .and_then(|s| s.selected_alpn_protocol()),
+                Value::None | Value::TlsListener(_) | Value::Socket(_) => None,
+                _ => return Err(Error::new("TypeError", "expected a TLS connection")),
+            };
+            let Some(bytes) = selected else {
+                return Ok(NONE);
+            };
+            let name = crate::objects::Codec::Utf8 { signature: false }
+                .decode(&bytes, None)
+                .map_err(|err| ctx.decode_error(err))?;
+            Ok(ctx.text(name))
+        }
         ("set_alpn_protocols", &[handle, wire]) => {
             let Value::Bytes(protocols) = ctx.heap.get(ctx.scalar_value(wire)) else {
                 return Err(Error::new("TypeError", "expected ALPN wire bytes"));
             };
-            let mut context = context(ctx, handle)?.borrow_mut();
-            if context.protocol != provider::Protocol::Client && !protocols.is_empty() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "server ALPN selection is unsupported",
-                ));
-            }
-            context
+            context(ctx, handle)?
+                .borrow_mut()
                 .set_alpn_protocols(protocols)
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)

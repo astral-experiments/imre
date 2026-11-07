@@ -65,6 +65,7 @@ impl Bio {
 }
 
 pub(in crate::dynamic) struct BioSession {
+    alpn: std::rc::Rc<super::alpn::Alpn>,
     api: &'static Api,
     handle: NonNull<c_void>,
     handshake_complete: bool,
@@ -193,6 +194,7 @@ impl BioSession {
         let api = ctx.api;
         let handle = ctx.new_connection(server)?;
         let session = Self {
+            alpn: ctx.alpn.clone(),
             api,
             handle,
             handshake_complete: false,
@@ -232,6 +234,10 @@ impl BioSession {
             }
         }
         Ok(session)
+    }
+
+    pub(in crate::dynamic) fn selected_alpn_protocol(&self) -> Option<Vec<u8>> {
+        self.alpn.selected(self.handle)
     }
 
     pub(in crate::dynamic) fn handshake(&mut self) -> std::result::Result<(), BioFailure> {

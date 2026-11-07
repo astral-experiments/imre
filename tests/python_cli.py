@@ -3552,6 +3552,11 @@ def report(text):
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
                 certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                alpn = fixtures / "ssl_alpn.py"
+                compare(
+                    "-IB", alpn, certdata,
+                    native_args=("run", alpn, "--quiet", "--", certdata), native_timeout=600,
+                )
                 dh_params = fixtures / "ssl_dh_params.py"
                 compare(
                     "-IB", dh_params, certdata,
