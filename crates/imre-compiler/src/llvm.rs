@@ -4109,6 +4109,40 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Lower a fixed-order binomial when range analysis proves its numerator fits one word.
+    fn bounded_comb(&mut self, expressions: &[Expr], args: &[Operand]) -> Option<Value> {
+        let n = self.ranges.integer(&expressions[0])?;
+        let order = self.ranges.integer(&expressions[1])?;
+        // Bound the unrolled product. Unknown signs or orders use the checked runtime.
+        if n.min < 0 || order.min != order.max || !(0..=8).contains(&order.min) {
+            return None;
+        }
+        let k = order.min;
+        if n.max < k {
+            return Some(small(0));
+        }
+        match k {
+            0 => return Some(small(1)),
+            1 => return Some(args[0].value.clone()),
+            _ => {}
+        }
+        let denominator = (2..=k).product::<i64>();
+        let upper = (0..k).try_fold(1_i64, |product, i| product.checked_mul(n.max - i))?;
+        // Dividing a signed word by at least two fits a tagged result. For n < k
+        // one factor is zero before any later negative factors are multiplied.
+        if n.min == n.max {
+            return Some(small(upper / denominator));
+        }
+        let raw = self.instruction(format!("ashr i64 {}, 1", args[0].value.operand));
+        let mut product = raw.clone();
+        for offset in 1..k {
+            let factor = self.instruction(format!("sub nsw i64 {raw}, {offset}"));
+            product = self.instruction(format!("mul nsw i64 {product}, {factor}"));
+        }
+        let result = self.instruction(format!("udiv exact i64 {product}, {denominator}"));
+        Some(self.tag_small(&result))
+    }
+
     /// Check the tags once for a short chain of integer comparisons.
     fn integer_extremum(&mut self, minimum: bool, args: &[Operand]) -> Value {
         let order = if minimum {
@@ -7688,11 +7722,13 @@ impl Emitter<'_, '_> {
             Builtin::MathFactorial => {
                 self.call("imre_math_factorial", Type::Int, &[&args[0].value])
             }
-            Builtin::MathComb => self.call(
-                "imre_math_comb",
-                Type::Int,
-                &[&args[0].value, &args[1].value],
-            ),
+            Builtin::MathComb => self.bounded_comb(expressions, &args).unwrap_or_else(|| {
+                self.call(
+                    "imre_math_comb",
+                    Type::Int,
+                    &[&args[0].value, &args[1].value],
+                )
+            }),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::Sumprod if returns == Type::Int => {
                 self.output.local_helper(
@@ -12086,6 +12122,22 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn bounded_combinations_preserve_the_checked_fallback() {
+        let fixed = function_body(
+            "from math import comb\ndef count(n: int) -> int:\n    return comb(n & 63, 5)\n",
+        );
+        assert!(fixed.contains("udiv exact i64"), "{fixed}");
+        assert!(!fixed.contains("@imre_math_comb("), "{fixed}");
+        for arguments in ["n, 2", "n & 63, n", "n & 1073741823, 8"] {
+            let source = format!(
+                "from math import comb\ndef count(n: int) -> int:\n    return comb({arguments})\n"
+            );
+            let body = function_body(&source);
+            assert!(body.contains("@imre_math_comb("), "{body}");
+        }
     }
 
     #[test]
