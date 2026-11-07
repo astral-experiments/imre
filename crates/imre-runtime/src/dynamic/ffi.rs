@@ -2240,6 +2240,11 @@ impl Context {
             {
                 return;
             }
+            if self.heap.retire_closed_descriptors()
+                && self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+            {
+                return;
+            }
             self.collect_unreachable();
         }
     }

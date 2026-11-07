@@ -98,6 +98,15 @@ impl BinaryFile {
     }
 
     /// All aliases observe closure through the same buffered stream.
+    /// A callback may check frame roots while a file operation holds its state.
+    pub(in crate::dynamic) fn owns_open_descriptor(&self) -> bool {
+        match self {
+            Self::Reader { slot, .. } => !slot.try_borrow().is_ok_and(|slot| slot.is_none()),
+            Self::Writer { file, .. } => !file.try_borrow().is_ok_and(|file| file.closed()),
+            _ => !self.closed(),
+        }
+    }
+
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
             Self::Descriptor(fd) => fd.closed(),
