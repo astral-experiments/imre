@@ -318,6 +318,11 @@ def check_sysconfig_build(imre, root, run):
     by_name = (
         "import _imp, importlib, sys\n"
         "mod = importlib.import_module(sys.argv[1])\n"
+        "config_vars = mod._CONFIG_VARS\n"
+        "version = mod.get_python_version()\n"
+        "assert version == '%d.%d' % sys.version_info[:2]\n"
+        "assert mod.get_python_version() is version\n"
+        "assert mod._CONFIG_VARS is config_vars\n"
         "assert mod.get_config_var('EXT_SUFFIX') in _imp.extension_suffixes()\n"
         "assert mod.get_config_vars() is mod.get_config_vars()\n"
     )
