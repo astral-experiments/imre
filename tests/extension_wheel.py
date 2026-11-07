@@ -9,6 +9,7 @@ import sysconfig
 import tempfile
 from pathlib import Path
 
+import packaging
 from packaging.utils import parse_wheel_filename
 
 
@@ -156,6 +157,17 @@ def main() -> None:
         shutil.copyfile(site / "retainer.pyi", installed / "retainer.pyi")
         assert run(launcher, "-B", caller, extra_env=startup) == b"b'source'\n"
         shutil.copyfile(site / "retainer.imre.a", installed / "retainer.imre.a")
+        assert run(launcher, "-B", caller, extra_env=startup) == b"b'wheel'\n"
+
+        shutil.copytree(Path(packaging.__file__).parent, installed / "packaging")
+        probe = (
+            "from packaging.tags import generic_tags\n"
+            "from sysconfig import get_config_var\n"
+            f"assert {str(tag)!r} in {{str(t) for t in generic_tags(platforms=[{tag.platform!r}])}}\n"
+            "print(get_config_var('EXT_SUFFIX'))"
+        )
+        suffix = run(launcher, "-B", "-c", probe, extra_env=startup).decode().strip()
+        (installed / "retainer.imre.a").rename(installed / ("retainer" + suffix))
         assert run(launcher, "-B", caller, extra_env=startup) == b"b'wheel'\n"
 
         cp_runner = "import runpy, sys; sys.path.insert(0, sys.argv[1]); runpy.run_path(sys.argv[2], run_name='__main__')"

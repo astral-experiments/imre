@@ -25,11 +25,11 @@ def main() -> None:
     if args.output.resolve().is_relative_to(args.stage.resolve()):
         parser.error("the output directory must be outside the staged package")
     target = json.loads(subprocess.check_output([args.imre, "build-target"]))
-    suffix = target["archive_suffix"]
-    archives = list(args.stage.rglob(f"*{suffix}"))
+    suffixes = target.get("archive_suffixes", [target["archive_suffix"]])
+    archives = [(path, suffix) for suffix in suffixes for path in args.stage.rglob(f"*{suffix}")]
     if not archives:
-        parser.error(f"the package contains no {suffix} archive")
-    for archive in archives:
+        parser.error(f"the package contains no {target['archive_suffix']} archive")
+    for archive, suffix in archives:
         stub = archive.with_name(archive.name.removesuffix(suffix) + ".pyi")
         if not stub.is_file():
             parser.error(f"missing native declarations at {stub}")

@@ -603,8 +603,11 @@ pub(crate) fn pkgutil_suffixes() -> String {
         format!("{}-linux-{libc}", std::env::consts::ARCH)
     };
     let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
-    let archive = format!(".{}", crate::NATIVE_ARCHIVE_EXTENSION);
-    serde_json::to_string(&[&tagged, ".abi3.so", &archive, ".so", ".py", ".pyc"]).unwrap()
+    let [versioned, legacy] = imre_ast::NATIVE_ARCHIVE_EXTENSIONS.map(|ext| format!(".{ext}"));
+    serde_json::to_string(&[
+        &tagged, ".abi3.so", &versioned, &legacy, ".so", ".py", ".pyc",
+    ])
+    .unwrap()
 }
 
 // CPython's built-in/frozen lookup precedes first-party files. These internal and
@@ -5988,16 +5991,27 @@ impl<'a> Loader<'a> {
                 (package, true, None)
             } else {
                 self.inputs.missing.push(package);
-                let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
                 let installed = self.search_roots[..self.archive_roots].contains(root);
-                let native = if installed {
-                    self.fs.is_file(&archive)
-                } else {
-                    self.site_wheels.as_mut().is_some_and(|(sites, probes)| {
-                        sites.contains(root) && probes.paired(&mut self.fs, &archive, &stub)
+                let mut archives = imre_ast::NATIVE_ARCHIVE_EXTENSIONS
+                    .iter()
+                    .map(|ext| base.with_extension(ext));
+                let archive = if installed {
+                    archives.find(|path| {
+                        let exists = self.fs.is_file(path);
+                        if !exists {
+                            self.inputs.missing.push(path.clone());
+                        }
+                        exists
                     })
+                } else {
+                    self.site_wheels
+                        .as_mut()
+                        .filter(|(sites, _)| sites.contains(root))
+                        .and_then(|(_, probes)| {
+                            archives.find(|path| probes.paired(&mut self.fs, path, &stub))
+                        })
                 };
-                if native {
+                if let Some(archive) = archive {
                     if installed && !self.fs.is_file(&stub) {
                         return Err(format!(
                             "native module {name:?} requires a typed declaration at {}",
@@ -6016,12 +6030,13 @@ impl<'a> Loader<'a> {
                 } else if installed && self.fs.is_file(&stub) {
                     return Err(format!(
                         "native module {name:?} requires a rebuilt archive at {}",
-                        archive.display()
+                        base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION)
+                            .display()
                     ));
                 } else {
                     self.inputs.missing.push(source);
                     if installed {
-                        self.inputs.missing.extend([archive, stub]);
+                        self.inputs.missing.push(stub);
                     }
                     if self.fs.is_dir(&base) {
                         portions.push((root_index, root.clone(), base));

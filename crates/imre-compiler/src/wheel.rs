@@ -59,7 +59,8 @@ fn build_target(directory: Option<&Path>) -> Result<String, String> {
         "{IMPLEMENTATION_NAME}{}{}",
         PYTHON_VERSION.major, PYTHON_VERSION.minor
     );
-    let abi_tag = "imre1";
+    let extensions = imre_ast::NATIVE_ARCHIVE_EXTENSIONS;
+    let (abi_tag, _) = extensions[0].split_once('.').unwrap();
     let mut target = json!({
         "implementation": IMPLEMENTATION_NAME,
         "python_version": PYTHON_VERSION.to_string(),
@@ -69,6 +70,7 @@ fn build_target(directory: Option<&Path>) -> Result<String, String> {
         "wheel_tag": format!("{python_tag}-{abi_tag}-{platform}"),
         "link_mode": "static",
         "archive_suffix": format!(".{NATIVE_ARCHIVE_EXTENSION}"),
+        "archive_suffixes": extensions.map(|ext| format!(".{ext}")),
     });
     if let Some(dir) = directory {
         for (file, contents) in [
