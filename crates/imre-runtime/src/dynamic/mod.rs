@@ -2351,7 +2351,10 @@ impl Context {
             let mut entries = Vec::with_capacity(members.size_hint().0);
             for name in members {
                 let key = self.heap.code_name(name);
-                let value = self.lookup_attr(class, name)?;
+                let value = match self.own_class_attr(class, name) {
+                    Some(member) => member,
+                    None => self.lookup_attr(class, name)?,
+                };
                 let value = if matches!(self.heap.get(value), Value::Native(symbol) if symbol == "str.maketrans")
                 {
                     method_decorator::static_method(self, value)?

@@ -4197,7 +4197,7 @@ impl Context {
                         | super::deque::CLASS
                         | super::deque::ITERATOR
                         | super::deque::REVERSE_ITERATOR
-                ) =>
+                ) || (class == defaultdict::CLASS && name == "__class_getitem__") =>
             {
                 let class = class.as_str().to_owned();
                 let (module, short) = class.rsplit_once('.').unwrap();
@@ -4853,7 +4853,7 @@ impl Context {
             {
                 return Ok(self.text(builtin.split('.').next().unwrap().to_owned()));
             }
-            Value::ContextVar { .. } | Value::ContextToken { .. }
+            Value::ContextVar { .. } | Value::ContextToken { .. } | Value::DefaultDict { .. }
                 if name == "__class_getitem__" =>
             {
                 let owner = self.exact_type(obj)?;

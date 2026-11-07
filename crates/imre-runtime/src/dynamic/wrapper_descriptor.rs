@@ -676,6 +676,8 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.owner == namespace::CLASS && self.name == "__replace__" => {
                 ctx.text("($self, /, **changes)")
             }
+            "__doc__" if self.name == "__class_getitem__" => ctx.text("See PEP 585"),
+            "__text_signature__" if self.name == "__class_getitem__" => ctx.text("($type, object, /)"),
             "__doc__" | "__text_signature__" if self.owner == defaultdict::CLASS => {
                 let (doc, signature) = defaultdict::metadata(self.name)?;
                 ctx.text(if name == "__doc__" { doc } else { signature })
@@ -694,8 +696,6 @@ impl BuiltinDescriptor {
                     ctx.text(format!("Return self{op}value."))
                 }
             }
-            "__doc__" if self.name == "__class_getitem__" => ctx.text("See PEP 585"),
-            "__text_signature__" if self.name == "__class_getitem__" => ctx.text("($type, object, /)"),
             "__doc__" if self.owner == "typing.Generic" => ctx.text("Function to initialize subclasses."),
             "__text_signature__" if self.owner == "typing.Generic" => NONE,
             "__name__" => ctx.text(self.name),
