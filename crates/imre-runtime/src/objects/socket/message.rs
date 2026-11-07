@@ -5,8 +5,9 @@ use allocator_api2::boxed::Box;
 use std::{io, ptr, slice};
 
 const SOCKLEN_LIMIT: usize = i32::MAX as usize;
-// SAFETY: these libc macros only compute layout sizes.
+// SAFETY: CMSG_LEN only computes a layout size for this constant payload length.
 const HEADER_LEN: usize = unsafe { libc::CMSG_LEN(0) as usize };
+// SAFETY: CMSG_SPACE only computes a layout size for this constant payload length.
 const PADDED_MIN: usize = unsafe { libc::CMSG_SPACE(1) as usize };
 
 pub(crate) fn cmsg_len(size: usize) -> Result<usize> {
@@ -76,11 +77,9 @@ impl Control {
         let count = len.div_ceil(size_of::<libc::cmsghdr>());
         let storage =
             Box::<[libc::cmsghdr]>::try_new_zeroed_slice(count).map_err(|_| Error::allocation())?;
-        // SAFETY: cmsghdr consists of integer fields; zeroed padding is also initialized.
-        Ok(Self {
-            storage: unsafe { storage.assume_init() },
-            len,
-        })
+        // SAFETY: every field of cmsghdr accepts zero and the allocation is fully zeroed.
+        let storage = unsafe { storage.assume_init() };
+        Ok(Self { storage, len })
     }
 
     fn data(&mut self) -> *mut libc::c_void {
@@ -147,6 +146,10 @@ impl<'a> Iterator for ControlItems<'a> {
         }
         // SAFETY: the checked prefix contains a full initialized cmsghdr.
         let header = unsafe { self.bytes.as_ptr().cast::<libc::cmsghdr>().read_unaligned() };
+        #[allow(
+            clippy::unnecessary_cast,
+            reason = "cmsg_len is socklen_t on some targets"
+        )]
         let len = header.cmsg_len as usize;
         if len < HEADER_LEN || self.bytes.len() < HEADER_LEN {
             self.malformed = true;
@@ -203,8 +206,9 @@ impl Drop for ReceivedControl {
         if self.owns_fds {
             for (level, kind, data) in self.iter() {
                 if level == libc::SOL_SOCKET && kind == libc::SCM_RIGHTS {
-                    for fd in data.chunks_exact(size_of::<libc::c_int>()) {
-                        let _ = super::close_fd(libc::c_int::from_ne_bytes(fd.try_into().unwrap()));
+                    let (descriptors, _) = data.as_chunks();
+                    for &fd in descriptors {
+                        let _ = super::close_fd(libc::c_int::from_ne_bytes(fd));
                     }
                 }
             }
@@ -261,6 +265,7 @@ pub(crate) unsafe fn recv(
     let control = &mut received.control;
     // SAFETY: zero is a valid empty msghdr and initialized sockaddr_storage.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    // SAFETY: zero initializes the integer fields and padding of the output address.
     let mut addr: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     msg.msg_name = (&raw mut addr).cast();
     msg.msg_control = control.data();
@@ -299,7 +304,7 @@ mod tests {
         let (mut peer, owner) = UnixStream::pair().unwrap();
         peer.set_nonblocking(true).unwrap();
         let rights = owner.as_raw_fd().to_ne_bytes();
-        let mut byte = [b'!'];
+        let mut byte = *b"!";
         let mut iov = [libc::iovec {
             iov_base: byte.as_mut_ptr().cast(),
             iov_len: byte.len(),
