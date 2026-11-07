@@ -456,7 +456,24 @@ pub unsafe extern "C" fn imre_record_new(descriptor: *const RecordDescriptor) ->
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_record_try_new(descriptor: *const RecordDescriptor) -> *mut usize {
     // SAFETY: the caller supplies a live descriptor and its immutable field kinds.
-    let record = unsafe { allocate_record(descriptor) };
+    checked_record_allocation(unsafe { allocate_record(descriptor) })
+}
+
+/// Allocate a record with the payload size calculated during compilation.
+///
+/// # Safety
+/// The static descriptor has valid immutable fields and `words` equals its full allocation length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_try_new_sized(
+    descriptor: *const RecordDescriptor,
+    words: usize,
+) -> *mut usize {
+    // SAFETY: the compiler supplies the complete payload size, including any private hash word.
+    checked_record_allocation(unsafe { allocate_record_payload(&*descriptor, words) })
+}
+
+/// Translate a failed native allocation to the pending Python exception.
+fn checked_record_allocation(record: *mut usize) -> *mut usize {
     if record.is_null() {
         super::exceptions::record_allocation_failed();
     }
@@ -567,12 +584,21 @@ pub unsafe extern "C" fn imre_record_shallow_copy(source: *const usize) -> *mut 
 pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mut usize {
     // SAFETY: the caller provides immutable live metadata for this allocation.
     let descriptor_value = unsafe { &*descriptor };
-    let allocation_layout = layout(descriptor_value.allocated_words());
     // Validate once before constructing an object whose destructor uses the kinds.
     for index in 0..descriptor_value.length {
         // SAFETY: the descriptor promises this many initialized kind entries.
         WordKind::new(unsafe { descriptor_value.kinds.add(index).read() });
     }
+    // SAFETY: all kind entries were checked and the descriptor outlives the record.
+    unsafe { allocate_record_payload(descriptor_value, descriptor_value.allocated_words()) }
+}
+
+/// Initialize the header and zero the payload of a prevalidated record layout.
+///
+/// # Safety
+/// The descriptor and its valid kinds outlive the allocation; `words` includes every trailing field.
+unsafe fn allocate_record_payload(descriptor: &RecordDescriptor, words: usize) -> *mut usize {
+    let allocation_layout = layout(words);
     // SAFETY: layout is nonzero and correctly aligned for the header and words.
     let allocation = unsafe { alloc(allocation_layout) };
     if allocation.is_null() {
@@ -587,7 +613,7 @@ pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mu
         // Only the payload needs zeroing for partial-field cleanup. The ordinary
         // allocation can reuse a freed small record without clearing its header.
         let payload = allocation.add(size_of::<Header>()).cast::<usize>();
-        payload.write_bytes(0, descriptor_value.allocated_words());
+        payload.write_bytes(0, words);
         payload
     }
 }

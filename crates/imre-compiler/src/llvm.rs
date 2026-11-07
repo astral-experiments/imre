@@ -10101,7 +10101,7 @@ impl Emitter<'_, '_> {
     fn record_with_layout(&mut self, ty: Type, layout: String) -> Value {
         // A loop can produce many small, independently escaping ordinary tuples.
         // Batch only the layouts for which several records fit in one block.
-        let allocate = if !self.loops.is_empty()
+        let operand = if !self.loops.is_empty()
             && matches!(ty, Type::Tuple(_))
             && self.module.types.tuple_origin(ty).is_none()
             && self
@@ -10110,16 +10110,41 @@ impl Emitter<'_, '_> {
                 .fields(ty)
                 .is_some_and(|fields| (1..=8).contains(&fields.len()))
         {
-            "imre_tuple_batch_try_new"
+            self.checked_pointer(format!("call ptr @imre_tuple_batch_try_new(ptr @{layout})"))
         } else {
-            "imre_record_try_new"
+            self.allocate_record(ty, &layout)
         };
         let value = Value {
             ty,
-            operand: self.checked_pointer(format!("call ptr @{allocate}(ptr @{layout})")),
+            operand,
             small_integer: false,
         };
         self.owned(value)
+    }
+
+    /// Pass the exact payload size for records with no runtime-specific trailing fields.
+    fn allocate_record(&mut self, ty: Type, layout: &str) -> String {
+        let words = match ty {
+            Type::Class(class) => {
+                self.module.class_fields[class].len()
+                    + usize::from(
+                        self.module
+                            .class_metadata
+                            .get(class)
+                            .is_some_and(|m| m.toml_hash),
+                    )
+            }
+            Type::Tuple(_) if self.module.types.tuple_metadata(ty).is_none() => {
+                self.module.types.fields(ty).unwrap().len()
+            }
+            _ => {
+                return self
+                    .checked_pointer(format!("call ptr @imre_record_try_new(ptr @{layout})"));
+            }
+        };
+        self.checked_pointer(format!(
+            "call ptr @imre_record_try_new_sized(ptr @{layout}, i64 {words})"
+        ))
     }
 
     fn checked_pointer(&mut self, instruction: impl AsRef<str>) -> String {
@@ -10142,7 +10167,7 @@ impl Emitter<'_, '_> {
         self.branch(&empty, &allocate, &cached);
         self.start(&allocate);
         let layout = self.output.record_layout(previous.ty);
-        let fresh = self.checked_pointer(format!("call ptr @imre_record_try_new(ptr @{layout})"));
+        let fresh = self.allocate_record(previous.ty, &layout);
         let allocated = self.current.clone();
         self.jump(&write);
         self.start(&cached);
@@ -11338,6 +11363,7 @@ declare ptr @imre_sys_default_encoding()
 declare ptr @imre_sys_filesystem_encoding()
 declare ptr @imre_sys_filesystem_errors()
 declare ptr @imre_record_try_new(ptr)
+declare ptr @imre_record_try_new_sized(ptr, i64)
 declare ptr @imre_tuple_batch_try_new(ptr)
 declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
@@ -12403,7 +12429,7 @@ print(show("x"))
                 .unwrap()
                 .0
         };
-        assert!(body("fn_0").contains("call ptr @imre_record_try_new("));
+        assert!(body("fn_0").contains("call ptr @imre_record_try_new_sized("));
         assert!(body("fn_0").contains("icmp eq ptr "));
         assert!(body("fn_1").contains("call i32 @imre_error_pending()"));
         assert!(llvm.contains("call void @imre_record_error_init()"));
@@ -12440,7 +12466,7 @@ print(show("x"))
             .split_once("\n}")
             .unwrap()
             .0;
-        assert!(!init.contains("@imre_record_try_new("));
+        assert!(!init.contains("@imre_record_try_new"));
     }
 
     #[test]
@@ -12774,7 +12800,10 @@ print(show("x"))
             "def probe(d: dict[tuple[str, int], int], x: str) -> int:\n    d.get((x, 1))\n    d.get((x, 2), 3)\n    if (x, 4) in d:\n        return d[(x, 5)]\n    return 0\n",
         );
         assert_eq!(body.matches("call ptr @imre_tuple_probe(").count(), 3);
-        assert_eq!(body.matches("call ptr @imre_record_try_new(").count(), 1);
+        assert_eq!(
+            body.matches("call ptr @imre_record_try_new_sized(").count(),
+            1
+        );
     }
 
     #[test]
@@ -12805,8 +12834,11 @@ print(show("x"))
             "def probe(d: dict[tuple[str, str], int], x: str, y: str, write: bool) -> int:\n    key = (x, y)\n    found = d.get(key, 0)\n    if write:\n        d[key] = found + 1\n    return found\n",
         );
         let (_, after_probe) = body.split_once("call ptr @imre_tuple_probe(").unwrap();
-        assert_eq!(body.matches("call ptr @imre_record_try_new(").count(), 1);
-        assert!(after_probe.contains("call ptr @imre_record_try_new("));
+        assert_eq!(
+            body.matches("call ptr @imre_record_try_new_sized(").count(),
+            1
+        );
+        assert!(after_probe.contains("call ptr @imre_record_try_new_sized("));
     }
 
     #[test]
@@ -12844,7 +12876,10 @@ print(show("x"))
                 "def probe(d: dict[tuple[str, int], int], other: dict[tuple[str, int], int], x: str) -> int:\n    key = (x, 0)\n    found = d.get(key, 0)\n{stores}\n    return found\n"
             ));
             assert!(!body.contains("call ptr @imre_tuple_probe("));
-            assert_eq!(body.matches("call ptr @imre_record_try_new(").count(), 1);
+            assert_eq!(
+                body.matches("call ptr @imre_record_try_new_sized(").count(),
+                1
+            );
         }
     }
 
