@@ -813,11 +813,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                 kind @ ("list_iterator" | "tuple_iterator" | "str_ascii_iterator" | "str_iterator"),
             ..
         } if matches!(attr, "__iter__" | "__next__") => kind,
-        Value::RangeIterator(iter)
-            if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
-        {
-            iter.kind
-        }
+        Value::RangeIterator(iter) if super::range::ITER_METHODS.contains(&attr) => iter.kind,
         Value::Slice(_) if super::slice::METHODS.contains(&attr) => "slice",
         Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. }
             if super::namedtuple::MEMBER_SLOTS.contains(&attr) || attr == "__reduce__" =>
@@ -1031,7 +1027,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "match"
         }
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
-        Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
+        Value::Filter { .. } if matches!(attr, "__iter__" | "__next__" | "__reduce__") => "filter",
+        Value::Filter { .. } | Value::Range(_) | Value::RangeIterator(_)
+            if attr == "__reduce_ex__" =>
+        {
+            "object"
+        }
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Deque(_) if attr == "__reduce_ex__" => "object",
@@ -1500,6 +1501,15 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "filter.__reduce__" {
+        let receiver = noargs_method_receiver(ctx, "filter", "__reduce__", args, kwargs)?;
+        let Value::Filter { predicate, input } = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+            unreachable!("validated filter")
+        };
+        let args = ctx.alloc(Value::Tuple(vec![predicate, input]));
+        let class = ctx.exact_type(receiver)?;
+        return Ok(ctx.alloc(Value::Tuple(vec![class, args])));
+    }
     if name == "method.__reduce__" {
         let method = noargs_method_receiver(ctx, "method", "__reduce__", args, kwargs)?;
         let Value::Method {
