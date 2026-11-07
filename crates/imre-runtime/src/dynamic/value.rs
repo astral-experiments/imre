@@ -1305,7 +1305,10 @@ pub(super) enum Value {
         initializing: bool,
         // Private state retained by this generation of a native module.
         module_state: Option<NativeModuleState>,
-        // Imported modules are resolved separately from independently constructed ones.
+        /// Named Python slots use offsets preserved by compatible module class changes.
+        module_slots: Option<Box<HashMap<usize, Id>>>,
+        // Concrete Python type. Imported base modules use None; a directly constructed
+        // module has an empty internal import name and always carries its constructor.
         constructor: Option<Id>,
     },
     Function {
@@ -1413,6 +1416,7 @@ pub(super) enum Value {
     SlotMember {
         owner: Id,
         name: Id,
+        module_offset: Option<usize>,
     },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
@@ -1826,6 +1830,7 @@ impl Value {
     pub(super) fn finalizer_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
         }
@@ -2106,9 +2111,13 @@ impl Value {
                 origin,
                 constructor,
                 module_state,
+                module_slots,
                 ..
             } => {
                 visit.push(*scope);
+                if let Some(slots) = module_slots {
+                    visit.extend(slots.values());
+                }
                 if let Some(state) = module_state {
                     state.references(visit);
                 }
@@ -2242,7 +2251,7 @@ impl Value {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);
             }
-            Self::SlotMember { owner, name } => visit.extend([*owner, *name]),
+            Self::SlotMember { owner, name, .. } => visit.extend([*owner, *name]),
             Self::Instance {
                 class,
                 fields,
@@ -6314,6 +6323,7 @@ mod tests {
             origin: None,
             initializing: false,
             module_state: None,
+            module_slots: None,
             constructor: None,
         });
         let modules = heap.alloc(Value::Dict(vec![(NONE, module)].into()));

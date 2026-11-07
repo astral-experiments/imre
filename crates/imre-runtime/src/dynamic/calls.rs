@@ -1128,10 +1128,6 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
-                            | "module.__init__"
-                            | "module.__dir__"
-                            | "module.__repr__"
-                            | "module.__getattribute__"
                             | "object.__str__"
                             | "bytes.count"
                             | "bytes.decode"
@@ -1472,6 +1468,12 @@ impl Context {
     }
 
     pub(super) fn read_member(&mut self, owner: &str, field: &str, receiver: Id) -> Result<Id> {
+        if owner == "module"
+            && field == "__dict__"
+            && let Value::Module { scope, .. } = *self.heap.get(receiver)
+        {
+            return self.module_globals(scope);
+        }
         if owner == "BaseExceptionGroup"
             && let Value::Raised(error) = self.heap.get(receiver)
             && let Some([message, exceptions]) = error.group()
@@ -2074,13 +2076,19 @@ impl Context {
             | Value::Class {
                 metaclass: Some(class),
                 ..
-            }
-            | Value::Module {
-                constructor: Some(class),
-                ..
             } => class,
             Value::Raised(ref error) if let Some(class) = error.class() => class,
+            Value::Module {
+                constructor: Some(class),
+                ..
+            } if matches!(self.heap.get(class), Value::Class { .. }) => class,
             Value::Module { scope, .. } => {
+                // Exact ModuleType has no data descriptors for ordinary names.
+                if !name.starts_with("__")
+                    && let Some(field) = self.scope_name(scope, name)
+                {
+                    return Ok(field);
+                }
                 return self.module_get_attribute(obj, scope, name, original);
             }
             Value::Super { .. } => return self.super_getattribute(obj, name),
@@ -2850,16 +2858,20 @@ impl Context {
                 };
                 return Ok(self.alloc(Value::Int(bound)));
             }
-            Value::Native(ref class) if class == "module" => match name {
-                "__doc__" => return Ok(self.text(module_type::DOC)),
-                "__init__" | "__new__" | "__dir__" | "__repr__" | "__getattribute__" => {
-                    return Ok(self.builtin(&format!("module.{name}")));
+            Value::Native(ref class) if class == "module" => {
+                if let Some(member) = self.own_class_attr(obj, name) {
+                    return Ok(member);
                 }
-                "__name__" | "__qualname__" => return Ok(self.text("module")),
-                "__module__" => return Ok(self.text("builtins")),
-                _ => {}
-            },
-            Value::SlotMember { owner, name: field } => match name {
+                match name {
+                    "__base__" => return Ok(self.builtin("object")),
+                    "__name__" | "__qualname__" => return Ok(self.text("module")),
+                    "__module__" => return Ok(self.text("builtins")),
+                    _ => {}
+                }
+            }
+            Value::SlotMember {
+                owner, name: field, ..
+            } => match name {
                 "__name__" => return Ok(field),
                 "__objclass__" => return Ok(owner),
                 "__doc__" => return Ok(NONE),
@@ -2902,6 +2914,9 @@ impl Context {
             Value::LayoutDescriptor(owner, field) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text(field)),
+                "__doc__" if matches!(field, "__annotations__" | "__annotate__") => {
+                    return Ok(NONE);
+                }
                 "__doc__" => {
                     return Ok(self.text(match field {
                         "__dict__" => "dictionary for instance variables",
@@ -5094,10 +5109,16 @@ impl Context {
                 constructor,
                 ..
             } => {
+                if let Some(class) = constructor
+                    && matches!(self.heap.get(class), Value::Class { .. })
+                    && self.class_attr(class, name).is_some()
+                {
+                    return self.module_instance_attribute(obj, class, scope, name);
+                }
                 if name == "__dict__" {
                     return self.module_globals(scope);
                 }
-                if constructor.is_none() && stdlib::has_lazy_attributes(module) {
+                if stdlib::has_lazy_attributes(module) {
                     if let Some(value) = self.scope_name(scope, name) {
                         return Ok(value);
                     }
@@ -5130,6 +5151,12 @@ impl Context {
             } => {
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
+                }
+                if name == "__base__"
+                    && self.has_base(obj, "module")
+                    && let Some(bases) = self.class_bases_tuple(obj)
+                {
+                    return self.member_layout_base(&bases);
                 }
                 // type.__abstractmethods__ exposes only this class's stored value.
                 if name == "__abstractmethods__" && metaclass_member.is_none() {
@@ -6182,6 +6209,13 @@ impl Context {
         receiver: Id,
     ) -> Result<Id> {
         match name {
+            "__annotations__" | "__annotate__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                let Value::Module { scope, .. } = *self.heap.get(receiver) else {
+                    return Err(self.missing_attribute(receiver, name));
+                };
+                self.module_annotation(scope, name)
+            }
             "__class__" => self.exact_type(receiver),
             "__text_signature__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
@@ -6304,6 +6338,20 @@ impl Context {
                     ),
                 ))
             }
+            "__annotations__" | "__annotate__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                let Value::Module { scope, .. } = *self.heap.get(receiver) else {
+                    return Err(self.missing_attribute(receiver, name));
+                };
+                self.update_module_annotations(scope, name, value)?;
+                if let Some(value) = value {
+                    self.bind(scope, name, value);
+                } else {
+                    let key = self.text(name);
+                    self.remove_binding(scope, name, key)?;
+                }
+                Ok(())
+            }
             "__class__" => self.assign_instance_class(receiver, value),
             _ => unreachable!(),
         }
@@ -6377,18 +6425,42 @@ impl Context {
             let name = self.text("__class__");
             super::stdlib::audit::event(self, "object.__setattr__", &[receiver, name, target])?;
         }
-        let Value::Instance { class: source, .. } = *self.heap.get(receiver) else {
-            return Err(self.immutable_class_assignment(value));
+        let source = match *self.heap.get(receiver) {
+            Value::Instance { class, .. } => class,
+            Value::Module { constructor, .. } => {
+                constructor.unwrap_or_else(|| self.builtin("module"))
+            }
+            _ => return Err(self.immutable_class_assignment(value)),
         };
+        let module = self.builtin("module");
+        let module_pair = self.subclass(source, module) && self.subclass(target, module);
         let mutable_class = |class| {
             matches!(self.heap.get(class), Value::Class { scope, .. }
                 if self.scope_data(*scope).class_cell.is_some()
                     && !self.scope_data(*scope).class_namespace.as_ref().is_some_and(|ns| ns.immutable_type))
         };
-        if !mutable_class(source) || !mutable_class(target) {
+        if !module_pair && (!mutable_class(source) || !mutable_class(target)) {
             return Err(self.immutable_class_assignment(value));
         }
         if source == target {
+            return Ok(());
+        }
+        if matches!(self.heap.get(receiver), Value::Module { .. }) {
+            if !module_pair
+                || self.module_slot_layout(source)? != self.module_slot_layout(target)?
+            {
+                return Err(self.class_layout_mismatch(source, target));
+            }
+            let Value::Module {
+                constructor, name, ..
+            } = self.heap.get_mut(receiver)
+            else {
+                unreachable!()
+            };
+            // Imported base modules keep their native lookup. Independently constructed modules
+            // have no internal import name and continue to carry their constructor.
+            *constructor = (target != module || name.is_empty()).then_some(target);
+            self.finish_class_change(receiver, source, target);
             return Ok(());
         }
         let object = self.builtin("object");
@@ -6402,18 +6474,8 @@ impl Context {
         };
         let old = layout(source);
         let new = layout(target);
-        let differs = || {
-            Error::new(
-                "TypeError",
-                format!(
-                    "__class__ assignment: '{}' object layout differs from '{}'",
-                    self.class_name(target),
-                    self.class_name(source)
-                ),
-            )
-        };
         if old != new {
-            return Err(differs());
+            return Err(self.class_layout_mismatch(source, target));
         }
         let (allocator, dict, weak, member_slots) = old;
         if allocator != Some(object) || member_slots {
@@ -6432,7 +6494,7 @@ impl Context {
             ));
         };
         if source_base != target_base {
-            return Err(differs());
+            return Err(self.class_layout_mismatch(source, target));
         }
         // Inline ordinary fields are keyed by name. Both they and an exposed __dict__
         // keep their storage and identity when the source and target layouts agree.
@@ -6440,13 +6502,28 @@ impl Context {
             unreachable!()
         };
         *class = target;
+        self.finish_class_change(receiver, source, target);
+        Ok(())
+    }
+
+    fn class_layout_mismatch(&self, source: Id, target: Id) -> Error {
+        Error::new(
+            "TypeError",
+            format!(
+                "__class__ assignment: '{}' object layout differs from '{}'",
+                self.class_name(target),
+                self.class_name(source)
+            ),
+        )
+    }
+
+    fn finish_class_change(&mut self, receiver: Id, source: Id, target: Id) {
         self.heap.weak_edge_removed(source);
         if self.class_attr(target, "__del__").is_some() {
             self.heap.register_finalizer(receiver);
         } else if self.heap.is_pending_finalizer(receiver) {
             self.heap.take_finalizer(receiver, false);
         }
-        Ok(())
     }
 
     /// Reject changes through an immutable instance's object.__class__ descriptor.
@@ -6885,7 +6962,10 @@ impl Context {
         }
         if member.is_none()
             && self.exposes_object_class(obj, name)
-            && matches!(self.heap.get(obj), Value::Instance { .. })
+            && matches!(
+                self.heap.get(obj),
+                Value::Instance { .. } | Value::Module { .. }
+            )
         {
             return self.assign_instance_class(obj, Some(value));
         }
@@ -6961,13 +7041,12 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
-                constructor,
                 ..
             } => {
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
-                if constructor.is_none() && module == "sys" && name == "path" {
+                if module == "sys" && name == "path" {
                     self.sys_path = value;
                 }
                 let scope = *scope;

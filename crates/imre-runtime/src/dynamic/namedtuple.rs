@@ -112,7 +112,9 @@ pub(super) fn doc_method(
             return Err(Error::new("TypeError", message));
         }
     }
-    if let Value::SlotMember { owner, name: field } = *ctx.heap.get(member)
+    if let Value::SlotMember {
+        owner, name: field, ..
+    } = *ctx.heap.get(member)
         && kwargs.is_empty()
     {
         return match (name, rest) {

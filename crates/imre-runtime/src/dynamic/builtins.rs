@@ -424,6 +424,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "dict"
             | "list"
             | "mappingproxy"
+            | "module"
             | "float"
             | "filter"
             | "function"

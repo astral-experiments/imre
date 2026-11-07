@@ -7,6 +7,12 @@ from ._bootstrap_external import (
 from _imre_importlib import find_spec as _find_cached_spec
 from ._abc import Loader
 
+__all__ = [
+    "LazyLoader", "Loader", "MAGIC_NUMBER", "cache_from_source", "decode_source",
+    "find_spec", "module_from_spec", "resolve_name", "source_from_cache",
+    "spec_from_file_location", "spec_from_loader",
+]
+
 
 def resolve_name(name, package):
     """Resolve a relative module name to an absolute one."""

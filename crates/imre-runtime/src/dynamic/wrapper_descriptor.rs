@@ -383,6 +383,10 @@ impl BuiltinDescriptor {
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "collections._tuplegetter.__repr__" => (super::namedtuple::GETTER, "__repr__"),
+            "module.__init__" => ("module", "__init__"),
+            "module.__dir__" => ("module", "__dir__"),
+            "module.__repr__" => ("module", "__repr__"),
+            "module.__getattribute__" => ("module", "__getattribute__"),
             "object.__init__" => ("object", "__init__"),
             "object.__lt__" => ("object", "__lt__"),
             "object.__le__" => ("object", "__le__"),
@@ -604,6 +608,7 @@ impl BuiltinDescriptor {
                 ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner)
             }
             deque::CLASS => matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Deque(_)),
+            "module" => matches!(ctx.heap.get(receiver), Value::Module { .. }),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             _ => ctx.builtin_slot_accepts(receiver, self.owner),
         };
@@ -756,6 +761,7 @@ impl BuiltinDescriptor {
             "__text_signature__" if matches!(self.owner, "object" | "dict") && self.name == "__init__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
+            "__doc__" if self.owner == "module" && self.name == "__dir__" => ctx.text("__dir__() -> list\nspecialized dir() implementation"),
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
             "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
             "__doc__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
