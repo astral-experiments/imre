@@ -88,6 +88,13 @@ def current():
     source.append(4)
     assert list(cursor) == [3, 4] and log == [0, 2, 3, 4]
     assert list(filter(None, [False, "x", 0, 1])) == ["x", 1]
+    from gc import collect
+
+    def keep_even(item):
+        collect()
+        return item % 2 == 0
+
+    assert list(filter(keep_even, range(1000, 1005))) == [1000, 1002, 1004]
     from operator import length_hint
 
     for text, name in (("", "str_ascii_iterator"), ("abc", "str_ascii_iterator"),

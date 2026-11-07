@@ -551,6 +551,17 @@ impl Context {
         dictionary
     }
 
+    fn replace_partial_dictionary(&mut self, obj: Id, value: Id) {
+        let Value::Partial { dictionary, .. } = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        if let Some(old) = dictionary.replace(value)
+            && old != value
+        {
+            self.heap.weak_edge_removed(old);
+        }
+    }
+
     /// Instance attributes use raw dict storage even when __dict__ was set to a subclass.
     fn dictionary_field(&mut self, dictionary: Option<Id>, name: &str) -> Result<Option<Id>> {
         let Some(dictionary) = dictionary else {
@@ -931,6 +942,7 @@ impl Context {
                 | Value::FractionHash(_)
                 | Value::AttrGetter(_)
                 | Value::ItemGetter(_)
+                | Value::MethodCaller { .. }
                 | Value::StaticMethod { .. }
                 | Value::KeyWrapper { .. }
                 | Value::Cached { .. }
@@ -1619,6 +1631,7 @@ impl Context {
                             | "operator.attrgetter"
                             | super::namedtuple::GETTER
                             | "operator.itemgetter"
+                            | "operator.methodcaller"
                             | "datetime.date"
                             | "datetime.datetime"
                             | "datetime.time"
@@ -1850,6 +1863,7 @@ impl Context {
                 Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. },
             )
             | ("operator.itemgetter", Value::ItemGetter(_))
+            | ("operator.methodcaller", Value::MethodCaller { .. })
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
             | (super::deque::ITERATOR, Value::DequeIterator { reverse: false, .. })
@@ -4396,7 +4410,9 @@ impl Context {
             Value::Epoll(_) if name == "fromfd" => return Ok(self.builtin("select.epoll.fromfd")),
             Value::Native(ref class) if class == "socket.socket" => match name {
                 "__name__" => return Ok(self.text("socket")),
-                "connect_ex" => return Ok(self.builtin("socket.socket.connect_ex")),
+                method if stdlib::SOCKET_CLASS_METHODS.contains(&method) => {
+                    return Ok(self.builtin(&format!("socket.socket.{method}")));
+                }
                 _ => {}
             },
             Value::Socket(ref socket) if name == "family" => {
@@ -4895,8 +4911,13 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("{}.{name}", super::namedtuple::GETTER)));
             }
-            Value::Native(ref class) if class == "operator.itemgetter" && name == "__reduce__" => {
-                return Ok(self.builtin("operator.itemgetter.__reduce__"));
+            Value::Native(ref class)
+                if matches!(
+                    class.as_str(),
+                    "operator.itemgetter" | "operator.methodcaller"
+                ) && name == "__reduce__" =>
+            {
+                return Ok(self.builtin(&format!("{class}.__reduce__")));
             }
             Value::Native(ref class)
                 if (class == "range" && super::range::METHODS.contains(&name))
@@ -5989,6 +6010,9 @@ impl Context {
                 }
                 match *self.heap.get(receiver) {
                     Value::Instance { .. } => Ok(self.instance_dictionary(receiver, class)),
+                    Value::Partial { dictionary, .. } => {
+                        Ok(self.partial_dictionary(receiver, dictionary))
+                    }
                     Value::Module { scope, .. } => self.module_globals(scope),
                     Value::Class { scope, .. } => Ok(self.class_dictionary(scope)),
                     Value::Raised(_) => Ok(self.exception_dictionary(receiver)),
@@ -6026,7 +6050,7 @@ impl Context {
                     Value::Module { .. } => {
                         return Err(Error::new("AttributeError", "readonly attribute"));
                     }
-                    Value::Instance { .. } | Value::Raised(_) => {}
+                    Value::Instance { .. } | Value::Raised(_) | Value::Partial { .. } => {}
                     _ => return Err(self.missing_attribute(receiver, name)),
                 }
                 if let Some(dictionary) = value
@@ -6039,6 +6063,17 @@ impl Context {
                             self.type_name(dictionary)
                         ),
                     ));
+                }
+                if matches!(
+                    self.heap.get(self.scalar_value(receiver)),
+                    Value::Partial { .. }
+                ) {
+                    let dictionary =
+                        value.ok_or_else(|| Error::new("TypeError", "cannot delete __dict__"))?;
+                    if matches!(self.heap.get(receiver), Value::Partial { .. }) {
+                        self.replace_partial_dictionary(receiver, dictionary);
+                        return Ok(());
+                    }
                 }
                 if let Value::Raised(error) = self.heap.get_mut(receiver) {
                     let dictionary =
@@ -6568,13 +6603,7 @@ impl Context {
             }
             match self.heap.get_mut(obj) {
                 Value::Raised(error) => error.tracing().dictionary = Some(value),
-                Value::Partial { dictionary, .. } => {
-                    if let Some(old) = dictionary.replace(value)
-                        && old != value
-                    {
-                        self.heap.weak_edge_removed(old);
-                    }
-                }
+                Value::Partial { .. } => self.replace_partial_dictionary(obj, value),
                 Value::Cached { dictionary, .. } => {
                     let old = std::mem::replace(dictionary, value);
                     if old != value {
@@ -7727,6 +7756,7 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
+            Value::MethodCaller { .. } => self.apply_methodcaller(callable, &args, &kwargs),
             Value::Cached {
                 function,
                 table,

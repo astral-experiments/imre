@@ -46,7 +46,8 @@ mod tokenize;
 mod unicodedata;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{
-    IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS, import_socket_constants, install_lowlevel_socket,
+    CLASS_METHODS as SOCKET_CLASS_METHODS, IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS,
+    import_socket_constants, install_lowlevel_socket,
 };
 pub(super) mod io;
 mod json;
@@ -180,11 +181,36 @@ pub(in crate::dynamic) fn diagnostic_type_name(
     if let Value::Calendar { value, .. } = ctx.heap.get(value) {
         return format!("datetime.{}", value.class()).into();
     }
-    ctx.heap
-        .get(value)
-        .instance_class()
-        .map(|class| ctx.class_name(class))
-        .or_else(|| ctx.builtin_type_name(value))
+    if let Some(class) = ctx.heap.get(value).instance_class() {
+        let ty = ctx.heap.get(class);
+        if let Some(name) = ty.io_kind() {
+            return format!("_io.{name}").into();
+        }
+        // Only CPython extension types have these qualified tp_names. A private
+        // implementation tag can also identify a Python class like random.Random.
+        if let Some(
+            name @ (hashlib::md5::CLASS
+            | datetime::isocalendar::CLASS
+            | ssl::provider::bio::CLASS
+            | value::SSL_ERROR_TYPE),
+        ) = ty.heap_type()
+        {
+            return name.into();
+        }
+        // The bundled itertools module freezes the types that stand in for C types.
+        if let Value::Class { scope, .. } = ty
+            && ctx.scope_data(*scope).module == "itertools"
+            && ctx
+                .scope_data(*scope)
+                .class_namespace
+                .as_ref()
+                .is_some_and(|ns| ns.immutable_type)
+        {
+            return format!("itertools.{}", ctx.class_name(class)).into();
+        }
+        return ctx.class_name(class).into();
+    }
+    ctx.builtin_type_name(value)
         .unwrap_or_else(|| ctx.type_name(value))
         .into()
 }
@@ -510,7 +536,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "gc",
             "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked",
         ) => ctx.builtin(&format!("gc.{name}")),
-        ("unicodedata", "normalize" | "decomposition") => {
+        ("unicodedata", "unidata_version") => ctx.text(imre_ast::UNICODE_DATA_VERSION),
+        ("unicodedata", "normalize" | "decomposition" | "east_asian_width") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
         ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
@@ -1843,6 +1870,9 @@ pub(super) fn call(
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
     }
+    if name == "unicodedata.east_asian_width" {
+        return unicodedata::east_asian_width(ctx, args, !kwargs.is_empty());
+    }
     if name == "unicodedata.decomposition" {
         return unicodedata::decomposition(ctx, args, !kwargs.is_empty());
     }
@@ -2193,16 +2223,22 @@ pub(super) fn call(
                 "invalid chain allocation arguments",
             ));
         };
-        if !kwargs.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "chain allocation takes no keyword arguments",
-            ));
-        }
         let valid = matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
             if *class == *base || ancestors.contains(base));
         if !valid {
             return Err(Error::new("TypeError", "expected a chain subclass"));
+        }
+        // A subclass initializer may consume extra keywords after allocation.
+        if !kwargs.is_empty()
+            && ctx.class_attr(*class, "__init__").is_none_or(|init| {
+                Some(init) == ctx.class_attr(*base, "__init__")
+                    || Some(&init) == ctx.builtins.get("object.__init__")
+            })
+        {
+            return Err(Error::new(
+                "TypeError",
+                "chain() takes no keyword arguments",
+            ));
         }
         let result = ctx.instance(*class, None);
         if let Value::Instance { fields, .. } = ctx.heap.get_mut(result) {
@@ -2213,21 +2249,6 @@ pub(super) fn call(
     }
     if name == "_imre_itertools._chain_next" {
         return itertools::chain_next(ctx, args, kwargs);
-    }
-    if name == "_imre_itertools._chain_set" {
-        if let [receiver, active, value] = args
-            && kwargs.is_empty()
-            && let Value::Instance { fields, .. } = ctx.heap.get_mut(*receiver)
-        {
-            let key = if *active == TRUE {
-                "_active"
-            } else {
-                "_sources"
-            };
-            fields.insert(key.to_owned(), *value);
-            return Ok(NONE);
-        }
-        return Err(Error::new("TypeError", "invalid chain state arguments"));
     }
     if let Some(class) = super::deque::iterator_class(name) {
         return super::deque::construct_iterator(ctx, class, args);
@@ -2443,7 +2464,7 @@ pub(super) fn call(
                 let data = ctx.registered_source_data(*loader, *filename);
                 return Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes.to_vec()))));
             }
-            ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
+            ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path),
             ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),
             ("loader_fields", [object], []) => {
                 if let Value::Instance { fields, .. } = ctx.heap.get(*object) {
@@ -2591,6 +2612,12 @@ pub(super) fn call(
         if name == "itemgetter" {
             return operator::itemgetter(ctx, args, kwargs);
         }
+        if name == "methodcaller" {
+            return operator::methodcaller(ctx, args, kwargs);
+        }
+        if name == "methodcaller.__reduce__" {
+            return operator::reduce_methodcaller(ctx, args, kwargs);
+        }
         if name == "itemgetter.__reduce__" {
             return operator::reduce_itemgetter(ctx, args, kwargs);
         }
@@ -2697,6 +2724,10 @@ pub(super) fn call(
         "_socket.htons" | "_socket.ntohs" | "_socket.htonl" | "_socket.ntohl"
     ) {
         return socket::convert_byte_order(ctx, name, args, kwargs);
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("CMSG_LEN" | "CMSG_SPACE")) = name.strip_prefix("_socket.") {
+        return socket::cmsg_size(ctx, function, args, kwargs);
     }
     if name == "_socket.inet_aton" {
         return socket::inet_aton(ctx, args, kwargs);

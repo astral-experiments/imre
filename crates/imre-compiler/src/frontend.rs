@@ -6944,9 +6944,7 @@ impl<'a> Checker<'a> {
                     return Ok(self.linecache_mapping());
                 }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
-                Intrinsic::Placeholder => {
-                    return Ok(partials::singleton(ir::PlaceholderKind::Value));
-                }
+                Intrinsic::Placeholder(kind) => return Ok(partials::singleton(kind)),
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
@@ -9757,12 +9755,8 @@ impl<'a> Checker<'a> {
                 };
                 return self.typed_expr(value);
             }
-            Some(Binding::Intrinsic(Intrinsic::Placeholder)) => {
-                return self.placeholder_call(
-                    call,
-                    partials::singleton(ir::PlaceholderKind::Value),
-                    ir::PlaceholderKind::Value,
-                );
+            Some(Binding::Intrinsic(Intrinsic::Placeholder(kind))) => {
+                return self.placeholder_call(call, partials::singleton(kind), kind);
             }
             Some(Binding::Intrinsic(Intrinsic::SingleDispatch)) => {
                 return self.single_dispatch(call);
@@ -9799,10 +9793,22 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::WeakProxy)) => {
                 return self.weak_proxy(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::UnicodeEastAsianWidth)) => {
+                return self.unicode_east_asian_width(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::UnicodeNormalize { check })) => {
                 return self.unicode_normalize(call, check);
             }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
+            Some(Binding::Intrinsic(Intrinsic::SocketControlSize { padded })) => {
+                let params = [ParameterKind::PositionalOnly.parameter("length", Type::Int, None)];
+                let args = self.arguments(call, &params, None)?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Socket(ir::SocketOp::ControlSize { padded }),
+                    Type::Int,
+                    args,
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::SocketGetFqdn)) => {
                 let params = [parameter(
                     "name",

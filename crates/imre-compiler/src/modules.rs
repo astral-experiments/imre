@@ -698,6 +698,7 @@ pub(crate) enum IntrinsicModule {
     Locale,
     LocaleNative,
     Functools,
+    FunctoolsNative,
     Calendar,
     Fractions,
     Fnmatch,
@@ -888,7 +889,7 @@ pub(crate) enum Intrinsic {
     CachedProperty,
     NewType,
     Partial,
-    Placeholder,
+    Placeholder(crate::ir::PlaceholderKind),
     Reduce,
     CmpToKey,
     TomlDumps,
@@ -1015,10 +1016,14 @@ pub(crate) enum Intrinsic {
     GaiError,
     HError,
     SocketGetFqdn,
+    SocketControlSize {
+        padded: bool,
+    },
     SocketConstant(&'static str),
     Sha1,
     Sha256,
     NamedHash(&'static str),
+    UnicodeEastAsianWidth,
     UnicodeNormalize {
         check: bool,
     },
@@ -1242,6 +1247,7 @@ impl IntrinsicModule {
                 | Self::StringFormatting
                 | Self::CollectionsNative
                 | Self::DatetimeNative
+                | Self::FunctoolsNative
                 | Self::SignalNative
         )
     }
@@ -1274,6 +1280,7 @@ impl IntrinsicModule {
             "_locale" => Some(Self::LocaleNative),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "_functools" => Some(Self::FunctoolsNative),
             "calendar" => Some(Self::Calendar),
             "fractions" => Some(Self::Fractions),
             "fnmatch" => Some(Self::Fnmatch),
@@ -1839,8 +1846,13 @@ impl IntrinsicModule {
             (Self::Fnmatch, "translate") => Intrinsic::Fnmatch(FnmatchOperation::Translate),
             (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
-            (Self::Functools, "partial") => Intrinsic::Partial,
-            (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
+            (Self::Functools | Self::FunctoolsNative, "partial") => Intrinsic::Partial,
+            (Self::Functools | Self::FunctoolsNative, "Placeholder") => {
+                Intrinsic::Placeholder(crate::ir::PlaceholderKind::Value)
+            }
+            (Self::Functools | Self::FunctoolsNative, "_PlaceholderType") => {
+                Intrinsic::Placeholder(crate::ir::PlaceholderKind::Class)
+            }
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::Functools, "cmp_to_key") => Intrinsic::CmpToKey,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
@@ -2089,6 +2101,10 @@ impl IntrinsicModule {
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
+            (Self::UnicodeData, "unidata_version") => {
+                Intrinsic::StringConstant(imre_ast::UNICODE_DATA_VERSION)
+            }
+            (Self::UnicodeData, "east_asian_width") => Intrinsic::UnicodeEastAsianWidth,
             (Self::UnicodeData, "decomposition") => {
                 Intrinsic::ObjectRuntimeExport("unicodedata.decomposition")
             }
@@ -2180,6 +2196,16 @@ impl IntrinsicModule {
             #[cfg(unix)]
             (Self::Socket, "fromfd") => Intrinsic::ScopedObjectExport("socket.fromfd"),
             (Self::Socket, "SocketIO") => Intrinsic::ScopedObjectExport("socket.SocketIO"),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "SCM_RIGHTS") => {
+                Intrinsic::IntConstant(i64::from(libc::SCM_RIGHTS))
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, name @ ("CMSG_LEN" | "CMSG_SPACE")) => {
+                Intrinsic::SocketControlSize {
+                    padded: name == "CMSG_SPACE",
+                }
+            }
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
@@ -2326,6 +2352,9 @@ impl IntrinsicModule {
             }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
+            (Self::Operator | Self::OperatorNative, "methodcaller") => {
+                Intrinsic::ScopedObjectExport("operator.methodcaller")
+            }
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Gc, "is_tracked") => Intrinsic::ScopedObjectExport("gc.is_tracked"),
             (Self::Math, "acos") => Intrinsic::MathAcos,
@@ -5166,7 +5195,9 @@ impl<'a> Loader<'a> {
                         !matches!(
                             module.symbol(alias.name.as_str()),
                             Some(Binding::Intrinsic(
-                                Intrinsic::IntConstant(_) | Intrinsic::ScopedObjectExport(_)
+                                Intrinsic::IntConstant(_)
+                                    | Intrinsic::SocketControlSize { .. }
+                                    | Intrinsic::ScopedObjectExport(_)
                             ))
                         )
                     })

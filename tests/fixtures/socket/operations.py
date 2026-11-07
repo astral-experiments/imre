@@ -1,7 +1,7 @@
 import errno
 import os
 import socket
-from socket import _LOCALHOST
+from socket import CMSG_SPACE, _LOCALHOST
 
 
 def last_owner() -> int:
@@ -73,6 +73,9 @@ def duplicated_connection() -> None:
 
 
 def main() -> None:
+    assert socket.SCM_RIGHTS > 0
+    assert socket.CMSG_LEN(4) == socket.CMSG_LEN(0) + 4
+    assert CMSG_SPACE(4) >= socket.CMSG_LEN(4)
     duplicated_connection()
     with socket.socket() as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

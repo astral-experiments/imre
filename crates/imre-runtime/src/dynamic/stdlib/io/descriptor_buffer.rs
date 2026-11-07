@@ -388,9 +388,13 @@ impl Descriptor {
 
     fn record_read(&mut self, result: isize) -> io::Result<usize> {
         let n = count(result)?;
+        self.advance_after_read(n);
+        Ok(n)
+    }
+
+    fn advance_after_read(&mut self, n: usize) {
         self.last_read = n;
         self.raw_position = self.raw_position.and_then(|p| p.checked_add(n as u64));
-        Ok(n)
     }
 
     /// Append one whole-block read directly to the caller's output.
@@ -757,6 +761,50 @@ impl BufferedFd {
         Ok(())
     }
 
+    /// Run Python with the logical buffer lock held, but without a Rust borrow.
+    fn dispatch_read_signal(&self, ctx: &mut Context) -> Result<()> {
+        self.callback_active.set(true);
+        let result = ctx.dispatch_signals();
+        self.callback_active.set(false);
+        result
+    }
+
+    /// read1 performs one successful raw read. A returning handler resumes the
+    /// same syscall; a handler raising EINTR restarts the buffered raw operation.
+    fn read1_unbuffered(&self, ctx: &mut Context, mut fd: RawFd, size: usize) -> Result<Id> {
+        let mut bytes = builtins::zeroed_bytes(size as i64)?;
+        loop {
+            match crate::objects::os::try_readinto(fd, &mut bytes) {
+                Ok(Some(n)) => {
+                    if let Some(Buffer::Reader(reader)) = self.buffer.borrow_mut().as_mut() {
+                        reader.get_mut().advance_after_read(n);
+                    }
+                    bytes.truncate(n);
+                    return Ok(ctx.alloc(Value::Bytes(bytes)));
+                }
+                Ok(None) => {
+                    if let Err(error) = self.dispatch_read_signal(ctx) {
+                        if !ctx.has_errno(&error, libc::EINTR) {
+                            return Err(error);
+                        }
+                        let raw = native_raw(ctx, self.raw, &["readinto"], "BufferedReader")?;
+                        fd = raw.live_fd().ok_or_else(file_io::closed)?;
+                        raw.check_direction(true)?;
+                    }
+                }
+                Err(error) => {
+                    let error = Error::from(error);
+                    if ctx.has_errno(&error, libc::EAGAIN)
+                        || ctx.has_errno(&error, libc::EWOULDBLOCK)
+                    {
+                        return Ok(ctx.alloc(Value::Bytes(Vec::new())));
+                    }
+                    return Err(error);
+                }
+            }
+        }
+    }
+
     /// Keep the prefix across interruptions and release the reader while Python handles a signal.
     fn read_sized(&self, ctx: &mut Context, size: usize) -> Result<Id> {
         let mut data = Vec::new();
@@ -789,9 +837,7 @@ impl BufferedFd {
                 Ok(_) => {}
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => {
                     drop(slot);
-                    self.callback_active.set(true);
-                    let result = ctx.dispatch_signals();
-                    self.callback_active.set(false);
+                    let result = self.dispatch_read_signal(ctx);
                     // The buffered readinto loop also retries a handler's OSError(EINTR).
                     if let Err(error) = result
                         && !ctx.has_errno(&error, libc::EINTR)
@@ -1029,6 +1075,11 @@ impl BufferedFd {
                 }
                 if name == "read1" {
                     let bytes = match buffer {
+                        Buffer::Reader(r) if size != 0 && r.buffer().is_empty() => {
+                            let size = usize::try_from(size).unwrap_or(r.capacity());
+                            drop(slot);
+                            return self.read1_unbuffered(ctx, fd, size);
+                        }
                         Buffer::Reader(r) => read_once(r, size)?,
                         Buffer::Random(file) => {
                             let size = file.read_once_size(usize::try_from(size).ok());

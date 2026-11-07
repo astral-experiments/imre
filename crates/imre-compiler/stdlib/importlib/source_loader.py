@@ -218,7 +218,7 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
     def get_code(self, fullname):
         path = self.get_filename(fullname)
         if isinstance(path, str):
-            code = _registered_code(self.name, path)
+            code = _registered_code(self, path)
             if code is not None:
                 return code
         else:

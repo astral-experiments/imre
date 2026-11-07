@@ -271,6 +271,7 @@ pub(crate) enum TypingOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SocketOp {
     Constant(&'static str),
+    ControlSize { padded: bool },
     GetFqdn,
     New,
     Bind,
@@ -1997,6 +1998,7 @@ pub(crate) enum TextOperation {
     ZFill {
         copy: bool,
     },
+    EastAsianWidth,
     Normalize,
     Lower,
     Upper,

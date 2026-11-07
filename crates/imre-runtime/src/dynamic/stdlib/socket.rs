@@ -1,7 +1,20 @@
 //! Runtime-loaded Python sockets share descriptor ownership and syscalls with typed sockets.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod message;
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 use crate::objects::socket as native;
 use std::time::Duration;
+
+/// Methods available through both the native socket class and its instances.
+pub(in super::super) const CLASS_METHODS: &[&str] = &[
+    "connect_ex",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "sendmsg",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "recvmsg",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "recvmsg_into",
+];
 
 const CONSTANTS: &[(&str, i32)] = &[
     ("AF_INET", libc::AF_INET),
@@ -63,6 +76,8 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("NI_NUMERICSERV", libc::NI_NUMERICSERV),
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
     ("SOL_SOCKET", libc::SOL_SOCKET),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("SCM_RIGHTS", libc::SCM_RIGHTS),
     ("SO_TYPE", libc::SO_TYPE),
     ("SO_ERROR", libc::SO_ERROR),
     ("SO_REUSEADDR", libc::SO_REUSEADDR),
@@ -92,6 +107,10 @@ const RESOLVER_NAMES: &[&str] = &[
 ];
 
 pub(in super::super) const IMPORTED_FUNCTIONS: &[&str] = &[
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "CMSG_LEN",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "CMSG_SPACE",
     "getdefaulttimeout",
     #[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
     "getprotobyname",
@@ -1017,6 +1036,18 @@ fn getnameinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
     Ok(ctx.alloc(Value::Tuple(vec![host, service])))
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) fn cmsg_size(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+    let size = native::message::control_size(receive_size(ctx, arg)?, name == "CMSG_SPACE")?;
+    Ok(ctx.int(size as i64))
+}
+
 fn receive_size(ctx: &mut Context, value: Id) -> Result<isize> {
     crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
         Error::new(
@@ -1345,13 +1376,34 @@ pub(super) fn call(
             format!("'{name}' is not a socket operation"),
         ));
     };
-    let (receiver, args) = args
-        .split_first()
-        .ok_or_else(|| Error::new("TypeError", "missing socket receiver"))?;
+    let is_message = matches!(method, "sendmsg" | "recvmsg" | "recvmsg_into");
+    let (receiver, args) = args.split_first().ok_or_else(|| {
+        if is_message {
+            Error::new(
+                "TypeError",
+                format!("unbound method socket.{method}() needs an argument"),
+            )
+        } else {
+            Error::new("TypeError", "missing socket receiver")
+        }
+    })?;
     let Value::Socket(handle) = ctx.heap.get(*receiver) else {
+        if is_message {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{method}' for '_socket.socket' objects doesn't apply to a '{}' object",
+                    ctx.type_name(*receiver)
+                ),
+            ));
+        }
         return Err(Error::new("TypeError", "expected a socket"));
     };
     let s = handle.clone();
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if is_message {
+        return message::call(ctx, &s, *receiver, method, args, kwargs);
+    }
     if matches!(method, "connect" | "connect_ex") {
         let peer = super::super::builtins::one_positional_arg(name, args, kwargs)?;
         let addr = address(ctx, native::family(&s), peer, method)?;

@@ -24,14 +24,20 @@ typedef struct {
     int truncated;
 } Text;
 typedef struct {
-    int present;
+    uint64_t revision;
     uint32_t line;
     Text file, name;
 } Frame;
+/* A fork keeps one pthread; its in-flight operations must retain their gates. */
+_Static_assert(__atomic_always_lock_free(sizeof(uintptr_t), 0),
+               "signal-time gate ownership must be lock-free");
+typedef _Atomic(uintptr_t) Gate;
 typedef struct {
-    atomic_uint busy;
+    Gate busy;
     Frame *frames;
     pthread_t thread;
+    /* Both numbers belong to the slot and survive the exit of its owner. */
+    uint64_t revision, incarnation;
     pid_t pid;
     char name[32];
     size_t depth, capacity;
@@ -43,7 +49,7 @@ typedef struct {
 static Slot slots[MAX_THREADS];
 /* A handler may inherit a small application-provided alternate stack. Keep
  * the bounded frame copies off that stack, including for a nested signal. */
-static struct { atomic_uint used; Frame frame; } scratch[MAX_THREADS];
+static struct { Gate used; Frame frame; } scratch[MAX_THREADS];
 #if defined(__linux__)
 /* The fatal handler must be able to read even an untouched thread's TLS
  * without calling a resolver that might allocate. */
@@ -60,18 +66,26 @@ static atomic_ullong settings;
 static pthread_mutex_t config_lock = PTHREAD_MUTEX_INITIALIZER;
 static const char hex[] = "0123456789abcdef";
 
+/* Called under the slot gate. Zero marks an unavailable record after exhaustion. */
+static uint64_t next_revision(Slot *s) {
+    return s->revision == UINT64_MAX ? 0 : ++s->revision;
+}
+
 static void unlock(Slot *s) { atomic_store_explicit(&s->busy, 0, memory_order_release); }
-static int try_lock(Slot *s) {
-    return atomic_exchange_explicit(&s->busy, 1, memory_order_acquire) == 0;
+static int try_gate(Gate *gate, uintptr_t thread) {
+    uintptr_t expected = 0;
+    return atomic_compare_exchange_strong_explicit(gate, &expected, thread,
+                                                   memory_order_acquire, memory_order_relaxed);
 }
 /* Only normal execution waits. The interrupted thread may itself own a gate. */
-static void lock(Slot *s) { while (!try_lock(s)) {} }
+static void lock(Slot *s, pthread_t thread) { while (!try_gate(&s->busy, (uintptr_t)thread)) {} }
 
 static void drop_slot(void *value) {
     Slot *s = value;
-    lock(s);
+    lock(s, s->thread);
     Frame *frames = s->frames;
     void *alt = s->alt_stack;
+    s->thread = (pthread_t)0;
     s->alt_stack = NULL;
     s->frames = NULL;
     s->depth = 0;
@@ -89,7 +103,40 @@ static void drop_slot(void *value) {
         free(alt);
     }
 }
-static void make_key(void) { key_ready = pthread_key_create(&key, drop_slot) == 0; }
+/* The child cannot wait for vanished publishers. A busy foreign slot can be
+ * between realloc and publication of the new pointer, so abandon its storage.
+ * Quiescent orphans are reclaimed on the next normal claim, outside this hook.
+ * No prepare handler waits for a thread whose progress might depend on fork. */
+static void after_fork(void) {
+    pthread_t thread = pthread_self();
+    uintptr_t self = (uintptr_t)thread;
+    pid_t pid = getpid();
+    for (size_t i = 0; i < MAX_THREADS; i++) {
+        Slot *s = &slots[i];
+        uintptr_t busy = atomic_load_explicit(&s->busy, memory_order_relaxed);
+        if (s->thread == thread) {
+            s->pid = pid;
+        } else {
+            if (busy && busy != self) {
+                s->frames = NULL;
+                s->alt_stack = NULL;
+            }
+            /* A later child pthread may reuse this old identifier before its own fork. */
+            s->thread = (pthread_t)0;
+            s->depth = 0;
+            s->pid = 0;
+        }
+        if (busy != self) unlock(s);
+        if (atomic_load_explicit(&scratch[i].used, memory_order_relaxed) != self) {
+            atomic_store_explicit(&scratch[i].used, 0, memory_order_relaxed);
+        }
+    }
+}
+static void make_key(void) {
+    if (pthread_key_create(&key, drop_slot) != 0) return;
+    if (pthread_atfork(NULL, NULL, after_fork) == 0) key_ready = 1;
+    else pthread_key_delete(key);
+}
 
 static Slot *thread_slot(void) {
     Slot *current = atomic_load_explicit(&local, memory_order_relaxed);
@@ -98,18 +145,27 @@ static Slot *thread_slot(void) {
     if (!key_ready) return NULL;
     Frame *frames = calloc(1, sizeof(Frame));
     if (!frames) return NULL;
+    pthread_t thread = pthread_self();
     for (size_t i = 0; i < MAX_THREADS; i++) {
         Slot *s = &slots[i];
-        lock(s);
-        if (!s->frames && pthread_setspecific(key, s) == 0) {
+        lock(s, thread);
+        if ((!s->frames || !s->pid) && s->revision != UINT64_MAX &&
+            pthread_setspecific(key, s) == 0) {
+            Frame *orphan = s->frames;
+            void *alt = s->alt_stack;
+            s->alt_stack = NULL;
+            s->depth = 0;
+            s->incarnation = next_revision(s);
             s->frames = frames;
             s->capacity = 1;
-            s->thread = pthread_self();
+            s->thread = thread;
             s->pid = getpid();
             s->name[0] = 0;
             pthread_getname_np(s->thread, s->name, sizeof(s->name));
             atomic_store_explicit(&local, s, memory_order_relaxed);
             unlock(s);
+            if (orphan) free(orphan);
+            if (alt) free(alt);
             return s;
         }
         unlock(s);
@@ -136,7 +192,7 @@ void imre_fault_frame(size_t index, const char *file, size_t file_len,
                       const char *name, size_t name_len, uint32_t line) {
     Slot *s = thread_slot();
     if (!s) return;
-    lock(s);
+    lock(s, s->thread);
     s->pid = getpid();
     /* Keep callers past the report limit. They become visible on unwind. */
     if (index >= s->depth) s->depth = index + 1;
@@ -154,22 +210,33 @@ void imre_fault_frame(size_t index, const char *file, size_t file_len,
     copy_text(&f->file, file, file_len);
     copy_text(&f->name, name, name_len);
     f->line = line;
-    f->present = 1;
+    f->revision = next_revision(s);
     unlock(s);
 }
 void imre_fault_line(size_t index, uint32_t line) {
     Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
     if (s) {
-        lock(s);
-        if (index < s->depth && index < s->capacity) s->frames[index].line = line;
+        lock(s, s->thread);
+        if (index < s->depth && index < s->capacity) {
+            Frame *f = &s->frames[index];
+            if (f->revision && f->line != line) {
+                f->line = line;
+                f->revision = next_revision(s);
+            }
+        }
         unlock(s);
     }
 }
 void imre_fault_truncate(size_t depth) {
     Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
     if (s) {
-        lock(s);
-        if (depth < s->depth) s->depth = depth;
+        lock(s, s->thread);
+        if (depth < s->depth) {
+            /* A later sparse publication must not expose calls that have returned. */
+            size_t end = s->depth < s->capacity ? s->depth : s->capacity;
+            for (size_t i = depth; i < end; i++) s->frames[i].revision = 0;
+            s->depth = depth;
+        }
         unlock(s);
     }
 }
@@ -217,8 +284,8 @@ static void thread_header(int fd, pthread_t tid, const char *name, int current) 
 
 /* A single bounded stack copy guards the lifetime of a worker or a frame
  * that is returning on another thread while this report is being written. */
-static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f) {
-    if (!try_lock(s)) return 0;
+static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f, uintptr_t self) {
+    if (!try_gate(&s->busy, self)) return 0;
 #if defined(__linux__)
     /* The caller's slot survives fork, even before it publishes its new PID. */
     int current = s == atomic_load_explicit(&local, memory_order_relaxed);
@@ -230,7 +297,7 @@ static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f) {
         unlock(s);
         return 0;
     }
-    size_t depth = s->depth;
+    uint64_t incarnation = s->incarnation;
     pthread_t thread = s->thread;
     char name[sizeof(s->name)];
     memcpy(name, s->name, sizeof(name));
@@ -238,30 +305,42 @@ static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f) {
     if (preceding) LIT(fd, "\n");
     if (all) thread_header(fd, thread, name, current);
     else LIT(fd, "Stack (most recent call first):\n");
+    /* The header write can block. Select the stack now, only for that owner. */
+    if (!try_gate(&s->busy, self)) goto unavailable;
+    int same_owner = s->frames && s->incarnation == incarnation;
+    size_t depth = s->depth;
+    uint64_t revision = s->revision;
+    unlock(s);
+    if (!same_owner) goto unavailable;
     if (!depth) LIT(fd, "  <no Python frame>\n");
     size_t count = depth > MAX_FRAMES ? MAX_FRAMES : depth;
     for (size_t i = 0; i < count; i++) {
         size_t index = depth-1-i;
-        if (!try_lock(s)) { LIT(fd, "  ...\n"); break; }
-        int valid = s->frames && pthread_equal(s->thread, thread) && index < s->depth &&
-                    index < s->capacity && s->frames[index].present;
+        if (!try_gate(&s->busy, self)) goto unavailable;
+        /* Only a record still present from the selected stack may be emitted. */
+        int valid = index < s->depth && index < s->capacity &&
+                    s->frames[index].revision && s->frames[index].revision <= revision;
         if (valid) *f = s->frames[index];
         unlock(s);
-        if (!valid) { LIT(fd, "  ...\n"); break; }
+        if (!valid) goto unavailable;
         LIT(fd, "  File \""); emit_text(fd, &f->file);
         LIT(fd, "\", line "); number(fd, f->line, 10, 0);
         LIT(fd, " in "); emit_text(fd, &f->name); LIT(fd, "\n");
     }
     return current ? 2 : 1;
+
+unavailable:
+    LIT(fd, "  ...\n");
+    return current ? 2 : 1;
 }
 void imre_fault_dump(int fd, int all_threads) {
+    uintptr_t self = (uintptr_t)pthread_self();
     size_t buf = 0;
-    while (buf < MAX_THREADS &&
-           atomic_exchange_explicit(&scratch[buf].used, 1, memory_order_acquire)) buf++;
+    while (buf < MAX_THREADS && !try_gate(&scratch[buf].used, self)) buf++;
     if (buf == MAX_THREADS) { LIT(fd, "  <traceback unavailable>\n"); return; }
     int preceding = 0, current = 0;
     for (size_t i = MAX_THREADS; i; i--) {
-        int which = dump_slot(&slots[i - 1], fd, all_threads, preceding, &scratch[buf].frame);
+        int which = dump_slot(&slots[i - 1], fd, all_threads, preceding, &scratch[buf].frame, self);
         if (which) preceding = 1;
         if (which == 2) current = 1;
     }

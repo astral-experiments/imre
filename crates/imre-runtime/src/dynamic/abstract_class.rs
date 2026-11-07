@@ -92,6 +92,7 @@ impl Context {
                             | "collections.abc._CallableGenericAlias"
                             | "operator.attrgetter"
                             | "operator.itemgetter"
+                            | "operator.methodcaller"
                             | "functools.partial"
                             | "functools._lru_cache_wrapper"
                             | "functools.KeyWrapper"

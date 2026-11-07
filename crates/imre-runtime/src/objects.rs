@@ -133,13 +133,13 @@ pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
-    count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
-    ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_isidentifier, python_islower, python_isprintable, python_isspace, python_istitle,
-    python_isupper, split_parts,
+    count_codepoints, count_text, east_asian_width, expand_tabs, find_codepoints, find_text,
+    normalize_unicode, ord_byte, ord_char, partition_text, python_alnum, python_isalpha,
+    python_isdigit, python_isidentifier, python_islower, python_isprintable, python_isspace,
+    python_istitle, python_isupper, split_parts,
 };
 mod typing;
-pub(crate) use text::{chr_scalar, short_string};
+pub(crate) use text::{chr_scalar, short_string, ucd_character};
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
