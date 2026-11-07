@@ -920,6 +920,17 @@ fn transfer(mut syscall: impl FnMut() -> isize) -> Result<Option<usize>> {
     }
 }
 
+/// A single FileIO write, including a successful short write to a pipe.
+pub(super) fn write_once(fd: RawFd, bytes: &[u8]) -> std::io::Result<usize> {
+    // SAFETY: the kernel reads at most the supplied slice and retains no pointer.
+    let count = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
+    if count < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(count as usize)
+    }
+}
+
 fn read_into(fd: RawFd, buf: &mut [u8]) -> Result<Option<usize>> {
     // SAFETY: read receives a writable slice and does not retain its pointer.
     transfer(|| unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) })
@@ -1139,14 +1150,22 @@ fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Resu
     if name == "write" {
         let input = args[0];
         ctx.check_buffer_exporter(input)?;
-        let bytes = ctx.native_buffer_bytes(input)?;
+        ctx.native_buffer_bytes(input)?;
         let raw = raw.ok_or_else(closed)?;
-        let count = raw.access(|fd| {
-            raw.check_direction(false)?;
-            // SAFETY: the write only reads the borrowed contiguous buffer during this call.
-            transfer(|| unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) })
-        })?;
-        return Ok(count.map_or(NONE, |n| ctx.int(n as i64)));
+        let fd = raw.live_fd().ok_or_else(closed)?;
+        raw.check_direction(false)?;
+        return ctx.with_buffer_export(input, |ctx| {
+            loop {
+                match write_once(fd, ctx.native_buffer_bytes(input)?) {
+                    Ok(n) => return Ok(ctx.int(n as i64)),
+                    Err(error) if error.kind() == ErrorKind::Interrupted => {
+                        ctx.dispatch_signals()?
+                    }
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(NONE),
+                    Err(error) => return Err(os_error(error)),
+                }
+            }
+        });
     }
     if name == "readinto" && ctx.writable_byte_span(args[0])?.is_none() {
         return Err(Error::new(

@@ -804,22 +804,57 @@ impl<W: Write> BinaryOutput<W> {
         }
     }
 
-    #[cold]
-    fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
-        let supplied = bytes.len();
-        if let Err(error) = self.flush_buffer() {
-            return self.buffer_after_error(bytes, 0, error);
+    fn try_buffer(&mut self, bytes: &[u8]) -> bool {
+        if bytes.is_empty()
+            || (bytes.len() < self.buffer.capacity()
+                && bytes.len() <= self.buffer.capacity() - self.buffer.len())
+        {
+            self.buffer.extend_from_slice(bytes);
+            return true;
         }
-        while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
-            match self.inner.write(bytes) {
-                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(count) => bytes = &bytes[count..],
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return self.buffer_after_error(bytes, supplied - bytes.len(), error),
+        false
+    }
+
+    /// Make at most one raw write, committing its count before the caller checks signals.
+    /// A nonblocking write can instead accept the remaining input into the buffer.
+    fn write_step(
+        &mut self,
+        bytes: &[u8],
+        sent: &mut usize,
+        write: impl FnOnce(&mut W, &[u8]) -> io::Result<usize>,
+    ) -> io::Result<bool> {
+        let remaining = &bytes[*sent..];
+        let result = if self.buffer.is_empty() {
+            write(&mut self.inner, remaining).and_then(nonzero_write)
+        } else {
+            self.flush_step(write).map(|()| 0)
+        };
+        match result {
+            Ok(count) => {
+                *sent += count;
+                Ok(true)
+            }
+            Err(error) => {
+                self.buffer_after_error(remaining, *sent, error)?;
+                *sent = bytes.len();
+                Ok(false)
             }
         }
-        self.buffer.extend_from_slice(bytes);
-        Ok(())
+    }
+
+    #[cold]
+    fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let mut sent = 0;
+        loop {
+            if let Err(error) = self.write_step(bytes, &mut sent, Write::write)
+                && error.kind() != io::ErrorKind::Interrupted
+            {
+                return Err(error);
+            }
+            if self.try_buffer(&bytes[sent..]) {
+                return Ok(());
+            }
+        }
     }
 
     /// After a nonblocking write stalls, keep as much of the new input as fits
@@ -843,18 +878,37 @@ impl<W: Write> BinaryOutput<W> {
         Ok(())
     }
 
+    /// Flush a single prefix. A handler may raise before the next flush.
+    fn flush_step(
+        &mut self,
+        write: impl FnOnce(&mut W, &[u8]) -> io::Result<usize>,
+    ) -> io::Result<()> {
+        let count = nonzero_write(write(&mut self.inner, &self.buffer[self.written..])?)?;
+        self.written += count;
+        if self.written == self.buffer.len() {
+            self.buffer.clear();
+            self.written = 0;
+        }
+        Ok(())
+    }
+
     fn flush_buffer(&mut self) -> io::Result<()> {
-        while self.written < self.buffer.len() {
-            match self.inner.write(&self.buffer[self.written..]) {
-                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(count) => self.written += count,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error),
+        while !self.buffer.is_empty() {
+            if let Err(error) = self.flush_step(Write::write)
+                && error.kind() != io::ErrorKind::Interrupted
+            {
+                return Err(error);
             }
         }
-        self.buffer.clear();
-        self.written = 0;
         Ok(())
+    }
+}
+
+fn nonzero_write(count: usize) -> io::Result<usize> {
+    if count == 0 {
+        Err(io::ErrorKind::WriteZero.into())
+    } else {
+        Ok(count)
     }
 }
 
@@ -866,10 +920,7 @@ impl<W: Write> Write for BinaryOutput<W> {
 
     #[inline]
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if bytes.len() < self.buffer.capacity()
-            && bytes.len() <= self.buffer.capacity() - self.buffer.len()
-        {
-            self.buffer.extend_from_slice(bytes);
+        if self.try_buffer(bytes) {
             return Ok(());
         }
         self.write_all_slow(bytes)
