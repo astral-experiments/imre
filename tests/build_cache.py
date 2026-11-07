@@ -63,6 +63,19 @@ def main():
         record, = cache.glob("*.json")
         ok(cli("run"), HIT, expected("alpha"))
         checks.append("A default build warmed run through XDG_CACHE_HOME")
+        records = set(cache.glob("*.json"))
+        alternate = project / "alternate.py"
+        alternate.write_text('print("alternate")\n')
+        ok(cli("run", "--runtime-imports", source=alternate), MISS, "alternate\n")
+        other_record, = set(cache.glob("*.json")) - records
+        record.write_bytes(other_record.read_bytes())
+        ok(cli("run"), MISS, expected("alpha"))
+        incomplete = json.loads(record.read_bytes())
+        incomplete["sources"]["files"] = []
+        record.write_text(json.dumps(incomplete))
+        ok(cli("run"), MISS, expected("alpha"))
+        ok(cli("run"), HIT, expected("alpha"))
+        checks.append("Misfiled and incomplete manifests were rebuilt before executable reuse")
         ok(cli("run", arg="two", source=Path("main.py")), HIT, expected("alpha", "two", "main.py"))
         other = root / "target"
         ok(cli("build", output=other, cwd=root), HIT)
