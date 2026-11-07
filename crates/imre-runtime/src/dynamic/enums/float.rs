@@ -78,7 +78,7 @@ impl Context {
         }
     }
 
-    pub(super) fn float_enum_lookup(
+    pub(super) fn indexed_enum_lookup(
         &mut self,
         class: Id,
         values: Id,

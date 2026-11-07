@@ -46,6 +46,13 @@ impl Context {
         if kind == "enum.IntFlag" {
             self.builtin("enum.Flag");
         } else if kind == "enum.Flag" {
+            let callable = self.builtin("enum.Flag._missing_");
+            let dictionary = self.dict(Vec::new());
+            let missing = self.alloc(Value::ClassMethod {
+                callable,
+                dictionary,
+            });
+            self.bind(scope, "_missing_", missing);
             let repr = self.builtin("repr");
             self.bind(scope, "_numeric_repr_", repr);
         }

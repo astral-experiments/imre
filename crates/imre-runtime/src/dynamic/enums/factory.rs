@@ -16,7 +16,7 @@ impl Context {
         args.insert(0, base);
         let prepared = self.call(prepare, args, kwargs)?;
         self.heap.keep(prepared);
-        let [name, members, module, qualname]: [Id; 4] = self
+        let [name, members, module, qualname, boundary]: [Id; 5] = self
             .items(prepared)?
             .as_slice()
             .try_into()
@@ -35,6 +35,7 @@ impl Context {
             module
         };
         let namespace = self.enum_namespace(&[base]).expect("native enum base");
+        let kind = namespace.kind;
         let scalar = namespace.kind.scalar_base().map(|base| self.builtin(base));
         let scope = self.scope(&caller_module, None);
         self.heap.keep(scope);
@@ -64,6 +65,7 @@ impl Context {
             self.bind(scope, &key, value);
         }
         self.bind(scope, "__module__", module);
+        self.bind_enum_boundary(scope, kind, boundary)?;
         if qualname != NONE {
             self.bind(scope, "__qualname__", qualname);
         }
@@ -71,6 +73,18 @@ impl Context {
         let class = self.allocate_enum_class(class_name, scope, base)?;
         self.populate_enum(class, scalar)?;
         Ok(class)
+    }
+
+    pub(in crate::dynamic) fn bind_enum_boundary(
+        &mut self,
+        scope: Id,
+        kind: auto::EnumKind,
+        boundary: Id,
+    ) -> Result<()> {
+        if self.truth(boundary)? && matches!(kind, auto::EnumKind::Flag | auto::EnumKind::IntFlag) {
+            self.bind(scope, "_boundary_", boundary);
+        }
+        Ok(())
     }
 
     pub(super) fn allocate_enum_class(

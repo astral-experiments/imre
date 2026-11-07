@@ -3441,6 +3441,9 @@ impl Context {
             let result = self.call(hook, vec![item], Vec::new())?;
             return self.truth(result);
         }
+        if self.enum_values(container).is_some() && self.has_base(container, "enum.Flag") {
+            return self.flag_contains(container, item);
+        }
         if let Value::Context(bindings) = self.heap.get(container) {
             self.context_key(item)?;
             return Ok(bindings.contains_key(&item));

@@ -2820,6 +2820,11 @@ pub(super) fn call(
         let arguments = ctx.alloc(Value::Tuple(vec![value?]));
         return Ok(ctx.alloc(Value::Tuple(vec![class, arguments])));
     }
+    if name == "enum.Flag._missing_" {
+        let [class, value] =
+            builtins::bind_builtin_arguments("_missing_", args, kwargs, ["cls", "value"], 2)?;
+        return ctx.flag_missing(class.unwrap(), value.unwrap());
+    }
     if name == "enum._simple_enum" {
         return ctx.enum_decorator(args, kwargs);
     }
