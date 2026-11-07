@@ -243,6 +243,13 @@ pub(super) fn drive<T>(
 ) -> Result<std::result::Result<T, BioFailure>> {
     loop {
         let name = match operation(ctx)? {
+            Err(BioFailure::Tls(provider::Failure::Io(e)))
+                if e.kind() == std::io::ErrorKind::Interrupted =>
+            {
+                // The provider and its destination have both been released before Python runs.
+                ctx.dispatch_signals()?;
+                continue;
+            }
             Err(BioFailure::ClientHello(name)) => name,
             result => return Ok(result),
         };
@@ -261,6 +268,7 @@ pub(super) fn drive<T>(
                 .ok_or_else(closed)?
                 .resolve_sni(alert),
             Value::TlsBioSession { session, .. } => session.borrow().resolve_sni(alert),
+            Value::TlsTransport(_) => return super::inactive_write(ctx, id),
             _ => unreachable!(),
         };
         resumed.map_err(|error| provider_error(ctx, error))?;

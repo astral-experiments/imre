@@ -833,8 +833,13 @@ class SSLSocket(_socket.socket):
     def recv_into(self, buffer, nbytes=None, flags=0):
         if nbytes is None:
             nbytes = memoryview(buffer).nbytes or 1024
-        if self._session is None:
+        session = self._session
+        if session is None:
             return super().recv_into(buffer, nbytes, flags)
+        if not _imre_ssl.is_session(session):
+            count = _call(_imre_ssl.recv, session, nbytes, flags, buffer)
+            if count is not None:
+                return count
         if flags:
             raise ValueError("non-zero flags not allowed in calls to recv_into() on %s" % self.__class__)
         return self.read(nbytes, buffer)
@@ -901,9 +906,9 @@ class SSLSocket(_socket.socket):
 
     def shutdown(self, how):
         session = SSLSocket._session.__get__(self)
-        super().shutdown(how)
-        if SSLSocket._session.__get__(self) is session:
-            SSLSocket._session.__set__(self, _imre_ssl.release_session(session))
+        if session is None:
+            return super().shutdown(how)
+        _imre_ssl.transport_shutdown(session, how)
 
     def _real_close(self):
         _imre_ssl.release_session(getattr(self, "_session", None))
