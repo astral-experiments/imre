@@ -1009,7 +1009,7 @@ impl Emitter<'_, '_> {
             format!("{operation}_int_nonzero")
         } else if ty == Type::Int {
             format!("{operation}_int")
-        } else if matches!(family, "str" | "object" | "record")
+        } else if matches!(family, "str" | "object" | "record" | "list")
             && (operation == "release" || value.ty != ty)
         {
             format!("{family}_{operation}_if_present")
@@ -2480,12 +2480,7 @@ impl Emitter<'_, '_> {
         };
         for slot in cleanup_slots {
             let value = self.borrow_slot(slot);
-            if matches!(value.ty.word_kind(), WordKind::IntList) {
-                // A conditional initializer can leave the slot empty on this exit.
-                self.void_call("list_release_if_present", &[&value]);
-            } else {
-                self.reference(&value, "release");
-            }
+            self.reference(&value, "release");
         }
         if let Some(leave) = leave_frame {
             self.line(leave);
@@ -3393,7 +3388,18 @@ impl Emitter<'_, '_> {
                     };
                     self.owned(value)
                 };
-                for value in values {
+                let mut remaining = values.as_slice();
+                if list.ty == Type::ListInt {
+                    while let [first, second, rest @ ..] = remaining {
+                        let first = self.operand(first);
+                        let second = self.operand(second);
+                        self.runtime_call(&LIST_APPEND_PAIR, [&list, &first.value, &second.value]);
+                        self.release_operand(&second);
+                        self.release_operand(&first);
+                        remaining = rest;
+                    }
+                }
+                for value in remaining {
                     if self.append_struct_constructor(&list, value) {
                         continue;
                     }
@@ -11907,7 +11913,7 @@ declare i64 @imre_ord(i64, i32)
 declare i64 @imre_int_pow(i64, i64)
 declare double @imre_int_negative_pow(i64, i64)
 declare i64 @imre_int_modpow(i64, i64, i64)
-declare ptr @imre_list_new()
+declare nonnull ptr @imre_list_new()
 declare ptr @imre_list_accumulate(ptr, i64)
 declare ptr @imre_collect_int_cursor(ptr)
 declare i64 @imre_list_sum(ptr, i64)
@@ -11960,12 +11966,7 @@ declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 fn nullable_pointer_helpers() -> String {
     let mut output = String::new();
     for family in ["str", "object", "record", "list"] {
-        let operations: &[&str] = if family == "list" {
-            &["release"]
-        } else {
-            &["release", "retain"]
-        };
-        for operation in operations {
+        for operation in ["release", "retain"] {
             writeln!(
                 output,
                 r#"
@@ -12554,6 +12555,15 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn integer_list_literals_batch_pairs_and_append_the_odd_element() {
+        let body = function_body(
+            "def make(value: int) -> list[int]:\n    return [value, value + 1, value - 1]\nprint(len(make(3)))",
+        );
+        assert_eq!(body.matches("call i32 @imre_list_append_pair(").count(), 1);
+        assert_eq!(body.matches("call i32 @imre_list_append(").count(), 1);
     }
 
     #[test]
