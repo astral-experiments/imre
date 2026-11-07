@@ -239,7 +239,40 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         bound(args),
         kwargs,
     )?;
-    let population = population.unwrap();
+    select_choices(ctx, None, population.unwrap(), weights, cumulative, k)
+}
+
+pub(super) fn instance_choices(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [random, population, weights, cumulative, k] = super::required_arguments(
+        "random._choices",
+        ["random", "population", "weights", "cum_weights", "k"],
+        args,
+        kwargs,
+    )?;
+    select_choices(
+        ctx,
+        Some(random),
+        population,
+        Some(weights),
+        Some(cumulative),
+        Some(k),
+    )
+}
+
+/// The module draws directly from its existing shared stream. A Python method captures
+/// the instance's random callable before evaluating the population and weights.
+fn select_choices(
+    ctx: &mut Context,
+    random: Option<Id>,
+    population: Id,
+    weights: Option<Id>,
+    cumulative: Option<Id>,
+    k: Option<Id>,
+) -> Result<Id> {
     let length = builtins::call(ctx, "len", &[population], &[])?;
     let n = ctx.as_integer(length)?;
     let preparation = ctx.heap.temporary_mark();
@@ -305,21 +338,57 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let k = ctx.index_integer(k)?;
     let mut repeat = objects::Repeat::new(NONE, Some(&k))?;
     let result = ctx.alloc(Value::List(Vec::new()));
+    enum Draw {
+        Unit(f64),
+        Object(Id),
+    }
+    let bound_stream = random.and_then(|callable| instance::bound_stream(ctx, callable));
+    let scale = match (weighted, random) {
+        (Some((_, total)), _) => total,
+        (None, Some(_)) => ctx.alloc(Value::Float(n as f64)),
+        (None, None) => NONE,
+    };
+    let float_scale = match ctx.heap.get(scale) {
+        Value::Float(total) => Some(*total),
+        _ => None,
+    };
     let mark = ctx.heap.temporary_mark();
     let mut limit = ctx.heap.streaming_collection_limit();
     while repeat.next().is_some() {
-        let draw = objects::imre_random_float();
-        let index = if let Some((cumulative, total)) = weighted {
-            let draw = ctx.alloc(Value::Float(draw));
-            let needle = ctx.binary("*", draw, total)?;
-            ctx.heap.keep(needle);
-            let index = weighted_index(ctx, cumulative, needle, n - 1)?;
-            ctx.heap.release_temporaries_since(mark);
-            index
-        } else {
-            (draw * n as f64).floor() as i64
+        let draw = match (random, bound_stream) {
+            (None, _) => Draw::Unit(objects::imre_random_float()),
+            (_, Some((owner, receiver))) => {
+                ctx.check_heap_method_receiver(owner, "random", receiver)?;
+                Draw::Unit(instance::draw(ctx, receiver))
+            }
+            (Some(callable), None) => Draw::Object(ctx.call(callable, Vec::new(), Vec::new())?),
         };
-        let index = ctx.int(index);
+        let index = match (draw, weighted) {
+            (Draw::Unit(value), None) => ctx.int((value * n as f64).floor() as i64),
+            (draw, _) => {
+                let needle = match (draw, float_scale) {
+                    (Draw::Unit(value), Some(total)) => ctx.alloc(Value::Float(value * total)),
+                    (draw, _) => {
+                        let operand = match draw {
+                            Draw::Unit(value) => ctx.alloc(Value::Float(value)),
+                            Draw::Object(operand) => operand,
+                        };
+                        let product = ctx.binary("*", operand, scale)?;
+                        ctx.heap.keep_call_result(mark, product);
+                        product
+                    }
+                };
+                if let Some((cumulative, _)) = weighted {
+                    let index = weighted_index(ctx, cumulative, needle, n - 1)?;
+                    ctx.heap.release_temporaries_since(mark);
+                    ctx.int(index)
+                } else {
+                    let index = super::math::call(ctx, "floor", &[needle], &[])?;
+                    ctx.heap.keep_call_result(mark, index);
+                    index
+                }
+            }
+        };
         let item = ctx.get_item(population, index)?;
         append(ctx, result, item)?;
         ctx.heap.release_temporaries_since(mark);

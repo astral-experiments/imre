@@ -3,6 +3,55 @@ from random import choice, choices, randbytes, randint, random as draw, sample a
 
 
 def current():
+    source = random.Random(41)
+    random.seed(41)
+    assert source.choices("abcd", k=12) == choices("abcd", k=12)
+    assert source.choices("ab", weights=[2, 1], k=7) == choices("ab", weights=[2, 1], k=7)
+    assert source.random() == random.random()
+
+    class Fixed(random.Random):
+        def random(self):
+            return 0.75
+
+    assert Fixed().choices("abcd", k=2) == ["d", "d"]
+
+    import gc
+    events = []
+
+    class Needle:
+        def __lt__(self, other):
+            return True
+
+        def __del__(self):
+            events.append("release")
+
+    class Weight:
+        def __add__(self, zero):
+            return self
+
+        def __le__(self, zero):
+            return False
+
+        def __float__(self):
+            return 2.0
+
+        def __rmul__(self, draw):
+            return Needle()
+
+    class Population:
+        def __len__(self):
+            return 2
+
+        def __getitem__(self, index):
+            gc.collect()
+            events.append("get")
+            return index
+
+    for rng in (random, source):
+        events.clear()
+        assert rng.choices(Population(), cum_weights=[1, Weight()]) == [0]
+        assert events == ["release", "get"]
+
     seed = (1 << 100) + 7
     random.seed(seed)
     first = random.Random(seed)
