@@ -22,3 +22,29 @@ for function in (sum, print):
         "{error}"
     );
 }
+
+#[test]
+fn math_perm_with_computed_none_keeps_imported_calls_checked() {
+    let root = tempfile::tempdir().unwrap();
+    let scores = root.path().join("scores.py");
+    let entry = root.path().join("main.py");
+    std::fs::write(&scores, "def take(value: int) -> int:\n    return value\n").unwrap();
+    let source = "\
+import math
+from scores import take
+
+def default_k():
+    return None
+
+def unused():
+    return math.perm(6, default_k())
+";
+    std::fs::write(&entry, format!("{source}\nprint(take(7))\n")).unwrap();
+    let program =
+        imre_compiler::compile_file(&entry, Some(root.path()), &Default::default()).unwrap();
+    assert!(!program.llvm_ir.contains("@imre_boxed_named_op"));
+
+    std::fs::write(&entry, format!("{source}\nprint(take('x'))\n")).unwrap();
+    let error = imre_compiler::check_file(&entry, Some(root.path())).unwrap_err();
+    assert!(error.contains("int") && error.contains("str"), "{error}");
+}

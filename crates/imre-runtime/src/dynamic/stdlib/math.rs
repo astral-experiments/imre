@@ -120,16 +120,30 @@ pub(super) fn call(
         let n = ctx.index_integer(n)?;
         return Ok(ctx.alloc(Value::Int(crate::integer_factorial(&n)?)));
     }
-    if operation == "comb" {
+    if operation == "perm" && matches!(args, [_] | [_, super::NONE]) {
+        let n = ctx.index_integer(args[0])?;
+        return Ok(ctx.alloc(Value::Int(crate::integer_factorial(&n)?)));
+    }
+    if matches!(operation, "comb" | "perm") {
         let &[n, k] = args else {
+            let expected = match operation {
+                "comb" => "2 arguments",
+                _ if args.is_empty() => "at least 1 argument",
+                _ => "at most 2 arguments",
+            };
             return Err(Error::new(
                 "TypeError",
-                format!("comb expected 2 arguments, got {}", args.len()),
+                format!("{operation} expected {expected}, got {}", args.len()),
             ));
         };
         let n = ctx.index_integer(n)?;
         let k = ctx.index_integer(k)?;
-        return Ok(ctx.alloc(Value::Int(crate::integer_comb(&n, &k)?)));
+        let result = if operation == "comb" {
+            crate::integer_comb(&n, &k)?
+        } else {
+            crate::integer_perm(&n, &k)?
+        };
+        return Ok(ctx.alloc(Value::Int(result)));
     }
     if matches!(operation, "gcd" | "lcm") {
         let mut result = if operation == "gcd" {

@@ -3688,6 +3688,7 @@ impl Context {
                 "erfc",
                 "fabs",
                 "factorial",
+                "perm",
                 "log10",
                 "log1p",
                 "nextafter",

@@ -4003,6 +4003,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_atan.py",
             "boxed_math_comb.py",
             "boxed_math_factorial.py",
+            "boxed_math_perm.py",
             "boxed_math_dist.py",
             "boxed_math_fabs.py",
             "boxed_math_fma.py",

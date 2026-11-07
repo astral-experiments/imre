@@ -7761,6 +7761,11 @@ impl Emitter<'_, '_> {
             Builtin::MathFactorial => self
                 .bounded_factorial(&expressions[0], &args[0].value)
                 .unwrap_or_else(|| self.call("imre_math_factorial", Type::Int, &[&args[0].value])),
+            Builtin::MathPerm => self.call(
+                "imre_math_perm",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::MathComb => self.bounded_comb(expressions, &args).unwrap_or_else(|| {
                 self.call(
                     "imre_math_comb",
@@ -10672,6 +10677,7 @@ declare void @imre_float_box_release(i64)
 declare ptr @imre_float_str(double)
 declare void @imre_print_float(double)
 declare i64 @imre_math_comb(i64, i64)
+declare i64 @imre_math_perm(i64, i64)
 declare i64 @imre_math_factorial(i64)
 declare i64 @imre_int_bit_length(i64)
 declare i64 @imre_int_hash(i64)

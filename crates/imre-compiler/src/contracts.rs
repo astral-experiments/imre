@@ -546,6 +546,7 @@ impl Builtin {
             | Self::ListAccumulate
             | Self::Sumprod
             | Self::MathComb
+            | Self::MathPerm
             | Self::MathFactorial
             | Self::EnumLookup(_)
             | Self::TomlDecode(_)
@@ -972,7 +973,7 @@ impl Builtin {
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
-            Self::MathComb => signature(&[Type::Int, Type::Int], Type::Int),
+            Self::MathComb | Self::MathPerm => signature(&[Type::Int, Type::Int], Type::Int),
             Self::MathFactorial | Self::IntBitLength | Self::IntHash => {
                 signature(&[Type::Int], Type::Int)
             }
@@ -1284,6 +1285,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_random_progression"
                 | "imre_function_get_wrapped"
                 | "imre_math_comb"
+                | "imre_math_perm"
                 | "imre_math_factorial"
                 | "imre_int_pow"
                 | "imre_int_modpow"
