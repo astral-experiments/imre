@@ -20,6 +20,22 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         return Some((path, include_str!("../../stdlib/encodings/utf_fixed.py")));
     }
     match name {
+        "encodings.utf_8" => Some((
+            "encodings/utf_8.py",
+            concat!(
+                include_str!("../../stdlib/encodings/writer_utf_8.py"),
+                "\n",
+                include_str!("../../stdlib/encodings/reader_utf_8.py")
+            ),
+        )),
+        "encodings.utf_8_sig" => Some((
+            "encodings/utf_8_sig.py",
+            concat!(
+                include_str!("../../stdlib/encodings/writer_utf_8_sig.py"),
+                "\n",
+                include_str!("../../stdlib/encodings/reader_utf_8_sig.py")
+            ),
+        )),
         "types" => {
             const UPSTREAM: &str = include_str!(
                 "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"

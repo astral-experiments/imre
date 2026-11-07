@@ -737,6 +737,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__le__",
             "__lt__",
             "__ne__",
+            "__neg__",
             "__round__",
             "__trunc__",
             "hex",
@@ -2203,6 +2204,7 @@ pub(super) fn call(
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "int" | "float"
                 if matches!(method, "__abs__" | "__int__" | "__float__")
+                    || name == "float.__neg__"
                     || super::operators::comparison_op(method).is_some() =>
             {
                 collections::builtin_slot(ctx, name, args, kwargs)
