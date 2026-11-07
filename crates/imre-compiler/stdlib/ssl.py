@@ -816,6 +816,14 @@ class SSLSocket(_socket.socket):
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")
         return _tls_result(_call(_imre_ssl.sendall, session, data, flags))
 
+    def write(self, data):
+        """Write bytes to the TLS channel and return the number written."""
+        self._checkClosed()
+        session = self._session
+        if not _imre_ssl.is_session(session):
+            raise ValueError("Write on closed or unwrapped SSL socket.")
+        return _tls_result(_call(_imre_ssl.send, session, data, 0))
+
     def read(self, len=1024, buffer=None):
         if not _imre_ssl.is_session(self._session):
             raise ValueError("Read on closed or unwrapped SSL socket.")

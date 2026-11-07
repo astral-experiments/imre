@@ -133,6 +133,9 @@ with client, server:
     assert client.getpeercert(binary_form=True) == leaf
     assert client.getpeercert()["subject"] and server.getpeercert() is None
     assert client.get_verified_chain()[0] == leaf
+    written = client.write(memoryview(b"TLS write"))
+    received = server.read(9)
+    assert written == 9 and received == b"TLS write"
     assert client.send(b"p\x00ng") == 4
     assert server.recv(64) == b"p\x00ng"
     server.sendall(b"p\xffng")
@@ -147,6 +150,12 @@ with client, server:
 
     assert client.getpeercert(ClosePeer()) == leaf
 assert client.fileno() == -1 and client.gettimeout() == 0.0
+try:
+    client.write(b"closed")
+except ValueError as exc:
+    assert str(exc) == "Write on closed or unwrapped SSL socket."
+else:
+    raise AssertionError("write accepted a closed TLS socket")
 assert server.fileno() == -1 and server.gettimeout() == 0.25
 
 # A failed memory BIO also reports the current operation's EOF.
