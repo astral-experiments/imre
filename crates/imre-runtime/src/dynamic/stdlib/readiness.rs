@@ -232,6 +232,14 @@ fn missing<T>(ctx: &mut Context, fileobj: Id) -> Result<T> {
     Err(Error::new("KeyError", format!("{name} is not registered")))
 }
 
+// The selectors module returns an empty readiness list if its underlying wait raises InterruptedError.
+fn wait_result<T: Default>(ctx: &Context, result: Result<T>) -> Result<T> {
+    match result {
+        Err(e) if ctx.is_builtin_error(&e, "InterruptedError") => Ok(T::default()),
+        other => other,
+    }
+}
+
 impl Selector {
     pub(in crate::dynamic) fn trace(&self, roots: &mut impl VisitReferences) {
         roots.extend([self.keys, self.mapping]);
@@ -242,9 +250,18 @@ impl Selector {
         let keys = handle.borrow().keys;
         if handle.borrow().poll.is_none() {
             let mut sets = SelectFds::new();
-            for (index, &(fd, entry)) in ctx.dict_entries(keys).unwrap().iter().enumerate() {
+            let count = ctx.dict_entries(keys).unwrap().len();
+            let mut watched = Vec::new();
+            watched
+                .try_reserve_exact(count)
+                .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+            ctx.heap.reserve_temporaries(count)?;
+            for index in 0..count {
+                let (number, entry) = ctx.dict_entries(keys).unwrap()[index];
                 let key = Registration::unpack(ctx, entry);
-                let fd = native_fd(ctx, fd)?;
+                let fd = native_fd(ctx, number)?;
+                ctx.heap.keep(number);
+                watched.push((number, fd));
                 if key.interests & READ != 0 {
                     sets.insert(0, index, fd)?;
                 }
@@ -253,18 +270,18 @@ impl Selector {
                 }
             }
             let mut results = Vec::new();
-            if sets.wait(timeout)? {
-                for i in 0..ctx.dict_entries(keys).unwrap().len() {
-                    let (fd, entry) = ctx.dict_entries(keys).unwrap()[i];
-                    let key = Registration::unpack(ctx, entry);
-                    let fd = native_fd(ctx, fd)?;
+            let ready = sets.wait(timeout, || ctx.dispatch_signals());
+            if wait_result(ctx, ready)? {
+                for (number, fd) in watched {
                     let events = (i64::from(sets.ready(0, fd)) * READ)
                         | (i64::from(sets.ready(1, fd)) * WRITE);
-                    if events != 0 {
+                    if events != 0
+                        && let Some(key) = registration(ctx, keys, number)?
+                    {
                         results
                             .try_reserve(1)
                             .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-                        let mask = ctx.int(events);
+                        let mask = ctx.int(events & key.interests);
                         results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
                     }
                 }
@@ -272,13 +289,15 @@ impl Selector {
             return Ok(ctx.alloc(Value::List(results)));
         }
         let events = {
-            let mut selector = handle.borrow_mut();
-            let (count, ready) = selector.poll.as_mut().unwrap().ready(timeout)?;
+            let snapshot = handle.borrow_mut().poll.as_mut().unwrap().snapshot()?;
+            let mut fds = snapshot.borrow_mut();
+            let result = fds.wait(timeout, || ctx.dispatch_signals());
+            let count = wait_result(ctx, result)?;
             let mut events = Vec::new();
             events
                 .try_reserve(count)
                 .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-            events.extend(ready);
+            events.extend(fds.events(count));
             events
         };
         let mut results = Vec::new();

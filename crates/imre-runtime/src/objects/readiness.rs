@@ -3,7 +3,9 @@ use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, allocate_record};
 use super::{Int, List, Object, Storage, StorageCell, Words, c_int, errno_error, object};
 use std::{
+    cell::RefCell,
     io, ptr,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -11,7 +13,12 @@ use std::{
 pub(crate) struct Poll {
     slots: Vec<libc::pollfd>,
     positions: std::collections::HashMap<i32, usize>,
+    snapshot: Rc<RefCell<PollFds>>,
+    changed: bool,
 }
+
+#[derive(Default)]
+pub(crate) struct PollFds(Vec<libc::pollfd>);
 
 impl Poll {
     pub(crate) fn contains(&self, fd: i32) -> bool {
@@ -35,6 +42,7 @@ impl Poll {
                 revents: 0,
             });
         }
+        self.changed = true;
         Ok(())
     }
 
@@ -43,36 +51,30 @@ impl Poll {
             return false;
         };
         self.slots[index].fd = -1;
+        self.changed = true;
         if self.slots.len() > self.positions.len().saturating_mul(2) {
             self.compact();
         }
         true
     }
 
-    /// Waits on the live descriptors and returns only kernel-reported events.
-    pub(crate) fn ready(
-        &mut self,
-        timeout: Option<Duration>,
-    ) -> Result<(usize, impl Iterator<Item = (i32, u16)> + '_)> {
+    /// Capture this call's registrations, leaving the poller available to signal handlers.
+    pub(crate) fn snapshot(&mut self) -> Result<Rc<RefCell<PollFds>>> {
         self.compact();
-        let fds = &mut self.slots;
-        let nfds = fds
-            .len()
-            .try_into()
-            .map_err(|_| Error::new(Kind::OverflowError, "too many file descriptors"))?;
-        let count = wait(timeout, |remaining| {
-            let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
-            // SAFETY: nfds is the length of this initialized, exclusively borrowed slice.
-            unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
-        })
-        .map_err(errno_error)? as usize;
-        Ok((
-            count,
-            fds.iter()
-                .filter(|p| p.revents != 0)
-                .take(count)
-                .map(|p| (p.fd, p.revents as u16)),
-        ))
+        // Only one wait can own the snapshot, including while its signal handler runs.
+        let mut fds = self
+            .snapshot
+            .try_borrow_mut()
+            .map_err(|_| Error::new(Kind::RuntimeError, "concurrent poll() invocation"))?;
+        if self.changed {
+            fds.0.clear();
+            fds.0
+                .try_reserve(self.slots.len())
+                .map_err(|_| Error::allocation())?;
+            fds.0.extend_from_slice(&self.slots);
+            self.changed = false;
+        }
+        Ok(self.snapshot.clone())
     }
 
     // Deletion leaves a tombstone so re-registering a number moves it to the end.
@@ -83,6 +85,35 @@ impl Poll {
                 *self.positions.get_mut(&p.fd).unwrap() = i;
             }
         }
+    }
+}
+
+impl PollFds {
+    /// Wait on the same descriptors across signal dispatch.
+    pub(crate) fn wait<E: From<Error>>(
+        &mut self,
+        timeout: Option<Duration>,
+        dispatch: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<usize, E> {
+        let fds = &mut self.0;
+        let nfds = fds
+            .len()
+            .try_into()
+            .map_err(|_| Error::new(Kind::OverflowError, "too many file descriptors"))?;
+        let count = wait(timeout, dispatch, |remaining| {
+            let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
+            // SAFETY: nfds is the length of this initialized, exclusively borrowed slice.
+            unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
+        })? as usize;
+        Ok(count)
+    }
+
+    pub(crate) fn events(&self, count: usize) -> impl Iterator<Item = (i32, u16)> + '_ {
+        self.0
+            .iter()
+            .filter(|p| p.revents != 0)
+            .take(count)
+            .map(|p| (p.fd, p.revents as u16))
     }
 }
 
@@ -170,10 +201,11 @@ pub(crate) fn checked_fd(fd: i32) -> Result<i32> {
 }
 
 // Keep the original deadline across EINTR. A zero timeout still observes readiness.
-fn wait(
+fn wait<E: From<Error>>(
     timeout: Option<Duration>,
+    mut dispatch: impl FnMut() -> std::result::Result<(), E>,
     mut call: impl FnMut(Option<Duration>) -> i32,
-) -> io::Result<i32> {
+) -> std::result::Result<i32, E> {
     let start = Instant::now();
     let mut remaining = timeout;
     loop {
@@ -183,8 +215,9 @@ fn wait(
         }
         let err = io::Error::last_os_error();
         if err.kind() != io::ErrorKind::Interrupted {
-            return Err(err);
+            return Err(errno_error(err).into());
         }
+        dispatch()?;
         remaining = timeout.map(|limit| limit.saturating_sub(start.elapsed()));
         if remaining == Some(Duration::ZERO) {
             return Ok(0);
@@ -287,12 +320,14 @@ pub unsafe extern "C" fn imre_poll_wait(
                 unreachable!()
             };
             let timeout = timeout(tag, word, true)?;
-            let (count, events) = p.ready(timeout)?;
+            let snapshot = p.snapshot()?;
+            let mut fds = snapshot.borrow_mut();
+            let count = fds.wait(timeout, super::stdlib::check_interrupt)?;
             let mut out = Words::new(6); // owned records
             out.values
                 .try_reserve(count)
                 .map_err(|_| Error::allocation())?;
-            for (fd, mask) in events {
+            for (fd, mask) in fds.events(count) {
                 // SAFETY: pair describes two writable tagged integer fields. The result
                 // sequence takes ownership of each fully initialized tuple.
                 let tuple = ptr::NonNull::new(allocate_record(pair))
@@ -347,9 +382,13 @@ impl SelectFds {
     }
 
     /// Replace the interest sets with the kernel's readiness result, retrying interrupted waits.
-    pub(crate) fn wait(&mut self, timeout: Option<Duration>) -> Result<bool> {
+    pub(crate) fn wait<E: From<Error>>(
+        &mut self,
+        timeout: Option<Duration>,
+        dispatch: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<bool, E> {
         let mut ready = self.sets;
-        let count = wait(timeout, |remaining| {
+        let count = wait(timeout, dispatch, |remaining| {
             ready = self.sets;
             let [r, w, x] = &mut ready;
             let mut tv = remaining.map(|d| {
@@ -369,8 +408,7 @@ impl SelectFds {
                     tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
                 )
             }
-        })
-        .map_err(errno_error)?;
+        })?;
         self.sets = if count == 0 { Self::new().sets } else { ready };
         Ok(count != 0)
     }
@@ -412,7 +450,7 @@ pub unsafe extern "C" fn imre_select_wait(
                     })
                 }?;
             }
-            let any_ready = sets.wait(timeout)?;
+            let any_ready = sets.wait(timeout, super::stdlib::check_interrupt)?;
             for (i, list) in lists.into_iter().enumerate() {
                 let mut result = Vec::new();
                 if any_ready {

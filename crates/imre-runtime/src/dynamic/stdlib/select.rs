@@ -88,7 +88,7 @@ fn select(ctx: &mut Context, args: &[Id]) -> Result<Id> {
             items.push((obj, n));
         }
     }
-    let any_ready = sets.wait(timeout)?;
+    let any_ready = sets.wait(timeout, || ctx.dispatch_signals())?;
     let mut lists = Vec::new();
     lists
         .try_reserve_exact(3)
@@ -172,12 +172,13 @@ pub(super) fn call(
     };
     if method == "poll" {
         let timeout = timeout(ctx, args.first(), true)?;
-        let mut poll = handle.borrow_mut();
-        let (n, events) = poll.ready(timeout)?;
+        let snapshot = handle.borrow_mut().snapshot()?;
+        let mut fds = snapshot.borrow_mut();
+        let n = fds.wait(timeout, || ctx.dispatch_signals())?;
         let mut out = Vec::new();
         out.try_reserve_exact(n)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for (fd, flags) in events {
+        for (fd, flags) in fds.events(n) {
             let fd = ctx.int(i64::from(fd));
             let flags = ctx.int(i64::from(flags));
             out.push(ctx.alloc(Value::Tuple(copy_ids(&[fd, flags])?)));
