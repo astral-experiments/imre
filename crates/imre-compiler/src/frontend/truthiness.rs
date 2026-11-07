@@ -201,13 +201,18 @@ impl Checker<'_> {
         // Exact strings and booleans have immutable, non-raising truth. The
         // decorator observes the same flag after its reason is evaluated.
         let immutable_truth = |ty| matches!(ty, Type::Str | Type::Bool);
-        if class_skip
+        // Exact bool operands already are their truth values, including in a return expression.
+        let booleans = right.ty == Type::Bool
+            && operands
+                .iter()
+                .all(|(_, value, _, _)| value.ty == Type::Bool);
+        let skip_truth = class_skip
             && immutable_truth(right.ty)
             && operands
                 .iter()
                 .all(|(_, value, _, _)| immutable_truth(value.ty))
-            && operands.iter().any(|(_, value, _, _)| value.ty != right.ty)
-        {
+            && operands.iter().any(|(_, value, _, _)| value.ty != right.ty);
+        if booleans || skip_truth {
             let mut values = operands
                 .into_iter()
                 .map(|(_, value, _, _)| self.truth_value(value))
