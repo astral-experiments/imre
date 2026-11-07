@@ -22,6 +22,7 @@ mod descriptor_buffer;
 mod native_random;
 mod native_reader;
 mod native_writer;
+pub(super) use native_writer::overridden_close;
 mod rwpair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,

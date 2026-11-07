@@ -157,8 +157,49 @@ try:
             assert os.stat(path).st_size == 0
     with io.FileIO(path, "w") as raw:
         raises(ValueError, NativeWriter, raw, 0)
+
+    def stage():
+        stream = io.open(path, "wb")
+        stream.write(b"staged")
+
+    stage()
+    gc.collect()
+    with io.FileIO(path, "r") as raw:
+        assert raw.read() == b"staged"
+
     with io.open(path, "wb") as stream:
         assert type(stream) is NativeWriter
         assert repr(stream) == f"<_io.BufferedWriter name={path!r}>"
+        failure = OSError("flush failed")
+        calls = []
+
+        def fail_flush():
+            calls.append(stream.closed)
+            raise failure
+
+        stream.write(b"pending")
+        try:
+            with stream:
+                stream.flush = fail_flush
+        except OSError as error:
+            assert error is failure
+        else:
+            raise AssertionError("close swallowed flush failure")
+        assert stream.closed
+        assert stream.close() is None and calls == [False]
+        assert os.stat(path).st_size == 0
+
+    raw = io.FileIO(path, "w")
+    stream = NativeWriter(raw)
+    raw_close = raw.close
+    close_calls = []
+
+    def close_once():
+        close_calls.append(None)
+        return raw_close()
+
+    raw.close = close_once
+    assert stream.close() is None and stream.close() is None
+    assert raw.closed and close_calls == [None]
 finally:
     os.unlink(path)

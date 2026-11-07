@@ -71,6 +71,42 @@ fn truncate_file(ctx: &mut Context, buffer: Id, size: Option<Id>) -> Result<Id> 
     Ok(ctx.int(size))
 }
 
+/// Run the public flush once, then close the raw even if flush raised.
+pub(super) fn flush_and_close(
+    ctx: &mut Context,
+    receiver: Id,
+    close_raw: impl FnOnce(&mut Context) -> Result<Id>,
+) -> Result<Id> {
+    // invoke keeps the exception alive across the raw close callback.
+    let flushed = super::text_wrapper::invoke(ctx, receiver, "flush", vec![]);
+    match (flushed, close_raw(ctx)) {
+        (Err(flush), Err(mut close)) => {
+            close.context = ctx.raised_instance(flush);
+            Err(close)
+        }
+        (Err(flush), _) => Err(flush),
+        (Ok(_), closed) => closed,
+    }
+}
+
+/// A native bound method can outlive a change to the writer's instance dictionary.
+pub(in crate::dynamic::stdlib) fn overridden_close(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    closed: bool,
+    close_raw: impl FnOnce(&mut Context) -> Result<Id>,
+) -> Option<Result<Id>> {
+    ctx.heap.get(receiver).native_file_dict()?;
+    if name == "__exit__" {
+        return Some(super::text_wrapper::invoke(ctx, receiver, "close", vec![]));
+    }
+    if closed {
+        return None;
+    }
+    Some(flush_and_close(ctx, receiver, close_raw))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     owner: &str,
@@ -191,22 +227,9 @@ pub(super) fn call(
             }
             "close" if buffer != receiver && !fd.closed() => {
                 fd.warn_on_close(ctx, receiver)?;
-                let flushed = ctx
-                    .lookup_attr(receiver, "flush")
-                    .and_then(|flush| ctx.call(flush, vec![], Vec::new()));
-                if let Err(error) = &flushed {
-                    for id in error.roots() {
-                        ctx.heap.keep(id);
-                    }
-                }
-                match (flushed, fd.close_after_flush(ctx, receiver)) {
-                    (Err(flush), Err(mut close)) => {
-                        close.context = ctx.raised_instance(flush);
-                        Err(close)
-                    }
-                    (Err(flush), _) => Err(flush),
-                    (_, closed) => closed.map(|()| NONE),
-                }
+                flush_and_close(ctx, receiver, |ctx| {
+                    fd.close_after_public_flush(ctx, receiver)
+                })
             }
             _ => fd.call(ctx, receiver, name, args),
         });

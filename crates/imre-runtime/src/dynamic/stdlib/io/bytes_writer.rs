@@ -16,7 +16,7 @@ pub(in crate::dynamic) struct Writer {
     pub(in crate::dynamic) raw: Cell<Option<Id>>,
     pub(super) active: super::native_writer::ActiveCall,
     pub(super) ready: Cell<bool>,
-    capacity: usize,
+    capacity: Cell<usize>,
     pending: RefCell<Vec<u8>>,
     written: Cell<usize>,
     unflushed: Cell<usize>,
@@ -83,7 +83,7 @@ pub(super) fn initialize(
         active: super::native_writer::ActiveCall::default(),
         ready: Cell::new(revived),
         raw: Cell::new(Some(raw)),
-        capacity,
+        capacity: Cell::new(capacity),
         pending: RefCell::new(pending),
         written: Cell::new(0),
         unflushed: Cell::new(0),
@@ -252,8 +252,8 @@ impl Writer {
     fn transfer(&self, ctx: &mut Context, raw: Id, data: Option<Id>) -> Result<Id> {
         let bytes = data.map(|id| files::output_bytes(ctx, id)).transpose()?;
         if let Some(bytes) = bytes
-            && bytes.len() < self.capacity
-            && bytes.len() <= self.capacity - self.pending.borrow().len()
+            && bytes.len() < self.capacity.get()
+            && bytes.len() <= self.capacity.get() - self.pending.borrow().len()
         {
             self.pending.borrow_mut().extend_from_slice(bytes);
             self.unflushed.set(self.unflushed.get() + bytes.len());
@@ -261,7 +261,7 @@ impl Writer {
         }
         let refresh = match (data, bytes) {
             (Some(id), Some(b))
-                if b.len() < self.capacity
+                if b.len() < self.capacity.get()
                     && matches!(
                         ctx.buffer_storage(id)?,
                         Value::ByteArray(_)
@@ -398,7 +398,8 @@ impl Writer {
             return Ok(raw);
         }
         if name == "write"
-            && files::output_bytes(ctx, args[0])?.len() >= self.capacity
+            && self.capacity.get() != 0
+            && files::output_bytes(ctx, args[0])?.len() >= self.capacity.get()
             && matches!(
                 ctx.buffer_storage(args[0])?,
                 Value::ByteArray(_)
@@ -420,8 +421,13 @@ impl Writer {
         } else {
             None
         };
-        let closed = ctx.lookup_attr(raw, "closed")?;
-        if ctx.truth(closed)? {
+        // close() can retire the buffer even if raw.close() leaves the raw open.
+        let retired =
+            self.capacity.get() == 0 && matches!(name, "flush" | "write" | "seek" | "truncate");
+        if retired || {
+            let closed = ctx.lookup_attr(raw, "closed")?;
+            ctx.truth(closed)?
+        } {
             if name == "close" {
                 return Ok(NONE);
             }
@@ -449,27 +455,16 @@ impl Writer {
                 }
                 // Public flush takes the lock itself and can be overridden.
                 drop(guard);
-                let flushed = invoke(ctx, receiver, "flush", vec![]);
-                let _guard = self.lock()?;
-                // invoke retains the exception roots across raw.close().
-                let raw = self.raw()?;
-                let python_raw = native_writer(&ctx.heap, raw).is_none();
-                let closed = invoke(ctx, raw, "close", vec![]);
-                if python_raw && closed.is_ok() {
-                    // CPython retires its buffer after calling raw.close, even if
-                    // public flush was overridden. An already-closed raw skips this.
-                    self.pending.borrow_mut().clear();
+                super::native_writer::flush_and_close(ctx, receiver, |ctx| {
+                    let _guard = self.lock()?;
+                    let raw = self.raw()?;
+                    let closed = invoke(ctx, raw, "close", vec![]);
+                    self.pending.take();
+                    self.capacity.set(0);
                     self.unflushed.set(0);
                     self.written.set(0);
-                }
-                match (flushed, closed) {
-                    (Err(flush), Err(mut close)) => {
-                        close.context = ctx.raised_instance(flush);
-                        Err(close)
-                    }
-                    (Err(flush), _) => Err(flush),
-                    (_, result) => result,
-                }
+                    closed
+                })
             }
             "seek" => {
                 if invoke(ctx, raw, "seekable", vec![])? != TRUE {

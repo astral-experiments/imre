@@ -278,6 +278,23 @@ pub(super) fn binary_method(
                 let pos = file.borrow_mut().seek_disk(&offset, i64::from(whence))?;
                 return Ok(ctx.int(pos as i64));
             }
+            if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
+                let closed = file.borrow().closed();
+                if let Some(result) =
+                    super::io::overridden_close(ctx, receiver, name, closed, |_| {
+                        file.borrow_mut()
+                            .close_binary_after_flush()
+                            .map_err(crate::objects::errno_error)?;
+                        Ok(NONE)
+                    })
+                {
+                    return result;
+                }
+                file.borrow_mut()
+                    .close()
+                    .map_err(crate::objects::errno_error)?;
+                return Ok(NONE);
+            }
             let mut file = file.borrow_mut();
             return match (name, args) {
                 ("write", [value]) => {
@@ -287,10 +304,6 @@ pub(super) fn binary_method(
                 }
                 ("flush", []) => {
                     file.flush()?;
-                    Ok(NONE)
-                }
-                ("close", []) | ("__exit__", [_, _, _]) => {
-                    file.close().map_err(crate::objects::errno_error)?;
                     Ok(NONE)
                 }
                 ("__enter__", []) if file.closed() => {
