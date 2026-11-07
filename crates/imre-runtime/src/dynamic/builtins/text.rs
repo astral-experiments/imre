@@ -1728,6 +1728,47 @@ fn split_string_lines(ctx: &mut Context, receiver: Id, keep: bool) -> Result<Id>
     Ok(ctx.alloc(Value::List(values)))
 }
 
+/// Partition at a Python character boundary, retaining the separator object on a hit.
+fn partition_string(ctx: &mut Context, receiver: Id, separator: Id, reverse: bool) -> Result<Id> {
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated string receiver");
+    let needle = ctx
+        .string_storage(separator)
+        .ok_or_else(|| type_error(format!("must be str, not {}", ctx.type_name(separator))))?;
+    let scalar = |id| matches!(ctx.heap.get(id), Value::Str(_));
+    let halves = if scalar(storage) && scalar(needle) {
+        crate::objects::partition_text(ctx.str_value(storage)?, ctx.str_value(needle)?, reverse)?
+            .map(|(left, right)| (left.to_owned(), right.to_owned()))
+            .map(|(left, right)| (ctx.text(left), ctx.text(right)))
+    } else {
+        let source = ctx.string_codepoints(storage)?;
+        let sep = ctx.string_codepoints(needle)?;
+        if sep.is_empty() {
+            return Err(Error::new("ValueError", "empty separator"));
+        }
+        let mut windows = source.windows(sep.len());
+        let found = if reverse {
+            windows.rposition(|w| w == sep.as_ref())
+        } else {
+            windows.position(|w| w == sep.as_ref())
+        };
+        let halves = found.map(|i| (source[..i].to_vec(), source[i + sep.len()..].to_vec()));
+        halves.map(|(left, right)| (ctx.text_codepoints(left), ctx.text_codepoints(right)))
+    };
+    let fields = if let Some((left, right)) = halves {
+        vec![left, separator, right]
+    } else {
+        let empty = ctx.text("");
+        if reverse {
+            vec![empty, empty, receiver]
+        } else {
+            vec![receiver, empty, empty]
+        }
+    };
+    Ok(ctx.alloc(Value::Tuple(fields)))
+}
+
 fn split_string(
     ctx: &mut Context,
     receiver: Id,
@@ -3054,6 +3095,20 @@ pub(super) fn method(
         let keep = ctx.optional_truth(keep, false)?;
         return split_string_lines(ctx, receiver, keep);
     }
+    if owner == "str" && matches!(name, "partition" | "rpartition") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "str.{name}() takes no keyword arguments"
+            )));
+        }
+        let [separator] = args else {
+            return Err(type_error(format!(
+                "str.{name}() takes exactly one argument ({} given)",
+                args.len()
+            )));
+        };
+        return partition_string(ctx, receiver, *separator, name == "rpartition");
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => format_string(ctx, &source, FormatSource::Arguments(args, kwargs)),
@@ -3068,36 +3123,6 @@ pub(super) fn method(
                 )));
             };
             format_string(ctx, &source, FormatSource::Mapping(*mapping))
-        }
-        "partition" | "rpartition" => {
-            if !kwargs.is_empty() {
-                return Err(type_error(format!(
-                    "str.{name}() takes no keyword arguments"
-                )));
-            }
-            let [separator] = args else {
-                return Err(type_error(format!(
-                    "str.{name}() takes exactly one argument ({} given)",
-                    args.len()
-                )));
-            };
-            let sep = ctx.str_value(*separator).map_err(|_| {
-                type_error(format!("must be str, not {}", ctx.type_name(*separator)))
-            })?;
-            let reverse = name == "rpartition";
-            let fields = if let Some((before, after)) =
-                crate::objects::partition_text(&source, sep, reverse)?
-            {
-                vec![ctx.text(before), *separator, ctx.text(after)]
-            } else {
-                let empty = ctx.text("");
-                if reverse {
-                    vec![empty, empty, receiver]
-                } else {
-                    vec![receiver, empty, empty]
-                }
-            };
-            Ok(ctx.alloc(Value::Tuple(fields)))
         }
         "capitalize" | "upper" => {
             positional(name, kwargs)?;
