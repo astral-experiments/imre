@@ -49,6 +49,17 @@ def format_stack(f=None, limit=None):
     return format_list(extract_stack(f, limit=limit))
 
 
+def print_tb(tb, limit=None, file=None):
+    """Print up to 'limit' stack trace entries from the traceback 'tb'.
+
+    If 'limit' is omitted or None, all entries are printed.  If 'file'
+    is omitted or None, the output goes to sys.stderr; otherwise
+    'file' should be an open file or file-like object with a write()
+    method.
+    """
+    print_list(extract_tb(tb, limit=limit), file=file)
+
+
 def format_tb(tb, limit=None):
     """A shorthand for 'format_list(extract_tb(tb, limit))'."""
     return extract_tb(tb, limit=limit).format()
