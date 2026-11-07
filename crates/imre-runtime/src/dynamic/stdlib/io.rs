@@ -51,7 +51,7 @@ pub(in crate::dynamic) enum NativeClass {
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     BufferedFile(Id),
-    Reader(std::rc::Rc<buffered_reader::Reader>),
+    Reader(crate::shared::Shared<buffered_reader::Reader>),
     UninitializedReader(Option<Id>),
     UninitializedWriter(Option<Id>),
     DetachedWriter,
@@ -426,6 +426,8 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             "readable",
             "writable",
             "seekable",
+            "seek",
+            "tell",
             "__enter__",
             "__exit__",
         ],
@@ -896,30 +898,30 @@ pub(in super::super) fn call(
     let buffered = owner_kind == Some("BufferedIOBase");
     let text = owner_kind == Some("TextIOBase");
     let bytes_io = owner_kind == Some("BytesIO");
-    let base_fileno = owner_kind == Some("IOBase") && name == "fileno";
-    let base_enter = owner_kind == Some("IOBase") && name == "__enter__";
-    let descriptor = if base_fileno || base_enter || name == "__dict__" {
-        Some("_IOBase")
-    } else if raw {
-        Some("_RawIOBase")
-    } else if buffered {
-        Some("_BufferedIOBase")
-    } else if text {
-        Some("_TextIOBase")
-    } else if matches!(
-        owner_kind,
-        Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
-    ) {
-        owner_kind
-    } else if owner_kind == Some("TextIOWrapper")
-        && matches!(name, "__next__" | "__repr__" | "truncate")
-    {
-        Some("TextIOWrapper")
-    } else if bytes_io {
-        Some("BytesIO")
-    } else {
-        None
-    };
+    let base = owner_kind == Some("IOBase");
+    let descriptor =
+        if base && matches!(name, "fileno" | "__enter__" | "seek" | "tell") || name == "__dict__" {
+            Some("_IOBase")
+        } else if raw {
+            Some("_RawIOBase")
+        } else if buffered {
+            Some("_BufferedIOBase")
+        } else if text {
+            Some("_TextIOBase")
+        } else if matches!(
+            owner_kind,
+            Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
+        ) {
+            owner_kind
+        } else if owner_kind == Some("TextIOWrapper")
+            && matches!(name, "__next__" | "__repr__" | "truncate")
+        {
+            Some("TextIOWrapper")
+        } else if bytes_io {
+            Some("BytesIO")
+        } else {
+            None
+        };
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
             (
@@ -984,21 +986,38 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
-    if base_enter {
+    if base && name == "seek" {
+        if rest.is_empty() && kwargs.len() <= 2 {
+            return Err(Error::new(
+                "TypeError",
+                "seek() takes at least 1 positional argument (0 given)",
+            ));
+        }
+        let args =
+            super::super::builtins::bind_method_arguments("seek", rest, kwargs, ["", ""], 2)?;
+        for value in args.into_iter().flatten() {
+            super::os::c_int(ctx, value)?;
+        }
+        return Err(Error::new("UnsupportedOperation", "seek"));
+    }
+    if base && matches!(name, "__enter__" | "tell") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "_IOBase.__enter__() takes no keyword arguments",
+                format!("_IOBase.{name}() takes no keyword arguments"),
             ));
         }
         if !rest.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!(
-                    "_IOBase.__enter__() takes no arguments ({} given)",
-                    rest.len()
-                ),
+                format!("_IOBase.{name}() takes no arguments ({} given)", rest.len()),
             ));
+        }
+        if name == "tell" {
+            let seek = ctx.lookup_attr(receiver, "seek")?;
+            let zero = ctx.int(0);
+            let current = ctx.int(1);
+            return ctx.call(seek, vec![zero, current], Vec::new());
         }
         if let Some(closed) = ctx.optional_attr(receiver, "closed")?
             && ctx.truth(closed)?
@@ -1083,7 +1102,7 @@ pub(in super::super) fn call(
         }
         return Ok(NONE);
     }
-    if base_fileno || (text || buffered) && name == "detach" {
+    if base && name == "fileno" || (text || buffered) && name == "detach" {
         if !rest.is_empty() || !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",

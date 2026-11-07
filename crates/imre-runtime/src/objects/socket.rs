@@ -9,7 +9,9 @@ use num_traits::ToPrimitive;
 use std::ffi::{CStr, CString};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+#[cfg(target_vendor = "apple")]
+use std::os::fd::AsRawFd;
+use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
 use std::time::{Duration, Instant};
 
@@ -18,24 +20,17 @@ pub(super) struct Socket {
     kind: i32,
     proto: i32,
     fd: RawFd,
+    generation: u64,
     // Python socket timeouts use signed nanoseconds: -1 blocks indefinitely, 0 is nonblocking.
     timeout_ns: i64,
-    readers: usize,
-    close_requested: bool,
+    // A Python subtype may take responsibility for the fd in its finalizer.
+    close_on_drop: bool,
 }
 
 impl Socket {
     fn into_owner(self) -> Result<crate::ObjectOwner> {
         crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Socket(self))))
             .map_err(|_| Error::memory_error())
-    }
-
-    fn close(&mut self) -> io::Result<()> {
-        self.close_requested = true;
-        if self.readers != 0 {
-            return Ok(());
-        }
-        self.close_fd()
     }
 
     fn close_fd(&mut self) -> io::Result<()> {
@@ -59,137 +54,9 @@ pub(crate) fn close_fd(fd: RawFd) -> io::Result<()> {
 
 impl Drop for Socket {
     fn drop(&mut self) {
-        let _ = self.close_fd();
-    }
-}
-
-/// The raw input for socket.makefile borrows the same descriptor until its last reader closes.
-pub(crate) struct SocketInput {
-    socket: Option<crate::ObjectOwner>,
-    buffer: io::Cursor<Vec<u8>>,
-    timed_out: bool,
-}
-
-const SOCKET_BUFFER_SIZE: usize = 128 * 1024;
-
-impl SocketInput {
-    /// Reserve the read buffer before retaining a reference to the descriptor.
-    pub(crate) fn try_new(socket: crate::ObjectOwner) -> Result<Self> {
-        // CPython uses io.DEFAULT_BUFFER_SIZE for the default buffered reader.
-        let mut bytes = Vec::new();
-        bytes
-            .try_reserve_exact(SOCKET_BUFFER_SIZE)
-            .map_err(|_| Error::memory_error())?;
-        retain_socketio(&socket);
-        Ok(Self {
-            socket: Some(socket),
-            buffer: io::Cursor::new(bytes),
-            timed_out: false,
-        })
-    }
-
-    // SocketIO permanently refuses reads after the first read timeout on this file.
-    unsafe fn read_socket(&mut self, target: *mut u8, size: usize) -> io::Result<usize> {
-        if size == 0 {
-            return Ok(0);
+        if self.close_on_drop {
+            let _ = self.close_fd();
         }
-        if self.timed_out {
-            return Err(io::Error::other("cannot read from timed out object"));
-        }
-        let socket = self
-            .socket
-            .as_ref()
-            .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))?;
-        // SAFETY: the caller provides size writable bytes.
-        let result = unsafe { receive(socket, target, size, 0) };
-        if let Err(err) = &result {
-            self.timed_out = err.kind() == io::ErrorKind::TimedOut;
-        }
-        result
-    }
-
-    /// Consume buffered input first, otherwise receive at most the requested bytes once.
-    pub(crate) fn read1(&mut self, target: &mut [u8]) -> io::Result<usize> {
-        if self.buffer.position() < self.buffer.get_ref().len() as u64 {
-            return io::Read::read(&mut self.buffer, target);
-        }
-        // SAFETY: target is writable for its length, and receive does not retain it.
-        match unsafe { self.read_socket(target.as_mut_ptr(), target.len()) } {
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
-            result => result,
-        }
-    }
-
-    pub(crate) fn close(&mut self) -> io::Result<()> {
-        let Some(socket) = self.socket.take() else {
-            return Ok(());
-        };
-        release_socketio(&socket)
-    }
-}
-
-/// Keep the descriptor open across socket.close() while its file is open.
-pub(crate) fn retain_socketio(socket: &Object) {
-    state(socket, |s| s.readers += 1);
-}
-
-/// Direct SocketIO construction does not acquire a makefile reference.
-pub(crate) fn release_socketio(socket: &Object) -> io::Result<()> {
-    state(socket, |s| {
-        s.readers = s.readers.saturating_sub(1);
-        if s.close_requested && s.readers == 0 {
-            s.close_fd()
-        } else {
-            Ok(())
-        }
-    })
-}
-
-impl AsRawFd for SocketInput {
-    fn as_raw_fd(&self) -> RawFd {
-        self.socket.as_ref().map_or(-1, |s| fd(s))
-    }
-}
-
-impl io::Read for SocketInput {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if buffer.is_empty() {
-            return Ok(0);
-        }
-        if self.buffer.position() >= self.buffer.get_ref().len() as u64
-            && buffer.len() >= SOCKET_BUFFER_SIZE
-        {
-            // SAFETY: buffer exposes this many exclusively writable bytes.
-            return unsafe { self.read_socket(buffer.as_mut_ptr(), buffer.len()) };
-        }
-        let count = io::Read::read(&mut io::BufRead::fill_buf(self)?, buffer)?;
-        io::BufRead::consume(self, count);
-        Ok(count)
-    }
-}
-
-impl io::BufRead for SocketInput {
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        if self.buffer.position() >= self.buffer.get_ref().len() as u64 {
-            self.buffer.get_mut().clear();
-            let target = self.buffer.get_mut().as_mut_ptr();
-            // SAFETY: try_new reserved this many bytes, and recv initializes the returned prefix.
-            let count = unsafe { self.read_socket(target, SOCKET_BUFFER_SIZE)? };
-            // SAFETY: receive initialized exactly count bytes in the reserved buffer.
-            unsafe { self.buffer.get_mut().set_len(count) };
-            self.buffer.set_position(0);
-        }
-        self.buffer.fill_buf()
-    }
-
-    fn consume(&mut self, count: usize) {
-        self.buffer.consume(count);
-    }
-}
-
-impl Drop for SocketInput {
-    fn drop(&mut self) {
-        let _ = self.close();
     }
 }
 
@@ -219,30 +86,10 @@ pub(crate) fn fd(s: &Object) -> RawFd {
     state(s, |s| s.fd)
 }
 
-/// Move a stream to its TLS owner and report whether a handshake can begin.
+/// Check that OpenSSL can use this socket's current descriptor and timeout.
 #[cfg(unix)]
-pub(crate) fn take_tls_stream(socket: &Object, server: bool) -> Result<(crate::ObjectOwner, bool)> {
-    if kind(socket) != libc::SOCK_STREAM {
-        return Err(Error::new(
-            Kind::NotImplementedError,
-            "only stream sockets are supported",
-        ));
-    }
-    let connected = match peer_call(|addr, len| {
-        // SAFETY: peer_call provides writable storage and its capacity for getpeername.
-        unsafe { libc::getpeername(fd(socket), addr, len) }
-    }) {
-        Ok(_) => true,
-        Err(e) if server && e.raw_os_error() == Some(libc::ENOTCONN) => false,
-        Err(e) => return Err(errno_error(e)),
-    };
+pub(crate) fn check_tls_mode(socket: &Object, connected: bool) -> Result<()> {
     state(socket, |s| {
-        if s.close_requested || s.readers != 0 {
-            return Err(Error::new(
-                Kind::ValueError,
-                "cannot wrap a closing socket or one with active file readers",
-            ));
-        }
         // SAFETY: this query only reads the flags of the socket-owned descriptor.
         let flags = checked(unsafe { libc::fcntl(s.fd, libc::F_GETFL) }).map_err(errno_error)?;
         // A finite timeout uses a nonblocking fd so OpenSSL can yield to poll.
@@ -257,25 +104,51 @@ pub(crate) fn take_tls_stream(socket: &Object, server: bool) -> Result<(crate::O
                 "TLS requires a blocking socket or a connected socket in the requested timeout mode",
             ));
         }
-        let transport = Socket {
-            fd: std::mem::replace(&mut s.fd, -1),
-            ..*s
-        };
-        s.close_requested = true;
-        Ok((transport.into_owner()?, connected))
+        Ok(())
     })
 }
 
-/// Detect cleartext queued on a peer that closed before TLS started.
-#[cfg(unix)]
-pub(crate) fn pending_tls_data(socket: &Object) -> Result<bool> {
-    let mut byte = 0;
-    // SAFETY: byte is writable for this call. The transferred blocking socket has no timeout.
-    match unsafe { receive(socket, &raw mut byte, 1, libc::MSG_DONTWAIT) } {
-        Ok(n) => Ok(n != 0),
-        Err(e) if matches!(e.raw_os_error(), Some(libc::ENOTCONN | libc::EINVAL)) => Ok(false),
-        Err(e) => Err(errno_error(e)),
+/// The socket BIO borrows a number. Reinitializing the Python object may replace its endpoint.
+pub(crate) struct TlsEndpoint {
+    fd: RawFd,
+    generation: u64,
+    #[cfg(target_os = "linux")]
+    cookie: Option<u64>,
+}
+
+impl TlsEndpoint {
+    pub(crate) fn new(socket: &Object) -> Self {
+        state(socket, |s| Self {
+            fd: s.fd,
+            generation: s.generation,
+            #[cfg(target_os = "linux")]
+            cookie: socket_cookie(s.fd),
+        })
     }
+
+    pub(crate) fn matches(&self, socket: &Object) -> bool {
+        state(socket, |s| {
+            if s.fd != self.fd {
+                return false;
+            }
+            if s.generation == self.generation {
+                return true;
+            }
+            // On Linux the cookie distinguishes a repeated init on the live socket
+            // from a different socket installed at precisely the same fd number.
+            #[cfg(target_os = "linux")]
+            return self.cookie.is_some() && self.cookie == socket_cookie(s.fd);
+            #[cfg(not(target_os = "linux"))]
+            false
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn socket_cookie(fd: RawFd) -> Option<u64> {
+    let mut bytes = [0; size_of::<u64>()];
+    let len = get_option_into(fd, libc::SOL_SOCKET, libc::SO_COOKIE, &mut bytes).ok()?;
+    (len == bytes.len()).then(|| u64::from_ne_bytes(bytes))
 }
 
 fn checked(ret: i32) -> io::Result<i32> {
@@ -488,6 +361,19 @@ fn handle_owned(
     kind: i32,
     proto: i32,
 ) -> Result<crate::ObjectOwner> {
+    let socket = uninitialized()?;
+    install_owned(&socket, fd, blocking, family, kind, proto)?;
+    Ok(socket)
+}
+
+fn install_owned(
+    s: &Object,
+    fd: OwnedFd,
+    blocking: bool,
+    family: i32,
+    kind: i32,
+    proto: i32,
+) -> Result<()> {
     #[cfg(target_vendor = "apple")]
     set_option(
         fd.as_raw_fd(),
@@ -495,31 +381,43 @@ fn handle_owned(
         libc::SO_NOSIGPIPE,
         SocketOption::Integer(1),
     )?;
-    let socket = socket_state(family, kind, proto, blocking)?;
-    state(&socket, |s| s.fd = fd.into_raw_fd());
-    Ok(socket)
+    install_fd(s, fd.into_raw_fd(), blocking, family, kind, proto);
+    Ok(())
 }
 
-fn socket_state(family: i32, kind: i32, proto: i32, blocking: bool) -> Result<crate::ObjectOwner> {
+fn install_fd(s: &Object, raw: RawFd, blocking: bool, family: i32, kind: i32, proto: i32) {
+    state(s, |s| {
+        // A repeated base initializer replaces the number in the same socket.
+        // The caller retains any previous fd, including when raw equals that fd.
+        s.generation = s.generation.wrapping_add(1);
+        s.fd = raw;
+        s.family = family;
+        s.kind = kind;
+        s.proto = proto;
+        s.timeout_ns = if blocking { -1 } else { 0 };
+    });
+}
+
+pub(crate) fn uninitialized() -> Result<crate::ObjectOwner> {
     Socket {
         fd: -1,
-        family,
-        kind,
-        proto,
-        timeout_ns: if blocking { -1 } else { 0 },
-        readers: 0,
-        close_requested: false,
+        generation: 0,
+        family: 0,
+        kind: 0,
+        proto: 0,
+        timeout_ns: -1,
+        close_on_drop: true,
     }
     .into_owner()
 }
 
-/// Adopt the caller’s descriptor after validating it and filling omitted metadata.
-pub(crate) fn adopt(
+pub(crate) fn adopt_into(
+    socket: &Object,
     raw: RawFd,
     mut family: i32,
     mut kind: i32,
     mut proto: i32,
-) -> Result<crate::ObjectOwner> {
+) -> Result<()> {
     if raw < 0 {
         return Err(Error::new(Kind::ValueError, "negative file descriptor"));
     }
@@ -554,17 +452,24 @@ pub(crate) fn adopt(
     );
     #[cfg(not(target_os = "linux"))]
     let blocking = true;
-    let socket = socket_state(family, kind, proto, blocking)?;
-    state(&socket, |s| s.fd = raw);
-    Ok(socket)
+    install_fd(socket, raw, blocking, family, kind, proto);
+    Ok(())
+}
+
+/// Give the subtype finalizer sole authority over the implicit close, including after resurrection.
+pub(crate) fn hand_finalization_to_python(socket: &Object) {
+    state(socket, |s| s.close_on_drop = false);
+}
+
+/// Release the currently installed fd, even if a reader still references the socket.
+/// Both finalization and failed initialization discard close errors.
+pub(crate) fn discard_fd(socket: &Object) {
+    let _ = state(socket, Socket::close_fd);
 }
 
 /// Return the underlying descriptor and disable subsequent closes by this socket.
 pub(crate) fn detach(socket: &Object) -> RawFd {
-    state(socket, |s| {
-        s.close_requested = true;
-        std::mem::replace(&mut s.fd, -1)
-    })
+    state(socket, |s| std::mem::replace(&mut s.fd, -1))
 }
 
 /// Return the syscall type, stored socket kind, and initial blocking mode.
@@ -584,6 +489,12 @@ fn creation_type(ty: i32) -> (i32, i32, bool) {
 }
 
 pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwner> {
+    let socket = uninitialized()?;
+    open_into(&socket, family, ty, proto)?;
+    Ok(socket)
+}
+
+pub(crate) fn open_into(socket: &Object, family: i32, ty: i32, proto: i32) -> Result<()> {
     // socket.socket uses -1 to request the default for each field.
     let family = if family == -1 { libc::AF_INET } else { family };
     let (flags, kind, blocking) = creation_type(if ty == -1 { libc::SOCK_STREAM } else { ty });
@@ -601,7 +512,7 @@ pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwne
     }
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
     let raw = checked(unsafe { libc::socket(family, flags, proto) }).map_err(errno_error)?;
-    handle(raw, blocking, family, kind, proto)
+    install_owned(socket, own_socket_fd(raw)?, blocking, family, kind, proto)
 }
 
 pub(crate) fn socketpair(
@@ -1949,16 +1860,6 @@ pub(crate) fn recv_into(
 }
 
 /// # Safety
-/// The caller retains exclusive access to len writable bytes at buffer.
-unsafe fn receive(socket: &Object, buffer: *mut u8, len: usize, flags: i32) -> io::Result<usize> {
-    let until = deadline(socket);
-    // SAFETY: the caller provides the same writable buffer through every attempt.
-    retry(until, || unsafe {
-        receive_until(socket, buffer, len, flags, until)
-    })
-}
-
-/// # Safety
 /// The caller provides len writable bytes for this attempt.
 unsafe fn receive_until(
     socket: &Object,
@@ -2097,7 +1998,7 @@ pub extern "C" fn imre_socket_close(s: &Object) {
 }
 
 pub(crate) fn close(s: &Object) -> Result<()> {
-    state(s, Socket::close).map_err(errno_error)
+    state(s, Socket::close_fd).map_err(errno_error)
 }
 
 fn set_blocking(raw: RawFd, blocking: bool) -> io::Result<()> {

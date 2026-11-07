@@ -967,23 +967,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
-        Value::Socket(_)
-            if matches!(
-                attr,
-                "accept"
-                    | "detach"
-                    | "close"
-                    | "makefile"
-                    | "_decref_socketios"
-                    | "dup"
-                    | "get_inheritable"
-                    | "set_inheritable"
-                    | "__enter__"
-                    | "__exit__"
-            ) || super::stdlib::SOCKET_CLASS_METHODS.contains(&attr) =>
-        {
-            "socket.socket"
-        }
+        Value::Socket(_) if super::stdlib::SOCKET_CLASS_METHODS.contains(&attr) => "socket.socket",
         // Context-manager lookup bypasses the normal _io descriptors for native files.
         Value::BufferedRandom(..) if matches!(attr, "__enter__" | "__exit__") => "BufferedRandom",
         Value::File(_) if matches!(attr, "__enter__" | "__exit__") => "file",

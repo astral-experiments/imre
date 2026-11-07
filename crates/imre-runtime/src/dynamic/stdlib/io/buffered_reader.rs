@@ -3,8 +3,8 @@
 mod update;
 use update::Update;
 
+use crate::shared::Shared;
 use std::cell::Cell;
-use std::rc::Rc;
 
 use super::super::files;
 use super::descriptor_buffer::ssize as index;
@@ -161,8 +161,7 @@ pub(super) fn install(
     update: bool,
 ) -> Result<Id> {
     let size = usize::try_from(size).map_err(|_| Error::new("ValueError", "negative count"))?;
-    let bytes = crate::zeroed_io_buffer(size)
-        .map_err(|_| Error::new("MemoryError", "bytes allocation is too large"))?;
+    let bytes = crate::zeroed_io_buffer(size).map_err(|_| Error::new("MemoryError", ""))?;
     install_buffer(ctx, receiver, raw, bytes, update)
 }
 
@@ -175,7 +174,7 @@ pub(super) fn install_buffer(
 ) -> Result<Id> {
     let size = bytes.len();
     let buffer = ctx.alloc(Value::ByteArray(bytes));
-    let state = Rc::new(Reader {
+    let state = Shared::try_new(Reader {
         raw: Cell::new(Some(raw)),
         size,
         buffer,
@@ -184,12 +183,13 @@ pub(super) fn install_buffer(
         absolute: Cell::new(None),
         locked: Cell::new(false),
         update: update.then(Update::default),
-    });
+    })
+    .map_err(|_| Error::new("MemoryError", ""))?;
     let attach = |ctx: &mut Context| {
         let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
             unreachable!()
         };
-        *memory_stream = Some(MemoryStream::Reader(Rc::clone(&state)));
+        *memory_stream = Some(MemoryStream::Reader(state.clone()));
     };
     if update && Reader::get(ctx, receiver).is_ok() {
         attach(ctx);
@@ -236,12 +236,12 @@ impl Reader {
         self.raw.get()
     }
 
-    fn get(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
+    fn get(ctx: &Context, receiver: Id) -> Result<Shared<Self>> {
         match ctx.heap.get(receiver) {
             Value::Instance {
                 memory_stream: Some(MemoryStream::Reader(r)),
                 ..
-            } => Ok(Rc::clone(r)),
+            } => Ok(r.clone()),
             _ => Err(Error::new(
                 "ValueError",
                 "I/O operation on uninitialized object",

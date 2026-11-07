@@ -1,9 +1,9 @@
 //! BufferedReader over a native FileIO retains that raw object and its descriptor.
 
-use super::super::{builtins, files, os_error};
+use super::super::{builtins, files};
 use super::descriptor_buffer::{self, backing, ssize};
 use super::{Context, Error, FALSE, Id, NONE, Result, Value};
-use files::{BinaryFile, ReadSource};
+use files::BinaryFile;
 
 pub(super) const METHODS: &[&str] = &[
     "__init__",
@@ -177,12 +177,6 @@ pub(super) fn call(
                 "mode" => return Ok(ctx.text(mode)),
                 _ => {}
             }
-        } else if let Some(fd) = handle.socket_reader_name() {
-            match name {
-                "name" => return Ok(ctx.int(i64::from(fd))),
-                "mode" => return Ok(ctx.text("rb")),
-                _ => {}
-            }
         }
         return Err(Error::new(
             "AttributeError",
@@ -217,15 +211,7 @@ pub(super) fn call(
         let source = slot
             .as_mut()
             .ok_or_else(|| Error::new("ValueError", "read of closed file"))?;
-        let data = match source {
-            ReadSource::File(reader) => descriptor_buffer::read_once(reader, size)?,
-            ReadSource::Socket(socket) => {
-                let mut data = builtins::zeroed_bytes(size)?;
-                let n = socket.read1(&mut data).map_err(os_error)?;
-                data.truncate(n);
-                data
-            }
-        };
+        let data = descriptor_buffer::read_once(source, size)?;
         return Ok(ctx.alloc(Value::Bytes(data)));
     }
     let result = files::binary_method(ctx, buffer, name, args)?;

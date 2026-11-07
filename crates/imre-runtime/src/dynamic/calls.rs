@@ -4590,13 +4590,14 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             Value::Epoll(_) if name == "fromfd" => return Ok(self.builtin("select.epoll.fromfd")),
-            Value::Native(ref class) if class == "socket.socket" => match name {
-                "__name__" => return Ok(self.text("socket")),
-                method if stdlib::SOCKET_CLASS_METHODS.contains(&method) => {
-                    return Ok(self.builtin(&format!("socket.socket.{method}")));
+            Value::Native(ref class) if class == "socket.socket" => {
+                if name == "__name__" {
+                    return Ok(self.text("socket"));
                 }
-                _ => {}
-            },
+                if let Some(member) = self.own_class_attr(obj, name) {
+                    return self.bind_attribute(member, NONE, obj);
+                }
+            }
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }
@@ -7136,6 +7137,7 @@ impl Context {
             weak_reference: None,
             itertools: None,
             member_values: None,
+            socket: None,
             memory_stream: None,
             fields: Default::default(),
             scalar: None,
@@ -7524,6 +7526,7 @@ impl Context {
             weak_reference: None,
             itertools: None,
             member_values: None,
+            socket: None,
             memory_stream: None,
         }))
     }
@@ -9532,11 +9535,14 @@ impl Context {
             .filter(|kind| kind.scalar_base().is_none())
             .and_then(|_| self.float_enum_type(&bases));
         let object = self.builtin("object");
+        // Socket subtypes store their native endpoint separately from Python member slots.
+        let socket = self.builtin("socket.socket");
         let ordinary_slots = typed_dict_meta.is_none()
             && enum_kind.is_none()
-            && bases
-                .iter()
-                .all(|&base| base == object || self.allocation_base(base) == Some(object));
+            && bases.iter().all(|&base| {
+                let storage = self.allocation_base(base).unwrap_or(base);
+                storage == object || storage == socket
+            });
         let layout = if ordinary_slots {
             super::typing::ClassLayout::OrdinarySlots
         } else {

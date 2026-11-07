@@ -3145,9 +3145,6 @@ impl Context {
                 "operator.itemgetter({})",
                 self.format_elements(self.itemgetter_keys(*keys), active)
             ),
-            Value::File(file) if let Some(name) = file.socket_reader_name() => {
-                format!("<_io.BufferedReader name={name}>")
-            }
             Value::Instance { class, .. } => self.default_object_repr(id, *class),
             _ => "<object>".to_owned(),
         };

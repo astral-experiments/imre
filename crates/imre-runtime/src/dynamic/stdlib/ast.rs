@@ -177,6 +177,7 @@ fn parsed_instance(
         weak_reference: None,
         itertools: None,
         member_values: None,
+        socket: None,
         memory_stream: None,
     })
 }

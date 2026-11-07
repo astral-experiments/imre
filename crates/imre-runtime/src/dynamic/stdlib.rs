@@ -45,10 +45,10 @@ pub(super) mod time;
 mod tokenize;
 mod unicodedata;
 pub(super) mod zstd;
-pub(super) use files::{BinaryFile, ReadSource};
+pub(super) use files::BinaryFile;
 pub(super) use socket::{
     CLASS_METHODS as SOCKET_CLASS_METHODS, IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS,
-    import_socket_constants, install_lowlevel_socket,
+    import_socket_constants, install_lowlevel_socket, install_socket_layout,
 };
 pub(super) mod io;
 mod json;
