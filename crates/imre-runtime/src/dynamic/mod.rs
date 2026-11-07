@@ -4489,6 +4489,10 @@ impl Context {
                     self.bind(scope, "modules", self.modules);
                     let version = stdlib::sys_version(self)?;
                     self.bind(scope, "version", version);
+                    if let Some(hexversion) = self.config["python_hexversion"].as_i64() {
+                        let value = self.int(hexversion);
+                        self.bind(scope, "hexversion", value);
+                    }
                     let names = self.alloc(Value::Set {
                         entries: Default::default(),
                         frozen: true,
