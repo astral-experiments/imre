@@ -293,7 +293,18 @@ impl Words {
         }
     }
 
+    /// Ordinary sequence storage already contains its element words.
+    #[inline]
     pub(super) fn resolved(&self) -> Result<&Self, super::exceptions::Error> {
+        if self.kind.0 < WordKind::STRUCT_ROWS.0 {
+            return Ok(self);
+        }
+        self.resolve_view()
+    }
+
+    /// Keep materialization off the common path for reads of an existing buffer.
+    #[inline(never)]
+    fn resolve_view(&self) -> Result<&Self, super::exceptions::Error> {
         if let Some(rows) = self.rows() {
             return Ok(rows.boxed());
         }

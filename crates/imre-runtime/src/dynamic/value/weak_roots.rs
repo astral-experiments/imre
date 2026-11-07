@@ -399,7 +399,7 @@ impl Heap {
     pub(in crate::dynamic) fn learn_finalizer_paths(
         &mut self,
         globals: [Id; 2],
-        stdin: Option<&[Id; 3]>,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
     ) -> bool {
         // Retry from the current roots when a previously proven path loses an anchor or edge.
         if !self.finalizer_roots.nodes.is_empty() && !self.finalizer_roots.valid(self, globals) {
@@ -414,7 +414,7 @@ impl Heap {
             .chain(&self.descriptor_owners)
             .copied()
             .filter(|id| {
-                !stdin.is_some_and(|input| input.contains(id))
+                !streams.is_some_and(|roots| roots.contains(id))
                     && !self.operand_keeps_finalizer(*id, 0)
             });
         let Some(paths) = RootPaths::discover(self, globals, endpoints, true, false) else {
@@ -482,17 +482,17 @@ impl Heap {
     pub(in crate::dynamic) fn cached_finalizers_kept(
         &self,
         globals: [Id; 2],
-        stdin: Option<&[Id; 3]>,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
         discard_from: Option<usize>,
     ) -> bool {
-        self.cached_finalizers_kept_except(globals, stdin, discard_from, &[])
+        self.cached_finalizers_kept_except(globals, streams, discard_from, &[])
     }
 
     /// Check all pending owners except those covered by a separate reachability proof.
     pub(in crate::dynamic) fn cached_finalizers_kept_except(
         &self,
         globals: [Id; 2],
-        stdin: Option<&[Id; 3]>,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
         discard_from: Option<usize>,
         except: &[Id],
     ) -> bool {
@@ -500,7 +500,7 @@ impl Heap {
         let kept = |owner: &Id| {
             except.contains(owner)
                 || (paths_valid && self.finalizer_roots.contains(*owner))
-                || stdin.is_some_and(|input| input.contains(owner))
+                || streams.is_some_and(|roots| roots.contains(owner))
                 || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
                 || self.bound_in_active_frame(*owner)
         };
