@@ -188,7 +188,9 @@ impl CompileOptions {
 
 /// Checks source syntax, ty diagnostics, and Imre's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    let (module, _) = checked_lower(&mut modules::SourceGraph::single(source)?)?;
+    let mut graph = modules::SourceGraph::single(source)?;
+    graph.session.explicit_check = true;
+    let (module, _) = checked_lower(&mut graph)?;
     verify_after(&module, "lowering")
 }
 
@@ -282,6 +284,7 @@ fn check_file_with(
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     let typed = |graph: &mut modules::SourceGraph| {
+        graph.session.explicit_check = true;
         let (module, _) = checked_lower_with(graph, cache.as_deref_mut())?;
         verify_after(&module, "lowering")
     };
