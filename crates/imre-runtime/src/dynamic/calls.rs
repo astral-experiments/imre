@@ -2367,6 +2367,14 @@ impl Context {
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr(&mut self, obj: Id, name: &str, mut lookup: AttributeLookup<'_>) -> Result<Id> {
         if name == "__dict__"
+            && matches!(self.heap.get(obj), Value::Native(symbol) if builtins::exception_kind(symbol).is_some())
+        {
+            // A mapping proxy exposes the identity of its type's underlying dictionary.
+            self.native_type_dicts
+                .entry(obj)
+                .or_insert_with(|| self.heap.alloc(Value::Dict(Default::default())));
+        }
+        if name == "__dict__"
             && let Some(&dictionary) = self.native_type_dicts.get(&obj)
         {
             if matches!(self.heap.get(obj), Value::Native(symbol) if symbol == "typing._GenericAlias")
@@ -9721,5 +9729,28 @@ impl Context {
             self.classes.insert("typing._Final".into(), class);
         }
         Ok(class)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_exception_namespaces_are_unique_and_reused() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let first = ctx.builtin("FileNotFoundError");
+        let second = ctx.builtin("PermissionError");
+        assert!(!ctx.native_type_dicts.contains_key(&first));
+        assert!(!ctx.native_type_dicts.contains_key(&second));
+
+        let proxy = ctx.default_get_attr(first, "__dict__").unwrap();
+        let dictionary = ctx.native_type_dicts[&first];
+        assert!(matches!(ctx.heap.get(proxy), Value::MappingProxy(id) if *id == dictionary));
+        let next = ctx.default_get_attr(first, "__dict__").unwrap();
+        assert!(matches!(ctx.heap.get(next), Value::MappingProxy(id) if *id == dictionary));
+
+        ctx.default_get_attr(second, "__dict__").unwrap();
+        assert_ne!(ctx.native_type_dicts[&second], dictionary);
     }
 }

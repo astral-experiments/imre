@@ -3049,8 +3049,10 @@ impl Context {
                     entries.push((self.heap.code_name(field), descriptor));
                 }
             }
-            let namespace = self.dict(entries);
-            self.native_type_dicts.insert(value, namespace);
+            if !entries.is_empty() {
+                let namespace = self.dict(entries);
+                self.native_type_dicts.insert(value, namespace);
+            }
         }
         if let Some(symbol) = object_size::descriptor(name) {
             self.builtin(symbol);

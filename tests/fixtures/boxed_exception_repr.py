@@ -203,3 +203,20 @@ except TypeError as exc:
     assert "may not be deleted" in str(exc)
 else:
     raise AssertionError("traceback deletion was accepted")
+
+
+# A native exception may inherit all of its descriptors from its base.
+import gc
+
+class MissingFile(FileNotFoundError):
+    pass
+
+for exception_type in (FileNotFoundError, PermissionError, MissingFile):
+    print("args" in dir(exception_type), "add_note" in dir(exception_type))
+    namespace = vars(exception_type)
+    gc.collect()
+    print(type(namespace).__name__, namespace == exception_type.__dict__)
+    try:
+        namespace["custom"] = 1
+    except TypeError:
+        print("read-only")
