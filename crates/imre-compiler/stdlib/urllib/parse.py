@@ -752,12 +752,47 @@ def urljoin(base, url, allow_fragments=True):
     return _imre_urljoin(base, url, allow_fragments)
 
 
+def _noop(value):
+    return value
+
+
+def _encode_result(value):
+    return value.encode('ascii', 'strict')
+
+
+def _coerce_args(*args):
+    text = isinstance(args[0], str)
+    for arg in args[1:]:
+        if arg and isinstance(arg, str) != text:
+            raise TypeError("Cannot mix str and non-str arguments")
+    if text:
+        return args + (_noop,)
+    return tuple(arg.decode('ascii', 'strict') if arg else '' for arg in args) + (_encode_result,)
+
+
+def _recompose_components(components, with_params):
+    fields = _coerce_args(*components)
+    if with_params:
+        scheme, netloc, path, params, query, fragment, coerce = fields
+    else:
+        scheme, netloc, path, query, fragment, coerce = fields
+        params = None
+    if not netloc:
+        if scheme and scheme in uses_netloc and (not path or path[:1] == '/'):
+            netloc = ''
+        else:
+            netloc = None
+    if params:
+        path = '%s;%s' % (path, params)
+    return coerce(_urlunsplit(scheme or None, netloc, path, query or None, fragment or None))
+
+
 def urlunparse(components):
     """Put a parsed URL back together again.  This may result in a
     slightly different, but equivalent URL, if the URL that was parsed
     originally had redundant delimiters, e.g. a ? with an empty query
     (the draft states that these are equivalent)."""
-    return _imre_urlunparse(components)
+    return _imre_urlunparse(components, _recompose_components)
 
 
 def urlunsplit(components):
@@ -766,4 +801,4 @@ def urlunsplit(components):
     This may result in a slightly different, but equivalent URL, if the URL that
     was parsed originally had unnecessary delimiters (for example, a ? with an
     empty query; the RFC states that these are equivalent)."""
-    return _imre_urlunsplit(components)
+    return _imre_urlunsplit(components, _recompose_components)
