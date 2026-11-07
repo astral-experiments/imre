@@ -2870,13 +2870,35 @@ impl Emitter<'_, '_> {
                             .map(|(_, value)| value)
                     })
                     .unwrap();
-                let old = self.get_item(&list.value, &index.value, element, nonnegative);
-                let right = self.operand(expression);
-                let value = self.binary(*op, &old, &right.value);
-                self.set_item(&list.value, &index.value, &value, nonnegative);
-                self.release(&value);
-                self.release_operand(&right);
-                self.release(&old);
+                // A local integer, immediate literal or rooted field load cannot raise or
+                // change the mapping between reading its entry and replacing its value.
+                let pure_right = matches!(expression.kind, ExprKind::Local(_))
+                    || expression.tagged_integer_literal().is_some()
+                    || matches!(&expression.kind, ExprKind::Field(parent, _) if matches!(parent.kind, ExprKind::Local(_)) && matches!(parent.ty, Type::Class(_)));
+                if matches!(list.value.ty, Type::Dict(_))
+                    && matches!(
+                        index.value.ty,
+                        Type::Str | Type::Int | Type::Bytes | Type::Bool
+                    )
+                    && self.module.types.mapping(list.value.ty) == Some((index.value.ty, Type::Int))
+                    && expression.ty == Type::Int
+                    && pure_right
+                    && matches!(op, Binary::Add | Binary::Subtract)
+                {
+                    let right = self.operand(expression);
+                    let key = self.key_word(&index.value);
+                    let operation = u32::from(matches!(op, Binary::Subtract));
+                    self.checked_line(format!("call void @imre_dict_accumulate_int(ptr {}, i64 {key}, i64 {}, i32 {operation})", list.value.operand, right.value.operand));
+                    self.release_operand(&right);
+                } else {
+                    let old = self.get_item(&list.value, &index.value, element, nonnegative);
+                    let right = self.operand(expression);
+                    let value = self.binary(*op, &old, &right.value);
+                    self.set_item(&list.value, &index.value, &value, nonnegative);
+                    self.release(&value);
+                    self.release_operand(&right);
+                    self.release(&old);
+                }
                 self.release_operand(&index);
                 self.release_operand(&list);
             }
@@ -11267,6 +11289,7 @@ declare i64 @imre_defaultdict_missing(ptr, i64)
 declare i32 @imre_defaultdict_has_factory(ptr)
 declare void @imre_defaultdict_set_factory(ptr, i32, i32)
 declare void @imre_dict_set(ptr, i64, i64)
+declare void @imre_dict_accumulate_int(ptr, i64, i64, i32)
 declare void @imre_dict_delete(ptr, i64)
 declare void @imre_dict_clear(ptr)
 declare ptr @imre_dict_iter(ptr, i32)
@@ -12026,6 +12049,19 @@ slow:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn integer_dictionary_updates_keep_effectful_operands_after_lookup() {
+        let llvm = compile(
+            "class Row:\n    def __init__(self, amount: int):\n        self.amount = amount\n\ndef change(d: dict[str, int], row: Row, key: str):\n    d[key] += row.amount\n    d[key] -= 1\n    d[key] += d.pop(key)\n\nchange({'x': 2}, Row(3), 'x')\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        assert_eq!(
+            llvm.matches("call void @imre_dict_accumulate_int(").count(),
+            2
+        );
+        assert!(llvm.contains("call i64 @imre_dict_get("));
+    }
 
     #[test]
     fn fixed_patterns_compile_once_across_search_sites() {
