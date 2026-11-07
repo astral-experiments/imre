@@ -5761,6 +5761,17 @@ impl Heap {
         (count, callbacks)
     }
 
+    /// The initial sweep has already released acyclic garbage. If no callbacks ran
+    /// and the isolate is empty, only the final sweep's byte-buffer budget reset remains.
+    pub(super) fn finish_empty_collection(&mut self) -> bool {
+        if self.full_collection_members().next().is_some() {
+            return false;
+        }
+        self.byte_buffer_allowance = BYTE_BUFFER_FLOOR;
+        self.end_full_collection();
+        true
+    }
+
     pub(super) fn end_full_collection(&mut self) {
         self.full_collection = None;
     }
@@ -5994,6 +6005,25 @@ mod tests {
         heap.alloc(Value::Bytes(buffer));
         assert!(heap.take_finalizer_check());
         assert!(heap.take_sweep_request());
+    }
+
+    #[test]
+    fn an_empty_generation_resets_the_retained_byte_budget() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        ctx.collect_generation(2).unwrap();
+
+        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        buffer.extend_from_slice(b"retained");
+        let owner = ctx.heap.alloc(Value::Bytes(buffer));
+        ctx.heap.keep(owner);
+        assert!(ctx.heap.take_sweep_request());
+        assert_eq!(ctx.collect_generation(2).unwrap(), 0);
+        assert!(matches!(ctx.heap.get(owner), Value::Bytes(bytes) if bytes == b"retained"));
+
+        let mut next = Vec::with_capacity(BYTE_BUFFER_FLOOR);
+        next.extend_from_slice(b"again");
+        ctx.heap.alloc(Value::Bytes(next));
+        assert!(ctx.heap.take_sweep_request());
     }
 
     #[test]
