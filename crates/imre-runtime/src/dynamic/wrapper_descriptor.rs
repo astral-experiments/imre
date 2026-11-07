@@ -4,7 +4,7 @@ use super::*;
 #[derive(Clone, Copy)]
 pub(super) struct BuiltinDescriptor {
     owner: &'static str,
-    name: &'static str,
+    pub(super) name: &'static str,
     pub(super) method: bool,
 }
 
@@ -351,6 +351,7 @@ impl BuiltinDescriptor {
             "frozenset.__sizeof__" => ("frozenset", "__sizeof__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
+            "method-wrapper.__reduce__" => ("method-wrapper", "__reduce__"),
             "method.__reduce__" => ("method", "__reduce__"),
             "builtin_function_or_method.__reduce__" => ("builtin_function_or_method", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
@@ -706,7 +707,7 @@ impl BuiltinDescriptor {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" || self.class() == "classmethod_descriptor" => ctx.class_qualname(receiver),
                         _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE | value::ZSTD_COMPRESS_TYPE | value::ZSTD_DECOMPRESS_TYPE | value::BZ2_COMPRESS_TYPE | value::BZ2_DECOMPRESS_TYPE | value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE) => self.owner.rsplit('.').next()?,
-                        _ if matches!(self.owner, "builtin_function_or_method" | "method") => self.owner,
+                        _ if matches!(self.owner, "builtin_function_or_method" | "method" | "method-wrapper") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
                         Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::os::stat::layout(owner) => layout.name(),
@@ -862,8 +863,8 @@ impl BuiltinDescriptor {
                     ("intersection_update", _) if self.owner == "set" => "($self, /, *others)",
                     ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
                     ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
-                    ("__reduce__", "__doc__") if matches!(self.owner, "builtin_function_or_method" | "method" | "types.GenericAlias" | "generic_alias_iterator") => return Some(NONE),
-                    ("__reduce__", _) if matches!(self.owner, "builtin_function_or_method" | "method" | "types.GenericAlias" | "generic_alias_iterator") => "($self, /)",
+                    ("__reduce__", "__doc__") if matches!(self.owner, "builtin_function_or_method" | "method" | "method-wrapper" | "types.GenericAlias" | "generic_alias_iterator") => return Some(NONE),
+                    ("__reduce__", _) if matches!(self.owner, "builtin_function_or_method" | "method" | "method-wrapper" | "types.GenericAlias" | "generic_alias_iterator") => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
                     ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",

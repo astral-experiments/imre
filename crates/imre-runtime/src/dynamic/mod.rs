@@ -420,9 +420,10 @@ impl Context {
             (weakref::PROXY_TYPE | weakref::CALLABLE_PROXY_TYPE, Value::Weak(wr)) => {
                 wr.kind.class() == owner
             }
-            ("builtin_function_or_method" | "method" | "wrapper_descriptor", _) => {
-                self.builtin_type_name(object) == Some(owner)
-            }
+            (
+                "builtin_function_or_method" | "method" | "method-wrapper" | "wrapper_descriptor",
+                _,
+            ) => self.builtin_type_name(object) == Some(owner),
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
             }
@@ -3059,7 +3060,7 @@ impl Context {
                 &[]
             }
             "function" => &["__call__"],
-            "builtin_function_or_method" | "method" => &["__reduce__"],
+            "builtin_function_or_method" | "method" | "method-wrapper" => &["__reduce__"],
             defaultdict::CLASS => {
                 self.builtin("dict");
                 defaultdict::METHODS
