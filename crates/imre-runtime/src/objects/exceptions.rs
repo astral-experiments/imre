@@ -347,6 +347,7 @@ impl Exception {
             Kind::BadGzipFile => "gzip.BadGzipFile",
             Kind::CsvError => "_csv.Error",
             Kind::GaiError => "socket.gaierror",
+            Kind::ZstdError => "compression.zstd.ZstdError",
             Kind::LzmaError => "_lzma.LZMAError",
             Kind::ZlibError => "zlib.error",
             Kind::TomlDecodeError => "tomllib.TOMLDecodeError",

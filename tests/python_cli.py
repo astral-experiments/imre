@@ -3840,6 +3840,8 @@ for name in ("md4", "ripemd160"):
         ):
             method_entry.write_text(body + "\n")
             compare("-B", method_entry)
+        plugin.write_bytes((fixtures / "boxed_zstd.py").read_bytes())
+        compare("-B", "-c", imports + "arithmetic.current()", extra={"IMREFLAGS": "--opt-level 0"})
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_compound.py",

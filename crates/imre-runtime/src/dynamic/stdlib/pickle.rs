@@ -300,6 +300,8 @@ fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
         Value::DirEntry(_)
         | Value::ClassMethod { .. }
         | Value::StaticMethod { .. }
+        | Value::ZstdCompressor(_)
+        | Value::ZstdDecompressor(_)
         | Value::Bz2Compressor(_)
         | Value::Bz2Decompressor(_)
         | Value::LzmaCompressor(_)

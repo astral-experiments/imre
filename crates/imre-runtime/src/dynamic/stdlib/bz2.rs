@@ -25,33 +25,7 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (member, args) = if let Some(owner) = member.strip_suffix(".__new__") {
-        let Some((&class, rest)) = args.split_first() else {
-            return Err(Error::new(
-                "TypeError",
-                format!("_bz2.{owner}.__new__(): not enough arguments"),
-            ));
-        };
-        if !ctx.is_type_object(class) {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "_bz2.{owner}.__new__(X): X is not a type object ({})",
-                    ctx.type_name(class)
-                ),
-            ));
-        }
-        if ctx.builtin(&format!("_bz2.{owner}")) != class {
-            let name = ctx.class_name(class);
-            return Err(Error::new(
-                "TypeError",
-                format!("_bz2.{owner}.__new__({name}): {name} is not a subtype of _bz2.{owner}"),
-            ));
-        }
-        (owner, rest)
-    } else {
-        (member, args)
-    };
+    let (member, args) = builtins::native_codec_new(ctx, "_bz2", member, args)?;
     match member {
         "BZ2Compressor" => {
             if !kwargs.is_empty() {

@@ -32,6 +32,7 @@ rustix = { version = "=1.1.5", features = ["fs"] }
 memchr = "=2.8.3"
 lz4_flex = { version = "=0.14.0", default-features = false, features = ["safe-encode", "safe-decode", "checked-decode"] }
 bzip2-sys = { version = "=0.1.13", features = ["static"] }
+zstd-safe = { version = "=7.2.4", default-features = false, features = ["std"] }
 liblzma = { version = "=0.4.9", default-features = false, features = ["static"] }
 liblzma-sys = { version = "=0.4.9", default-features = false, features = ["static"] }
 corosensei = "=0.3.4"
