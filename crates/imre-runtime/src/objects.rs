@@ -610,26 +610,24 @@ pub unsafe extern "C" fn imre_seq_append_owned(
     // SAFETY: these element types have ordinary word storage; value-struct rows
     // would copy their argument and therefore cannot take this ownership path.
     let appended = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| append_sequence_word(storage.sequence_mut()?, word, kind, true))
+        object(value).0.with_mut(|storage| {
+            append_sequence_word::<true>(storage.sequence_mut()?, word, kind)
+                .map_err(|_| Error::allocation())
+        })
     };
     finish(appended.map(|()| 1), 0)
 }
 
 /// Reserve before acquiring or transferring the argument on either entry path.
-unsafe fn append_sequence_word(
+#[inline]
+unsafe fn append_sequence_word<const OWNED: bool>(
     sequence: &mut Words,
     word: usize,
     kind: u32,
-    owned: bool,
-) -> Result<(), Error> {
+) -> Result<(), smallvec::CollectionAllocErr> {
     sequence.check_kind(kind);
-    sequence
-        .values
-        .try_reserve(1)
-        .map_err(|_| Error::allocation())?;
-    let word = if owned {
+    sequence.values.try_reserve(1)?;
+    let word = if OWNED {
         word
     } else {
         // SAFETY: word is rooted and agrees with the sequence's declared kind.
@@ -660,7 +658,8 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
                 words.update_header();
                 return result;
             }
-            append_sequence_word(storage.sequence_mut()?, word, kind, false)
+            append_sequence_word::<false>(storage.sequence_mut()?, word, kind)
+                .map_err(|_| Error::allocation())
         })
     };
     finish(appended.map(|()| 1), 0)
@@ -797,19 +796,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
                 .checked_mul(count)
                 .filter(|&length| length <= MAX_LIST_LEN)
                 .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
-            let mut result = Words::new(values.kind.raw());
-            result
-                .values
-                .try_reserve_exact(length)
-                .map_err(|_| Error::allocation())?;
-            if !values.values.is_empty() {
-                for _ in 0..count {
-                    for &word in &values.values {
-                        result.values.push(values.kind.acquire(word).into_word());
-                    }
-                }
-            }
-            Ok(result)
+            values.repeated(count, length)
         })
     };
     finish(

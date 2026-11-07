@@ -37,6 +37,11 @@ impl WordKind {
         u32::from(self.0)
     }
 
+    /// These representations can be copied and dropped as raw machine words.
+    pub(super) fn is_bitwise_copy(self) -> bool {
+        matches!(self.base(), 0 | 1 | 10) || self.raw() == 7
+    }
+
     pub(super) fn can_queue_release(self) -> bool {
         matches!(self.base(), 5 | 6 | 9 | 14)
     }
@@ -311,6 +316,41 @@ impl Words {
         Ok(())
     }
 
+    /// Repeat the resolved sequence, acquiring shared owners only for reference-bearing kinds.
+    pub(super) fn repeated(
+        &self,
+        count: usize,
+        length: usize,
+    ) -> Result<Self, super::exceptions::Error> {
+        let mut result = Self::new(self.kind.raw());
+        result
+            .values
+            .try_reserve_exact(length)
+            .map_err(|_| super::exceptions::Error::allocation())?;
+        if length == 0 {
+            return Ok(result);
+        }
+        if self.kind.is_bitwise_copy() {
+            if let [word] = self.values.as_slice() {
+                result.values.resize(length, *word);
+            } else {
+                for _ in 0..count {
+                    result.values.extend_from_slice(&self.values);
+                }
+            }
+        } else {
+            for _ in 0..count {
+                for &word in &self.values {
+                    // SAFETY: the source buffer owns a rooted word of this homogeneous kind.
+                    result
+                        .values
+                        .push(unsafe { self.kind.acquire(word) }.into_word());
+                }
+            }
+        }
+        Ok(result)
+    }
+
     pub(super) fn copy_strings(&self) -> Result<Self, super::exceptions::Error> {
         debug_assert!(self.plan().is_none());
         self.check_kind(3);
@@ -522,6 +562,9 @@ impl Drop for Words {
         if self.kind == WordKind::DEFERRED {
             // SAFETY: the deferred header owns exactly this one boxed plan.
             drop(unsafe { allocator_api2::boxed::Box::from_raw(self.values[0] as *mut Deferred) });
+            return;
+        }
+        if self.kind.is_bitwise_copy() {
             return;
         }
         if self.values.spilled() && self.kind.can_queue_release() {
