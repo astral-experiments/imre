@@ -180,6 +180,34 @@ fn unquote(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) 
                 })?;
                 return Ok(id);
             }
+            if let Value::SurrogateStr(points) = ctx.heap.get(storage) {
+                // unquote decodes the ASCII runs and leaves every other code point untouched.
+                let source = copy_ids(points)?;
+                let encoding = encoding
+                    .filter(|&id| id != NONE)
+                    .unwrap_or_else(|| ctx.text("utf-8"));
+                let errors = errors
+                    .filter(|&id| id != NONE)
+                    .unwrap_or_else(|| ctx.text("replace"));
+                let mut result = Vec::new();
+                for run in source.chunk_by(|a, b| (*a < 128) == (*b < 128)) {
+                    let text;
+                    let decoded = if run[0] < 128 {
+                        let bytes = ctx.alloc(Value::Bytes(run.iter().map(|&p| p as u8).collect()));
+                        // The bytes entry always runs the codec, even on runs without escapes.
+                        let value = unquote(ctx, bytes, Some(encoding), Some(errors))?;
+                        text = ctx.string_codepoints(value)?;
+                        text.as_ref()
+                    } else {
+                        run
+                    };
+                    result
+                        .try_reserve(decoded.len())
+                        .map_err(|_| crate::Error::allocation())?;
+                    result.extend_from_slice(decoded);
+                }
+                return Ok(ctx.text_codepoints(result));
+            }
             input(ctx, storage).map_err(|_| {
                 Error::new(
                     "TypeError",
