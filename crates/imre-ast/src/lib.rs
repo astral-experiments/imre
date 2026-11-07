@@ -29,6 +29,11 @@ use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use ruff_text_size::{Ranged, TextSize};
 
+/// A valueless parenthesized name in an annotation neither binds nor reads the name.
+pub fn annotation_visits_target(assignment: &ast::StmtAnnAssign) -> bool {
+    assignment.simple || assignment.value.is_some() || !assignment.target.is_name_expr()
+}
+
 /// Diagnose the positional-only range constructor before converting any bounds.
 pub fn range_constructor_error(positional: usize, keywords: bool) -> Option<String> {
     if keywords {

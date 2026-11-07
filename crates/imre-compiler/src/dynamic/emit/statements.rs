@@ -17,8 +17,8 @@ struct ClosureNames {
     reads: std::collections::BTreeSet<String>,
     globals: std::collections::BTreeSet<String>,
     nonlocals: std::collections::BTreeSet<String>,
-    in_comprehension: bool,
     include_nested_reads: bool,
+    string_annotations: bool,
     incomplete: bool,
     locals_incomplete: bool,
 }
@@ -41,26 +41,75 @@ pub(super) fn class_locals(body: &[ast::Stmt]) -> ClassBindings {
     }
 }
 
+impl ClosureNames {
+    fn finish_scope(&mut self) {
+        for name in self.globals.iter().chain(&self.nonlocals) {
+            self.locals.shift_remove(name);
+        }
+        self.reads
+            .retain(|name| !self.locals.contains(name) && !self.globals.contains(name));
+        self.reads.extend(self.nonlocals.iter().cloned());
+    }
+
+    /// A nested function's external reads propagate through its enclosing function.
+    fn child_reads(
+        &mut self,
+        parameters: Option<&ast::Parameters>,
+        visit: impl FnOnce(&mut Self),
+    ) -> std::collections::BTreeSet<String> {
+        let mut child = Self {
+            include_nested_reads: true,
+            string_annotations: self.string_annotations,
+            ..Self::default()
+        };
+        visit(&mut child);
+        self.incomplete |= child.incomplete;
+        if let Some(parameters) = parameters {
+            child
+                .locals
+                .extend(parameters.iter().map(|p| p.name().to_string()));
+        }
+        child.finish_scope();
+        child.reads
+    }
+}
+
 impl<'a> Visitor<'a> for ClosureNames {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         match stmt {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
-                self.incomplete = true;
                 if self.include_nested_reads {
-                    // A name used only by a nested function can be free in this function too.
-                    let mut child = Self {
-                        include_nested_reads: true,
-                        ..Self::default()
+                    // The child body and its lazy annotations see type parameters. Only
+                    // the body sees the child's parameters and local bindings.
+                    let mut reads =
+                        self.child_reads(Some(&f.parameters), |child| child.visit_body(&f.body));
+                    let mut annotations = if self.string_annotations {
+                        Vec::new()
+                    } else {
+                        crate::frontend::parameter_annotations(&f.parameters, f.returns.as_deref())
                     };
-                    child.visit_body(&f.body);
-                    child
-                        .locals
-                        .extend(f.parameters.iter().map(|param| param.name().to_string()));
-                    self.reads.extend(child.nonlocals);
-                    self.reads.extend(child.reads.into_iter().filter(|name| {
-                        !child.locals.contains(name) && !child.globals.contains(name)
-                    }));
+                    if let Some(params) = &f.type_params {
+                        for param in params.iter() {
+                            if let ast::TypeParam::TypeVar(v) = param
+                                && let Some(bound) = v.bound.as_deref()
+                            {
+                                annotations.push(("", bound));
+                            }
+                            if let Some(default) = param.default() {
+                                annotations.push(("", default));
+                            }
+                        }
+                    }
+                    reads.extend(class_metadata::annotation_reads(&annotations, None, false));
+                    if let Some(params) = &f.type_params {
+                        for param in params.iter() {
+                            reads.remove(param.name().as_str());
+                        }
+                    }
+                    self.reads.extend(reads);
+                } else {
+                    self.incomplete = true;
                 }
                 // Decorator expressions run here and can bind names in this frame.
                 for decorator in &f.decorator_list {
@@ -71,6 +120,16 @@ impl<'a> Visitor<'a> for ClosureNames {
                         // Defaults run here. Their expression walk records enclosing bindings.
                         self.visit_expr(default);
                     }
+                }
+            }
+            // Local variable annotations never evaluate in a function's scope.
+            ast::Stmt::AnnAssign(a) if self.include_nested_reads => {
+                // A bare parenthesized name with no value has no binding effect.
+                if imre_ast::annotation_visits_target(a) {
+                    self.visit_expr(&a.target);
+                }
+                if let Some(value) = &a.value {
+                    self.visit_expr(value);
                 }
             }
             ast::Stmt::ClassDef(c) => {
@@ -140,13 +199,6 @@ impl<'a> Visitor<'a> for ClosureNames {
     }
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         match expr {
-            ast::Expr::Named(named) if self.in_comprehension => {
-                if let ast::Expr::Name(target) = &*named.target {
-                    self.locals.insert(target.id.to_string());
-                }
-                self.visit_expr(&named.value);
-            }
-            ast::Expr::Name(_) if self.in_comprehension => {}
             ast::Expr::Name(n) => match n.ctx {
                 ast::ExprContext::Load => {
                     self.reads.insert(n.id.to_string());
@@ -157,7 +209,14 @@ impl<'a> Visitor<'a> for ClosureNames {
                 _ => {}
             },
             ast::Expr::Lambda(lambda) => {
-                self.incomplete = true;
+                if self.include_nested_reads {
+                    let reads = self.child_reads(lambda.parameters.as_deref(), |child| {
+                        child.visit_expr(&lambda.body)
+                    });
+                    self.reads.extend(reads);
+                } else {
+                    self.incomplete = true;
+                }
                 if let Some(parameters) = &lambda.parameters {
                     for parameter in parameters.iter_non_variadic_params() {
                         if let Some(default) = &parameter.default {
@@ -170,11 +229,14 @@ impl<'a> Visitor<'a> for ClosureNames {
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_)
             | ast::Expr::Generator(_) => {
-                self.incomplete = true;
-                self.locals_incomplete = true;
-                let previous = std::mem::replace(&mut self.in_comprehension, true);
-                visitor::walk_expr(self, expr);
-                self.in_comprehension = previous;
+                let (reads, bindings) =
+                    class_metadata::comprehension_scope(expr, self.string_annotations);
+                self.reads.extend(reads);
+                self.locals.extend(bindings);
+                if !self.include_nested_reads {
+                    self.incomplete = true;
+                    self.locals_incomplete = true;
+                }
             }
             _ => visitor::walk_expr(self, expr),
         }
@@ -316,7 +378,7 @@ impl Function<'_, '_> {
                             &value,
                             matches!(&*v.target, ast::Expr::Name(_)),
                         );
-                    } else if self.source.string_annotations {
+                    } else {
                         match &*v.target {
                             ast::Expr::Attribute(attr) => {
                                 self.discard_annotation_operand(&attr.value);
@@ -851,6 +913,7 @@ impl Function<'_, '_> {
             (self.output.data(text.as_bytes()), self.source.line(first))
         });
         let mut closure_names = ClosureNames {
+            string_annotations: self.source.string_annotations,
             include_nested_reads: matches!(
                 &body,
                 Body::Statements(_) | Body::GeneratorFunction(..)
@@ -975,15 +1038,7 @@ impl Function<'_, '_> {
                 closure_names.locals.insert(name.to_owned());
             }
         }
-        for name in closure_names.globals.iter().chain(&closure_names.nonlocals) {
-            closure_names.locals.shift_remove(name);
-        }
-        closure_names.reads.retain(|name| {
-            !closure_names.locals.contains(name) && !closure_names.globals.contains(name)
-        });
-        closure_names
-            .reads
-            .extend(closure_names.nonlocals.iter().cloned());
+        closure_names.finish_scope();
         signature["scope_locals"] = json!(closure_names.locals.iter().collect::<Vec<_>>());
         signature["scope_reads"] = json!(closure_names.reads);
         signature["scope_nonlocals"] = json!(closure_names.nonlocals);
