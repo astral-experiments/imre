@@ -9,6 +9,8 @@ use std::os::unix::process::ExitStatusExt;
 mod build_cache;
 mod build_output;
 mod cli;
+#[cfg(all(target_os = "linux", not(test)))]
+mod closed_stdio;
 mod python_command;
 #[cfg(unix)]
 mod run_program;
