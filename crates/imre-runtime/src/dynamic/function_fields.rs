@@ -12,6 +12,7 @@ pub(super) struct FunctionFields {
     pub annotate: Id,
     annotations: Option<Id>,
     type_params: Id,
+    /// The writable namespace, or `NONE` until a generator expression first needs it.
     pub(super) dict: Id,
 }
 
@@ -32,7 +33,11 @@ impl FunctionFields {
             module: ctx.function_module(scope),
             annotations: None,
             type_params: ctx.alloc(Value::Tuple(Vec::new())),
-            dict: ctx.dict(Vec::new()),
+            dict: if matches!(ctx.heap.get(name), Value::Str(name) if name == "<genexpr>") {
+                NONE
+            } else {
+                ctx.dict(Vec::new())
+            },
         }
     }
 
@@ -43,7 +48,9 @@ impl FunctionFields {
         visit.push(self.doc);
         visit.push(self.annotate);
         visit.push(self.type_params);
-        visit.push(self.dict);
+        if self.dict != NONE {
+            visit.push(self.dict);
+        }
         visit.extend(self.annotations);
     }
 }
@@ -54,6 +61,19 @@ impl Context {
             scope = parent;
         }
         self.scope_name(scope, "__name__").unwrap_or(NONE)
+    }
+
+    /// Materialize the dictionary only when Python exposes or writes it.
+    fn function_dict(&mut self, fun: Id, dict: Id) -> Id {
+        if dict != NONE {
+            return dict;
+        }
+        let dict = self.dict(Vec::new());
+        let Value::Function { fields, .. } = self.heap.get_mut(fun) else {
+            unreachable!()
+        };
+        fields.dict = dict;
+        dict
     }
 
     pub(super) fn function_attr(
@@ -69,7 +89,7 @@ impl Context {
             "__doc__" => fields.doc,
             "__annotate__" => fields.annotate,
             "__type_params__" => fields.type_params,
-            "__dict__" => fields.dict,
+            "__dict__" => self.function_dict(fun, fields.dict),
             "__defaults__" | "__kwdefaults__" => {
                 let Value::Function {
                     defaults,
@@ -112,7 +132,7 @@ impl Context {
                 annotations
             }
             _ => {
-                let entries = self.dict_entries(fields.dict).expect("function namespace");
+                let entries = self.dict_entries(fields.dict).unwrap_or_default();
                 return Ok(entries.iter().find_map(|&(key, value)| {
                     matches!(self.heap.get(key), Value::Str(s) if s == name).then_some(value)
                 }));
@@ -142,7 +162,9 @@ impl Context {
                 self.set_function_attr(fun, name, NONE)
             }
             _ => {
-                let storage = self.dict_storage(fields.dict).expect("function namespace");
+                let Some(storage) = self.dict_storage(fields.dict) else {
+                    return Err(self.missing_attribute(fun, name));
+                };
                 self.delete_dict_attribute(fun, storage, name)
             }
         }
@@ -241,7 +263,8 @@ impl Context {
                 fields.annotations = (value != NONE).then_some(value);
             }
             _ => {
-                let dict = fields.dict;
+                let current = fields.dict;
+                let dict = self.function_dict(fun, current);
                 let storage = self.dict_storage(dict).expect("function namespace");
                 let key = self.text(name);
                 self.put_item(storage, key, value)?;
