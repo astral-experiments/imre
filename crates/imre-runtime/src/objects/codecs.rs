@@ -223,15 +223,56 @@ pub unsafe extern "C" fn imre_codec_decode(
     errors: *const Str,
 ) -> *const Str {
     // SAFETY: the generated call retains all three operands.
-    let result = unsafe { codec(info).decode(&*bytes, Some(&*errors)) };
-    finish(
-        result.and_then(|s| {
-            StrOwner::try_new(s.into())
-                .map(StrOwner::into_raw)
-                .map_err(|_| Error::allocation())
-        }),
-        std::ptr::null(),
-    )
+    let (codec, data, errors) = unsafe { (codec(info), &*bytes, &*errors) };
+    let text = match codec {
+        Codec::Latin1 => latin1_string(data),
+        _ => codec.decode(data, Some(errors)).map(Str::from),
+    };
+    finish(text.and_then(crate::checked_owned_str), std::ptr::null())
+}
+
+/// Decode a statically selected Latin-1 buffer.
+///
+/// # Safety
+/// The caller retains the immutable byte buffer through decoding.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_decode_latin1(value: *const Bytes) -> *const Str {
+    // SAFETY: the caller roots the immutable buffer for this call.
+    let text = latin1_string(unsafe { &*value });
+    finish(text.and_then(crate::checked_owned_str), std::ptr::null())
+}
+
+/// Size the native string once and fill it with complete UTF-8 code points.
+fn latin1_string(bytes: &[u8]) -> Result<Str> {
+    let text = if bytes.is_ascii() {
+        // SAFETY: each ASCII byte is a complete UTF-8 code point.
+        Str::try_new(unsafe { std::str::from_utf8_unchecked(bytes) })
+    } else {
+        // Each non-ASCII Latin-1 byte expands to exactly two UTF-8 bytes.
+        let extra = bytes.iter().filter(|byte| !byte.is_ascii()).count();
+        let length = bytes.len() + extra;
+        Str::try_with_capacity(length).map(|mut text| {
+            // SAFETY: an ASCII byte takes one slot and every other byte takes two.
+            // The capacity covers exactly these writes. They form complete UTF-8
+            // sequences, and the new length is published only after initialization.
+            unsafe {
+                let mut output = text.spare_capacity_mut().as_mut_ptr().cast::<u8>();
+                for &byte in bytes {
+                    if byte.is_ascii() {
+                        output.write(byte);
+                        output = output.add(1);
+                    } else {
+                        output.write(0xc0 | (byte >> 6));
+                        output.add(1).write(0x80 | (byte & 0x3f));
+                        output = output.add(2);
+                    }
+                }
+                text.set_len(length);
+            }
+            text
+        })
+    };
+    text.map_err(|_| Error::allocation())
 }
 
 /// Explicit byte order never inserts a BOM. U+FEFF in the input encodes normally.

@@ -446,6 +446,7 @@ impl Builtin {
             | Self::NegativeIntegerPower
             | Self::Decode
             | Self::DecodeAscii
+            | Self::DecodeLatin1
             | Self::FloatDivmod | Self::BytesHex
             | Self::UrlsafeB64encode
             | Self::Base64Translate
@@ -1442,6 +1443,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
+                | "imre_bytes_decode_latin1"
                 | "imre_bytes_hex"
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"

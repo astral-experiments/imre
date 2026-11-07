@@ -11933,29 +11933,12 @@ impl<'a> Checker<'a> {
                 .iter()
                 .any(|alias| name.eq_ignore_ascii_case(alias))
         {
-            // Evaluate the input before acquiring the builtin codec. str(bytes, encoding)
-            // decodes the buffer directly, including when Python overrides bytes.decode.
-            let slot = self.hidden(Type::Bytes);
-            let codec = Expr {
-                ty: Type::CodecInfo,
-                kind: ExprKind::Builtin(
-                    Builtin::CodecLookup,
-                    vec![Self::string_value(encoding.clone())],
-                ),
-            };
+            // str(bytes, encoding) decodes the buffer even when bytes.decode is overridden.
+            let mut args = args;
+            args.truncate(1);
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::Assign(slot, bytes.clone())],
-                    value: Box::new(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Builtin(
-                            Builtin::CodecDecode,
-                            vec![codec, self.local(slot), unpacking::string("strict")],
-                        ),
-                    }),
-                    clear: vec![slot],
-                },
+                kind: ExprKind::Builtin(Builtin::DecodeLatin1, args),
             });
         }
         if tuple_dir && self.types.is_plain_or_declared_tuple(args[0].ty) {
