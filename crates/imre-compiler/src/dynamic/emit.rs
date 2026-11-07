@@ -221,6 +221,73 @@ pub(super) fn initializer(
     Ok(Some((symbol, ir)))
 }
 
+struct ParsedSource {
+    parsed: ruff_python_parser::Parsed<ast::ModModule>,
+    replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
+}
+
+fn parse_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<ParsedSource, String> {
+    let parsed = imre_ast::indentation::prepare(source)
+        .parse_module()
+        .map_err(|err| format!("{}: {err}", path.display()))?;
+    crate::analysis::check_scope_syntax(source, parsed.syntax())
+        .map_err(|error| format!("{}:{error}", path.display()))?;
+    if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
+        let name = keyword.arg.as_ref().expect("repeated named argument");
+        let reason = format!("SyntaxError: keyword argument repeated: {name}");
+        let error = crate::frontend::diagnostic_message(source, keyword, &reason);
+        return Err(format!("{}:{error}", path.display()));
+    }
+    let replacements = strings::literal_replacements(source, parsed.tokens());
+    if keep_docstrings && !replacements.is_empty() {
+        strings::check_docs(source, &parsed.syntax().body, &replacements)
+            .map_err(|error| format!("{}:{error}", path.display()))?;
+    }
+    Ok(ParsedSource {
+        parsed,
+        replacements,
+    })
+}
+
+fn lower_source(
+    path: &Path,
+    source: &str,
+    body: &mut [ast::Stmt],
+) -> Result<imre_ast::Names, String> {
+    let private_names = imre_ast::lower(body);
+    if source.contains("nonlocal") {
+        statements::type_parameters::check_nonlocals(source, body)
+            .map_err(|error| format!("{}:{error}", path.display()))?;
+    }
+    if let Some((range, reason)) = imre_ast::type_alias_error(body) {
+        let error =
+            crate::frontend::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
+        return Err(format!("{}:{error}", path.display()));
+    }
+    if let Some(param) = &private_names.duplicate_type_parameter {
+        let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
+        let error = crate::frontend::diagnostic_message(source, param, &reason);
+        return Err(format!("{}:{error}", path.display()));
+    }
+    Ok(private_names)
+}
+
+/// Validate the modules that will have native initializers. Source-only registrations
+/// stay unparsed here, just as they do when emitting a runnable program.
+pub(super) fn check(
+    modules: &[(String, PathBuf, String)],
+    keep_docstrings: bool,
+    source_initializers: &HashSet<PathBuf>,
+) -> Result<(), String> {
+    for (_, path, source) in modules {
+        if !source_initializers.contains(path) {
+            let source_tree = parse_source(path, source, keep_docstrings)?;
+            lower_source(path, source, &mut source_tree.parsed.into_syntax().body)?;
+        }
+    }
+    Ok(())
+}
+
 impl Output {
     fn module(
         &mut self,
@@ -231,22 +298,10 @@ impl Output {
         file: &str,
         bundled: bool,
     ) -> Result<String, String> {
-        let parsed = imre_ast::indentation::prepare(source)
-            .parse_module()
-            .map_err(|err| format!("{}: {err}", path.display()))?;
-        crate::analysis::check_scope_syntax(source, parsed.syntax())
-            .map_err(|error| format!("{}:{error}", path.display()))?;
-        if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
-            let name = keyword.arg.as_ref().expect("repeated named argument");
-            let reason = format!("SyntaxError: keyword argument repeated: {name}");
-            let error = crate::frontend::diagnostic_message(source, keyword, &reason);
-            return Err(format!("{}:{error}", path.display()));
-        }
-        let replacements = strings::literal_replacements(source, parsed.tokens());
-        if self.keep_docstrings && !replacements.is_empty() {
-            strings::check_docs(source, &parsed.syntax().body, &replacements)
-                .map_err(|error| format!("{}:{error}", path.display()))?;
-        }
+        let ParsedSource {
+            parsed,
+            replacements,
+        } = parse_source(path, source, self.keep_docstrings)?;
         let package = crate::modules::import_package(
             name,
             path.file_name().is_some_and(|file| file == "__init__.py"),
@@ -287,24 +342,7 @@ impl Output {
             .unwrap_or_default();
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
-        let private_names = imre_ast::lower(&mut body);
-        if source.contains("nonlocal") {
-            statements::type_parameters::check_nonlocals(source, &body)
-                .map_err(|error| format!("{}:{error}", path.display()))?;
-        }
-        if let Some((range, reason)) = imre_ast::type_alias_error(&body) {
-            let error = crate::frontend::diagnostic_message(
-                source,
-                &range,
-                &format!("SyntaxError: {reason}"),
-            );
-            return Err(format!("{}:{error}", path.display()));
-        }
-        if let Some(param) = &private_names.duplicate_type_parameter {
-            let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
-            let error = crate::frontend::diagnostic_message(source, param, &reason);
-            return Err(format!("{}:{error}", path.display()));
-        }
+        let private_names = lower_source(path, source, &mut body)?;
         // Frozen code exposes its origin independently of the module's registered source path.
         let code_file = match (bundled, name) {
             (true, "_frozen_importlib") => self.data(b"<frozen importlib._bootstrap>"),

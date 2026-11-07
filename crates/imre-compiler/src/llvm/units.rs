@@ -252,7 +252,7 @@ pub(crate) fn emit_units(
     functions: &[usize],
     names: &[String],
     entry: usize,
-) -> Result<Vec<CodegenUnit>, String> {
+) -> Result<Vec<CodegenUnit>, super::Unsupported> {
     let mut output = Output::new(functions, names.len(), entry, true);
     emit_program(module, ranges, sanitize, &mut output)?;
     Ok(names

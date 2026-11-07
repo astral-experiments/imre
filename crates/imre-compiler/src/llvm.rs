@@ -301,11 +301,15 @@ enum Completion {
     Error,
 }
 
+/// The native representation cannot implement this checked operation.
+#[derive(Debug)]
+pub(crate) struct Unsupported(pub(crate) &'static str);
+
 pub(crate) fn emit(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-) -> Result<String, String> {
+) -> Result<String, Unsupported> {
     let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
     emit_program(module, ranges, sanitize, &mut output)?;
     Ok(std::mem::take(output.entry_buffer()))
@@ -316,7 +320,7 @@ fn emit_program(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
     output: &mut Output,
-) -> Result<(), String> {
+) -> Result<(), Unsupported> {
     let callable_targets = crate::callables::Targets::analyze(module);
     let mut resource_types: HashSet<_> = module
         .functions
@@ -406,7 +410,9 @@ fn emit_program(
                     || module.types.cache_adapter(target.function).is_some()
             })
     }) {
-        return Err("Imre: wrapper links require a callable signature with only known, unbound native functions".to_owned());
+        return Err(Unsupported(
+            "Imre: wrapper links require a callable signature with only known, unbound native functions",
+        ));
     }
     let mut emitter = Emitter {
         module,
@@ -2113,7 +2119,7 @@ impl Emitter<'_, '_> {
         entry: bool,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
-    ) -> Result<String, String> {
+    ) -> Result<String, Unsupported> {
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
         self.entry_allocas.clear();
@@ -2554,7 +2560,9 @@ impl Emitter<'_, '_> {
         }
         self.code.insert_str(allocas_at, &self.entry_allocas);
         if self.cleanup_limit_hit {
-            return Err("Imre: finally cleanup expansion exceeds the compiler limit".to_owned());
+            return Err(Unsupported(
+                "Imre: finally cleanup expansion exceeds the compiler limit",
+            ));
         }
         Ok(params)
     }

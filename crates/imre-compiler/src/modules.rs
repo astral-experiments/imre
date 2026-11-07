@@ -4340,7 +4340,8 @@ impl<'a> Loader<'a> {
             if python_archive_indices.contains(&index) {
                 if let std::collections::hash_map::Entry::Vacant(entry) = zip_sources.entry(logical)
                 {
-                    let archive = crate::zip_entry::ZipSources::open(entry.key(), &mut zip_inputs)?;
+                    let archive =
+                        crate::zip_entry::ZipSources::open(entry.key(), &mut zip_inputs, &mut fs)?;
                     search_roots.push(entry.key().clone());
                     entry.insert(archive);
                 }
