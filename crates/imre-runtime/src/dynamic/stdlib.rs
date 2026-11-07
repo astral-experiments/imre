@@ -1814,6 +1814,9 @@ pub(super) fn call(
     if name == "random.choices" {
         return random::choices(ctx, args, kwargs);
     }
+    if name == "random._choices" {
+        return random::instance_choices(ctx, args, kwargs);
+    }
     if matches!(name, "random.choice" | "secrets.choice") {
         return random::choice(ctx, args, kwargs, name == "secrets.choice");
     }

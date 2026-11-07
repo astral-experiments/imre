@@ -146,6 +146,10 @@ class Random:
             raise IndexError('Cannot choose from an empty sequence')
         return seq[self._randbelow(len(seq))]
 
+    def choices(self, population, weights=None, *, cum_weights=None, k=1):
+        """Return k selections from population with replacement."""
+        return _choices(self.random, population, weights, cum_weights, k)
+
     def shuffle(self, x):
         """Shuffle list x in place, and return None."""
 
