@@ -3339,6 +3339,11 @@ def report(text):
             (fixtures / "floats" / "sign_parameters.py").read_bytes()
         )
         compare("-B", "-m", "sign_parameters")
+        (root / "scalar_returns.py").write_bytes(
+            (fixtures / "boxed_scalar_return_bindings.py").read_bytes()
+        )
+        result = run(imre, "-B", "-m", "scalar_returns")
+        assert result.returncode == 0 and not result.stderr, result
 
         served = root / "served"
         served.mkdir()

@@ -235,6 +235,35 @@ impl Entries {
         unreachable!("the dictionary probe always yields a bucket")
     }
 
+    /// A proof may read an exact string key only before Python equality would run.
+    pub(in super::super) fn lookup_text(
+        &self,
+        heap: &Heap,
+        name: &str,
+    ) -> ControlFlow<(), Option<Id>> {
+        let Some(index) = &self.index else {
+            if self
+                .iter()
+                .any(|&(key, _)| !matches!(heap.get(key), Value::Str(_)))
+            {
+                return ControlFlow::Break(());
+            }
+            return ControlFlow::Continue(self.named_item(heap, name));
+        };
+        let hash = normalized(crate::python_hash::text(name));
+        let mut probe = Probe::new(hash, index.slots.len());
+        while let Some((_, dense)) = index.next_candidate(self, &mut probe, hash, None) {
+            let (key, value) = self[dense];
+            let Value::Str(stored) = heap.get(key) else {
+                return ControlFlow::Break(());
+            };
+            if stored == name {
+                return ControlFlow::Continue(Some(value));
+            }
+        }
+        ControlFlow::Continue(None)
+    }
+
     /// Probe an unboxed ordinal. Defer before a resident key could run Python equality.
     pub(in super::super) fn lookup_ordinal(
         &self,
