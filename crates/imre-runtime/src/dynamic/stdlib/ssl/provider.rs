@@ -2,10 +2,12 @@
 use std::ffi::{CStr, CString, c_char, c_int, c_long, c_uint, c_ulong, c_void};
 use std::io;
 use std::ptr::{self, NonNull};
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use crate::objects::socket;
 
+mod alpn;
 pub(in crate::dynamic) mod bio;
 pub(super) mod certificate;
 pub(super) mod ciphers;
@@ -150,6 +152,9 @@ functions! {
     X509_VERIFY_PARAM_clear_flags(Handle, c_ulong) -> c_int;
     X509_VERIFY_PARAM_get_flags(Handle) -> c_ulong;
     SSL_CTX_set_alpn_protos(Handle, *const u8, c_uint) -> c_int;
+    SSL_CTX_set_alpn_select_cb(Handle, alpn::SelectCallback, Handle) -> ();
+    SSL_select_next_proto(*mut *mut u8, *mut u8, *const u8, c_uint, *const u8, c_uint) -> c_int;
+    SSL_get0_alpn_selected(Handle, *mut *const u8, *mut c_uint) -> ();
     SSL_set_post_handshake_auth(Handle, c_int) -> ();
     SSL_set_verify(Handle, c_int, VerifyCallback) -> ();
     SSL_verify_client_post_handshake(Handle) -> c_int;
@@ -547,6 +552,7 @@ const SSL_VERIFY_POST_HANDSHAKE: c_int = 8;
 const VERIFY_REQUIRED: c_int = SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
 
 pub(crate) struct Context {
+    alpn: Rc<alpn::Alpn>,
     api: &'static Api,
     handle: NonNull<c_void>,
     pub(super) protocol: Protocol,
@@ -592,6 +598,7 @@ impl Context {
         let handle = NonNull::new(unsafe { (api.SSL_CTX_new)(select()) })
             .ok_or_else(|| api.error("SSL_CTX_new"))?;
         let mut ctx = Self {
+            alpn: Rc::new(alpn::Alpn::new(api)),
             api,
             handle,
             protocol,
@@ -847,18 +854,7 @@ impl Context {
     }
 
     pub(crate) fn set_alpn_protocols(&mut self, protocols: &[u8]) -> Result<(), Failure> {
-        let len = c_uint::try_from(protocols.len())
-            .map_err(|_| Failure::Other("ALPN protocol list is too long".into()))?;
-        self.api.clear();
-        // SAFETY: OpenSSL validates and copies the length-prefixed protocol
-        // list, and this API returns zero on success (including an empty list).
-        if unsafe {
-            (self.api.SSL_CTX_set_alpn_protos)(self.handle.as_ptr(), protocols.as_ptr(), len)
-        } != 0
-        {
-            return Err(self.api.error("SSL_CTX_set_alpn_protos"));
-        }
-        Ok(())
+        self.alpn.configure(self.handle, protocols)
     }
 
     fn new_connection(&self, server: bool) -> Result<NonNull<c_void>, Failure> {
@@ -1184,6 +1180,7 @@ impl Drop for Context {
 }
 
 pub(crate) struct Session {
+    alpn: Rc<alpn::Alpn>,
     api: &'static Api,
     handle: NonNull<c_void>,
     socket: Option<crate::ObjectOwner>,
@@ -1217,6 +1214,7 @@ impl Session {
         let api = ctx.api;
         let handle = ctx.new_connection(server)?;
         let session = Self {
+            alpn: Rc::clone(&ctx.alpn),
             api,
             handle,
             socket: Some(socket),
@@ -1323,6 +1321,10 @@ impl Session {
                 return Err(Failure::Io(io::Error::new(io::ErrorKind::TimedOut, message)).into());
             }
         }
+    }
+
+    pub(super) fn selected_alpn_protocol(&self) -> Option<Vec<u8>> {
+        self.alpn.selected(self.handle)
     }
 
     pub(crate) fn channel_binding(&self) -> Option<Vec<u8>> {
