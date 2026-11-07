@@ -8850,12 +8850,16 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(value);
                 }
-                if matches!(
-                    attribute.attr.as_str(),
-                    "buffer" | "write_through" | "line_buffering"
-                ) && self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO
-                {
-                    return Err(self.scoped_builtin_error("text stream buffer", attribute));
+                if self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO {
+                    match attribute.attr.as_str() {
+                        "buffer" => {
+                            return Err(self.scoped_builtin_error("text stream buffer", attribute));
+                        }
+                        "write_through" | "line_buffering" => {
+                            return Ok(self.deferred_stream_flag(attribute));
+                        }
+                        _ => {}
+                    }
                 }
                 if matches!(attribute.attr.as_str(), "encoding" | "errors")
                     && matches!(
@@ -10841,6 +10845,22 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
                 return self.import_error(call, 41, Some(receiver));
             }
+            if attribute.attr.as_str() == "isatty"
+                && self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO
+            {
+                // Check the operands before leaving signature binding to the actual stream.
+                for arg in &call.arguments.args {
+                    let value = match arg {
+                        ast::Expr::Starred(spread) => &*spread.value,
+                        value => value,
+                    };
+                    self.evaluated_argument(value)?;
+                }
+                for keyword in &call.arguments.keywords {
+                    self.evaluated_argument(&keyword.value)?;
+                }
+                return Ok(self.deferred_stream_flag(call));
+            }
             let receiver = self.optional_stream(receiver, attribute.attr.as_str());
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
@@ -12313,12 +12333,28 @@ impl<'a> Checker<'a> {
                 return Ok(Expr::sequence_len(args));
             }
             "print"
-                if args.len() == 1
-                    && matches!(
-                        args[0].ty,
-                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes | Type::None
-                    ) =>
+                if !args.is_empty()
+                    && args.iter().all(|arg| {
+                        matches!(
+                            arg.ty,
+                            Type::Int
+                                | Type::Float
+                                | Type::Bool
+                                | Type::Str
+                                | Type::Bytes
+                                | Type::None
+                        )
+                    })
+                    && (args.len() == 1
+                        || (call.arguments.keywords.is_empty()
+                            && self.unshadowed_builtin(&call.func, "print"))) =>
             {
+                if args.len() > 1 {
+                    // Write the checked values through the active stream in the object provider.
+                    let error = self.scoped_builtin_error("multi-argument print", call);
+                    self.defer_object_error(&error);
+                    return Ok(Expr::none());
+                }
                 (Builtin::Print, Type::None)
             }
             "complex"

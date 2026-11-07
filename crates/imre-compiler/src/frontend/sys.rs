@@ -215,6 +215,13 @@ impl Checker<'_> {
         Ok(Some(bindings))
     }
 
+    /// The object provider reads the attached stream after the caller has type-checked.
+    pub(super) fn deferred_stream_flag(&self, node: &impl Ranged) -> Expr {
+        let error = self.scoped_builtin_error("text stream flag", node);
+        self.defer_object_error(&error);
+        Expr::boolean(false)
+    }
+
     /// Preserve lookup of an optional text stream before evaluating method arguments.
     pub(super) fn optional_stream(&self, value: Expr, name: &str) -> Expr {
         if let Some(stream @ (Type::TextIO | Type::TextOutput)) = self.types.payload(value.ty)
