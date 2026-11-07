@@ -1439,6 +1439,23 @@ impl Context {
 
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
+        let value = self.call_repr_slot(id)?;
+        if let Some(result) = value
+            && self.string_storage(result).is_none()
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__repr__ returned non-string (type {})",
+                    self.type_name(result)
+                ),
+            ));
+        }
+        Ok(value)
+    }
+
+    /// Call the live repr slot directly, as the inherited object.__str__ descriptor does.
+    pub(super) fn call_repr_slot(&mut self, id: Id) -> Result<Option<Id>> {
         if let Some(text) = super::stdlib::datetime::render::exact(self, id, true)? {
             return Ok(Some(text));
         }
@@ -1448,24 +1465,42 @@ impl Context {
         let Some((class, slot)) = self.format_slot(id, "__repr__") else {
             return Ok(None);
         };
-        let result = if matches!(self.heap.get(slot), Value::Native(symbol)
-            if super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol).is_some())
+        self.with_repr_slot_depth(|ctx| {
+            if matches!(ctx.heap.get(slot), Value::Native(symbol)
+                if super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol).is_some())
+            {
+                ctx.call(slot, vec![id], Vec::new())
+            } else {
+                let hook = ctx.bind_attribute(slot, id, class)?;
+                ctx.call(hook, Vec::new(), Vec::new())
+            }
+        })
+        .map(Some)
+    }
+
+    /// A recursive repr may delegate entirely through native descriptors, without a Python frame.
+    fn with_repr_slot_depth<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        const MESSAGE: &str =
+            "maximum recursion depth exceeded while getting the repr of an object";
+        let dispatch = |ctx: &mut Self| ctx.with_slot_depth(MESSAGE, operation);
+        // Unoptimized builtin dispatch can cross the usual slot margin in one call.
+        // Allow a finite delegation to continue on one spare segment. Its own
+        // margin remains the boundary for an unbounded chain.
+        if cfg!(debug_assertions)
+            && stacker::remaining_stack().is_some_and(|remaining| remaining < 512 * 1024)
         {
-            self.call(slot, vec![id], Vec::new())?
-        } else {
-            let hook = self.bind_attribute(slot, id, class)?;
-            self.call(hook, Vec::new(), Vec::new())?
-        };
-        if self.string_storage(result).is_none() {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "__repr__ returned non-string (type {})",
-                    self.type_name(result)
-                ),
-            ));
+            if self.repr_spare_stack {
+                return Err(Error::new("RecursionError", MESSAGE));
+            }
+            self.repr_spare_stack = true;
+            let result = stacker::grow(4 * 1024 * 1024, || dispatch(self));
+            self.repr_spare_stack = false;
+            return result;
         }
-        Ok(Some(result))
+        dispatch(self)
     }
 
     /// Look up a method's live qualified name, falling back only when that attribute is absent.

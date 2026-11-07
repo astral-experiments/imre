@@ -797,6 +797,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
+        repr_spare_stack: false,
         // Measure the execution thread before entering the native Python evaluator.
         repr_sequence_words: super::operators::remaining_repr_words(),
         suspended_typing_frames: 0,
