@@ -24,6 +24,8 @@ enum Origin {
 
 #[derive(Default)]
 pub(super) struct RootPaths {
+    /// The search found every requested endpoint. A new weak reference invalidates this result.
+    pub(super) covers_endpoints: bool,
     anchors: Vec<(Root, Id)>,
     // Kept sorted between searches for membership checks at collection points.
     nodes: Vec<Id>,
@@ -210,6 +212,7 @@ impl RootPaths {
                 true,
             )?;
         }
+        paths.covers_endpoints = wanted.is_empty();
         Some(paths)
     }
 
@@ -342,10 +345,11 @@ impl RootPaths {
 impl Heap {
     pub(super) fn cached_weak_roots(&self, globals: [Id; 2]) -> bool {
         self.weak_roots.valid(self, globals)
-            && self.weak.iter().all(|(target, refs)| {
-                self.weak_roots.contains(*target)
-                    && refs.iter().all(|id| self.weak_roots.contains(*id))
-            })
+            && (self.weak_roots.covers_endpoints
+                || self.weak.iter().all(|(target, refs)| {
+                    self.weak_roots.contains(*target)
+                        && refs.iter().all(|id| self.weak_roots.contains(*id))
+                }))
     }
 
     pub(in crate::dynamic) fn learn_weak_roots(&mut self, modules: Id, reference: Id) {
@@ -543,5 +547,10 @@ mod tests {
         heap.new_weak_reference(target, TRUE, Kind::Reference, None)
             .unwrap();
         assert!(!heap.weak_values_kept_by(modules, NONE));
+
+        heap.release_temporaries_since(0);
+        heap.collect([modules].into_iter());
+        assert_eq!(heap.weak_references(target), &[reference]);
+        assert!(heap.cached_weak_roots([modules, NONE]));
     }
 }
