@@ -1070,6 +1070,52 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     Ok(Int::new(result))
 }
 
+/// Compute math.comb for either entry point after both arguments have been indexed.
+fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
+    let (n, k) = (n.big(), k.big());
+    if n.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "n must be a non-negative integer",
+        ));
+    }
+    if k.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "k must be a non-negative integer",
+        ));
+    }
+    if k > n {
+        return Ok(Int::from(0));
+    }
+    let complement = n.as_ref() - k.as_ref();
+    let steps = k.into_owned().min(complement).to_i64().ok_or_else(|| {
+        Error::new(
+            Kind::OverflowError,
+            "min(n - k, k) must not exceed 9223372036854775807",
+        )
+    })?;
+    // C(n, d) = C(n, d - 1) * (n - d + 1) / d. The division is exact,
+    // and the unbounded product does not need a GCD to prevent overflow.
+    let mut factor = n.into_owned();
+    let mut result = BigInt::from(1);
+    for divisor in 1..=steps {
+        result *= &factor;
+        result /= divisor;
+        factor -= 1;
+    }
+    Ok(Int::new(result))
+}
+
+/// # Safety
+/// Both arguments borrow live integer handles. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_comb(n: usize, k: usize) -> usize {
+    // SAFETY: the generated caller roots both arguments for this call.
+    let (n, k) = unsafe { (Int::borrow(n), Int::borrow(k)) };
+    finish(integer_comb(&n, &k).map(Int::into_raw), 1)
+}
+
 /// Validates the count before zero shortcuts. Unbounded right shifts retain
 /// the infinite sign extension; impossible left shifts follow CPython 3.14's
 /// signed-64-bit bit-count limit without attempting an enormous allocation.
