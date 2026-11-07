@@ -2513,6 +2513,7 @@ impl IntrinsicModule {
             (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
             (Self::Random, "sample") => Intrinsic::ScopedObjectExport("random.sample"),
             (Self::Random, "Random") => Intrinsic::ScopedObjectExport("random.Random"),
+            (Self::Random, "uniform") => Intrinsic::ScopedObjectExport("random.uniform"),
             (Self::Random, "expovariate") => Intrinsic::ScopedObjectExport("random.expovariate"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },

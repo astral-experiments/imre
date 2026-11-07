@@ -217,7 +217,14 @@ def current():
     assert events == ["len", ("get", j), ("get", 2), ("set", 2, 2), ("set", j, 3)]
 
     from math import log
-    from random import expovariate
+    from random import expovariate, uniform
+
+    assert uniform.__self__ is random._inst
+    assert uniform.__func__ is random.Random.uniform
+    random.seed(1701)
+    reference = random.Random(1701)
+    assert uniform(-3.0, 10.0) == reference.uniform(-3.0, 10.0)
+    assert random.random() == reference.random()
 
     saved_random = random.Random.random
     random.seed(551)
