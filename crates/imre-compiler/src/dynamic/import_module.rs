@@ -59,29 +59,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
-        "http.server" => {
-            const UPSTREAM: &str = include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/server.py"
-            );
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("http/server.py", SOURCE.get_or_init(|| {
-                let threaded_start = UPSTREAM.find("class ThreadingHTTPServer(").unwrap();
-                let threaded_end = UPSTREAM.find("class HTTPSServer(").unwrap();
-                let threaded = &UPSTREAM[threaded_start..threaded_end];
-                let start = UPSTREAM.find("class SimpleHTTPRequestHandler(").unwrap();
-                let (handler, _) = UPSTREAM[start..]
-                    .split_once("# Utilities for CGIHTTPRequestHandler")
-                    .unwrap();
-                // The existing server's _escape implements html.escape with quote=False.
-                let handler = handler
-                    .replace("html.escape(displaypath, quote=False)", "_escape(displaypath)")
-                    .replace("html.escape(displayname, quote=False)", "_escape(displayname)");
-                format!(
-                    "{}\n{threaded}\nimport datetime\nimport email.utils\nimport io\nimport mimetypes\nimport os\nimport posixpath\nimport shutil\nimport urllib.parse\n\n{handler}",
-                    include_str!("../../stdlib/http/server.py")
-                )
-            })))
-        }
         "reprlib" => bundled_source!("reprlib.py"),
         // The scalar Decimal stays available for checked serializers.
         "decimal" => Some(("decimal.py", include_str!("../../stdlib/decimal_boxed.py"))),

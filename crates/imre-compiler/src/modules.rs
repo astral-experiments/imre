@@ -583,7 +583,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/cookiejar.py"
             ),
         )),
-        "http.server" => bundled_source!("http/server.py"),
+        "http.server" => Some((
+            "http/server.py",
+            concat!(
+                include_str!("../stdlib/http/server.py"),
+                "\n",
+                include_str!("../stdlib/http/server_files.py"),
+            ),
+        )),
         "locale" => bundled_source!("locale.py"),
         "_imre_gettext_locale" => bundled_source!("_imre_gettext_locale.py"),
         // CPython 3.14.5 Lib/colorsys.py. See licenses/CPython.txt.
@@ -5857,6 +5864,8 @@ impl<'a> Loader<'a> {
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
             "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
+            // The checked socketserver provides the synchronous server and handler bases.
+            "http.server" => bundled_source!("http/server.py"),
             _ => bundled_runtime_source(name),
         };
         if let Some((filename, source)) = bundled {
