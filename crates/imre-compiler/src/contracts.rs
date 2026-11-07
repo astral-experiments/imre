@@ -1520,6 +1520,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_read"
                 | "imre_text_readline"
                 | "imre_text_write"
+                | "imre_text_output_write"
                 | "imre_text_flush"
                 | "imre_text_close"
                 | "imre_bytes_io"

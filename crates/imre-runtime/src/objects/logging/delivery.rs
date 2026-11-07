@@ -9,20 +9,19 @@ use super::state;
 /// # Safety
 /// Both the writable stream and the exact string stay live for the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_text_output_write(stream: *const Object, text: *const Str) -> usize {
+pub unsafe extern "C" fn imre_text_output_write(
+    stream: *const Object,
+    source: *const Str,
+) -> usize {
     // SAFETY: the caller keeps the exact string alive for this write.
-    let text = unsafe { &*text };
+    let text = unsafe { &*source };
     // SAFETY: the caller roots the stream, and these sealed writes cannot reenter it.
     let result = unsafe {
+        let input = || Ok(StrOwner::acquire_word(source as usize));
         object(stream).0.with_mut(|s| match s {
-            Storage::CodecWriter(writer) => writer
-                .write(text, || {
-                    // The codec retains the exact input only when constructing an encoding error.
-                    Ok(StrOwner::acquire_word(text as *const Str as usize))
-                })
-                .map(|()| 0),
+            Storage::CodecWriter(writer) => writer.write(text, input).map(|()| 0),
             Storage::File(file) => file
-                .write(text)
+                .write_with(text, input)
                 .map(|()| Int::from_usize(text.chars().count()).into_raw()),
             _ => unreachable!("checked text output stream"),
         })

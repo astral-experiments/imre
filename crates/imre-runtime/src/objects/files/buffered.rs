@@ -90,23 +90,27 @@ impl Output {
                 .is_some_and(|pending| pending.try_append_parts(parts))
     }
 
-    pub(super) fn write_text(&mut self, text: &str) -> Result<()> {
+    pub(super) fn write_text(
+        &mut self,
+        text: &str,
+        input: impl FnOnce() -> Result<StrOwner>,
+    ) -> Result<()> {
         let Some(encoder) = self.encoder.as_mut() else {
             return self.write(text.as_bytes()).map_err(errno_error);
         };
-        let translated;
-        let text = if let Some(newline) = encoder.newline {
-            translated = super::path_text::output_newlines(text, newline)?;
-            &translated
-        } else {
-            text
-        };
-        let encoded =
-            encoder
-                .codec
-                .encode(text, encoder.errors.as_deref().map(Str::as_str), || {
-                    super::super::text::try_owned_string(text)
-                })?;
+        let translated = encoder
+            .newline
+            .filter(|_| text.contains('\n'))
+            .map(|newline| super::path_text::output_newlines(text, newline))
+            .transpose()?;
+        let encoded = encoder.codec.encode(
+            translated.as_deref().unwrap_or(text),
+            encoder.errors.as_deref().map(Str::as_str),
+            || match &translated {
+                Some(value) => super::super::text::try_owned_string(value),
+                None => input(),
+            },
+        )?;
         if matches!(encoder.codec, Codec::Utf8 { signature: true }) {
             encoder.codec = Codec::Utf8 { signature: false };
         }

@@ -443,7 +443,7 @@ impl FileState {
             return self.text_memory()?.write(text);
         }
         if let Some(Stream::Write(writer)) = self.stream.as_mut() {
-            return writer.write_text(text);
+            return writer.write_text(text, input);
         }
         self.write_bytes(text.as_bytes())
     }
@@ -1128,15 +1128,15 @@ pub unsafe extern "C" fn imre_text_readline_inline(
 /// Both handles must be rooted with matching types and pending state clear.
 /// Raw zero signals failure; a successful empty write returns tagged zero (1).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_text_write(value: *const Object, text: *const Str) -> usize {
+pub unsafe extern "C" fn imre_text_write(value: *const Object, source: *const Str) -> usize {
     // SAFETY: the caller roots this immutable string throughout the write and count.
-    let text = unsafe { &*text };
+    let text = unsafe { &*source };
     // SAFETY: text is immutable, both handles are rooted, and no storage escapes.
     let result = unsafe {
         object(value).0.with_mut(|storage| {
-            storage.file_mut().write_with(text, || {
-                Ok(StrOwner::acquire_word(text as *const Str as usize))
-            })
+            storage
+                .file_mut()
+                .write_with(text, || Ok(StrOwner::acquire_word(source as usize)))
         })
     };
     finish(
