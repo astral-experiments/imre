@@ -978,6 +978,9 @@ impl Analyzer {
                         },
                         _ => Interval::UNKNOWN,
                     },
+                    Builtin::IntBitCount | Builtin::IntBitLength if values[0].small().is_some() => {
+                        Interval::bounded(0, 63)
+                    }
                     Builtin::BytesGet => Interval::bounded(0, 255),
                     Builtin::TryDigitSums(_) => Interval::bounded(-1, MAX_SMALL),
                     Builtin::ListGetI32 => {

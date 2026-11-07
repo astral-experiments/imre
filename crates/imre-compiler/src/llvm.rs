@@ -7932,6 +7932,21 @@ impl Emitter<'_, '_> {
                     };
                     self.call(symbol, Type::Int, &[&args[0].value, &args[1].value])
                 }),
+            Builtin::IntBitCount | Builtin::IntBitLength if args[0].value.small_integer => {
+                let raw = self.instruction(format!("ashr i64 {}, 1", args[0].value.operand));
+                // A signed tagged integer has 63 bits, so its magnitude fits in i64.
+                let magnitude =
+                    self.instruction(format!("call i64 @llvm.abs.i64(i64 {raw}, i1 true)"));
+                let bits = if matches!(builtin, Builtin::IntBitCount) {
+                    self.instruction(format!("call i64 @llvm.ctpop.i64(i64 {magnitude})"))
+                } else {
+                    let zeros = self.instruction(format!(
+                        "call i64 @llvm.ctlz.i64(i64 {magnitude}, i1 false)"
+                    ));
+                    self.instruction(format!("sub nuw nsw i64 64, {zeros}"))
+                };
+                self.tag_small(&bits)
+            }
             Builtin::IntBitCount => self.call("imre_int_bit_count", Type::Int, &[&args[0].value]),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::Sumprod if returns == Type::Int => {
@@ -11869,6 +11884,9 @@ declare ptr @imre_list_slice(ptr, i64, i64, i64)
 declare ptr @imre_seq_slice(ptr, i64, i64, i64)
 declare void @imre_assert_fail()
 declare void @imre_range_step_zero()
+declare i64 @llvm.abs.i64(i64, i1 immarg)
+declare i64 @llvm.ctpop.i64(i64)
+declare i64 @llvm.ctlz.i64(i64, i1 immarg)
 declare void @llvm.assume(i1)
 declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
