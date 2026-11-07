@@ -790,6 +790,8 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.owner == "mappingproxy" && self.method => {
                 ctx.text(if self.name == "get" { "($self, key, default=None, /)" } else { "($self, /)" })
             }
+            "__doc__" if self.name == "with_traceback" => ctx.text("Set self.__traceback__ to tb and return self."),
+            "__text_signature__" if self.name == "with_traceback" => ctx.text("($self, tb, /)"),
             "__doc__" if self.name == "add_note" => ctx.text("Add a note to the exception"),
             "__text_signature__" if self.name == "add_note" => ctx.text("($self, note, /)"),
             "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),

@@ -117,7 +117,10 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         {
             ctx.builtin("builtin_function_or_method")
         }
-        Value::Function { .. } | Value::ClassMethod { .. } | Value::StaticMethod { .. } => {
+        Value::Function { .. }
+        | Value::ClassMethod { .. }
+        | Value::StaticMethod { .. }
+        | Value::Raised(_) => {
             return namespace_directory(ctx, object, true);
         }
         Value::Method { .. } if ctx.builtin_type_name(object) == Some("method") => {
@@ -676,11 +679,17 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 "object"
             };
             class_names(ctx, ctx.builtins[base], names)?;
-            for &(key, _) in ctx
-                .dict_entries(dictionary)
-                .expect("native class dictionary")
-            {
-                names.insert(ctx.str_value(key)?.to_owned());
+            let ancestors = super::exception_kind(owner)
+                .into_iter()
+                .flat_map(super::exception_ancestors)
+                .filter_map(|base| ctx.native_type_dicts.get(&ctx.builtins[base]).copied());
+            for namespace in std::iter::once(dictionary).chain(ancestors) {
+                for &(key, _) in ctx
+                    .dict_entries(namespace)
+                    .expect("native class dictionary")
+                {
+                    names.insert(ctx.str_value(key)?.to_owned());
+                }
             }
         }
         Value::Native(name)
