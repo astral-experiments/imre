@@ -424,27 +424,6 @@ impl Context {
             {
                 Some(NONE)
             }
-            Value::Native(kind) if let Some(exception) = builtins::exception_kind(kind) => {
-                match name {
-                    name if kind == "BaseExceptionGroup"
-                        && (super::exception_group::METHODS.contains(&name)
-                            || matches!(name, "__class_getitem__" | "message" | "exceptions")) =>
-                    {
-                        self.builtins
-                            .get(&format!("BaseExceptionGroup.{name}"))
-                            .copied()
-                    }
-                    name if kind == "BaseException"
-                        && let Some(symbol) = builtins::base_exception_method(name) =>
-                    {
-                        self.builtins.get(symbol).copied()
-                    }
-                    name if builtins::declares_exception_constructor(exception, name) => {
-                        self.builtins.get(&format!("{kind}.{name}")).copied()
-                    }
-                    _ => None,
-                }
-            }
             Value::Native(kind)
                 if matches!(
                     kind.as_str(),
@@ -2024,6 +2003,69 @@ impl Context {
         tuple
     }
 
+    fn read_exception_getset(&mut self, obj: Id, name: &str) -> Result<Id> {
+        let Value::Raised(error) = self.heap.get(obj) else {
+            return Err(self.missing_attribute(obj, name));
+        };
+        match name {
+            "args" => Ok(self.exception_argument_tuple(obj, error.clone())),
+            "__traceback__" => self.exception_traceback(obj),
+            "__context__" => Ok(error.context),
+            "__cause__" => Ok(error
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.cause)
+                .unwrap_or(NONE)),
+            _ => unreachable!(),
+        }
+    }
+
+    fn write_exception_getset(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<()> {
+        if !matches!(self.heap.get(obj), Value::Raised(_)) {
+            return Err(self.missing_attribute(obj, name));
+        }
+        let value =
+            value.ok_or_else(|| Error::new("TypeError", format!("{name} may not be deleted")))?;
+        match name {
+            "__traceback__" => self.set_traceback(obj, value),
+            "__cause__" => self.set_exception_cause(obj, value),
+            "__context__" => {
+                if value != NONE && !matches!(self.heap.get(value), Value::Raised(_)) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "exception context must be None or derive from BaseException",
+                    ));
+                }
+                let Value::Raised(error) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                error.context = value;
+                Ok(())
+            }
+            "args" => {
+                let tuple = if matches!(self.heap.get(value), Value::Tuple(_)) {
+                    value
+                } else {
+                    let iter = self.iterator(value)?;
+                    self.heap.keep(iter);
+                    let mut items = Vec::new();
+                    while let Some(item) = self.next_item(iter)? {
+                        self.heap.keep(item);
+                        items.push(item);
+                    }
+                    self.alloc(Value::Tuple(items))
+                };
+                let _ = self.import_error_message(obj, None);
+                let Value::Raised(error) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                error.args = Some(tuple);
+                Ok(())
+            }
+            _ => unreachable!(),
+        }
+    }
+
     /// Preserve ImportError's original message when its arguments are replaced.
     pub(super) fn import_error_message(&mut self, obj: Id, replacement: Option<Id>) -> Option<Id> {
         let Value::Raised(error) = self.heap.get(obj) else {
@@ -2671,29 +2713,15 @@ impl Context {
             Value::Complex(z) if matches!(name, "real" | "imag") => {
                 return Ok(self.alloc(Value::Float(if name == "real" { z.real } else { z.imag })));
             }
-            Value::Raised(ref error)
-                if matches!(
-                    name,
-                    "__traceback__" | "__context__" | "__cause__" | "__suppress_context__"
-                ) =>
-            {
-                match name {
-                    "__traceback__" => return self.exception_traceback(obj),
-                    "__context__" => {
-                        return Ok(error.context);
-                    }
-                    "__cause__" => {
-                        return Ok(error.trace.as_ref().and_then(|t| t.cause).unwrap_or(NONE));
-                    }
-                    "__suppress_context__" => {
-                        return Ok(if error.trace.as_ref().is_some_and(|t| t.cause.is_some()) {
-                            TRUE
-                        } else {
-                            FALSE
-                        });
-                    }
-                    _ => unreachable!(),
-                }
+            Value::Raised(_) if builtins::EXCEPTION_GETSETS.contains(&name) => {
+                return self.read_exception_getset(obj, name);
+            }
+            Value::Raised(ref error) if name == "__suppress_context__" => {
+                return Ok(if error.trace.as_ref().is_some_and(|t| t.cause.is_some()) {
+                    TRUE
+                } else {
+                    FALSE
+                });
             }
             Value::Traceback {
                 frame,
@@ -2944,7 +2972,10 @@ impl Context {
             Value::LayoutDescriptor(owner, field) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text(field)),
-                "__doc__" if matches!(field, "__annotations__" | "__annotate__") => {
+                "__doc__"
+                    if matches!(field, "__annotations__" | "__annotate__")
+                        || matches!(self.heap.get(owner), Value::Native(symbol) if symbol == "BaseException") =>
+                {
                     return Ok(NONE);
                 }
                 "__doc__" => {
@@ -4674,9 +4705,6 @@ impl Context {
                         _ => {}
                     }
                 }
-                if name == "args" {
-                    return Ok(self.exception_argument_tuple(obj, error.clone()));
-                }
                 if matches!(&*error.kind, "UnicodeDecodeError" | "UnicodeEncodeError")
                     && let Some([encoding, object, start, end, reason]) =
                         self.exception_arguments(error)
@@ -5057,14 +5085,7 @@ impl Context {
                     "dict" | "list" | "tuple" | stdlib::functools::PARTIAL_CLASS
                 ) || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
-                    || (builtins::is_exception(class)
-                        && matches!(
-                            name,
-                            "__new__" | "__init__" | "add_note" | "with_traceback"
-                        ))
-                    || (matches!(class.as_str(), "BaseExceptionGroup" | "ExceptionGroup")
-                        && (super::exception_group::METHODS.contains(&name)
-                            || matches!(name, "__class_getitem__" | "message" | "exceptions")))
+                    || builtins::is_exception(class)
                     || (class == "type" && name == "__setattr__")
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
@@ -5755,9 +5776,6 @@ impl Context {
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, None);
         }
-        if name == "__cause__" && matches!(self.heap.get(obj), Value::Raised(_)) {
-            return Err(Error::new("TypeError", "__cause__ may not be deleted"));
-        }
         if self.update_key_wrapper_field(obj, name, None)?
             || self.update_os_field(obj, name, None)?
         {
@@ -5791,8 +5809,10 @@ impl Context {
         if name == "msg" && self.import_error_message(obj, Some(NONE)).is_some() {
             return Ok(());
         }
-        if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
-            return Err(Error::new("TypeError", "args may not be deleted"));
+        if builtins::EXCEPTION_GETSETS.contains(&name)
+            && matches!(self.heap.get(obj), Value::Raised(_))
+        {
+            return self.write_exception_getset(obj, name, None);
         }
         if member.is_none() && self.exposes_object_class(obj, name) {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
@@ -6295,6 +6315,10 @@ impl Context {
         receiver: Id,
     ) -> Result<Id> {
         match name {
+            field if builtins::EXCEPTION_GETSETS.contains(&field) => {
+                self.layout_receiver_class(owner, field, receiver)?;
+                self.read_exception_getset(receiver, field)
+            }
             "__annotations__" | "__annotate__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 let Value::Module { scope, .. } = *self.heap.get(receiver) else {
@@ -6349,6 +6373,10 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         match name {
+            field if builtins::EXCEPTION_GETSETS.contains(&field) => {
+                self.layout_receiver_class(owner, field, receiver)?;
+                self.write_exception_getset(receiver, field, value)
+            }
             "__text_signature__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 Err(Error::new(
@@ -6792,22 +6820,6 @@ impl Context {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_base_local_attribute(obj, name, Some(value));
         }
-        if name == "__traceback__" && matches!(self.heap.get(obj), Value::Raised(_)) {
-            return self.set_traceback(obj, value);
-        }
-        if name == "__context__" && matches!(self.heap.get(obj), Value::Raised(_)) {
-            if value != NONE && !matches!(self.heap.get(value), Value::Raised(_)) {
-                return Err(Error::new(
-                    "TypeError",
-                    "exception context must be None or derive from BaseException",
-                ));
-            }
-            let Value::Raised(error) = self.heap.get_mut(obj) else {
-                unreachable!()
-            };
-            error.context = value;
-            return Ok(());
-        }
         if let Value::StaticMethod { dictionary, .. } | Value::ClassMethod { dictionary, .. } =
             *self.heap.get(obj)
         {
@@ -6918,9 +6930,6 @@ impl Context {
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, Some(value));
         }
-        if name == "__cause__" && matches!(self.heap.get(obj), Value::Raised(_)) {
-            return self.set_exception_cause(obj, value);
-        }
         if self.update_key_wrapper_field(obj, name, Some(value))?
             || self.update_os_field(obj, name, Some(value))?
         {
@@ -6987,25 +6996,10 @@ impl Context {
         if name == "msg" && self.import_error_message(obj, Some(value)).is_some() {
             return Ok(());
         }
-        if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
-            let tuple = if matches!(self.heap.get(value), Value::Tuple(_)) {
-                value
-            } else {
-                let iter = self.iterator(value)?;
-                self.heap.keep(iter);
-                let mut items = Vec::new();
-                while let Some(item) = self.next_item(iter)? {
-                    self.heap.keep(item);
-                    items.push(item);
-                }
-                self.alloc(Value::Tuple(items))
-            };
-            let _ = self.import_error_message(obj, None);
-            let Value::Raised(error) = self.heap.get_mut(obj) else {
-                unreachable!()
-            };
-            error.args = Some(tuple);
-            return Ok(());
+        if builtins::EXCEPTION_GETSETS.contains(&name)
+            && matches!(self.heap.get(obj), Value::Raised(_))
+        {
+            return self.write_exception_getset(obj, name, Some(value));
         }
         if let Value::Raised(error) = self.heap.get(obj)
             && !self.native_exception_descriptor(error, name)

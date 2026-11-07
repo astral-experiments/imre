@@ -139,6 +139,10 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     }
 }
 
+/// Fields backed by the shared exception argument and traceback storage.
+pub(super) const EXCEPTION_GETSETS: &[&str] =
+    &["args", "__traceback__", "__context__", "__cause__"];
+
 /// Methods declared on BaseException and inherited by every native exception type.
 pub(super) fn base_exception_method(name: &str) -> Option<&'static str> {
     match name {

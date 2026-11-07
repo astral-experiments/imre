@@ -3015,31 +3015,44 @@ impl Context {
             for base in builtins::exception_ancestors(kind) {
                 self.builtin(base);
             }
+            let mut entries = Vec::new();
             for slot in ["__new__", "__init__"] {
                 if builtins::declares_exception_constructor(kind, slot) {
-                    self.builtin(&format!("{name}.{slot}"));
+                    let method = self.builtin(&format!("{name}.{slot}"));
+                    entries.push((self.heap.code_name(slot), method));
                 }
             }
             if name == "BaseException" {
-                self.builtin("BaseException.add_note");
-                self.builtin("BaseException.with_traceback");
+                for slot in ["add_note", "with_traceback"] {
+                    let method = self.builtin(&format!("{name}.{slot}"));
+                    entries.push((self.heap.code_name(slot), method));
+                }
+                for field in
+                    std::iter::once("__dict__").chain(builtins::EXCEPTION_GETSETS.iter().copied())
+                {
+                    let descriptor = self.alloc(Value::LayoutDescriptor(value, field));
+                    entries.push((self.heap.code_name(field), descriptor));
+                }
             }
             if name == "BaseExceptionGroup" {
-                self.builtin("BaseExceptionGroup.__class_getitem__");
-                self.readonly_member("BaseExceptionGroup", "message");
-                self.readonly_member("BaseExceptionGroup", "exceptions");
+                for slot in std::iter::once("__class_getitem__")
+                    .chain(exception_group::METHODS.iter().copied())
+                {
+                    let method = self.builtin(&format!("{name}.{slot}"));
+                    entries.push((self.heap.code_name(slot), method));
+                }
+                for field in ["message", "exceptions"] {
+                    let descriptor = self.readonly_member("BaseExceptionGroup", field);
+                    entries.push((self.heap.code_name(field), descriptor));
+                }
             }
+            let namespace = self.dict(entries);
+            self.native_type_dicts.insert(value, namespace);
         }
         if let Some(symbol) = object_size::descriptor(name) {
             self.builtin(symbol);
         }
         let methods = match name {
-            "BaseExceptionGroup" => {
-                for method in exception_group::METHODS {
-                    self.builtin(&format!("BaseExceptionGroup.{method}"));
-                }
-                &[][..]
-            }
             "type" => &[
                 "mro",
                 "__subclasses__",
