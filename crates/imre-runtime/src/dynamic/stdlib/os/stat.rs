@@ -116,7 +116,7 @@ pub(in crate::dynamic::stdlib) fn construct(
     else {
         unreachable!()
     };
-    let mut values = super::super::fixed_structseq::sequence_values(ctx, sequence)?;
+    let mut values = ctx.fast_sequence_values(sequence, "constructor requires a sequence")?;
     let dictionary = attributes
         .map(|value| {
             ctx.dict_storage(value).ok_or_else(|| {

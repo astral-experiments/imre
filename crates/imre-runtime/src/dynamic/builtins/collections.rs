@@ -777,6 +777,7 @@ pub(super) fn method(
     if matches!(
         name,
         "list.__add__"
+            | "list.__setitem__"
             | "list.__iadd__"
             | "list.__init__"
             | "list.__iter__"
@@ -1491,6 +1492,27 @@ pub(super) fn builtin_slot(
         )));
     }
     let storage = ctx.scalar_value(object);
+    if name == "list.__setitem__" {
+        if !kwargs.is_empty() {
+            return Err(type_error(
+                "wrapper __setitem__() takes no keyword arguments",
+            ));
+        }
+        let [key, value] = rest else {
+            return Err(type_error(format!(
+                "__setitem__ expected 2 arguments, got {}",
+                rest.len()
+            )));
+        };
+        // A list assigned to its own slice copies its contents without invoking __iter__.
+        let value = if object == *value && matches!(ctx.heap.get(*key), Value::Slice(_)) {
+            storage
+        } else {
+            *value
+        };
+        ctx.put_item(storage, *key, value)?;
+        return Ok(NONE);
+    }
     let set_op = set_operator(method);
     let comparison = super::super::operators::comparison_op(method);
     if matches!(method, "__add__" | "__iadd__" | "__contains__" | "__pow__")

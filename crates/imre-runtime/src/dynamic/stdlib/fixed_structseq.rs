@@ -154,26 +154,6 @@ pub(super) fn current_hash_info(ctx: &mut Context) -> Id {
     record(ctx, HASH_INFO, values)
 }
 
-/// Materialize a struct sequence's positional argument with PySequence_Fast semantics.
-pub(super) fn sequence_values(ctx: &mut Context, sequence: Id) -> Result<Vec<Id>> {
-    if matches!(ctx.heap.get(sequence), Value::List(_) | Value::Tuple(_)) {
-        ctx.items(sequence)
-    } else {
-        let iter = ctx.iterator(sequence).map_err(|err| {
-            let type_error = ctx.builtin("TypeError");
-            if ctx.raised_error_matches(&err, type_error) {
-                Error::new("TypeError", "constructor requires a sequence")
-            } else {
-                err
-            }
-        })?;
-        // PySequence_Fast consumes this iterator as a list, including its length hint.
-        let list = ctx.alloc(Value::List(Vec::new()));
-        super::super::builtins::list_extend(ctx, list, iter)?;
-        ctx.items(list)
-    }
-}
-
 pub(in crate::dynamic) fn construct(
     ctx: &mut Context,
     class: &'static str,
@@ -203,7 +183,7 @@ pub(in crate::dynamic) fn construct(
         1,
     )?;
     let sequence = sequence.expect("required sequence bound");
-    let values = sequence_values(ctx, sequence)?;
+    let values = ctx.fast_sequence_values(sequence, "constructor requires a sequence")?;
     let extras = if let Some(dict) = dictionary {
         ctx.dict_entries(dict)
             .ok_or_else(|| {

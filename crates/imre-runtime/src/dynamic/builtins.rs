@@ -643,6 +643,7 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "__iter__",
     "__len__",
     "__repr__",
+    "__setitem__",
     "append",
     "clear",
     "copy",

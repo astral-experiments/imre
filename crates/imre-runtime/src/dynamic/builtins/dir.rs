@@ -595,7 +595,6 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__mul__",
                         "__reversed__",
                         "__rmul__",
-                        "__setitem__",
                     ],
                 ),
                 _ => {
