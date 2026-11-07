@@ -166,6 +166,14 @@ def current():
     check_import_nodes()
     check_comparison_nodes()
     check_template_nodes()
+
+    indices = ast.parse("table[row, col]", mode="eval").body.slice
+    assert indices.dims is indices.elts
+    swapped = list(reversed(indices.dims))
+    indices.dims = swapped
+    assert indices.elts is swapped
+    assert [node.id for node in ast.walk(indices) if isinstance(node, ast.Name)] == ["col", "row"]
+
     decorated_source = (
         "if ready:\n"
         "    @first\n"

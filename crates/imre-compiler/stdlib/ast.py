@@ -130,3 +130,18 @@ class NodeTransformer(NodeVisitor):
                 else:
                     setattr(node, field, new_node)
         return node
+
+
+# If the ast module is loaded more than once, only add deprecated methods once
+if not hasattr(Tuple, 'dims'):
+    # The following code is for backward compatibility.
+    # It will be removed in future.
+
+    def _dims_getter(self):
+        """Deprecated. Use elts instead."""
+        return self.elts
+
+    def _dims_setter(self, value):
+        self.elts = value
+
+    Tuple.dims = property(_dims_getter, _dims_setter)
