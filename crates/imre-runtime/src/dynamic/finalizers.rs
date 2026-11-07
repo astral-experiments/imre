@@ -98,6 +98,17 @@ impl Context {
         Ok(finalized)
     }
 
+    fn finalize_unstarted_coroutine(&mut self, owner: Id) -> Result<()> {
+        // Cyclic GC already cleared the isolate's weakrefs. On ordinary deallocation,
+        // old weakrefs must expire even when a warning recorder resurrects its source.
+        if !self.heap.in_full_collection(owner) {
+            let (heap, roots) = self.heap_and_roots();
+            let callbacks = heap.clear_dealloc_weakrefs(owner, roots)?;
+            self.run_weak_callbacks(callbacks);
+        }
+        self.warn_unawaited_coroutine(owner)
+    }
+
     pub(super) fn dispatch_finalizer(&mut self, owner: Id) {
         let scan = match self.heap.get(owner) {
             Value::Scandir(scan) => Some(std::rc::Rc::clone(scan)),
@@ -157,7 +168,18 @@ impl Context {
                 );
             }
         } else if let Some(frame) = generator_frame {
-            if let Err(error) = self.close_generator_frame(frame, owner) {
+            if self.heap.is_unstarted_coroutine(owner) {
+                // A warning recorder can keep its source and subsequently await it.
+                if let Err(error) = self.finalize_unstarted_coroutine(owner) {
+                    super::unraisable::report(
+                        self,
+                        error,
+                        true,
+                        Some(owner),
+                        "Exception ignored while finalizing coroutine",
+                    );
+                }
+            } else if let Err(error) = self.close_generator_frame(frame, owner) {
                 eprintln!(
                     "Exception ignored while calling __del__: {}",
                     error.report(&self.heap)

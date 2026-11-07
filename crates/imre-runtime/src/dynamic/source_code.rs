@@ -4637,7 +4637,9 @@ impl Context {
             let frame = self.new_generator(code, scope, owner);
             Ok(if kind == FunctionKind::Coroutine {
                 let origin = self.coroutine_origin();
-                self.alloc(Value::Coroutine { frame, origin })
+                let coroutine = self.alloc(Value::Coroutine { frame, origin });
+                self.heap.watch_unstarted_coroutine(coroutine)?;
+                coroutine
             } else if kind == FunctionKind::AsyncGenerator {
                 self.async_generator(frame)
             } else {
@@ -5474,6 +5476,7 @@ impl Context {
                 if code.interactive && matches!(op, Instruction::Eval(_)) {
                     self.display_expression(value)?;
                 }
+                self.heap.note_discarded_coroutine(value);
             }
             Instruction::Assert(stmt) => {
                 if !self.source_condition(code, scope, &stmt.test)? {
