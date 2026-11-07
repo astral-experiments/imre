@@ -696,24 +696,12 @@ impl Checker<'_> {
             ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => (old, new, Some(&kw.value)),
             _ => return Err(self.object_builtin_error("str.replace", call)),
         };
-        // Check both operands before selecting object dispatch. A computed string may
-        // need object lowering, but an exact type mismatch is a checked error.
-        let mut string_argument = |node| {
-            let value = self.expr_expected_if(node, Type::Str, |checker, ty| {
-                !ir::InstanceType::ExactText.accepts(ty, checker.types)
-                    && checker.may_be_instance(ty, ir::InstanceType::Exact(Type::Str))
-            });
-            match value {
-                Ok(value) if value.ty == Type::Str => Ok(Some(value)),
-                Err(error) if self.failure_kind(&error) == Some(FailureKind::ExactType) => {
-                    Err(error)
-                }
-                _ => Ok(None),
-            }
-        };
-        let (Some(old), Some(new)) = (string_argument(old)?, string_argument(new)?) else {
-            return Err(self.object_builtin_error("str.replace", call));
-        };
+        let old = self
+            .expr_expected(old, Type::Str)
+            .map_err(|_| self.object_builtin_error("str.replace", call))?;
+        let new = self
+            .expr_expected(new, Type::Str)
+            .map_err(|_| self.object_builtin_error("str.replace", call))?;
         let mut args = vec![receiver, old, new];
         if let Some(count) = count {
             let count = powers::integer(self.expr(count)?);
