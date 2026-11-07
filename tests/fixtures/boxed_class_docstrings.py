@@ -57,6 +57,9 @@ class Replaced:
 
 
 def current():
+    assert property.__doc__.splitlines()[0] == "Property attribute."
+    assert property().__doc__ is None
+    assert Documented.reading.__doc__ == Documented.reading.fget.__doc__
     for value in ("text", 42, True, (1,), frozenset({3})):
         assert value.__doc__ == type(value).__doc__
         assert isinstance(value.__doc__, str) and value.__doc__
