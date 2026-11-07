@@ -184,7 +184,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 43 suites, 2,928 of 5,606 originals have paired passes. The totals include two complete module invocations that stopped during import, before a native test body began.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 45 suites, 3,039 of 5,762 originals have paired passes. The totals include two complete module invocations that stopped during import, before a native test body began.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
@@ -226,10 +226,12 @@ We track these families separately to keep the original 16,202-test baseline com
 | `shlex` | 18 | 19 | 19 passed | 18 passed, 1 skipped |
 | `signal` | 16 | 57 | 44 passed, 13 skipped | `SiginterruptTest.test_siginterrupt_off` already passed on the parent. The `signal.pause()` fix on #5925 changed `PosixTests.test_interprocess_signal` from failure to pass. Each native level recorded 16 passes, 33 skips, one failure and seven errors. The O0/O3 labels identify the test runners. The child executables and their effective optimization levels were not recorded. [#5925](https://github.com/astral-experiments/imre/pull/5925) |
 | `statistics` | 132 | 400 | 400 passed | All 114 earlier passes held. The 18 additions cover `median`, including its doctest. Each native run recorded 226 originals with errors, one failure and 21 skips. Twenty stock doctests did not register. [Public revision](https://github.com/astral-experiments/imre/commit/9fc3782e546c4217286e0c021ce396f5fe1635f1). |
-| `test_urllib2` | 77 | 80 | 78 passed, 2 skipped | The unchanged urllib.request suite had 77 matching parent passes. One used two empty CPython child processes to supply nonseekable pipes. The native parent checked the request headers. [Measured public revision](https://github.com/astral-experiments/imre/pull/5969) |
+| `test_urllib2` | 77 | 80 | 78 passed, 2 skipped | Both full native runs had the same 77 parent passes. One case used two empty CPython children as nonseekable pipes while the native parent checked the request headers. A separate replay used two purpose-built native pipe helpers at each matching tier and reaped all four. [Measured public revision](https://github.com/astral-experiments/imre/pull/5969) |
 | `test_urllib2_localnet` | 0 | 21 | 21 passed | All 21 local-network originals registered and started. The native worker thread failed while setting up the HTTP server. [Measured public revision](https://github.com/astral-experiments/imre/pull/5969) |
 | `timeit` | 41 | 41 | 41 passed | 41 passed. [Public change](https://github.com/astral-experiments/imre/pull/5474). |
+| `unicodedata` | 21 | 54 | 54 passed | All 54 originals ran with the historical database present, producing 21 passes, 31 errors, one failure and one skip on each native tier. Historical normalization and IDNA Nameprep share the same implementation. [Historical Unicode support](https://github.com/astral-experiments/imre/pull/6056) |
 | `urllib.parse` | 74 | 77 | 74 parent passes, 3 subtest-only parents | All 77 parents started and stopped. Stock and both native levels had 74 parent passes, 800 successful subtests and five subtest skips. All suites exited zero. [Measured public revision](https://github.com/astral-experiments/imre/pull/6005) |
+| `urllib.robotparser` | 90 | 102 | 99 passed, 3 network failures | Stock and both native runs registered all 102 IDs. Native HTTP server setup blocked six bodies. Three external network failures also occurred on stock. The standard stock runner skipped the network class and passed its 99 enabled bodies. [Measured public revision](https://github.com/astral-experiments/imre/pull/6028) |
 | `zlib` | 57 | 76 | 74 passed, 2 skipped | 57 passed, 15 errors, 4 skipped |
 
 In a separate control for `asyncio.test_subprocess`, the supplied stock CPython build passed 42 tests and skipped the 39 pidfd cases. Both `95c1068c` and `8a7104c5` paired 8 of those 42 passes at O0 and O3. The table counts the 81-test replay with pidfd support once.
