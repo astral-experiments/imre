@@ -9769,7 +9769,9 @@ impl<'a> Checker<'a> {
                 let cursor = self.prepare_cursor(source, element);
                 return self.collect_set(cursor, input);
             }
-            let key = key.ok_or_else(|| self.object_builtin_error("set", call))?;
+            let key = key
+                .or_else(|| self.types.mapping(source.ty).map(|(key, _)| key))
+                .ok_or_else(|| self.object_builtin_error("set", call))?;
             return Ok(Expr {
                 ty: self.types.set(key),
                 kind: ExprKind::Builtin(Builtin::KeySet, vec![source]),

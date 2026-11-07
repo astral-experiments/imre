@@ -12166,6 +12166,13 @@ mod tests {
     }
 
     #[test]
+    fn set_constructor_copies_the_keys_of_an_exact_mapping() {
+        let source = "def copy(d: dict[str, int]) -> set[str]:\n    return set(d)\nprint(len(copy({'key': 1})))\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_key_union("));
+    }
+
+    #[test]
     fn fixed_patterns_compile_once_across_search_sites() {
         let llvm = compile(
             "import re\n\ndef first(text: str) -> int:\n    if m := re.search('a+', text):\n        return m.start()\n    return -1\nprint(first('aa'))\nprint(bool(re.compile('a+').search('b')))\n",
