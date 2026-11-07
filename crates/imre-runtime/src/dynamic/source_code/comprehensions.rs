@@ -43,10 +43,7 @@ impl Program {
         operand: &OperandPlan,
     ) -> Result<()> {
         let line = operand.line;
-        let mut targets = HashSet::new();
-        for clause in comp.clauses {
-            Self::collect_target_names(&clause.target, &mut targets)?;
-        }
+        let targets = comp.try_target_names().map_err(invalid_target)?;
         let iterable = self.lower_suspension(comp.outer.clone(), line, operand.function)?;
         self.instructions
             .push((line, Instruction::Iter(iterable, comp.outer_async)));
@@ -324,7 +321,7 @@ impl Context {
             definition,
         )?;
         self.heap.keep(function);
-        let first = &genexpr.generators[0];
+        let first = outer_clause(&genexpr.generators);
         let iterable = match outer {
             Some(value) => value,
             None => self.source_expr(code, scope, &first.iter)?,

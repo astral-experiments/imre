@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
 use imre_ast::code_flags;
-use imre_ast::comprehension::{Output, Plan};
+use imre_ast::comprehension::{
+    InvalidTarget, Output, Plan, outer_clause, try_collect_target_names,
+};
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
@@ -170,7 +172,7 @@ enum BranchUse {
     Operand,
 }
 
-/// Source locations of supported awaits within one expression. The plan is discarded
+/// Suspension sites among the supported operands of one expression. The plan is discarded
 /// after lowering; untouched subtrees stay in the ordinary expression evaluator.
 struct OperandPlan {
     sites: smallvec::SmallVec<[ruff_text_size::TextSize; 1]>,
@@ -181,16 +183,23 @@ struct OperandPlan {
 impl OperandPlan {
     fn new(root: &ast::Expr, kind: FunctionKind, line: u32, function: bool) -> Self {
         let mut sites = smallvec::SmallVec::new();
-        if kind.is_async() {
+        if kind.is_async() || (function && imre_ast::code_flags::yields_in_expression(root)) {
             let mut work = smallvec::SmallVec::<[&ast::Expr; 8]>::new();
             work.push(root);
             while let Some(expr) = work.pop() {
                 match expr {
-                    ast::Expr::Await(a) => {
+                    ast::Expr::Await(a) if kind.is_async() => {
                         sites.push(a.start());
                         work.push(&a.value);
                     }
-                    ast::Expr::Generator(g) => work.push(&g.generators[0].iter),
+                    ast::Expr::Yield(y) => {
+                        sites.push(y.start());
+                        work.extend(y.value.as_deref());
+                    }
+                    ast::Expr::YieldFrom(y) => {
+                        sites.push(y.start());
+                        work.push(&y.value);
+                    }
                     expr if let Some(comp) = Plan::from_expr(expr) => {
                         if comp.suspends() {
                             sites.push(expr.start());
@@ -507,10 +516,10 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
                         .comprehensions
                         .last_mut()
                         .expect("current comprehension");
-                    if let Err(error) = Program::collect_target_names(
-                        &clause.target,
-                        &mut frame.iteration_variables,
-                    ) {
+                    if let Err(error) =
+                        try_collect_target_names(&clause.target, &mut frame.iteration_variables)
+                            .map_err(invalid_target)
+                    {
                         self.invalid_target.get_or_insert(error);
                     }
                     if let Some(name) = frame
@@ -708,6 +717,19 @@ enum Step {
 
 fn unsupported(what: impl std::fmt::Display) -> Error {
     Error::new("NotImplementedError", format!("runtime source: {what}"))
+}
+
+fn invalid_target(error: InvalidTarget) -> Error {
+    match error {
+        InvalidTarget::BareStar => Error::new(
+            "SyntaxError",
+            "starred assignment target must be in a list or tuple",
+        ),
+        InvalidTarget::MultipleStars => {
+            Error::new("SyntaxError", "multiple starred expressions in assignment")
+        }
+        InvalidTarget::Unsupported => unsupported("unpacking target"),
+    }
 }
 
 /// Constants shared by code objects produced by one source compilation.
@@ -1003,7 +1025,7 @@ impl<'a> CompiledStrings<'a, '_> {
                     }
                 }
                 expr if let Some((_, clauses)) = Output::from_expr(expr) => {
-                    self.visit_expr(&clauses[0].iter);
+                    self.visit_expr(&outer_clause(clauses).iter);
                 }
                 _ => ast::visitor::walk_expr(self, expr),
             }
@@ -1060,16 +1082,12 @@ impl<'a> CompiledStrings<'a, '_> {
                         .try_reserve(1)
                         .map_err(|_| Error::new("MemoryError", ""))?;
                     functions.push((expr, self.bound.clone()));
-                    self.visit_expr(&genexpr.generators[0].iter);
+                    self.visit_expr(&outer_clause(&genexpr.generators).iter);
                     continue;
                 }
                 expr if let Some(plan) = Plan::from_expr(expr) => {
-                    let generators = plan.clauses;
-                    self.visit_expr(&generators[0].iter);
-                    let mut names = HashSet::new();
-                    for clause in generators {
-                        Program::collect_target_names(&clause.target, &mut names)?;
-                    }
+                    self.visit_expr(plan.outer);
+                    let mut names = plan.try_target_names().map_err(invalid_target)?;
                     if !plan.suspends() {
                         self.eager_comprehension_targets
                             .insert(expr.range(), names.clone());
@@ -1399,6 +1417,7 @@ impl Program {
             exhausted: false,
         };
         let mut enclosing_bindings = Vec::new();
+        let mut prepared_generators = Vec::new();
         for (_, op) in &mut self.instructions {
             match op {
                 Instruction::EnterComprehension { targets, .. } => {
@@ -1423,7 +1442,6 @@ impl Program {
                 | Instruction::Discard(e)
                 | Instruction::Unless(e, _)
                 | Instruction::Branch { value: Some(e), .. }
-                | Instruction::MakeGenerator(e)
                 | Instruction::LoadResult(e)
                 | Instruction::Iter(Some(e), _)
                 | Instruction::CollectItem { value: Some(e), .. }
@@ -1456,6 +1474,11 @@ impl Program {
                 }
                 Instruction::BindAsyncItem(Some(target)) | Instruction::BindOperand(target) => {
                     strings.visit_expr(target);
+                }
+                // The instructions before this site already acquired the outer
+                // operand, so do not scan its yield a second time as unlowered.
+                Instruction::MakeGenerator(expr) => {
+                    prepared_generators.push((&*expr, strings.bound.clone()));
                 }
                 Instruction::StoreAttribute(attr) => {
                     strings.heap.code_name(attr.as_str());
@@ -1644,7 +1667,8 @@ impl Program {
                 | Instruction::Delegate => {}
             }
         }
-        let (class_cell, functions) = strings.scan(&mut self.unlowered_yield)?;
+        let (class_cell, mut functions) = strings.scan(&mut self.unlowered_yield)?;
+        functions.extend(prepared_generators);
         self.class_cell |= class_cell;
         self.expression_functions
             .try_reserve(functions.len())
@@ -2098,27 +2122,26 @@ impl Program {
 
     fn emit_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<Option<ast::Expr>> {
         let line = plan.line;
-        if !plan.suspends(&expr) {
-            let op = match expr {
-                ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) if !plan.function => {
-                    return Err(Error::new("SyntaxError", "'yield' outside function"));
-                }
-                ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
-                ast::Expr::YieldFrom(y) => {
-                    self.instructions
-                        .push((line, Instruction::Iter(Some(*y.value), false)));
-                    Instruction::Delegate
-                }
-                value => return Ok(Some(value)),
-            };
+        if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
+            if !plan.function {
+                return Err(Error::new("SyntaxError", "'yield' outside function"));
+            }
             if self.kind != FunctionKind::AsyncGenerator {
                 self.kind = FunctionKind::Generator;
             }
-            self.instructions.push((line, op));
-            return Ok(None);
+        }
+        if !plan.suspends(&expr) {
+            return Ok(Some(expr));
         }
         if let ast::Expr::Generator(genexpr) = &expr {
-            self.lower_result(genexpr.generators[0].iter.clone(), plan)?;
+            if let Some(outer) = self.lower_suspension(
+                outer_clause(&genexpr.generators).iter.clone(),
+                line,
+                plan.function,
+            )? {
+                self.instructions
+                    .push((line, Instruction::LoadResult(outer)));
+            }
             self.instructions
                 .push((line, Instruction::MakeGenerator(expr)));
             return Ok(None);
@@ -2128,6 +2151,22 @@ impl Program {
             return Ok(None);
         }
         match expr {
+            ast::Expr::Yield(y) => {
+                let op = match y.value {
+                    None => Instruction::Yield(None),
+                    Some(value) => match self.lower_operand(*value, plan)? {
+                        Some(expr) => Instruction::Yield(Some(expr)),
+                        None => Instruction::YieldResult,
+                    },
+                };
+                self.instructions.push((line, op));
+            }
+            ast::Expr::YieldFrom(y) => {
+                let iterable = self.lower_operand(*y.value, plan)?;
+                self.instructions
+                    .push((line, Instruction::Iter(iterable, false)));
+                self.instructions.push((line, Instruction::Delegate));
+            }
             ast::Expr::Await(a) => {
                 let value = self.lower_operand(*a.value, plan)?;
                 self.instructions.push((line, Instruction::Await(value)));
@@ -2239,7 +2278,7 @@ impl Program {
                     program.lower_result(arm, plan)
                 })?;
             }
-            _ => unreachable!("operand with a supported await"),
+            _ => unreachable!("operand with a supported suspension"),
         }
         Ok(None)
     }
@@ -3484,47 +3523,7 @@ impl Program {
 
     /// Declare every local name in a loop or unpacking target.
     fn declare_target(&mut self, target: &ast::Expr) -> Result<()> {
-        Self::collect_target_names(target, &mut self.locals)
-    }
-
-    fn collect_target_names(target: &ast::Expr, names: &mut impl Extend<String>) -> Result<()> {
-        match target {
-            ast::Expr::Name(n) => {
-                names.extend([n.id.to_string()]);
-            }
-            ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {}
-            ast::Expr::Starred(_) => {
-                return Err(Error::new(
-                    "SyntaxError",
-                    "starred assignment target must be in a list or tuple",
-                ));
-            }
-            ast::Expr::Tuple(ast::ExprTuple { elts, .. })
-            | ast::Expr::List(ast::ExprList { elts, .. }) => {
-                if elts
-                    .iter()
-                    .filter(|item| matches!(item, ast::Expr::Starred(_)))
-                    .count()
-                    > 1
-                {
-                    return Err(Error::new(
-                        "SyntaxError",
-                        "multiple starred expressions in assignment",
-                    ));
-                }
-                for element in elts {
-                    Self::collect_target_names(
-                        match element {
-                            ast::Expr::Starred(star) => &star.value,
-                            _ => element,
-                        },
-                        names,
-                    )?;
-                }
-            }
-            _ => return Err(unsupported("unpacking target")),
-        }
-        Ok(())
+        try_collect_target_names(target, &mut self.locals).map_err(invalid_target)
     }
 
     fn arm(
