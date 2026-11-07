@@ -2733,6 +2733,9 @@ pub(super) fn call(
         };
     }
     #[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
+    if name == "_socket.gethostbyname_ex" {
+        return socket::call(ctx, "gethostbyname_ex", args, kwargs);
+    }
     if name == "_socket.getprotobyname" {
         return socket::getprotobyname(ctx, args, kwargs);
     }

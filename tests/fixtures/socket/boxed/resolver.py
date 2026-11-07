@@ -51,6 +51,23 @@ else:
     raise AssertionError("surrogate service was accepted")
 
 loopback = "127.0.0.1"
+unicode_loopback = "１２７。０．０｡１"
+assert socket.gethostbyname(unicode_loopback) == loopback
+assert socket.gethostbyname_ex is _socket.gethostbyname_ex
+assert socket.gethostbyname_ex.__module__ == "_socket"
+assert socket.gethostbyname_ex(unicode_loopback) == _socket.gethostbyname_ex(loopback)
+assert raw_getaddrinfo(unicode_loopback, 80, socket.AF_INET, socket.SOCK_STREAM,
+                       0, socket.AI_NUMERICHOST) == [raw]
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+    udp.bind((unicode_loopback, 0))
+    assert udp.getsockname()[0] == loopback
+try:
+    socket.getfqdn("x..é")
+except UnicodeEncodeError as exc:
+    assert (exc.encoding, exc.object, exc.start, exc.end) == ("idna", "x..é", 2, 3)
+    assert exc.__notes__ == ["encoding with 'idna' codec failed"]
+else:
+    raise AssertionError("getfqdn accepted an empty IDNA label")
 assert socket.gethostbyname(bytearray(b"127.0.0.1")) == loopback
 name, aliases, addresses = socket.gethostbyaddr(loopback)
 assert name and isinstance(aliases, list) and loopback in addresses
