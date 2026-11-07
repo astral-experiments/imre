@@ -737,6 +737,7 @@ impl Error {
     pub(crate) fn into_parts(self) -> (&'static str, Rendered) {
         let kind = match self.kind {
             Kind::BadGzipFile => "gzip.BadGzipFile",
+            Kind::ZstdError => "compression.zstd.ZstdError",
             Kind::ZlibError => "zlib.error",
             kind => kind.name(),
         };

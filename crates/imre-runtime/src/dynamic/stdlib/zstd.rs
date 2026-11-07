@@ -1,8 +1,6 @@
 //! Incremental Zstandard streams for compression.zstd.
-pub(in crate::dynamic) mod streams;
-
 use super::{Context, Error, Id, NONE, Result, Value, builtins, os, value};
-use crate::Shared;
+use crate::{Shared, zstd_streams as streams};
 use num_traits::ToPrimitive;
 use std::cell::RefCell;
 
@@ -158,6 +156,7 @@ pub(super) fn call(
                         state
                             .borrow_mut()
                             .compress(ctx.native_buffer_bytes(view)?, mode)
+                            .map_err(Error::from)
                     })?
                 }
                 "flush" => {

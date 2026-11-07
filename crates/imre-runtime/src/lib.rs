@@ -44,6 +44,7 @@ mod signals;
 mod string_cursor;
 mod string_owner;
 mod sumprod;
+mod zstd_streams;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
 type ListOwner = Shared<List>;

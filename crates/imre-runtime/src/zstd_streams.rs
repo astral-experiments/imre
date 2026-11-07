@@ -1,15 +1,11 @@
 //! Incremental Zstandard streams. Each object owns one libzstd context.
-use super::{Error, Result};
+use crate::{Error, Kind, Result};
 use zstd_safe::zstd_sys::ZSTD_EndDirective::{ZSTD_e_continue, ZSTD_e_end, ZSTD_e_flush};
 use zstd_safe::{CCtx, CParameter, DCtx, InBuffer, OutBuffer, ResetDirective};
 
-fn memory_error() -> Error {
-    Error::new("MemoryError", "")
-}
-
 fn zstd_error(operation: &str, code: usize) -> Error {
     Error::new(
-        "compression.zstd.ZstdError",
+        Kind::ZstdError,
         format!("{operation}: {}", zstd_safe::get_error_name(code)),
     )
 }
@@ -23,7 +19,7 @@ fn output_block(
 ) -> Result<(usize, bool)> {
     let start = bytes.len();
     let space = (32 * 1024).min(limit - start);
-    bytes.try_reserve(space).map_err(|_| memory_error())?;
+    bytes.try_reserve(space).map_err(|_| Error::allocation())?;
     bytes.resize(start + space, 0);
     let mut out = OutBuffer::around(&mut bytes[start..]);
     let remaining = pump(&mut out)?;
@@ -32,25 +28,21 @@ fn output_block(
     Ok((remaining, written == space))
 }
 
-pub(in crate::dynamic) struct Compressor {
+pub(crate) struct Compressor {
     stream: CCtx<'static>,
-    pub(in crate::dynamic) last_mode: i32,
+    pub(crate) last_mode: i32,
 }
 
 impl Compressor {
     pub(super) fn new(level: Option<i32>) -> Result<Self> {
-        let mut stream = CCtx::try_create().ok_or_else(|| {
-            Error::new(
-                "compression.zstd.ZstdError",
-                "Unable to create ZSTD_CCtx instance.",
-            )
-        })?;
+        let mut stream = CCtx::try_create()
+            .ok_or_else(|| Error::new(Kind::ZstdError, "Unable to create ZSTD_CCtx instance."))?;
         if let Some(level) = level {
             let min = zstd_safe::min_c_level();
             let max = zstd_safe::max_c_level();
             if !(min..=max).contains(&level) {
                 return Err(Error::new(
-                    "ValueError",
+                    Kind::ValueError,
                     format!("illegal compression level {level}; the valid range is [{min}, {max}]"),
                 ));
             }
@@ -67,7 +59,7 @@ impl Compressor {
     pub(super) fn set_pledged_input_size(&mut self, size: Option<u64>) -> Result<()> {
         if size.is_some_and(|n| n >= zstd_safe::CONTENTSIZE_ERROR) {
             return Err(Error::new(
-                "ValueError",
+                Kind::ValueError,
                 format!(
                     "size argument should be a positive int less than {}",
                     zstd_safe::CONTENTSIZE_ERROR
@@ -76,7 +68,7 @@ impl Compressor {
         }
         if self.last_mode != 2 {
             return Err(Error::new(
-                "ValueError",
+                Kind::ValueError,
                 "set_pledged_input_size() method must be called when last_mode == FLUSH_FRAME",
             ));
         }
@@ -93,7 +85,7 @@ impl Compressor {
             2 => ZSTD_e_end,
             _ => {
                 return Err(Error::new(
-                    "ValueError",
+                    Kind::ValueError,
                     "mode argument wrong value, it should be one of ZstdCompressor.CONTINUE, ZstdCompressor.FLUSH_BLOCK, ZstdCompressor.FLUSH_FRAME.",
                 ));
             }
@@ -122,7 +114,7 @@ impl Compressor {
     }
 }
 
-pub(in crate::dynamic) struct Decompressor {
+pub(crate) struct Decompressor {
     stream: DCtx<'static>,
     pending: Vec<u8>,
     offset: usize,
@@ -132,12 +124,8 @@ pub(in crate::dynamic) struct Decompressor {
 
 impl Decompressor {
     pub(super) fn new() -> Result<Self> {
-        let stream = DCtx::try_create().ok_or_else(|| {
-            Error::new(
-                "compression.zstd.ZstdError",
-                "Unable to create ZSTD_DCtx instance.",
-            )
-        })?;
+        let stream = DCtx::try_create()
+            .ok_or_else(|| Error::new(Kind::ZstdError, "Unable to create ZSTD_DCtx instance."))?;
         Ok(Self {
             stream,
             pending: Vec::new(),
@@ -150,7 +138,7 @@ impl Decompressor {
     pub(super) fn decompress(&mut self, data: &[u8], max_length: usize) -> Result<Vec<u8>> {
         if self.eof {
             return Err(Error::new(
-                "EOFError",
+                Kind::EOFError,
                 "Already at the end of a Zstandard frame.",
             ));
         }
@@ -172,7 +160,7 @@ impl Decompressor {
         }
         self.pending
             .try_reserve(data.len())
-            .map_err(|_| memory_error())?;
+            .map_err(|_| Error::allocation())?;
         self.pending.extend_from_slice(data);
         let mut input = InBuffer {
             src: &self.pending[self.offset..],
