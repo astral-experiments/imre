@@ -14,6 +14,7 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 pub(crate) enum Kind {
     Ordinary,
     ExactType,
+    DeclaredArgument,
     ReturnType,
     Object,
     ScopedObject,
@@ -152,6 +153,21 @@ impl Failure<&'static str> {
 }
 
 impl Failure {
+    pub(super) fn at_callable_argument(
+        mut self,
+        site: TextRange,
+        declared: impl FnOnce() -> bool,
+    ) -> Self {
+        if let Self::Diagnostic(d) = &mut self
+            && d.kind == Kind::ExactType
+            && d.position.as_ref().is_some_and(|p| p.range == site)
+            && declared()
+        {
+            d.kind = Kind::DeclaredArgument;
+        }
+        self
+    }
+
     pub(super) fn classify(mut self, kind: Kind) -> Self {
         if let Self::Diagnostic(d) = &mut self {
             d.kind = kind;

@@ -403,6 +403,21 @@ impl Session {
         untyped_generator_local(index, function).is_some()
     }
 
+    fn sole_binding(
+        &self,
+        module: usize,
+        expression: &Expr,
+    ) -> Option<ty_python_core::definition::Definition<'_>> {
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        let scope = index.try_expression_scope_id(expression)?;
+        let use_id = index.try_expression_use_id(expression.into())?;
+        let mut bindings = index.use_def_map(scope).bindings_at_use(use_id);
+        let first = bindings.next()?.binding.definition()?;
+        bindings.next().is_none().then_some(first)
+    }
+
     /// Fold a local import only while that statement is the sole binding reaching this read.
     pub(crate) fn has_import_binding(
         &self,
@@ -411,21 +426,39 @@ impl Session {
         alias: TextRange,
         parsed: &ParsedModuleRef,
     ) -> bool {
-        self.hint_reads.set(self.hint_reads.get() + 1);
+        self.sole_binding(module, expression)
+            .is_some_and(|def| def.kind(&self.db).target_range(parsed) == alias)
+    }
+
+    /// Check the reaching declaration of the original callee. A forwarded call can
+    /// reuse an original call's index while substituting a different function.
+    pub(crate) fn calls_annotated_parameter(
+        &self,
+        module: usize,
+        call: &ruff_python_ast::ExprCall,
+        operand: TextRange,
+        parsed: &ParsedModuleRef,
+    ) -> bool {
         let index =
             ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
-        let Some(scope) = index.try_expression_scope_id(expression) else {
+        if index
+            .try_expression_scope_id(&ruff_python_ast::ExprRef::Call(call))
+            .is_none()
+        {
+            return false;
+        }
+        let ruff_python_ast::AnyRootNodeRef::Expr(Expr::Call(original)) =
+            parsed.get_by_index(call.node_index.load())
+        else {
             return false;
         };
-        let Some(use_id) = index.try_expression_use_id(expression.into()) else {
-            return false;
-        };
-        let mut bindings = index.use_def_map(scope).bindings_at_use(use_id);
-        bindings
-            .next()
-            .and_then(|b| b.binding.definition())
-            .is_some_and(|def| def.kind(&self.db).target_range(parsed) == alias)
-            && bindings.next().is_none()
+        original.range() == call.range()
+            && original.func == call.func
+            && original.arguments.range().contains_range(operand)
+            && self.sole_binding(module, &original.func).is_some_and(|def| {
+                matches!(def.kind(&self.db), ty_python_core::definition::DefinitionKind::Parameter(p)
+                    if p.annotation(parsed).is_some())
+            })
     }
 
     /// Only eager global reads with no reaching definition can fall back to a builtin here.

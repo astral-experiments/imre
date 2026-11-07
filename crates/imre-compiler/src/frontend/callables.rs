@@ -606,6 +606,12 @@ impl Checker<'_> {
                 "indirect calls require the full positional Callable signature; keywords and omitted defaults are unsupported",
             ));
         }
+        let local = call
+            .func
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()));
+        let local_callable = matches!(callable.kind, ExprKind::Local(slot)
+            if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
         let values = call
             .arguments
@@ -617,7 +623,24 @@ impl Checker<'_> {
                 if slot == 0 && index_callable {
                     self.integer_index(argument)
                 } else {
-                    self.expr_expected(argument, ty)
+                    calls::Supplied::Source(argument).check_with(
+                        self,
+                        ty,
+                        false,
+                        |checker, value, expected, site| {
+                            checker.coerce(value, expected, site).map_err(|error| {
+                                error.at_callable_argument(site.range(), || {
+                                    local_callable
+                                        && checker.graph.session.calls_annotated_parameter(
+                                            checker.module,
+                                            call,
+                                            site.range(),
+                                            &checker.graph.modules[checker.module].parsed,
+                                        )
+                                })
+                            })
+                        },
+                    )
                 }
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -636,6 +659,22 @@ impl Checker<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn callable_parameter_owns_its_argument_in_a_checked_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main.py");
+        let declarations = "import ast\nfrom collections.abc import Callable\ndef take(x: str) -> str: return x\ndef apply(take: Callable[[int], int]) -> int:\n";
+        std::fs::write(&main, format!("{declarations}    return take('x')\n")).unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(
+            error.contains("main.py:5:17: Imre: expected int, got str"),
+            "{error}"
+        );
+
+        std::fs::write(&main, format!("{declarations}    return take(1)\n")).unwrap();
+        crate::check_file(&main, None).unwrap();
+    }
+
     #[test]
     fn eager_coroutine_factories_remain_direct_calls() {
         let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\ndef factory(x: int) -> Awaitable[int]:\n    return cold(x)\n";

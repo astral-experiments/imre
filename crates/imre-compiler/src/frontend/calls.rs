@@ -195,10 +195,27 @@ impl<'a> Supplied<'a> {
         ty: Type,
         sign_only: bool,
     ) -> Result<Expr, String> {
-        match self {
-            Self::Source(node) => checker.direct_argument(node, ty, sign_only),
-            Self::Field(value, node) => checker.direct_value(value, node, ty, sign_only),
+        self.check_with(checker, ty, sign_only, |checker, value, ty, site| {
+            checker.direct_value(value, site, ty, sign_only)
+        })
+    }
+
+    /// Check an operand in context. The destination sees only its evaluated value.
+    pub(super) fn check_with(
+        self,
+        checker: &mut Checker<'_>,
+        ty: Type,
+        sign_only: bool,
+        coerce: impl Fn(&Checker<'_>, Expr, Type, &ast::Expr) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
+        if let Self::Source(node) = self
+            && !sign_only
+        {
+            return checker.expr_in_context(node, ty, |_, _| false, coerce);
         }
+        let node = self.site();
+        let value = self.value(checker)?;
+        coerce(checker, value, ty, node)
     }
 }
 
