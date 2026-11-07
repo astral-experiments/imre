@@ -667,7 +667,12 @@ fn emit_program(
         } else {
             (emitter.output.entry, "main".to_owned(), "i32")
         };
-        let attrs = if sanitize { " sanitize_address" } else { "" };
+        // Keep native function entries aligned to a cache line as the linked runtime changes.
+        let attrs = if sanitize {
+            " sanitize_address"
+        } else {
+            " align 64"
+        };
         emitter.output.common().push('\n');
         emitter
             .output

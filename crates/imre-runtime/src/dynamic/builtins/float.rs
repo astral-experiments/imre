@@ -315,6 +315,52 @@ pub(in crate::dynamic) fn from_numeric_slots(ctx: &mut Context, value: Id) -> Re
 }
 
 /// Sum a boxed iterable, retaining low-order bits independently on each numerical axis.
+/// Read only exact integer and boolean operands that fit the native accumulator.
+fn small_integer(value: &Value) -> Option<i64> {
+    match value {
+        Value::Int(value) => value.to_i64(),
+        Value::Bool(value) => Some(i64::from(*value)),
+        _ => None,
+    }
+}
+
+/// Reduce a native iterator without advancing it until every operand is known to be exact.
+#[inline(never)]
+fn integer_slice_sum(
+    ctx: &Context,
+    initial: &crate::Int,
+    first: Id,
+    items: IteratorSlice<'_>,
+) -> Option<crate::Int> {
+    let add = |sum: i64, &id: &Id| sum.checked_add(small_integer(ctx.heap.get(id))?);
+    match items {
+        IteratorSlice::Values(items) => std::iter::once(&first)
+            .chain(items)
+            .try_fold(initial.to_i64()?, add)
+            .map(crate::Int::from),
+        IteratorSlice::Reversed(items) => std::iter::once(&first)
+            .chain(items.iter().rev())
+            .try_fold(initial.to_i64()?, add)
+            .map(crate::Int::from),
+        IteratorSlice::Bytes(bytes) | IteratorSlice::ReversedBytes(bytes) => {
+            // Each chunk vectorizes in a machine word. Even the largest byte slice fits in i128.
+            let mut subtotal = i128::from(small_integer(ctx.heap.get(first))?);
+            for chunk in bytes.chunks(1 << 16) {
+                subtotal += i128::from(chunk.iter().copied().map(i64::from).sum::<i64>());
+            }
+            if let Some(start) = initial.to_i64() {
+                let result = i128::from(start) + subtotal;
+                return Some(match i64::try_from(result) {
+                    Ok(value) => crate::Int::from(value),
+                    Err(_) => crate::Int::new(result.into()),
+                });
+            }
+            Some(crate::Int::new(initial.big().as_ref() + subtotal))
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id> {
     let iterator = ctx.iterator(source)?;
     let mut total = start.unwrap_or_else(|| ctx.int(0));
@@ -341,28 +387,19 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
     };
 
     if let Value::Int(initial) = ctx.heap.get(total)
+        && matches!(ctx.heap.get(iterator), Value::Iterator { .. })
+        && let Some(sum) = integer_slice_sum(ctx, initial, item, ctx.iterator_remaining(iterator)?)
+    {
+        if let Value::Iterator { sequence, .. } = ctx.heap.get_mut(iterator) {
+            *sequence = None;
+        }
+        ctx.heap.release_temporaries_since(mark);
+        return Ok(ctx.alloc(Value::Int(sum)));
+    }
+
+    if let Value::Int(initial) = ctx.heap.get(total)
         && let Some(mut integer) = initial.to_i64()
     {
-        let small_integer = |value: &Value| match value {
-            Value::Int(value) => value.to_i64(),
-            Value::Bool(value) => Some(i64::from(*value)),
-            _ => None,
-        };
-        if matches!(ctx.heap.get(iterator), Value::Iterator { .. })
-            && let IteratorSlice::Values(items) = ctx.iterator_remaining(iterator)?
-            && let Some(sum) = std::iter::once(&item)
-                .chain(items)
-                .try_fold(integer, |sum, &id| {
-                    sum.checked_add(small_integer(ctx.heap.get(id))?)
-                })
-        {
-            // These exact integer additions cannot call Python or allocate intermediate values.
-            if let Value::Iterator { sequence, .. } = ctx.heap.get_mut(iterator) {
-                *sequence = None;
-            }
-            ctx.heap.release_temporaries_since(mark);
-            return Ok(ctx.int(sum));
-        }
         loop {
             let Some(next) =
                 small_integer(ctx.heap.get(item)).and_then(|value| integer.checked_add(value))

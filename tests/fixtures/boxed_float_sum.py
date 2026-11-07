@@ -29,6 +29,16 @@ def current():
     except ValueError as error:
         print(str(error))
 
+    for values in ([1, True, 3, 4], (1, True, 3, 4), (2**63, -1, 1), b"abc"):
+        reverse = reversed(values)
+        print(next(reverse), sum(reverse, 5), list(reverse))
+    for start in (2**63 - 1, 2**100, -(2**100)):
+        data = iter(b"\xff\x02")
+        assert sum(data, start) == start + 257
+        assert list(data) == []
+    remaining = iter(bytearray([1, 250, 3]))
+    print(next(remaining), sum(remaining, 2**63 - 100), list(remaining))
+
     class Extra:
         def __radd__(self, value):
             return ('rounded', value)
