@@ -124,7 +124,6 @@ fn repeated_writes(plan: &Plan<'_>, depth: usize) -> HashSet<String> {
 struct Reads {
     names: HashSet<String>,
     bound: Vec<HashSet<String>>,
-    nested_lambdas: bool,
 }
 
 /// Finds lexical free reads for capture rejection, including through nested
@@ -133,7 +132,6 @@ pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> Hash
     let mut reads = Reads {
         names: HashSet::new(),
         bound: vec![bound],
-        nested_lambdas: true,
     };
     reads.visit_expr(expression);
     reads.names
@@ -143,7 +141,6 @@ pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String>
     let mut reads = Reads {
         names: HashSet::new(),
         bound: Vec::new(),
-        nested_lambdas: true,
     };
     reads.visit_function(function);
     reads.names
@@ -170,20 +167,18 @@ impl<'a> Visitor<'a> for Reads {
 
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
         if let ast::Expr::Lambda(lambda) = expression {
-            if self.nested_lambdas {
-                let mut bound = narrowing::expression_assignments(&lambda.body);
-                if let Some(parameters) = &lambda.parameters {
-                    for parameter in parameters.iter_non_variadic_params() {
-                        if let Some(default) = &parameter.default {
-                            self.visit_expr(default);
-                        }
-                        bound.insert(parameter.name().to_string());
+            let mut bound = narrowing::expression_assignments(&lambda.body);
+            if let Some(parameters) = &lambda.parameters {
+                for parameter in parameters.iter_non_variadic_params() {
+                    if let Some(default) = &parameter.default {
+                        self.visit_expr(default);
                     }
+                    bound.insert(parameter.name().to_string());
                 }
-                self.bound.push(bound);
-                self.visit_expr(&lambda.body);
-                self.bound.pop();
             }
+            self.bound.push(bound);
+            self.visit_expr(&lambda.body);
+            self.bound.pop();
         } else if let Some(plan) = Plan::from_expr(expression) {
             self.visit_expr(plan.outer);
             self.bound.push(plan.target_names());
@@ -468,7 +463,6 @@ impl Checker<'_> {
         let mut reads = Reads {
             names: HashSet::new(),
             bound: vec![targets.clone()],
-            nested_lambdas: false,
         };
         display.visit_body(|expr| reads.visit_expr(expr));
         let mut captures = reads.names.into_iter().collect::<Vec<_>>();
