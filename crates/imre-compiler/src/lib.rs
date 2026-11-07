@@ -1031,7 +1031,7 @@ mod tests {
                     "1:1: Imre: cannot infer function return type; add an annotation; recursive calls remain unsupported",
                 ),
             ] {
-                let path = directory.join(file);
+                let path = directory.join(file).canonicalize().unwrap();
                 let error = super::check_file(&path, None).unwrap_err();
                 assert_eq!(error, format!("{}:{diagnostic}", path.display()));
             }
