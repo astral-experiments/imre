@@ -214,6 +214,19 @@ def check_utf8_incremental_encoder():
     assert factory("ignore").encode("\ud800Z") == b"Z"
 
 
+def check_utf8_stream_readers():
+    from io import BytesIO
+
+    data = codecs.BOM_UTF8 + "AΩ".encode() + codecs.BOM_UTF8
+    for name, expected in (("utf8", "\ufeffAΩ\ufeff"), ("utf_8_sig", "AΩ\ufeff")):
+        factory = codecs.getreader(name)
+        assert factory is codecs.lookup(name).streamreader
+        reader = factory(BytesIO(data))
+        assert reader.read(1) + reader.read() == expected
+        reader.seek(0)
+        assert reader.read() == expected
+
+
 def check_charmap_factories():
     from encodings import cp1252
     from io import BytesIO
@@ -327,6 +340,7 @@ def current():
     check_utf8_error_handler()
     check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
+    check_utf8_stream_readers()
     check_charmap_factories()
     check_incremental_decoder_factory()
     check_text_encoding_flag()

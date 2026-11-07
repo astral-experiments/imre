@@ -595,7 +595,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo, spelling: Id) -> Result
     };
     let encoder = factory(ctx, "IncrementalEncoder")?;
     ctx.heap.keep(encoder);
-    let reader = if matches!(codec, Codec::CodePage(_)) {
+    let reader = if matches!(codec, Codec::CodePage(_) | Codec::Utf8 { .. }) {
         factory(ctx, "StreamReader")?
     } else {
         NONE
