@@ -11917,6 +11917,40 @@ impl<'a> Checker<'a> {
         if name == "str" && args.len() == 1 {
             return self.checked_string(args.into_iter().next().unwrap(), call);
         }
+        if self.unshadowed_builtin(&call.func, "str")
+            && call.arguments.keywords.is_empty()
+            && let [bytes, encoding] = args.as_slice()
+            && bytes.ty == Type::Bytes
+            && let ExprKind::Str(name) = &encoding.kind
+            && ["latin-1", "latin1", "iso-8859-1", "iso8859-1"]
+                .iter()
+                .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            // Evaluate the input before acquiring the builtin codec. str(bytes, encoding)
+            // decodes the buffer directly, including when Python overrides bytes.decode.
+            let slot = self.hidden(Type::Bytes);
+            let codec = Expr {
+                ty: Type::CodecInfo,
+                kind: ExprKind::Builtin(
+                    Builtin::CodecLookup,
+                    vec![Self::string_value(encoding.clone())],
+                ),
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(slot, bytes.clone())],
+                    value: Box::new(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::CodecDecode,
+                            vec![codec, self.local(slot), unpacking::string("strict")],
+                        ),
+                    }),
+                    clear: vec![slot],
+                },
+            });
+        }
         if tuple_dir && self.types.is_plain_or_declared_tuple(args[0].ty) {
             return Err(self.object_builtin_error("dir", call));
         }
