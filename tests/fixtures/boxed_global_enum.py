@@ -1,4 +1,4 @@
-from enum import Enum, IntEnum, IntFlag, StrEnum, global_enum, global_enum_repr, global_str
+from enum import _simple_enum, Enum, IntEnum, IntFlag, StrEnum, global_enum, global_enum_repr, global_str
 
 
 SCARLET = None
@@ -75,6 +75,31 @@ def current():
         HIGH = 2
     assert global_enum(NamedBits, True) is NamedBits
     assert str(NamedBits(3)) == "LOW|HIGH" and str(NamedBits(4)) == "NamedBits(4)"
+
+    # Converting an existing class creates an enum and preserves the template's hierarchy.
+    owners = []
+    class Descriptor:
+        def __get__(self, obj, owner=None):
+            return self
+        def __set_name__(self, owner, name):
+            owners.append((owner, "READ" in vars(owner)))
+
+    class Template:
+        label = Descriptor()
+        READ = 1
+        ALIAS = 1
+        EXECUTE = 4
+
+    class Child(Template):
+        pass
+
+    flags = _simple_enum(IntFlag)(Template)
+    assert owners == [(Template, True), (flags, False)]
+    assert flags is not Template and flags.__bases__ == (IntFlag,)
+    assert flags.__mro__[1:] == Bits.__mro__[1:]
+    assert Child.__bases__ == (Template,) and type(Child.READ) is int
+    assert flags.ALIAS is flags.READ and flags(3).name == "READ|2"
+    assert flags._numeric_repr_(2) == "2" and int(~flags.READ) == 6
 
     # Decorating the base affects enum classes declared before and after the call.
     class Existing(IntEnum):
