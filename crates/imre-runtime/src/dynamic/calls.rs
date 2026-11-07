@@ -4975,6 +4975,9 @@ impl Context {
                     }
                 }
                 let class = constructor.unwrap_or_else(|| self.builtin("module"));
+                if name == super::import_meta::BUILTIN_MODULE_NAMES {
+                    self.materialize_builtin_module_names(scope);
+                }
                 return self.module_instance_attribute(obj, class, scope, name);
             }
             Value::Class {
@@ -5582,6 +5585,9 @@ impl Context {
                 super::method_decorator::update_attribute(self, obj, dictionary, name, None)
             }
             Value::Module { scope, .. } => {
+                if name == super::import_meta::BUILTIN_MODULE_NAMES {
+                    self.materialize_builtin_module_names(scope);
+                }
                 self.update_module_annotations(scope, name, None)?;
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));

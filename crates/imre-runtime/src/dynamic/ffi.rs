@@ -808,6 +808,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         codec_entries: Default::default(),
         warning_state: None,
         frozen_override: 0,
+        pending_builtin_module_names: None,
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,

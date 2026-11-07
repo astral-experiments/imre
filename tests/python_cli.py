@@ -3745,6 +3745,17 @@ for name in ("md4", "ripemd160"):
         ):
             method_entry.write_text(body + "\n")
             compare("-B", method_entry)
+        compare(
+            "-B", "-c",
+            "from sys import builtin_module_names\n"
+            "assert 'sys' in builtin_module_names\n",
+        )
+        compare(
+            "-B", "-c",
+            "module = __import__('sys')\n"
+            "del module.builtin_module_names\n"
+            "assert 'builtin_module_names' not in vars(module)\n",
+        )
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_compound.py",
@@ -3787,6 +3798,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
             "boxed_sys_byteorder.py",
+            "boxed_sys_builtin_module_names.py",
             "boxed_sys_stdlib_module_names.py",
             "boxed_sys_float_info.py",
             "boxed_sys_hash_info.py",

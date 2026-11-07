@@ -10,6 +10,8 @@ use super::{
     value::{Code, Error, Id, NONE, Result, Value},
 };
 
+pub(super) const BUILTIN_MODULE_NAMES: &str = "builtin_module_names";
+
 impl Context {
     /// The bootstrap modules are initialized before user code can replace any import registry.
     pub(super) fn install_import_registry(&mut self) -> Result<()> {
@@ -105,6 +107,33 @@ impl Context {
     fn sealed_native(&self, name: &str) -> bool {
         self.is_frozen(name)
             || (stdlib::is_module(name) && !imre_ast::providers::is_native_fallback(name))
+    }
+
+    /// Publish the inventory before exposing the original sys namespace.
+    pub(super) fn materialize_builtin_module_names(&mut self, scope: Id) {
+        if self.pending_builtin_module_names != Some(scope) {
+            return;
+        }
+        self.pending_builtin_module_names = None;
+        if self.scope_name(scope, BUILTIN_MODULE_NAMES).is_some() {
+            return;
+        }
+        let names = self.builtin_module_names();
+        self.bind(scope, BUILTIN_MODULE_NAMES, names);
+    }
+
+    fn builtin_module_names(&mut self) -> Id {
+        let mut names: Vec<_> = imre_ast::providers::module_provider_names()
+            .filter(|name| {
+                !self.is_frozen(name)
+                    && self.bundled_registration(name).is_none()
+                    && stdlib::is_module(name)
+            })
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        let names = names.into_iter().map(|name| self.text(name)).collect();
+        self.heap.packed_tuple(names, false)
     }
 
     /// Look up a module owned by this loader, including native modules without a Python body.
