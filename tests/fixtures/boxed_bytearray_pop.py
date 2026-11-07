@@ -46,6 +46,3 @@ def current():
     else:
         raise AssertionError("popped an empty bytearray")
     print("bytearray pop")
-
-
-current()
