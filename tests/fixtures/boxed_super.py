@@ -108,6 +108,7 @@ def current():
     check_super_initialization()
     check_native_classmethod()
     check_super_descriptor()
+    check_metaclass_setattr()
     check_subclass_hooks()
 
 
@@ -168,6 +169,44 @@ def check_native_base_lookup():
     else:
         raise AssertionError("accepted an unrelated receiver")
     assert unrelated.args == ("original",)
+
+
+def check_metaclass_setattr():
+    writes = []
+
+    class Field:
+        def __set__(self, cls, value):
+            writes.append((cls, value))
+
+    class Meta(type):
+        field = Field()
+
+        def __setattr__(cls, name, value):
+            writes.append(name)
+            return super().__setattr__(name, value)
+
+    class Target(metaclass=Meta):
+        pass
+
+    marker = object()
+    Target.field = marker
+    assert type.__setattr__(Target, "field", marker) is None
+    assert writes == ["field", (Target, marker), (Target, marker)]
+    Target.other = marker
+    assert Target.__dict__["other"] is marker
+    assert "field" not in Target.__dict__
+    mro = Target.__mro__
+    try:
+        type.__setattr__(Target, "__mro__", ())
+    except AttributeError as exc:
+        assert exc.args == ("attribute '__mro__' of 'type' objects is not writable",)
+    else:
+        raise AssertionError("wrote a read-only type field")
+    assert Target.__mro__ is mro and "__mro__" not in Target.__dict__
+
+    qualified = "Target" + chr(0xD800)
+    type.__setattr__(Target, "__qualname__", qualified)
+    assert Target.__qualname__ is qualified
 
 
 def check_super_descriptor():
