@@ -71,10 +71,22 @@ pub(super) fn annotation_reads(
     uses.direct
 }
 
+/// Reads that reach the containing function and assignment expressions that bind there.
+pub(super) fn comprehension_scope(
+    expression: &ast::Expr,
+    string_annotations: bool,
+) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut uses = Uses::new(string_annotations);
+    uses.visit_expr(expression);
+    uses.direct.append(&mut uses.nested);
+    (uses.direct, uses.walrus)
+}
+
 #[derive(Default)]
 struct Uses {
     direct: BTreeSet<String>,
     nested: BTreeSet<String>,
+    walrus: BTreeSet<String>,
     string_annotations: bool,
 }
 
@@ -128,6 +140,7 @@ impl Uses {
         let mut bounds = ClosureNames::default();
         for (index, generator) in generators.iter().enumerate() {
             bounds.visit_expr(&generator.target);
+            child.visit_expr(&generator.target);
             if index == 0 {
                 self.visit_expr(&generator.iter);
             } else {
@@ -140,6 +153,8 @@ impl Uses {
         for item in items {
             child.visit_expr(item);
         }
+        // Assignment expressions escape comprehension scopes, but stop at a lambda or function.
+        self.walrus.append(&mut child.walrus);
         self.child(child, bounds, None, false);
     }
 }
@@ -181,6 +196,12 @@ impl<'a> Visitor<'a> for Uses {
             ast::Expr::Name(n) if n.ctx == ast::ExprContext::Load => {
                 let name = n.id.as_str();
                 self.direct.insert(name.to_owned());
+            }
+            ast::Expr::Named(n) => {
+                if let ast::Expr::Name(target) = &*n.target {
+                    self.walrus.insert(target.id.to_string());
+                }
+                self.visit_expr(&n.value);
             }
             ast::Expr::Lambda(f) => {
                 if let Some(params) = &f.parameters {

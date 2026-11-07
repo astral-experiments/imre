@@ -191,7 +191,9 @@ impl<'a> Visitor<'a> for Scope {
                 }
             }
             ast::Stmt::AnnAssign(a) => {
-                self.visit_expr(&a.target);
+                if crate::annotation_visits_target(a) {
+                    self.visit_expr(&a.target);
+                }
                 if let Some(value) = &a.value {
                     self.visit_expr(value);
                 }
