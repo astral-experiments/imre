@@ -4252,9 +4252,10 @@ impl<'a> Loader<'a> {
         let mut search_roots = Vec::new();
         let mut zip_sources = HashMap::new();
         let mut zip_inputs = crate::SourceInputs::default();
+        let mut inputs = crate::SourceInputs::default();
         for (index, path) in extension_paths.iter().enumerate() {
+            let logical = std::path::absolute(path).map_err(|e| e.to_string())?;
             if python_archive_indices.contains(&index) {
-                let logical = std::path::absolute(path).map_err(|e| e.to_string())?;
                 if let std::collections::hash_map::Entry::Vacant(entry) = zip_sources.entry(logical)
                 {
                     let archive = crate::zip_entry::ZipSources::open(entry.key(), &mut zip_inputs)?;
@@ -4272,12 +4273,12 @@ impl<'a> Loader<'a> {
                     path.display()
                 ));
             }
+            inputs.directories.push((logical, directory.clone()));
             if !search_roots.contains(&directory) {
                 search_roots.push(directory);
             }
         }
         let archive_roots = search_roots.len();
-        let mut inputs = crate::SourceInputs::default();
         for site in installed_dirs {
             let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
             inputs
@@ -6507,6 +6508,31 @@ mod native_tests {
                 .unwrap()
                 .contains("cannot resolve first-party module")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changing_an_extension_root_invalidates_the_compiled_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let entry = root.join("main.py");
+        fs::write(&entry, "from helper import value\nprint(value)\n").unwrap();
+        for (name, value) in [("first", 23), ("second", 41)] {
+            let directory = root.join(name);
+            fs::create_dir(&directory).unwrap();
+            fs::write(directory.join("helper.py"), format!("value = {value}\n")).unwrap();
+        }
+        let selected = root.join("selected");
+        std::os::unix::fs::symlink(root.join("first"), &selected).unwrap();
+        let options = crate::CompileOptions {
+            extension_paths: vec![selected.clone()],
+            ..Default::default()
+        };
+        let compilation = crate::compile_file(&entry, Some(&root), &options).unwrap();
+        assert!(compilation.source_inputs.fresh());
+        fs::remove_file(&selected).unwrap();
+        std::os::unix::fs::symlink(root.join("second"), &selected).unwrap();
+        assert!(!compilation.source_inputs.fresh());
     }
 
     #[test]
