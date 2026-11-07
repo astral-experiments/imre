@@ -274,13 +274,14 @@ pub(in crate::dynamic) enum Operation {
 }
 
 macro_rules! operator_functions {
-    ($($name:literal => $operation:expr),* $(,)?) => {
+    ($($name:literal => $operation:expr,)* checked { $($plain:literal => $checked:expr),* $(,)? }) => {
         impl Operation {
-            const NAMES: &[&str] = &[$($name),*];
+            const NAMES: &[(&str, bool)] = &[$(($name, true),)* $(($plain, false)),*];
 
             pub(in crate::dynamic) fn named(name: &str) -> Option<Self> {
                 Some(match name {
                     $($name => $operation,)*
+                    $($plain => $checked,)*
                     _ => return None,
                 })
             }
@@ -295,10 +296,10 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, owner: Id, scope: Id, modul
     if module == "_operator" {
         super::hmac::bind_compare(ctx, owner, scope, "_operator._compare_digest");
     }
-    for &name in Operation::NAMES {
+    for &(name, with_alias) in Operation::NAMES {
         let function = ctx.builtin(&format!("operator.{name}"));
         ctx.bind(scope, name, function);
-        if module == "operator" && name != "length_hint" {
+        if module == "operator" && with_alias && name != "length_hint" {
             let alias = format!("__{}__", name.trim_end_matches('_'));
             ctx.bind(scope, &alias, function);
         }

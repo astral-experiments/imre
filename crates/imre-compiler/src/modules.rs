@@ -2388,6 +2388,12 @@ impl IntrinsicModule {
             (Self::Operator | Self::OperatorNative, "add" | "__add__") => {
                 Intrinsic::ObjectRuntimeExport("operator.add")
             }
+            (Self::Operator | Self::OperatorNative, "is_") => {
+                Intrinsic::ScopedObjectExport("operator.is_")
+            }
+            (Self::Operator | Self::OperatorNative, "is_not") => {
+                Intrinsic::ScopedObjectExport("operator.is_not")
+            }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator | Self::OperatorNative, "methodcaller") => {

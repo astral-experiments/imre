@@ -214,7 +214,7 @@ fn boxed_unittest_export(name: &str) -> bool {
 
 fn boxed_operator(name: &str) -> bool {
     macro_rules! operator_functions {
-        ($($function:literal => $operation:expr),* $(,)?) => { &[$($function),*] };
+        ($($function:literal => $operation:expr,)* checked { $($plain:literal => $checked:expr),* $(,)? }) => { &[$($function),*] };
     }
     const FUNCTIONS: &[&str] = include!("../../../imre-runtime/native/operator-functions.rs");
     matches!(name, "attrgetter" | "itemgetter")

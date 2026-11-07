@@ -4551,6 +4551,11 @@ impl Context {
     }
 
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        match op {
+            "is" => return Ok(builtins::boolean(a == b)),
+            "is not" => return Ok(builtins::boolean(a != b)),
+            _ => {}
+        }
         if matches!(op, "==" | "!=")
             && let (Value::Int(left), Value::Int(right)) = (self.heap.get(a), self.heap.get(b))
         {
@@ -4573,7 +4578,7 @@ impl Context {
                 return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
             }
         }
-        if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
+        if self.heap.has_weak_values {
             let left = self.weak_proxy_target(a)?;
             let right = self.weak_proxy_target(b)?;
             if left != a || right != b {
@@ -4705,8 +4710,6 @@ impl Context {
                     && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
                 return Ok(truth(equal == (op == "==")));
             }
-            "is" => return Ok(truth(a == b)),
-            "is not" => return Ok(truth(a != b)),
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => return self.order(op, a, b),

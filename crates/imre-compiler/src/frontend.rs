@@ -6975,6 +6975,13 @@ impl<'a> Checker<'a> {
                         "checked math.sumprod requires a direct call",
                     ));
                 }
+                Intrinsic::ScopedObjectExport("operator.is_" | "operator.is_not") => {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "checked operator identity functions require a direct call",
+                    ));
+                }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
                 }
@@ -7446,33 +7453,8 @@ impl<'a> Checker<'a> {
                 return self.boolean_value(boolean, None);
             }
             ast::Expr::Compare(compare) => {
-                if let Some((value, class, positive)) = self.exact_object_type(compare) {
-                    let predicate = match class {
-                        ty_python_semantic::types::KnownClass::Str => {
-                            Builtin::IsInstance(vec![ir::InstanceType::ExactText])
-                        }
-                        ty_python_semantic::types::KnownClass::Tuple => Builtin::ObjectIsExactTuple,
-                        _ => unreachable!("only exact str and tuple comparisons"),
-                    };
-                    let test = Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Builtin(predicate, vec![self.expr(value)?]),
-                    };
-                    return Ok(if positive {
-                        test
-                    } else {
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Not(Box::new(test)),
-                        }
-                    });
-                }
-                if let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref()
-                    && let [left, right] = compare.operands.as_ref()
-                    && let (Some(left), Some(right)) =
-                        (self.class_reference(left), self.class_reference(right))
-                {
-                    return Ok(Expr::boolean((left == right) == (*op == ast::CmpOp::Is)));
+                if let Some((left, op, right)) = self.identity_test(expression) {
+                    return self.identity_comparison(left, right, op, expression);
                 }
                 if compare.ops.len() == 1
                     && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
@@ -7587,20 +7569,6 @@ impl<'a> Checker<'a> {
                         };
                     }
                     return Ok(result);
-                }
-                if compare.ops.len() == 1
-                    && matches!(compare.ops[0], ast::CmpOp::Is | ast::CmpOp::IsNot)
-                {
-                    let value = match compare.operands.as_ref() {
-                        [ast::Expr::NoneLiteral(_), value] | [value, ast::Expr::NoneLiteral(_)] => {
-                            self.expr(value)?
-                        }
-                        [left, right] => {
-                            return self.nominal_identity(left, right, compare.ops[0], expression);
-                        }
-                        _ => unreachable!(),
-                    };
-                    return Ok(Self::identity_is_none(value, compare.ops[0]));
                 }
                 let mut values = Vec::new();
                 let mut exit = None;
@@ -10066,6 +10034,18 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
             ))) => return self.base85_encode(call, name),
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("operator.is_" | "operator.is_not"),
+            ))) => {
+                if let Some((left, op, right)) = self.operator_identity_call(call, name) {
+                    return self.identity_comparison(left, right, op, call);
+                }
+                return Err(error(
+                    self.source,
+                    call,
+                    "checked operator identity functions require two positional arguments",
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("math.fabs" | "math.log1p"),
             ))) if call.arguments.keywords.is_empty()
