@@ -5,18 +5,7 @@ use num_traits::Signed;
 
 /// Clear container storage, then finalize any buffered writer whose last owner was removed.
 pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
-    let owns_finalizer = |&id: &Id| ctx.heap.could_own_finalizer(id, true);
-    let released = ctx.heap.has_unbound_finalizer(NONE)
-        && match ctx.heap.get(receiver) {
-            Value::List(items) => items.iter().any(owns_finalizer),
-            Value::Dict(entries)
-            | Value::DefaultDict { entries, .. }
-            | Value::Set { entries, .. } => entries
-                .iter()
-                .any(|(key, value)| owns_finalizer(key) || owns_finalizer(value)),
-            Value::Deque(ring) => ring.items.iter().any(owns_finalizer),
-            _ => unreachable!("clearable container"),
-        };
+    let released = ctx.heap.has_unbound_finalizer(NONE) && ctx.heap.clear_owns_finalizer(receiver);
     match ctx.heap.get_mut(receiver) {
         Value::List(items) => {
             for item in std::mem::take(items) {
