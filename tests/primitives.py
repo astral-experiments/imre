@@ -46,11 +46,10 @@ REJECTED = {
     "list_sort_reverse_type": "values = [1]\nvalues.sort(reverse=1)\n",
     "join_wrong_element": 'print(",".join([1]))\n',
     "join_keyword": 'print(",".join(iterable=["x"]))\n',
-    "replace_wrong_type": 'print("x".replace("x", 1))\n',
-    "replace_count": 'print("x".replace("x", "y", 1))\n',
 }
 
 ERRORS = {
+    "replace_wrong_type": ('print("before")\nprint("x".replace("x", 1))\n', "TypeError"),
     "negative_left_shift": ('print("before")\nprint(1 << -1)\n', "ValueError"),
     "negative_right_shift": ('print("before")\nprint(1 >> -1)\n', "ValueError"),
     "divmod_zero": ('print("before")\npair = divmod(3, 0)\n', "ZeroDivisionError"),

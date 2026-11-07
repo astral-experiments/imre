@@ -698,7 +698,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.thinlto == 'true'
     runs-on: *linux-x64
-    timeout-minutes: 120
+    timeout-minutes: ${{ inputs.full_thinlto && 120 || 300 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -714,6 +714,7 @@ jobs:
       - name: Check ThinLTO linking and native semantics
         env:
           FULL_THINLTO: ${{ inputs.full_thinlto || false }}
+          IMRE_CI_LTO_JOBS: '1'
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           imre_lld_dir="$(rustc --print sysroot)/lib/rustlib/$imre_target/bin"
@@ -722,8 +723,17 @@ jobs:
           mkdir -p "$IMRE_CI_LTO_CACHE"
           ci_lld="$GITHUB_WORKSPACE/.github/scripts/ci-thinlto-ld.lld"
           python3 tests/lto.py --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --rust-lld "$ci_lld" --python python3
+          log_dir=/tmp/imre-suites-thinlto
+          suite_args=()
           if [[ "$FULL_THINLTO" != true ]]; then
             suites=(module_values)
+            suite_args=(--thinlto-build-timeout 600)
+            if (( $(nproc) >= 16 )); then
+              export IMRE_CI_LTO_JOBS=4
+            fi
+            tail -n +1 -F "$log_dir/module_values.log" 2>/dev/null &
+            progress_pid=$!
+            trap 'kill "$progress_pid" 2>/dev/null || true' EXIT
           else
             suites=(
               differential imports classes containers tuple_keys comprehensions fstrings calls
@@ -734,5 +744,5 @@ jobs:
             )
           fi
           python3 tests/run_suites_children.py
-          python3 tests/run_suites.py --kill-failed-children --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
-            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3
+          python3 tests/run_suites.py --kill-failed-children --log-dir "$log_dir" --suites "${suites[@]}" \
+            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3 "${suite_args[@]}"

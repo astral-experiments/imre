@@ -168,7 +168,7 @@ REJECTED = {
             "print(lcm(6, 10))\n"
             "typed('wrong')\n"
         ),
-    }, "invalid-argument-type"),
+    }, "expected int, got str"),
     "math_constants_preserve_typed_call": ({
         "main.py": (
             "from math import e, inf, nan, pi, tau\n"
@@ -1282,6 +1282,23 @@ ACCEPTED = {
         "stat/__init__.py": "invalid shadow package!\n",
         "stat/S_IRWXU.py": "invalid shadow member!\n",
     },
+    "boxed_frozen_shadow_override": {
+        "main.py": (
+            "import sys\nfrom _imp import _override_frozen_modules_for_tests as override\n"
+            "from importlib import import_module as load\n"
+            "override(1)\nimport __hello__ as frozen\nassert load('__hello__') is frozen\n"
+            "del sys.modules['__hello__']\noverride(-1)\n"
+            "try:\n    from __hello__ import initialized\n"
+            "except SyntaxError as error:\n"
+            "    path = getattr(error, 'filename', None) or str(error)\n"
+            "    assert '__hello__/__init__.py' in path.replace(chr(92), '/')\n"
+            "    print('invalid package')\n"
+            "else:\n    raise AssertionError('expected invalid package')\n"
+            "finally:\n    override(0)\n"
+        ),
+        "__hello__/__init__.py": "invalid shadow package!\n",
+        "__hello__.py": "initialized = 'local'\n",
+    },
     "email_address_parsers": {
         "main.py": (
             "import email\n"
@@ -2023,18 +2040,19 @@ def main() -> None:
             assert "expected int, got str" in result.stderr or "invalid-argument-type" in result.stderr, result
             checks += 1
 
-        # A TypeError raised while evaluating a return operand can still be caught.
+        # Explicit runtime imports let a TypeError in a return operand be caught.
         caught = temporary / "object_return_operand"
         write_files(caught, {
             "main.py": "from helper import wrapper\ntry:\n    wrapper()\nexcept TypeError:\n    print('caught')\n",
-            "helper.py": "import ast\nast.parse('1')\ndef take(value: int) -> int:\n    return value\n"
+            "helper.py": "def take(value: int) -> int:\n    return value\n"
                          "def wrapper() -> int:\n    return take('argument')\n",
         })
         for level in args.opt_levels:
             executable = temporary / f"operand-{level}"
             for flags in ([], ["--reachable-only"]):
                 command = [compiler, "build", str(caught / "main.py"), "-o", str(executable),
-                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level), *build_flags, *flags]
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                           "--runtime-imports", *build_flags, *flags]
                 if args.sanitize:
                     command += ["--sanitize"]
                 require_success(run(command, temporary))

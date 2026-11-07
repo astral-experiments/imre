@@ -25,6 +25,7 @@ struct Imports {
     private_names: imre_ast::Names,
     uses_import_builtin: bool,
     uses_exec: bool,
+    uses_generic_class: bool,
     computed_import: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
@@ -339,6 +340,7 @@ impl<'a> Visitor<'a> for Imports {
                     }) =>
             {
                 self.runtime_imports = true;
+                self.uses_generic_class |= class.type_params.is_some();
             }
             Stmt::Assign(a) if a.targets.iter().any(|t| self.sys_path(t)) => {
                 self.runtime_imports = true;
@@ -537,15 +539,31 @@ fn boxed_function_type_params<'a>(
     (!body.unsupported).then_some(params)
 }
 
+enum ImportScanError {
+    Parse(ruff_python_parser::ParseError),
+    Other(String),
+}
+
+impl std::fmt::Display for ImportScanError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(error) => error.fmt(formatter),
+            Self::Other(message) => formatter.write_str(message),
+        }
+    }
+}
+
 fn scan_imports(
     source: &str,
     kind: SourceKind,
     getter: Option<&mut Imports>,
-) -> Result<Imports, String> {
-    let normalized = crate::normalize_source(source, kind)?;
-    crate::analysis::check_source_complexity(&normalized).map_err(str::to_owned)?;
-    let parsed = ruff_python_parser::parse_module(&normalized).map_err(|e| e.to_string())?;
-    crate::analysis::check_indentation(&normalized, parsed.tokens())?;
+) -> Result<Imports, ImportScanError> {
+    let normalized = crate::normalize_source(source, kind).map_err(ImportScanError::Other)?;
+    crate::analysis::check_source_complexity(&normalized)
+        .map_err(|error| ImportScanError::Other(error.to_owned()))?;
+    let parsed = ruff_python_parser::parse_module(&normalized).map_err(ImportScanError::Parse)?;
+    crate::analysis::check_indentation(&normalized, parsed.tokens())
+        .map_err(ImportScanError::Other)?;
     let mut imports = Imports::default();
     let mut body = parsed.into_syntax().body;
     imports.private_names = imre_ast::lower(&mut body);
@@ -843,8 +861,9 @@ pub(crate) fn compile(
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
+    let mut uses_generic_class = false;
     let mut computed_import = registered_imports.computed;
-    let mut source_only_provider = None;
+    let mut source_only_paths = HashSet::new();
     let mut bundled_only = false;
     let mut getters = VecDeque::new();
     let mut bundled_imports = VecDeque::new();
@@ -871,11 +890,15 @@ pub(crate) fn compile(
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
+            // The implicit Generic base initializes its parameters through typing.
+            if uses_generic_class && !seen.contains("typing") {
+                imports.add(0, "typing");
+            }
             // A runtime-selected decimal module in a standalone binary needs its private provider.
             if startup.is_none() && computed_import && !seen.contains("decimal") {
                 // Carry its source for relocation, but leave compilation until the name is chosen.
                 if !seen.contains("_pydecimal") {
-                    source_only_provider = Some("_pydecimal");
+                    source_only_paths.insert(Path::new(bundled_root).join("_pydecimal.py"));
                 }
                 imports.add(0, "decimal");
             }
@@ -971,6 +994,7 @@ pub(crate) fn compile(
             return Ok(None);
         }
         uses_exec |= imports.uses_exec;
+        uses_generic_class |= imports.uses_generic_class;
         computed_import |= imports.computed_import;
         let mut names = imports.names;
         if owner == "importlib" {
@@ -1017,10 +1041,9 @@ pub(crate) fn compile(
             };
             // A frozen import never visits sys.path unless the program can disable
             // the frozen importer. Defer collecting its filesystem alternatives.
-            if !seen.contains("_imp")
-                && let Some(top @ ("stat" | "__hello__")) = name.split('.').next()
-                && crate::modules::bundled_runtime_source(top).is_some()
-            {
+            let frozen = matches!(name.split('.').next(), Some(top @ ("stat" | "__hello__"))
+                if crate::modules::bundled_runtime_source(top).is_some());
+            if frozen && !seen.contains("_imp") {
                 frozen_imports.names.push((0, name));
                 continue;
             }
@@ -1174,14 +1197,21 @@ pub(crate) fn compile(
                     installed = None;
                     let src = std::fs::read_to_string(&path)
                         .map_err(|e| format!("{}: {e}", path.display()))?;
-                    let imports = imports_for_module(&path, &src)?;
+                    match scan_imports(&src, SourceKind::File, None) {
+                        Ok(imports) => work.push_back((prefix.clone(), package, imports)),
+                        Err(ImportScanError::Parse(_)) if frozen => {
+                            // Keep this alternative for standalone binaries. Its syntax error
+                            // should surface only if the runtime chooses it over frozen code.
+                            source_only_paths.insert(path.clone());
+                        }
+                        Err(error) => return Err(format!("{}: {error}", path.display())),
+                    }
                     inputs.files.push((
                         path.clone(),
                         path.canonicalize().map_err(|e| e.to_string())?,
                         blake3::hash(src.as_bytes()).to_hex().to_string(),
                     ));
                     sources.push((prefix.clone(), path, src));
-                    work.push_back((prefix.clone(), package, imports));
                     entry_sources
                         .entry(prefix.clone())
                         .or_insert_with(|| (root.clone(), package));
@@ -1318,7 +1348,7 @@ pub(crate) fn compile(
             Path::new(bundled_root),
             &providers,
             split,
-            source_only_provider,
+            &source_only_paths,
         )
     };
     let (mut units, mut used_archive) = emit(!matches!(layout, crate::BoxedLayout::Whole))?;

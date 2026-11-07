@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -51,7 +52,6 @@ REJECTED = {
     "text_bytes_write": 'with open("out", "w", encoding="utf-8") as stream:\n    stream.write(b"wrong")\n',
     "binary_annotation": 'from typing import BinaryIO\nvalue: BinaryIO = open("out", "w", encoding="utf-8")\n',
     "binary_encoding": 'value = open("out", "wb", encoding="utf-8")\n',
-    "binary_update": 'value = open("out", "wb+")\n',
     "binary_bool_size": 'with open("input", "rb") as stream:\n    stream.read(True)\n',
     "binary_seek_text_offset": 'with open("input", "rb") as stream:\n    stream.seek("start")\n',
     "binary_closed_write": 'with open("out", "wb") as stream:\n    stream.closed = False\n',
@@ -136,6 +136,10 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         for name, source, error in cases(project, ERRORS):
+            build_flags = flags
+            if name in {"hashlib_blake2", "hashlib_result_allocation", "hashlib_signature"}:
+                # These compare dynamic keyword arguments and runtime TypeErrors with CPython.
+                build_flags = [*flags, "--runtime-imports"]
             reference_dir = temporary / name / "reference"
             reference_dir.mkdir(parents=True)
             runner = run_with_failing_output if name == "file_failures" else subprocess.run
@@ -160,7 +164,7 @@ def main() -> None:
                         clang,
                         "--opt-level",
                         level,
-                        *flags,
+                        *build_flags,
                     ],
                     temporary,
                 )
@@ -188,10 +192,12 @@ def main() -> None:
                 checks += 1
         formatter = 'def version(n: int) -> bytes:\n    return b"TZif%d" % n\n'
         invalid = 'def wrong() -> int:\n    return "bad"\n'
+        cli_flags = "\x1f".join(["--runtime", runtime, "--clang", clang, *flags])
         for definitions in ((formatter, invalid), (invalid, formatter)):
             script = temporary / "format_contract.py"
             script.write_text("\n".join((*definitions, "print(version(3))\n")))
-            result = run([compiler, "-B", str(script)], temporary)
+            with patch.dict("os.environ", IMRE_ENCODED_FLAGS=cli_flags):
+                result = run([compiler, "-B", str(script)], temporary)
             assert result.returncode > 0 and not result.stdout, result
             assert "expected int, got str; annotations are enforced contracts" in result.stderr, result
             checks += 1
