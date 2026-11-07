@@ -2521,17 +2521,21 @@ impl Context {
         if self.heap.full_collection_active() {
             return false;
         }
-        let globals = self.finalizer_path_roots();
         let streams = super::stdlib::io::rooted_standard_streams(self);
         if streams.as_ref().is_some_and(|roots| {
             self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + roots.len()
                 && self.heap.finalizers_kept_by(roots)
         }) {
-            return !self.heap.has_weak_values
-                || self.heap.weak_values_kept_by(globals[0], globals[1]);
+            return !self.heap.has_weak_values || {
+                let [modules, reference] = self.finalizer_path_roots();
+                self.heap.weak_values_kept_by(modules, reference)
+            };
         }
-        self.heap
-            .cached_finalizers_kept(globals, streams.as_ref(), Some(retained_current))
+        self.heap.cached_finalizers_kept(
+            self.finalizer_path_roots(),
+            streams.as_ref(),
+            Some(retained_current),
+        )
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
