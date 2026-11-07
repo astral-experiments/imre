@@ -1844,7 +1844,6 @@ impl Context {
             | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
             | ("socket.socket", Value::Socket(_))
-            | ("_io.TextIOWrapper", Value::TextFile(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("collections.defaultdict", Value::DefaultDict { .. })
@@ -2373,10 +2372,7 @@ impl Context {
             {
                 return Ok(value);
             }
-            // Standard text streams implement most properties directly on their native handle.
-            if (!matches!(self.heap.get(obj), Value::TextFile(_))
-                || matches!(name, "__dict__" | "__repr__" | "truncate"))
-                && let Some(member) = member
+            if let Some(member) = member
                 && matches!(
                     self.heap.get(member),
                     Value::IoMethod { .. } | Value::GetSetDescriptor { .. }
@@ -4447,30 +4443,6 @@ impl Context {
             }
             Value::Socket(ref socket) if name == "type" => {
                 return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
-            }
-            Value::TextFile(ref file)
-                if name == "buffer"
-                    && let Some(buffer) = file.buffer =>
-            {
-                return Ok(buffer);
-            }
-            Value::TextFile(ref file)
-                if name == "name"
-                    && let Some(buffer) = file.buffer =>
-            {
-                return self.lookup_attr(buffer, "name");
-            }
-            Value::TextFile(ref file) if name == "encoding" => return Ok(file.encoding),
-            Value::TextFile(ref file) if name == "errors" => return Ok(file.errors),
-            Value::TextFile(ref file) if name == "_finalizing" => {
-                return Ok(builtins::boolean(file.finalizing));
-            }
-            Value::TextFile(_) if name == "write_through" => return Ok(FALSE),
-            Value::TextFile(ref file) if name == "line_buffering" => {
-                return Ok(if file.line_buffering { TRUE } else { FALSE });
-            }
-            Value::TextFile(ref file) if name == "closed" => {
-                return Ok(if file.closed() { TRUE } else { FALSE });
             }
             Value::Raised(ref error)
                 if let Some(index) = builtins::IMPORT_KEYWORDS

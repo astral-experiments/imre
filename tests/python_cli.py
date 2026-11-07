@@ -1823,8 +1823,15 @@ def main():
         expected = run(sys.executable, "-B", streams)
         actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
-        assert actual.stdout == expected.stdout == "stdout π\nraw:then:text\n".encode()
+        assert actual.stdout == expected.stdout == "stdout π\nraw:then:text\nAoldB\\xe9C".encode()
         assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\nbinary stderr\n".encode()
+
+        shutdown = Path(__file__).with_name("fixtures") / "boxed_stdio_shutdown.py"
+        for mode, code in (("broken-pipe", 120), ("detached", 120), ("rewrapped", 0)):
+            reference = run(sys.executable, "-B", shutdown, mode)
+            result = run(imre, "run", shutdown, "--runtime-imports", "--quiet", "--", mode)
+            assert result.returncode == reference.returncode == code, result.stderr
+            assert (result.stdout, result.stderr) == (reference.stdout, reference.stderr)
 
         text_close = run(imre, "-B", "-c", "import streams", "close-text")
         assert text_close.returncode == 0, text_close.stderr

@@ -132,6 +132,59 @@ pub(super) fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> R
     result
 }
 
+fn flush_open(ctx: &mut Context, stream: Id) -> Result<()> {
+    let closed = ctx
+        .lookup_attr(stream, "closed")
+        .and_then(|value| ctx.truth(value))
+        .unwrap_or(false);
+    if !closed {
+        invoke(ctx, stream, "flush", vec![])?;
+    }
+    Ok(())
+}
+
+/// Flush the active sys bindings. Displaced original streams may still own buffered bytes.
+pub(in crate::dynamic) fn flush_standard_outputs(ctx: &mut Context) -> bool {
+    if ctx.threads.system_module.is_none() {
+        return true;
+    }
+    let mark = ctx.heap.temporary_mark();
+    let mut active = [None; 2];
+    let mut ok = true;
+    for (index, name) in ["stdout", "stderr"].into_iter().enumerate() {
+        if let Ok(Some(stream)) = ctx.sys_binding(name)
+            && stream != NONE
+        {
+            ctx.heap.keep(stream);
+            active[index] = Some(stream);
+            if let Err(error) = flush_open(ctx, stream) {
+                ok = false;
+                if index == 0 {
+                    crate::dynamic::unraisable::report(
+                        ctx,
+                        error,
+                        false,
+                        None,
+                        "Exception ignored while flushing sys.stdout",
+                    );
+                }
+            }
+        }
+    }
+    for index in 0..ctx.heap.standard_outputs.len() {
+        if let Some(stream) = ctx.heap.standard_outputs[index]
+            && !active.contains(&Some(stream))
+            && Wrapper::from_receiver(ctx, stream)
+                .is_ok_and(|wrapper| wrapper.buffer_id().is_some())
+        {
+            ctx.heap.keep(stream);
+            let _ = flush_open(ctx, stream);
+        }
+    }
+    ctx.heap.release_temporaries_since(mark);
+    ok
+}
+
 fn flag(ctx: &mut Context, obj: Id, method: &str) -> Result<bool> {
     let value = invoke(ctx, obj, method, Vec::new())?;
     ctx.truth(value)
@@ -287,10 +340,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
 /// Render public name and mode under the same recursion guard as other I/O objects.
 pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let class = ctx.exact_type(receiver)?;
-    let standard_output = matches!(ctx.heap.get(receiver), Value::TextFile(_));
-    if !standard_output {
-        Wrapper::from_receiver(ctx, receiver)?;
-    }
+    Wrapper::from_receiver(ctx, receiver)?;
     let name = if ctx.heap.get(class).io_kind() == Some("TextIOWrapper") {
         "_io.TextIOWrapper"
     } else {
@@ -322,7 +372,7 @@ pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
         let field_mark = ctx.heap.temporary_mark();
         let mut rendered_mark = None;
         result = (|| {
-            let value = if field == "encoding" && !standard_output {
+            let value = if field == "encoding" {
                 // Either public getter can reinitialize the wrapper before its private encoding is used.
                 Wrapper::from_receiver(ctx, receiver)?.encoding.get()
             } else {
@@ -765,12 +815,7 @@ pub(super) fn truncate(
         ));
     }
     super::argument_count("TextIOWrapper", "truncate", args.len())?;
-    let buffer = |ctx: &Context| match ctx.heap.get(receiver) {
-        Value::TextFile(file) => file
-            .buffer
-            .ok_or_else(|| Error::new("ValueError", "underlying buffer has been detached")),
-        _ => Wrapper::from_receiver(ctx, receiver)?.binary(),
-    };
+    let buffer = |ctx: &Context| Wrapper::from_receiver(ctx, receiver)?.binary();
     buffer(ctx)?;
     invoke(ctx, receiver, "flush", vec![])?;
     let stream = buffer(ctx)?;

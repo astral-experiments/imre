@@ -33,24 +33,13 @@ fn write_repr(ctx: &mut Context, stream: Id, value: Id) -> Result<()> {
 }
 
 fn write_unencodable(ctx: &mut Context, stream: Id, value: Id) -> Result<()> {
-    let encoding = if let Value::TextFile(file) = ctx.heap.get(stream) {
-        let encoding = file
-            .encoding()
-            .ok_or_else(|| Error::new("TypeError", "bad argument type for built-in operation"))?;
-        ctx.text(encoding.as_str())
-    } else {
-        ctx.lookup_attr(stream, "encoding")?
-    };
+    let encoding = ctx.lookup_attr(stream, "encoding")?;
     ctx.heap.keep(encoding);
     ctx.str_value(encoding)?;
     let repr = builtins::call(ctx, "repr", &[value], &[])?;
     ctx.heap.keep(repr);
     let errors = ctx.text("backslashreplace");
     let bytes = codecs::encode_text(ctx, repr, Some(encoding), Some(errors))?;
-    if let Value::TextFile(file) = ctx.heap.get(stream) {
-        crate::sys::write_standard_buffer(file.standard_writer()?, &bytes)?;
-        return Ok(());
-    }
     let bytes = ctx.alloc(Value::Bytes(bytes));
     ctx.heap.keep(bytes);
     match ctx.lookup_attr(stream, "buffer") {
