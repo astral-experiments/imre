@@ -16,6 +16,16 @@ class Owner:
     value = original_exit
 
 
+state = {'mode': 'original'}
+with patch.object(Owner, 'value', None):
+    patch.dict(state, mode='outer').start()
+    patch.object(Owner, 'value', 7).start()
+    patch.dict(state, mode='inner').start()
+    patch.stopall()
+    assert state == {'mode': 'original'} and Owner.value is None
+assert Owner.value is original_exit
+
+
 owner = Owner()
 first = owner
 pending = patch('__main__.owner.value', None)

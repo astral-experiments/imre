@@ -84,7 +84,7 @@ def _enter_patchings(stack, patchings, kwargs):
 
 class _patch:
     attribute_name = None
-    _active_patches = []
+    _active_patches = _active_patches
 
     def __init__(self, getter, attribute, new, create, *, spec=None, spec_set=None,
                  autospec=None, new_callable=None, **kwargs):
@@ -320,6 +320,10 @@ def _patch_multiple(target, spec=None, create=False, spec_set=None,
 
 
 class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
+    _active_patches = _patch._active_patches
+    start = _patch.start
+    stop = _patch.stop
+
     def __init__(self, in_dict, values=(), clear=False, **kwargs):
         updates = dict(values)
         updates.update(kwargs)
