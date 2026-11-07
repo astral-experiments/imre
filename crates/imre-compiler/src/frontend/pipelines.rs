@@ -2261,7 +2261,7 @@ impl Checker<'_> {
         first.evaluate.append(&mut first.acquire);
         let mut input = first;
         let mut pc = 0;
-        let mut pulls = Vec::with_capacity(plan.depths);
+        let mut pulls: Vec<Pull> = Vec::with_capacity(plan.depths);
         let yielded = loop {
             let Step::Next {
                 depth,
@@ -2288,7 +2288,8 @@ impl Checker<'_> {
             }
             self.forget_comprehension_writes(&plan, depth);
             let binding = self.bind_iterator_pattern(target, input.value)?;
-            let (accepted, filters) = self.comprehension_filters(&plan, pc)?;
+            let parent = pulls.last().map(|outer| outer.pc);
+            let (accepted, filters) = self.comprehension_filters(&plan, pc, parent)?;
             pulls.push(Pull {
                 pc,
                 input,
@@ -2374,13 +2375,10 @@ impl Checker<'_> {
         let mut cases = Vec::new();
         for pull in pulls.iter().rev() {
             let mut accepted = match plan.steps[pull.accepted] {
-                Step::Emit { resume, .. } => {
-                    debug_assert_eq!(resume, pull.pc);
-                    vec![
-                        Statement::Assign(value, yielded.clone()),
-                        Statement::Assign(ready, Expr::boolean(true)),
-                    ]
-                }
+                Step::Emit { .. } => vec![
+                    Statement::Assign(value, yielded.clone()),
+                    Statement::Assign(ready, Expr::boolean(true)),
+                ],
                 Step::Open { depth, .. } => {
                     let child = &pulls[depth];
                     let mut initialize = child.input.evaluate.clone();

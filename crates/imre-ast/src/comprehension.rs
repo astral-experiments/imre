@@ -166,6 +166,54 @@ impl<'a> Plan<'a> {
         }
     }
 
+    /// The filters accepted by one structured loop. Rejection and emission must
+    /// return to this pull, and exhaustion must close it and rejoin its caller.
+    /// The step at the end of the range opens the next loop or emits its item.
+    pub fn loop_filters(
+        &self,
+        head: usize,
+        parent: Option<usize>,
+    ) -> Option<std::ops::Range<usize>> {
+        let Step::Next {
+            depth, exhausted, ..
+        } = self.steps.get(head)?
+        else {
+            return None;
+        };
+        let Step::Close {
+            depth: closing,
+            next,
+        } = self.steps.get(*exhausted)?
+        else {
+            return None;
+        };
+        let rejoin = match self.steps.get(*next)? {
+            Step::Next { .. } => Some(*next),
+            Step::End => None,
+            _ => return None,
+        };
+        if depth != closing || rejoin != parent {
+            return None;
+        }
+        for (pc, step) in self.steps.iter().enumerate().skip(head + 1) {
+            match step {
+                Step::Filter { reject, .. } if *reject == head => continue,
+                Step::Emit { resume, .. } if *resume == head => {}
+                Step::Open {
+                    depth: inner,
+                    is_async,
+                    ..
+                } if *inner == depth + 1
+                    && matches!(self.steps.get(pc + 1),
+                        Some(Step::Next { depth, is_async: pull_async, .. }) if depth == inner && pull_async == is_async) =>
+                    {}
+                _ => return None,
+            }
+            return Some(head + 1..pc);
+        }
+        None
+    }
+
     pub fn target_names(&self) -> HashSet<String> {
         let mut names = HashSet::new();
         for step in &self.steps {
@@ -276,6 +324,22 @@ impl Suspension<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loop_filters_follow_their_pull_and_enclosing_loop() {
+        let expression =
+            ruff_python_parser::parse_expression("(y for x in xs if x if f(x) for y in x if y)")
+                .unwrap();
+        let mut plan = Plan::from_expr(expression.expr()).unwrap();
+        assert_eq!(plan.loop_filters(0, None), Some(1..3));
+        assert_eq!(plan.loop_filters(4, Some(0)), Some(5..6));
+        assert_eq!(plan.loop_filters(4, None), None);
+        let Step::Filter { reject, .. } = &mut plan.steps[5] else {
+            unreachable!()
+        };
+        *reject = 0;
+        assert_eq!(plan.loop_filters(4, Some(0)), None);
+    }
 
     #[test]
     fn deferred_body_and_enclosing_operand_suspend_independently() {
