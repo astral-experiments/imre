@@ -1397,6 +1397,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "encodings.cp1252",
     "encodings.cp424",
     "encodings.cp437",
+    "encodings.iso8859_2",
     "encodings.iso8859_15",
     "encodings.koi8_u",
     "encodings.idna",

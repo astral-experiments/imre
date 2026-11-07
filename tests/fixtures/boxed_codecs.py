@@ -411,6 +411,13 @@ def current():
         assert text[128:131] == "Çüé" and text.encode(name) == wire
         assert codecs.lookup(name).name == "cp437"
 
+    from encodings.iso8859_2 import Codec as Latin2
+    latin2 = codecs.lookup("iso.ir.101")
+    assert latin2.decode.__self__.__class__ is Latin2
+    assert latin2.decode.__func__ is Latin2.decode
+    assert Latin2.__bases__ == (codecs.Codec,)
+    assert latin2.decode(b"\xa1") == ("Ą", 1)
+
     entry_koi8 = codecs.lookup("KOI8_U")
     assert entry_koi8.name == "koi8-u"
     assert entry_koi8.decode(bytes.fromhex("a4 b4 ad bd a6 b6 a7 b7")) == ("єЄґҐіІїЇ", 8)
