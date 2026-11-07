@@ -309,6 +309,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::Range
             | Type::SysImplementation
             | Type::CompletedProcess(_, None)
             | Type::ActivePopen

@@ -1969,6 +1969,7 @@ fn annotation_with_aliases(
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
             "int" => Ok(Type::Int),
+            "range" => Ok(Type::Range),
             "type" => Ok(Type::BuiltinClass),
             "float" => Ok(Type::Float),
             "bool" => Ok(Type::Bool),
@@ -9039,10 +9040,8 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
-        if self.unshadowed_builtin(&call.func, "range")
-            && let Some(failure) = self.range_argument_error(call, self.types.cursor(Type::Int))?
-        {
-            return Ok(failure);
+        if self.unshadowed_builtin(&call.func, "range") {
+            return self.range_value(call);
         }
         if self.unshadowed_builtin(&call.func, "__import__")
             && call

@@ -100,6 +100,7 @@ impl Type {
             | Self::CmpKey(..)
             | Self::Callable(_)
             | Self::ModuleSpec(_)
+            | Self::Range
             | Self::SysImplementation
             | Self::CompletedProcess(..) => WordKind::Record,
             Self::List(_)
@@ -4563,6 +4564,7 @@ impl Emitter<'_, '_> {
                 | Type::JsonObject
                 | Type::RegexMatch
                 | Type::Union(_)
+                | Type::Range
                 | Type::ModuleSpec(_)
                 | Type::StringIterable => {
                     unreachable!("container comparison is rejected by the frontend")
@@ -7546,7 +7548,7 @@ impl Emitter<'_, '_> {
             Builtin::ExceptionTupleView => {
                 self.call("imre_exception_tuple_view", returns, &[&args[0].value])
             }
-            Builtin::ExceptionRecordFields => {
+            Builtin::RecordFromFields => {
                 let record = self.record(returns);
                 for (i, value) in args.iter().enumerate() {
                     self.set_field(&record, i, &value.value);
@@ -10268,6 +10270,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
 
 fn record_name(ty: Type) -> String {
     match ty {
+        Type::Range => "range_record".to_owned(),
         Type::SysImplementation => "sys_implementation_record".to_owned(),
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
@@ -10314,6 +10317,7 @@ fn record_layouts(module: &Module, output: &mut Output) {
             Type::Class(id) => module.class_fields[id].clone(),
             Type::Tuple(_) => module.types.fields(ty).unwrap(),
             Type::ModuleSpec(id) => module.types.module_spec_fields(id),
+            Type::Range => vec![Type::Int; 3],
             Type::SysImplementation => crate::version::implementation_fields(&module.types),
             Type::CompletedProcess(capture, cmd) => vec![
                 module.types.completed_command(cmd),

@@ -109,6 +109,10 @@ impl Checker<'_> {
         value: &Expr,
         node: &impl Ranged,
     ) -> Result<Option<Prepared>, String> {
+        if value.ty == Type::Range {
+            let cursor = self.range_cursor(value.clone());
+            return Ok(Some(self.prepare_cursor(cursor, Type::Int)));
+        }
         if let Some(element) = self.types.cursor_element(value.ty) {
             return Ok(Some(self.prepare_cursor(value.clone(), element)));
         }
@@ -295,6 +299,14 @@ fn raise_value_error(message: String) -> Statement {
             })),
         },
     }))
+}
+
+pub(super) fn check_range_step(step: Expr) -> Statement {
+    Statement::If(
+        compare(Compare::Equal, step, Expr::integer(0)),
+        vec![raise_value_error("range() arg 3 must not be zero".into())],
+        Vec::new(),
+    )
 }
 
 /// Collects private binding names without treating stores through attributes or
@@ -1510,11 +1522,7 @@ impl Checker<'_> {
             _ => unreachable!("range arity was checked"),
         };
         if arguments.len() == 3 {
-            evaluate.push(Statement::If(
-                compare(Compare::Equal, step.clone(), Expr::integer(0)),
-                vec![raise_value_error("range() arg 3 must not be zero".into())],
-                Vec::new(),
-            ));
+            evaluate.push(check_range_step(step.clone()));
         }
         let cursor = self.hidden(Type::Int);
         let end = self.hidden(Type::Int);

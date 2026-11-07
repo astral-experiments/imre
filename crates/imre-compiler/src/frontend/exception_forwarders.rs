@@ -482,7 +482,7 @@ impl Checker<'_> {
         }
         let record = scope.finish(Expr {
             ty: Type::Class(class),
-            kind: ExprKind::Builtin(Builtin::ExceptionRecordFields, fields),
+            kind: ExprKind::Builtin(Builtin::RecordFromFields, fields),
         });
         Ok(self.wrap_exception_record(class, record))
     }
