@@ -2174,7 +2174,8 @@ impl Context {
         if let Some(namespace) = scope.binding_namespace(name) {
             return self.dict_named_item(namespace, name);
         }
-        let bucket = name.len() ^ usize::from(name.as_bytes().first().copied().unwrap_or(0));
+        let middle = name.as_bytes().get(name.len() / 2).copied().unwrap_or(0);
+        let bucket = name.len() ^ usize::from(middle);
         let slot = &self.scope_name_slots[bucket % self.scope_name_slots.len()];
         if let Some((key, value)) = scope.names.get_index(slot.get())
             && key == name
