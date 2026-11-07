@@ -1780,7 +1780,7 @@ impl Value {
             },
             Self::ClassMethod { .. } => "classmethod",
             Self::ThreadLocal(_) => super::thread_local::CLASS,
-            Self::ThreadHandle(_) => "_thread._ThreadHandle",
+            Self::ThreadHandle(_) => super::thread_handle::CLASS,
             Self::Random(_) => "Random",
             Self::HandlerLock(_) => super::thread_rlock::CLASS,
             Self::PrimitiveLock(_) => super::thread_lock::CLASS,

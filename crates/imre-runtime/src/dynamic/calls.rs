@@ -269,6 +269,7 @@ impl Context {
             && matches!(
                 kind.as_str(),
                 stdlib::datetime::TZINFO
+                    | super::thread_handle::CLASS
                     | "datetime.timezone"
                     | value::BZ2_COMPRESS_TYPE
                     | value::BZ2_DECOMPRESS_TYPE
@@ -1667,6 +1668,7 @@ impl Context {
                             | stdlib::os::scandir::ENTRY
                             | stdlib::os::scandir::ITER
                             | super::thread_rlock::CLASS
+                            | super::thread_handle::CLASS
                             | super::thread_lock::CLASS
                             | value::REGEX_PATTERN_TYPE
                             | value::REGEX_MATCH_TYPE
@@ -1876,6 +1878,7 @@ impl Context {
             | (stdlib::os::scandir::ENTRY, Value::DirEntry(_))
             | (stdlib::os::scandir::ITER, Value::Scandir(_))
             | (super::thread_rlock::CLASS, Value::HandlerLock(_))
+            | (super::thread_handle::CLASS, Value::ThreadHandle(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
             | (value::TEMPLATE_TYPE, Value::Template { .. })
             | (value::TEMPLATE_ITER_TYPE, Value::TemplateIter { .. })
@@ -2303,7 +2306,8 @@ impl Context {
         if let Value::Native(owner) = self.heap.get(obj)
             && matches!(
                 owner.as_str(),
-                value::BZ2_COMPRESS_TYPE
+                super::thread_handle::CLASS
+                    | value::BZ2_COMPRESS_TYPE
                     | value::BZ2_DECOMPRESS_TYPE
                     | value::LZMA_COMPRESS_TYPE
                     | value::LZMA_DECOMPRESS_TYPE
@@ -2323,7 +2327,8 @@ impl Context {
         }
         if matches!(
             self.heap.get(obj),
-            Value::Bz2Compressor(_)
+            Value::ThreadHandle(_)
+                | Value::Bz2Compressor(_)
                 | Value::Bz2Decompressor(_)
                 | Value::LzmaCompressor(_)
                 | Value::LzmaDecompressor(_)
@@ -3889,6 +3894,7 @@ impl Context {
                 "int"
                     | "float"
                     | super::deque::CLASS
+                    | super::thread_handle::CLASS
                     | "typing.Union"
                     | "typing.TypeAliasType"
                     | "_ssl.MemoryBIO"
@@ -3914,14 +3920,16 @@ impl Context {
                         return Ok(self.text("dictionary that this view refers to"));
                     }
                     "__doc__"
-                        if owner == stdlib::datetime::isocalendar::CLASS
-                            || matches!(
-                                self.heap.get(get),
-                                Value::IoMethod {
-                                    name: "__dict__",
-                                    ..
-                                }
-                            ) =>
+                        if matches!(
+                            owner,
+                            stdlib::datetime::isocalendar::CLASS | super::thread_handle::CLASS
+                        ) || matches!(
+                            self.heap.get(get),
+                            Value::IoMethod {
+                                name: "__dict__",
+                                ..
+                            }
+                        ) =>
                     {
                         return Ok(NONE);
                     }
@@ -3951,6 +3959,7 @@ impl Context {
                                     | "typing.Union"
                                     | "typing.TypeAliasType"
                                     | "_ssl.MemoryBIO"
+                                    | super::thread_handle::CLASS
                                     | stdlib::hashlib::md5::CLASS
                                     | stdlib::datetime::isocalendar::CLASS
                             )
@@ -5321,7 +5330,9 @@ impl Context {
             && (super::deque::iterator_class(class).is_some()
                 || matches!(
                     class.as_str(),
-                    value::REGEX_SCANNER_TYPE | value::STRUCT_UNPACK_ITERATOR
+                    value::REGEX_SCANNER_TYPE
+                        | value::STRUCT_UNPACK_ITERATOR
+                        | super::thread_handle::CLASS
                 ))
         {
             return Err(Error::new(
@@ -5797,7 +5808,7 @@ impl Context {
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
         if matches!(
             self.heap.get(obj),
-            Value::LzmaDecompressor(_) | Value::Bz2Decompressor(_)
+            Value::LzmaDecompressor(_) | Value::Bz2Decompressor(_) | Value::ThreadHandle(_)
         ) {
             let class = self.exact_type(obj)?;
             return Ok(self.own_class_attr(class, name));
@@ -7558,8 +7569,9 @@ impl Context {
             )),
             Value::Native(name)
                 if builtins::is_builtin(&name)
-                    || builtins::constructor_owner(&name)
-                        .is_some_and(|owner| !HashState::is_provider_class(owner))
+                    || builtins::constructor_owner(&name).is_some_and(|owner| {
+                        !HashState::is_provider_class(owner) && owner != super::thread_handle::CLASS
+                    })
                     || builtins::exception_init_descriptor(&name).is_some()
                     || matches!(
                         name.as_str(),

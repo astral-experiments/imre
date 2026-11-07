@@ -2824,6 +2824,9 @@ impl Context {
             Value::DirEntry(entry) => {
                 format!("<DirEntry {}>", self.format_value(entry.name, true, active))
             }
+            Value::ThreadHandle(handle) => {
+                format!("<_thread._ThreadHandle object: ident={}>", handle.ident())
+            }
             Value::PrimitiveLock(lock) => {
                 let state = if lock.locked() { "locked" } else { "unlocked" };
                 format!("<{state} _thread.lock object at {id:#x}>")

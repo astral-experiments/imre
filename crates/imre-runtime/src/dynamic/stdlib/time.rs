@@ -76,6 +76,41 @@ pub(super) fn ctime_text(fields: [i64; 9], year_width: usize) -> String {
     format!("{weekday} {month} {day:2} {hour:02}:{minute:02}:{second:02} {year:0year_width$}")
 }
 
+/// Convert seconds to a signed PyTime timeout, rounding away from zero.
+pub(in crate::dynamic) fn timeout_ns(ctx: &mut Context, seconds: Id) -> Result<i64> {
+    if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(seconds)) {
+        return Ok(crate::objects::time::sleep_float_ns(*value)?);
+    }
+    let overflow = || {
+        Error::new(
+            "OverflowError",
+            "timestamp too large to convert to C PyTime_t",
+        )
+    };
+    let seconds = match ctx.index_integer(seconds) {
+        Ok(seconds) => seconds,
+        Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+            let class = ctx.exact_type(seconds)?;
+            let name = super::qualified_type(ctx, class)?;
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "'{}' object cannot be interpreted as an integer or float",
+                    ctx.str_value(name)?
+                ),
+            ));
+        }
+        Err(error) if ctx.is_builtin_error(&error, "OverflowError") => {
+            return Err(overflow());
+        }
+        Err(error) => return Err(error),
+    };
+    seconds
+        .to_i64()
+        .and_then(|n| n.checked_mul(1_000_000_000))
+        .ok_or_else(overflow)
+}
+
 fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [sequence, attributes] = bind("structseq", args, kwargs, ["sequence", "dict"])?;
     let sequence = sequence.ok_or_else(|| {
@@ -282,38 +317,7 @@ pub(super) fn call(
                 ));
             };
             audit::event(ctx, "time.sleep", args)?;
-            let nanos = if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
-                crate::objects::time::sleep_float_ns(*value)?
-            } else {
-                let overflow = || {
-                    Error::new(
-                        "OverflowError",
-                        "timestamp too large to convert to C PyTime_t",
-                    )
-                };
-                let seconds = match ctx.index_integer(*seconds) {
-                    Ok(seconds) => seconds,
-                    Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
-                        let class = ctx.exact_type(*seconds)?;
-                        let name = super::qualified_type(ctx, class)?;
-                        return Err(Error::new(
-                            "TypeError",
-                            format!(
-                                "'{}' object cannot be interpreted as an integer or float",
-                                ctx.str_value(name)?
-                            ),
-                        ));
-                    }
-                    Err(error) if ctx.is_builtin_error(&error, "OverflowError") => {
-                        return Err(overflow());
-                    }
-                    Err(error) => return Err(error),
-                };
-                seconds
-                    .to_i64()
-                    .and_then(|n| n.checked_mul(1_000_000_000))
-                    .ok_or_else(overflow)?
-            };
+            let nanos = timeout_ns(ctx, *seconds)?;
             crate::objects::time::sleep_ns(nanos, || ctx.dispatch_signals())?;
             Ok(NONE)
         }

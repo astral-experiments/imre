@@ -398,6 +398,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "super"
             | "type"
             | super::thread_local::CLASS
+            | super::thread_handle::CLASS
             | super::namespace::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
         || super::deque::iterator_class(owner).is_some()
@@ -2090,7 +2091,7 @@ pub(super) fn call(
                 } else if let Value::IoMethod { owner: class, .. } = *ctx.heap.get(get) {
                     super::stdlib::io::receiver_class(ctx, values[0])
                         .is_some_and(|receiver| ctx.direct_subclass(receiver, class))
-                } else if matches!(owner, "int" | "float")
+                } else if matches!(owner, "int" | "float" | super::thread_handle::CLASS)
                     || Context::dict_view_owner(owner).is_some()
                 {
                     ctx.builtin_slot_accepts(values[0], owner)

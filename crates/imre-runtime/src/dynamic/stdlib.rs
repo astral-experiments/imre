@@ -581,9 +581,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "slotted_type"
             | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("_imre_thread", "start" | "join" | "alive" | "threads" | "current" | "shutdown") => {
-            ctx.builtin(&format!("{module}.{name}"))
-        }
+        (
+            "_imre_thread",
+            "start" | "join" | "alive" | "threads" | "current" | "attach_current" | "shutdown",
+        ) => ctx.builtin(&format!("{module}.{name}")),
+        ("_thread", "_ThreadHandle") => ctx.builtin(super::thread_handle::CLASS),
         ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
@@ -1822,6 +1824,24 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_thread._local.") {
         return super::thread_local::method(ctx, method, args, kwargs);
+    }
+    if name == super::thread_handle::CLASS || name == "_thread._ThreadHandle.__new__" {
+        if name.ends_with(".__new__") {
+            let class = super::thread_handle::CLASS;
+            let Some(&receiver) = args.first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{name}(): not enough arguments"),
+                ));
+            };
+            if receiver != ctx.builtin(class) {
+                return Err(ctx.invalid_new_subtype(class, receiver));
+            }
+        }
+        return Ok(ctx.alloc(Value::ThreadHandle(Default::default())));
+    }
+    if let Some(method) = name.strip_prefix("_thread._ThreadHandle.") {
+        return super::thread_handle::method(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("_thread.lock.") {
         return super::thread_lock::method(ctx, method, args, kwargs);
