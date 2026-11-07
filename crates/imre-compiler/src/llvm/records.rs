@@ -67,8 +67,24 @@ pub(super) fn semantics(
     ty: Type,
     fields: &[Type],
     name: &str,
-    output: &mut String,
+    units: &mut Output,
+    resource_types: &HashSet<Type>,
 ) -> String {
+    let repr = match ty {
+        Type::Class(class) => module
+            .class_metadata
+            .get(class)
+            .and_then(|meta| meta.repr_method),
+        _ => None,
+    };
+    // A checked call transfers resource-bearing parameters, including an inherited
+    // method's declared receiver. All other receiver parameters are borrowed.
+    let takes_self = repr.is_some_and(|id| {
+        let method = &module.functions[id];
+        resource_types.contains(&method.locals[method.params[0]])
+    });
+    let repr = repr.map(|id| units.function_ref(id));
+    let output = units.entry_buffer();
     let named = module.types.tuple_metadata(ty);
     // These field owners can be dropped without scheduling child records.
     let scalar_fields = fields.iter().all(|ty| {
@@ -87,7 +103,9 @@ pub(super) fn semantics(
                 | (u32::from(metadata.toml_hash) << 2)
                 | (u32::from(metadata.value_struct) << 3)
                 | (u32::from(metadata.fields.iter().any(|f| f.repr_text)) << 4)
-                | (u32::from(scalar_fields) << 6);
+                | (u32::from(scalar_fields) << 6)
+                | (u32::from(takes_self) << 7)
+                | (u32::from(repr.is_some()) << 8);
             // The runtime walks the physical layout. Hidden cache and shadow fields
             // own their payloads, but have no public name, equality, or repr role.
             let layout = (0..module.class_fields[class].len()).map(|index| {
@@ -195,9 +213,13 @@ pub(super) fn semantics(
     };
     let class_name = names(output, "name", class_name);
     let qualified_name = names(output, "qualified", qualified_name);
+    let (repr_type, repr_value) = match repr {
+        Some(symbol) => (", ptr", format!(", ptr @{symbol}")),
+        None => ("", String::new()),
+    };
     writeln!(
         output,
-        "@semantics_{name} = private constant {{ i32, i32, ptr, i64, ptr, i64, ptr }} {{ i32 {kind}, i32 {flags}, {class_name}, {qualified_name}, ptr {fields} }}"
+        "@semantics_{name} = private constant {{ i32, i32, ptr, i64, ptr, i64, ptr{repr_type} }} {{ i32 {kind}, i32 {flags}, {class_name}, {qualified_name}, ptr {fields}{repr_value} }}"
     )
     .unwrap();
     format!("@semantics_{name}")

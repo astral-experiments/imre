@@ -484,6 +484,13 @@ fn emit_program(
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
+    // Erased formatters may call back through another missing key. The normal
+    // checked function frame bounds that recursion even without a direct IR call edge.
+    let repr_methods: HashSet<_> = module
+        .class_metadata
+        .iter()
+        .filter_map(|m| m.repr_method)
+        .collect();
     let mut bodies = Vec::with_capacity(module.functions.len() + 1);
     for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
         let entry = id == module.functions.len();
@@ -497,7 +504,15 @@ fn emit_program(
             emitter.next_value = 0;
             emitter.next_label = 0;
         }
-        let frame = module.source_frames.get(id).and_then(Option::as_ref);
+        let frame = module
+            .source_frames
+            .get(id)
+            .and_then(Option::as_ref)
+            .or_else(|| {
+                repr_methods
+                    .contains(&id)
+                    .then_some(&ir::SourceFrame::Depth)
+            });
         let params = emitter.function(function, entry, frame, &borrows[id])?;
         bodies.push((params, std::mem::take(&mut emitter.code)));
     }
@@ -588,7 +603,7 @@ fn emit_program(
         .unwrap();
     }
     json::schemas(module, &emitter.json_schema_roots, emitter.output);
-    record_layouts(module, emitter.output);
+    record_layouts(module, emitter.output, &emitter.resource_types);
     callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
     if emitter.uses_byte_output_windows {
@@ -2469,6 +2484,16 @@ impl Emitter<'_, '_> {
             self.line("store i64 %fault_depth, ptr @imre_typed_fault_depth");
         }
         if let Some(failed) = failed {
+            // A formatter can use module globals. Report before clearing them, and
+            // defer interruption until cleanup has also released buffered files.
+            let exit = self.instruction("alloca { i32, i1 }");
+            let report = self.label();
+            let cleanup = self.label();
+            self.branch(&failed, &report, &cleanup);
+            self.start(&report);
+            self.line(format!("call void @imre_report_unhandled(ptr {exit})"));
+            self.jump(&cleanup);
+            self.start(&cleanup);
             if self.has_extensions {
                 self.line("call void @imre_extension_clear()");
             }
@@ -2486,14 +2511,14 @@ impl Emitter<'_, '_> {
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
             }
-            let report = self.label();
+            let error_return = self.label();
             let flush = self.label();
-            self.branch(&failed, &report, &flush);
+            self.branch(&failed, &error_return, &flush);
+            self.start(&error_return);
+            let status = self.instruction(format!("call i32 @imre_finish_unhandled(ptr {exit})"));
+            self.line(format!("ret i32 {status}"));
             self.start(&flush);
             let status = self.instruction("call i32 @imre_finish_stdio()");
-            self.line(format!("ret i32 {status}"));
-            self.start(&report);
-            let status = self.instruction("call i32 @imre_error_unhandled()");
             self.line(format!("ret i32 {status}"));
         } else if function.returns == Type::None {
             self.line("ret i8 0");
@@ -10303,7 +10328,10 @@ fn storage_type(ty: Type) -> &'static str {
 /// Emits concrete field layouts and static destruction descriptors. No per-field
 /// runtime tag or presence bitmap is needed: owning fields reserve zero until
 /// initialization, and their exact kinds are shared by every instance.
-fn record_layouts(module: &Module, output: &mut Output) {
+fn record_layouts(module: &Module, output: &mut Output, resource_types: &HashSet<Type>) {
+    // All record descriptors live in the entry unit, including references to
+    // checked formatters defined in other source modules.
+    output.current = output.entry;
     let mut records: Vec<_> = std::mem::take(&mut output.record_types)
         .into_iter()
         .map(|(ty, descriptor)| (record_name(ty), ty, descriptor))
@@ -10348,7 +10376,7 @@ fn record_layouts(module: &Module, output: &mut Output) {
             "@kinds_{name} = private unnamed_addr constant [{kind_count} x i32] [{kinds}]"
         )
         .unwrap();
-        let semantics = records::semantics(module, ty, &fields, &name, output.entry_buffer());
+        let semantics = records::semantics(module, ty, &fields, &name, output, resource_types);
         writeln!(
             output.global(
                 output.entry,
@@ -10865,7 +10893,8 @@ declare i1 @imre_typed_interrupt()
 declare i32 @imre_error_pending()
 declare ptr @imre_error_take()
 declare void @imre_error_set(ptr)
-declare i32 @imre_error_unhandled()
+declare void @imre_report_unhandled(ptr)
+declare i32 @imre_finish_unhandled(ptr)
 declare i32 @imre_record_has_type(ptr, ptr) nounwind memory(read)
 declare ptr @imre_source_module(ptr, ptr)
 declare ptr @imre_source_module_name(ptr)
@@ -12118,9 +12147,10 @@ print(show("x"))
         let main = llvm.split_once("define i32 @main(").unwrap().1;
         assert_eq!(main.matches("call void @imre_init_literals()").count(), 1);
         assert_eq!(main.matches("call void @imre_clear_literals()").count(), 1);
-        let (_, exits) = main.split_once("call void @imre_clear_literals()").unwrap();
+        let (before_cleanup, exits) = main.split_once("call void @imre_clear_literals()").unwrap();
+        assert!(before_cleanup.contains("call void @imre_report_unhandled("));
+        assert!(exits.contains("call i32 @imre_finish_unhandled("));
         assert!(exits.contains("call i32 @imre_finish_stdio()"));
-        assert!(exits.contains("call i32 @imre_error_unhandled()"));
     }
 
     /// Classifies only assignments to a source slot, excluding its argument and

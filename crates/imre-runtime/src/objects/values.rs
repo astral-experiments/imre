@@ -489,7 +489,7 @@ pub(super) unsafe fn try_write_repr(
     kind: WordKind,
 ) -> std::fmt::Result {
     // SAFETY: the caller supplies a rooted value with its concrete kind.
-    unsafe { write_repr_with(output, word, kind, true) }
+    unsafe { write_repr_with(output, word, kind, true, false) }
 }
 
 /// # Safety
@@ -500,7 +500,20 @@ pub(super) unsafe fn try_write_unchecked_repr(
     kind: WordKind,
 ) -> std::fmt::Result {
     // SAFETY: the caller roots the value under its concrete kind.
-    unsafe { write_repr_with(output, word, kind, false) }
+    unsafe { write_repr_with(output, word, kind, false, false) }
+}
+
+/// Exception display retains its argument before any checked Python formatter runs.
+///
+/// # Safety
+/// The caller roots the word and releases all mutable storage borrows before entry.
+pub(super) unsafe fn try_write_argument_repr(
+    output: &mut ReprWriter<'_>,
+    word: usize,
+    kind: WordKind,
+) -> std::fmt::Result {
+    // SAFETY: the caller keeps the value alive across its repr callback.
+    unsafe { write_repr_with(output, word, kind, true, true) }
 }
 
 type ReprStack = smallvec::SmallVec<[ReprTask; 4]>;
@@ -558,6 +571,7 @@ unsafe fn write_repr_with(
     word: usize,
     kind: WordKind,
     mut check_digits: bool,
+    argument: bool,
 ) -> std::fmt::Result {
     let mut pending = ReprStack::new();
     let mut callback_roots = std::collections::HashMap::new();
@@ -577,7 +591,14 @@ unsafe fn write_repr_with(
             match task {
                 ReprTask::Word(word, kind) => match kind.raw() & !NULLABLE {
                     5 if word != 0 => Some(ReprTask::Object(word as *const Object, 0)),
-                    6 if word != 0 => Some(ReprTask::Record(word as *const usize, 0, 0)),
+                    6 if word != 0 => {
+                        let payload = word as *const usize;
+                        if argument && let Some(method) = descriptor(payload).repr_method() {
+                            Some(ReprTask::Display(kind.acquire(word), Some(method)))
+                        } else {
+                            Some(ReprTask::Record(payload, 0, 0))
+                        }
+                    }
                     9 if word != 0 => {
                         let (member, kind) = super::unions::member(word);
                         Some(ReprTask::Word(member, kind))
@@ -622,7 +643,10 @@ unsafe fn write_repr_with(
                             }
                             Ok(None)
                         }
-                        Storage::Exception(_) => Ok(Some(ReprTask::Exception(owner))),
+                        Storage::Exception(_) => Ok(Some(ReprTask::Display(
+                            WordKind::new(5).acquire(owner as usize),
+                            None,
+                        ))),
                         Storage::SourceModule { name, filename } => {
                             output.write_str("<module ")?;
                             super::exceptions::write_quoted_repr(name, output)?;
@@ -843,7 +867,7 @@ unsafe fn write_repr_with(
                     tail.write(output)?;
                     None
                 }
-                ReprTask::Exception(owner) => {
+                ReprTask::Display(receiver, method) => {
                     // A custom repr can remove its own reference or a pending container.
                     // Retain the cursors outside every StorageCell borrow. Formatting
                     // ordinary values needs no extra owners.
@@ -856,11 +880,13 @@ unsafe fn write_repr_with(
                             }
                         }
                     }
-                    let exception: crate::ObjectOwner =
-                        crate::ObjectOwner::acquire_word(owner as usize);
-                    let text = super::exceptions::imre_exception_repr(crate::ObjectOwner::as_ptr(
-                        &exception,
-                    ));
+                    let text = match method {
+                        Some((method, true)) => method(receiver.into_word() as *const usize),
+                        Some((method, false)) => method(receiver.word as *const usize),
+                        None => {
+                            super::exceptions::imre_exception_repr(receiver.word as *const Object)
+                        }
+                    };
                     if text.is_null() {
                         return Err(std::fmt::Error);
                     }
@@ -901,7 +927,7 @@ enum ReprTask {
     ContextEnd(super::contextvars::ReprEnd, bool),
     Word(usize, WordKind),
     Object(*const Object, usize),
-    Exception(*const Object),
+    Display(OwnedWord, Option<(super::records::ReprMethod, bool)>),
     Record(*const usize, usize, usize),
     KeySeparator,
 }
@@ -948,11 +974,11 @@ impl ReprTask {
             Self::ContextEnd(_, _) => None,
             Self::Context(ref view) => view.owner().map(|owner| (owner as usize, WordKind::new(5))),
             Self::Word(word, kind) => Some((word, kind)),
-            Self::Object(owner, _) | Self::Exception(owner) => {
-                Some((owner as usize, WordKind::new(5)))
-            }
+            Self::Object(owner, _) => Some((owner as usize, WordKind::new(5))),
             Self::Record(record, _, _) => Some((record as usize, WordKind::new(6))),
-            Self::Leave(_) | Self::KeySeparator | Self::DequeMembers(..) => None,
+            Self::Display(..) | Self::Leave(_) | Self::KeySeparator | Self::DequeMembers(..) => {
+                None
+            }
         }
     }
 }
@@ -1029,7 +1055,7 @@ unsafe fn write_scalar(
             14 => super::typing::write_repr(output, word)?,
             13 => {
                 let (member, value) = super::annotations::member(word);
-                write_repr_with(output, value, member, false)?;
+                write_repr_with(output, value, member, false, false)?;
             }
             11 => write!(output, "<class '{}'>", *(word as *const Str))?,
             1 => {

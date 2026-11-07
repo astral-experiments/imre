@@ -344,6 +344,10 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 && !classes.methods[id].contains_key("__post_init__")
                 && !classes.has_concrete_subclasses(id))
             .then(|| classes.methods[id]["__init__"].id),
+            repr_method: classes.methods[id]
+                .get("__repr__")
+                .filter(|method| !method.asynchronous && classes.has_repr_override(id))
+                .map(|method| method.id),
             value_struct: class.dataclass.is_some_and(|options| options.value_struct),
             dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),

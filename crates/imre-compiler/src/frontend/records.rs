@@ -892,6 +892,23 @@ impl Checker<'_> {
         self.direct_record_display(value, at, method)
     }
 
+    /// A formatter can itself require the repr of another statically known class.
+    fn require_record_repr(&self, class: usize, at: &impl Ranged) -> Result<(), String> {
+        if self.graph.reachable_only()
+            && let Some((owner, method)) = self.classes.repr_override(class)
+            && !method.is_async
+            && !self.graph.includes_method(owner.module, method)
+        {
+            self.graph.missing_repr.set(Some(owner));
+            return Err(error(
+                self.source,
+                at,
+                "this representation requires a reachable __repr__ implementation",
+            ));
+        }
+        Ok(())
+    }
+
     fn direct_record_display(
         &mut self,
         value: Expr,
@@ -905,6 +922,7 @@ impl Checker<'_> {
             {
                 Some(method.id)
             } else if self.classes.has_repr_override(id) {
+                self.require_record_repr(id, at)?;
                 let method = methods.get("__repr__").ok_or_else(|| {
                     error(
                         self.source,
@@ -1052,6 +1070,9 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "__repr__" {
+            self.require_record_repr(class, attribute)?;
+        }
         if self.mock_implementation_method(class, attribute.attr.as_str()) {
             return Err(error(
                 self.source,
@@ -1193,6 +1214,9 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "__repr__" {
+            self.require_record_repr(class, attribute)?;
+        }
         if self.mock_implementation_method(class, attribute.attr.as_str()) {
             return Err(error(
                 self.source,

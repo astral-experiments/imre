@@ -504,6 +504,8 @@ pub(crate) struct ClassMetadata {
     pub http_members: Vec<HttpMember>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
+    /// Checked instance method used to render a retained value after type erasure.
+    pub repr_method: Option<usize>,
     pub value_struct: bool,
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,

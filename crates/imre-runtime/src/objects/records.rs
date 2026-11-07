@@ -53,6 +53,16 @@ pub struct RecordSemantics {
     pub fields: *const RecordField,
 }
 
+/// Checked class layouts with bit 8 set append their unary Python repr to the
+/// unchanged semantics prefix. Bit 7 marks a method that consumes its self owner.
+#[repr(C)]
+struct ClassRepr {
+    semantics: RecordSemantics,
+    method: ReprMethod,
+}
+
+pub(super) type ReprMethod = unsafe extern "C" fn(*const usize) -> *const crate::Str;
+
 /// A plain Python tuple; excludes named tuples, struct sequences, and private frames.
 pub(super) const EXACT_TUPLE: u32 = 1 << 5;
 
@@ -61,6 +71,17 @@ impl RecordDescriptor {
     pub(super) fn class_semantics(&self) -> Option<&RecordSemantics> {
         // SAFETY: generated semantics are immutable and outlive the descriptor.
         unsafe { self.semantics.as_ref() }.filter(|s| s.kind == 0)
+    }
+
+    pub(super) fn repr_method(&self) -> Option<(ReprMethod, bool)> {
+        let semantics = self.class_semantics()?;
+        if semantics.flags & (1 << 8) == 0 {
+            return None;
+        }
+        // SAFETY: the descriptor points to the complete immutable extended layout
+        // when its class has a checked repr method.
+        let method = unsafe { (*self.semantics.cast::<ClassRepr>()).method };
+        Some((method, semantics.flags & (1 << 7) != 0))
     }
 
     /// Codegen units may own different descriptors for one Python class.

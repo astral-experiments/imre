@@ -84,6 +84,7 @@ except KeyError as error:
 """,
     "upstream_support_payloads": upstream_support_payloads(),
     "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
+    "retained_key_repr": (Path(__file__).parent / "fixtures/exceptions/retained_key_repr.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
     "http_exception": (Path(__file__).parent / "fixtures/exceptions/http_exception.py").read_text(),
     "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
@@ -1353,6 +1354,38 @@ class WithMethod(Exception):
 }
 
 ERRORS = {
+    "unhandled_key_repr_globals": (
+        """\
+from dataclasses import dataclass
+
+labels = ["invoice-"]
+
+@dataclass(frozen=True)
+class Ticket:
+    number: int
+
+    def __repr__(self) -> str:
+        return labels[0] + str(self.number)
+
+ledger = {Ticket(1): "paid"}
+ledger[Ticket(2)]
+""",
+        "KeyError",
+    ),
+    "unhandled_formatter_output": (
+        """\
+class Notice(ValueError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+    def __str__(self) -> str:
+        print(self.detail)
+        raise ValueError("cannot display notice")
+
+raise Notice("rendering notice")
+""",
+        "Notice",
+    ),
     "unhandled_skip_class": (
         'import unittest\nraise unittest.SkipTest("skip")\n',
         "unittest.case.SkipTest",
