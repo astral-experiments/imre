@@ -455,27 +455,68 @@ impl Function<'_, '_> {
         self.value(&format!("phi i64 {}", incoming.join(", ")))
     }
 
+    /// Keep just the live stack operands when Python may observe their release.
+    fn keep_operands(&mut self, mark: &str, first: &str, second: &str) -> String {
+        self.value(&format!(
+            "call i64 @imre_dyn_keep_operands(ptr %ctx, i64 {mark}, i64 {first}, i64 {second})"
+        ))
+    }
+
+    /// Unwind this operand window before propagating its pending exception.
+    fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
+        let failed = self.name("b");
+        let outer = std::mem::replace(&mut self.error, failed.clone());
+        let result = body(self);
+        let ready = self.name("b");
+        self.jump(&ready);
+        self.label(&failed);
+        self.discard_truth(mark);
+        self.jump(&outer);
+        self.label(&ready);
+        self.error = outer;
+        result
+    }
+
     /// A failed intermediate comparison returns its object in a value context and false in a branch.
     fn compare_expr(&mut self, comparison: &ast::ExprCompare, context: BooleanContext) -> String {
-        let mut left = self.expr(&comparison.operands[0]);
-        if let [op @ (ast::CmpOp::In | ast::CmpOp::NotIn)] = comparison.ops.as_ref()
-            && let ast::Expr::Tuple(tuple) = &comparison.operands[1]
-            && tuple.elts.len() <= 8
-            && tuple.elts.iter().all(imre_ast::literal_tuple_element)
+        if let [op] = comparison.ops.as_ref()
+            && !matches!(op, ast::CmpOp::Is | ast::CmpOp::IsNot)
         {
-            // Keep the entry-block scratch array bounded even for very large tuple displays.
-            let values: Vec<_> = tuple.elts.iter().map(|item| self.expr(item)).collect();
-            let (array, count) = self.handle_array(&values);
-            let negate = u32::from(*op == ast::CmpOp::NotIn);
-            let value = self.checked(&format!(
-                "call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {left}, ptr {array}, i64 {count}, i32 {negate})"
-            ));
+            let left = self.expr(&comparison.operands[0]);
+            let operand = &comparison.operands[1];
+            let value = if matches!(op, ast::CmpOp::In | ast::CmpOp::NotIn)
+                && let ast::Expr::Tuple(tuple) = operand
+                && tuple.elts.len() <= 8
+                && tuple.elts.iter().all(imre_ast::literal_tuple_element)
+            {
+                // Keep the entry-block scratch array bounded for large tuple displays.
+                let values: Vec<_> = tuple.elts.iter().map(|item| self.expr(item)).collect();
+                let (array, count) = self.handle_array(&values);
+                let negate = u32::from(*op == ast::CmpOp::NotIn);
+                self.checked(&format!(
+                    "call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {left}, ptr {array}, i64 {count}, i32 {negate})"
+                ))
+            } else {
+                let right = self.expr(operand);
+                self.op(op.as_str(), &[&left, &right])
+            };
             return if context == BooleanContext::Condition {
                 self.truth(&value)
             } else {
                 value
             };
         }
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |f| f.comparison_steps(comparison, context, &mark))
+    }
+
+    fn comparison_steps(
+        &mut self,
+        comparison: &ast::ExprCompare,
+        context: BooleanContext,
+        mark: &str,
+    ) -> String {
+        let mut left = self.expr(&comparison.operands[0]);
         let done = self.name("b");
         let mut incoming = Vec::new();
         for (i, (op, operand)) in comparison
@@ -484,12 +525,39 @@ impl Function<'_, '_> {
             .zip(&comparison.operands[1..])
             .enumerate()
         {
-            let right = self.expr(operand);
-            let value = self.op(op.as_str(), &[&left, &right]);
-            left = right;
-            if i + 1 == comparison.ops.len() {
+            let last = i + 1 == comparison.ops.len();
+            let right_mark = self.temporary_mark();
+            let (right, value, predicate) = self.unwind_operands(&right_mark, |f| {
+                let right = f.expr(operand);
+                let predicate = match op {
+                    ast::CmpOp::Is => Some("eq"),
+                    ast::CmpOp::IsNot => Some("ne"),
+                    _ => None,
+                }
+                .map(|relation| f.value(&format!("icmp {relation} i64 {left}, {right}")));
+                let value = if let Some(bit) = &predicate {
+                    f.value(&format!(
+                        "select i1 {bit}, i64 {}, i64 {}",
+                        permanent::TRUE,
+                        permanent::FALSE
+                    ))
+                } else {
+                    f.op(op.as_str(), &[&left, &right])
+                };
+                (right, value, predicate)
+            });
+            if last {
+                // The final operation consumes right before left. Identity
+                // produces an immortal boolean; a rich result may alias either.
+                for boundary in [right_mark.as_str(), mark] {
+                    if predicate.is_some() {
+                        self.discard_truth(boundary);
+                    } else {
+                        self.keep_operands(boundary, &value, "0");
+                    }
+                }
                 let result = if context == BooleanContext::Condition {
-                    self.truth(&value)
+                    predicate.unwrap_or_else(|| self.truth(&value))
                 } else {
                     value
                 };
@@ -499,17 +567,35 @@ impl Function<'_, '_> {
                 incoming.push(format!("[ {result}, %{} ]", self.current_block()));
                 self.jump(&done);
             } else {
-                let truth = self.truth(&value);
+                let rich = predicate.is_none();
+                let middle_end = self.keep_operands(mark, &right, if rich { &value } else { "0" });
+                let truth = predicate
+                    .unwrap_or_else(|| self.unwind_operands(&middle_end, |f| f.truth(&value)));
+                if rich && context == BooleanContext::Condition {
+                    self.discard_truth(&middle_end);
+                }
+                let stop = self.name("b");
+                let next = self.name("b");
+                self.branch(&truth, &next, &stop);
+                self.label(&stop);
+                if rich && context == BooleanContext::Value {
+                    self.keep_operands(mark, &value, "0");
+                } else {
+                    self.discard_truth(mark);
+                }
                 let result = if context == BooleanContext::Condition {
                     "false"
                 } else {
                     &value
                 };
                 incoming.push(format!("[ {result}, %{} ]", self.current_block()));
-                let next = self.name("b");
-                self.branch(&truth, &next, &done);
+                self.jump(&done);
                 self.label(&next);
+                if rich && context == BooleanContext::Value {
+                    self.discard_truth(&middle_end);
+                }
             }
+            left = right;
         }
         self.label(&done);
         let ty = if context == BooleanContext::Condition {

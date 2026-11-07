@@ -2227,6 +2227,23 @@ pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: 
     unsafe { (&mut *ctx).discard_truth(mark) }
 }
 
+/// Publish surviving operands before collecting, returning the boundary above the first one.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_keep_operands(
+    ctx: *mut Context,
+    mark: usize,
+    first: Id,
+    second: Id,
+) -> usize {
+    // SAFETY: these live handles and the mark belong to the current generated frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.discard_temporaries(
+        mark,
+        std::iter::once(first).chain((second != NONE).then_some(second)),
+    );
+    mark + 1
+}
+
 /// Publish the named expression's result before the caller evaluates its next operand.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_named_assignment(
@@ -2498,7 +2515,15 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        self.discard_temporaries(mark, None);
+        if let Some(error) = self.pending.take() {
+            // A weak callback may reenter Python during unwind. Keep the original
+            // exception alive without exposing it as a failure of the callback.
+            self.discard_temporaries(mark, error.roots());
+            self.pending = Some(error);
+            self.heap.release_temporaries_since(mark);
+        } else {
+            self.discard_temporaries(mark, None);
+        }
     }
 
     /// Release operand roots and report whether a weak callback or finalizer may become runnable.
