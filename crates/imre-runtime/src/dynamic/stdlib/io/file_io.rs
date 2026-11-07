@@ -431,8 +431,8 @@ pub(in crate::dynamic) fn open(
     }
     let update = mode_text.contains('+');
     let sized_reader = !numeric && buffering > 1 && matches!(mode_text, "rb" | "br");
+    let text_input = matches!(mode_text, "r" | "rt" | "tr");
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
-    let text_input = buffering < 0 && matches!(mode_text, "r" | "rt" | "tr");
     if binary && buffering == 1 {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
@@ -481,7 +481,13 @@ pub(in crate::dynamic) fn open(
         };
         let line_buffering =
             buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
-        let buffer = if fresh.is_some() || sized_reader || (binary && warning_options) {
+        let large_text_reader =
+            text_input && capacity > crate::text_output::MAX_DEFAULT_BUFFER_SIZE;
+        let buffer = if fresh.is_some()
+            || sized_reader
+            || large_text_reader
+            || (binary && warning_options)
+        {
             let class = if update {
                 types.random
             } else if reading {
