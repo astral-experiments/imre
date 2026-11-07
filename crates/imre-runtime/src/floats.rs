@@ -186,6 +186,22 @@ pub(crate) fn float_logarithm(x: f64, log: fn(f64) -> f64) -> Result<f64> {
     Ok(log(x))
 }
 
+pub(crate) fn log1p(value: f64) -> Result<f64> {
+    if value <= -1.0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("expected argument value > -1, got {}", render(value)),
+        ));
+    }
+    // Some platform log1p implementations lose the sign of zero.
+    Ok(if value == 0.0 { value } else { value.ln_1p() })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_log1p(value: f64) -> f64 {
+    finish(log1p(value), 0.0)
+}
+
 /// CPython returns the input NaN, including its signaling bit and payload.
 pub(crate) fn log10(x: f64) -> f64 {
     if x.is_nan() { x } else { x.log10() }

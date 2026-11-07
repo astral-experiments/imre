@@ -3920,6 +3920,7 @@ for name in ("md4", "ripemd160"):
             "boxed_math_dist.py",
             "boxed_math_fabs.py",
             "boxed_math_fma.py",
+            "boxed_math_log1p.py",
             "boxed_math_pow.py",
             "boxed_math_remainder.py",
             "boxed_math_frexp.py",

@@ -552,6 +552,7 @@ impl Builtin {
             | Self::FloatAcos
             | Self::FloatAsin
             | Self::FloatLog10
+            | Self::FloatLog1p
             | Self::IntLog10
             | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
@@ -980,7 +981,8 @@ impl Builtin {
             | Self::FloatAtan
             | Self::FloatErfc
             | Self::FloatLog2
-            | Self::FloatLog10 => signature(&[Type::Float], Type::Float),
+            | Self::FloatLog10
+            | Self::FloatLog1p => signature(&[Type::Float], Type::Float),
             Self::IntSignAsFloat | Self::IntLog10 => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
@@ -1557,6 +1559,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_float_acos"
                 | "imre_float_asin"
                 | "imre_float_log10"
+                | "imre_float_log1p"
                 | "imre_int_log10"
                 | "imre_float_int"
                 | "imre_float_parse"
