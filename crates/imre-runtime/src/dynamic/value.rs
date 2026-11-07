@@ -2956,6 +2956,8 @@ struct RootTrace {
     next_roots: Vec<Id>,
     flags: Vec<u8>,
     covered: Vec<Id>,
+    covered_runs: Vec<std::ops::Range<usize>>,
+    checked_runs: bool,
     frontier: Vec<Id>,
     valid: bool,
 }
@@ -2964,6 +2966,7 @@ impl RootTrace {
     const COVERED: u8 = 1;
     const FRONTIER: u8 = 2;
     const VOLATILE: u8 = 4;
+    const MIN_RUN_MARKS: usize = 64 * 1024;
 
     /// Revisit a mutated value through the ordinary marker on later collections.
     fn changed(&mut self, index: usize) {
@@ -3001,11 +3004,27 @@ impl RootTrace {
         self.add_frame_containers(heap);
         if !self.valid || self.roots != self.next_roots {
             std::mem::swap(&mut self.roots, &mut self.next_roots);
+            self.covered_runs.clear();
+            self.checked_runs = false;
             self.valid = self.rebuild(heap);
+        } else if !self.checked_runs {
+            self.checked_runs = true;
+            // Build the index only when a large trace can amortize the scan.
+            if self.covered.len() >= Self::MIN_RUN_MARKS {
+                self.cache_covered_runs();
+            }
         }
         if self.valid {
-            for &id in &self.covered {
-                heap.traces[id as usize].set(END);
+            if self.covered_runs.is_empty() {
+                for &id in &self.covered {
+                    heap.traces[id as usize].set(END);
+                }
+            } else {
+                for run in &self.covered_runs {
+                    for trace in &heap.traces[run.clone()] {
+                        trace.set(END);
+                    }
+                }
             }
             heap.mark_reference_roots(self.frontier.iter().copied(), None);
         } else {
@@ -3040,6 +3059,29 @@ impl RootTrace {
                     self.next_roots.push(id);
                 }
             }
+        }
+    }
+
+    /// Record contiguous marks when the same proven roots survive another collection.
+    fn cache_covered_runs(&mut self) {
+        // Bound the scan by the size of the ID list it replaces, and keep a range
+        // only when it represents at least eight marks on average.
+        let max_runs = self.covered.len() / 8;
+        if max_runs == 0 || self.flags.len() > std::mem::size_of_val(self.covered.as_slice()) {
+            return;
+        }
+        let mut start = 0;
+        for group in self.flags.chunk_by(|a, b| (a ^ b) & Self::COVERED == 0) {
+            let end = start + group.len();
+            if group[0] & Self::COVERED != 0 {
+                if self.covered_runs.len() == max_runs || self.covered_runs.try_reserve(1).is_err()
+                {
+                    self.covered_runs.clear();
+                    return;
+                }
+                self.covered_runs.push(start..end);
+            }
+            start = end;
         }
     }
 
@@ -6736,6 +6778,43 @@ mod tests {
         heap.collect([reused].into_iter());
         assert!(heap.slots[root as usize].value.is_none());
         assert!(heap.slots[reused as usize].value.is_some());
+    }
+
+    #[test]
+    fn cached_mark_runs_follow_changes_to_their_root() {
+        let mut heap = Heap::new();
+        let children: Vec<_> = (0..RootTrace::MIN_RUN_MARKS)
+            .map(|_| heap.alloc(Value::List(Vec::new())))
+            .collect();
+        let root = heap.alloc(Value::Tuple(children.clone()));
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        heap.collect([root].into_iter());
+        assert!(
+            heap.root_trace
+                .covered_runs
+                .iter()
+                .any(|run| run.contains(&(children[0] as usize)))
+        );
+        assert!(
+            children
+                .iter()
+                .all(|&id| heap.slots[id as usize].value.is_some())
+        );
+
+        *heap.get_mut(root) = Value::Tuple(Vec::new());
+        heap.collect([root].into_iter());
+        assert!(heap.root_trace.covered_runs.is_empty());
+        assert!(
+            children
+                .iter()
+                .all(|&id| heap.slots[id as usize].value.is_none())
+        );
+        let reused = heap.alloc(Value::List(Vec::new()));
+        assert!(children.contains(&reused));
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[reused as usize].value.is_none());
     }
 
     #[test]
