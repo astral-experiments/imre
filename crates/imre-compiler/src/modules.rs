@@ -2811,7 +2811,12 @@ pub(crate) struct SourceModule {
     is_package: bool,
     search_roots: SearchRoots,
     /// A rebuilt module is declared by a .pyi beside its platform-specific archive.
-    pub(crate) archive: Option<PathBuf>,
+    pub(crate) archive: Option<NativeArchive>,
+}
+
+pub(crate) struct NativeArchive {
+    path: PathBuf,
+    pub(crate) identity: PathBuf,
 }
 
 enum SearchRoots {
@@ -3210,6 +3215,22 @@ impl SourceGraph {
             .map(|(path, _, _)| path.clone())
             .chain(profile.map(Path::to_path_buf))
             .collect();
+        // The linker receives physical archive paths. A hit must also validate the
+        // import spelling in case a wheel symlink was retargeted or removed.
+        for archive in self
+            .modules
+            .iter()
+            .filter_map(|module| module.archive.as_ref())
+        {
+            match FileSystem::default().open_hashed(&archive.identity) {
+                Ok((_, hash)) => inputs.files.push((
+                    archive.path.clone(),
+                    archive.identity.clone(),
+                    hash.to_hex().to_string(),
+                )),
+                Err(_) => inputs.relink_site_wheel = true,
+            }
+        }
         (inputs, paths)
     }
 
@@ -4220,7 +4241,7 @@ impl SiteProbes {
     pub(crate) fn record(&self, inputs: &mut crate::SourceInputs) {
         inputs.missing.extend_from_slice(&self.missing);
         inputs.file_checks.extend(self.file_checks.clone());
-        inputs.relink_site_wheel = self.selected;
+        inputs.relink_site_wheel = self.selected && inputs.boxed_imports;
     }
 }
 
@@ -5985,13 +6006,20 @@ impl<'a> Loader<'a> {
                             stub.display()
                         ));
                     }
-                    let archive = self.fs.canonicalize(&archive).map_err(|e| e.to_string())?;
-                    if !archive.starts_with(root) {
+                    let identity = self.fs.canonicalize(&archive).map_err(|e| e.to_string())?;
+                    if !identity.starts_with(root) {
                         return Err(format!(
                             "archive for native module {name:?} resolves outside its extension path"
                         ));
                     }
-                    (stub, false, Some(archive))
+                    (
+                        stub,
+                        false,
+                        Some(NativeArchive {
+                            path: archive,
+                            identity,
+                        }),
+                    )
                 } else if self.fs.is_file(&source) {
                     (source, false, None)
                 } else if installed && self.fs.is_file(&stub) {
@@ -6582,6 +6610,10 @@ mod native_tests {
             compiled.extension_archives,
             [archive.canonicalize().unwrap()]
         );
+        assert!(compiled.source_inputs.fresh());
+        fs::write(&archive, b"updated archive").unwrap();
+        assert!(!compiled.source_inputs.fresh());
+        fs::write(&archive, []).unwrap();
         assert_eq!(
             compiled
                 .llvm_ir

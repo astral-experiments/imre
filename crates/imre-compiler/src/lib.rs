@@ -234,7 +234,7 @@ pub struct SourceInputs {
     /// A native run of this image can request Python source modules at runtime.
     #[serde(default)]
     pub boxed_imports: bool,
-    /// Relink a wheel found during checked import resolution, including after object fallback.
+    /// Relink when a wheel or its native dependencies cannot be validated for an executable hit.
     #[serde(skip)]
     pub relink_site_wheel: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
@@ -623,7 +623,7 @@ fn compile_file_with_layout(
             extension_archives: graph
                 .modules
                 .iter()
-                .filter_map(|m| m.archive.clone())
+                .filter_map(|m| m.archive.as_ref().map(|archive| archive.identity.clone()))
                 .collect(),
             source_inputs,
             input_paths,
@@ -774,7 +774,7 @@ fn compile_file_units_with(
             extension_archives: graph
                 .modules
                 .iter()
-                .filter_map(|m| m.archive.clone())
+                .filter_map(|m| m.archive.as_ref().map(|archive| archive.identity.clone()))
                 .collect(),
             input_paths,
             source_inputs,
