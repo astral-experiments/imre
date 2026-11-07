@@ -1331,6 +1331,7 @@ pub(super) enum Value {
     },
     Function {
         fields: super::function_fields::FunctionFields,
+        /// The Python closure tuple, a lone cell awaiting tuple access, or NONE.
         closure: Id,
         code: Id,
         scope: Id,

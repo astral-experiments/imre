@@ -2127,10 +2127,10 @@ impl Context {
         } else {
             scope
         };
-        let closure = if cells.is_empty() {
-            NONE
-        } else {
-            self.alloc(Value::Tuple(cells))
+        let closure = match cells.as_slice() {
+            [] => NONE,
+            [only] => *only,
+            _ => self.alloc(Value::Tuple(cells)),
         };
         self.alloc(Value::Function {
             fields,
