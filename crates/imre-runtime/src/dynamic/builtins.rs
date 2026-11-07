@@ -1672,6 +1672,10 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "_getset_descriptor_doc" {
+        let receiver = noargs_method_receiver(ctx, "getset_descriptor", "__doc__", args, kwargs)?;
+        return ctx.getset_documentation(receiver);
+    }
     if name == "_wrapper_descriptor_doc" {
         let receiver = noargs_method_receiver(ctx, "wrapper_descriptor", "__doc__", args, kwargs)?;
         return ctx.lookup_attr(receiver, "__doc__");
@@ -2301,7 +2305,7 @@ pub(super) fn call(
                     || Context::dict_view_owner(owner).is_some()
                 {
                     ctx.builtin_slot_accepts(values[0], owner)
-                } else if owner == "wrapper_descriptor" {
+                } else if matches!(owner, "wrapper_descriptor" | "getset_descriptor") {
                     return Err(ctx.readonly_getset_error(owner, field, values[0]));
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))

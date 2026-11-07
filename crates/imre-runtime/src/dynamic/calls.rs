@@ -15,6 +15,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::XOF_CLASS
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
+            | "getset_descriptor"
             | value::ZLIB_DECOMPRESS_TYPE
             | "anext_awaitable"
             | "_buffer_wrapper"
@@ -1545,9 +1546,52 @@ impl Context {
         }
     }
 
+    /// Read native getset documentation without rebinding the descriptor's own __doc__.
+    pub(super) fn getset_documentation(&mut self, descriptor: Id) -> Result<Id> {
+        let doc = match *self.heap.get(descriptor) {
+            Value::LayoutDescriptor(owner, field) => {
+                if matches!(self.heap.get(owner), Value::Native(name) if name == "BaseException") {
+                    None
+                } else {
+                    match field {
+                        "__dict__" => Some("dictionary for instance variables"),
+                        "__class__" => Some("the object's class"),
+                        "__weakref__" => Some("list of weak references to the object"),
+                        _ => None,
+                    }
+                }
+            }
+            Value::GetSetDescriptor {
+                owner, name, get, ..
+            } => match (owner, name) {
+                ("int", "numerator") => Some("the numerator of a rational number in lowest terms"),
+                ("int", "denominator") => {
+                    Some("the denominator of a rational number in lowest terms")
+                }
+                ("float", "real") => Some("the real part of a complex number"),
+                ("float", "imag") => Some("the imaginary part of a complex number"),
+                ("struct.Struct", "format") => Some("struct format string"),
+                ("struct.Struct", "size") => Some("struct size in bytes"),
+                (super::deque::CLASS, "maxlen") => {
+                    Some("maximum size of a deque or None if unbounded")
+                }
+                (_, "mapping") if Self::dict_view_owner(owner).is_some() => {
+                    Some("dictionary that this view refers to")
+                }
+                ("wrapper_descriptor" | "getset_descriptor", "__doc__")
+                | (stdlib::datetime::isocalendar::CLASS | super::thread_handle::CLASS, _)
+                | ("datetime.date" | "datetime.datetime" | "datetime.time", _) => None,
+                (_, "__dict__") if matches!(self.heap.get(get), Value::IoMethod { .. }) => None,
+                _ => return Err(self.missing_attribute(descriptor, "__doc__")),
+            },
+            _ => unreachable!("validated getset descriptor"),
+        };
+        Ok(doc.map_or(NONE, |text| self.text(text)))
+    }
+
     /// A read-only getset can be installed on another class without changing its receiver.
     pub(super) fn readonly_getset_error(&self, owner: &str, name: &str, receiver: Id) -> Error {
-        if owner == "wrapper_descriptor"
+        if matches!(owner, "wrapper_descriptor" | "getset_descriptor")
             && let Err(error) =
                 builtins::noargs_method_receiver(self, owner, name, &[receiver], &[])
         {
@@ -2971,22 +3015,12 @@ impl Context {
                 return Ok(self.builtin(&format!("member_descriptor.{name}")));
             }
             Value::TupleGetter { doc, .. } if name == "__doc__" => return Ok(doc.unwrap_or(NONE)),
+            Value::LayoutDescriptor(..) | Value::GetSetDescriptor { .. } if name == "__doc__" => {
+                return self.getset_documentation(obj);
+            }
             Value::LayoutDescriptor(owner, field) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text(field)),
-                "__doc__"
-                    if matches!(field, "__annotations__" | "__annotate__")
-                        || matches!(self.heap.get(owner), Value::Native(symbol) if symbol == "BaseException") =>
-                {
-                    return Ok(NONE);
-                }
-                "__doc__" => {
-                    return Ok(self.text(match field {
-                        "__dict__" => "dictionary for instance variables",
-                        "__class__" => "the object's class",
-                        _ => "list of weak references to the object",
-                    }));
-                }
                 "__qualname__" => {
                     let qualname = self.lookup_attr(owner, "__qualname__")?;
                     return Ok(self.text(format!("{}.{field}", self.str_value(qualname)?)));
@@ -4109,6 +4143,7 @@ impl Context {
                 "int"
                     | "float"
                     | "wrapper_descriptor"
+                    | "getset_descriptor"
                     | super::deque::CLASS
                     | super::thread_handle::CLASS
                     | "typing.Union"
@@ -4132,37 +4167,6 @@ impl Context {
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
-                    "__doc__" if Self::dict_view_owner(owner).is_some() => {
-                        return Ok(self.text("dictionary that this view refers to"));
-                    }
-                    "__doc__"
-                        if matches!(
-                            owner,
-                            stdlib::datetime::isocalendar::CLASS
-                                | super::thread_handle::CLASS
-                                | "wrapper_descriptor"
-                        ) || matches!(
-                            self.heap.get(get),
-                            Value::IoMethod {
-                                name: "__dict__",
-                                ..
-                            }
-                        ) =>
-                    {
-                        return Ok(NONE);
-                    }
-                    "__doc__" if owner == super::deque::CLASS => {
-                        return Ok(self.text("maximum size of a deque or None if unbounded"));
-                    }
-                    "__doc__" if owner == "float" => {
-                        let part = if field == "real" { "real" } else { "imaginary" };
-                        return Ok(self.text(format!("the {part} part of a complex number")));
-                    }
-                    "__doc__" if owner == "int" => {
-                        return Ok(
-                            self.text(format!("the {field} of a rational number in lowest terms"))
-                        );
-                    }
                     "__qualname__" => {
                         return Ok(
                             self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap()))
@@ -4175,6 +4179,7 @@ impl Context {
                                 "int"
                                     | "float"
                                     | "wrapper_descriptor"
+                                    | "getset_descriptor"
                                     | "typing.Union"
                                     | "typing.TypeAliasType"
                                     | "_ssl.MemoryBIO"
@@ -5037,7 +5042,7 @@ impl Context {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
             Value::Native(ref class)
-                if class == "wrapper_descriptor"
+                if matches!(class.as_str(), "wrapper_descriptor" | "getset_descriptor")
                     && let Some(member) = self.own_class_attr(obj, name) =>
             {
                 return Ok(member);
@@ -6085,8 +6090,13 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
-        if name == "__doc__" && self.builtin_type_name(obj) == Some("wrapper_descriptor") {
-            let class = self.builtin("wrapper_descriptor");
+        if name == "__doc__"
+            && matches!(
+                self.builtin_type_name(obj),
+                Some("wrapper_descriptor" | "getset_descriptor")
+            )
+        {
+            let class = self.exact_type(obj)?;
             return Ok(self.own_class_attr(class, name));
         }
         if matches!(
