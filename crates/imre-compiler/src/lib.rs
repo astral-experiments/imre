@@ -1389,6 +1389,23 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn generic_io_annotations_use_typed_stream_reads() {
+        let source = r#"
+import typing
+from typing import IO as Stream
+
+def text(stream: Stream[str]) -> str:
+    return stream.readline()
+
+def binary(stream: typing.IO[bytes]) -> bytes:
+    return stream.readline()
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_text_readline("));
+        assert!(llvm.contains("call ptr @imre_binary_readline("));
+    }
+
+    #[test]
     fn file_iterators_pull_typed_lines_and_keep_reads_in_the_loop() {
         let source = r#"
 from gzip import open

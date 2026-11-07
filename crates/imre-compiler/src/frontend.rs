@@ -2194,6 +2194,19 @@ fn annotation_with_aliases(
                 }
             }
             item if graph.resolve_type(module, item)
+                == Some(Binding::Intrinsic(Intrinsic::TYPING_IO)) =>
+            {
+                match nested(&value.slice)? {
+                    Type::Str => Ok(Type::TextIO),
+                    Type::Bytes => Ok(Type::BinaryIO),
+                    _ => Err(error(
+                        source,
+                        &*value.slice,
+                        "checked IO requires str or bytes",
+                    )),
+                }
+            }
+            item if graph.resolve_type(module, item)
                 == Some(Binding::Intrinsic(Intrinsic::Deque)) =>
             {
                 Ok(types.deque(nested(&value.slice)?))
