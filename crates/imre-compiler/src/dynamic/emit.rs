@@ -49,6 +49,7 @@ declare i64 @imre_dyn_next_pair(ptr, i64, ptr, i1)
 declare i64 @imre_dyn_builtin_method_target(ptr, i64, ptr, ptr)
 declare i64 @imre_dyn_dict_get_target(ptr, i64, ptr)
 declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
+declare i64 @imre_dyn_keyword_call_at(ptr, i64, ptr, i64, ptr, i64, i64, ptr, i64)
 declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
@@ -608,8 +609,14 @@ impl Output {
     }
 }
 
-/// Pack expanded operands in Python containers or pass evaluated positional handles directly.
+/// Pass fixed operands in native storage or pack expanded operands in Python containers.
 enum CallArguments {
+    FixedKeywords {
+        array: &'static str,
+        positional: usize,
+        names: String,
+        keywords: usize,
+    },
     Packed {
         args: String,
         kwargs: String,
@@ -1016,6 +1023,15 @@ impl Function<'_, '_> {
                 "imre_dyn_partition_field_at",
                 format!("ptr {array}, i32 {index}, ptr {get_position}"),
             ),
+            CallArguments::FixedKeywords {
+                array,
+                positional,
+                names,
+                keywords,
+            } => (
+                "imre_dyn_keyword_call_at",
+                format!("ptr {array}, i64 {positional}, ptr {names}, i64 {keywords}"),
+            ),
             CallArguments::Packed { args, kwargs } => (
                 "imre_dyn_scoped_call_at",
                 format!("i64 {args}, i64 {kwargs}"),
@@ -1040,6 +1056,16 @@ impl Function<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pass_fixed_keywords_directly_and_keep_expanded_calls_packed() {
+        let source = "target(1, name=2)\ntarget(1, **options)\n";
+        let (_, ir) = initializer("example", Path::new("example.py"), source, true, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ir.matches("call i64 @imre_dyn_keyword_call_at(").count(), 1);
+        assert_eq!(ir.matches("call i64 @imre_dyn_scoped_call_at(").count(), 1);
+    }
 
     #[test]
     fn declare_exit_line_only_for_compiled_with() {
