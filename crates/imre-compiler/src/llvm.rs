@@ -7932,6 +7932,7 @@ impl Emitter<'_, '_> {
                     };
                     self.call(symbol, Type::Int, &[&args[0].value, &args[1].value])
                 }),
+            Builtin::IntBitCount => self.call("imre_int_bit_count", Type::Int, &[&args[0].value]),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::Sumprod if returns == Type::Int => {
                 self.output.local_helper(
@@ -10925,6 +10926,7 @@ declare void @imre_print_float(double)
 declare i64 @imre_math_comb(i64, i64)
 declare i64 @imre_math_perm(i64, i64)
 declare i64 @imre_math_factorial(i64)
+declare i64 @imre_int_bit_count(i64)
 declare i64 @imre_int_bit_length(i64)
 declare i64 @imre_int_hash(i64)
 declare double @imre_int_float(i64)

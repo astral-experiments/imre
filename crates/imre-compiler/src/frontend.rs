@@ -11245,7 +11245,7 @@ impl<'a> Checker<'a> {
                 });
             }
             if (method == "to_bytes"
-                || (matches!(method, "bit_length" | "__hash__")
+                || (matches!(method, "bit_count" | "bit_length" | "__hash__")
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()))
                 && (matches!(receiver.ty, Type::Int | Type::Bool)
@@ -11253,10 +11253,10 @@ impl<'a> Checker<'a> {
             {
                 let receiver = self.int_method_receiver(receiver, attribute)?;
                 if method != "to_bytes" {
-                    let builtin = if method == "__hash__" {
-                        Builtin::IntHash
-                    } else {
-                        Builtin::IntBitLength
+                    let builtin = match method {
+                        "__hash__" => Builtin::IntHash,
+                        "bit_count" => Builtin::IntBitCount,
+                        _ => Builtin::IntBitLength,
                     };
                     return Ok(Expr {
                         ty: Type::Int,
