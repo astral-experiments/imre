@@ -1,3 +1,4 @@
+from functools import update_wrapper
 from typing import Callable
 
 
@@ -14,6 +15,10 @@ class Item:
 
     def render(self, suffix: str) -> str:
         return self.text + suffix + str(self.number)
+
+
+def repeat(text: str) -> str:
+    return text + text
 
 
 def select(items: list[Item]) -> Callable[[str], str]:
@@ -46,6 +51,12 @@ def main() -> None:
     print(changed("?"))
     temporary: Callable[[str], str] = Item("temporary", 5).render
     print(temporary("/"))
+    method = other.render
+    wrapper = update_wrapper(repeat, method, (), ())
+    saved = wrapper.__wrapped__
+    update_wrapper(wrapper, temporary, (), ())
+    print(wrapper is repeat, saved is method, repeat.__wrapped__ is temporary)
+    print(wrapper(":"), saved("?"), wrapper.__wrapped__("/"))
 
 
 main()

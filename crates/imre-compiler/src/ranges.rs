@@ -161,18 +161,7 @@ impl RangeFacts<'_> {
             }
             _ => {}
         });
-        loop {
-            let mut changed = false;
-            for &(source, target) in &moves {
-                if !small[source] && small[target] {
-                    small[target] = false;
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
+        crate::ir::propagate_copy_facts(&mut small, &moves);
         small
     }
 }

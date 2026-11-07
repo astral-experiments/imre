@@ -3006,6 +3006,60 @@ pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -
     result
 }
 
+/// A local keeps a fact only if every value copied into it also has that fact.
+/// Copy edges can point backward through a loop or through a moved temporary.
+pub(crate) fn propagate_copy_facts(proven: &mut [bool], copies: &[(usize, usize)]) {
+    loop {
+        let mut changed = false;
+        for &(source, target) in copies {
+            if !proven[source] && proven[target] {
+                proven[target] = false;
+                changed = true;
+            }
+        }
+        if !changed {
+            return;
+        }
+    }
+}
+
+/// Only a plain function owns the writable third word used by wrapper links.
+pub(crate) fn plain_link_owners(function: &Function, owners: &[&Expr]) -> bool {
+    fn origin(value: &Expr) -> &ExprKind {
+        match &value.kind {
+            ExprKind::Builtin(Builtin::FunctionWrappedSet, args) => origin(&args[0]),
+            ExprKind::Scope { value, .. } => origin(value),
+            kind => kind,
+        }
+    }
+
+    let mut plain = vec![true; function.locals.len()];
+    for &parameter in &function.params {
+        plain[parameter] = false;
+    }
+    let mut copies = Vec::new();
+    walk_nodes(&function.body, &mut |node| match node {
+        // Clearing a slot does not give it a new callable.
+        Node::Statement(Statement::Clear(_) | Statement::Scope { .. })
+        | Node::Expression(Expr {
+            kind: ExprKind::Scope { .. },
+            ..
+        }) => {}
+        Node::Statement(Statement::Move(target, source)) => copies.push((*source, *target)),
+        _ => node_writes(node, &mut |slot, value| match value.map(origin) {
+            Some(ExprKind::Local(source)) => copies.push((*source, slot)),
+            Some(ExprKind::Builtin(Builtin::StaticFunction(_), _)) => {}
+            _ => plain[slot] = false,
+        }),
+    });
+    propagate_copy_facts(&mut plain, &copies);
+    owners.iter().all(|owner| match origin(owner) {
+        ExprKind::Local(slot) => plain[*slot],
+        ExprKind::Builtin(Builtin::StaticFunction(_), _) => true,
+        _ => false,
+    })
+}
+
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
 pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Option<&Expr>)) {
     walk_nodes(body, &mut |node| node_writes(node, &mut visit));

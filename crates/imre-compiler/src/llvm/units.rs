@@ -252,17 +252,18 @@ pub(crate) fn emit_units(
     functions: &[usize],
     names: &[String],
     entry: usize,
-) -> Result<Vec<CodegenUnit>, super::Unsupported> {
+) -> Result<(Vec<CodegenUnit>, bool), super::Unsupported> {
     let mut output = Output::new(functions, names.len(), entry, true);
-    emit_program(module, ranges, sanitize, &mut output)?;
-    Ok(names
+    let prefer_objects = emit_program(module, ranges, sanitize, &mut output)?;
+    let units = names
         .iter()
         .zip(output.finish())
         .map(|(name, llvm_ir)| CodegenUnit {
             name: name.clone(),
             llvm_ir,
         })
-        .collect())
+        .collect();
+    Ok((units, prefer_objects))
 }
 
 #[cfg(test)]

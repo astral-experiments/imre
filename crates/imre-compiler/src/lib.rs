@@ -313,7 +313,7 @@ fn check_file_with(
             graph.session.explicit_check = true;
             checked_lower_with(graph, cache.as_deref_mut())
         },
-        |_, _| Ok(()),
+        |_, _| Ok(((), false)),
         |_| (),
     )
 }
@@ -374,7 +374,7 @@ fn object_fallback<T>(
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
     mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<CheckedIr, LoweringDiagnostic>,
-    native: impl Fn(&mut modules::SourceGraph, CheckedIr) -> Result<T, llvm::Unsupported>,
+    native: impl Fn(&mut modules::SourceGraph, CheckedIr) -> Result<(T, bool), llvm::Unsupported>,
     boxed: impl FnOnce(UnitCompilation) -> T,
 ) -> Result<T, String> {
     if options.module_entry.is_some() {
@@ -397,6 +397,7 @@ fn object_fallback<T>(
     let mut import_failure = None;
     let mut site_probes = modules::SiteProbes::default();
     let mut infer_sets = true;
+    let mut native_candidate = None;
     let (error, graph, checked_entry) = loop {
         let mut graph = match options.load_graph(
             path,
@@ -430,11 +431,17 @@ fn object_fallback<T>(
                         owners.push(owners[original]);
                     }
                 }
-                match native(&mut graph, (module, owners)) {
-                    Ok(value) => return Ok(value),
-                    Err(refusal) => LoweringDiagnostic::plain(refusal.0.to_owned())
-                        .classified(LoweringKind::Object),
-                }
+                let reason = match native(&mut graph, (module, owners)) {
+                    Ok((value, true)) if options.entry_profile.is_none() => {
+                        // Keep the Python entry's full exception locations when it supports this
+                        // module. Otherwise the retained native callable layout can run it.
+                        native_candidate = Some(value);
+                        "Imre: native bound wrapper links use checked exception locations"
+                    }
+                    Ok((value, _)) => return Ok(value),
+                    Err(refusal) => refusal.0,
+                };
+                LoweringDiagnostic::plain(reason.to_owned()).classified(LoweringKind::Object)
             }
             // Tracing and startup imports both need the same Python heap as the entry.
             Ok(_) => {
@@ -451,6 +458,7 @@ fn object_fallback<T>(
         if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
             break (error, Some(graph), false);
         }
+        native_candidate = None;
         infer_sets = false;
         import_failure = None;
         site_probes = modules::SiteProbes::default();
@@ -467,7 +475,7 @@ fn object_fallback<T>(
                 error.kind == LoweringKind::ReturnType || g.imports_struct_decorator()
             }))
     {
-        return Err(error.to_string());
+        return native_candidate.ok_or_else(|| error.to_string());
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
@@ -566,7 +574,7 @@ fn object_fallback<T>(
             site_probes.record(&mut compilation.source_inputs);
             Ok(boxed(compilation))
         }
-        None => Err(error.to_string()),
+        None => native_candidate.ok_or_else(|| error.to_string()),
     }
 }
 
@@ -604,9 +612,10 @@ fn compile_file_with_layout(
 ) -> Result<Compilation, String> {
     let typed = |graph: &mut modules::SourceGraph, (module, _): CheckedIr| {
         let ranges = ranges::analyze(&module);
-        let llvm_ir = llvm::emit(&module, &ranges, options.address_sanitizer)?;
+        let (llvm_ir, prefer_objects) =
+            llvm::emit_file(&module, &ranges, options.address_sanitizer)?;
         let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-        Ok(Compilation {
+        let compilation = Compilation {
             llvm_ir,
             extension_archives: graph
                 .modules
@@ -615,7 +624,8 @@ fn compile_file_with_layout(
                 .collect(),
             source_inputs,
             input_paths,
-        })
+        };
+        Ok((compilation, prefer_objects))
     };
     object_fallback(
         layout,
@@ -747,7 +757,7 @@ fn compile_file_units_with(
             .iter()
             .map(|m| m.name.clone())
             .collect::<Vec<_>>();
-        let units = llvm::emit_units(
+        let (units, prefer_objects) = llvm::emit_units(
             &module,
             &ranges,
             options.address_sanitizer,
@@ -756,7 +766,7 @@ fn compile_file_units_with(
             graph.entry,
         )?;
         let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-        Ok(UnitCompilation {
+        let compilation = UnitCompilation {
             units,
             extension_archives: graph
                 .modules
@@ -765,7 +775,8 @@ fn compile_file_units_with(
                 .collect(),
             input_paths,
             source_inputs,
-        })
+        };
+        Ok((compilation, prefer_objects))
     };
     object_fallback(
         BoxedLayout::Split,
@@ -1151,7 +1162,7 @@ mod tests {
                             .set(super::modules::SetLayoutHint::Disabled);
                         super::checked_lower(graph)
                     },
-                    |_, _| Ok(()),
+                    |_, _| Ok(((), false)),
                     |_| (),
                 );
                 assert_eq!(
