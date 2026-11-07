@@ -4546,6 +4546,10 @@ for name in ("md4", "ripemd160"):
                 compare("-IB", "-c", imports)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_generator_delegation.py":
+                named = root / fixture
+                named.write_text(plugin.read_text() + "\ncurrent()")
+                compare("-IB", named, native_args=("run", named, "--runtime-imports", "--quiet"))
             if fixture == "boxed_json_module_doc.py":
                 compare("-IOOB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_interactive.py":

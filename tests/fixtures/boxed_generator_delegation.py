@@ -230,6 +230,19 @@ def current():
     del retained
     assert closed == ["temporary", "retained"]
 
+    closed.clear()
+    stream = (b for a in tracked("outer") for b in tracked("inner"))
+    assert next(stream) == 1
+    error = LookupError("injected")
+    try:
+        stream.throw(error)
+    except LookupError as caught:
+        assert caught is error
+        assert caught.__traceback__.tb_next.tb_frame.f_code.co_name == "<genexpr>"
+    assert closed == ["inner"]
+    error.__traceback__ = None
+    assert closed == ["inner", "outer"]
+
     from itertools import repeat
 
     closed = []

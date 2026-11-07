@@ -389,6 +389,7 @@ impl Context {
             scope,
             offset,
             running,
+            lineno,
             ..
         } = *self.heap.get(id)
         else {
@@ -415,25 +416,33 @@ impl Context {
                 Err(error)
             };
         }
-        if offset == Some(0) {
-            // Throwing into a fresh generator unwinds at its definition before any body instruction.
+        let fresh = offset == Some(0);
+        if fresh || matches!(self.code_object(code).body, Body::Native(_)) {
+            // A fresh frame unwinds at its definition, a suspended native frame at its yield.
             let definition = self.code_object(code);
             let location = Location {
                 file: self.str_value(definition.filename)?.to_owned().into(),
-                line: definition.first_line,
+                line: lineno,
                 span: None,
             };
             self.heap.enter(scope, code, FrameOwner::Generator(id));
             self.heap.publish_statement(&[], location, NONE);
             self.record_exception_frame(&mut error, None);
             self.heap.leave(NONE, false);
+            if !fresh {
+                // Unwind the compiled iterator stack. The traceback retains Python locals,
+                // including the outer iterator in .0.
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!("generator scope")
+                };
+                frame
+                    .names
+                    .retain(|name, _| name != ".iterator" && !name.starts_with(".iterator."));
+                error = self.frame_error(error, code);
+            }
             self.heap.disarm_finalizer(finalizer);
             self.heap.discard_generator_frame(id);
             return Err(error);
-        }
-        if matches!(self.code_object(code).body, Body::Native(_)) {
-            self.heap.discard_generator_frame(id);
-            return Err(self.frame_error(error, code));
         }
         self.resume_source_input(
             id,
