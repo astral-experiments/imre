@@ -89,7 +89,7 @@ fn write_code_pages(out_dir: &Path) {
             .find(|(alias, _)| *alias == name)
             .unwrap();
         let table: usize = table.parse().unwrap();
-        let mut pages = [0_u16; 256];
+        let mut pages = [0_u8; 256];
         // Empty entries use byte zero. Its unique meaning comes from the decoding table.
         let mut rows = vec![[0_u8; 256]];
         let mut ascii_identity = true;
@@ -101,12 +101,14 @@ fn write_code_pages(out_dir: &Path) {
             if (byte < 128 || scalar < 128) && usize::from(scalar) != byte {
                 ascii_identity = false;
             }
-            if scalar == 0xfffe {
+            // Byte zero is recovered from the decoding table. At most 255 other
+            // bytes can populate pages, leaving index zero for the empty page.
+            if byte == 0 || scalar == 0xfffe {
                 continue;
             }
             let row = &mut pages[usize::from(scalar >> 8)];
             if *row == 0 {
-                *row = u16::try_from(rows.len()).unwrap();
+                *row = u8::try_from(rows.len()).unwrap();
                 rows.push([0; 256]);
             }
             rows[usize::from(*row)][usize::from(scalar & 255)] = byte as u8;

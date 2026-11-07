@@ -16,7 +16,7 @@ pub(crate) struct CodePage {
     index: usize,
     pub(crate) module_name: &'static str,
     decode: Charmap,
-    pages: [u16; 256],
+    pages: [u8; 256],
     bytes: &'static [[u8; 256]],
     ascii_identity: bool,
 }
@@ -38,14 +38,21 @@ fn encode_byte_prefix(
     out: &mut Vec<u8>,
     encode: impl Fn(char) -> Option<u8>,
 ) -> bool {
-    while let Some(&(_, ch)) = chars.peek() {
-        let Some(byte) = encode(ch) else {
-            return false;
+    let mut written = 0;
+    for slot in out.spare_capacity_mut() {
+        let Some(&(_, ch)) = chars.peek() else {
+            break;
         };
-        out.push(byte);
+        let Some(byte) = encode(ch) else {
+            break;
+        };
+        slot.write(byte);
+        written += 1;
         chars.next();
     }
-    true
+    // SAFETY: the loop initialized these consecutive slots in the reserved tail.
+    unsafe { out.set_len(out.len() + written) };
+    chars.peek().is_none()
 }
 
 include!(concat!(env!("OUT_DIR"), "/code_pages.rs"));
