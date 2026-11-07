@@ -175,13 +175,25 @@ def _extract_mock(value):
     return value
 
 
+def _async_object_type(value):
+    try:
+        return type(value)
+    except NotImplementedError:
+        # Some native module functions have no exposed Python type.
+        return None
+
+
 def _is_async_obj(value):
     from inspect import isawaitable, iscoroutinefunction
 
-    if _is_instance_mock(value) and not isinstance(value, AsyncMock):
+    cls = _async_object_type(value)
+    if cls is not None and issubclass(cls, NonCallableMock) and not isinstance(value, AsyncMock):
         return False
-    value = getattr(value, "__func__", value)
-    return iscoroutinefunction(value) or isawaitable(value)
+    # CPython probes before fetching. A descriptor can change between the reads.
+    if hasattr(value, "__func__"):
+        value = value.__func__
+        cls = _async_object_type(value)
+    return iscoroutinefunction(value) or (cls is not None and isawaitable(value))
 
 
 def _is_exception(value):

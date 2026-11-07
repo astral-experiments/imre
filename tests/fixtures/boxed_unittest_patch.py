@@ -1,7 +1,7 @@
 import sys
 from inspect import iscoroutinefunction
 from unittest import TestCase
-from unittest.mock import DEFAULT, InvalidSpecError, Mock, call, patch, sentinel
+from unittest.mock import DEFAULT, AsyncMock, InvalidSpecError, MagicMock, Mock, call, patch, sentinel
 
 assert DEFAULT is sentinel.DEFAULT
 assert sentinel.value is sentinel.value and sentinel.value is not DEFAULT
@@ -346,5 +346,33 @@ with check.assertRaises(StopIteration) as completed:
 assert completed.exception.value == "queued"
 installed.assert_called_once_with("A17", depot="west")
 assert main_module.lookup is original_lookup
+
+async def authorize(parcel):
+    return parcel
+
+
+with patch('__main__.authorize', return_value='approved') as request:
+    with check.assertRaises(StopIteration) as completed:
+        authorize('A17').send(None)
+    assert completed.exception.value == 'approved'
+    request.assert_awaited_once_with('A17')
+
+with patch('__main__.lookup', spec_set=authorize) as request:
+    assert isinstance(request, AsyncMock)
+
+
+class ChangingMethod:
+    def __init__(self, selected):
+        self.functions = iter((lookup, selected))
+
+    @property
+    def __func__(self):
+        return next(self.functions)
+
+
+for selected, expected in ((authorize, AsyncMock), (sys.exit, MagicMock)):
+    owner.method = ChangingMethod(selected)
+    with patch.object(owner, 'method') as request:
+        assert isinstance(request, expected)
 
 print("patch restored")

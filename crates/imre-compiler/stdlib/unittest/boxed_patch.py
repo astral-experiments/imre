@@ -71,14 +71,6 @@ def _get_target(target):
     return lambda: _patch_owner(owner), attribute
 
 
-def _is_async_spec(spec):
-    if _is_instance_mock(spec):
-        return False
-    from inspect import isawaitable, iscoroutinefunction
-    spec = getattr(spec, '__func__', spec)
-    return iscoroutinefunction(spec) or isawaitable(spec)
-
-
 def _enter_patchings(stack, patchings, kwargs):
     extra = []
     for patching in patchings:
@@ -135,11 +127,13 @@ class _patch:
         is_names = type(effective_spec) in (list, tuple)
         if factory is None:
             factory = MagicMock
-            if effective_spec is not None:
-                if _is_async_spec(effective_spec) or (spec is None and _is_async_spec(original)):
-                    raise NotImplementedError("patching asynchronous specs is not supported")
+            if spec is None and _is_async_obj(original):
+                factory = AsyncMock
+            elif effective_spec is not None:
                 callable_spec = '__call__' in effective_spec if is_names else callable(effective_spec)
-                if not callable_spec:
+                if _is_async_obj(effective_spec):
+                    factory = AsyncMock
+                elif not callable_spec:
                     factory = NonCallableMagicMock
 
         options = {}
