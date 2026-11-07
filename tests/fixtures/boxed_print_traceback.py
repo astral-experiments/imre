@@ -214,7 +214,7 @@ assert summary[0].locals == {'binding': '17', 'value': '17'}
 saved.clear()
 assert StackSummary.extract([(saved, 1)], capture_locals=True)[0].locals is None
 
-from traceback import extract_tb, walk_tb
+from traceback import extract_tb, print_tb, walk_tb
 
 
 def divide_by_zero():
@@ -239,6 +239,10 @@ assert extract_tb(tb, limit=1) == summary[:1]
 assert extract_tb(tb, limit=-1) == summary[-1:]
 assert extract_tb(tb, limit=0) == extract_tb(None) == []
 assert summary[-1].lineno == tb.tb_next.tb_lineno
+
+stream = Writer()
+assert print_tb(tb, -1, stream) is None
+assert stream.chunks == [summary.format()[-1], '']
 
 assert list(walk_tb(None)) == []
 assert list(walk_tb(tb)) == [(tb.tb_frame, tb.tb_lineno),
