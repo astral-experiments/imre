@@ -1807,7 +1807,7 @@ pub(super) fn call(
             return ctx.object_repr(receiver);
         }
         if method == "__str__" {
-            if let Some(value) = ctx.repr_override(receiver)? {
+            if let Some(value) = ctx.call_repr_slot(receiver)? {
                 return Ok(value);
             }
             let repr = ctx.checked_format(receiver, true)?;

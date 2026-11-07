@@ -146,21 +146,21 @@ pub(super) fn construct(
                 let text = ctx.checked_format(value, false)?;
                 return Ok(ctx.text(text));
             }
-            let (name, method) = match string_hook {
-                Some(method) => ("__str__", Some(method)),
+            let method = match string_hook {
+                Some(method) => Some(method),
                 None if matches!(ctx.heap.get(value), Value::Raised(_))
                     || ctx.string_storage(value).is_some() =>
                 {
-                    ("__str__", None)
+                    None
                 }
-                None => ("__repr__", ctx.bound_slot(value, "__repr__")?),
+                None => ctx.bound_slot(value, "__repr__")?,
             };
             if let Some(method) = method {
                 let result = ctx.call(method, Vec::new(), Vec::new());
                 let result = ctx.release_with_result(before_slot, result)?;
                 if ctx.string_storage(result).is_none() {
                     return Err(type_error(format!(
-                        "{name} returned non-string (type {})",
+                        "__str__ returned non-string (type {})",
                         ctx.type_name(result)
                     )));
                 }
