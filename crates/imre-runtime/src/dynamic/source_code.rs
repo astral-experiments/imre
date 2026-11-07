@@ -41,8 +41,7 @@ pub(super) struct Program {
     doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
     literals: HashMap<ruff_text_size::TextRange, Id>,
-    // For each capturing OR alternative, its operand slots in first-alternative binding order.
-    alternative_captures: HashMap<ruff_text_size::TextRange, Vec<usize>>,
+    alternatives: Vec<SourceAlternatives>,
     pub(super) string_roots: Id,
     first_line: u32,
     kind: FunctionKind,
@@ -310,6 +309,64 @@ enum Instruction {
     EndFinally,
     Delegate,
     BindSent(Vec<ast::Expr>),
+}
+
+/// The matching plan referenced by a validated OR pattern's node index.
+enum SourceAlternatives {
+    Plain,
+    Captures { width: usize, slots: Box<[u32]> },
+    Integers { minimum: i64, bits: u64 },
+}
+
+impl SourceAlternatives {
+    /// Read a signed integer pattern without evaluating a Python expression.
+    fn literal(arm: &ast::Pattern) -> Option<i64> {
+        let ast::Pattern::MatchValue(pattern) = arm else {
+            return None;
+        };
+        let (expr, negative) = match pattern.value.as_ref() {
+            ast::Expr::UnaryOp(p) if p.op == ast::UnaryOp::USub => (p.operand.as_ref(), true),
+            expr => (expr, false),
+        };
+        let ast::Expr::NumberLiteral(number) = expr else {
+            return None;
+        };
+        let ast::Number::Int(value) = &number.value else {
+            return None;
+        };
+        let value = value.as_i64()?;
+        if negative {
+            value.checked_neg()
+        } else {
+            Some(value)
+        }
+    }
+
+    /// Pack exact integer alternatives into one word when their range permits it.
+    fn integers(arms: &[ast::Pattern]) -> Option<Self> {
+        let minimum = arms
+            .iter()
+            .try_fold(i64::MAX, |min, arm| Some(min.min(Self::literal(arm)?)))?;
+        let mut bits = 0;
+        for arm in arms {
+            let offset = u32::try_from(Self::literal(arm)?.abs_diff(minimum)).ok()?;
+            bits |= 1u64.checked_shl(offset)?;
+        }
+        Some(Self::Integers { minimum, bits })
+    }
+
+    /// Return operand slots in the binding order of the first alternative.
+    fn captures(&self, arm: usize) -> &[u32] {
+        let Self::Captures { width, slots } = self else {
+            return &[];
+        };
+        let start = if slots.len() == *width {
+            0
+        } else {
+            arm * width
+        };
+        &slots[start..start + width]
+    }
 }
 
 struct SourceCase {
@@ -2008,7 +2065,7 @@ impl Program {
             doc: None,
             strip_docstrings: false,
             literals: HashMap::new(),
-            alternative_captures: HashMap::new(),
+            alternatives: Vec::new(),
             string_roots: NONE,
             first_line: 1,
             kind: FunctionKind::Plain,
@@ -3311,6 +3368,10 @@ impl Program {
             }
             ast::Pattern::MatchOr(p) => {
                 let mut first = indexmap::IndexMap::new();
+                let mut slots = Vec::new();
+                let mut reordered = false;
+                let different_names =
+                    || Error::source_syntax("alternative patterns bind different names", p.range());
                 for (i, arm) in p.patterns.iter().enumerate() {
                     let mut names = indexmap::IndexMap::new();
                     self.validate_pattern(
@@ -3318,25 +3379,35 @@ impl Program {
                         &mut names,
                         allow_irrefutable && i + 1 == p.patterns.len(),
                     )?;
-                    let order = if i == 0 {
+                    if i == 0 {
+                        slots.extend((0..names.len()).map(|slot| slot as u32));
                         first = names;
-                        (0..first.len()).collect()
                     } else {
-                        let order: Option<Vec<_>> =
-                            first.keys().map(|name| names.get_index_of(name)).collect();
-                        order
-                            .filter(|order| order.len() == names.len())
-                            .ok_or_else(|| {
-                                Error::source_syntax(
-                                    "alternative patterns bind different names",
-                                    p.range(),
-                                )
-                            })?
-                    };
-                    if !order.is_empty() {
-                        self.alternative_captures.insert(arm.range(), order);
+                        if names.len() != first.len() {
+                            return Err(different_names());
+                        }
+                        for (slot, name) in first.keys().enumerate() {
+                            let position = names.get_index_of(name).ok_or_else(different_names)?;
+                            reordered |= position != slot;
+                            slots.push(position as u32);
+                        }
                     }
                 }
+                let plan = if first.is_empty() {
+                    SourceAlternatives::integers(&p.patterns).unwrap_or(SourceAlternatives::Plain)
+                } else {
+                    if !reordered {
+                        slots.truncate(first.len());
+                    }
+                    SourceAlternatives::Captures {
+                        width: first.len(),
+                        slots: slots.into_boxed_slice(),
+                    }
+                };
+                // The owned pattern and its plan live in this program. Both counts fit the source range.
+                p.node_index
+                    .set(ast::NodeIndex::from(self.alternatives.len() as u32));
+                self.alternatives.push(plan);
                 for (name, binding) in first {
                     if captures.contains_key(&name) {
                         return Err(Error::source_syntax(
@@ -6516,6 +6587,15 @@ impl Context {
         matched
     }
 
+    /// Read an exact native integer or boolean for literal pattern comparison.
+    fn small_pattern_subject(&self, subject: Id) -> Option<i64> {
+        match self.heap.get(subject) {
+            Value::Int(value) => value.as_small(),
+            Value::Bool(value) => Some(i64::from(*value)),
+            _ => None,
+        }
+    }
+
     fn match_source_pattern(
         &mut self,
         code: &Program,
@@ -6534,6 +6614,11 @@ impl Context {
                 Ok(subject == singleton)
             }
             ast::Pattern::MatchValue(p) => {
+                if let Some(expected) = SourceAlternatives::literal(pattern)
+                    && let Some(actual) = self.small_pattern_subject(subject)
+                {
+                    return Ok(actual == expected);
+                }
                 let operand = self.heap.temporary_mark() - 1;
                 let value = self.source_expr(code, scope, &p.value)?;
                 let comparison = self.binary("==", subject, value);
@@ -6543,13 +6628,17 @@ impl Context {
             ast::Pattern::MatchOr(p) => {
                 // Each attempt gets its own operand and tentative captures. Dropping a failed
                 // attempt can run finalizers before the next alternative evaluates any Python.
+                let index = p.node_index.load().as_u32().expect("validated OR pattern");
+                let plan = &code.alternatives[index as usize];
+                if let SourceAlternatives::Integers { minimum, bits } = plan
+                    && let Some(value) = self.small_pattern_subject(subject)
+                {
+                    let offset = value.abs_diff(*minimum);
+                    return Ok(value >= *minimum && offset < 64 && bits & (1u64 << offset) != 0);
+                }
                 let mark = self.heap.temporary_mark();
-                for arm in &p.patterns {
-                    let order = code
-                        .alternative_captures
-                        .get(&arm.range())
-                        .map(Vec::as_slice)
-                        .unwrap_or_default();
+                for (arm_index, arm) in p.patterns.iter().enumerate() {
+                    let order = plan.captures(arm_index);
                     self.heap.reserve_temporaries(order.len() + 1)?;
                     for _ in order {
                         self.heap.keep(NONE);
@@ -6563,7 +6652,7 @@ impl Context {
                         mark..mark + order.len(),
                     )? {
                         for index in order {
-                            let value = *self.heap.temporary_root(mark + index);
+                            let value = *self.heap.temporary_root(mark + *index as usize);
                             let slot = slots.next().expect("validated OR capture");
                             *self.heap.temporary_root(slot) = value;
                         }

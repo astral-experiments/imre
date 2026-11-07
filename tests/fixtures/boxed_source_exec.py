@@ -939,6 +939,39 @@ def pick(value, allow):
             return a, b
     return b, a
 """, scope)
+    exec("""
+def integer_choice(value):
+    match value:
+        case -2 | 0 | 1 | 4 | 7 | 59: return True
+        case _: return False
+
+def nested_choice(value):
+    match value:
+        case [9, ([a, b, 0] | [b, a, 1])] | [8, ([b, a, 2] | [a, b, 3])]:
+            return a, b
+        case _: return None
+""", scope)
+    exec("""
+def single_integer(value):
+    match value:
+        case -7: return True
+        case _: return False
+""", scope)
+    single_integer = scope["single_integer"]
+    assert single_integer(-7) and single_integer(-7.0) and not single_integer(-8)
+    integer_choice = scope["integer_choice"]
+    for value in (-3, -2, -1, 0, True, False, 1, 4, 58, 59, 60, 2**96, 0.0, 4.0, None):
+        assert integer_choice(value) == (value in (-2, 0, 1, 4, 7, 59))
+    comparisons = []
+    class EqualFour:
+        def __eq__(self, other):
+            comparisons.append(other)
+            return other == 4
+    assert integer_choice(EqualFour()) and comparisons == [-2, 0, 1, 4]
+    nested_choice = scope["nested_choice"]
+    assert nested_choice([9, [2, 3, 1]]) == (3, 2)
+    assert nested_choice([8, [2, 3, 2]]) == (3, 2)
+    assert nested_choice([8, [2, 3, 3]]) == (2, 3)
     pick = scope["pick"]
     assert pick([], False) == [] and pick((), False) == ()
     assert pick([1, 2, 1], True) == (2, 1)
