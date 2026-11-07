@@ -3735,6 +3735,14 @@ impl Context {
                             "code lacks closure metadata",
                         ));
                     }
+                    if matches!(self.heap.get(closure), Value::Cell(_)) {
+                        let tuple = self.alloc(Value::Tuple(vec![closure]));
+                        let Value::Function { closure, .. } = self.heap.get_mut(obj) else {
+                            unreachable!()
+                        };
+                        *closure = tuple;
+                        return Ok(tuple);
+                    }
                     return Ok(closure);
                 }
                 if name == "__globals__" {

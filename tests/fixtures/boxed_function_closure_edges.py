@@ -1,4 +1,5 @@
 import dataclasses
+import gc
 import types
 
 
@@ -8,6 +9,10 @@ def make():
     alpha = 1
     beta = 2
     return read
+
+
+def paired_readers(value):
+    return (lambda: value), (lambda: value)
 
 
 def constant_factory():
@@ -139,3 +144,20 @@ def current():
     print(empty.__code__.co_freevars, empty.__closure__)
     print(types.FunctionType(empty.__code__, {})())
     print(types.FunctionType(empty.__code__, {}, closure=()).__closure__)
+
+    left, right = paired_readers("before")
+    gc.collect()
+    left_cells = left.__closure__
+    gc.collect()
+    right_cells = right.__closure__
+    assert left.__closure__ is left_cells
+    assert right.__closure__ is right_cells
+    assert left_cells is not right_cells
+    assert left_cells[0] is right_cells[0]
+    left_cells[0].cell_contents = "after"
+    assert left() == right() == "after"
+
+    supplied = (left_cells[0],)
+    copied = types.FunctionType(left.__code__, {}, closure=supplied)
+    assert copied.__closure__ is supplied
+    assert copied() == "after"

@@ -173,13 +173,18 @@ impl Callback {
                 roots,
             )));
         }
+        let captured = match ctx.heap.get(closure) {
+            Value::Tuple(cells) => Some(cells.as_slice()),
+            Value::Cell(_) => Some(std::slice::from_ref(&closure)),
+            _ => None,
+        };
         if let [name] = code.freevars.as_slice()
             && pos.is_empty()
             && kwargs.is_none_or(
                 |id| matches!(ctx.heap.get(id), Value::Dict(entries) if entries.is_empty()),
             )
-            && let Value::Tuple(cells) = ctx.heap.get(closure)
-            && let [cell] = cells.as_slice()
+            && let Some(cells) = captured
+            && let [cell] = cells
             && let Value::Cell(Some(id)) = *ctx.heap.get(*cell)
         {
             let entry = match &code.body {
@@ -213,7 +218,7 @@ impl Callback {
                 && let Some(kwargs) = kwargs
                 && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
                 && let Some(names) = meta["thread_captured_locks"].as_array()
-                && let Value::Tuple(cells) = ctx.heap.get(closure)
+                && let Some(cells) = captured
                 && cells.len() == code.freevars.len()
                 && cells.len() == names.len()
             {
