@@ -2638,7 +2638,7 @@ impl Context {
         if name == "__name__"
             && let Some(member) = self.wrapper_name(obj)
         {
-            return Ok(self.heap.string_literal(member)?);
+            return self.heap.string_literal(member);
         }
         if matches!(name, "__reduce__" | "__reduce_ex__") {
             let class = match self.heap.get(obj) {
