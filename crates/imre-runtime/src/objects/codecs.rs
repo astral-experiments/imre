@@ -11,38 +11,44 @@ use crate::{BytesOwner, ObjectOwner, StrOwner};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
 pub(crate) struct CodePage {
     index: usize,
     pub(crate) module_name: &'static str,
     decode: Charmap,
-    encode: HashMap<char, u8>,
+    pages: [u16; 256],
+    bytes: &'static [[u8; 256]],
+    ascii_identity: bool,
 }
 
 impl CodePage {
-    /// Reuse the pinned source decoding table in both directions.
-    fn new(index: usize, module_name: &'static str) -> Self {
-        let decode = Charmap::named(module_name).unwrap();
-        let encode = (0..=u8::MAX)
-            .filter_map(|byte| decode.decode(byte).map(|ch| (ch, byte)))
-            .collect();
-        Self {
-            index,
-            module_name,
-            decode,
-            encode,
-        }
+    /// Look up a scalar in the reverse mapping generated from the decoding table.
+    fn encode(&self, ch: char) -> Option<u8> {
+        let scalar = ch as usize;
+        let &page = self.pages.get(scalar >> 8)?;
+        let byte = self.bytes[usize::from(page)][scalar & 255];
+        (byte != 0 || self.decode.decode(0) == Some(ch)).then_some(byte)
     }
 }
 
-static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
-static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
-static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
-static KOI8_U: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(8, "koi8_u"));
-static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"));
-static ISO8859_15: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(10, "iso8859_15"));
-static ISO8859_2: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(12, "iso8859_2"));
+/// Encode one byte per scalar into the reserved output. Leave an unmappable scalar
+/// in the iterator so the error handler sees its original index and following characters.
+fn encode_byte_prefix(
+    chars: &mut std::iter::Peekable<impl Iterator<Item = (usize, char)>>,
+    out: &mut Vec<u8>,
+    encode: impl Fn(char) -> Option<u8>,
+) -> bool {
+    while let Some(&(_, ch)) = chars.peek() {
+        let Some(byte) = encode(ch) else {
+            return false;
+        };
+        out.push(byte);
+        chars.next();
+    }
+    true
+}
+
+include!(concat!(env!("OUT_DIR"), "/code_pages.rs"));
 
 const CODEC_NAMES: [&str; 13] = [
     "ascii",
@@ -731,7 +737,7 @@ impl Codec {
         match self {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
-            Self::CodePage(page) => page.encode.get(&ch).copied(),
+            Self::CodePage(page) => page.encode(ch),
             Self::Utf8 { .. } | Self::ShiftJis | Self::Idna => {
                 unreachable!("expected a single-byte encoding")
             }
@@ -785,10 +791,28 @@ impl Codec {
             }
             _ => self.encoding_error_reason(),
         };
+        let ascii_identity = matches!(self, Self::Ascii | Self::Latin1)
+            || matches!(self, Self::CodePage(page) if page.ascii_identity);
+        if ascii_identity && text.is_ascii() {
+            return Ok(Cow::Borrowed(text.as_bytes()));
+        }
         let mut out = Vec::new();
         out.try_reserve_exact(text.len())
             .map_err(|_| Error::allocation())?;
         let mut chars = text.chars().enumerate().peekable();
+        let complete = match self {
+            Self::Ascii => {
+                encode_byte_prefix(&mut chars, &mut out, |ch| ch.is_ascii().then_some(ch as u8))
+            }
+            Self::Latin1 => {
+                encode_byte_prefix(&mut chars, &mut out, |ch| u8::try_from(u32::from(ch)).ok())
+            }
+            Self::CodePage(page) => encode_byte_prefix(&mut chars, &mut out, |ch| page.encode(ch)),
+            _ => false,
+        };
+        if complete {
+            return Ok(Cow::Owned(out));
+        }
         while let Some((start, ch)) = chars.next() {
             if let Some((unit, size)) = self.encode_unit(ch) {
                 out.try_reserve(size).map_err(|_| Error::allocation())?;
@@ -1000,6 +1024,32 @@ pub(crate) fn decoding_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_code_pages_invert_every_defined_byte() {
+        for page in [
+            &CP1251,
+            &CP424,
+            &CP437,
+            &KOI8_U,
+            &CP1252,
+            &ISO8859_15,
+            &ISO8859_2,
+        ] {
+            let mut expected = vec![None; 1 << 16];
+            for byte in 0..=u8::MAX {
+                if let Some(ch) = page.decode.decode(byte) {
+                    expected[ch as usize] = Some(byte);
+                }
+            }
+            for (scalar, byte) in expected.into_iter().enumerate() {
+                if let Some(ch) = char::from_u32(scalar as u32) {
+                    assert_eq!(page.encode(ch), byte, "{} U+{scalar:04X}", page.module_name);
+                }
+            }
+            assert_eq!(page.encode('\u{10000}'), None);
+        }
+    }
 
     #[test]
     fn strict_str_encode_retains_the_original_text_until_the_error_is_dropped() {

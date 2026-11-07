@@ -65,8 +65,61 @@ long imre_platform_pathconf(const char *path, int fd, int name, int *error) {
     );
 }
 
+/// Invert the pinned single-byte decoding tables into compact, directly indexed Unicode pages.
+fn write_code_pages(out_dir: &Path) {
+    let names_file = "src/objects/linecache/codec_names.txt";
+    let tables_file = "src/objects/linecache/charmaps.bin";
+    println!("cargo:rerun-if-changed={names_file}");
+    println!("cargo:rerun-if-changed={tables_file}");
+    let names = std::fs::read_to_string(names_file).unwrap();
+    let tables = std::fs::read(tables_file).unwrap();
+    let mut output = String::new();
+    for (index, name) in [
+        (4, "cp1251"),
+        (5, "cp424"),
+        (6, "cp437"),
+        (8, "koi8_u"),
+        (9, "cp1252"),
+        (10, "iso8859_15"),
+        (12, "iso8859_2"),
+    ] {
+        let (_, table) = names
+            .lines()
+            .filter_map(|line| line.split_once(' '))
+            .find(|(alias, _)| *alias == name)
+            .unwrap();
+        let table: usize = table.parse().unwrap();
+        let mut pages = [0_u16; 256];
+        // Empty entries use byte zero. Its unique meaning comes from the decoding table.
+        let mut rows = vec![[0_u8; 256]];
+        let mut ascii_identity = true;
+        for (byte, encoded) in tables[table * 512..(table + 1) * 512]
+            .chunks_exact(2)
+            .enumerate()
+        {
+            let scalar = u16::from_le_bytes([encoded[0], encoded[1]]);
+            if (byte < 128 || scalar < 128) && usize::from(scalar) != byte {
+                ascii_identity = false;
+            }
+            if scalar == 0xfffe {
+                continue;
+            }
+            let row = &mut pages[usize::from(scalar >> 8)];
+            if *row == 0 {
+                *row = u16::try_from(rows.len()).unwrap();
+                rows.push([0; 256]);
+            }
+            rows[usize::from(*row)][usize::from(scalar & 255)] = byte as u8;
+        }
+        let symbol = name.to_ascii_uppercase();
+        writeln!(output, "static {symbol}: CodePage = CodePage {{ index: {index}, module_name: {name:?}, decode: Charmap::at({table}), ascii_identity: {ascii_identity}, pages: {pages:?}, bytes: &{rows:?} }};").unwrap();
+    }
+    std::fs::write(out_dir.join("code_pages.rs"), output).unwrap();
+}
+
 fn main() {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    write_code_pages(&out_dir);
     write_class_table(&out_dir, "unicode_alnum.rs", r"[\p{L}\p{N}]");
     write_class_table(&out_dir, "unicode_alpha.rs", r"\p{L}");
     write_class_table(&out_dir, "unicode_identifier_start.rs", r"[_\p{XID_Start}]");
