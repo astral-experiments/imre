@@ -1306,6 +1306,44 @@ mod tests {
     }
 
     #[test]
+    fn checked_print_keeps_the_input_in_encoding_errors() {
+        use super::super::stdio::{imre_print_scalars, imre_sys_stdout_clear, imre_sys_stdout_set};
+
+        let directory = Directory::new();
+        let path = directory.0.join("print.txt");
+        let name = path_name(&path);
+        let encoding = Str::new("ascii");
+        let input = StrOwner::new(Str::new("α"));
+        let observer = StrOwner::downgrade(&input);
+        let kinds = [1_u8, 3, 0];
+        let words = [1, StrOwner::as_ptr(&input) as usize, 0];
+        // SAFETY: the path and encoding stay live through open; the arguments stay rooted through print.
+        unsafe {
+            let path = super::super::paths::imre_path_new(StrOwner::as_ptr(&name));
+            assert!(!path.is_null());
+            let path = crate::ObjectOwner::from_raw(path);
+            let file = super::path_text::imre_path_open_text_output(
+                crate::ObjectOwner::as_ptr(&path),
+                &Str::new("w"),
+                &encoding as *const Str as usize,
+                0,
+                0,
+            );
+            assert!(!file.is_null());
+            let file = crate::ObjectOwner::from_raw(file);
+            imre_sys_stdout_set(crate::ObjectOwner::as_ptr(&file) as usize);
+            imre_print_scalars(kinds.as_ptr(), words.as_ptr(), words.len());
+            imre_sys_stdout_clear();
+        }
+        let error = super::super::exceptions::take_pending().unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), b"True ");
+        drop(input);
+        assert!(observer.upgrade().is_some());
+        drop(error);
+        assert!(observer.upgrade().is_none());
+    }
+
+    #[test]
     fn failed_sized_read_keeps_the_temporary_file_position() {
         let directory = Directory::new();
         let mut file = FileState::temporary(directory.0.to_str()).ok().unwrap();

@@ -279,6 +279,29 @@ pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usiz
             let (kind, word) = unsafe {
                 super::boxed_values::concrete(super::words::WordKind::new(kind.into()), word)
             };
+            if kind.raw() == 3 {
+                // SAFETY: the argument keeps this exact string alive through the write.
+                // An encoding failure can acquire its own reference through write_piece.
+                let text = std::mem::ManuallyDrop::new(unsafe {
+                    crate::StrOwner::from_raw(word as *const crate::Str)
+                });
+                write(&text, Some(&text))?;
+                continue;
+            }
+            let mut digits = itoa::Buffer::new();
+            let scalar = match kind.raw() {
+                0 => Some("None"),
+                1 => Some(if word == 0 { "False" } else { "True" }),
+                // SAFETY: the checked caller roots this integer for the duration of the write.
+                2 => unsafe { crate::Int::borrow(word) }
+                    .as_small()
+                    .map(|n| digits.format(n)),
+                _ => None,
+            };
+            if let Some(text) = scalar {
+                write(text, None)?;
+                continue;
+            }
             let text = match super::boxed_values::word_text(kind, word, false) {
                 Ok(text) => text,
                 Err(_) if super::exceptions::imre_error_pending() != 0 => return Ok(()),
