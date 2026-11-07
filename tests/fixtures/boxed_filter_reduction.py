@@ -25,3 +25,27 @@ def current():
             assert list(restored) == expected
         assert list(jobs) == expected
         assert list(copy.deepcopy(jobs)) == []
+
+    # Older pickles provide the consumed count as state for the range iterator.
+    legacy = b'c__builtin__\niter\n(c__builtin__\nxrange\n(I10\nI20\nI2\ntRtRI2\nb.'
+    cursor = pickle.loads(legacy)
+    sibling = copy.copy(cursor)
+
+    class Offset:
+        def __index__(self):
+            assert next(cursor) == 14
+            return 1
+
+    cursor.__setstate__(Offset())
+    assert list(cursor) == [18]
+    assert list(sibling) == [14, 16, 18]
+
+    cursor = iter(range(-(2**100), 6, 2))
+    try:
+        cursor.__setstate__(True)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("long range iterator accepted a bool state")
+    cursor.__setstate__(2**99 + 1)
+    assert list(cursor) == [2, 4]
