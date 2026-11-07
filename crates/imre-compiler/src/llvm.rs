@@ -505,15 +505,7 @@ fn emit_program(
             emitter.next_value = 0;
             emitter.next_label = 0;
         }
-        let frame = module
-            .source_frames
-            .get(id)
-            .and_then(Option::as_ref)
-            .or_else(|| {
-                repr_methods
-                    .contains(&id)
-                    .then_some(&ir::SourceFrame::Depth)
-            });
+        let frame = function_source_frame(module, &repr_methods, id);
         let params = emitter.function(function, entry, frame, &borrows[id])?;
         bodies.push((params, std::mem::take(&mut emitter.code)));
     }
@@ -604,7 +596,12 @@ fn emit_program(
         .unwrap();
     }
     json::schemas(module, &emitter.json_schema_roots, emitter.output);
-    record_layouts(module, emitter.output, &emitter.resource_types);
+    record_layouts(
+        module,
+        emitter.output,
+        &emitter.resource_types,
+        &repr_methods,
+    );
     callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
     if emitter.uses_byte_output_windows {
@@ -10351,6 +10348,23 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
     }
 }
 
+/// The frame emitted in the checked function body also counts indirect calls into it.
+fn function_source_frame<'a>(
+    module: &'a Module,
+    repr_methods: &HashSet<usize>,
+    id: usize,
+) -> Option<&'a ir::SourceFrame> {
+    module
+        .source_frames
+        .get(id)
+        .and_then(Option::as_ref)
+        .or_else(|| {
+            repr_methods
+                .contains(&id)
+                .then_some(&ir::SourceFrame::Depth)
+        })
+}
+
 fn record_name(ty: Type) -> String {
     match ty {
         Type::Range => "range_record".to_owned(),
@@ -10389,7 +10403,12 @@ fn storage_type(ty: Type) -> &'static str {
 /// Emits concrete field layouts and static destruction descriptors. No per-field
 /// runtime tag or presence bitmap is needed: owning fields reserve zero until
 /// initialization, and their exact kinds are shared by every instance.
-fn record_layouts(module: &Module, output: &mut Output, resource_types: &HashSet<Type>) {
+fn record_layouts(
+    module: &Module,
+    output: &mut Output,
+    resource_types: &HashSet<Type>,
+    repr_methods: &HashSet<usize>,
+) {
     // All record descriptors live in the entry unit, including references to
     // checked formatters defined in other source modules.
     output.current = output.entry;
@@ -10438,7 +10457,15 @@ fn record_layouts(module: &Module, output: &mut Output, resource_types: &HashSet
             "@kinds_{name} = private unnamed_addr constant [{kind_count} x i32] [{kinds}]"
         )
         .unwrap();
-        let semantics = records::semantics(module, ty, &fields, &name, output, resource_types);
+        let semantics = records::semantics(
+            module,
+            ty,
+            &fields,
+            &name,
+            output,
+            resource_types,
+            repr_methods,
+        );
         writeln!(
             output.global(
                 output.entry,

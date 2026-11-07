@@ -509,6 +509,9 @@ pub(crate) struct ClassMetadata {
     pub frozen_initializer: Option<usize>,
     /// Checked instance method used to render a retained value after type erasure.
     pub repr_method: Option<usize>,
+    pub str_method: Option<usize>,
+    /// An explicit async override cannot be called through a synchronous text slot.
+    pub async_str: bool,
     pub value_struct: bool,
     pub field_equality: bool,
     pub dataclass_repr: bool,
