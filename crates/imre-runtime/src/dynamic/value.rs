@@ -2811,6 +2811,8 @@ impl DictIterator {
 // visited slot. Both sentinels exceed the largest possible Vec index.
 const UNMARKED: usize = usize::MAX;
 const END: usize = usize::MAX - 1;
+// A read-only clear probe restores this mark before collection or Python code can run.
+const CHECKED_RELEASE: usize = usize::MAX - 2;
 
 /// Minimum allocation allowance for separately owned Python bytes buffers.
 const BYTE_BUFFER_FLOOR: usize = 8 * 1024 * 1024;
@@ -4508,12 +4510,80 @@ impl Heap {
         })
     }
 
+    /// Check aliased list and tuple contents once while all the outgoing edges are stable.
+    pub(super) fn clear_owns_finalizer(&self, receiver: Id) -> bool {
+        self.clear_may_release(receiver, |id| {
+            self.slot_shapes[id as usize].is_scalar_leaf() || self.finalizer_free_scalar(id)
+        })
+    }
+
+    fn clear_may_release(&self, receiver: Id, inert: impl Fn(Id) -> bool) -> bool {
+        match self.get(receiver) {
+            Value::List(items) => self.any_releasing_edge(items.iter().copied(), inert),
+            Value::Deque(ring) => self.any_releasing_edge(ring.items.iter().copied(), inert),
+            Value::Dict(entries)
+            | Value::DefaultDict { entries, .. }
+            | Value::Set { entries, .. } => self
+                .any_releasing_edge(entries.iter().flat_map(|&(key, value)| [key, value]), inert),
+            _ => unreachable!("clearable storage"),
+        }
+    }
+
+    fn any_releasing_edge(
+        &self,
+        edges: impl Iterator<Item = Id> + Clone,
+        inert: impl Fn(Id) -> bool,
+    ) -> bool {
+        let marked = Cell::new(false);
+        let found = edges
+            .clone()
+            .any(|id| self.check_release(id, true, &inert, Some(&marked)));
+        if marked.get() {
+            for id in edges {
+                let trace = &self.traces[id as usize];
+                if trace.get() == CHECKED_RELEASE {
+                    trace.set(UNMARKED);
+                }
+            }
+        }
+        found
+    }
+
     fn could_release(&self, id: Id, skip_bound: bool, inert: impl Fn(Id) -> bool) -> bool {
-        if inert(id) || (skip_bound && self.bound_in_active_frame(id)) {
+        self.check_release(id, skip_bound, inert, None)
+    }
+
+    #[inline]
+    fn check_release(
+        &self,
+        id: Id,
+        skip_bound: bool,
+        inert: impl Fn(Id) -> bool,
+        marked: Option<&Cell<bool>>,
+    ) -> bool {
+        if inert(id) {
+            return false;
+        }
+        let trace = &self.traces[id as usize];
+        if marked.is_some_and(Cell::get) && trace.get() == CHECKED_RELEASE {
+            return false;
+        }
+        if skip_bound && self.bound_in_active_frame(id) {
             return false;
         }
         match self.get(id) {
-            Value::List(values) | Value::Tuple(values) => values.iter().any(|&item| !inert(item)),
+            Value::List(values) | Value::Tuple(values) => {
+                if values.iter().any(|&item| !inert(item)) {
+                    return true;
+                }
+                if let Some(marked) = marked
+                    && trace.get() == UNMARKED
+                {
+                    trace.set(CHECKED_RELEASE);
+                    marked.set(true);
+                }
+                false
+            }
             Value::Dict(entries) => !entries.is_empty(),
             _ => true,
         }
