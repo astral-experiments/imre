@@ -169,30 +169,12 @@ pub(super) fn install_buffer(
     ctx: &mut Context,
     receiver: Id,
     raw: Id,
-    bytes: Vec<u8>,
+    mut bytes: Vec<u8>,
     update: bool,
 ) -> Result<Id> {
-    let size = bytes.len();
-    let buffer = ctx.alloc(Value::ByteArray(bytes));
-    let state = Shared::try_new(Reader {
-        raw: Cell::new(Some(raw)),
-        size,
-        buffer,
-        end: Cell::new(0),
-        pos: Cell::new(0),
-        absolute: Cell::new(None),
-        locked: Cell::new(false),
-        update: update.then(Update::default),
-    })
-    .map_err(|_| Error::new("MemoryError", ""))?;
-    let attach = |ctx: &mut Context| {
-        let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
-            unreachable!()
-        };
-        *memory_stream = Some(MemoryStream::Reader(state.clone()));
-    };
+    let state = Reader::new(ctx, raw, &mut bytes, update.then(Update::default))?;
     if update && Reader::get(ctx, receiver).is_ok() {
-        attach(ctx);
+        attach(ctx, receiver, state.clone());
     }
     let absolute = invoke(ctx, raw, "tell", vec![])
         .and_then(|n| index(ctx, n))
@@ -219,8 +201,28 @@ pub(super) fn install_buffer(
     if update {
         state.raw.set(raw_member(ctx, receiver));
     }
-    attach(ctx);
+    attach(ctx, receiver, state);
     Ok(NONE)
+}
+
+/// Retain the descriptor's complete read/write window without probing or reopening the raw.
+pub(super) fn adopt_for_close<F>(
+    ctx: &mut Context,
+    receiver: Id,
+    raw: Id,
+    file: &mut crate::objects::Random<F>,
+) -> Result<()> {
+    let update = Update {
+        terminal_raw_pos: Some(Cell::new(file.last_raw_pos() as i64)),
+        raw_offset: Cell::new(file.raw_pos as i64),
+        dirty: Cell::new(file.dirty.as_ref().map(|span| (span.start, span.end))),
+        ..Update::default()
+    };
+    let state = Reader::new(ctx, raw, &mut file.buffer, Some(update))?;
+    state.end.set(file.read_end);
+    state.pos.set(file.pos);
+    attach(ctx, receiver, state);
+    Ok(())
 }
 
 fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
@@ -230,7 +232,38 @@ fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn attach(ctx: &mut Context, receiver: Id, state: Shared<Reader>) {
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    *memory_stream = Some(MemoryStream::Reader(state));
+}
+
 impl Reader {
+    fn new(
+        ctx: &mut Context,
+        raw: Id,
+        bytes: &mut Vec<u8>,
+        update: Option<Update>,
+    ) -> Result<Shared<Self>> {
+        // Reserve the new owner before moving bytes that the descriptor has already accepted.
+        let mut state = Shared::try_new(Self {
+            raw: Cell::new(Some(raw)),
+            size: bytes.len(),
+            buffer: NONE,
+            end: Cell::new(0),
+            pos: Cell::new(0),
+            absolute: Cell::new(None),
+            locked: Cell::new(false),
+            update,
+        })
+        .map_err(|_| Error::new("MemoryError", ""))?;
+        Shared::get_mut(&mut state)
+            .expect("fresh reader is uniquely owned")
+            .buffer = ctx.alloc(Value::ByteArray(std::mem::take(bytes)));
+        Ok(state)
+    }
+
     pub(super) fn pending_update(&self) -> Option<Id> {
         self.update.as_ref()?.dirty.get()?;
         self.raw.get()
@@ -707,6 +740,13 @@ impl Reader {
                 ));
             }
             self.reset();
+            if let Some(cursor) = self
+                .update
+                .as_ref()
+                .and_then(|u| u.terminal_raw_pos.as_ref())
+            {
+                cursor.set(0);
+            }
             self.absolute.set(Some(pos));
             Ok(ctx.int(pos))
         })
@@ -726,8 +766,16 @@ pub(super) fn close_raw(ctx: &mut Context, receiver: Id) -> Result<Id> {
             // Retire the backing on which raw.close was called, even when it refuses.
             // The raw remains attached and determines the public closed property.
             update.retired.set(true);
+            if let Some(pos) = &update.terminal_raw_pos
+                && (reader.end.get() != 0 || update.dirty.get().is_some())
+            {
+                pos.set(update.raw_offset.get());
+            }
             update.dirty.set(None);
             reader.reset();
+            if let Some(pos) = &update.terminal_raw_pos {
+                update.raw_offset.set(pos.get());
+            }
         }
         result
     });
@@ -789,7 +837,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
             if closed {
                 return Ok(NONE);
             }
-            super::native_reader::flush_and_close(ctx, receiver)
+            super::buffered_io::close(ctx, receiver)
         }
         "detach" => {
             invoke(ctx, receiver, "flush", vec![])?;
@@ -847,6 +895,15 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
                     _ => "read of closed file",
                 },
             )?;
+            if name == "read"
+                && size == 0
+                && reader
+                    .update
+                    .as_ref()
+                    .is_some_and(|u| u.terminal_raw_pos.is_some())
+            {
+                return Ok(ctx.alloc(Value::Bytes(Vec::new())));
+            }
             reader.with_lock(ctx, receiver, |ctx| {
                 if name == "read" && size == -1 {
                     reader.read_all(ctx)

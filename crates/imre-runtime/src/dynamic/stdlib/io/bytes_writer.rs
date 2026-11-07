@@ -108,23 +108,31 @@ pub(super) fn raw_write(ctx: &mut Context, raw: Id, data: &[u8]) -> Result<Optio
     with_write_temporaries(ctx, |ctx| RawWriter::call_raw(ctx, raw, data))
 }
 
-/// Pass an owned buffer window to a Python raw writer without borrowing the bytes across the call.
-pub(super) fn write_window(
+/// Drain a live output window. Commit each returned count before delivering pending signals.
+pub(super) fn flush_window(
     ctx: &mut Context,
     raw: Id,
     buffer: Id,
-    start: usize,
-    len: usize,
-) -> Result<usize> {
-    with_write_temporaries(ctx, |ctx| {
-        let view = ctx.ownerless_byte_view(buffer, start, len, true)?;
-        match RawWriter::call_view(ctx, raw, view, len)? {
-            RawCount::Written(count) => Ok(count),
-            RawCount::WouldBlock(errno) => {
-                Err(super::descriptor_buffer::blocking_error(ctx, errno, 0))
+    range: std::ops::Range<usize>,
+    mut advanced: impl FnMut(usize, usize),
+) -> Result<()> {
+    let mut start = range.start;
+    while start < range.end {
+        let len = range.end - start;
+        let count = with_write_temporaries(ctx, |ctx| {
+            let view = ctx.ownerless_byte_view(buffer, start, len, true)?;
+            match RawWriter::call_view(ctx, raw, view, len)? {
+                RawCount::Written(count) => Ok(count),
+                RawCount::WouldBlock(errno) => {
+                    Err(super::descriptor_buffer::blocking_error(ctx, errno, 0))
+                }
             }
-        }
-    })
+        })?;
+        start += count;
+        advanced(start, count);
+        ctx.dispatch_signals()?;
+    }
+    Ok(())
 }
 
 fn with_write_temporaries<T>(
@@ -500,7 +508,7 @@ impl Writer {
                 }
                 // Public flush takes the lock itself and can be overridden.
                 drop(guard);
-                super::native_writer::flush_and_close(ctx, receiver, |ctx| {
+                super::buffered_io::flush_and_close(ctx, receiver, |ctx| {
                     let _guard = self.lock()?;
                     let raw = self.raw()?;
                     let closed = invoke(ctx, raw, "close", vec![]);
