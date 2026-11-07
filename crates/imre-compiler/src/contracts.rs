@@ -598,6 +598,8 @@ impl Builtin {
             | Self::IntHash
             | Self::FloatIsInteger
             | Self::FloatAtan
+            | Self::FloatDegrees
+            | Self::FloatRadians
             | Self::FloatErfc
             | Self::FloatLog2
             | Self::IntSignAsFloat
@@ -983,6 +985,8 @@ impl Builtin {
             Self::FloatAcos
             | Self::FloatAsin
             | Self::FloatAtan
+            | Self::FloatDegrees
+            | Self::FloatRadians
             | Self::FloatErfc
             | Self::FloatLog2
             | Self::FloatLog10

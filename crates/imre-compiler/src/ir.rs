@@ -1243,6 +1243,8 @@ pub(crate) enum Builtin {
     FloatAcos,
     FloatAsin,
     FloatAtan,
+    FloatDegrees,
+    FloatRadians,
     FloatErfc,
     Sumprod,
     /// Base-two logarithm after checking the Python domain in the caller.
