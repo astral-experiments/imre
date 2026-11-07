@@ -5,8 +5,9 @@ use allocator_api2::boxed::Box;
 use std::{io, ptr, slice};
 
 const SOCKLEN_LIMIT: usize = i32::MAX as usize;
-// SAFETY: these libc macros only compute layout sizes.
+// SAFETY: CMSG_LEN only computes a layout size for this constant payload length.
 const HEADER_LEN: usize = unsafe { libc::CMSG_LEN(0) as usize };
+// SAFETY: CMSG_SPACE only computes a layout size for this constant payload length.
 const PADDED_MIN: usize = unsafe { libc::CMSG_SPACE(1) as usize };
 
 pub(crate) fn cmsg_len(size: usize) -> Result<usize> {
@@ -76,11 +77,9 @@ impl Control {
         let count = len.div_ceil(size_of::<libc::cmsghdr>());
         let storage =
             Box::<[libc::cmsghdr]>::try_new_zeroed_slice(count).map_err(|_| Error::allocation())?;
-        // SAFETY: cmsghdr consists of integer fields; zeroed padding is also initialized.
-        Ok(Self {
-            storage: unsafe { storage.assume_init() },
-            len,
-        })
+        // SAFETY: every field of cmsghdr accepts zero and the allocation is fully zeroed.
+        let storage = unsafe { storage.assume_init() };
+        Ok(Self { storage, len })
     }
 
     fn data(&mut self) -> *mut libc::c_void {
@@ -147,6 +146,10 @@ impl<'a> Iterator for ControlItems<'a> {
         }
         // SAFETY: the checked prefix contains a full initialized cmsghdr.
         let header = unsafe { self.bytes.as_ptr().cast::<libc::cmsghdr>().read_unaligned() };
+        #[allow(
+            clippy::unnecessary_cast,
+            reason = "cmsg_len is socklen_t on some targets"
+        )]
         let len = header.cmsg_len as usize;
         if len < HEADER_LEN || self.bytes.len() < HEADER_LEN {
             self.malformed = true;
@@ -203,8 +206,9 @@ impl Drop for ReceivedControl {
         if self.owns_fds {
             for (level, kind, data) in self.iter() {
                 if level == libc::SOL_SOCKET && kind == libc::SCM_RIGHTS {
-                    for fd in data.chunks_exact(size_of::<libc::c_int>()) {
-                        let _ = super::close_fd(libc::c_int::from_ne_bytes(fd.try_into().unwrap()));
+                    let (descriptors, _) = data.as_chunks();
+                    for &fd in descriptors {
+                        let _ = super::close_fd(libc::c_int::from_ne_bytes(fd));
                     }
                 }
             }
@@ -261,6 +265,7 @@ pub(crate) unsafe fn recv(
     let control = &mut received.control;
     // SAFETY: zero is a valid empty msghdr and initialized sockaddr_storage.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    // SAFETY: zero initializes the integer fields and padding of the output address.
     let mut addr: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     msg.msg_name = (&raw mut addr).cast();
     msg.msg_control = control.data();
@@ -287,19 +292,33 @@ pub(crate) unsafe fn recv(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
-    use std::os::fd::AsRawFd;
-    use std::os::unix::net::UnixStream;
+    use std::os::fd::{AsRawFd, RawFd};
+
+    /// Identify the file currently occupying a descriptor in this process.
+    fn file_identity(fd: RawFd) -> Option<(libc::dev_t, libc::ino_t)> {
+        let mut stat = std::mem::MaybeUninit::uninit();
+        // SAFETY: fstat checks the descriptor and receives writable storage for one stat.
+        if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } == -1 {
+            assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::EBADF));
+            return None;
+        }
+        // SAFETY: a successful fstat initialized the result.
+        let stat = unsafe { stat.assume_init() };
+        Some((stat.st_dev, stat.st_ino))
+    }
 
     #[test]
     fn dropping_unreturned_rights_closes_the_received_fd() {
         let (tx, rx) = super::super::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0)
             .ok()
             .expect("message sockets");
-        let (mut peer, owner) = UnixStream::pair().unwrap();
-        peer.set_nonblocking(true).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("imre-scm-rights-{}", getrandom::u64().unwrap()));
+        let owner = std::fs::File::create_new(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        let expected = file_identity(owner.as_raw_fd()).unwrap();
         let rights = owner.as_raw_fd().to_ne_bytes();
-        let mut byte = [b'!'];
+        let mut byte = *b"!";
         let mut iov = [libc::iovec {
             iov_base: byte.as_mut_ptr().cast(),
             iov_len: byte.len(),
@@ -314,7 +333,6 @@ mod tests {
             send(&tx, &mut iov, &mut outgoing, 0, None, None)
                 .ok()
                 .expect("sendmsg");
-            drop(owner);
             recv(&rx, &mut iov, &mut control, 0, None)
                 .ok()
                 .expect("recvmsg");
@@ -324,11 +342,10 @@ mod tests {
             (level, kind, data.len()),
             (libc::SOL_SOCKET, libc::SCM_RIGHTS, rights.len())
         );
-        assert_eq!(
-            peer.read(&mut byte).unwrap_err().kind(),
-            io::ErrorKind::WouldBlock
-        );
+        let received = libc::c_int::from_ne_bytes(data.try_into().unwrap());
+        assert_eq!(file_identity(received), Some(expected));
         drop(control);
-        assert_eq!(peer.read(&mut byte).unwrap(), 0);
+        // A parallel fork can inherit the file, and a sibling thread can reuse the fd.
+        assert_ne!(file_identity(received), Some(expected));
     }
 }
