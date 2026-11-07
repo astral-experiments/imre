@@ -1707,7 +1707,8 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
     #[derive(Default)]
     struct Group {
         operators: usize,
-        child_depth: usize,
+        primary_depth: usize,
+        longest_primary: usize,
         longest_item: usize,
         enclosing_operators: usize,
         longest_boolean_operand: usize,
@@ -1720,8 +1721,12 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
     }
 
     impl Group {
+        fn operand_depth(&self) -> usize {
+            self.operators + self.longest_primary.max(self.primary_depth)
+        }
+
         fn depth(&self) -> usize {
-            let operand = self.operators + self.child_depth;
+            let operand = self.operand_depth();
             // A Boolean expression has at most an outer "or" and an inner "and".
             // Ruff stores the operands of each operator as siblings.
             let boolean = if self.boolean_operators == 0 {
@@ -1741,7 +1746,8 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
             self.longest_boolean_operand = 0;
             self.boolean_operators = 0;
             self.operators = 0;
-            self.child_depth = 0;
+            self.primary_depth = 0;
+            self.longest_primary = 0;
         }
     }
 
@@ -1781,23 +1787,32 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
                 if token == Lbrace && group.interpolated_string {
                     group.next_item();
                 }
-                group.operators += 1;
+                group.primary_depth += 1;
                 parents.push(std::mem::take(&mut group));
                 group.interpolated_string = matches!(token, FStringStart | TStringStart);
             }
             Rpar | Rsqb | Rbrace | FStringEnd | TStringEnd => {
                 if let Some(mut parent) = parents.pop() {
-                    parent.child_depth = parent.child_depth.max(group.depth());
+                    parent.primary_depth = parent.primary_depth.max(1 + group.depth());
                     group = parent;
                 }
             }
             Comma if !group.keep_commas && group.open_lambda_parameters == 0 => group.next_item(),
             And | Or => {
-                let depth = group.operators + group.child_depth;
+                let depth = group.operand_depth();
                 group.longest_boolean_operand = group.longest_boolean_operand.max(depth);
                 group.boolean_operators += 1;
                 group.operators = 0;
-                group.child_depth = 0;
+                group.primary_depth = 0;
+                group.longest_primary = 0;
+            }
+            Dot => group.primary_depth += 1,
+            kind if kind.as_binary_operator().is_some() => {
+                // In f() + g(), the calls are siblings. Count every operator on
+                // the expression spine and the deepest of its primary operands.
+                group.longest_primary = group.longest_primary.max(group.primary_depth);
+                group.primary_depth = 0;
+                group.operators += 1;
             }
             // These expressions can enclose Boolean operands across the entire item.
             Lambda => {

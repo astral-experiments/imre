@@ -1106,6 +1106,16 @@ mod tests {
         let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
         compile(&flat, &CompileOptions::default()).unwrap();
 
+        let calls = vec!["part()"; 84].join(" + ");
+        super::analysis::check_source_complexity(&format!("table = tuple({calls})\n")).unwrap();
+        for expression in [
+            format!("f{}", "()".repeat(128)),
+            format!("f({}){}", "1+".repeat(50) + "1", "[0]".repeat(50)),
+            vec!["f()"; 128].join(" + "),
+        ] {
+            assert!(super::analysis::check_source_complexity(&expression).is_err());
+        }
+
         let clauses = "row is not None or ".repeat(64);
         super::check(&format!(
             "def f(row: int | None) -> bool:\n    return {clauses}False\n"
