@@ -203,7 +203,12 @@ impl Context {
                 format!("descriptor '{name}' of '{owner}' object needs an argument"),
             ));
         };
-        if self.heap.get(cursor).intrinsic_type_name() != Some(owner) {
+        let storage = if owner == "filter" {
+            self.scalar_value(cursor)
+        } else {
+            cursor
+        };
+        if self.heap.get(storage).intrinsic_type_name() != Some(owner) {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -228,7 +233,7 @@ impl Context {
             "__iter__" => Ok(cursor),
             "__length_hint__" => self.length_hint(cursor, None),
             "__next__" => self
-                .next_result(cursor)?
+                .next_result(storage)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "__reduce__" => {
                 let Value::DictIterator(state) = self.heap.get(cursor) else {

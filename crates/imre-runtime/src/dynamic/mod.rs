@@ -2778,6 +2778,20 @@ impl Context {
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
+        if name == "filter" {
+            let doc = self.text(concat!(
+                "Return an iterator yielding those items of iterable for which function(item)\n",
+                "is true. If function is None, return the items that are true."
+            ));
+            let mut entries = Vec::new();
+            for name in std::iter::once("__new__").chain(builtins::FILTER_METHODS.iter().copied()) {
+                let member = self.builtin(&format!("filter.{name}"));
+                entries.push((self.heap.code_name(name), member));
+            }
+            entries.push((self.heap.code_name("__doc__"), doc));
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == "super" {
             let mut entries = Vec::new();
             for name in [

@@ -49,3 +49,39 @@ def current():
         raise AssertionError("long range iterator accepted a bool state")
     cursor.__setstate__(2**99 + 1)
     assert list(cursor) == [2, 4]
+
+    class Jobs(filter):
+        pass
+
+    source = iter(range(1, 7))
+    jobs = Jobs(None, source)
+    assert jobs.__reduce__() == (Jobs, (None, source))
+    shallow = copy.copy(jobs)
+    assert type(shallow) is Jobs
+    assert next(shallow) == 1
+    assert next(jobs) == 2
+
+    class Tagged(Jobs):
+        def __init__(self, predicate, source, *, tag):
+            self.tag = tag
+
+        def __next__(self):
+            return super().__next__() * 10
+
+    jobs = Tagged(None, [0, 3, 4], tag="ready")
+    assert jobs.tag == "ready" and iter(jobs) is jobs
+    assert next(jobs) == 30
+    assert filter.__next__(jobs) == 4
+
+    class Named(Jobs):
+        def __new__(cls, source, *, name):
+            jobs = super().__new__(cls, None, source)
+            jobs.name = name
+            return jobs
+
+        def __reduce__(self):
+            return list, ((self.name,),)
+
+    named = Named([0, 5], name="pending")
+    assert next(named) == 5
+    assert copy.copy(named) == ["pending"]
