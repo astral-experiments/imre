@@ -214,21 +214,23 @@ pub unsafe extern "C" fn imre_str_slice(
 ) -> *const Str {
     // SAFETY: the immutable input remains rooted through all scans.
     let text = unsafe { &*value };
+    // SAFETY: the optional step and both bounds stay rooted throughout this call.
+    if unsafe { slice_component(step) }.unwrap_or(1) == 1 {
+        // SAFETY: the caller roots nonzero canonical integer bounds.
+        let span = unsafe { contiguous_slice(text, start, stop) };
+        if span.len() == text.len() {
+            // SAFETY: a full slice may share immutable storage; acquire its new owner.
+            return StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(value as usize) });
+        }
+        return StrOwner::into_raw(StrOwner::new(Str::new(span)));
+    }
     let length = text.chars().count();
     // SAFETY: all borrowed nullable integer components remain rooted.
     let slice = match unsafe { SliceIndices::new(length, start, stop, step) } {
         Ok(slice) => slice,
         Err(error) => return error.returning(std::ptr::null()),
     };
-    if !slice.reverse && slice.stride == 1 && slice.len() == length {
-        // SAFETY: a full slice may share immutable storage; acquire its new owner.
-        return StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(value as usize) });
-    }
-    let result = if !slice.reverse && slice.stride == 1 {
-        // A contiguous slice needs one copy, without decoding and appending
-        // every selected character again. The result owns its UTF-8 bytes.
-        Str::new(contiguous_slice(text, length, &slice))
-    } else if slice.reverse && slice.len() != 0 {
+    let result = if slice.reverse && slice.len() != 0 {
         copy_string_slice(
             text.chars().rev(),
             length - 1 - slice.at,
@@ -241,23 +243,57 @@ pub unsafe extern "C" fn imre_str_slice(
     StrOwner::into_raw(StrOwner::new(result))
 }
 
-/// Borrows the UTF-8 bytes of a normalized, forward unit-stride slice.
-fn contiguous_slice<'a>(text: &'a str, length: usize, slice: &SliceIndices) -> &'a str {
-    if slice.len() == 0 {
-        ""
-    } else if length == text.len() {
-        // Equal byte and code-point counts prove that every byte is ASCII.
-        &text[slice.at..slice.at + slice.len()]
+/// Clamp a signed code-point bound to a byte boundary, walking from the indicated end.
+fn slice_byte_bound(text: &str, index: isize) -> usize {
+    let count = index.unsigned_abs();
+    if count >= text.len() {
+        return if index < 0 { 0 } else { text.len() };
+    }
+    let mut chars = text.chars();
+    if index < 0 {
+        let offset = text.len() - count;
+        if text.as_bytes()[offset..].is_ascii() {
+            return offset;
+        }
+        chars.nth_back(count - 1);
+        chars.as_str().len()
     } else {
-        let mut boundaries = text
-            .char_indices()
-            .map(|(offset, _)| offset)
-            .chain(std::iter::once(text.len()));
-        let start = boundaries.nth(slice.at).expect("normalized slice start");
-        let end = boundaries
-            .nth(slice.len() - 1)
-            .expect("normalized slice end");
-        &text[start..end]
+        if text.as_bytes()[..count].is_ascii() {
+            return count;
+        }
+        chars.nth(count - 1);
+        text.len() - chars.as_str().len()
+    }
+}
+
+/// Borrow a unit-stride span. Bounds on the same side share the first traversal.
+///
+/// # Safety
+/// Each nonzero bound must be a rooted canonical integer.
+unsafe fn contiguous_slice(text: &str, start: usize, stop: usize) -> &str {
+    // SAFETY: the caller roots both bounds for this conversion.
+    let (start, stop) = unsafe { (slice_component(start).unwrap_or(0), slice_component(stop)) };
+    if start >= 0 {
+        let tail = &text[slice_byte_bound(text, start)..];
+        let Some(stop) = stop else { return tail };
+        let relative = if stop < 0 {
+            stop
+        } else {
+            (stop - start).max(0)
+        };
+        &tail[..slice_byte_bound(tail, relative)]
+    } else if stop.is_none_or(|stop| stop < 0) {
+        let end = stop.map_or(text.len(), |stop| slice_byte_bound(text, stop));
+        let distance = start - stop.unwrap_or(0);
+        if distance >= 0 {
+            return "";
+        }
+        let prefix = &text[..end];
+        &prefix[slice_byte_bound(prefix, distance)..]
+    } else {
+        let start = slice_byte_bound(text, start);
+        let end = slice_byte_bound(text, stop.unwrap());
+        &text[start.min(end)..end]
     }
 }
 
@@ -274,19 +310,12 @@ pub unsafe extern "C" fn imre_str_slice_equal(
     right_start: usize,
     right_stop: usize,
 ) -> u32 {
-    /// Omitting both bounds borrows the whole string without counting code points.
-    unsafe fn region(text: &str, start: usize, stop: usize) -> &str {
-        if start == 0 && stop == 0 {
-            return text;
-        }
-        let length = text.chars().count();
-        // SAFETY: both bounds stay rooted and the stride is one.
-        let slice = unsafe { SliceIndices::with_step(length, start, stop, 1) };
-        contiguous_slice(text, length, &slice)
-    }
-    // SAFETY: the caller roots both immutable strings and their bounds.
+    // SAFETY: the caller roots both immutable strings and their two optional bounds.
     unsafe {
-        u32::from(region(&*left, left_start, left_stop) == region(&*right, right_start, right_stop))
+        u32::from(
+            contiguous_slice(&*left, left_start, left_stop)
+                == contiguous_slice(&*right, right_start, right_stop),
+        )
     }
 }
 
