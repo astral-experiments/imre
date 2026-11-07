@@ -768,6 +768,8 @@ macro_rules! table {
     };
 }
 
+mod accumulate;
+
 impl<V: Copy> Tables<V> {
     fn try_for_each(
         &self,
