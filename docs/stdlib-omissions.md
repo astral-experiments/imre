@@ -210,6 +210,12 @@ The two subclass tests for inconsistent cache lookups remain in scope. A caller 
 
 Omit `test.test_uuid.TestUUIDWithoutExtModule.test_safe_uuid_enum`, occurrence 1. The original calls CPython’s private `enum._test_simple_enum` helper to compare the optimized `SafeUUID` class with an ordinary enum. The helper rejects differences in private class metadata even when lookup returns the same members. Imre supports the public member names and values, lookup by name and value, member identity, and `UUID.is_safe`. Thirteen checks of that behavior passed on stock and at both native optimization levels. The original still errors on the missing private helper. [Original test](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_uuid.py#L80-L85) · [Enum checker](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/enum.py#L2016) · [SafeUUID contract](https://docs.python.org/3.14/library/uuid.html#uuid.SafeUUID).
 
+### `zipfile`
+
+| Original CPython test | Occurrence | Reason for omission | Public behavior checked |
+| --- | ---: | --- | --- |
+| [`test.test_zipfile.test_core.LazyImportTest.test_lazy_import`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_zipfile/test_core.py#L55-L58) | 1 | The upstream `@cpython_only` test checks whether `typing` is absent at startup and after importing `zipfile` in a fresh process with `-S`. Imre can load its dependencies in a different order. [Upstream helper](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/import_helper.py#L316-L334) | Stock passed and Imre took the decorator skip. Both wrote a ZIP containing `src/payload.py`, recovered the exact source bytes and passed the archive CRC check. |
+
 ## Supplemental omissions
 
 ### `decimal`
