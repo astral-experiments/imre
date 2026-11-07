@@ -1869,6 +1869,17 @@ impl Value {
         }
     }
 
+    /// The Python object whose buffer this value currently exports.
+    fn buffer_export_owner(&self) -> Option<Id> {
+        match self {
+            Self::MemoryView { owner, .. } => *owner,
+            Self::StructUnpackIterator { buffer, .. } => *buffer,
+            Self::RegexScanner { subject, .. } => Some(*subject),
+            Self::PythonBufferLease { view, .. } => Some(*view),
+            _ => None,
+        }
+    }
+
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } | Self::FrameLocalsProxy { class, .. } => Some(*class),
@@ -2835,7 +2846,8 @@ struct Slot {
     untracked_tuple: Cell<bool>,
     // GC-header allocations still contribute pressure when a tuple becomes untracked.
     has_gc_header: bool,
-    may_have_buffer_views: bool,
+    // Zero for no exporter, its slot for one, and u32::MAX for overlapping exports.
+    buffer_exporter: u32,
     finalization: Finalization,
     generation: u8,
 }
@@ -2848,7 +2860,7 @@ impl Slot {
             gc_prev: Cell::new(UNMARKED),
             untracked_tuple: Cell::new(false),
             has_gc_header: false,
-            may_have_buffer_views: false,
+            buffer_exporter: 0,
             finalization: Finalization::None,
             generation: 0,
         }
@@ -3818,6 +3830,31 @@ impl Heap {
                 self.classes.push(id);
                 id
             }
+            Value::MemoryView { .. }
+            | Value::StructUnpackIterator { .. }
+            | Value::RegexScanner { .. }
+            | Value::PythonBufferLease { .. } => {
+                let owner = value.buffer_export_owner();
+                let id = self.alloc_slot(value);
+                if let Some(owner) = owner {
+                    let storage = self.view_storage_id(owner);
+                    if matches!(
+                        self.get(storage),
+                        Value::Array(_)
+                            | Value::ByteArray(_)
+                            | Value::BytesIoStorage(_)
+                            | Value::MemoryView { .. }
+                    ) {
+                        self.slots[storage as usize].buffer_exporter =
+                            if self.may_have_buffer_views(storage) {
+                                u32::MAX
+                            } else {
+                                u32::try_from(id).unwrap_or(u32::MAX)
+                            };
+                    }
+                }
+                id
+            }
             value => self.alloc_slot(value),
         }
     }
@@ -3951,7 +3988,7 @@ impl Heap {
             self.free_count -= 1;
             self.slot_shapes[index] = shape;
             self.slots[index].value = Some(value());
-            self.slots[index].may_have_buffer_views = false;
+            self.slots[index].buffer_exporter = 0;
             self.slots[index].generation = 0;
             index
         } else {
@@ -4882,12 +4919,36 @@ impl Heap {
         reachable
     }
 
-    pub(super) fn note_buffer_view(&mut self, storage: Id) {
-        self.slots[storage as usize].may_have_buffer_views = true;
+    /// Resolve scalar subclasses and BytesIO exports to their backing storage.
+    pub(super) fn view_storage_id(&self, owner: Id) -> Id {
+        match self.slots[owner as usize].value.as_ref() {
+            Some(
+                Value::Instance {
+                    scalar: Some(backing),
+                    ..
+                }
+                | Value::BytesIoBuffer {
+                    storage: backing, ..
+                },
+            ) => *backing,
+            _ => owner,
+        }
+    }
+
+    /// Check the current slot owner after a view is released or its index is reused.
+    fn exports_buffer(&self, slot: &Slot, storage: Id) -> bool {
+        slot.value
+            .as_ref()
+            .and_then(Value::buffer_export_owner)
+            .is_some_and(|owner| owner == storage || self.view_storage_id(owner) == storage)
     }
 
     pub(super) fn may_have_buffer_views(&self, storage: Id) -> bool {
-        self.slots[storage as usize].may_have_buffer_views
+        match self.slots[storage as usize].buffer_exporter {
+            0 => false,
+            u32::MAX => true,
+            exporter => self.exports_buffer(&self.slots[exporter as usize], storage),
+        }
     }
 
     /// A view can be unreachable before the next sweep. Check its actual lifetime
@@ -4902,34 +4963,16 @@ impl Heap {
         }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let exports = |slot: &Slot| match slot.value {
-            Some(
-                Value::MemoryView {
-                    owner: Some(owner), ..
-                }
-                | Value::StructUnpackIterator {
-                    buffer: Some(owner),
-                    ..
-                }
-                | Value::RegexScanner { subject: owner, .. },
-            ) => {
-                owner == storage
-                    || matches!(self.get(owner),
-                    Value::Instance { scalar: Some(backing), .. } | Value::BytesIoBuffer { storage: backing, .. }
-                        if *backing == storage)
-            }
-            // Derived views share one acquisition of the returned memoryview.
-            Some(Value::PythonBufferLease { view, .. }) => view == storage,
-            _ => false,
-        };
         let live = self
             .slots
             .iter()
             .zip(&self.traces)
-            .filter(|(slot, trace)| trace.get() != UNMARKED && exports(slot))
+            .filter(|(slot, trace)| trace.get() != UNMARKED && self.exports_buffer(slot, storage))
             .count();
         self.clear_marks();
-        self.slots[storage as usize].may_have_buffer_views = live != 0;
+        if live == 0 {
+            self.slots[storage as usize].buffer_exporter = 0;
+        }
         Ok(live)
     }
 
