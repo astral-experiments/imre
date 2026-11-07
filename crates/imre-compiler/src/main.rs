@@ -449,7 +449,9 @@ fn run() -> Result<ExitCode, String> {
     if let (Some(path), Some(ir)) = (&llvm_path, boxed_ir_dump) {
         std::fs::write(path, ir).map_err(|e| e.to_string())?;
     }
-    let stage = executable_cache.and_then(|c| c.stage());
+    let stage = executable_cache
+        .filter(|_| !sources.relink_site_wheel)
+        .and_then(|c| c.stage());
     let staged_output = stage.as_ref().map(|s| s.path().join("program"));
     let mut temporary = None;
     let mut scratch = None;
@@ -490,9 +492,11 @@ fn run() -> Result<ExitCode, String> {
                 &optimization,
                 options.address_sanitizer,
                 dir.path(),
-                cache
-                    .as_ref()
-                    .filter(|_| stage.is_some() || !options.extension_paths.is_empty()),
+                cache.as_ref().filter(|_| {
+                    stage.is_some()
+                        || sources.relink_site_wheel
+                        || !options.extension_paths.is_empty()
+                }),
                 |name, hit| progress.unit(name, hit),
             )?;
             progress.linking();

@@ -42,9 +42,13 @@ def main() -> None:
         if args.sanitize:
             env["ASAN_OPTIONS"] = "detect_leaks=1:halt_on_error=1"
 
-        def run(*command: str | Path, success: bool = True) -> bytes:
+        def run(
+            *command: str | Path,
+            success: bool = True,
+            extra_env: dict[str, str] | None = None,
+        ) -> bytes:
             result = subprocess.run(
-                command, cwd=root, env=env, capture_output=True, timeout=120
+                command, cwd=root, env=env | (extra_env or {}), capture_output=True, timeout=120
             )
             assert (result.returncode == 0) == success, (
                 command,
@@ -130,6 +134,29 @@ def main() -> None:
         assert (site / "retainer.imre.a").read_bytes() == (
             stage / "retainer.imre.a"
         ).read_bytes()
+
+        venv = root / "venv"
+        launcher = venv / "bin" / "python"
+        launcher.parent.mkdir(parents=True)
+        launcher.symlink_to(compiler)
+        (venv / "pyvenv.cfg").write_text(
+            f"home = {compiler.parent}\ninclude-system-site-packages = false\n"
+        )
+        installed = venv / "lib/imre3.14/site-packages"
+        installed.mkdir(parents=True)
+        (installed / "retainer.py").write_text(
+            "def buffer_bytes(data: bytes, mode: int, /) -> bytes: return b'source'\n"
+        )
+        caller = app / "installed.py"
+        caller.write_text("import retainer\nprint(retainer.buffer_bytes(b'wheel', 0))\n")
+        flags = ["--runtime", str(runtime), "--clang", args.clang, "--opt-level", "0"]
+        if args.sanitize:
+            flags.append("--sanitize")
+        startup = {"IMRE_ENCODED_FLAGS": "\x1f".join(flags), "PYTHONPATH": ""}
+        shutil.copyfile(site / "retainer.pyi", installed / "retainer.pyi")
+        assert run(launcher, "-B", caller, extra_env=startup) == b"b'source'\n"
+        shutil.copyfile(site / "retainer.imre.a", installed / "retainer.imre.a")
+        assert run(launcher, "-B", caller, extra_env=startup) == b"b'wheel'\n"
 
         cp_runner = "import runpy, sys; sys.path.insert(0, sys.argv[1]); runpy.run_path(sys.argv[2], run_name='__main__')"
         programs = {}

@@ -124,7 +124,7 @@ python -m pip install --no-index --no-deps --no-compile --only-binary=:all: \
 imre run tests/fixtures/extensions/retained.py --extension-path build/site
 ```
 
-Supply `--extension-path` again for additional installed directories. CPython wheels have a different ABI. Builds using an extension path reuse cached module objects and relink the executable, so replacing an installed archive or its link libraries takes effect on the next build. A finished Imre executable can run after the installation directory is removed.
+For statically resolved imports in a script or `-c` command, the Python launcher also finds paired archives and stubs in its active site-packages directories. Supply `--extension-path` again for additional installed directories. CPython wheels have a different ABI. Builds using an extension path reuse cached module objects and relink the executable, so replacing an installed archive or its link libraries takes effect on the next build. A finished Imre executable can run after the installation directory is removed.
 
 ## The C boundary
 

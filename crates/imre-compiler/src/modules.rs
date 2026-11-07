@@ -3647,7 +3647,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], &[], FileSystem::default())?;
+        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], None, FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
@@ -3668,13 +3668,14 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
+        site_wheels: &mut SiteWheels,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
             &options.python_archive_indices,
-            options.installed_dirs(),
+            Some((options, site_wheels)),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3710,6 +3711,7 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
+        site_wheels: &mut SiteWheels,
     ) -> Result<Self, String> {
         let filename = std::env::current_dir()
             .map_err(|err| err.to_string())?
@@ -3736,7 +3738,7 @@ impl SourceGraph {
             root,
             &options.extension_paths,
             &options.python_archive_indices,
-            options.installed_dirs(),
+            Some((options, site_wheels)),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;
@@ -3824,7 +3826,7 @@ impl SourceGraph {
         let source = fs
             .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root, extension_paths, &[], &[], fs)?;
+        let mut loader = Loader::new(root, extension_paths, &[], None, fs)?;
         loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
@@ -4208,6 +4210,31 @@ pub(crate) enum EntryImportFailure {
     ZipImport,
 }
 
+/// File probes that affect checked admission, even when the program later uses object imports.
+#[derive(Default)]
+pub(crate) struct SiteWheels {
+    missing: Vec<PathBuf>,
+    selected: bool,
+}
+
+impl SiteWheels {
+    fn paired(&mut self, fs: &mut FileSystem<'_>, archive: &Path, stub: &Path) -> bool {
+        for file in [archive, stub] {
+            if !fs.is_file(file) {
+                self.missing.push(file.to_owned());
+                return false;
+            }
+        }
+        self.selected = true;
+        true
+    }
+
+    pub(crate) fn record(&self, inputs: &mut crate::SourceInputs) {
+        inputs.missing.extend_from_slice(&self.missing);
+        inputs.relink_site_wheel = self.selected;
+    }
+}
+
 struct Loader<'a> {
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
@@ -4222,6 +4249,7 @@ struct Loader<'a> {
     root: PathBuf,
     search_roots: Vec<PathBuf>,
     archive_roots: usize,
+    site_wheels: Option<(HashSet<PathBuf>, &'a mut SiteWheels)>,
     session: Session,
     modules: Vec<SourceModule>,
     by_name: HashMap<String, ModuleId>,
@@ -4241,11 +4269,11 @@ struct Loader<'a> {
 }
 
 impl<'a> Loader<'a> {
-    fn new<'p>(
+    fn new(
         root: PathBuf,
         extension_paths: &[PathBuf],
         python_archive_indices: &[usize],
-        installed_dirs: impl IntoIterator<Item = &'p PathBuf>,
+        python: Option<(&crate::CompileOptions, &'a mut SiteWheels)>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
@@ -4278,19 +4306,25 @@ impl<'a> Loader<'a> {
             }
         }
         let archive_roots = search_roots.len();
-        for site in installed_dirs {
-            let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
-            inputs
-                .directories
-                .push((site.to_owned(), canonical.clone()));
-            let site = canonical;
-            if !search_roots.contains(&site) {
-                search_roots.push(site);
+        let mut site_roots = HashSet::new();
+        let mut site_wheels = None;
+        if let Some((options, probes)) = python {
+            for dir in options.installed_dirs() {
+                let canonical = fs.canonicalize(dir).map_err(|e| e.to_string())?;
+                inputs.directories.push((dir.to_owned(), canonical.clone()));
+                if options.site_dirs.contains(dir) {
+                    site_roots.insert(canonical.clone());
+                }
+                if !search_roots.contains(&canonical) {
+                    search_roots.push(canonical);
+                }
             }
+            site_wheels = Some((site_roots, probes));
         }
         Ok(Self {
             fs,
             archive_roots,
+            site_wheels,
             session: Session::new(&root, &search_roots)?,
             search_roots,
             inputs,
@@ -5902,8 +5936,15 @@ impl<'a> Loader<'a> {
                 self.inputs.missing.push(package);
                 let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
                 let installed = self.search_roots[..self.archive_roots].contains(root);
-                if installed && self.fs.is_file(&archive) {
-                    if !self.fs.is_file(&stub) {
+                let native = if installed {
+                    self.fs.is_file(&archive)
+                } else {
+                    self.site_wheels.as_mut().is_some_and(|(sites, probes)| {
+                        sites.contains(root) && probes.paired(&mut self.fs, &archive, &stub)
+                    })
+                };
+                if native {
+                    if installed && !self.fs.is_file(&stub) {
                         return Err(format!(
                             "native module {name:?} requires a typed declaration at {}",
                             stub.display()
