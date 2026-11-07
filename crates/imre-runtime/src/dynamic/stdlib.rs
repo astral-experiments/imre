@@ -46,7 +46,8 @@ mod tokenize;
 mod unicodedata;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{
-    IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS, import_socket_constants, install_lowlevel_socket,
+    CLASS_METHODS as SOCKET_CLASS_METHODS, IMPORTED_FUNCTIONS as SOCKET_FUNCTIONS,
+    import_socket_constants, install_lowlevel_socket,
 };
 pub(super) mod io;
 mod json;
@@ -2723,6 +2724,10 @@ pub(super) fn call(
         "_socket.htons" | "_socket.ntohs" | "_socket.htonl" | "_socket.ntohl"
     ) {
         return socket::convert_byte_order(ctx, name, args, kwargs);
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("CMSG_LEN" | "CMSG_SPACE")) = name.strip_prefix("_socket.") {
+        return socket::cmsg_size(ctx, function, args, kwargs);
     }
     if name == "_socket.inet_aton" {
         return socket::inet_aton(ctx, args, kwargs);

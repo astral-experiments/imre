@@ -17,6 +17,16 @@ impl Emitter<'_, '_> {
                 small_integer: true,
             };
         }
+        if let ControlSize { padded } = op {
+            let length = &args[0].value.operand;
+            return Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call i64 @imre_socket_control_size(i64 {length}, i1 {padded})"
+                )),
+                small_integer: true,
+            };
+        }
         if matches!(op, SockName | Accept) {
             let layout = self.output.record_layout(returns);
             let socket = &args[0].value.operand;
@@ -55,7 +65,7 @@ impl Emitter<'_, '_> {
             SetSockOpt if args[3].value.ty == Type::Bytes => "imre_socket_setsockopt_bytes",
             SetSockOpt => "imre_socket_setsockopt",
             GetSockOpt => "imre_socket_getsockopt",
-            Constant(_) | Accept | SockName => unreachable!(),
+            Constant(_) | ControlSize { .. } | Accept | SockName => unreachable!(),
         };
         let args: Vec<_> = args.iter().map(|a| &a.value).collect();
         if returns == Type::None {

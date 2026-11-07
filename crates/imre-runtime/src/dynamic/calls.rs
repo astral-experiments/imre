@@ -4399,7 +4399,9 @@ impl Context {
             Value::Epoll(_) if name == "fromfd" => return Ok(self.builtin("select.epoll.fromfd")),
             Value::Native(ref class) if class == "socket.socket" => match name {
                 "__name__" => return Ok(self.text("socket")),
-                "connect_ex" => return Ok(self.builtin("socket.socket.connect_ex")),
+                method if stdlib::SOCKET_CLASS_METHODS.contains(&method) => {
+                    return Ok(self.builtin(&format!("socket.socket.{method}")));
+                }
                 _ => {}
             },
             Value::Socket(ref socket) if name == "family" => {

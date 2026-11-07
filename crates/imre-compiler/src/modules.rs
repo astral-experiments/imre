@@ -1015,6 +1015,9 @@ pub(crate) enum Intrinsic {
     GaiError,
     HError,
     SocketGetFqdn,
+    SocketControlSize {
+        padded: bool,
+    },
     SocketConstant(&'static str),
     Sha1,
     Sha256,
@@ -2182,6 +2185,16 @@ impl IntrinsicModule {
             #[cfg(unix)]
             (Self::Socket, "fromfd") => Intrinsic::ScopedObjectExport("socket.fromfd"),
             (Self::Socket, "SocketIO") => Intrinsic::ScopedObjectExport("socket.SocketIO"),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "SCM_RIGHTS") => {
+                Intrinsic::IntConstant(i64::from(libc::SCM_RIGHTS))
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, name @ ("CMSG_LEN" | "CMSG_SPACE")) => {
+                Intrinsic::SocketControlSize {
+                    padded: name == "CMSG_SPACE",
+                }
+            }
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
@@ -5171,7 +5184,9 @@ impl<'a> Loader<'a> {
                         !matches!(
                             module.symbol(alias.name.as_str()),
                             Some(Binding::Intrinsic(
-                                Intrinsic::IntConstant(_) | Intrinsic::ScopedObjectExport(_)
+                                Intrinsic::IntConstant(_)
+                                    | Intrinsic::SocketControlSize { .. }
+                                    | Intrinsic::ScopedObjectExport(_)
                             ))
                         )
                     })

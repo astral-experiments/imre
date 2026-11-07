@@ -617,29 +617,33 @@ impl Context {
                         ctx.heap.keep(id);
                     }
                 }
-                let storage = ctx.scalar_value(object);
-                let view = ctx.alloc(Value::MemoryView {
-                    owner: Some(storage),
-                    lease: None,
-                    anonymous: true,
-                    restricted: true,
-                    layout: None,
-                    readonly: matches!(ctx.heap.get(storage), Value::Bytes(_)),
-                    hash: None,
-                });
-                ctx.heap.keep(view);
-                ctx.release_python_buffer(object, view);
-                // The callback can retain or explicitly release the view. Its
-                // storage must be inaccessible once PyBuffer_Release returns.
-                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(view) else {
-                    unreachable!()
-                };
-                if let Some(storage) = owner.take() {
-                    ctx.heap.weak_edge_removed(storage);
-                }
+                ctx.notify_native_buffer_release(object);
             }
             result
         })
+    }
+
+    fn notify_native_buffer_release(&mut self, object: Id) {
+        let storage = self.scalar_value(object);
+        let view = self.alloc(Value::MemoryView {
+            owner: Some(storage),
+            lease: None,
+            anonymous: true,
+            restricted: true,
+            layout: None,
+            readonly: matches!(self.heap.get(storage), Value::Bytes(_)),
+            hash: None,
+        });
+        self.heap.keep(view);
+        self.release_python_buffer(object, view);
+        // The callback can retain or explicitly release the view. Its
+        // storage must be inaccessible once PyBuffer_Release returns.
+        let Value::MemoryView { owner, .. } = self.heap.get_mut(view) else {
+            unreachable!()
+        };
+        if let Some(storage) = owner.take() {
+            self.heap.weak_edge_removed(storage);
+        }
     }
 
     /// Release a synchronous Python export after its consumer has dropped the view's export.
@@ -1807,31 +1811,9 @@ impl Context {
     /// before the caller can invoke another Python callback.
     fn collect_iterable(&mut self, source: Id, tuple: bool) -> Result<Id> {
         let mark = self.heap.temporary_mark();
-        let result: Result<Id> = (|| {
-            self.heap.reserve_temporaries(2)?;
-            let iterator = self.iterator(source)?;
-            self.heap.keep(iterator);
-            let buffer = self.alloc(Value::List(Vec::new()));
-            let step = self.heap.temporary_mark();
-            while let Some(item) = self.next_item(iterator)? {
-                let Value::List(items) = self.heap.get_mut(buffer) else {
-                    unreachable!()
-                };
-                items
-                    .try_reserve(1)
-                    .map_err(|_| crate::Error::memory_error())?;
-                items.push(item);
-                self.comprehension_step(step);
-            }
-            if tuple {
-                let Value::List(items) = self.heap.get_mut(buffer) else {
-                    unreachable!()
-                };
-                let items = std::mem::take(items);
-                return Ok(self.alloc(Value::Tuple(items)));
-            }
-            Ok(buffer)
-        })();
+        let result = self
+            .iterator(source)
+            .and_then(|iterator| self.collect_iterator_items(iterator, tuple, Vec::new()));
         match &result {
             Ok(snapshot) => self.heap.keep_call_result(mark, *snapshot),
             Err(error) => {
@@ -1842,6 +1824,31 @@ impl Context {
             }
         }
         result
+    }
+
+    fn collect_iterator_items(&mut self, iterator: Id, tuple: bool, items: Vec<Id>) -> Result<Id> {
+        self.heap.reserve_temporaries(2)?;
+        self.heap.keep(iterator);
+        let buffer = self.alloc(Value::List(items));
+        let step = self.heap.temporary_mark();
+        while let Some(item) = self.next_item(iterator)? {
+            let Value::List(items) = self.heap.get_mut(buffer) else {
+                unreachable!()
+            };
+            items
+                .try_reserve(1)
+                .map_err(|_| crate::Error::memory_error())?;
+            items.push(item);
+            self.comprehension_step(step);
+        }
+        if tuple {
+            let Value::List(items) = self.heap.get_mut(buffer) else {
+                unreachable!()
+            };
+            let items = std::mem::take(items);
+            return Ok(self.alloc(Value::Tuple(items)));
+        }
+        Ok(buffer)
     }
 
     /// Check the Python sequence protocol without consuming iterators.
