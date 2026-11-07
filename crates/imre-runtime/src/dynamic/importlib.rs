@@ -696,12 +696,11 @@ impl Context {
                 };
                 (child, path, false)
             } else {
-                (fullname, self.sys_path, true)
+                (fullname, NONE, true)
             };
         if self.import_registry_installed {
             let name = self.text(fullname);
-            let path = if top_level { NONE } else { search };
-            let args = vec![name, path];
+            let args = vec![name, search];
             return match finder {
                 Some(finder) => self.call(finder, args, vec![]),
                 None => self.meta_call(NONE, "_find_spec", args),
@@ -716,6 +715,11 @@ impl Context {
                 "find_spec requires a registered source file",
             ));
         }
+        let search = if top_level {
+            self.startup_search_path()?
+        } else {
+            search
+        };
         let mut locations = Vec::new();
         let Some((path, body)) =
             self.source_on_path(fullname, child, search, top_level, &mut locations)?

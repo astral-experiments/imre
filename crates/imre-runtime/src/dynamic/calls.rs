@@ -7130,16 +7130,9 @@ impl Context {
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
-            Value::Module {
-                name: module,
-                scope,
-                ..
-            } => {
+            Value::Module { scope, .. } => {
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
-                }
-                if module == "sys" && name == "path" {
-                    self.sys_path = value;
                 }
                 let scope = *scope;
                 self.update_module_annotations(scope, name, Some(value))?;

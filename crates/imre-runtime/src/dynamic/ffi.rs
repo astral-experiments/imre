@@ -807,7 +807,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         executable,
         helper_executable,
         argv: NONE,
-        sys_path: NONE,
         startup_path0: None,
         default_encoding: NONE,
         displaced_sni_callbacks: Default::default(),
@@ -862,16 +861,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     ctx.import_missing = ctx.instance(object, None);
     let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
-    let paths: Vec<String> =
-        serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
-    // The CLI adds its script directory only after site has finished.
-    let has_path0 = ctx.config["path0"] == true;
-    let paths = paths
-        .into_iter()
-        .skip(usize::from(has_path0))
-        .map(|p| ctx.text(p))
-        .collect();
-    ctx.sys_path = ctx.alloc(Value::List(paths));
     ctx.default_encoding = ctx.heap.code_name(crate::sys::default_encoding().as_str());
     let current = ctx.alloc(Value::Context(Default::default()));
     ctx.contexts.push(current);
@@ -2380,7 +2369,6 @@ impl Context {
                 .chain(self.source_builtins)
                 .chain([
                     self.argv,
-                    self.sys_path,
                     self.zip_path_importers,
                     self.modules,
                     self.import_missing,

@@ -147,7 +147,6 @@ pub(crate) struct Context {
     interpreter_layout: Result<imre_ast::layout::InterpreterLayout>,
     helper_executable: String,
     argv: Id,
-    sys_path: Id,
     /// Filesystem bytes of the installed startup entry. An empty entry follows the current cwd.
     startup_path0: Option<Vec<u32>>,
     default_encoding: Id,
@@ -3371,6 +3370,12 @@ impl Context {
         Ok(self.scope_name(scope, name))
     }
 
+    /// Read the original sys namespace for native searches before PathFinder is installed.
+    fn startup_search_path(&mut self) -> Result<Id> {
+        self.sys_binding("path")?
+            .ok_or_else(|| Error::new("RuntimeError", "unable to get sys.path"))
+    }
+
     fn registered_module(&mut self, name: Id) -> Result<Option<Id>> {
         let (_, index) = self.find_dictionary_key(self.modules, name, None)?;
         Ok(index.map(|i| self.stored_entries(self.modules)[i].1))
@@ -3632,12 +3637,7 @@ impl Context {
             self.import_path_text(&first)?
         };
         self.startup_path0 = Some(self.string_codepoints(entry)?.into_owned());
-        let path = if self.config["sitecustomize"] == true {
-            self.sys_binding("path")?
-                .ok_or_else(|| Error::new("RuntimeError", "unable to get sys.path"))?
-        } else {
-            self.sys_path
-        };
+        let path = self.startup_search_path()?;
         let storage = self
             .list_storage(path)
             .ok_or_else(|| Error::new("SystemError", "bad argument to internal function"))?;
@@ -3688,7 +3688,7 @@ impl Context {
             let (search, child) = if let Some((parent, child)) = parent {
                 (self.parent_import_path(name, parent)?, child)
             } else {
-                (self.sys_path, name)
+                (self.startup_search_path()?, name)
             };
             self.source_on_path(name, child, search, parent.is_none(), &mut locations)?
         };
@@ -4621,6 +4621,16 @@ impl Context {
                 }
                 self.bind(scope, "_xoptions", xoptions);
                 if self.threads.system_module.is_none() {
+                    let paths: Vec<String> = serde_json::from_value(self.config["paths"].clone())
+                        .expect("compiler search paths");
+                    // The launcher inserts path[0] separately during startup.
+                    let entries = paths
+                        .into_iter()
+                        .skip(usize::from(self.config["path0"] == true))
+                        .map(|path| self.text(path))
+                        .collect();
+                    let path = self.alloc(Value::List(entries));
+                    self.bind(scope, "path", path);
                     self.bind(scope, "modules", self.modules);
                     let version = stdlib::sys_version(self)?;
                     self.bind(scope, "version", version);
