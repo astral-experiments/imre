@@ -51,6 +51,8 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "default_verify_flags",
         "set_alpn_protocols",
         "selected_alpn_protocol",
+        "cipher",
+        "version",
         "post_handshake_auth",
         "verify_client_post_handshake",
         "get_ciphers",
@@ -117,6 +119,16 @@ fn session(ctx: &Context, id: Id) -> Result<&RefCell<Option<provider::Session>>>
         Value::None => Err(closed()),
         _ => Err(Error::new("TypeError", "expected a TLS session")),
     }
+}
+
+fn retained_session(ctx: &Context, handle: Id) -> Result<Option<provider::OwnedSsl>> {
+    let session = match ctx.heap.get(handle) {
+        Value::TlsBioSession { session, .. } => Some(session.borrow().retain_ssl()),
+        Value::TlsSession(session, _) => session.borrow().as_ref().map(|ssl| ssl.retain_ssl()),
+        Value::TlsListener(_) | Value::None => None,
+        _ => return Err(Error::new("TypeError", "expected a TLS session")),
+    };
+    session.transpose().map_err(|e| provider_error(ctx, e))
 }
 
 fn without_session(ctx: &Context, handle: Id) -> bool {
@@ -683,6 +695,18 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
+        ("cipher" | "version", &[handle]) => {
+            let Some(ssl) = retained_session(ctx, handle)? else {
+                return Ok(NONE);
+            };
+            if name == "cipher" {
+                Ok(ssl.negotiated_cipher(ctx))
+            } else {
+                Ok(ssl
+                    .negotiated_version()
+                    .map_or(NONE, |v| ctx.text(v.to_string_lossy())))
+            }
+        }
         ("selected_alpn_protocol", &[handle]) => {
             let selected = match ctx.heap.get(handle) {
                 Value::TlsBioSession { session, .. } => session.borrow().selected_alpn_protocol(),
@@ -1058,13 +1082,7 @@ pub(super) fn call(
                     ),
                 ));
             }
-            if without_session(ctx, handle) {
-                return Ok(NONE);
-            }
-            let data = session(ctx, handle)?
-                .borrow()
-                .as_ref()
-                .and_then(|ssl| ssl.channel_binding());
+            let data = retained_session(ctx, handle)?.and_then(|ssl| ssl.channel_binding());
             Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes))))
         }
         ("get_verified_chain" | "get_unverified_chain", &[handle]) => {

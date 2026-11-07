@@ -615,6 +615,15 @@ class SSLObject:
         """Advance the handshake, raising SSLWantReadError when more peer data is needed."""
         self._sslobj.do_handshake()
 
+    def cipher(self):
+        return _imre_ssl.cipher(self._sslobj)
+
+    def version(self):
+        return _imre_ssl.version(self._sslobj)
+
+    def get_channel_binding(self, cb_type="tls-unique"):
+        return _call(_imre_ssl.channel_binding, self._sslobj, cb_type)
+
     def selected_alpn_protocol(self):
         return _imre_ssl.selected_alpn_protocol(self._sslobj)
 
@@ -861,6 +870,12 @@ class SSLSocket(_socket.socket):
         if not _imre_ssl.is_session(self._session):
             return 0
         return _tls_result(_call(_imre_ssl.pending, self._session))
+
+    def cipher(self):
+        return _imre_ssl.cipher(self._session)
+
+    def version(self):
+        return _imre_ssl.version(self._session)
 
     def selected_alpn_protocol(self):
         return _imre_ssl.selected_alpn_protocol(self._session)
