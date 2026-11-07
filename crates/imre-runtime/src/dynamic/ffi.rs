@@ -2353,15 +2353,16 @@ impl Context {
         let globals = self.finalizer_path_roots();
         let input = super::stdlib::io::rooted_input_chain(self);
         // Include the three owners retained by sys.__stdin__.
-        (self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
-            && (!self.heap.has_weak_values
-                || self.heap.weak_values_kept_by(globals[0], globals[1]))
+        if self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
             && input
                 .as_ref()
-                .is_some_and(|chain| self.heap.finalizers_kept_by(chain)))
-            || self
-                .heap
-                .cached_finalizers_kept(globals, input.as_ref(), Some(retained_current))
+                .is_some_and(|chain| self.heap.finalizers_kept_by(chain))
+        {
+            return !self.heap.has_weak_values
+                || self.heap.weak_values_kept_by(globals[0], globals[1]);
+        }
+        self.heap
+            .cached_finalizers_kept(globals, input.as_ref(), Some(retained_current))
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
