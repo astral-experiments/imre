@@ -103,14 +103,17 @@ def check_installed_site(imre, root, run):
         "assert importlib.import_module(sys.argv[4]).mean([2, 3, 4]) == 3\n"
         "assert importlib.import_module(sys.argv[5]).unescape('&lt;&amp;&gt;') == '<&>'\n"
         "assert importlib.import_module(sys.argv[6]).Wave_read.__name__ == 'Wave_read'\n"
+        "address = importlib.import_module(sys.argv[7]).ip_address('2001:0db8::1')\n"
+        "assert str(address) == '2001:db8::1'\n"
         "assert list(sorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
         "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
         "    with tar.extractfile('payload') as member:\n"
         "        assert member.read() == b'archive member'\n"
     )
+    source_args = (name, sample, "graphlib", "statistics", "html", "wave", "ipaddress")
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
-    bare = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", "html", "wave", timeout=300)
+    bare = run(launcher, "-IB", "-c", use_sources, *source_args, timeout=300)
     assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
     opaque = run(
         launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
@@ -127,7 +130,7 @@ def check_installed_site(imre, root, run):
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported
     archive.write_bytes(exported.stdout)
-    packaged = run(launcher, "-IB", "-c", use_sources, name, sample, "graphlib", "statistics", "html", "wave", timeout=300)
+    packaged = run(launcher, "-IB", "-c", use_sources, *source_args, timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
     words = run(
         launcher, "-IB", "-c",
