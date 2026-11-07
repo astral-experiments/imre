@@ -25,13 +25,6 @@ LOCALE_FORMAT = (
 )
 
 REJECTED = {
-    "struct_clearcache_preserves_typed_call": ({
-        "scores.py": "def take(value: int) -> int: return value\n",
-        "main.py": (
-            "from struct import _clearcache as clear\nfrom scores import take\n"
-            "def unused() -> int: return take('x')\nclear()\n"
-        ),
-    }, "expected int, got str"),
     "unused_reload_preserves_typed_call": ({
         "scores.py": "def take(value: int) -> int: return value\n",
         "main.py": (
@@ -482,6 +475,13 @@ REJECTED = {
     "chdir_keeps_subsequent_checks": ({
         "main.py": "import os\ndef path(n: int) -> int:\n    return n\nos.chdir('.')\npath('wrong')\n",
     }, "expected int, got str"),
+    "struct_clearcache_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from struct import _clearcache as clear\nfrom scores import take\n"
+            "def unused() -> int: return take('x')\nclear()\n"
+        ),
+    }, "expected int, got str"),
     "unused_struct_keeps_return_checks": ({
         "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
     }, "expected int, got str"),
@@ -743,21 +743,6 @@ REJECTED = {
 }
 
 ACCEPTED = {
-    "struct_clearcache_evaluates_rejected_arguments": {
-        "main.py": (
-            "from struct import _clearcache\n"
-            "def touch(n: int) -> int:\n    print(n)\n    return n\n"
-            "try:\n    _clearcache(touch(1), key=touch(2))\n"
-            "except TypeError as exc:\n    print(str(exc))\n"
-        ),
-    },
-    "struct_clearcache_with_typed_call": {
-        "scores.py": "def take(value: int) -> int: return value + 1\n",
-        "main.py": (
-            "import struct\nfrom struct import _clearcache as clear\nfrom scores import take\n"
-            "assert struct._clearcache() is None and clear() is None\nprint(take(6))\n"
-        ),
-    },
     "methodcaller_module_alias": {
         "main.py": "import operator as op\nprint(op.methodcaller('upper')('ok'))\n",
     },
@@ -1175,6 +1160,21 @@ ACCEPTED = {
             "stream = Stream()\ncache = WeakKeyDictionary()\n"
             "cache[stream] = 'cached'\n"
             "print(ref(stream)() is stream, cache.get(stream))\n"
+        ),
+    },
+    "struct_clearcache_evaluates_rejected_arguments": {
+        "main.py": (
+            "from struct import _clearcache\n"
+            "def touch(n: int) -> int:\n    print(n)\n    return n\n"
+            "try:\n    _clearcache(touch(1), key=touch(2))\n"
+            "except TypeError as exc:\n    print(str(exc))\n"
+        ),
+    },
+    "struct_clearcache_with_typed_call": {
+        "scores.py": "def take(value: int) -> int: return value + 1\n",
+        "main.py": (
+            "import struct\nfrom struct import _clearcache as clear\nfrom scores import take\n"
+            "assert struct._clearcache() is None and clear() is None\nprint(take(6))\n"
         ),
     },
     "imported_struct_timestamp": {
