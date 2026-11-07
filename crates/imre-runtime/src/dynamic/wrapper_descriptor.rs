@@ -58,8 +58,15 @@ impl BuiltinDescriptor {
                 method: !matches!(name, "__eq__" | "__ne__" | "__iter__"),
             });
         }
+        if let Some(owner) = typing::generic_alias_method_owner(symbol) {
+            return Some(Self {
+                owner,
+                name: "__class_getitem__",
+                method: true,
+            });
+        }
         if let Some((stdlib::functools::PARTIAL_CLASS, attr)) = symbol.rsplit_once('.')
-            && let Some(&name) = ["__class_getitem__", "__reduce__", "__setstate__"]
+            && let Some(&name) = ["__reduce__", "__setstate__"]
                 .iter()
                 .find(|&&name| name == attr)
         {
@@ -447,7 +454,7 @@ impl BuiltinDescriptor {
                 | ("int", "from_bytes")
                 | ("float", "fromhex")
                 | ("dict", "fromkeys")
-                | (stdlib::functools::PARTIAL_CLASS, "__class_getitem__")
+                | (_, "__class_getitem__")
                 | ("typing.Generic", "__init_subclass__")
         ) {
             "classmethod_descriptor"

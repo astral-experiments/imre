@@ -2750,6 +2750,18 @@ pub(super) fn call(
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);
     }
+    if let Some(class) = super::typing::generic_alias_method_owner(name) {
+        let Some((&owner, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                format!("descriptor '__class_getitem__' of '{class}' object needs an argument"),
+            ));
+        };
+        datetime::validate_classmethod_receiver(ctx, class, "__class_getitem__", owner)?;
+        let qualified = format!("{}.__class_getitem__", ctx.class_qualname(owner));
+        let index = builtins::one_positional_arg(&qualified, rest, kwargs)?;
+        return Ok(super::typing::builtin_alias(ctx, owner, index));
+    }
     if let Some(method) = name.strip_prefix("_contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
     }
@@ -2889,23 +2901,6 @@ pub(super) fn call(
             ));
         }
         return Ok(functools::placeholder(ctx));
-    }
-    if name == "functools.partial.__class_getitem__" {
-        let Some((&owner, rest)) = args.split_first() else {
-            return Err(Error::new(
-                "TypeError",
-                "descriptor '__class_getitem__' of 'functools.partial' object needs an argument",
-            ));
-        };
-        datetime::validate_classmethod_receiver(
-            ctx,
-            functools::PARTIAL_CLASS,
-            "__class_getitem__",
-            owner,
-        )?;
-        let qualified = format!("{}.__class_getitem__", ctx.class_qualname(owner));
-        let index = builtins::one_positional_arg(&qualified, rest, kwargs)?;
-        return Ok(super::typing::builtin_alias(ctx, owner, index));
     }
     if name == "functools.partial.__reduce__" {
         let receiver = builtins::noargs_method_receiver(

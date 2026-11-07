@@ -715,6 +715,18 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     allocate_alias(ctx, AliasKind::Builtin, origin, args, NONE, None, true)
 }
 
+/// Native class methods backed by CPython's Py_GenericAlias calling convention.
+pub(super) fn generic_alias_method_owner(symbol: &str) -> Option<&'static str> {
+    let owner = symbol.strip_suffix(".__class_getitem__")?;
+    [
+        super::stdlib::functools::PARTIAL_CLASS,
+        "_contextvars.ContextVar",
+        "_contextvars.Token",
+    ]
+    .into_iter()
+    .find(|&name| name == owner)
+}
+
 /// Return the underlying PEP 585 alias while preserving the subtype object for callbacks.
 pub(super) fn alias_payload(ctx: &Context, obj: Id) -> Option<Id> {
     let payload = ctx.scalar_value(obj);
@@ -910,7 +922,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             ))
         }));
     }
-    if matches!(ctx.heap.get(target), Value::Class { .. })
+    if matches!(ctx.heap.get(target), Value::Class { .. } | Value::Native(_))
         && ctx.class_attr(target, "__class_getitem__").is_some()
     {
         return Some(
@@ -932,7 +944,6 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     | "set"
                     | "frozenset"
                     | "mappingproxy"
-                    | super::stdlib::functools::PARTIAL_CLASS
                     | "type"
                     | super::value::REGEX_PATTERN_TYPE
                     | super::value::REGEX_MATCH_TYPE
@@ -3270,6 +3281,9 @@ impl Context {
                             | "typing.TypeVarTuple"
                             | "typing.TypeAliasType"
                             | "NoDefaultType"
+                            | "_contextvars.Context"
+                            | "_contextvars.ContextVar"
+                            | "_contextvars.Token"
                             | "datetime.timezone"
                             | super::stdlib::flags::TYPE
                             | "bool"

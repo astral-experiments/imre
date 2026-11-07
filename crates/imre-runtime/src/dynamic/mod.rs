@@ -2766,6 +2766,12 @@ impl Context {
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
+        if matches!(name, "_contextvars.ContextVar" | "_contextvars.Token") {
+            let key = self.heap.code_name("__class_getitem__");
+            let method = self.builtin(&format!("{name}.__class_getitem__"));
+            let dictionary = self.dict(vec![(key, method)]);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == stdlib::functools::PARTIAL_CLASS {
             let mut entries = Vec::new();
             for method in [
