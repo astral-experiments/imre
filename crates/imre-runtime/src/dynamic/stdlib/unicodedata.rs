@@ -68,6 +68,11 @@ pub(super) fn east_asian_width(ctx: &mut Context, args: &[Id], has_keywords: boo
     Ok(ctx.text(crate::objects::east_asian_width(point)))
 }
 
+pub(super) fn bidirectional(ctx: &mut Context, args: &[Id], has_keywords: bool) -> Result<Id> {
+    let point = character(ctx, "unicodedata", "bidirectional", args, has_keywords)?;
+    Ok(ctx.text(crate::objects::bidirectional(point)))
+}
+
 pub(super) fn category(ctx: &mut Context, args: &[Id], has_keywords: bool) -> Result<Id> {
     let point = character(ctx, "unicodedata", "category", args, has_keywords)?;
     Ok(ctx.text(crate::objects::general_category(point)))
@@ -90,9 +95,8 @@ pub(super) fn decomposition(ctx: &mut Context, args: &[Id], has_keywords: bool) 
     Ok(ctx.text(MAPPINGS.get(&point).copied().unwrap_or("")))
 }
 
-pub(in crate::dynamic) const CATEGORY_DOC: &str =
-    "Returns the general category assigned to the character chr as string.";
-pub(in crate::dynamic) const CATEGORY_SIGNATURE: &str = "($self, chr, /)";
+const CATEGORY_DOC: &str = "Returns the general category assigned to the character chr as string.";
+const CHARACTER_SIGNATURE: &str = "($self, chr, /)";
 pub(in crate::dynamic) const CLASS: &str = "unicodedata.UCD";
 
 /// Install the database type and its historical instance for this module generation.
@@ -149,7 +153,7 @@ pub(in crate::dynamic) fn method_metadata(name: &str, attribute: &str) -> Option
             _ => return None,
         }),
         "__text_signature__" => Some(match name {
-            "category" | "bidirectional" => CATEGORY_SIGNATURE,
+            "category" | "bidirectional" => CHARACTER_SIGNATURE,
             "normalize" | "is_normalized" => "($self, form, unistr, /)",
             _ => return None,
         }),

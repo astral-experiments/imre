@@ -58,7 +58,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "operator" if stdlib::operator::Operation::named(function).is_some() => {
             Some(("_operator", function))
         }
-        "unicodedata" if function == "category" => Some((module, function)),
+        "unicodedata" if matches!(function, "category" | "bidirectional") => {
+            Some((module, function))
+        }
         "time" if stdlib::time::is_function(function) => Some((module, function)),
         "sys"
             if matches!(
@@ -3046,11 +3048,12 @@ impl Context {
                         return Ok(stdlib::time::text_signature(function)
                             .map_or(NONE, |sig| self.text(sig)));
                     }
-                    "__text_signature__" if symbol == "unicodedata.category" => {
-                        return Ok(self.text(stdlib::unicodedata::CATEGORY_SIGNATURE));
-                    }
-                    "__doc__" if symbol == "unicodedata.category" => {
-                        return Ok(self.text(stdlib::unicodedata::CATEGORY_DOC));
+                    _ if module == "unicodedata"
+                        && matches!(function, "category" | "bidirectional")
+                        && let Some(metadata) =
+                            stdlib::unicodedata::method_metadata(function, name) =>
+                    {
+                        return Ok(self.text(metadata));
                     }
                     "__self__" if module == "sys" => {
                         if let Some(original) = self.threads.system_module {

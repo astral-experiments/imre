@@ -26,6 +26,10 @@ def current():
             print(str(error))
         else:
             raise AssertionError("non-character accepted")
+    bidi = unicodedata.bidirectional
+    for value, expected in ((Text("א"), "R"), ("\u2801", "L"), ("\udfff", "L"), ("\u0378", "")):
+        assert bidi(value) == expected
+    assert bidi.__self__ is unicodedata
     legacy = unicodedata.ucd_3_2_0
     assert type(legacy) is unicodedata.UCD
     assert legacy.unidata_version == "3.2.0"

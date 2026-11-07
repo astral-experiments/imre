@@ -2142,6 +2142,9 @@ impl IntrinsicModule {
             (Self::UnicodeData, "unidata_version") => {
                 Intrinsic::StringConstant(imre_ast::UNICODE_DATA_VERSION)
             }
+            (Self::UnicodeData, "bidirectional") => {
+                Intrinsic::UnicodeProperty(UnicodeProperty::Bidirectional)
+            }
             (Self::UnicodeData, "category") => {
                 Intrinsic::UnicodeProperty(UnicodeProperty::Category)
             }

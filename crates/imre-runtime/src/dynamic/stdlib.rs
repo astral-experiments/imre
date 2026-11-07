@@ -585,7 +585,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("unicodedata", "unidata_version") => ctx.text(imre_ast::UNICODE_DATA_VERSION),
         (
             "unicodedata",
-            "normalize" | "is_normalized" | "decomposition" | "east_asian_width" | "category",
+            "normalize" | "is_normalized" | "decomposition" | "east_asian_width" | "category"
+            | "bidirectional",
         ) => ctx.builtin(&format!("unicodedata.{name}")),
         ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
         (
@@ -1995,6 +1996,9 @@ pub(super) fn call(
     }
     if name == "unicodedata.east_asian_width" {
         return unicodedata::east_asian_width(ctx, args, !kwargs.is_empty());
+    }
+    if name == "unicodedata.bidirectional" {
+        return unicodedata::bidirectional(ctx, args, !kwargs.is_empty());
     }
     if name == "unicodedata.category" {
         return unicodedata::category(ctx, args, !kwargs.is_empty());

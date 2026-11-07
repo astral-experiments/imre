@@ -6327,8 +6327,8 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
-            Builtin::UnicodeCategoryOfOrdinal => self.call(
-                "imre_unicode_category_of_ordinal",
+            Builtin::UnicodePropertyOfOrdinal(property) => self.call(
+                &format!("imre_unicode_{}_of_ordinal", property.name()),
                 Type::Str,
                 &[&args[0].value],
             ),
@@ -11420,6 +11420,8 @@ declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
 declare ptr @imre_str_zfill(ptr, i64, i32)
 declare ptr @imre_unicode_east_asian_width(ptr)
+declare ptr @imre_unicode_bidirectional(ptr)
+declare ptr @imre_unicode_bidirectional_of_ordinal(i64)
 declare ptr @imre_unicode_category(ptr)
 declare ptr @imre_unicode_category_of_ordinal(i64)
 declare ptr @imre_unicode_normalize(ptr, ptr)

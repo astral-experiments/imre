@@ -183,6 +183,22 @@ pub(crate) fn general_category(point: u32) -> &'static str {
     names[usize::from(runs[end - 1].1)]
 }
 
+/// CPython leaves Bidi_Class empty for unassigned code points, including those
+/// for which ICU supplies a default direction or a post-Unicode-16 assignment.
+pub(crate) fn bidirectional(point: u32) -> &'static str {
+    use icu_properties::{
+        CodePointMapData,
+        props::{BidiClass, NamedEnumeratedProperty},
+    };
+    if general_category(point) == "Cn" {
+        ""
+    } else {
+        CodePointMapData::<BidiClass>::new()
+            .get32(point)
+            .short_name()
+    }
+}
+
 /// Argument Clinic's character converter counts Python code points, including surrogates.
 pub(crate) fn ucd_character(name: &str, mut points: impl Iterator<Item = u32>) -> Result<u32> {
     let first = points.next();
@@ -206,6 +222,14 @@ pub unsafe extern "C" fn imre_unicode_east_asian_width(text: *const Str) -> *con
 }
 
 /// # Safety
+/// The checked caller provides a rooted UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_bidirectional(text: *const Str) -> *const Str {
+    // SAFETY: the caller retains the string.
+    unicode_property(unsafe { &*text }, "bidirectional", bidirectional)
+}
+
+/// # Safety
 /// The caller retains the input string until the result is returned.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_unicode_category(text: *const Str) -> *const Str {
@@ -219,8 +243,21 @@ pub unsafe extern "C" fn imre_unicode_category(text: *const Str) -> *const Str {
 pub unsafe extern "C" fn imre_unicode_category_of_ordinal(value: usize) -> *const Str {
     // SAFETY: the generated caller retains the integer.
     let value = unsafe { Int::borrow(value) };
-    let result = chr_codepoint(&value)
-        .and_then(|point| try_owned_string(general_category(point)))
+    unicode_property_of_ordinal(&value, general_category)
+}
+
+/// # Safety
+/// The integer operand of the checked chr call is rooted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_bidirectional_of_ordinal(value: usize) -> *const Str {
+    // SAFETY: the generated caller retains the integer.
+    let value = unsafe { Int::borrow(value) };
+    unicode_property_of_ordinal(&value, bidirectional)
+}
+
+fn unicode_property_of_ordinal(value: &Int, property: fn(u32) -> &'static str) -> *const Str {
+    let result = chr_codepoint(value)
+        .and_then(|point| try_owned_string(property(point)))
         .map(StrOwner::into_raw);
     finish(result, std::ptr::null())
 }
