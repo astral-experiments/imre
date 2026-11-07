@@ -14,6 +14,17 @@ def current():
     tokens = list(tokenize.tokenize(BytesIO(source).readline))
     assert tokenize.untokenize(tokens) == source
 
+    # A leading explicit join uses eight columns for both indentation comparisons.
+    first = "if True:\n\t\\\n   pass\n"
+    records = list(tokenize.generate_tokens(StringIO(first + "        pass\n").readline))
+    assert [t.string for t in records if t.type == token.INDENT] == ["   "]
+    try:
+        list(tokenize.generate_tokens(StringIO(first + "\tpass\n").readline))
+    except TabError as error:
+        assert error.lineno == 4
+    else:
+        raise AssertionError("inconsistent indentation was accepted")
+
     text = "\ufeffvalue = 1\n"
     tokens = list(tokenize.generate_tokens(StringIO(text).readline))
     assert (tokens[0].type, tokens[0].string, tokens[0].end) == (token.NAME, "\ufeffvalue", (1, 6))

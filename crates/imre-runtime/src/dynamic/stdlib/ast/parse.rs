@@ -1167,6 +1167,10 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let decoded;
     let source = if ctx.string_storage(source).is_some() {
         text = copy(ctx.str_value(source)?)?;
+        if text.contains('\0') {
+            let file = filename_id.unwrap_or_else(|| ctx.text("<unknown>"));
+            return Err(ctx.source_decode_error(crate::objects::SourceDecodeError::Null, file));
+        }
         text.as_str()
     } else {
         let bytes = ctx.native_buffer_bytes(source).map_err(|_| {
@@ -1228,13 +1232,21 @@ fn parse_source(
     let syntax = |err| Error::new("SyntaxError", format!("{filename}: {err}"));
     match mode {
         "exec" => {
+            let input = imre_ast::indentation::prepare(source);
             let body =
-                ruff_python_parser::parse_unchecked_source(source, ast::PySourceType::Python);
+                ruff_python_parser::parse_unchecked_source(&input.text, ast::PySourceType::Python);
             if let Some(limit) =
-                crate::dynamic::source_code::IndentationLimit::find(&body, source, true, None)
+                crate::dynamic::source_code::IndentationDiagnostic::find(&body, source, true, None)
             {
                 let file = parser.ctx.text(filename);
                 return limit.raise(parser.ctx, file);
+            }
+            if let Some(error) = input.first_issue(body.errors().first()) {
+                let issue = crate::dynamic::source_code::IndentationDiagnostic::from_issue(
+                    source, error, true,
+                );
+                let file = parser.ctx.text(filename);
+                return issue.raise(parser.ctx, file);
             }
             if let Some(error) = body.errors().first() {
                 return Err(syntax(error.clone()));

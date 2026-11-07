@@ -4870,7 +4870,7 @@ impl<'a> Loader<'a> {
                 let spaces = " ".repeat(range.len());
                 source.replace_range(range, &spaces);
             }
-            module.parsed = self.session.replace_source(id, source);
+            module.parsed = self.session.replace_source(id, source)?;
         }
         self.loading.remove(&id);
         self.initialization

@@ -810,12 +810,7 @@ impl Function<'_, '_> {
                 let first = stmts[0].start();
                 let start = first.to_usize();
                 let end = stmts.last().unwrap().end().to_usize();
-                let prefix = self.source.text[..start].rsplit('\n').next().unwrap();
-                let indent = if prefix.chars().all(char::is_whitespace) {
-                    prefix
-                } else {
-                    " "
-                };
+                let indent = imre_ast::indentation::generator_prefix(&self.source.text[..start]);
                 // Slice the suite as written so indentation inside multiline strings survives.
                 let header = if *flag == code_flags::GENERATOR {
                     "def"

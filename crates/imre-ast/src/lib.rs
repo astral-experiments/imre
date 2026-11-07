@@ -9,6 +9,7 @@ pub const UNICODE_DATA_VERSION: &str = "16.0.0";
 #[cfg(target_os = "linux")]
 pub mod epoll;
 pub mod exceptions;
+pub mod indentation;
 pub mod layout;
 pub mod lzma;
 pub mod providers;
