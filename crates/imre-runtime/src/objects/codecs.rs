@@ -104,7 +104,7 @@ fn matches_alias(key: &str, aliases: &[&str]) -> bool {
         || (key.contains('.') && aliases.contains(&key.replace('.', "_").as_str()))
 }
 
-/// An owned entry in the native registry, shared by typed and boxed callers.
+/// An owned entry in the native codec registry for checked callers.
 #[derive(Clone)]
 pub(crate) struct CodecInfo(ObjectOwner);
 

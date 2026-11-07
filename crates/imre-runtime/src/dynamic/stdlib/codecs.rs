@@ -10,11 +10,13 @@ pub(in crate::dynamic) use wide_unicode::WideFunction;
 pub(super) use wide_unicode::decode_chunk as decode_wide_chunk;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder};
+use crate::objects::{Codec, DecodeIssue, FixedUnicode, StrEncoder};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
-    entries: HashMap<*const Object, (CodecInfo, Id)>,
+    // The boxed provider preserves an entry for each normalized spelling across
+    // registry cache invalidations. Its object belongs to this interpreter.
+    entries: HashMap<String, Id>,
     initialized: bool,
     search_path: Vec<Id>,
     // None denotes an existing stateless native transform with no boxed CodecInfo.
@@ -28,7 +30,6 @@ impl Registry {
     pub(in crate::dynamic) fn roots(&self) -> impl Iterator<Item = &Id> {
         self.entries
             .values()
-            .map(|(_, entry)| entry)
             .chain(
                 self.functions
                     .values()
@@ -386,8 +387,12 @@ pub(super) fn native_search(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
         let module = format!("encodings.{}", format.codec_name(true).replace('-', "_"));
         return module_entry(ctx, arg, &module);
     }
-    match CodecInfo::lookup(&key).map_err(Error::from) {
-        Ok(entry) => box_native_entry(ctx, entry, arg),
+    let normalized = crate::objects::normalize_codec(&key)?;
+    if let Some(&entry) = ctx.codec_entries.entries.get(&normalized) {
+        return Ok(entry);
+    }
+    match Codec::by_key(&normalized, &key).map_err(Error::from) {
+        Ok(codec) => box_native_entry(ctx, normalized, codec, arg),
         Err(error) if error.kind == "LookupError" => Ok(NONE),
         Err(error) => Err(error),
     }
@@ -541,12 +546,7 @@ fn module_entry(ctx: &mut Context, spelling: Id, module: &str) -> Result<Id> {
     ctx.call(entry, vec![spelling, provider], Vec::new())
 }
 
-fn box_native_entry(ctx: &mut Context, entry: CodecInfo, spelling: Id) -> Result<Id> {
-    let key = entry.as_ptr();
-    if let Some((_, id)) = ctx.codec_entries.entries.get(&key) {
-        return Ok(*id);
-    }
-    let codec = entry.codec();
+fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) -> Result<Id> {
     let suffix = match codec {
         Codec::Ascii => "ascii",
         Codec::Latin1 => "latin_1",
@@ -620,7 +620,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo, spelling: Id) -> Result
         .entries
         .try_reserve(1)
         .map_err(|_| crate::Error::allocation())?;
-    ctx.codec_entries.entries.insert(key, (entry, id));
+    ctx.codec_entries.entries.insert(key, id);
     Ok(id)
 }
 
