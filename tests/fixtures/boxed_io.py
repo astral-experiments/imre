@@ -292,6 +292,14 @@ def exercise(path):
     with open(buffered_path, "rb") as reader:
         assert reader.read() == b"abcde"
 
+    for filename in (buffered_path, buffered_path.encode()):
+        for mode in ("rb", "br"):
+            with io.open(filename, mode, buffering=2) as reader:
+                assert isinstance(reader, io.BufferedReader)
+                assert reader.raw.name == filename
+                assert reader.read(1) == b"a" and reader.raw.tell() == 2
+                assert reader.read(2) == b"bc" and reader.raw.tell() == 4
+
     target_path = path + ".output"
     with open(target_path, "wb") as output:
         assert output.name is target_path and output.mode == "wb"
