@@ -4109,6 +4109,30 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Look up a factorial when the operand and result are both proven tagged integers.
+    fn bounded_factorial(&mut self, expression: &Expr, value: &Value) -> Option<Value> {
+        let n = self.ranges.integer(expression)?;
+        if n.min < 0 || n.max > 20 {
+            return None;
+        }
+        if n.min == n.max {
+            return Some(small((2..=n.min).product()));
+        }
+        self.output.local_helper(
+            "imre_small_factorials",
+            include_str!("llvm/small_factorials.ll"),
+        );
+        let index = self.instruction(format!("lshr i64 {}, 1", value.operand));
+        let slot = self.instruction(format!(
+            "getelementptr inbounds [21 x i64], ptr @imre_small_factorials, i64 0, i64 {index}"
+        ));
+        Some(Value {
+            ty: Type::Int,
+            operand: self.instruction(format!("load i64, ptr {slot}, align 8")),
+            small_integer: true,
+        })
+    }
+
     /// Lower a fixed-order binomial when range analysis proves its numerator fits one word.
     fn bounded_comb(&mut self, expressions: &[Expr], args: &[Operand]) -> Option<Value> {
         let n = self.ranges.integer(&expressions[0])?;
@@ -7719,9 +7743,9 @@ impl Emitter<'_, '_> {
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
             Builtin::IntHash => self.call("imre_int_hash", Type::Int, &[&args[0].value]),
-            Builtin::MathFactorial => {
-                self.call("imre_math_factorial", Type::Int, &[&args[0].value])
-            }
+            Builtin::MathFactorial => self
+                .bounded_factorial(&expressions[0], &args[0].value)
+                .unwrap_or_else(|| self.call("imre_math_factorial", Type::Int, &[&args[0].value])),
             Builtin::MathComb => self.bounded_comb(expressions, &args).unwrap_or_else(|| {
                 self.call(
                     "imre_math_comb",
@@ -12122,6 +12146,24 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn factorials_use_a_word_table_only_for_proven_inputs() {
+        let body = |arg| {
+            function_body(&format!(
+                "from math import factorial\ndef score(n: int) -> int:\n    return factorial({arg})\n"
+            ))
+        };
+        let bounded = body("n & 15");
+        assert!(bounded.contains("@imre_small_factorials"), "{bounded}");
+        assert!(!bounded.contains("@imre_math_factorial("), "{bounded}");
+        let constant = body("6");
+        assert!(constant.contains("i64 1441"), "{constant}");
+        for arg in ["n", "n & 31", "-1"] {
+            let wide = body(arg);
+            assert!(wide.contains("@imre_math_factorial("), "{wide}");
+        }
     }
 
     #[test]
