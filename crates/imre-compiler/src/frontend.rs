@@ -9770,7 +9770,11 @@ impl<'a> Checker<'a> {
                 return self.collect_set(cursor, input);
             }
             let key = key
-                .or_else(|| self.types.mapping(source.ty).map(|(key, _)| key))
+                .or_else(|| {
+                    let (key, _) = self.types.mapping(source.ty)?;
+                    self.graph.has_object_constructor_fallback.set(true);
+                    Some(key)
+                })
                 .ok_or_else(|| self.object_builtin_error("set", call))?;
             return Ok(Expr {
                 ty: self.types.set(key),
@@ -12346,7 +12350,7 @@ impl<'a> Checker<'a> {
                 }
                 // The scalar-default caller cache cannot replay object-provider eligibility.
                 self.default_reads = None;
-                self.graph.has_native_bytearray.set(true);
+                self.graph.has_object_constructor_fallback.set(true);
                 (Builtin::ByteArrayNew, Type::ByteArray)
             }
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
