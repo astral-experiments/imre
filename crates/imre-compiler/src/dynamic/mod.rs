@@ -1539,15 +1539,7 @@ fn bundled_module_source(
     } else {
         import_module::boxed_source(name)?
     };
-    let source = if name == "pkgutil" {
-        std::borrow::Cow::Owned(format!(
-            "{source}\n_module_suffixes = {}\n",
-            crate::modules::pkgutil_suffixes()
-        ))
-    } else {
-        std::borrow::Cow::Borrowed(source)
-    };
-    Some((file, source))
+    Some((file, source.into()))
 }
 
 fn imports_for_module(path: &Path, src: &str) -> Result<Imports, String> {

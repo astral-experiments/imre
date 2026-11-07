@@ -535,27 +535,6 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
     }
 }
 
-/// Spell filesystem import suffixes in longest-first order for both pkgutil frontends.
-pub(crate) fn pkgutil_suffixes() -> String {
-    let version = crate::PYTHON_VERSION;
-    let abi = if cfg!(target_os = "macos") {
-        "darwin".to_owned()
-    } else {
-        let libc = if cfg!(target_env = "musl") {
-            "musl"
-        } else {
-            "gnu"
-        };
-        format!("{}-linux-{libc}", std::env::consts::ARCH)
-    };
-    let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
-    let [versioned, legacy] = imre_ast::NATIVE_ARCHIVE_EXTENSIONS.map(|ext| format!(".{ext}"));
-    serde_json::to_string(&[
-        &tagged, ".abi3.so", &versioned, &legacy, ".so", ".py", ".pyc",
-    ])
-    .unwrap()
-}
-
 // CPython's built-in/frozen lookup precedes first-party files. These internal and
 // frozen test modules have no corresponding stubs in the pinned typeshed inventory.
 const INTRINSIC_MODULES: &[&str] = &[
@@ -5813,7 +5792,7 @@ impl<'a> Loader<'a> {
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;
-                let suffixes = pkgutil_suffixes();
+                let suffixes = serde_json::to_string(&imre_ast::module_suffixes()).unwrap();
                 let discovery = include_str!("../stdlib/pkgutil/iter_modules.py");
                 pkgutil_source = format!(
                     "{source}\n{discovery}\n_search_path: list[str] = {paths}\n_module_suffixes: list[str] = {suffixes}\n"

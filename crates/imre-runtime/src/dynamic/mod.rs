@@ -4047,6 +4047,12 @@ impl Context {
                 self.bind(scope, "_finder_external", finder);
             }
             "_imre_importlib" => {
+                let suffixes = imre_ast::module_suffixes()
+                    .into_iter()
+                    .map(|suffix| self.heap.owned_text(suffix.into()))
+                    .collect();
+                let suffixes = self.alloc(Value::Tuple(suffixes));
+                self.bind(scope, "module_suffixes", suffixes);
                 // Both bootstrap modules import the index used to build the installed archive.
                 let members = self.config["stdlib_members"]
                     .as_str()
