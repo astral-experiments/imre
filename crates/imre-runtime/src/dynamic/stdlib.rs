@@ -590,6 +590,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "native_spec_info"
             | "native_source"
             | "native_code"
+            | "frozen_info"
+            | "frozen_code"
             | "is_builtin_module"
             | "create_builtin_module"
             | "exec_builtin_module"
@@ -2480,6 +2482,14 @@ pub(super) fn call(
             ("registered_path", [path], []) => return ctx.registered_path(*path),
             ("registered_path_spec", [name, path], []) => {
                 return ctx.registered_path_spec(*name, *path);
+            }
+            ("frozen_info" | "frozen_code", [name], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return if method == "frozen_info" {
+                    Ok(ctx.frozen_info(&name))
+                } else {
+                    ctx.frozen_code(&name)
+                };
             }
             ("is_builtin_module", [name], []) => {
                 return Ok(builtins::boolean(

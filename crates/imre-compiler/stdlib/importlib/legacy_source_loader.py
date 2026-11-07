@@ -5,6 +5,8 @@ from _thread import RLock
 from _imre_importlib import (
     _import_lock,
     is_builtin_module as _is_builtin_module,
+    frozen_info as _frozen_info,
+    frozen_code as _frozen_code,
     create_builtin_module as _create_builtin_module,
     exec_builtin_module as _exec_builtin_module,
     create_native_module as _create_native_module,
@@ -67,7 +69,7 @@ def _warning_module():
 
 
 _is_frozen = __name__ == "_frozen_importlib"
-if not _is_frozen:
+if not _is_frozen or "_bootstrap_external" not in globals():
     _bootstrap_external = None
 
 
@@ -132,7 +134,11 @@ class BuiltinImporter:
         return _load_module_shim(cls, fullname)
 
 
-def _init_builtin_specs(sys_functions):
+def _frozen_package(name):
+    return _frozen_info(name)[1]
+
+
+def _init_startup_specs(sys_functions):
     # Recreating single-phase modules restores their initial exports. Interpreter
     # configuration and streams belong to the running interpreter's sys object.
     global _core_exports
@@ -143,6 +149,8 @@ def _init_builtin_specs(sys_functions):
                       __package__=None, __loader__=None, __spec__=None)
     for name, module in tuple(sys.modules.items()):
         spec = BuiltinImporter.find_spec(name)
+        if spec is None:
+            spec = FrozenImporter.find_spec(name)
         if spec is not None:
             _init_module_attrs(spec, module)
 

@@ -1634,6 +1634,9 @@ impl IntrinsicModule {
             }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibMachinery, "FrozenImporter") => {
+                Intrinsic::ScopedObjectExport("importlib.machinery.FrozenImporter")
+            }
             (Self::ImportlibMachinery, "BuiltinImporter") => {
                 Intrinsic::ScopedObjectExport("importlib.machinery.BuiltinImporter")
             }

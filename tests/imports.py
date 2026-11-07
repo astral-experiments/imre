@@ -91,6 +91,15 @@ REJECTED = {
     "unused_strptime_preserves_typed_call": ({
         "main.py": "from time import strptime\n" + HELPER + "f('wrong')\n",
     }, "expected int, got str"),
+    "frozen_importer_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from importlib.machinery import FrozenImporter\n"
+            "from scores import take\n"
+            "if False: FrozenImporter.find_spec('stat')\n"
+            "print(take('x'))\n"
+        ),
+    }, "invalid-argument-type"),
     "builtin_importer_preserves_typed_call": ({
         "scores.py": "def take(value: int) -> int: return value\n",
         "main.py": (
@@ -1534,6 +1543,10 @@ ACCEPTED = {
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
     },
+    "frozen_importer": {
+        "main.py": (FIXTURES.parent / "frozen_importer.py").read_text(),
+        "frozen_price_plugin.py": "def quote(n): return n * 7\n",
+    },
     "builtin_importer": {
         "main.py": (FIXTURES.parent / "builtin_importer.py").read_text(),
         "price_plugin.py": "executions = globals().get('executions', 0) + 1\ndef quote(n): return n * 7\n",
@@ -1861,7 +1874,7 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
-                    "boxed_unittest_lazy_import", "builtin_importer", "bundled_source_loader_data",
+                    "boxed_unittest_lazy_import", "builtin_importer", "bundled_source_loader_data", "frozen_importer",
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
