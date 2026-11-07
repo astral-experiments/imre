@@ -114,6 +114,11 @@ python scripts/pack_extension_wheel.py build/stage --name retainer --version 1.0
 
 For a package module such as `checksums._native`, put `_native.pyi` and `_native.imre.a` in `checksums/` alongside a supported `__init__.py`. The archive exports `PyInit__native`. An optional `_native.imre.libs` file lists one system link library per line, such as `stdc++` on Linux. Native modules in one executable must have distinct initialization symbols.
 
+A build using `sysconfig.get_config_var("EXT_SUFFIX")` names the same archive
+`_native.imre1.a`, with a matching `_native.imre1.libs` for system libraries.
+Imre searches this ABI-tagged name first. Both filenames use the same
+`_native.pyi` and wheel tag.
+
 ## Install and use it
 
 The wheel tag is `imre314-imre1-<platform>`. Its interpreter tag identifies Imre’s Python 3.14 language target, so pip can enforce the package's original `Requires-Python`. The ABI tag identifies Imre's first native extension interface. With the wheel above, these commands install it in an isolated directory and run an application that imports it.

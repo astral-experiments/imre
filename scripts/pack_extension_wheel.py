@@ -25,13 +25,17 @@ def main() -> None:
     if args.output.resolve().is_relative_to(args.stage.resolve()):
         parser.error("the output directory must be outside the staged package")
     target = json.loads(subprocess.check_output([args.imre, "build-target"]))
-    suffix = target["archive_suffix"]
-    archives = list(args.stage.rglob(f"*{suffix}"))
+    suffixes = target.get("archive_suffixes", [target["archive_suffix"]])
+    files = {path for path in args.stage.rglob("*") if path.is_file()}
+    sorted_files = sorted(files)
+    archives = [
+        (path, suffix) for suffix in suffixes for path in sorted_files if path.name.endswith(suffix)
+    ]
     if not archives:
-        parser.error(f"the package contains no {suffix} archive")
-    for archive in archives:
+        parser.error(f"the package contains no {target['archive_suffix']} archive")
+    for archive, suffix in archives:
         stub = archive.with_name(archive.name.removesuffix(suffix) + ".pyi")
-        if not stub.is_file():
+        if stub not in files:
             parser.error(f"missing native declarations at {stub}")
 
     dist = name.replace("-", "_")
@@ -41,9 +45,8 @@ def main() -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     output = args.output / f"{dist}-{args.version}-{tag}.whl"
     with WheelFile(str(output), "w") as wheel:
-        for path in sorted(args.stage.rglob("*")):
-            if path.is_file():
-                wheel.write(path, path.relative_to(args.stage).as_posix())
+        for path in sorted_files:
+            wheel.write(path, path.relative_to(args.stage).as_posix())
         wheel.writestr(
             f"{info}/METADATA",
             f"Metadata-Version: 2.1\nName: {name}\nVersion: {args.version}\n",

@@ -52,7 +52,7 @@ pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = version::LANGUAGE;
 pub const IMPLEMENTATION_NAME: &str = "imre";
 
 /// File extension of installed native archives linked into an application.
-pub const NATIVE_ARCHIVE_EXTENSION: &str = "imre.a";
+pub const NATIVE_ARCHIVE_EXTENSION: &str = imre_ast::NATIVE_ARCHIVE_EXTENSIONS[1];
 
 /// Startup choices made before a native Python command executes.
 #[derive(Clone, serde::Serialize)]
