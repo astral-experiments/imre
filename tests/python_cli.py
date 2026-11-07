@@ -4047,6 +4047,7 @@ for name in ("md4", "ripemd160"):
             "boxed_binary_iterators.py",
             "boxed_array.py",
             "boxed_bytearray_memoryview.py",
+            "boxed_bytearray_pop.py",
             "boxed_fileio_buffer_export.py",
             "boxed_bytes_io.py",
             "boxed_io_newline_decoder.py",
