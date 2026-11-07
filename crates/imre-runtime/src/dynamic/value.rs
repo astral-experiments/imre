@@ -11,6 +11,7 @@ use std::sync::{Arc, Weak};
 use super::Context;
 
 pub(super) type Id = u64;
+type MemberValues = hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 
 /// Immutable executable and argument layout shared by functions from one Python definition.
@@ -1411,8 +1412,7 @@ pub(super) enum Value {
         class: Id,
         fields: Box<indexmap::IndexMap<String, Id>>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values:
-            Option<Box<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>>,
+        member_values: Option<Box<MemberValues>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -1962,6 +1962,33 @@ impl Value {
         )
     }
 
+    /// Strong reference to the wrapped coroutine or to its suspended execution state.
+    fn suspended_owner(&self) -> Option<Id> {
+        match self {
+            Self::CoroutineWrapper(coroutine) => Some(*coroutine),
+            Self::Coroutine { frame, .. } => Some(*frame),
+            Self::Generator { scope, .. } => Some(*scope),
+            _ => None,
+        }
+    }
+
+    /// Each stored slot keeps both the declaring member and its value alive.
+    /// Let a bounded search decline the table before constructing its iterator.
+    fn stored_member_edges(
+        &self,
+        accept: impl FnOnce(&MemberValues) -> bool,
+    ) -> impl Iterator<Item = [Id; 2]> + '_ {
+        let values = match self {
+            Self::Instance { member_values, .. } => member_values.as_deref(),
+            _ => None,
+        };
+        values
+            .filter(|values| accept(values))
+            .into_iter()
+            .flatten()
+            .map(|(&member, &value)| [member, value])
+    }
+
     fn children(&self, visit: &mut impl VisitReferences) {
         self.try_children(visit)
             .expect("borrowed native state during collection");
@@ -2197,8 +2224,11 @@ impl Value {
                 visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
-            Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
-            Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
+            Self::Coroutine { origin, .. } => {
+                visit.extend(self.suspended_owner());
+                visit.push(*origin);
+            }
+            Self::CoroutineWrapper(_) => visit.extend(self.suspended_owner()),
             Self::AsyncGenerator {
                 frame, finalizer, ..
             } => {
@@ -2250,12 +2280,13 @@ impl Value {
                 name,
                 qualname,
                 code,
-                scope,
                 iterators,
                 protected,
                 ..
             } => {
-                visit.extend([*code, *scope, *name, *qualname, owner.root()]);
+                visit.push(*code);
+                visit.extend(self.suspended_owner());
+                visit.extend([*name, *qualname, owner.root()]);
                 visit.extend(*frame);
                 visit.extend(iterators);
                 visit.extend(
@@ -2336,7 +2367,7 @@ impl Value {
             Self::Instance {
                 class,
                 fields,
-                member_values,
+                member_values: _,
                 namespace,
                 dictionary,
                 scalar,
@@ -2386,10 +2417,8 @@ impl Value {
                 }
                 visit.push(*class);
                 visit.extend(dictionary);
-                if let Some(values) = member_values {
-                    for (&member, &value) in values.iter() {
-                        visit.extend([member, value]);
-                    }
+                for edges in self.stored_member_edges(|_| true) {
+                    visit.extend(edges);
                 }
                 visit.extend(fields.values());
                 visit.extend(namespace);

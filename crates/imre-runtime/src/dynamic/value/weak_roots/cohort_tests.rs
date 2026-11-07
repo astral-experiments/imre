@@ -354,11 +354,53 @@ fn late_dictionary_values_keep_the_full_ordinary_search_budget() {
     assert!(ctx.heap.cached_weak_roots([registry, NONE]));
 }
 
+fn assert_traced_edges(heap: &super::Heap, paths: &super::RootPaths) {
+    for &(parent, _, child) in &paths.edges {
+        let mut visit = super::super::FindReferences {
+            targets: [child; 2],
+            found: false,
+        };
+        heap.get(parent).try_children(&mut visit).unwrap();
+        assert!(visit.found, "untraced edge {parent} -> {child}");
+    }
+}
+
+#[test]
+fn a_slotted_owner_is_kept_only_while_the_member_holds_it() {
+    use super::RootPaths;
+
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let class = ctx.builtin("object");
+    let holder = ctx.instance(class, None);
+    let owner = ctx.instance(class, None);
+    let name = ctx.text("resource");
+    let member = ctx.alloc(Value::SlotMember {
+        owner: class,
+        name,
+        storage: super::super::SlotStorage::Instance,
+    });
+    ctx.write_slot_member(member, holder, Some(owner)).unwrap();
+    let roots = [holder, NONE];
+    let paths = RootPaths::discover(&ctx.heap, roots, [owner].into_iter(), false, false).unwrap();
+    assert!(paths.covers_endpoints);
+    assert!(paths.valid(&ctx.heap, roots));
+    assert_traced_edges(&ctx.heap, &paths);
+
+    ctx.write_slot_member(member, holder, Some(NONE)).unwrap();
+    assert!(!paths.valid(&ctx.heap, roots));
+    ctx.write_slot_member(member, holder, Some(owner)).unwrap();
+    assert!(paths.valid(&ctx.heap, roots));
+    ctx.write_slot_member(member, holder, None).unwrap();
+    assert!(!paths.valid(&ctx.heap, roots));
+}
+
 #[test]
 fn iterator_paths_recheck_the_suspended_operands() {
-    use super::{Heap, RootPaths};
+    use super::RootPaths;
 
-    let mut heap = Heap::new();
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let scope = ctx.scope("suspended", None);
+    let heap = &mut ctx.heap;
     let target = heap.alloc(Value::List(Vec::new()));
     let cursor = heap.alloc(Value::LoopIterator {
         source: NONE,
@@ -371,15 +413,20 @@ fn iterator_paths_recheck_the_suspended_operands() {
         qualname: NONE,
         lineno: 0,
         code: NONE,
-        scope: NONE,
+        scope,
         iterators: vec![cursor],
         protected: Vec::new(),
         offset: Some(0),
         running: false,
     });
+    let coroutine = heap.alloc(Value::Coroutine {
+        frame: generator,
+        origin: NONE,
+    });
+    let wrapper = heap.alloc(Value::CoroutineWrapper(coroutine));
     let mapped = heap.alloc(Value::Map {
         function: NONE,
-        inputs: [generator].into(),
+        inputs: [wrapper].into(),
         strict: false,
     });
     let zipped = heap.alloc(Value::Zip {
@@ -387,26 +434,39 @@ fn iterator_paths_recheck_the_suspended_operands() {
         strict: false,
     });
     let globals = [zipped, NONE];
-    let paths = RootPaths::discover(&heap, globals, [target].into_iter(), false, false).unwrap();
-    assert!(paths.nodes.contains(&target));
-    assert!(paths.valid(&heap, globals));
+    let paths =
+        RootPaths::discover(heap, globals, [target, scope].into_iter(), false, false).unwrap();
+    assert!(paths.covers_endpoints);
+    assert!(paths.valid(heap, globals));
+    assert_traced_edges(heap, &paths);
 
     let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
         unreachable!()
     };
     *peeked = None;
-    assert!(!paths.valid(&heap, globals));
+    assert!(!paths.valid(heap, globals));
     let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
         unreachable!()
     };
     *peeked = Some(target);
-    assert!(paths.valid(&heap, globals));
+    assert!(paths.valid(heap, globals));
+
+    let Value::Generator { scope: current, .. } = heap.get_mut(generator) else {
+        unreachable!()
+    };
+    *current = NONE;
+    assert!(!paths.valid(heap, globals));
+    let Value::Generator { scope: current, .. } = heap.get_mut(generator) else {
+        unreachable!()
+    };
+    *current = scope;
+    assert!(paths.valid(heap, globals));
 
     let Value::Generator { iterators, .. } = heap.get_mut(generator) else {
         unreachable!()
     };
     iterators.clear();
-    assert!(!paths.valid(&heap, globals));
+    assert!(!paths.valid(heap, globals));
 }
 
 #[test]
