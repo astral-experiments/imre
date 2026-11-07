@@ -41,7 +41,7 @@ pub(super) fn compile(
     } else {
         ByteFold::None
     };
-    let Ok((mut source, groups)) = imre_regex::backtracking_source(
+    let Ok(pattern) = imre_regex::backtracking_pattern(
         pattern,
         flags & VERBOSE != 0,
         alphabet(bytes, ascii, flags),
@@ -49,6 +49,8 @@ pub(super) fn compile(
     ) else {
         return Err(original);
     };
+    let mut source = pattern.source;
+    let groups = pattern.groups;
     // The Python tokenizer emits \k<N> only for a real reference. Literal
     // backslashes are hex-escaped, including within assertions or classes.
     if locale_case && !source.contains(r"\k<") {
@@ -96,7 +98,7 @@ pub(super) fn compile(
     } else {
         BytesMode::Unicode
     };
-    let matcher = Lookahead::new(&source, groups, mode, fold)?;
+    let matcher = Lookahead::new(&source, groups, mode, fold, pattern.minimum_width > 0)?;
     Ok((source, Matcher::Lookahead(Box::new(matcher))))
 }
 
@@ -155,6 +157,7 @@ impl ByteFold {
 }
 
 pub(super) struct Lookahead {
+    pub(super) requires_input: bool,
     search: Regex,
     mode: BytesMode,
     fold: ByteFold,
@@ -169,6 +172,7 @@ impl Lookahead {
         groups: GroupInfo,
         mode: BytesMode,
         fold: ByteFold,
+        requires_input: bool,
     ) -> Result<Self, String> {
         let search = RegexBuilder::new(source)
             .bytes_mode(mode)
@@ -178,6 +182,7 @@ impl Lookahead {
             return Err("backtracking would change the Python capture groups".into());
         }
         Ok(Self {
+            requires_input,
             search,
             mode,
             fold,
@@ -188,7 +193,13 @@ impl Lookahead {
     }
 
     pub(super) fn with_source(&self, source: &str) -> Result<Self, String> {
-        Self::new(source, self.groups.clone(), self.mode, self.fold)
+        Self::new(
+            source,
+            self.groups.clone(),
+            self.mode,
+            self.fold,
+            self.requires_input,
+        )
     }
 
     pub(super) fn total_close_order(&self) -> bool {

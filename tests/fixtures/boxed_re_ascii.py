@@ -279,6 +279,12 @@ def current():
         assert doubled.fullmatch(other + other).group(1) == other
         assert doubled.fullmatch(letter + other) is None
 
+    for spelling in (r"(a)\1", r"(?P<x>ab)(?P=x)", rb"(is)\1"):
+        pattern = re.compile(spelling, re.I)
+        text = b"isis" if isinstance(spelling, bytes) else "abab"
+        assert pattern.match(text, 2, 1) is None
+        assert pattern.scanner(text, 2, 1).match() is None
+
     for spelling, message, position in (
         ("é(?P<?foo>x)", "bad character in group name '?foo'", 5),
         ("(?P=<foo>)", "bad character in group name '<foo>'", 4),
