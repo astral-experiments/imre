@@ -4353,6 +4353,7 @@ for name in ("md4", "ripemd160"):
             "boxed_set_difference.py",
             "boxed_set_intersection.py",
             "boxed_starred_call_order.py",
+            "boxed_fixed_keyword_calls.py",
             "boxed_tuple_membership.py",
             "boxed_set_intersection_lifetime.py",
             "boxed_partition_field.py",

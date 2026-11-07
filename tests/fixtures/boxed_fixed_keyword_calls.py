@@ -1,4 +1,7 @@
-events = []
+import sys
+
+
+events = list(sys.argv[1:])
 
 
 def record(label, value):
@@ -18,15 +21,14 @@ def pack(**kwargs):
     return tuple(kwargs.items())
 
 
-print(selected()(record("a", 1), café=record("café", 2), b=record("b", 3)))
-print(events)
-print(pack(outer=pack(inner=1), café=target(2, b=3, café=4)))
-
-
 class Receiver:
     def method(self, positional, *, label):
         return positional, label
 
+
+print(selected()(record("a", 1), café=record("café", 2), b=record("b", 3)))
+print(events)
+print(pack(outer=pack(inner=1), café=target(2, b=3, café=4)))
 
 print(Receiver().method(5, label=pack(a=6, b=7)))
 try:
