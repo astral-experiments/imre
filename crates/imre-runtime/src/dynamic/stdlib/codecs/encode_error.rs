@@ -12,11 +12,12 @@ pub(super) enum Handler {
 pub(super) fn registered(ctx: &Context, codec: Codec, name: &str) -> Option<Handler> {
     let callback = *ctx.codec_entries.handlers.get(name)?;
     // The C encoders implement these named policies inline, bypassing the registry.
-    if matches!(name, "replace" | "ignore")
-        || name == "xmlcharrefreplace" && !matches!(codec, Codec::ShiftJis)
-        || name == "strict" && !matches!(codec, Codec::Utf8 { .. })
-        || name == "backslashreplace" && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis)
-        || name == "surrogatepass" && matches!(codec, Codec::Utf8 { .. })
+    if !matches!(codec, Codec::Wide(_))
+        && (matches!(name, "replace" | "ignore")
+            || name == "xmlcharrefreplace" && !matches!(codec, Codec::ShiftJis)
+            || name == "strict" && !matches!(codec, Codec::Utf8 { .. })
+            || name == "backslashreplace" && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis)
+            || name == "surrogatepass" && matches!(codec, Codec::Utf8 { .. }))
     {
         return None;
     }
@@ -52,6 +53,12 @@ fn point(codec: Codec, code: u32, output: Option<&mut Vec<u8>>) -> Result<bool> 
     let Some(ch) = char::from_u32(code) else {
         return Ok(false);
     };
+    if let Codec::Wide(format) = codec {
+        if let Some(out) = output {
+            format.append(out, [code])?;
+        }
+        return Ok(true);
+    }
     let mut scratch = [0; 4];
     let bytes: &[u8] = if matches!(codec, Codec::Utf8 { .. }) {
         ch.encode_utf8(&mut scratch).as_bytes()
@@ -100,13 +107,15 @@ pub(super) fn encode(
                 continue;
             }
             let mut end = pos + 1;
-            while !matches!(codec, Codec::ShiftJis)
+            while !matches!(codec, Codec::ShiftJis | Codec::Wide(_))
                 && end < source.len()
                 && !point(codec, source[end], None)?
             {
                 end += 1;
             }
-            if name == "surrogateescape" && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis) {
+            if name == "surrogateescape"
+                && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis | Codec::Wide(_))
+            {
                 while pos < end && (0xdc80..=0xdcff).contains(&source[pos]) {
                     append(&mut output, &[source[pos] as u8])?;
                     pos += 1;
@@ -203,10 +212,16 @@ pub(super) fn encode(
             if let Some(bytes) = encoded {
                 append(&mut output, &bytes)?;
             } else if let Value::Bytes(bytes) = ctx.heap.get(value) {
+                if let Codec::Wide(format) = codec
+                    && !bytes.len().is_multiple_of(format.width())
+                {
+                    ctx.advance_decode_error(exc, pos, end, reason);
+                    return ctx.op("raise", exc, NONE, NONE).map(|_| unreachable!());
+                }
                 append(&mut output, bytes)?;
             } else {
                 for &code in ctx.string_codepoints(value)?.iter() {
-                    if matches!(codec, Codec::Utf8 { .. }) && code > 0x7f
+                    if matches!(codec, Codec::Utf8 { .. } | Codec::Wide(_)) && code > 0x7f
                         || !point(codec, code, Some(&mut output))?
                     {
                         ctx.advance_decode_error(exc, pos, end, reason);

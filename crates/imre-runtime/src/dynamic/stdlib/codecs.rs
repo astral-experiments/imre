@@ -5,13 +5,12 @@ mod bytes_escape;
 mod encode_error;
 mod raw_unicode_escape;
 mod surrogate_utf8;
-mod utf16;
 mod wide_unicode;
+pub(in crate::dynamic) use wide_unicode::WideFunction;
 pub(super) use wide_unicode::decode_chunk as decode_wide_chunk;
-pub(super) use wide_unicode::{encode as wide_encode, extended as wide_extended};
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder, Utf16Order};
+use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
@@ -201,7 +200,7 @@ pub(super) fn builtin_handler(
             let codepoint = 0xd000 + (u32::from(*b & 0x3f) << 6) + u32::from(*c & 0x3f);
             Some((codepoint, 3))
         } else {
-            pass_wide.and_then(|format| wide_unicode::surrogate(format, &bytes[start..]))
+            pass_wide.and_then(|format| format.surrogate(&bytes[start..]))
         };
         if let Some((codepoint, width)) = replacement {
             let text = ctx.text_codepoints(vec![codepoint]);
@@ -384,11 +383,8 @@ pub(super) fn native_search(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
         return Ok(NONE);
     }
     if let Some((format, true)) = FixedUnicode::encoding(&key) {
-        let module = match format {
-            FixedUnicode::Utf16(_) => "encodings.utf_16",
-            _ => "encodings.utf_32",
-        };
-        return module_entry(ctx, arg, module);
+        let module = format!("encodings.{}", format.codec_name(true).replace('-', "_"));
+        return module_entry(ctx, arg, &module);
     }
     match CodecInfo::lookup(&key).map_err(Error::from) {
         Ok(entry) => box_native_entry(ctx, entry, arg),
@@ -438,7 +434,7 @@ pub(super) fn lookup_transform(
     let name = ctx.text(key.clone());
     let (heap, roots) = ctx.heap_and_roots();
     let name = heap.intern(name, roots);
-    let native_only = FixedUnicode::by_key(&key).is_some() || key == "raw_unicode_escape";
+    let native_only = key == "raw_unicode_escape";
     let default = native_only.then(|| ctx.builtin("encodings.search_function"));
     // A callback may change the live list. CPython snapshots only its length.
     for index in 0..count {
@@ -515,6 +511,13 @@ pub(super) fn entry_functions(
 }
 
 fn native_functions(ctx: &mut Context, codec: Codec) -> Result<(Id, Id)> {
+    if let Codec::Wide(format) = codec {
+        let name = format.name().replace('-', "_");
+        return Ok((
+            ctx.builtin(&format!("codecs.{name}_encode")),
+            ctx.builtin(&format!("codecs.{name}_decode")),
+        ));
+    }
     if let Some(&functions) = ctx.codec_entries.functions.get(codec.name()) {
         return Ok(functions);
     }
@@ -552,6 +555,10 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo, spelling: Id) -> Result
         Codec::CodePage(page) => page.module_name,
         Codec::ShiftJis => codec.name(),
         Codec::Idna => return module_entry(ctx, spelling, "encodings.idna"),
+        Codec::Wide(format) => {
+            let module = format!("encodings.{}", format.name().replace('-', "_"));
+            return module_entry(ctx, spelling, &module);
+        }
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     // Keep the pending constructor arguments across Python-visible module lookups.
@@ -734,12 +741,23 @@ pub(super) fn encode_fixed(
         FixedUnicode::Utf32Le | FixedUnicode::Utf32Be => !matches!(order, -1 | 1),
     };
     let name = encoder.codec_name(generic);
+    let errors = if generic {
+        errors
+    } else {
+        match encode_error::registered(ctx, Codec::Wide(encoder), errors) {
+            Some(encode_error::Handler::Python(callback)) => {
+                return encode_error::encode(ctx, id, Codec::Wide(encoder), callback, errors);
+            }
+            Some(encode_error::Handler::Builtin(policy)) => policy,
+            None => errors,
+        }
+    };
     for (i, &point) in points.iter().enumerate() {
         if char::from_u32(point).is_some() {
             encoder.append(&mut bytes, [point])?;
             continue;
         }
-        if ctx.codec_entries.handlers.contains_key(errors) {
+        if generic && ctx.codec_entries.handlers.contains_key(errors) {
             return Err(Error::new(
                 "NotImplementedError",
                 match encoder {
@@ -813,6 +831,12 @@ pub(in crate::dynamic) fn decode_bytes(
     errors: Option<Id>,
 ) -> Result<Id> {
     let name = error_name(ctx, errors)?;
+    if let Codec::Wide(format) = codec {
+        let name = name.to_owned();
+        return ctx.with_buffer_export(input, |ctx| {
+            wide_unicode::decode(ctx, input, &name, format, false)
+        });
+    }
     if matches!(codec, Codec::ShiftJis) {
         let name = name.to_owned();
         return ctx.with_buffer_export(input, |ctx| {
@@ -1209,7 +1233,11 @@ fn encoder_input_length(ctx: &Context, function: &str, input: Id) -> Result<usiz
         _ => {
             return Err(type_error(format!(
                 "{function}() argument 1 must be str, not {}",
-                ctx.type_name(input)
+                if input == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(input)
+                }
             )));
         }
     })
@@ -1227,6 +1255,7 @@ pub(in crate::dynamic) fn entry_encode(
         Codec::Ascii => "ascii_encode",
         Codec::Utf8 { .. } => "utf_8_encode",
         Codec::CodePage(_) => "charmap_encode",
+        Codec::Wide(_) => unreachable!("fixed-order codecs use the named builtin"),
         Codec::ShiftJis | Codec::Idna => "encode",
     };
     let (input, errors) = if matches!(codec, Codec::Utf8 { signature: true } | Codec::CodePage(_)) {
@@ -1267,6 +1296,7 @@ pub(in crate::dynamic) fn decode(
         Codec::Ascii => "ascii_decode",
         Codec::Utf8 { .. } => "utf_8_decode",
         Codec::CodePage(_) => "charmap_decode",
+        Codec::Wide(_) => unreachable!("fixed-order codecs use the named builtin"),
         Codec::ShiftJis | Codec::Idna => "decode",
     };
     if matches!(codec, Codec::ShiftJis) {
