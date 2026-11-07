@@ -3000,12 +3000,10 @@ impl Context {
                             .map_or(NONE, |sig| self.text(sig)));
                     }
                     "__text_signature__" if symbol == "unicodedata.category" => {
-                        return Ok(self.text("($self, chr, /)"));
+                        return Ok(self.text(stdlib::unicodedata::CATEGORY_SIGNATURE));
                     }
                     "__doc__" if symbol == "unicodedata.category" => {
-                        return Ok(self.text(
-                            "Returns the general category assigned to the character chr as string.",
-                        ));
+                        return Ok(self.text(stdlib::unicodedata::CATEGORY_DOC));
                     }
                     "__self__" if module == "sys" => {
                         if let Some(original) = self.threads.system_module {
@@ -3737,6 +3735,11 @@ impl Context {
                     name: method,
                 } = *self.heap.get(callable) =>
                 {
+                    if self.heap.get(owner).heap_type() == Some(stdlib::unicodedata::CLASS)
+                        && matches!(name, "__doc__" | "__text_signature__")
+                    {
+                        return self.lookup_attr(callable, name);
+                    }
                     if self.heap.get(owner).heap_type()
                         == Some(stdlib::datetime::isocalendar::CLASS)
                     {
@@ -4007,6 +4010,11 @@ impl Context {
                 owner,
                 name: member,
             } => match name {
+                _ if self.heap.get(owner).heap_type() == Some(stdlib::unicodedata::CLASS)
+                    && let Some(metadata) = stdlib::unicodedata::method_metadata(member, name) =>
+                {
+                    return Ok(self.text(metadata));
+                }
                 _ if self.heap.get(owner).heap_type()
                     == Some(stdlib::datetime::isocalendar::CLASS)
                     && let Some(value) =
@@ -7270,6 +7278,9 @@ impl Context {
         {
             return Some("typing.Union");
         }
+        if value.heap_type() == Some(stdlib::unicodedata::CLASS) {
+            return Some(stdlib::unicodedata::CLASS);
+        }
         value.hash_type()
     }
 
@@ -7982,6 +7993,9 @@ impl Context {
             Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::HeapTypeMethod { owner, name } => {
+                if self.heap.get(owner).heap_type() == Some(stdlib::unicodedata::CLASS) {
+                    return stdlib::unicodedata::legacy_method(self, owner, name, &args, &kwargs);
+                }
                 #[cfg(unix)]
                 if self.heap.get(owner).heap_type() == Some(value::SSL_ERROR_TYPE) {
                     return stdlib::ssl::provider::objects::error_str(self, owner, &args, &kwargs);

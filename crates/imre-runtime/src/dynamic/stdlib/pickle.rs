@@ -287,18 +287,29 @@ fn reduce_without_newargs(
 }
 
 fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
-    match ctx.heap.get(obj) {
-        Value::DirEntry(_) if protocol < 2 => {
-            // copyreg's legacy reducer records the class even when its instances cannot be created.
-            let copyreg = ctx.module("copyreg")?;
-            let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
-            let class = ctx.exact_type(obj)?;
-            let base = ctx.builtin("object");
-            let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
-            Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
+    let value = ctx.heap.get(obj);
+    if matches!(value, Value::DirEntry(_))
+        || value
+            .instance_class()
+            .and_then(|class| ctx.heap.get(class).heap_type())
+            == Some(super::unicodedata::CLASS)
+    {
+        if protocol >= 2 {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot pickle '{}' object", ctx.type_name(obj)),
+            ));
         }
-        Value::DirEntry(_)
-        | Value::ClassMethod { .. }
+        // copyreg's legacy reducer records the class even when its instances cannot be created.
+        let copyreg = ctx.module("copyreg")?;
+        let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
+        let class = ctx.exact_type(obj)?;
+        let base = ctx.builtin("object");
+        let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
+        return Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])));
+    }
+    match value {
+        Value::ClassMethod { .. }
         | Value::StaticMethod { .. }
         | Value::ZstdCompressor(_)
         | Value::ZstdDecompressor(_)
