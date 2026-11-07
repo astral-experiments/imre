@@ -6630,13 +6630,11 @@ impl Context {
                 // attempt can run finalizers before the next alternative evaluates any Python.
                 let index = p.node_index.load().as_u32().expect("validated OR pattern");
                 let plan = &code.alternatives[index as usize];
-                if let SourceAlternatives::Integers { minimum, bits } = plan {
-                    if let Some(value) = self.small_pattern_subject(subject) {
-                        let offset = value.abs_diff(*minimum);
-                        return Ok(value >= *minimum
-                            && offset < 64
-                            && bits & (1u64 << offset) != 0);
-                    }
+                if let SourceAlternatives::Integers { minimum, bits } = plan
+                    && let Some(value) = self.small_pattern_subject(subject)
+                {
+                    let offset = value.abs_diff(*minimum);
+                    return Ok(value >= *minimum && offset < 64 && bits & (1u64 << offset) != 0);
                 }
                 let mark = self.heap.temporary_mark();
                 for (arm_index, arm) in p.patterns.iter().enumerate() {
