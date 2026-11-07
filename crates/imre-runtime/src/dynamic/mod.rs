@@ -2936,6 +2936,7 @@ impl Context {
                 self.builtin("BaseException.with_traceback");
             }
             if name == "BaseExceptionGroup" {
+                self.builtin("BaseExceptionGroup.__class_getitem__");
                 self.readonly_member("BaseExceptionGroup", "message");
                 self.readonly_member("BaseExceptionGroup", "exceptions");
             }

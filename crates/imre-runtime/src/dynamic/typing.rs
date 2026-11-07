@@ -719,6 +719,7 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
 pub(super) fn generic_alias_method_owner(symbol: &str) -> Option<&'static str> {
     let owner = symbol.strip_suffix(".__class_getitem__")?;
     [
+        "BaseExceptionGroup",
         super::stdlib::functools::PARTIAL_CLASS,
         "_contextvars.ContextVar",
         "_contextvars.Token",
