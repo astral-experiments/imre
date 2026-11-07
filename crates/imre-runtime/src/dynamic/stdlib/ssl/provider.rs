@@ -233,6 +233,9 @@ functions! {
     SSL_pending(Handle) -> c_int;
     SSL_read_ex(Handle, Handle, usize, *mut usize) -> c_int;
     SSL_write_ex(Handle, *const c_void, usize, *mut usize) -> c_int;
+    SSL_get_current_cipher(Handle) -> Handle;
+    SSL_get_version(Handle) -> *const c_char;
+    SSL_is_server(Handle) -> c_int;
     SSL_get_ciphers(Handle) -> Handle;
     SSL_CIPHER_get_id(Handle) -> u32;
     SSL_CIPHER_get_name(Handle) -> *const c_char;
@@ -1016,6 +1019,45 @@ pub(super) struct OwnedSsl {
     handle: NonNull<c_void>,
 }
 
+impl OwnedSsl {
+    pub(super) fn negotiated_version(&self) -> Option<&CStr> {
+        let ssl = self.handle.as_ptr();
+        // SAFETY: this reference keeps the SSL alive while inspecting its protocol.
+        unsafe {
+            if (self.api.SSL_is_init_finished)(ssl) == 0 {
+                return None;
+            }
+            let version = CStr::from_ptr((self.api.SSL_get_version)(ssl));
+            (version != c"unknown").then_some(version)
+        }
+    }
+
+    pub(super) fn channel_binding(&self) -> Option<Vec<u8>> {
+        let ssl = self.handle.as_ptr();
+        // CPython returns the client's Finished for a new session and the server's
+        // for a resumed session, including TLS 1.3 where the server sends first.
+        // SAFETY: this owned reference keeps the SSL alive.
+        let resumed = unsafe { (self.api.SSL_session_reused)(ssl) } != 0;
+        // SAFETY: read the configured role from the same retained SSL.
+        let server = unsafe { (self.api.SSL_is_server)(ssl) } != 0;
+        let finished = if resumed == server {
+            self.api.SSL_get_finished
+        } else {
+            self.api.SSL_get_peer_finished
+        };
+        // SAFETY: zero output capacity queries the size. No handshake or Python
+        // callback runs between these two reads of the retained SSL.
+        let len = unsafe { finished(ssl, ptr::null_mut(), 0) };
+        if len == 0 {
+            return None;
+        }
+        let mut bytes = vec![0; len];
+        // SAFETY: OpenSSL copies at most the supplied buffer length.
+        unsafe { finished(ssl, bytes.as_mut_ptr().cast(), len) };
+        Some(bytes)
+    }
+}
+
 impl Drop for OwnedSsl {
     fn drop(&mut self) {
         // SAFETY: release the reference acquired by SSL_new or SSL_up_ref.
@@ -1489,28 +1531,6 @@ impl Session {
 
     pub(super) fn selected_alpn_protocol(&self) -> Option<Vec<u8>> {
         self.sni.selected_alpn_protocol(self.handle)
-    }
-
-    pub(crate) fn channel_binding(&self) -> Option<Vec<u8>> {
-        let ssl = self.handle.as_ptr();
-        // SAFETY: this SSL is live. On a full handshake the client
-        // sends the first Finished; on resumption the server sends it first.
-        let resumed = unsafe { (self.api.SSL_session_reused)(ssl) } != 0;
-        let finished = if resumed == self.server {
-            self.api.SSL_get_finished
-        } else {
-            self.api.SSL_get_peer_finished
-        };
-        // SAFETY: a zero-length output requests the full size. The SSL is exclusively
-        // borrowed across both calls, so no handshake can change the Finished message.
-        let len = unsafe { finished(ssl, ptr::null_mut(), 0) };
-        if len == 0 {
-            return None;
-        }
-        let mut bytes = vec![0; len];
-        // SAFETY: OpenSSL copies at most the supplied buffer length.
-        unsafe { finished(ssl, bytes.as_mut_ptr().cast(), len) };
-        Some(bytes)
     }
 
     pub(super) fn verify_client_post_handshake(&self) -> Result<(), Failure> {
