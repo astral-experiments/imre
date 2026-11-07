@@ -9,6 +9,10 @@ _PY_VERSION_SHORT = "%d.%d" % sys.version_info[:2]
 _CONFIG_VARS = None
 
 
+def get_python_version():
+    return _PY_VERSION_SHORT
+
+
 def get_config_vars(*args):
     global _CONFIG_VARS
     prefix = os.path.normpath(sys.prefix)
