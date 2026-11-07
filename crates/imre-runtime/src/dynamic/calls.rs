@@ -1472,13 +1472,13 @@ impl Context {
         if owner == value::ZSTD_COMPRESS_TYPE
             && let Value::ZstdCompressor(state) = self.heap.get(receiver)
         {
-            let mode = state.borrow().last_mode;
+            let mode = state.lock().unwrap().last_mode;
             return Ok(self.int(i64::from(mode)));
         }
         if owner == value::ZSTD_DECOMPRESS_TYPE
             && let Value::ZstdDecompressor(state) = self.heap.get(receiver)
         {
-            return Ok(state.borrow().field(field));
+            return Ok(state.field(field));
         }
         if owner == value::BZ2_DECOMPRESS_TYPE
             && let Value::Bz2Decompressor(state) = self.heap.get(receiver)

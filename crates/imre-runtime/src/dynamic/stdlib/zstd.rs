@@ -1,8 +1,9 @@
 //! Incremental Zstandard streams for compression.zstd.
 use super::{Context, Error, Id, NONE, Result, Value, builtins, os, value};
-use crate::{Shared, zstd_streams as streams};
+use crate::zstd_streams as streams;
 use num_traits::ToPrimitive;
-use std::cell::RefCell;
+use std::sync::Mutex;
+use triomphe::Arc;
 
 pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) {
     for name in ["ZstdCompressor", "ZstdDecompressor", "ZstdError"] {
@@ -24,16 +25,18 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) {
     ctx.bind(scope, "zstd_version", version);
 }
 
+#[derive(Clone)]
 pub(in crate::dynamic) struct Decompressor {
-    stream: streams::Decompressor,
+    stream: Arc<Mutex<streams::Decompressor>>,
+    // Keep the Python reference in the heap object, outside the provider lock.
     pub(in crate::dynamic) unused_data: Id,
 }
 
 impl Decompressor {
     pub(in crate::dynamic) fn field(&self, name: &str) -> Id {
         match name {
-            "eof" => builtins::boolean(self.stream.eof),
-            "needs_input" => builtins::boolean(self.stream.needs_input),
+            "eof" => builtins::boolean(self.stream.lock().unwrap().eof),
+            "needs_input" => builtins::boolean(self.stream.lock().unwrap().needs_input),
             "unused_data" => self.unused_data,
             _ => unreachable!("unknown decompressor member"),
         }
@@ -116,7 +119,7 @@ pub(super) fn call(
                 .transpose()?;
             options(ctx, member, params)?;
             dictionary(dict)?;
-            let state = Shared::try_new(RefCell::new(streams::Compressor::new(level)?))
+            let state = Arc::try_new(Mutex::new(streams::Compressor::new(level)?))
                 .map_err(|_| crate::Error::allocation())?;
             Ok(ctx.alloc(Value::ZstdCompressor(state)))
         }
@@ -125,12 +128,13 @@ pub(super) fn call(
                 builtins::bind_method_arguments(member, args, kwargs, ["zstd_dict", "options"], 2)?;
             dictionary(dict)?;
             options(ctx, member, params)?;
-            let state = Shared::try_new(RefCell::new(Decompressor {
-                stream: streams::Decompressor::new()?,
-                unused_data: ctx.heap.bytes_from_data(Vec::new()),
-            }))
-            .map_err(|_| crate::Error::allocation())?;
-            Ok(ctx.alloc(Value::ZstdDecompressor(state)))
+            let stream = Arc::try_new(Mutex::new(streams::Decompressor::new()?))
+                .map_err(|_| crate::Error::allocation())?;
+            let unused_data = ctx.heap.bytes_from_data(Vec::new());
+            Ok(ctx.alloc(Value::ZstdDecompressor(Decompressor {
+                stream,
+                unused_data,
+            })))
         }
         "ZstdCompressor.compress"
         | "ZstdCompressor.flush"
@@ -153,9 +157,11 @@ pub(super) fn call(
                     )?;
                     ctx.with_read_buffer(data.unwrap(), |ctx, view| {
                         let mode = mode.map(|id| os::c_int(ctx, id)).transpose()?.unwrap_or(0);
+                        let input = ctx.native_buffer_bytes(view)?;
                         state
-                            .borrow_mut()
-                            .compress(ctx.native_buffer_bytes(view)?, mode)
+                            .lock()
+                            .unwrap()
+                            .compress(input, mode)
                             .map_err(Error::from)
                     })?
                 }
@@ -169,7 +175,7 @@ pub(super) fn call(
                             "mode argument wrong value, it should be ZstdCompressor.FLUSH_FRAME or ZstdCompressor.FLUSH_BLOCK.",
                         ));
                     }
-                    state.borrow_mut().compress(&[], mode)?
+                    state.lock().unwrap().compress(&[], mode)?
                 }
                 _ => {
                     let size = builtins::one_positional_arg(member, args, kwargs)?;
@@ -192,7 +198,7 @@ pub(super) fn call(
                                 },
                             )?)
                         };
-                    state.borrow_mut().set_pledged_input_size(size)?;
+                    state.lock().unwrap().set_pledged_input_size(size)?;
                     return Ok(NONE);
                 }
             };
@@ -209,7 +215,7 @@ pub(super) fn call(
             let Value::ZstdDecompressor(state) = ctx.heap.get(receiver) else {
                 unreachable!()
             };
-            let state = state.clone();
+            let stream = state.stream.clone();
             let [data, limit] = builtins::bind_builtin_arguments(
                 "decompress",
                 args,
@@ -223,16 +229,18 @@ pub(super) fn call(
                     .transpose()?
                     .unwrap_or(-1);
                 let input = ctx.native_buffer_bytes(view)?;
-                let mut d = state.borrow_mut();
-                let out = d
-                    .stream
-                    .decompress(input, usize::try_from(max_length).unwrap_or(usize::MAX))?;
-                if d.stream.eof {
-                    let suffix = d.stream.take_unused_data();
+                let mut decoder = stream.lock().unwrap();
+                let out =
+                    decoder.decompress(input, usize::try_from(max_length).unwrap_or(usize::MAX))?;
+                if decoder.eof {
+                    let suffix = decoder.take_unused_data();
+                    drop(decoder);
                     if !suffix.is_empty() {
-                        drop(d);
                         let id = ctx.heap.bytes_from_data(suffix);
-                        state.borrow_mut().unused_data = id;
+                        let Value::ZstdDecompressor(state) = ctx.heap.get_mut(receiver) else {
+                            unreachable!()
+                        };
+                        state.unused_data = id;
                     }
                 }
                 Ok(out)
@@ -240,5 +248,66 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         _ => Err(Error::new("AttributeError", member)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_streams_keep_their_frame_across_a_thread_handoff() {
+        let mut ctx = crate::dynamic::ffi::new_context(
+            serde_json::json!({"paths": []}),
+            std::iter::empty::<String>(),
+        );
+        let c = call(&mut ctx, "ZstdCompressor", &[], &[]).unwrap();
+        let d = call(&mut ctx, "ZstdDecompressor", &[], &[]).unwrap();
+        let Value::ZstdCompressor(encoder) = ctx.heap.get(c) else {
+            unreachable!()
+        };
+        let Value::ZstdDecompressor(decoder) = ctx.heap.get(d) else {
+            unreachable!()
+        };
+        let encoder = encoder.clone();
+        let decoder = decoder.stream.clone();
+        let block = encoder
+            .lock()
+            .unwrap()
+            .compress(b"first ", 1)
+            .map_err(Error::from)
+            .unwrap();
+        assert_eq!(
+            decoder
+                .lock()
+                .unwrap()
+                .decompress(&block, 3)
+                .map_err(Error::from)
+                .unwrap(),
+            b"fir"
+        );
+
+        drop(ctx);
+        std::thread::spawn(move || {
+            let mut frame = encoder
+                .lock()
+                .unwrap()
+                .compress(b"second", 2)
+                .map_err(Error::from)
+                .unwrap();
+            frame.extend_from_slice(b"tail");
+            let mut stream = decoder.lock().unwrap();
+            assert_eq!(
+                stream
+                    .decompress(&frame, usize::MAX)
+                    .map_err(Error::from)
+                    .unwrap(),
+                b"st second"
+            );
+            assert!(stream.eof);
+            assert_eq!(stream.take_unused_data(), b"tail");
+        })
+        .join()
+        .unwrap();
     }
 }
