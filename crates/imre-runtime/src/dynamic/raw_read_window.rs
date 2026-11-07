@@ -28,7 +28,7 @@ impl Context {
         match self.heap.get(id) {
             Value::ByteArray(bytes) => Some(bytes.len()),
             Value::Array(array) => Some(array.as_bytes().len()),
-            Value::BytesIoStorage(Some(file)) => Some(file.storage().len()),
+            Value::BytesIoStorage(state) => state.file.as_ref().map(|file| file.storage().len()),
             _ => None,
         }
     }

@@ -30,6 +30,7 @@ pub(in crate::dynamic) use descriptor_buffer::{
 };
 pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 mod bytes_io;
+pub(in crate::dynamic) use bytes_io::BytesIoStorage;
 mod bytes_writer;
 pub(in crate::dynamic) use bytes_writer::pending_callback_write;
 mod docstrings;
@@ -58,7 +59,7 @@ pub(in crate::dynamic) enum MemoryStream {
     DetachedWriter,
     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
     Pair(rwpair::Pair),
-    Bytes(std::rc::Rc<bytes_io::BytesIo>),
+    Bytes(bytes_io::BytesIo),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
     Decoder(newline_decoder::Decoder),

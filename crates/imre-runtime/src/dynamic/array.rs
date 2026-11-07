@@ -556,7 +556,7 @@ fn from_bytes(ctx: &mut Context, receiver: Id, input: Id) -> Result<Id> {
             let data = match source {
                 Value::Bytes(data) | Value::ByteArray(data) => data.as_slice(),
                 Value::Array(array) => array.as_bytes(),
-                Value::BytesIoStorage(Some(file)) => file.storage(),
+                Value::BytesIoStorage(state) => state.file()?.storage(),
                 _ => unreachable!("contiguous buffer backing"),
             };
             target.append_bytes(&data[range])?;
