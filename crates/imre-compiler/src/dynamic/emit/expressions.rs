@@ -214,7 +214,7 @@ impl Function<'_, '_> {
                         Some(format!(
                             "call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
                         ))
-                    } else if direct && !name.starts_with('_') {
+                    } else if direct && !name.starts_with("__") {
                         let symbol = self.output.data(name.as_bytes());
                         Some(format!(
                             "call i64 @imre_dyn_builtin_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
