@@ -539,31 +539,17 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "email.quoprimime" => bundled_source!("email/quoprimime.py"),
         "email.utils" => bundled_source!("email/utils.py", from "email"),
         "http" => bundled_source!("http/__init__.py"),
-        "http.client" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "http/client.py",
-                SOURCE.get_or_init(|| {
-                    const UPSTREAM: &str = include_str!(
-                        "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/client.py"
-                    );
-                    let transport = UPSTREAM
-                        .replace("import email.parser\n", "")
-                        // Match the same invalid newline bytes without regex lookahead.
-                        .replace(
-                            r"\n(?![ \t])|\r(?![ \t\n])",
-                            r"\n[^ \t]|\r[^ \t\n]|[\n\r]\Z",
-                        );
-                    concat!(
-                        include_str!("../stdlib/http/client.py"),
-                        "\n_parse_http_fields = HTTPMessage._parse\n",
-                    )
-                    .to_owned()
-                        + &transport
-                        + include_str!("../stdlib/http/boxed_headers.py")
-                }),
-            ))
-        }
+        "http.client" => Some((
+            "http/client.py",
+            concat!(
+                include_str!("../stdlib/http/client.py"),
+                include_str!("../stdlib/http/boxed_header_binding.py"),
+                include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/client.py"
+                ),
+                include_str!("../stdlib/http/boxed_headers.py"),
+            ),
+        )),
         "http.cookiejar" => Some((
             "http/cookiejar.py",
             include_str!(
