@@ -21,3 +21,11 @@ def current():
             assert child.wait() == 0
             full = prefix + arg + suffix
             assert repr(child) == (full if length == 80 else full[:76] + "...>")
+
+    result = subprocess.run(["/bin/false"], stderr=subprocess.PIPE)
+    assert repr(result) == "CompletedProcess(args=['/bin/false'], returncode=1, stderr=b'')"
+
+    class Result(subprocess.CompletedProcess):
+        pass
+
+    assert repr(Result("cmd", -1, "")) == "Result(args='cmd', returncode=-1, stdout='')"
