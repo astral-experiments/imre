@@ -7124,6 +7124,30 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::OsSeparator { alternate }, vec![]),
                     });
                 }
+                config @ (Intrinsic::StartupFilesystemRoots | Intrinsic::ModuleSuffixes) => {
+                    let values: Vec<Expr> = if config == Intrinsic::ModuleSuffixes {
+                        imre_ast::module_suffixes()
+                            .into_iter()
+                            .map(unpacking::string)
+                            .collect()
+                    } else {
+                        self.graph
+                            .filesystem_roots
+                            .iter()
+                            .map(|root| {
+                                let path = root.to_str().ok_or_else(|| {
+                                    error(self.source, expression, "filesystem roots must be valid UTF-8 for checked discovery")
+                                })?;
+                                Ok(unpacking::string(path))
+                            })
+                            .collect::<Result<_, String>>()?
+                    };
+                    let tuple = Expr {
+                        ty: self.types.tuple(vec![Type::Str; values.len()]),
+                        kind: ExprKind::Tuple(values),
+                    };
+                    return self.coerce(tuple, self.types.var_tuple(Type::Str), expression);
+                }
                 Intrinsic::StringConstant(value) => return Ok(unpacking::string(value)),
                 Intrinsic::BoolConstant(value) => return Ok(Expr::boolean(value)),
                 Intrinsic::LogRecordFlag(mask) => {

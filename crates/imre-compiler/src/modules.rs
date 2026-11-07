@@ -903,6 +903,8 @@ pub(crate) enum Intrinsic {
     GetSysconfigPath,
     OsPathExists,
     StringConstant(&'static str),
+    StartupFilesystemRoots,
+    ModuleSuffixes,
     SysExit,
     ShlexSplit,
     ShlexQuote,
@@ -2923,6 +2925,30 @@ impl SourceModule {
             || (self.is_bundled(TEMPFILE_SPOOL) && class == "SpooledTemporaryFile")
     }
 
+    /// These annotation-only declarations receive immutable data from the checked resolver.
+    pub(crate) fn import_config_slot<'a>(
+        &self,
+        statement: &'a ast::Stmt,
+    ) -> Option<(&'a str, Intrinsic)> {
+        let ast::Stmt::AnnAssign(declaration) = statement else {
+            return None;
+        };
+        if declaration.value.is_some() {
+            return None;
+        }
+        let name = value_name(statement)?;
+        let slot = match name {
+            "_filesystem_roots"
+                if self.is_bundled("pkgutil") || self.is_bundled(METADATA_VERSION) =>
+            {
+                Intrinsic::StartupFilesystemRoots
+            }
+            "_module_suffixes" if self.is_bundled("pkgutil") => Intrinsic::ModuleSuffixes,
+            _ => return None,
+        };
+        Some((name, slot))
+    }
+
     pub(crate) fn is_bundled(&self, name: &str) -> bool {
         self.bundled && self.name == name
     }
@@ -3058,6 +3084,8 @@ pub(crate) enum SetLayoutHint {
 }
 
 pub(crate) struct SourceGraph {
+    /// Fixed at graph construction, in the checked resolver's search order.
+    pub(crate) filesystem_roots: Box<[PathBuf]>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
@@ -4513,6 +4541,10 @@ impl<'a> Loader<'a> {
             checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
         }
         let mut graph = SourceGraph {
+            filesystem_roots: std::iter::once(self.root)
+                .skip(usize::from(self.skip_current_root))
+                .chain(self.search_roots)
+                .collect(),
             doctest_imports,
             command_startup: None,
             virtual_command: false,
@@ -4662,6 +4694,10 @@ impl<'a> Loader<'a> {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
                 return Err(self.modules[id].error(statement,
                     "native stubs allow type-only imports and fully annotated, required positional-only methods with an ellipsis body"));
+            }
+            if let Some((name, slot)) = self.modules[id].import_config_slot(statement) {
+                self.bind(id, name, Binding::Intrinsic(slot), statement)?;
+                continue;
             }
             match statement {
                 ast::Stmt::If(guard)
@@ -5510,23 +5546,18 @@ impl<'a> Loader<'a> {
                     })
                 })
         };
-        let metadata = if module == Some(IntrinsicModule::ImportlibMetadata)
-            && !self.by_name.contains_key(METADATA_VERSION)
-            && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "version"))
-        {
-            let source = concat!(
-                include_str!("../stdlib/importlib/metadata_typed.py"),
-                "\n",
-                include_str!("../stdlib/importlib/metadata_version.py"),
-            );
-            let paths = self.filesystem_search_path()?;
-            Some(format!("{source}\n_search_path: list[str] = {paths}\n"))
-        } else {
-            None
-        };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
-            metadata.as_deref().map(|source| (METADATA_VERSION, source)),
+            (module == Some(IntrinsicModule::ImportlibMetadata)
+                && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "version")))
+            .then_some((
+                METADATA_VERSION,
+                concat!(
+                    include_str!("../stdlib/importlib/metadata_typed.py"),
+                    "\n",
+                    include_str!("../stdlib/importlib/metadata_version.py"),
+                ),
+            )),
             (module == Some(IntrinsicModule::Fractions)
                 && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "Fraction")))
             .then_some((FRACTION_CLASS, include_str!("../stdlib/fraction_pair.py"))),
@@ -5683,15 +5714,6 @@ impl<'a> Loader<'a> {
         })
     }
 
-    /// Embed the same ordered roots that resolve imports, including Python's safe-path exclusion.
-    fn filesystem_search_path(&self) -> Result<String, String> {
-        let roots = std::iter::once(&self.root)
-            .skip(usize::from(self.skip_current_root))
-            .chain(&self.search_roots)
-            .collect::<Vec<_>>();
-        serde_json::to_string(&roots).map_err(|e| e.to_string())
-    }
-
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
         if name == FRACTION_CLASS {
             return Err("the private Fraction implementation is not an importable module".into());
@@ -5764,7 +5786,14 @@ impl<'a> Loader<'a> {
                 self.needs_object_imports = true;
                 bundled_runtime_source(name).map(|(path, _)| (path, ""))
             }
-            "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
+            "pkgutil" => Some((
+                "pkgutil.py",
+                concat!(
+                    include_str!("../stdlib/pkgutil.py"),
+                    "\n",
+                    include_str!("../stdlib/pkgutil/iter_modules.py")
+                ),
+            )),
             "zipimport" if cfg!(unix) => Some((
                 "zipimport.py",
                 concat!(
@@ -5826,18 +5855,6 @@ impl<'a> Loader<'a> {
                     | "zoneinfo"
                     | "compression._common._streams"
             );
-            let pkgutil_source;
-            let source = if name == "pkgutil" {
-                let paths = self.filesystem_search_path()?;
-                let suffixes = serde_json::to_string(&imre_ast::module_suffixes()).unwrap();
-                let discovery = include_str!("../stdlib/pkgutil/iter_modules.py");
-                pkgutil_source = format!(
-                    "{source}\n{discovery}\n_search_path: list[str] = {paths}\n_module_suffixes: list[str] = {suffixes}\n"
-                );
-                &pkgutil_source
-            } else {
-                source
-            };
             let parent = self.package_parent(name)?;
             // Initializing the package may already have imported this child.
             if let Some(&id) = self.by_name.get(name) {
@@ -6735,6 +6752,73 @@ mod native_tests {
         let (_, paths) = graph.disk_inputs(None);
         assert!(paths.contains(&module));
         assert!(!paths.contains(&namespace.join("__init__.py")));
+    }
+
+    #[test]
+    fn checked_discovery_sources_are_independent_of_search_roots() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        let entry = root.join("main.py");
+        fs::write(
+            &entry,
+            "from importlib.metadata import version\nfrom pkgutil import iter_modules\n",
+        )
+        .unwrap();
+        for dirname in ["first", "quote'Ω"] {
+            let extension = root.join(dirname);
+            fs::create_dir(&extension).unwrap();
+            let graph = SourceGraph::load(&entry, Some(root), &[extension]).unwrap();
+            for (name, source) in [
+                (
+                    super::METADATA_VERSION,
+                    concat!(
+                        include_str!("../stdlib/importlib/metadata_typed.py"),
+                        "\n",
+                        include_str!("../stdlib/importlib/metadata_version.py"),
+                    ),
+                ),
+                (
+                    "pkgutil",
+                    concat!(
+                        include_str!("../stdlib/pkgutil.py"),
+                        "\n",
+                        include_str!("../stdlib/pkgutil/iter_modules.py"),
+                    ),
+                ),
+            ] {
+                let module = graph
+                    .modules
+                    .iter()
+                    .find(|module| module.is_bundled(name))
+                    .unwrap();
+                assert_eq!(module.source, source, "checked source for {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn project_import_config_uses_its_own_declarations() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        fs::create_dir(root.join("imre")).unwrap();
+        fs::write(root.join("imre/__init__.py"), "").unwrap();
+        fs::write(
+            root.join("imre/_import_config.py"),
+            "def filesystem_roots(n: int) -> int: return n + 1\n",
+        )
+        .unwrap();
+        let entry = root.join("main.py");
+        fs::write(
+            &entry,
+            concat!(
+                "from imre._import_config import filesystem_roots\n",
+                "import imre._import_config as config\n",
+                "from importlib.metadata import version\n",
+                "print(filesystem_roots(config.filesystem_roots(40)))\n",
+            ),
+        )
+        .unwrap();
+        crate::check_file(&entry, Some(root)).unwrap();
     }
 
     #[test]
