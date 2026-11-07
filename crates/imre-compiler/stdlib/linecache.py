@@ -1,4 +1,3 @@
-# Adapted from CPython 3.14.5 Lib/linecache.py. See licenses/CPython.txt.
 """Cache lines from Python source files.
 
 This is intended to read lines from modules imported -- hence if a filename

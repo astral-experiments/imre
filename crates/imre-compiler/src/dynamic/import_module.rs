@@ -87,6 +87,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "subprocess" if cfg!(unix) => {
             bundled_source!("subprocess.py")
         }
+        // CPython 3.14.5 Lib/linecache.py. See licenses/CPython.txt.
         "linecache" => bundled_source!("linecache.py"),
         "bisect" => bundled_source!("bisect.py"),
         "email.errors" => Some((
