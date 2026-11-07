@@ -14,3 +14,4 @@ xml/etree/ElementPath.py
 xml/etree/ElementTree.py
 html/__init__.py
 html/entities.py
+html/parser.py

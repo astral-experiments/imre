@@ -1,5 +1,4 @@
 _markupbase.py
-html/parser.py
 http/cookies.py
 ipaddress.py
 venv/__init__.py
