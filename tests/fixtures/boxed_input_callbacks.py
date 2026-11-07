@@ -35,6 +35,7 @@ def current():
     print(line, list(data))
     check_stream_release()
     check_renderer_release()
+    check_standard_flush()
 
 
 def check_stream_release():
@@ -117,6 +118,45 @@ def check_renderer_release():
     finally:
         sys.stdin, sys.stdout = stdin, stdout
     assert data == b"AA"
+
+
+def check_standard_flush():
+    calls = []
+
+    class FlushKey:
+        def __hash__(self):
+            return hash("flush")
+
+        def __eq__(self, other):
+            return other == "flush"
+
+    def flush():
+        calls.append("flush")
+
+    for key in ("flush", FlushKey()):
+        sys.stdout.__dict__[key] = flush
+        try:
+            print("", end="", flush=True)
+        finally:
+            del sys.stdout.__dict__[key]
+    assert calls == ["flush", "flush"]
+
+    def fileno():
+        calls.append("fileno")
+        return -1
+
+    def readline():
+        calls.append("readline")
+        return "rebound\n"
+
+    sys.stdin.fileno = fileno
+    sys.stdin.readline = readline
+    try:
+        assert input() == "rebound"
+    finally:
+        del sys.stdin.readline
+        del sys.stdin.fileno
+    assert calls[-2:] == ["fileno", "readline"]
 
 
 if __name__ == "__main__":
