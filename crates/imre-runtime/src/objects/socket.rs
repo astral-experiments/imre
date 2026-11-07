@@ -64,23 +64,23 @@ impl Socket {
     }
 
     fn detach(&mut self) -> io::Result<RawFd> {
-        if let Some(registration) = &self.tls {
-            if registration.displaced(self.fd)? {
-                // Transfer the registered description, never a stranger's descriptor.
-                let registration = self.tls.take().unwrap();
-                let owned = match Rc::try_unwrap(registration) {
-                    Ok(registration) => registration.fd,
-                    Err(active) => match active.fd.try_clone() {
-                        Ok(copy) => copy,
-                        Err(error) => {
-                            self.tls = Some(active);
-                            return Err(error);
-                        }
-                    },
-                };
-                self.fd = -1;
-                return Ok(owned.into_raw_fd());
-            }
+        if let Some(registration) = &self.tls
+            && registration.displaced(self.fd)?
+        {
+            // Transfer the registered description, never a stranger's descriptor.
+            let registration = self.tls.take().unwrap();
+            let owned = match Rc::try_unwrap(registration) {
+                Ok(registration) => registration.fd,
+                Err(active) => match active.fd.try_clone() {
+                    Ok(copy) => copy,
+                    Err(error) => {
+                        self.tls = Some(active);
+                        return Err(error);
+                    }
+                },
+            };
+            self.fd = -1;
+            return Ok(owned.into_raw_fd());
         }
         self.tls = None;
         Ok(std::mem::replace(&mut self.fd, -1))
