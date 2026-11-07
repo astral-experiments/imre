@@ -5,6 +5,7 @@
 #include <stdint.h>
 #if defined(__linux__) || defined(__APPLE__)
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -63,7 +64,8 @@ static int key_ready;
 static atomic_uint generation;
 static unsigned next_generation;
 static atomic_ullong settings;
-static pthread_mutex_t config_lock = PTHREAD_MUTEX_INITIALIZER;
+static Gate config_owner;
+static void recover_config(uintptr_t self);
 static const char hex[] = "0123456789abcdef";
 
 /* Called under the slot gate. Zero marks an unavailable record after exhaustion. */
@@ -111,6 +113,10 @@ static void after_fork(void) {
     pthread_t thread = pthread_self();
     uintptr_t self = (uintptr_t)thread;
     pid_t pid = getpid();
+    sigset_t mask, previous;
+    sigfillset(&mask);
+    sigprocmask(SIG_BLOCK, &mask, &previous);
+    recover_config(self);
     for (size_t i = 0; i < MAX_THREADS; i++) {
         Slot *s = &slots[i];
         uintptr_t busy = atomic_load_explicit(&s->busy, memory_order_relaxed);
@@ -131,6 +137,7 @@ static void after_fork(void) {
             atomic_store_explicit(&scratch[i].used, 0, memory_order_relaxed);
         }
     }
+    sigprocmask(SIG_SETMASK, &previous, NULL);
 }
 static void make_key(void) {
     if (pthread_key_create(&key, drop_slot) != 0) return;
@@ -411,16 +418,30 @@ static _Atomic(Dispositions *) originals;
 static atomic_uint readers;
 _Static_assert(ATOMIC_POINTER_LOCK_FREE == 2, "signal-time disposition loads must not lock");
 
+/* A fork from a nested application handler must run outside the pin. Restore
+ * the interrupted mask before any dump, redelivery or predecessor callback. */
+static void pin(atomic_uint *readers, sigset_t *previous) {
+    sigset_t mask;
+    sigfillset(&mask);
+    sigprocmask(SIG_BLOCK, &mask, previous);
+    atomic_fetch_add(readers, 1);
+}
+static void unpin(atomic_uint *readers, const sigset_t *previous) {
+    atomic_fetch_sub(readers, 1);
+    sigprocmask(SIG_SETMASK, previous, NULL);
+}
+
 static void fatal(int sig, siginfo_t *info, void *context) {
     (void)info;
     int saved_errno = errno;
     size_t i = 0;
     while (i < NSIGNALS && signals[i].signum != sig) i++;
     if (i == NSIGNALS) return;
-    atomic_fetch_add(&readers, 1);
+    sigset_t previous;
+    pin(&readers, &previous);
     Dispositions *d = atomic_load(&originals);
     sigaction(sig, &d->saved[i], NULL);
-    atomic_fetch_sub(&readers, 1);
+    unpin(&readers, &previous);
     unsigned long long opts = atomic_load(&settings);
     int fd = (int)(uint32_t)opts;
     LIT(fd, "Fatal Python error: ");
@@ -447,61 +468,321 @@ static void alternate_stack(void) {
     else free(buf);
 }
 
+/* A delivery borrows the destination just as enable() does. Readers only pin
+ * configuration while copying options or changing the kernel disposition.
+ * In particular, unregister never waits on output or an arbitrary predecessor. */
+typedef struct {
+    struct sigaction previous;
+    uint64_t serial;
+    int fd, all, chain;
+} UserAction;
+typedef struct {
+    _Atomic(UserAction *) active;
+    atomic_uint readers;
+    atomic_ullong restored;
+    Gate restorer;
+} UserSignal;
+static UserSignal user_signals[NSIG];
+static uint64_t user_serial;
+static unsigned user_count;
+enum { ALL_FATAL = (1u << NSIGNALS) - 1 };
+static atomic_uint fatal_mask;
+
+/* A normal writer exchanges one immutable allocation at a time. If it
+ * vanishes at fork, the published pointer determines which allocation is
+ * still owned. The other can be freed on the child's next normal operation. */
+static struct {
+    atomic_int signal;  /* Positive for a user registration, -1 for the fatal set. */
+    void *old, *next;
+} transfer;
+static void *discard_after_fork;
+
+static int lock_config(void) {
+    pthread_once(&key_once, make_key);  /* Also needed with an external alt stack. */
+    if (!key_ready) { errno = EAGAIN; return -1; }
+    uintptr_t self = (uintptr_t)pthread_self();
+    while (!try_gate(&config_owner, self)) sched_yield();
+    void *discard = discard_after_fork;
+    discard_after_fork = NULL;
+    free(discard);
+    return 0;
+}
+
+static void unlock_config(void) {
+    atomic_store_explicit(&config_owner, 0, memory_order_release);
+}
+
+static void begin_transfer(int sig, void *old, void *next) {
+    transfer.old = old;
+    transfer.next = next;
+    atomic_store(&transfer.signal, sig);
+}
+
+static void update_publication(void) {
+    if (atomic_load(&fatal_mask) || user_count) {
+        if (!imre_fault_generation()) {
+            if (++next_generation == 0) next_generation++;
+            atomic_store_explicit(&generation, next_generation, memory_order_release);
+        }
+    } else {
+        atomic_store_explicit(&generation, 0, memory_order_release);
+    }
+}
+
+static void recover_config(uintptr_t self) {
+    /* Nested application signals can fork only after the short pin ends. */
+    atomic_store(&readers, 0);
+    for (int i = 1; i < NSIG; i++) {
+        atomic_store(&user_signals[i].readers, 0);
+        if (atomic_load(&user_signals[i].restorer) != self) {
+            atomic_store(&user_signals[i].restored, 0);
+        }
+    }
+    if (atomic_load(&config_owner) == self) return;
+    int sig = atomic_load(&transfer.signal);
+    if (sig) {
+        void *published;
+        if (sig > 0) {
+            /* Keep the kernel's forked disposition. During an initial
+             * sigaction its predecessor may still reside inside libc. */
+            published = atomic_load(&user_signals[sig].active);
+            user_count = 0;
+            for (int i = 1; i < NSIG; i++) {
+                if (atomic_load(&user_signals[i].active)) user_count++;
+            }
+        } else {
+            published = atomic_load(&originals);
+            unsigned mask = 0;
+            for (size_t i = 0; i < NSIGNALS; i++) {
+                struct sigaction action;
+                if (sigaction(signals[i].signum, NULL, &action) == 0 &&
+                    (action.sa_flags & SA_SIGINFO) && action.sa_sigaction == fatal) mask |= 1u << i;
+            }
+            atomic_store(&fatal_mask, mask);
+        }
+        if (transfer.old != transfer.next) {
+            discard_after_fork = published == transfer.next ? transfer.old : transfer.next;
+        }
+        atomic_store(&transfer.signal, 0);
+        update_publication();
+    }
+    unlock_config();
+}
+
+int imre_fault_enabled(void) { return atomic_load(&fatal_mask) != 0; }
+
+static void user_signal(int sig);
+static struct sigaction user_action(int chain) {
+    struct sigaction action = {.sa_handler = user_signal,
+        .sa_flags = SA_ONSTACK | (chain ? SA_NODEFER : SA_RESTART)};
+    sigemptyset(&action.sa_mask);
+    return action;
+}
+
+static UserAction *read_user(UserSignal *slot, sigset_t *previous) {
+    pin(&slot->readers, previous);
+    return atomic_load(&slot->active);
+}
+
+static void user_signal(int sig) {
+    int saved_errno = errno;
+    UserSignal *slot = &user_signals[sig];
+    sigset_t previous;
+    UserAction *active = read_user(slot, &previous);
+    if (!active) {
+        unpin(&slot->readers, &previous);
+        return;
+    }
+    uint64_t serial = active->serial;
+    int fd = active->fd, all = active->all;
+    /* A fork during first installation can inherit our inactive handler.
+     * Keep that exact action for unregister without redelivering to ourselves. */
+    int chain = active->chain && active->previous.sa_handler != user_signal;
+    unpin(&slot->readers, &previous);
+    imre_fault_dump(fd, all);
+    if (chain) {
+        active = read_user(slot, &previous);
+        int deliver = active && active->serial == serial;
+        if (deliver) {
+            atomic_store(&slot->restorer, (uintptr_t)pthread_self());
+            atomic_store(&slot->restored, serial);
+            if (sigaction(sig, &active->previous, NULL) < 0) {
+                atomic_store(&slot->restored, 0);
+                deliver = 0;
+            }
+        }
+        unpin(&slot->readers, &previous);
+        if (deliver) {
+            errno = saved_errno;
+            raise(sig);
+            saved_errno = errno;
+            active = read_user(slot, &previous);
+            if (active && active->serial == serial) {
+                struct sigaction action = user_action(chain);
+                sigaction(sig, &action, NULL);
+                atomic_store(&slot->restored, 0);
+            }
+            unpin(&slot->readers, &previous);
+        }
+    }
+    errno = saved_errno;
+}
+
+int imre_fault_register(int sig, int fd, int all, int chain) {
+    if (sig <= 0 || sig >= NSIG || fd < 0) { errno = EINVAL; return -1; }
+    if (lock_config() < 0) return -1;
+    UserSignal *slot = &user_signals[sig];
+    UserAction *old = atomic_load(&slot->active);
+    UserAction *next = NULL;
+    if (user_serial == UINT64_MAX) { errno = EOVERFLOW; goto fail; }
+    next = malloc(sizeof(*next));
+    if (!next) goto fail;
+    next->serial = ++user_serial;
+    next->fd = fd;
+    next->all = all;
+    next->chain = chain;
+    struct sigaction action = user_action(chain);
+    begin_transfer(sig, old, next);
+    if (old) next->previous = old->previous;
+    else {
+        alternate_stack();
+        if (sigaction(sig, &action, &next->previous) < 0) goto fail;
+    }
+    atomic_store(&slot->active, next);
+    while (atomic_load(&slot->readers)) {}
+    /* Replacing options normally leaves the existing disposition alone. If a
+     * previous delivery restored its predecessor, that delivery cannot rearm
+     * this new registration on return. Install the new action here instead. */
+    if (old && atomic_load(&slot->restored) == old->serial) {
+        if (sigaction(sig, &action, NULL) < 0) {
+            int error = errno;
+            atomic_store(&slot->active, old);
+            while (atomic_load(&slot->readers)) {}
+            errno = error;
+            goto fail;
+        }
+    }
+    if (!old) user_count++;
+    update_publication();
+    atomic_store(&transfer.signal, 0);
+    free(old);
+    unlock_config();
+    return 0;
+fail: {
+        int error = errno;
+        atomic_store(&transfer.signal, 0);
+        free(next);
+        unlock_config();
+        errno = error;
+        return -1;
+    }
+}
+
+static int unregister_user(int sig) {
+    UserSignal *slot = &user_signals[sig];
+    UserAction *old = atomic_load(&slot->active);
+    if (!old) return 0;
+    begin_transfer(sig, old, NULL);
+    atomic_store(&slot->active, NULL);
+    while (atomic_load(&slot->readers)) {}
+    if (sigaction(sig, &old->previous, NULL) < 0) {
+        atomic_store(&slot->active, old);
+        atomic_store(&transfer.signal, 0);
+        return -1;
+    }
+    atomic_store(&slot->restored, 0);
+    user_count--;
+    update_publication();
+    atomic_store(&transfer.signal, 0);
+    free(old);
+    return 1;
+}
+
+int imre_fault_unregister(int sig) {
+    if (sig <= 0 || sig >= NSIG) { errno = EINVAL; return -1; }
+    if (lock_config() < 0) return -1;
+    int result = unregister_user(sig);
+    unlock_config();
+    return result;
+}
+
+void imre_fault_unregister_all(void) {
+    if (lock_config() < 0) return;
+    for (int sig = 1; sig < NSIG && user_count; sig++) unregister_user(sig);
+    unlock_config();
+}
+
 int imre_fault_enable(int fd, int all_threads, int c_stack) {
     if (fd < 0) { errno = EINVAL; return -1; }
-    pthread_mutex_lock(&config_lock);
+    if (lock_config() < 0) return -1;
     unsigned long long opts = (uint32_t)fd | ((unsigned long long)!!all_threads << 32)
                                           | ((unsigned long long)!!c_stack << 33);
-    if (imre_fault_generation()) {
+    unsigned installed = atomic_load(&fatal_mask);
+    if (installed == ALL_FATAL) {
         atomic_store(&settings, opts);
-        pthread_mutex_unlock(&config_lock);
+        unlock_config();
         return 0;
     }
+    Dispositions *old = atomic_load(&originals);
     Dispositions *d = malloc(sizeof(*d));
     if (!d) goto fail;
     for (size_t i = 0; i < NSIGNALS; i++) {
-        if (sigaction(signals[i].signum, NULL, &d->saved[i]) != 0) {
-            free(d); goto fail;
-        }
+        if (installed & (1u << i)) d->saved[i] = old->saved[i];
+        else if (sigaction(signals[i].signum, NULL, &d->saved[i]) < 0) { free(d); goto fail; }
     }
+    begin_transfer(-1, old, d);
     alternate_stack();
-    Dispositions *old = atomic_exchange(&originals, d);
+    atomic_store(&originals, d);
     while (atomic_load(&readers)) {}
-    free(old);
     atomic_store(&settings, opts);
     struct sigaction action = { .sa_sigaction = fatal, .sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER };
     sigemptyset(&action.sa_mask);
     sigaddset(&action.sa_mask, SIGPIPE);
     for (size_t i = 0; i < NSIGNALS; i++) {
+        if (installed & (1u << i)) continue;
         if (sigaction(signals[i].signum, &action, NULL) != 0) {
             int error = errno;
-            while (i) { i--; sigaction(signals[i].signum, &d->saved[i], NULL); }
+            while (i) {
+                i--;
+                if (!(installed & (1u << i))) sigaction(signals[i].signum, &d->saved[i], NULL);
+            }
+            atomic_store(&transfer.signal, 0);
+            free(old);
             errno = error;
             goto fail;
         }
     }
-    if (++next_generation == 0) next_generation++;
-    atomic_store_explicit(&generation, next_generation, memory_order_release);
-    pthread_mutex_unlock(&config_lock);
+    atomic_store(&fatal_mask, ALL_FATAL);
+    update_publication();
+    atomic_store(&transfer.signal, 0);
+    free(old);
+    unlock_config();
     return 0;
 fail:
-    pthread_mutex_unlock(&config_lock);
+    unlock_config();
     return -1;
 }
 int imre_fault_disable(void) {
-    pthread_mutex_lock(&config_lock);
-    int enabled = atomic_exchange(&generation, 0) != 0;
-    if (enabled) {
+    if (lock_config() < 0) return 0;
+    unsigned installed = atomic_load(&fatal_mask);
+    if (installed) {
         Dispositions *d = atomic_load(&originals);
-        for (size_t i = 0; i < NSIGNALS; i++) sigaction(signals[i].signum, &d->saved[i], NULL);
+        begin_transfer(-1, d, d);
+        for (size_t i = 0; i < NSIGNALS; i++) {
+            if (installed & (1u << i)) sigaction(signals[i].signum, &d->saved[i], NULL);
+        }
+        atomic_store(&fatal_mask, 0);
+        update_publication();
+        atomic_store(&transfer.signal, 0);
     }
-    pthread_mutex_unlock(&config_lock);
-    return enabled;
+    unlock_config();
+    return installed != 0;
 }
 #else
 /* Native signal management is implemented for Imre's Linux and macOS hosts. */
 int imre_fault_enable(int fd, int all, int stack) { (void)fd;(void)all;(void)stack;errno=ENOSYS;return -1; }
 int imre_fault_disable(void) { return 0; }
+int imre_fault_enabled(void) { return 0; }
 uint32_t imre_fault_generation(void) { return 0; }
 void imre_fault_frame(size_t i,const char*f,size_t fl,const char*n,size_t nl,uint32_t l)
     { (void)i;(void)f;(void)fl;(void)n;(void)nl;(void)l; }

@@ -150,6 +150,7 @@ pub(crate) struct Context {
     fork_hooks: [Vec<Id>; 3],
     // The fatal handler borrows its descriptor while Python retains the destination.
     fault_file: Option<Id>,
+    fault_user_files: HashMap<i32, Id>,
     exit_callbacks: Vec<Id>,
     finalizing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // The active stack roots suspended contexts while Context.run executes native code.
