@@ -348,13 +348,26 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
             Value::Bool(value) => Some(i64::from(*value)),
             _ => None,
         };
+        let add = |sum: i64, &id: &Id| sum.checked_add(small_integer(ctx.heap.get(id))?);
         if matches!(ctx.heap.get(iterator), Value::Iterator { .. })
-            && let IteratorSlice::Values(items) = ctx.iterator_remaining(iterator)?
-            && let Some(sum) = std::iter::once(&item)
-                .chain(items)
-                .try_fold(integer, |sum, &id| {
-                    sum.checked_add(small_integer(ctx.heap.get(id))?)
-                })
+            && let Some(sum) = (match ctx.iterator_remaining(iterator)? {
+                IteratorSlice::Values(items) => {
+                    std::iter::once(&item).chain(items).try_fold(integer, add)
+                }
+                IteratorSlice::Reversed(items) => std::iter::once(&item)
+                    .chain(items.iter().rev())
+                    .try_fold(integer, add),
+                IteratorSlice::Bytes(bytes) | IteratorSlice::ReversedBytes(bytes) => {
+                    add(integer, &item).and_then(|first| {
+                        // Bytes are nonnegative, so both directions overflow at the same total.
+                        // Each bounded chunk fits in i64 and lets LLVM vectorize the reduction.
+                        bytes.chunks(1 << 16).try_fold(first, |sum, chunk| {
+                            sum.checked_add(chunk.iter().copied().map(i64::from).sum::<i64>())
+                        })
+                    })
+                }
+                _ => None,
+            })
         {
             // These exact integer additions cannot call Python or allocate intermediate values.
             if let Value::Iterator { sequence, .. } = ctx.heap.get_mut(iterator) {
