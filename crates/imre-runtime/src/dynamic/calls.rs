@@ -8502,9 +8502,34 @@ impl Context {
         self.scalar_scope_name(scope, member)?
     }
 
+    /// A generated annotation can close over a local type name. For an integer
+    /// argument, prove that it names the builtin float without evaluating Python.
+    fn captured_float_reference(&self, scope: Id, name: &str) -> Option<Id> {
+        if name.contains('.') {
+            return None;
+        }
+        let cells = &self.scope_data(scope).closure.cells;
+        let binding = |name: &str| match self.heap.get(*cells.get(name)?) {
+            Value::Cell(value) => *value,
+            _ => None,
+        };
+        let class_binding = if cells.contains_key("__classdict__") {
+            self.scalar_dict_name(binding("__classdict__")?, name)?
+        } else {
+            None
+        };
+        let value = class_binding.or_else(|| binding(name))?;
+        (self.builtins.get("float") == Some(&value)).then_some(value)
+    }
+
     /// Use published annotations first. An unread generated provider can prove a
     /// module binding without executing it, including when transferred to another function.
-    fn checked_annotation(&self, function: Id, slot: &str) -> Result<Option<Id>> {
+    fn checked_annotation(
+        &self,
+        function: Id,
+        slot: &str,
+        integer_argument: bool,
+    ) -> Result<Option<Id>> {
         let Value::Function {
             fields,
             scope: owner,
@@ -8553,7 +8578,11 @@ impl Context {
         } else {
             scope
         };
-        Ok(self.module_type_reference(scope, name))
+        let target = self.module_type_reference(scope, name);
+        if target.is_none() && integer_argument && !postponed {
+            return Ok(self.captured_float_reference(scope, name));
+        }
+        Ok(target)
     }
 
     fn require_scalar(
@@ -8574,15 +8603,20 @@ impl Context {
             }
             _ => None,
         };
-        let bound = self.checked_annotation(function, slot)?.and_then(|target| {
-            let family = match self.heap.get(target) {
-                Value::Class { ancestors, .. } => ancestors.iter().find_map(|&base| scalar(base)),
-                Value::None => Some("None"),
-                _ => scalar(target),
-            }?;
-            Some((target, family))
-        });
         let boxed = self.heap.get(value);
+        let integer_argument = slot != "return" && matches!(boxed, Value::Int(_));
+        let bound = self
+            .checked_annotation(function, slot, integer_argument)?
+            .and_then(|target| {
+                let family = match self.heap.get(target) {
+                    Value::Class { ancestors, .. } => {
+                        ancestors.iter().find_map(|&base| scalar(base))
+                    }
+                    Value::None => Some("None"),
+                    _ => scalar(target),
+                }?;
+                Some((target, family))
+            });
         let expected = if let Some((target, family)) = bound {
             if let Value::Instance { class, .. } = boxed
                 && (*class == target
@@ -8597,6 +8631,10 @@ impl Context {
                     "TypeError",
                     format!("{context} requires {family}"),
                 ));
+            }
+            // The boxed parameter retains the integer itself, including in a closure.
+            if integer_argument && family == "float" {
+                return Ok(());
             }
             family
         } else if matches!(
