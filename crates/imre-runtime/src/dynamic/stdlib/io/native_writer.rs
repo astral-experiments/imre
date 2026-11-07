@@ -78,7 +78,9 @@ pub(super) fn flush_and_close(
     close_raw: impl FnOnce(&mut Context) -> Result<Id>,
 ) -> Result<Id> {
     // invoke keeps the exception alive across the raw close callback.
-    let flushed = super::text_wrapper::invoke(ctx, receiver, "flush", vec![]);
+    let flushed = super::text_wrapper::invoke_with(ctx, receiver, "flush", |ctx, method| {
+        descriptor_buffer::flush_before_close(ctx, receiver, method)
+    });
     match (flushed, close_raw(ctx)) {
         (Err(flush), Err(mut close)) => {
             close.context = ctx.raised_instance(flush);
@@ -219,6 +221,9 @@ pub(super) fn call(
         return fd.active.run(|| match name {
             "raw" => Ok(fd.raw),
             "name" | "mode" => ctx.lookup_attr(fd.raw, name),
+            "truncate" if fd.retired_write_offset().is_some() => {
+                Err(Error::new("ValueError", "truncate of closed file"))
+            }
             "truncate" if owner == "BufferedRandom" => fd.call(ctx, receiver, name, args),
             "truncate" => {
                 fd.call(ctx, receiver, "flush", &[])?;

@@ -105,8 +105,34 @@ struct RawWriter<'a> {
 }
 
 pub(super) fn raw_write(ctx: &mut Context, raw: Id, data: &[u8]) -> Result<Option<usize>> {
+    with_write_temporaries(ctx, |ctx| RawWriter::call_raw(ctx, raw, data))
+}
+
+/// Pass an owned buffer window to a Python raw writer without borrowing the bytes across the call.
+pub(super) fn write_window(
+    ctx: &mut Context,
+    raw: Id,
+    buffer: Id,
+    start: usize,
+    len: usize,
+) -> Result<usize> {
+    with_write_temporaries(ctx, |ctx| {
+        let view = ctx.ownerless_byte_view(buffer, start, len, true)?;
+        match RawWriter::call_view(ctx, raw, view, len)? {
+            RawCount::Written(count) => Ok(count),
+            RawCount::WouldBlock(errno) => {
+                Err(super::descriptor_buffer::blocking_error(ctx, errno, 0))
+            }
+        }
+    })
+}
+
+fn with_write_temporaries<T>(
+    ctx: &mut Context,
+    write: impl FnOnce(&mut Context) -> Result<T>,
+) -> Result<T> {
     let mark = ctx.heap.temporary_mark();
-    let result = RawWriter::call_raw(ctx, raw, data);
+    let result = write(ctx);
     ctx.heap.release_temporaries_since(mark);
     if let Err(error) = &result {
         for id in error.roots() {
@@ -114,6 +140,11 @@ pub(super) fn raw_write(ctx: &mut Context, raw: Id, data: &[u8]) -> Result<Optio
         }
     }
     result
+}
+
+enum RawCount {
+    Written(usize),
+    WouldBlock(i32),
 }
 
 impl RawWriter<'_> {
@@ -132,36 +163,50 @@ impl RawWriter<'_> {
             readonly: false,
             hash: None,
         });
+        Ok(match Self::call_view(ctx, raw, view, data.len())? {
+            RawCount::Written(count) => Some(count),
+            RawCount::WouldBlock(_) => None,
+        })
+    }
+
+    fn call_view(ctx: &mut Context, raw: Id, view: Id, len: usize) -> Result<RawCount> {
         // Attribute lookup itself can invoke Python and collect temporaries.
         ctx.heap.keep(view);
         let retry_mark = ctx.heap.temporary_mark();
-        let result = loop {
-            match invoke(ctx, raw, "write", vec![view]) {
+        let (result, raw_errno) = loop {
+            // A raw returning None can leave a syscall errno, including EAGAIN.
+            errno::set_errno(errno::Errno(0));
+            let mut raw_errno = 0;
+            let result = super::text_wrapper::invoke_with(ctx, raw, "write", |ctx, write| {
+                let result = ctx.call(write, vec![view], Vec::new());
+                raw_errno = errno::errno().0;
+                result
+            });
+            match result {
                 Err(error) if ctx.has_errno(&error, libc::EINTR) => {
                     ctx.heap.release_temporaries_since(retry_mark);
                     continue;
                 }
-                result => break result?,
+                result => break (result?, raw_errno),
             }
         };
         if result == NONE {
-            return Ok(None);
+            return Ok(RawCount::WouldBlock(raw_errno));
         }
         let count = ctx
             .index_integer(result)
             .ok()
             .and_then(|n| n.to_i64())
             .unwrap_or(-1);
-        if count < 0 || count as u64 > data.len() as u64 {
+        if count < 0 || count as u64 > len as u64 {
             return Err(Error::new(
                 "OSError",
                 format!(
-                    "raw write() returned invalid length {count} (should have been between 0 and {})",
-                    data.len()
+                    "raw write() returned invalid length {count} (should have been between 0 and {len})"
                 ),
             ));
         }
-        Ok(Some(count as usize))
+        Ok(RawCount::Written(count as usize))
     }
 }
 
@@ -205,7 +250,7 @@ impl Drop for Lock<'_> {
     }
 }
 
-fn position(ctx: &mut Context, result: Id) -> Result<i64> {
+pub(super) fn position(ctx: &mut Context, result: Id) -> Result<i64> {
     let pos = ctx.index_integer(result)?.to_i64().ok_or_else(|| {
         Error::new(
             "ValueError",
