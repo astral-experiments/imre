@@ -205,6 +205,16 @@ impl FormatPart {
     }
 }
 
+/// Count normalized positions without traversing the slice or negating a minimum stride.
+fn slice_count(start: i64, end: i64, step: i64) -> usize {
+    let distance = if step > 0 {
+        end.saturating_sub(start)
+    } else {
+        start.saturating_sub(end)
+    };
+    (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize
+}
+
 fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
     std::iter::successors(Some(start), move |&i| i.checked_add(step))
         .take_while(move |&i| if step > 0 { i < end } else { i > end })
@@ -3648,12 +3658,7 @@ impl Context {
             _ => unreachable!("validated sequence"),
         };
         let [start, end, step] = super::slice::normalize(bounds, len as i64);
-        let distance = if step > 0 {
-            end.saturating_sub(start)
-        } else {
-            start.saturating_sub(end)
-        };
-        let count = (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize;
+        let count = slice_count(start, end, step);
         let positions = slice_positions(start, end, step);
         let result = match self.heap.get(obj) {
             Value::SurrogateStr(points) => {
@@ -3696,38 +3701,70 @@ impl Context {
         Ok(self.alloc(result))
     }
 
-    /// Materialize the iterable before normalizing against the possibly resized destination.
+    /// Borrow disjoint arrays directly and finish arbitrary iterators before normalizing.
     fn set_list_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
         let bounds = super::slice::sequence_components(self, parts)?;
-        let replacement = source
-            .map(|source| {
-                self.fast_sequence_values(source, "must assign iterable to extended slice")
-            })
-            .transpose()?;
-        let Value::List(target) = self.heap.get_mut(obj) else {
-            unreachable!("list slice receiver")
+        let owned;
+        let (target, replacement, observe_removed) = if let Some(source) = source
+            && source != obj
+            && matches!(self.heap.get(source), Value::List(_) | Value::Tuple(_))
+        {
+            let observe = self.heap.has_weak_values;
+            let (source, Value::List(target)) = self.heap.source_and_target(source, obj).unwrap()
+            else {
+                unreachable!("list slice receiver")
+            };
+            let (Value::List(items) | Value::Tuple(items)) = source else {
+                unreachable!("exact replacement sequence")
+            };
+            (target, Some(items.as_slice()), observe)
+        } else {
+            owned = source
+                .map(|source| {
+                    self.fast_sequence_values(source, "must assign iterable to extended slice")
+                })
+                .transpose()?;
+            let observe = self.heap.has_weak_values;
+            let Value::List(target) = self.heap.get_mut(obj) else {
+                unreachable!("list slice receiver")
+            };
+            (target, owned.as_deref(), observe)
         };
         let [start, end, step] = super::slice::normalize(bounds, target.len() as i64);
         let positions = slice_positions(start, end, step);
-        let count = positions.clone().count();
-        let removed = sliced_values(target, positions.clone(), count)?;
+        let count = slice_count(start, end, step);
+        if step != 1
+            && let Some(values) = replacement
+            && values.len() != count
+        {
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "attempt to assign sequence of size {} to extended slice of size {count}",
+                    values.len()
+                ),
+            ));
+        }
+        // The heap only observes displaced weak edges. Most lists can be changed
+        // directly without allocating and traversing a second set of slots.
+        let removed = if observe_removed {
+            sliced_values(target, positions.clone(), count)?
+        } else {
+            Vec::new()
+        };
         if step == 1 {
             let replacement = replacement.unwrap_or_default();
             target
                 .try_reserve(replacement.len().saturating_sub(count))
                 .map_err(slice_memory_error)?;
-            target.splice(start as usize..end.max(start) as usize, replacement);
-        } else if let Some(replacement) = replacement {
-            if replacement.len() != count {
-                return Err(Error::new(
-                    "ValueError",
-                    format!(
-                        "attempt to assign sequence of size {} to extended slice of size {count}",
-                        replacement.len()
-                    ),
-                ));
+            let range = start as usize..end.max(start) as usize;
+            if count == replacement.len() {
+                target[range].copy_from_slice(replacement);
+            } else {
+                target.splice(range, replacement.iter().copied());
             }
-            for (i, value) in positions.zip(replacement) {
+        } else if let Some(replacement) = replacement {
+            for (i, &value) in positions.zip(replacement) {
                 target[i] = value;
             }
         } else {

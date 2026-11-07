@@ -1,5 +1,6 @@
 import sys
 import unittest
+import weakref
 
 
 class RestorePath(unittest.TestCase):
@@ -70,3 +71,17 @@ def current():
     else:
         raise AssertionError("ignored length hint failure")
     assert items == [1, 2, 3, 4] and calls == ["iter", "iter", "hint"]
+
+    # Consuming the replacement can introduce the first weak observer.
+    class Element:
+        pass
+
+    target = [Element()]
+    observers = []
+
+    def empty_replacement():
+        observers.append(weakref.ref(target[0]))
+        yield from ()
+
+    list.__setitem__(target, slice(None), empty_replacement())
+    assert observers[0]() is None
