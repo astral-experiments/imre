@@ -5,7 +5,11 @@ use num_traits::{Signed, ToPrimitive};
 use super::{Error, Int, Kind, Result};
 
 /// Batch word-sized numerator and denominator factors before touching wide digits.
-fn word_comb(n: usize, steps: usize) -> Int {
+fn word_comb(n: usize, steps: usize) -> Result<Int> {
+    // For a dense coefficient, the odd-only sieve takes about one byte per step or less.
+    if steps >= 1024 && steps >= n.div_ceil(16) {
+        return dense(n, steps);
+    }
     let mut wide = None;
     let (mut numerator, mut denominator) = (1_usize, 1_usize);
     for divisor in 1..=steps {
@@ -23,10 +27,10 @@ fn word_comb(n: usize, steps: usize) -> Int {
             denominator = divisor;
         }
     }
-    match wide {
+    Ok(match wide {
         Some(result) => Int::new(result * numerator / denominator),
         None => Int::from_usize(numerator / denominator),
-    }
+    })
 }
 
 /// Compute math.comb for either entry point after both arguments have been indexed.
@@ -35,11 +39,11 @@ pub(super) fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
         && n >= 0
         && k >= 0
     {
-        return Ok(if k > n {
-            Int::from(0)
+        return if k > n {
+            Ok(Int::from(0))
         } else {
             word_comb(n as usize, k.min(n - k) as usize)
-        });
+        };
     }
     let (value, k) = (n.big(), k.big());
     if value.is_negative() {
@@ -79,4 +83,64 @@ pub(super) fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
         result /= divisor;
     }
     Ok(Int::new(result))
+}
+
+/// Multiply the surviving prime powers of `n! / (k! * (n - k)!)`.
+fn dense(n: usize, k: usize) -> Result<Int> {
+    let words = (n / 2 + 1).div_ceil(u64::BITS as usize);
+    let mut composites = Vec::new();
+    composites
+        .try_reserve_exact(words)
+        .map_err(|_| Error::allocation())?;
+    composites.resize(words, 0_u64);
+
+    let mut groups = Vec::new();
+    groups.try_reserve(1).map_err(|_| Error::allocation())?;
+    groups.push(prime_power(n, k, 2));
+    for prime in (3..=n).step_by(2) {
+        let index = prime / 2;
+        if composites[index / 64] & (1 << (index % 64)) != 0 {
+            continue;
+        }
+        if prime <= n / prime {
+            for multiple in (prime * prime..=n).step_by(2 * prime) {
+                let index = multiple / 2;
+                composites[index / 64] |= 1 << (index % 64);
+            }
+        }
+        let factor = prime_power(n, k, prime);
+        let group = groups.last_mut().expect("initial factor from two");
+        if let Some(product) = group.checked_mul(factor) {
+            *group = product;
+        } else {
+            groups.try_reserve(1).map_err(|_| Error::allocation())?;
+            groups.push(factor);
+        }
+    }
+    Ok(Int::new(product(&groups)))
+}
+
+/// Subtract the denominator factorial valuations at each power of the prime.
+fn prime_power(mut n: usize, mut k: usize, prime: usize) -> usize {
+    let mut complement = n - k;
+    let mut factor = 1;
+    while n >= prime {
+        n /= prime;
+        k /= prime;
+        complement /= prime;
+        // The difference is a carry of zero or one, so the final prime power fits n.
+        if n > k + complement {
+            factor *= prime;
+        }
+    }
+    factor
+}
+
+/// Pair similarly sized products so large multiplications use balanced operands.
+fn product(groups: &[usize]) -> BigInt {
+    if groups.len() == 1 {
+        return BigInt::from(groups[0]);
+    }
+    let (left, right) = groups.split_at(groups.len() / 2);
+    product(left) * product(right)
 }
