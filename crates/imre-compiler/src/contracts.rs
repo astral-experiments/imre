@@ -169,6 +169,7 @@ impl Builtin {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
                     | TextOperation::ZFill { .. }
+                    | TextOperation::EastAsianWidth
                     | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper

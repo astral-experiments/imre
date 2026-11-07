@@ -1404,6 +1404,12 @@ pub(super) enum Value {
     },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
+    /// Captured arguments are kept alive across calls, including Python attribute hooks.
+    MethodCaller {
+        name: Id,
+        args: Id,
+        keywords: Id,
+    },
     ThreadLocal(super::thread_local::Dictionaries),
     ThreadHandle(std::sync::Arc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
@@ -1725,6 +1731,7 @@ impl Value {
                 "member_descriptor"
             }
             Self::ItemGetter(_) => "operator.itemgetter",
+            Self::MethodCaller { .. } => "operator.methodcaller",
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
@@ -1933,6 +1940,11 @@ impl Value {
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::TupleGetter { doc, .. } => visit.extend(doc),
             Self::ItemGetter(keys) => visit.push(*keys),
+            Self::MethodCaller {
+                name,
+                args,
+                keywords,
+            } => visit.extend([*name, *args, *keywords]),
             Self::KeyWrapper { comparator, object } => {
                 visit.push(*comparator);
                 visit.extend(object);
@@ -2942,8 +2954,8 @@ pub(super) struct Heap {
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
-    // Weak loader identities; the source bytes belong to the executable.
-    pub(super) loader_sources: HashMap<Id, (String, &'static [u8])>,
+    // Weak loader identities. The executable owns the initializer and any embedded bytes.
+    pub(super) loader_sources: HashMap<Id, super::SourceModule>,
     frames: Vec<Frame>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
@@ -4253,24 +4265,30 @@ impl Heap {
 
     fn publish_fault_frames(&self, generation: u32) {
         let depth = self.python_depth();
-        for index in depth.saturating_sub(crate::fault_handler::MAX_FRAMES)..depth {
+        // Rebuild from the leaf. An interrupted refresh can expose a real prefix
+        // of this traceback, but cannot attach older records to the new calls.
+        crate::fault_handler::truncate(0);
+        for index in (depth.saturating_sub(crate::fault_handler::MAX_FRAMES)..depth).rev() {
             self.publish_fault_frame(index);
         }
-        crate::fault_handler::truncate(depth);
         self.fault_generation.set(Some(generation));
     }
 
     /// A new enable period needs all callers, including those already on the stack.
     fn fault_frames_current(&mut self) -> bool {
         let generation = crate::fault_handler::generation();
-        if generation == 0 {
-            let Some(workers) = self.fault_workers.get_mut() else {
-                return false;
-            };
-            if workers.strong_count() == 0 {
-                *self.fault_workers.get_mut() = None;
-                return false;
+        if generation == 0
+            && self
+                .fault_workers
+                .get_mut()
+                .as_ref()
+                .is_none_or(|workers| workers.strong_count() == 0)
+        {
+            *self.fault_workers.get_mut() = None;
+            if self.fault_generation.take().is_some() {
+                crate::fault_handler::truncate(0);
             }
+            return false;
         }
         if self.fault_generation.get() != Some(generation) {
             self.publish_fault_frames(generation);

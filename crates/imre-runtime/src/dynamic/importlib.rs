@@ -511,29 +511,31 @@ impl Context {
             .find(|source| source.path == Path::new(filename))
     }
 
-    /// Associate embedded bytes with the loader issued for this registration.
+    /// Bind the issued loader to its initializer, including modules compiled without source text.
     pub(super) fn bind_loader_source(&mut self, loader: Id, name: Id, origin: Id) -> Result<()> {
         let filename = self.str_value(origin)?;
-        if let Some(bytes) = self
-            .registered_file(self.str_value(name)?, filename)
-            .and_then(|entry| entry.bundled_text)
-        {
-            let filename = filename.to_owned();
-            self.heap.loader_sources.insert(loader, (filename, bytes));
+        if let Some(source) = self.registered_file(self.str_value(name)?, filename) {
+            let source = super::SourceModule {
+                path: filename.into(),
+                ..*source
+            };
+            self.heap.loader_sources.insert(loader, source);
         }
         Ok(())
     }
 
-    pub(super) fn registered_source_data(&self, loader: Id, filename: Id) -> Option<&'static [u8]> {
-        let (origin, bytes) = self.heap.loader_sources.get(&loader)?;
-        (self.str_value(filename).ok()? == origin).then_some(*bytes)
+    fn loader_source(&self, loader: Id, filename: Id) -> Option<&super::SourceModule> {
+        let source = self.heap.loader_sources.get(&loader)?;
+        (source.path.to_str()? == self.str_value(filename).ok()?).then_some(source)
     }
 
-    /// Return the registered body for this loader, or None to read the source through get_data.
-    pub(super) fn registered_code(&mut self, name: Id, path: Id) -> Result<Id> {
-        let name = self.str_value(name)?;
-        let filename = self.str_value(path)?;
-        if let Some(source) = self.registered_file(name, filename) {
+    pub(super) fn registered_source_data(&self, loader: Id, filename: Id) -> Option<&'static [u8]> {
+        self.loader_source(loader, filename)?.bundled_text
+    }
+
+    /// Return the issued loader's body, or None to compile through its normal file hooks.
+    pub(super) fn registered_code(&mut self, loader: Id, path: Id) -> Result<Id> {
+        if let Some(source) = self.loader_source(loader, path) {
             let (entry, path) = (source.code, source.path.clone());
             return self.module_code(entry, &path);
         }

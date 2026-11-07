@@ -46,6 +46,57 @@ pub(super) fn itemgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(ctx.alloc(Value::ItemGetter(keys)))
 }
 
+pub(super) fn methodcaller(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&name, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "methodcaller needs at least one argument, the method name",
+        ));
+    };
+    if ctx.string_storage(name).is_none() {
+        return Err(Error::new("TypeError", "method name must be a string"));
+    }
+    let args = ctx.alloc(Value::Tuple(args.to_vec()));
+    let keywords = ctx.dict(Vec::new());
+    for (key, value) in kwargs {
+        let key = ctx.text(key);
+        ctx.put_item(keywords, key, *value)?;
+    }
+    Ok(ctx.alloc(Value::MethodCaller {
+        name,
+        args,
+        keywords,
+    }))
+}
+
+pub(super) fn reduce_methodcaller(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let receiver =
+        builtins::noargs_method_receiver(ctx, "operator.methodcaller", "__reduce__", args, kwargs)?;
+    let Value::MethodCaller {
+        name,
+        args,
+        keywords,
+    } = *ctx.heap.get(receiver)
+    else {
+        unreachable!("validated methodcaller receiver");
+    };
+    let class = ctx.builtin("operator.methodcaller");
+    let kw = ctx.keyword_args(keywords)?;
+    let (constructor, args) = if kw.is_empty() {
+        let mut all = vec![name];
+        all.extend(ctx.items(args)?);
+        (class, ctx.alloc(Value::Tuple(all)))
+    } else {
+        let partial = ctx.builtin("functools.partial");
+        (ctx.call(partial, vec![class, name], kw)?, args)
+    };
+    Ok(ctx.alloc(Value::Tuple(vec![constructor, args])))
+}
+
 /// Reconstruct the getter with the original positional key objects, including a single tuple key.
 pub(super) fn reduce_itemgetter(
     ctx: &mut Context,
@@ -108,6 +159,46 @@ impl Context {
                 .iter()
                 .try_fold(obj, |obj, name| ctx.lookup_attr(obj, name))
         })
+    }
+
+    pub(in super::super) fn apply_methodcaller(
+        &mut self,
+        caller: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let [receiver] = *args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("methodcaller expected 1 argument, got {}", args.len()),
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "methodcaller() takes no keyword arguments",
+            ));
+        }
+        let Value::MethodCaller {
+            name,
+            args: stored,
+            keywords,
+        } = *self.heap.get(caller)
+        else {
+            unreachable!("methodcaller dispatch")
+        };
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(caller);
+        self.heap.keep(receiver);
+        let result = (|| {
+            let attr = builtins::attribute_name(self, name)?;
+            let method = self.lookup_named_attr(receiver, &attr, Some(name))?;
+            self.heap.keep(method);
+            let args = self.items(stored)?;
+            let kwargs = self.keyword_args(keywords)?;
+            self.call(method, args, kwargs)
+        })();
+        self.release_with_result(mark, result)
     }
 
     pub(in super::super) fn apply_itemgetter(
@@ -198,7 +289,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, owner: Id, scope: Id, modul
             ctx.bind(scope, &alias, function);
         }
     }
-    for name in ["attrgetter", "itemgetter"] {
+    for name in ["attrgetter", "itemgetter", "methodcaller"] {
         let class = ctx.builtin(&format!("operator.{name}"));
         ctx.bind(scope, name, class);
     }

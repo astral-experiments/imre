@@ -428,6 +428,7 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("array.array", Value::Array(_))
+            | ("operator.methodcaller", Value::MethodCaller { .. })
             | (stdlib::functools::PARTIAL_CLASS, Value::Partial { .. })
             | (stdlib::functools::LRU_CACHE_CLASS, Value::Cached { .. })
             | ("set", Value::Set { frozen: false, .. })
@@ -1928,6 +1929,9 @@ impl Context {
                 items
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
+                // The Rust vector is invisible to the collector during the next Python call.
+                self.heap.reserve_temporaries(1)?;
+                self.heap.keep(item);
                 items.push(item);
             }
             return Ok(items);
@@ -3760,7 +3764,6 @@ impl Context {
                     "_predicate_state",
                     "_chain_allocate",
                     "_chain_next",
-                    "_chain_set",
                 ] {
                     let value = self.builtin(&format!("{name}.{attr}"));
                     self.bind(scope, attr, value);

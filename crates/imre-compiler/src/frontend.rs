@@ -9799,6 +9799,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::WeakProxy)) => {
                 return self.weak_proxy(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::UnicodeEastAsianWidth)) => {
+                return self.unicode_east_asian_width(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::UnicodeNormalize { check })) => {
                 return self.unicode_normalize(call, check);
             }

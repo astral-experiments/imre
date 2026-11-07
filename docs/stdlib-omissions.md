@@ -175,7 +175,7 @@ Omit `test.test_uuid.TestUUIDWithoutExtModule.test_safe_uuid_enum`, occurrence 1
 
 ### `decimal`
 
-The 53 omissions above cover the 44 main families. All eight supplemental omissions remain in Decimal’s raw denominator of 732. None increases the 374 paired passes. Stock skipped the five originals that require `-DEXTRA_FUNCTIONALITY`. At both native levels, the two `CFunctionality` originals skipped for that build option and the six `CWhitebox` originals skipped because `_decimal` was unavailable. The related originals below passed on stock, O0 and O3. [Public run revision](https://github.com/astral-experiments/imre/commit/1070ab0fccbe63e002c85d1b44bbc1f60a8845f4)
+The 53 omissions above cover the 44 main families. Decimal keeps all eight omissions in its raw denominator of 732. None increases the 374 paired passes. Stock skipped the five originals that require `-DEXTRA_FUNCTIONALITY`. At both native levels, the two `CFunctionality` originals skipped for that build option and the six `CWhitebox` originals skipped because `_decimal` was unavailable. The related originals below passed on stock, O0 and O3. [Public run revision](https://github.com/astral-experiments/imre/commit/1070ab0fccbe63e002c85d1b44bbc1f60a8845f4)
 
 | Original CPython test | Occurrence | Stock | Decision and reason | Public behavior checked |
 | --- | ---: | --- | --- | --- |
@@ -189,6 +189,12 @@ The 53 omissions above cover the 44 main families. All eight supplemental omissi
 | [`test.test_decimal.CWhitebox.test_c_signaldict_segfault`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_decimal.py#L5752-L5780) | 1 | Passed | The test directly constructs an unattached C `SignalDict` and expects `ValueError` with the text `invalid signal dict` when reading, writing, comparing or copying it. | Reading, updating and comparing flags and traps on a live context (`PyContextFlags.test_flag_comparisons`). |
 
 `test.test_decimal.CWhitebox.test_sizeof` (occurrence 1) stays in scope. It requires an ordinary `Decimal(0)` to report a positive size before it checks the exact four- or eight-byte increments of libmpdec’s coefficient storage. [Pinned assertions](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_decimal.py#L5691-L5703)
+
+### `test_urllib2`
+
+For the separate 80-case replay, omit the requirement in `test.test_urllib2.TrivialTests.test_trivial` (occurrence 1, position 80) that `urllib.request.__file__` name a file on disk. The test constructs a file URL from that path and reads it with `urlopen`. It passed on disk-backed CPython 3.14.5 and errored on both zip-backed CPython 3.14.5 and embedded Imre. Reading real files through file URLs stays in scope. Both real-file URL controls passed. [Pinned CPython test, lines 60–69](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_urllib2.py#L60-L69).
+
+At O0 and O3, Imre’s module loader returned the same 64,632 embedded source bytes through ordinary and late imports. A fresh `SourceFileLoader` read the physical file, saw its replacement and raised `FileNotFoundError` after deletion. The unmodified suite retains all 80 originals with 77 passes, two platform skips and one error. The historical `urllib` row counts 173/178 separately. [Public loader and replay evidence, #5812](https://github.com/astral-experiments/imre/pull/5812).
 
 ## Reviewed cases still in scope
 

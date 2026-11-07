@@ -827,6 +827,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             super::namedtuple::GETTER
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
+        Value::MethodCaller { .. } if attr == "__reduce__" => "operator.methodcaller",
         Value::NamedTuple {
             class: Some(owner), ..
         } if let Some(layout) = super::stdlib::os::stat::layout(owner)

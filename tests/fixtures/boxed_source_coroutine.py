@@ -130,6 +130,8 @@ async def forward(awaitable):
 
     awaited_call_arguments()
     awaited_binary_operands()
+    awaited_conditions()
+    awaited_receiver()
 
 
 def awaited_call_arguments():
@@ -253,3 +255,119 @@ def awaited_binary_operands():
     else:
         raise AssertionError("awaited difference did not return")
     assert calls == ['right', 'subtract']
+
+
+def completed_send(task, value):
+    try:
+        task.send(value)
+    except StopIteration as done:
+        return done.value
+    raise AssertionError('coroutine yielded instead of returning')
+
+
+def awaited_conditions():
+    events = []
+
+    def pause(label):
+        events.append(label)
+        return Pause()
+
+    class Verdict:
+        def __bool__(self):
+            events.append('truth')
+            return events.count('truth') > 1
+
+    verdict = Verdict()
+
+    class Left:
+        def __lt__(self, right):
+            events.append('compare')
+            return verdict
+
+    async def choose():
+        while await pause('wait') != 0:
+            if not await pause('retry'):
+                continue
+            if Left() < await pause('middle') < pause('unreachable'):
+                raise AssertionError('false comparison chain')
+            return await pause('result') or pause('skipped')
+        return None
+
+    task = choose()
+    assert task.send(None) == 'paused'
+    assert task.send(1) == 'paused'
+    assert task.send(False) == 'paused'
+    assert task.send(2) == 'paused'
+    assert task.send(True) == 'paused'
+    assert task.send(3) == 'paused'
+    assert completed_send(task, 42) == 42
+    assert events == ['wait', 'retry', 'wait', 'retry', 'middle', 'compare', 'truth', 'result']
+
+    async def value():
+        return Left() < await pause('middle') < pause('skipped')
+
+    events.clear()
+    task = value()
+    assert task.send(None) == 'paused'
+    assert completed_send(task, 1) is verdict
+    assert events == ['middle', 'compare', 'truth']
+
+    async def mixed():
+        return ((Left() < await pause('middle') < pause('skipped')) and 'end') or 'fallback'
+
+    events.clear()
+    task = mixed()
+    assert task.send(None) == 'paused'
+    assert completed_send(task, 1) == 'end'
+    assert events == ['middle', 'compare', 'truth', 'truth']
+
+
+    # A short-circuit in the fall-through arm can select the final result
+    # directly. The other arm materializes its result before the enclosing and.
+    async def tail(flag):
+        return (None if flag else ((await Pause()) and 'inner')) and 'outer'
+
+    async def head(flag):
+        return (((await Pause()) and 'inner') if flag else None) and 'outer'
+
+    for build, flag, expected, count in [(tail, False, verdict, 1), (head, True, 'outer', 2)]:
+        events.clear()
+        task = build(flag)
+        assert task.send(None) == 'paused'
+        result = completed_send(task, verdict)
+        assert result is expected or result == expected
+        assert events == ['truth'] * count
+
+    async def skipped(flag):
+        return (None if flag else (verdict and 'inner')) and await Pause()
+
+    events.clear()
+    assert completed_send(skipped(False), None) is verdict
+    assert events == ['truth']
+
+
+    # Long unparenthesized binary expressions use the same native stack budget as the
+    # ordinary evaluator. The await at the left edge is discovered once during lowering.
+    scope = {}
+    exec("async def one(): return 1\nasync def long_sum(): return await one()" + " + 0" * 12000, scope)
+    assert completed_send(scope['long_sum'](), None) == 1
+
+
+def awaited_receiver():
+    events = []
+
+    class Process:
+        @property
+        def wait(self):
+            events.append('lookup')
+            return Pause
+
+    async def status():
+        return -await (await Pause()).wait()
+
+    task = status()
+    assert task.send(None) == 'paused'
+    assert events == []
+    assert task.send(Process()) == 'paused'
+    assert events == ['lookup']
+    assert completed_send(task, 7) == -7

@@ -2541,6 +2541,34 @@ impl Context {
                             }
                             continue;
                         }
+                        Value::MethodCaller {
+                            name,
+                            args,
+                            keywords,
+                        } => {
+                            if !enter_ancestor(&mut ancestors, id)? {
+                                append_rendered_text(&mut output, "operator.methodcaller(...)")?;
+                                continue;
+                            }
+                            push_frame(&mut active, id)?;
+                            append_rendered_text(&mut output, "operator.methodcaller(")?;
+                            push_frame(&mut work, Part::Leave(id, ")"))?;
+                            for &(key, value) in ctx.dict_entries(*keywords).unwrap().iter().rev() {
+                                push_frame(&mut work, Part::Value(value, true))?;
+                                push_frame(&mut work, Part::Text("="))?;
+                                push_frame(&mut work, Part::Value(key, false))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            let Value::Tuple(positional) = ctx.heap.get(*args) else {
+                                unreachable!("captured positional tuple")
+                            };
+                            for &arg in positional.iter().rev() {
+                                push_frame(&mut work, Part::Value(arg, true))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            push_frame(&mut work, Part::Value(*name, true))?;
+                            continue;
+                        }
                         Value::ItemGetter(keys) => {
                             // Multi-key getters expose this same tuple through __reduce__.
                             let (argument, start, end) = match *ctx.itemgetter_keys(*keys) {

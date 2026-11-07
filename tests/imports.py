@@ -57,6 +57,14 @@ REJECTED = {
     "unused_strptime_preserves_typed_call": ({
         "main.py": "from time import strptime\n" + HELPER + "f('wrong')\n",
     }, "expected int, got str"),
+    "methodcaller_preserves_typed_call": ({
+        "main.py": (
+            "from operator import methodcaller\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(methodcaller('upper')('ok'))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unused_is_tracked_preserves_typed_call": ({
         "main.py": "from gc import is_tracked\n" + HELPER + "f('wrong')\n",
     }, "expected int, got str"),
@@ -720,6 +728,12 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "methodcaller_module_alias": {
+        "main.py": "import operator as op\nprint(op.methodcaller('upper')('ok'))\n",
+    },
+    "methodcaller_from_alias": {
+        "main.py": "from operator import methodcaller as call\nprint(call('replace', 'a', 'b')('abc'))\n",
+    },
     "doctest_qualified_exception": {
         "events_module.py": (
             '"""\n>>> raise Problem("sample event")\nTraceback (most recent call last):\n'
@@ -1436,6 +1450,10 @@ ACCEPTED = {
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
     },
+    "source_loader_external_code": {
+        "main.py": (FIXTURES.parent / "source_loader_external_code.py").read_text(),
+        "local_body.py": "value = 41\n",
+    },
     "bundled_source_loader_data": {
         "main.py": (FIXTURES.parent / "bundled_source_loader_data.py").read_text(),
     },
@@ -1759,7 +1777,7 @@ def main() -> None:
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
-                    "warn_named_helper", "zip_source_spec",
+                    "source_loader_external_code", "warn_named_helper", "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))

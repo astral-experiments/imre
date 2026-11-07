@@ -143,6 +143,57 @@ pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
     finish(result, std::ptr::null())
 }
 
+/// Unicode 16 East_Asian_Width, including its defaults for unassigned code points.
+pub(crate) fn east_asian_width(point: u32) -> &'static str {
+    use icu_properties::{
+        CodePointMapData,
+        props::{EastAsianWidth, NamedEnumeratedProperty},
+    };
+
+    let width = if char::from_u32(point).is_some_and(crate::integer_text::newer_printable) {
+        // ICU 78 includes later assignments. EastAsianWidth-16.0.0.txt gives
+        // unassigned CJK ideographs and undesignated code points in planes 2/3
+        // width W. The default elsewhere is N.
+        match point {
+            0x3400..=0x4dbf
+            | 0x4e00..=0x9fff
+            | 0xf900..=0xfaff
+            | 0x20000..=0x2fffd
+            | 0x30000..=0x3fffd => EastAsianWidth::Wide,
+            _ => EastAsianWidth::Neutral,
+        }
+    } else {
+        CodePointMapData::<EastAsianWidth>::new().get32(point)
+    };
+    width.short_name()
+}
+
+/// Argument Clinic's character converter counts Python code points, including surrogates.
+pub(crate) fn ucd_character(name: &str, mut points: impl Iterator<Item = u32>) -> Result<u32> {
+    let first = points.next();
+    let rest = points.count();
+    if let (Some(point), 0) = (first, rest) {
+        return Ok(point);
+    }
+    let length = usize::from(first.is_some()) + rest;
+    Err(Error::new(
+        Kind::TypeError,
+        format!("{name}(): argument must be a unicode character, not a string of length {length}"),
+    ))
+}
+
+/// # Safety
+/// The caller retains the input string until the result is returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_east_asian_width(text: *const Str) -> *const Str {
+    // SAFETY: the checked caller provides a rooted UTF-8 string.
+    let text = unsafe { &*text };
+    let result = ucd_character("east_asian_width", text.chars().map(u32::from))
+        .and_then(|point| try_owned_string(east_asian_width(point)))
+        .map(StrOwner::into_raw);
+    finish(result, std::ptr::null())
+}
+
 fn ord_length(length: usize) -> Error {
     Error::new(
         Kind::TypeError,

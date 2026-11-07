@@ -19,3 +19,14 @@ def current():
     with case.assertRaises(AssertionError) as changed:
         compare({1: "one"}, {1: "two"}, msg="changed")
     print(str(changed.exception))
+
+    for first, second, comparator in (
+        ({"units": 2}, {"units": 3}, case.assertDictEqual),
+        (["x"], ["y"], case.assertListEqual),
+        (("x",), ("y",), case.assertTupleEqual),
+    ):
+        with case.assertRaises(AssertionError) as direct:
+            comparator(first, second, msg="report")
+        with case.assertRaises(AssertionError) as dispatched:
+            case.assertEqual(first, second, msg="report")
+        assert dispatched.exception.args == direct.exception.args
