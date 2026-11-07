@@ -271,6 +271,7 @@ pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usiz
     let write =
         |text: &str, owner: Option<&crate::StrOwner>| write_piece(Some(&stream), text, owner);
     let result = (|| {
+        let mut wide_digits = String::new();
         for (i, (&kind, &word)) in kinds.iter().zip(words).enumerate() {
             if i > 0 {
                 write(" ", None)?;
@@ -279,12 +280,50 @@ pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usiz
             let (kind, word) = unsafe {
                 super::boxed_values::concrete(super::words::WordKind::new(kind.into()), word)
             };
-            let text = match super::boxed_values::word_text(kind, word, false) {
-                Ok(text) => text,
-                Err(_) if super::exceptions::imre_error_pending() != 0 => return Ok(()),
-                Err(_) => return Err(Error::allocation()),
+            let mut digits = itoa::Buffer::new();
+            let ascii = match kind.raw() {
+                0 => Some("None"),
+                1 => Some(if word == 0 { "False" } else { "True" }),
+                2 => {
+                    // SAFETY: the checked caller roots this integer for the duration of the write.
+                    if let Some(value) = unsafe { crate::Int::borrow(word) }.as_small() {
+                        Some(digits.format(value))
+                    } else {
+                        wide_digits.clear();
+                        // SAFETY: the checked integer remains rooted while its digits are written.
+                        // This formatter also enforces the active integer string conversion limit.
+                        if unsafe { super::values::write_int_repr(&mut wide_digits, word) }.is_err()
+                        {
+                            if super::exceptions::imre_error_pending() != 0 {
+                                return Ok(());
+                            }
+                            return Err(Error::allocation());
+                        }
+                        Some(wide_digits.as_str())
+                    }
+                }
+                _ => None,
             };
-            write(&text, Some(&text))?;
+            let borrowed;
+            let formatted;
+            let (text, owner): (&str, Option<&crate::StrOwner>) = if let Some(text) = ascii {
+                (text, None)
+            } else if kind.raw() == 3 {
+                // SAFETY: the argument pins the string until the write finishes. An
+                // encoding error acquires its own reference through write_piece.
+                borrowed = std::mem::ManuallyDrop::new(unsafe {
+                    crate::StrOwner::from_raw(word as *const crate::Str)
+                });
+                (&borrowed, Some(&borrowed))
+            } else {
+                formatted = match super::boxed_values::word_text(kind, word, false) {
+                    Ok(text) => text,
+                    Err(_) if super::exceptions::imre_error_pending() != 0 => return Ok(()),
+                    Err(_) => return Err(Error::allocation()),
+                };
+                (&formatted, Some(&formatted))
+            };
+            write(text, owner)?;
         }
         write("\n", None)
     })();
