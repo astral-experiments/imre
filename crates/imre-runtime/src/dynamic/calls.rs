@@ -3573,6 +3573,7 @@ impl Context {
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"
+                                | "_thread._shutdown"
                                 | "sys._get_cpu_count_config"
                                 | "sys.get_coroutine_origin_tracking_depth"
                         ) =>
