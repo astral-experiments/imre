@@ -218,6 +218,36 @@ def check_installed_site(imre, root, run):
     result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
     check_symlinked_venv(launcher, site, root.resolve(), run)
+    check_copied_venv(launcher, root.resolve(), run)
+
+
+def check_copied_venv(launcher, root, run):
+    def create(executable, target):
+        result = run(executable, "-B", "-m", "venv", "--without-pip", "--copies", target, timeout=300)
+        assert result.returncode == 0, result.stderr
+        assert not (target / "bin" / "python").is_symlink()
+
+    def check(env):
+        python = env / "bin" / "python"
+        result = run(
+            python, "-B", "-c",
+            "import sys; print(sys.implementation.name, sys.executable, sys._base_executable, "
+            "sys.prefix, sys.base_prefix, sep='\\n')", timeout=300,
+        )
+        assert result.returncode == 0, result.stderr
+        expected = ["imre", str(python), str(launcher), str(env), str(launcher.parent.parent)]
+        assert result.stdout.decode().splitlines() == expected
+
+    copied = root / "copied-venv"
+    create(launcher, copied)
+    check(copied)
+    alias = root / "copied-venv-link"
+    alias.symlink_to(copied, target_is_directory=True)
+    check(alias)
+    nested = root / "nested-copied-venv"
+    create(copied / "bin" / "python", nested)
+    copied.rename(root / "moved-outer-venv")
+    check(nested)
 
 
 def check_symlinked_venv(launcher, base_site, root, run):

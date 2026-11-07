@@ -74,7 +74,7 @@ impl NativeToolchain {
         if !cfg!(target_os = "linux") {
             return None;
         }
-        let root = env::current_exe().ok()?.with_file_name("imre-toolchain");
+        let root = super::installation_file("imre-toolchain").ok()?;
         let clang = root.join("bin/clang");
         clang.is_file().then(|| Self {
             clang,
@@ -448,10 +448,9 @@ pub fn native_toolchain(
     {
         return None;
     }
-    let compiler = env::current_exe().ok()?;
     // Also support a standalone linker beside Imre, as in earlier releases.
     let lld = [
-        compiler.with_file_name("imre-ld.lld"),
+        super::installation_file("imre-ld.lld").ok()?,
         PathBuf::from("/usr/bin/ld.lld-18"),
     ]
     .into_iter()

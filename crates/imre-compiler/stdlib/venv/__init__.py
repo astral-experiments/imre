@@ -229,6 +229,7 @@ class EnvBuilder:
         context.cfg_path = path = os.path.join(context.env_dir, 'pyvenv.cfg')
         with open(path, 'w', encoding='utf-8') as f:
             f.write('home = %s\n' % context.python_dir)
+            f.write('base-executable = %s\n' % context.executable)
             if self.system_site_packages:
                 incl = 'true'
             else:
