@@ -1073,6 +1073,11 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             "Exception ignored during resource cleanup",
         );
     }
+    let status = if stdlib::io::flush_standard_outputs(&mut ctx) {
+        status
+    } else {
+        120
+    };
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::unregister_all();
     crate::fault_handler::disable();

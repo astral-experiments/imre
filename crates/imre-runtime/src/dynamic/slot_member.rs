@@ -767,9 +767,6 @@ impl Context {
         let finalizing = self.heap.get(owner).io_kind() == Some("TextIOWrapper")
             && self.str_value(name)? == "_finalizing";
         if matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
-            || finalizing
-                && matches!(self.heap.get(receiver), Value::TextFile(_))
-                && self.builtins.get("_io.TextIOWrapper") == Some(&owner)
         {
             return Ok((name, finalizing));
         }
@@ -797,9 +794,6 @@ impl Context {
 
     pub(super) fn read_slot_member(&self, member: Id, receiver: Id) -> Result<Id> {
         let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
-        if let Value::TextFile(file) = self.heap.get(receiver) {
-            return Ok(super::builtins::boolean(file.finalizing));
-        }
         let Value::Instance { member_values, .. } = self.heap.get(receiver) else {
             unreachable!()
         };
@@ -824,10 +818,6 @@ impl Context {
                 .ok_or_else(|| Error::new("TypeError", "can't delete numeric/char attribute"))?;
             if !matches!(value, TRUE | FALSE) {
                 return Err(Error::new("TypeError", "attribute value type must be bool"));
-            }
-            if let Value::TextFile(file) = self.heap.get_mut(receiver) {
-                file.finalizing = value == TRUE;
-                return Ok(());
             }
         }
         let Value::Instance { member_values, .. } = self.heap.get_mut(receiver) else {

@@ -38,6 +38,7 @@ pub(super) use file_io::{
 };
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
+pub(in crate::dynamic) use text_wrapper::flush_standard_outputs;
 
 #[derive(Clone, Copy)]
 pub(in crate::dynamic) enum NativeClass {
@@ -106,30 +107,10 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
         return unbuffered_standard(ctx, fd, if stderr { "<stderr>" } else { "<stdout>" });
     }
     let file = crate::objects::TextFile::standard(stderr);
-    let encoding = ctx.text(crate::sys::standard_field(fd as u32, false).as_str());
-    let errors = ctx.text(crate::sys::standard_field(fd as u32, true).as_str());
     let path = ctx.text(if stderr { "<stderr>" } else { "<stdout>" });
-    let buffer = ctx.alloc(
-        super::BinaryFile::Standard {
-            file: file.clone(),
-            path,
-        }
-        .into_value()?,
-    );
-    let mode = ctx.text("mode");
-    let write = ctx.text("w");
-    let dictionary = ctx.dict(vec![(mode, write)]);
-    Ok(
-        ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
-            file,
-            encoding,
-            errors,
-            dictionary,
-            buffer: Some(buffer),
-            finalizing: false,
-            line_buffering: stderr || crate::stdio_settings().stdout_line_buffered,
-        })),
-    )
+    let buffer = ctx.alloc(super::BinaryFile::Standard { file, path }.into_value()?);
+    let line_buffering = stderr || crate::stdio_settings().stdout_line_buffered;
+    wrap_standard(ctx, fd, buffer, line_buffering, false)
 }
 
 /// Build the interpreter's shared text reader without taking ownership of fd 0.
@@ -187,16 +168,36 @@ fn unbuffered_standard(ctx: &mut Context, fd: i32, name: &str) -> Result<Id> {
     };
     let name = ctx.text(name);
     ctx.set_attr(raw, "name", name)?;
+    wrap_standard(ctx, fd, buffer, false, true)
+}
+
+fn wrap_standard(
+    ctx: &mut Context,
+    fd: i32,
+    buffer: Id,
+    line_buffering: bool,
+    write_through: bool,
+) -> Result<Id> {
+    if !ctx.builtins.contains_key("_io.TextIOWrapper") {
+        ctx.module("_io")?;
+    }
     let wrapper = ctx.builtins["_io.TextIOWrapper"];
     let encoding = ctx.text(crate::sys::standard_field(fd as u32, false).as_str());
     let errors = ctx.text(crate::sys::standard_field(fd as u32, true).as_str());
     let newline = ctx.text("\n");
     let stream = ctx.call(
         wrapper,
-        vec![buffer, encoding, errors, newline, FALSE, TRUE],
+        vec![
+            buffer,
+            encoding,
+            errors,
+            newline,
+            super::super::builtins::boolean(line_buffering),
+            super::super::builtins::boolean(write_through),
+        ],
         Vec::new(),
     )?;
-    let mode = ctx.text(if input { "r" } else { "w" });
+    let mode = ctx.text(if fd == 0 { "r" } else { "w" });
     ctx.set_attr(stream, "mode", mode)?;
     Ok(stream)
 }
@@ -1110,9 +1111,6 @@ pub(in super::super) fn call(
     if layout == Some("TextIOWrapper") {
         if name == "truncate" {
             return text_wrapper::truncate(ctx, receiver, rest, kwargs);
-        }
-        if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {
-            return super::files::text_method(ctx, name, args, kwargs);
         }
         return text_wrapper::call(ctx, receiver, name, rest, kwargs);
     }

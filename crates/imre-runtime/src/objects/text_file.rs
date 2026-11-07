@@ -107,34 +107,14 @@ impl TextFile {
         unsafe { self.0.0.with(|storage| storage.file().closed()) }
     }
 
-    /// Consumes one decoded line or the remaining text from the shared cursor.
-    pub(crate) fn read(&self, line: bool) -> Result<crate::Str> {
-        // SAFETY: reading the owned file runs no Python callbacks.
-        unsafe {
-            self.0.0.with_mut(|storage| {
-                let file = storage.file_mut();
-                if line { file.readline() } else { file.read() }
-            })
-        }
-    }
-
     pub(crate) fn fileno(&self) -> Result<std::os::fd::RawFd> {
         // SAFETY: reading the owned file's descriptor runs no Python callbacks.
         unsafe { self.0.0.with(|storage| storage.file().fileno()) }
     }
 
-    pub(crate) fn isatty(&self) -> Result<bool> {
-        Ok(super::os::isatty(self.fileno()?))
-    }
-
     pub(crate) fn write(&self, value: &str) -> Result<()> {
         // SAFETY: the text writer uses no Python callbacks during this borrow.
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().write(value)) }
-    }
-
-    pub(crate) fn encoding(&self) -> Option<crate::StrOwner> {
-        // SAFETY: the retained encoding is cloned without running Python code.
-        unsafe { self.0.0.with(|storage| storage.file().encoding.clone()) }
     }
 
     /// Identify the still-open original stream, even when Python retained an alias.

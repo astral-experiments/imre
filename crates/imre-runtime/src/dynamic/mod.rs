@@ -1015,7 +1015,6 @@ impl Context {
                 | Value::AsyncGeneratorOperation { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
-                | Value::TextFile(_)
                 | Value::Enumerate { .. }
                 | Value::Count { .. }
                 | Value::Repeat(_)
@@ -1041,7 +1040,6 @@ impl Context {
             let closed = match self.heap.get(id) {
                 Value::BufferedRandom(file, _) => file.borrow().closed(),
                 Value::File(file) => file.closed(),
-                Value::TextFile(file) => file.closed(),
                 _ => false,
             };
             if closed {
@@ -1194,7 +1192,6 @@ impl Context {
                 | Value::AsyncGeneratorOperation { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
-                | Value::TextFile(_)
                 | Value::Enumerate { .. }
         ) || value.instance_class().is_some()
             || value.is_weak_proxy()
@@ -1629,7 +1626,7 @@ impl Context {
                 });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
-            Value::BufferedRandom(..) | Value::File(_) | Value::TextFile(_) => {
+            Value::BufferedRandom(..) | Value::File(_) => {
                 let readline = self.lookup_attr(id, "readline")?;
                 let line = self.call(readline, Vec::new(), Vec::new())?;
                 return Ok(self.truth(line)?.then_some(line));
@@ -1915,7 +1912,6 @@ impl Context {
                 | Value::Filter { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
-                | Value::TextFile(_)
                 | Value::Count { .. }
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
@@ -4348,9 +4344,11 @@ impl Context {
                     let stream = stdlib::io::standard_output(self, stderr)?;
                     self.bind(scope, name, stream);
                     self.bind(scope, original, stream);
-                    if stderr && self.threads.system_module.is_none() {
-                        self.threads.system_module = Some(module);
-                        self.heap.default_stderr = Some(stream);
+                    if self.threads.system_module.is_none() {
+                        self.heap.standard_outputs[usize::from(stderr)] = Some(stream);
+                        if stderr {
+                            self.threads.system_module = Some(module);
+                        }
                     }
                 }
                 let stdin = stdlib::io::standard_input(self)?;

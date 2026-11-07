@@ -2799,9 +2799,6 @@ pub(super) fn call(
         let receiver = argument(args, 0)?;
         return tempfile::method(ctx, receiver, method, &args[1..], kwargs);
     }
-    if let Some(method) = name.strip_prefix("TextIOWrapper.") {
-        return files::text_method(ctx, method, args, kwargs);
-    }
     if matches!(
         name,
         "gc.enable" | "gc.disable" | "gc.isenabled" | "gc.get_threshold"

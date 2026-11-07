@@ -200,9 +200,13 @@ pub(super) fn call(
         // Once exposed, the live dict can be changed through an arbitrary alias.
         && (ctx.scope_data(*scope).namespace.is_some()
             || ctx.scope_name(*scope, "unraisablehook").is_some_and(|hook| Some(hook) != ctx.threads.default_unraisable_hook)
-            || ctx.heap.default_stderr.is_none_or(|stderr| {
+            || ctx.heap.standard_outputs[1].is_none_or(|stderr| {
                 ctx.scope_name(*scope, "stderr") != Some(stderr)
-                    || matches!(ctx.heap.get(stderr), Value::TextFile(file) if file.closed())
+                    || matches!(ctx.heap.get(stderr), Value::Instance {
+                            memory_stream: Some(super::stdlib::io::MemoryStream::Wrapper(wrapper)), ..
+                        } if wrapper.buffer_id().is_none_or(|buffer| {
+                            matches!(ctx.heap.get(buffer), Value::File(file) if file.closed())
+                        }))
             }))
     {
         return Err(Error::new(

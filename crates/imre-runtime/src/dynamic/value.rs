@@ -1084,25 +1084,6 @@ impl<T> std::ops::Deref for BoxedFile<T> {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct BoxedTextFile {
-    pub(super) dictionary: Id,
-    pub(super) file: crate::objects::TextFile,
-    pub(super) encoding: Id,
-    pub(super) errors: Id,
-    pub(super) finalizing: bool,
-    pub(super) line_buffering: bool,
-    pub(super) buffer: Option<Id>,
-}
-
-impl std::ops::Deref for BoxedTextFile {
-    type Target = crate::objects::TextFile;
-
-    fn deref(&self) -> &Self::Target {
-        &self.file
-    }
-}
-
 /// State that belongs to a single initialization of a native module.
 #[derive(Clone, Copy)]
 pub(super) enum NativeModuleState {
@@ -1553,7 +1534,6 @@ pub(super) enum Value {
         child: Option<crate::objects::BoxedPopen>,
     },
     File(BoxedFile<crate::Shared<super::stdlib::BinaryFile>>),
-    TextFile(BoxedTextFile),
     GzipDecoder(crate::Shared<BoxedGzipDecoder>),
     ZlibDecompressor {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
@@ -1627,7 +1607,6 @@ impl Value {
     /// Whether releasing this native value can still flush or close a descriptor.
     fn owns_open_descriptor(&self) -> bool {
         match self {
-            Self::TextFile(file) => !file.closed(),
             Self::File(file) => file.owns_open_descriptor(),
             #[cfg(target_os = "linux")]
             Self::Epoll(epoll) => epoll.fd() >= 0,
@@ -1638,7 +1617,6 @@ impl Value {
 
     pub(super) fn native_file_dict(&self) -> Option<Id> {
         match self {
-            Self::TextFile(file) => Some(file.dictionary),
             Self::File(file) => file.dictionary,
             Self::BufferedRandom(file, _) => file.dictionary,
             _ => None,
@@ -1649,7 +1627,6 @@ impl Value {
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
         match self {
             Self::BufferedRandom(..) => Some("_io.BufferedRandom"),
-            Self::TextFile(_) => Some("_io.TextIOWrapper"),
             Self::File(file) => Some(match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
                     "_io.BufferedRandom"
@@ -1710,7 +1687,7 @@ impl Value {
             Self::RawReadWindow(_) => "_imre_raw_read_window",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
-            Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
+            Self::File(_) => return self.native_io_class_name(),
             Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
             Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
@@ -2443,10 +2420,6 @@ impl Value {
                 visit.extend(*dictionary);
                 state.try_borrow()?.children(visit);
             }
-            Self::TextFile(file) => {
-                visit.extend([file.dictionary, file.encoding, file.errors]);
-                visit.extend(file.buffer);
-            }
             Self::BufferedRandom(file, name) => {
                 visit.extend(file.dictionary);
                 visit.push(*name);
@@ -2994,8 +2967,8 @@ pub(super) struct Heap {
     finalizer_roots: weak_roots::RootPaths,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
-    // Detached workers compare against the original stderr without keeping it alive.
-    pub(super) default_stderr: Option<Id>,
+    // Shutdown and detached workers observe the original streams without keeping them alive.
+    pub(super) standard_outputs: [Option<Id>; 2],
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
@@ -3217,7 +3190,7 @@ impl Heap {
             weak_roots: Default::default(),
             finalizer_roots: Default::default(),
             borrowed_hooks: Vec::new(),
-            default_stderr: None,
+            standard_outputs: [None; 2],
             has_weak_values: false,
             collect_next_statement: false,
             check_finalizers_next_statement: false,
@@ -5765,9 +5738,9 @@ impl Heap {
         {
             self.discarded_shutdown_write = Some(true);
         }
-        self.default_stderr = self
-            .default_stderr
-            .filter(|&id| self.traces[id as usize].get() != UNMARKED);
+        for stream in &mut self.standard_outputs {
+            *stream = stream.filter(|&id| self.traces[id as usize].get() != UNMARKED);
+        }
         for id in &mut self.borrowed_hooks {
             if self.traces[*id as usize].get() == UNMARKED {
                 *id = NONE;
