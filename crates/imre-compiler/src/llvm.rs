@@ -310,9 +310,17 @@ pub(crate) fn emit(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
 ) -> Result<String, Unsupported> {
+    emit_file(module, ranges, sanitize).map(|(llvm, _)| llvm)
+}
+
+pub(crate) fn emit_file(
+    module: &Module,
+    ranges: &RangeFacts<'_>,
+    sanitize: bool,
+) -> Result<(String, bool), Unsupported> {
     let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
-    emit_program(module, ranges, sanitize, &mut output)?;
-    Ok(std::mem::take(output.entry_buffer()))
+    let prefer_objects = emit_program(module, ranges, sanitize, &mut output)?;
+    Ok((std::mem::take(output.entry_buffer()), prefer_objects))
 }
 
 fn emit_program(
@@ -320,7 +328,7 @@ fn emit_program(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
     output: &mut Output,
-) -> Result<(), Unsupported> {
+) -> Result<bool, Unsupported> {
     let callable_targets = crate::callables::Targets::analyze(module);
     let mut resource_types: HashSet<_> = module
         .functions
@@ -347,6 +355,7 @@ fn emit_program(
     let mut literal_globals = vec![None; module.globals.len()];
     let mut extension_modules = std::collections::BTreeSet::new();
     let mut function_link_types = HashSet::new();
+    let mut mixed_link_owners = Vec::new();
     let mut declared_caches = HashSet::new();
     let mut uses_regex_positions = false;
     let mut uses_sys_argv = false;
@@ -356,6 +365,7 @@ fn emit_program(
     let mut uses_builtins_last = false;
     let mut changes_stdout = false;
     for function in module.functions.iter().chain([&module.entry]) {
+        let mut owners = Vec::new();
         crate::ir::walk_expressions(&function.body, &mut |expr| {
             let ExprKind::Builtin(builtin, args) = &expr.kind else {
                 return;
@@ -369,7 +379,15 @@ fn emit_program(
                     extension_modules.insert(name.clone());
                 }
                 Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
-                    function_link_types.insert(args[0].ty);
+                    let owner = &args[0];
+                    function_link_types.insert(owner.ty);
+                    if callable_targets
+                        .get(owner.ty)
+                        .iter()
+                        .any(|target| target.bound)
+                    {
+                        owners.push(owner);
+                    }
                 }
                 Builtin::ModuleCache(id) => {
                     declared_caches.insert(*id);
@@ -399,19 +417,31 @@ fn emit_program(
                 _ => {}
             }
         });
+        if !owners.is_empty() {
+            mixed_link_owners.push((function, owners));
+        }
     }
     if function_link_types.iter().any(|&ty| {
         let targets = callable_targets.get(ty);
         module.types.dispatcher(ty).is_some()
             || targets.is_empty()
             || targets.iter().any(|target| {
-                target.bound
+                let function = &module.functions[target.function];
+                target.bound && !matches!(function.locals[function.params[0]], Type::Class(_))
                     || declared_caches.contains(&target.function)
                     || module.types.cache_adapter(target.function).is_some()
             })
     }) {
         return Err(Unsupported(
-            "Imre: wrapper links require a callable signature with only known, unbound native functions",
+            "Imre: wrapper links require a callable signature with known native functions or source methods",
+        ));
+    }
+    if mixed_link_owners
+        .iter()
+        .any(|(function, owners)| !ir::plain_link_owners(function, owners))
+    {
+        return Err(Unsupported(
+            "Imre: native wrapper links require a plain function as their owner",
         ));
     }
     let mut emitter = Emitter {
@@ -691,7 +721,7 @@ fn emit_program(
         .output
         .common()
         .push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
-    Ok(())
+    Ok(!mixed_link_owners.is_empty())
 }
 
 struct Emitter<'a, 'module> {

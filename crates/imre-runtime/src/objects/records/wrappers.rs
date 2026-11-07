@@ -17,7 +17,8 @@ unsafe fn link(function: *const usize) -> *mut *const usize {
 }
 
 /// # Safety
-/// Both arguments borrow live Python functions with the same callable signature.
+/// The wrapper is a live Python function. The target borrows a live callable
+/// record with the same signature, including a method with an owned receiver.
 /// The caller takes one reference to the returned wrapper.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_function_set_wrapped(
@@ -26,7 +27,7 @@ pub unsafe extern "C" fn imre_function_set_wrapped(
 ) -> *const usize {
     // SAFETY: retained before replacing the old owner, even on self-assignment.
     unsafe {
-        debug_assert!(is_function(descriptor(wrapper)) && is_function(descriptor(wrapped)));
+        debug_assert!(is_function(descriptor(wrapper)));
         imre_record_retain(wrapped);
         let previous = link(wrapper).replace(wrapped);
         imre_record_release(previous);
@@ -66,7 +67,7 @@ pub(super) unsafe fn release_unowned_cycle(first: *const usize) {
     let mut function = first;
     loop {
         // SAFETY: the preceding rooted function owns this edge, and the
-        // compiler admits only plain native functions to a linked signature.
+        // descriptor check below stops at a target without a link field.
         unsafe {
             let next = link(function).read();
             if next.is_null() {
