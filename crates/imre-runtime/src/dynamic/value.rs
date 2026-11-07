@@ -1306,6 +1306,10 @@ pub(super) enum Value {
         // Private state retained by this generation of a native module.
         module_state: Option<NativeModuleState>,
         /// Named Python slots use offsets preserved by compatible module class changes.
+        #[expect(
+            clippy::box_collection,
+            reason = "keep the optional slot map pointer-sized"
+        )]
         module_slots: Option<Box<HashMap<usize, Id>>>,
         // Concrete Python type. Imported base modules use None; a directly constructed
         // module has an empty internal import name and always carries its constructor.
