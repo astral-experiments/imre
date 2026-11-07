@@ -223,6 +223,37 @@ fn search_keeps_proven_paths_when_the_node_budget_runs_out() {
 }
 
 #[test]
+fn a_frame_can_hold_a_weak_target_without_a_finalizer_path() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let mark = ctx.heap.temporary_mark();
+    let scope = ctx.scope("sample", None);
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let target = ctx.alloc(Value::List(Vec::new()));
+    let reference = ctx
+        .heap
+        .new_weak_reference(target, NONE, weakref::Kind::Reference, None)
+        .unwrap();
+    let registry = ctx.alloc(Value::List(vec![reference]));
+    ctx.bind(scope, "target", target);
+    ctx.heap.release_temporaries_since(0);
+
+    ctx.heap.learn_weak_roots(registry, NONE);
+    assert!(ctx.heap.weak_values_kept_by(registry, NONE));
+    ctx.heap.leave(NONE, false);
+    assert!(!ctx.heap.weak_values_kept_by(registry, NONE));
+    ctx.heap.collect([registry].into_iter());
+    assert!(
+        ctx.heap
+            .get(reference)
+            .weak_reference()
+            .unwrap()
+            .target
+            .is_none()
+    );
+}
+
+#[test]
 fn weak_dict_key_and_frame_held_target_must_both_survive() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let registry = ctx.dict(Vec::new());
@@ -295,6 +326,38 @@ fn wide_siblings_leave_room_for_nested_roots_and_late_edges() {
     };
     items[MAX_NODES / 4] = NONE;
     assert!(!paths.valid(&ctx.heap, globals));
+}
+
+#[test]
+fn a_wide_frame_probe_leaves_room_to_follow_global_modules() {
+    use super::{MAX_NODES, RootPaths};
+
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let module = ctx.allocate_module(NONE);
+    let target = ctx.alloc(Value::List(Vec::new()));
+    let Value::Module { scope: globals, .. } = *ctx.heap.get(module) else {
+        unreachable!()
+    };
+    let Value::Scope(global_scope) = ctx.heap.get_mut(globals) else {
+        unreachable!()
+    };
+    global_scope.names.insert("target".into(), target);
+
+    let items = (0..MAX_NODES)
+        .map(|_| ctx.alloc(Value::List(Vec::new())))
+        .collect();
+    let wide = ctx.alloc(Value::List(items));
+    let scope = ctx.scope("caller", None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let Value::Scope(caller) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    caller.names.insert("wide".into(), wide);
+    let globals = [module, NONE];
+    let paths =
+        RootPaths::discover(&ctx.heap, globals, [target].into_iter(), false, false).unwrap();
+    assert!(paths.covers_endpoints);
+    assert!(paths.valid(&ctx.heap, globals));
 }
 
 #[test]
