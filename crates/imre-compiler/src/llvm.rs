@@ -4640,18 +4640,8 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Compare the first UTF-8 byte with an ASCII literal without owning the indexed character.
-    fn indexed_ascii_comparison(
-        &mut self,
-        left: &Expr,
-        right: &Expr,
-        op: Compare,
-    ) -> Option<Value> {
-        let predicate = match op {
-            Compare::Equal => "eq",
-            Compare::NotEqual => "ne",
-            _ => return None,
-        };
+    /// A single ASCII scalar can be compared using just the leading UTF-8 byte.
+    fn indexed_ascii_literal<'a>(left: &'a Expr, right: &'a Expr) -> Option<(&'a [Expr], u8)> {
         let (args, literal) = match (&left.kind, &right.kind) {
             (ExprKind::Builtin(Builtin::StringGet, args), ExprKind::Str(literal))
             | (ExprKind::Str(literal), ExprKind::Builtin(Builtin::StringGet, args)) => {
@@ -4662,6 +4652,11 @@ impl Emitter<'_, '_> {
         let [byte] = literal.as_bytes() else {
             return None;
         };
+        Some((args, *byte))
+    }
+
+    /// Evaluate the checked subscript at its original position and retain only its leading byte.
+    fn indexed_leading_byte(&mut self, args: &[Expr]) -> String {
         let source = self.operand(&args[0]);
         let index = self.operand(&args[1]);
         let buffer = self.entry_alloca("[4 x i8]");
@@ -4674,10 +4669,82 @@ impl Emitter<'_, '_> {
         self.check_failed(&failed);
         self.release_operand(&source);
         self.release_operand(&index);
-        let first = self.instruction(format!("load i8, ptr {buffer}"));
+        self.instruction(format!("load i8, ptr {buffer}"))
+    }
+
+    /// Compare one character lookup with an ASCII literal without owning the character.
+    fn indexed_ascii_comparison(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        op: Compare,
+    ) -> Option<Value> {
+        let predicate = match op {
+            Compare::Equal => "eq",
+            Compare::NotEqual => "ne",
+            _ => return None,
+        };
+        let (args, literal) = Self::indexed_ascii_literal(left, right)?;
+        let byte = self.indexed_leading_byte(args);
         Some(Value {
             ty: Type::Bool,
-            operand: self.instruction(format!("icmp {predicate} i8 {first}, {byte}")),
+            operand: self.instruction(format!("icmp {predicate} i8 {byte}, {literal}")),
+            small_integer: false,
+        })
+    }
+
+    /// An immutable local string and an unchanged integer index give the same
+    /// character throughout a short-circuit chain of literal comparisons.
+    fn indexed_ascii_membership(&mut self, and: bool, values: &[Expr]) -> Option<Value> {
+        if values.len() < 2 {
+            return None;
+        }
+        let mut tests = values.iter().map(|value| {
+            let ExprKind::Compare(operands, ops) = &value.kind else {
+                return None;
+            };
+            let ([left, right], [op]) = (operands.as_slice(), ops.as_slice()) else {
+                return None;
+            };
+            if !matches!(
+                (and, *op),
+                (true, Compare::NotEqual) | (false, Compare::Equal)
+            ) {
+                return None;
+            }
+            Self::indexed_ascii_literal(left, right)
+        });
+        let (args, first) = tests.next()??;
+        let ExprKind::Local(source) = args[0].kind else {
+            return None;
+        };
+        let mut literals = Vec::with_capacity(values.len());
+        for test in tests {
+            let (other, literal) = test?;
+            if !matches!(other[0].kind, ExprKind::Local(slot) if slot == source) {
+                return None;
+            }
+            let same_index = match (&args[1].kind, &other[1].kind) {
+                (ExprKind::Local(left), ExprKind::Local(right)) => left == right,
+                _ => args[1]
+                    .tagged_integer_literal()
+                    .is_some_and(|n| Some(n) == other[1].tagged_integer_literal()),
+            };
+            if !same_index {
+                return None;
+            }
+            literals.push(literal);
+        }
+        let byte = self.indexed_leading_byte(args);
+        let (predicate, combine) = if and { ("ne", "and") } else { ("eq", "or") };
+        let mut result = self.instruction(format!("icmp {predicate} i8 {byte}, {first}"));
+        for literal in literals {
+            let test = self.instruction(format!("icmp {predicate} i8 {byte}, {literal}"));
+            result = self.instruction(format!("{combine} i1 {result}, {test}"));
+        }
+        Some(Value {
+            ty: Type::Bool,
+            operand: result,
             small_integer: false,
         })
     }
@@ -4822,6 +4889,9 @@ impl Emitter<'_, '_> {
     }
 
     fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
+        if let Some(result) = self.indexed_ascii_membership(and, values) {
+            return result;
+        }
         if !and && let Some(value) = self.ascii_affix_alternatives(values) {
             return value;
         }
@@ -12057,6 +12127,15 @@ slow:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn ascii_membership_shares_only_stable_character_lookups() {
+        let llvm = compile(
+            "def check(s: str, i: int, j: int) -> bool:\n    return (s[i] == '+' or '-' == s[i] or s[i] == '.') and (s[i] != '/' and s[j] != ':')\n\nprint(check('ab', 0, 1))\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        assert_eq!(llvm.matches("call i32 @imre_str_get_part(").count(), 3);
+    }
 
     #[test]
     fn integer_dictionary_updates_keep_effectful_operands_after_lookup() {
