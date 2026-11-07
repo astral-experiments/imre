@@ -8,6 +8,7 @@ use annotations::CONDITIONAL;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use imre_ast::code_flags;
 use imre_ast::comprehension::{Output, Plan};
@@ -21,7 +22,7 @@ use super::*;
 struct SourceFilename {
     // Code objects own the Python spelling. Rust diagnostic locations require scalar text.
     object: Id,
-    display: Rc<str>,
+    display: Arc<str>,
 }
 
 pub(super) struct Program {
@@ -3803,7 +3804,7 @@ impl Context {
     fn source_filename(&self, object: Id) -> Result<SourceFilename> {
         Ok(SourceFilename {
             object,
-            display: Rc::from(self.filename_display(object)?.as_ref()),
+            display: Arc::from(self.filename_display(object)?.as_ref()),
         })
     }
 

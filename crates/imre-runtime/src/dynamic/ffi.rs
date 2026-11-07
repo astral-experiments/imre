@@ -2,6 +2,7 @@
 
 use std::ffi::{CStr, c_char};
 use std::slice;
+use std::sync::Arc;
 
 use super::*;
 
@@ -2315,13 +2316,13 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 
 impl Context {
     /// Decode a static, NUL-terminated native filename once for statement diagnostics.
-    unsafe fn native_filename_label(&mut self, file: *const c_char) -> Result<std::rc::Rc<str>> {
+    unsafe fn native_filename_label(&mut self, file: *const c_char) -> Result<Arc<str>> {
         if let Some(label) = self.native_filename_labels.get(&file.addr()) {
             return Ok(label.clone());
         }
         // SAFETY: the emitted filename is a native path constant for the lifetime of the program.
         let path = unsafe { native_path(file) };
-        let label: std::rc::Rc<str> = match path.to_str() {
+        let label: Arc<str> = match path.to_str() {
             Some(text) if text.is_ascii() => text.into(),
             _ => {
                 let filename = self.import_path_text(path)?;
@@ -2724,18 +2725,18 @@ mod tests {
         let mut first = new_context();
         let mut second = new_context();
         let raw = c"ledger-\xff.py";
-        let first_label = Rc::downgrade(&label(&mut first, raw));
+        let first_label = Arc::downgrade(&label(&mut first, raw));
         let second_label = label(&mut second, raw);
         assert_eq!(&*label(&mut first, c"other.py"), "other.py");
 
         first.collect_generation(2).unwrap();
         let retained = first_label.upgrade().unwrap();
-        assert!(Rc::ptr_eq(&retained, &label(&mut first, raw)));
-        assert!(!Rc::ptr_eq(&retained, &second_label));
+        assert!(Arc::ptr_eq(&retained, &label(&mut first, raw)));
+        assert!(!Arc::ptr_eq(&retained, &second_label));
         drop(retained);
         drop(first);
         assert!(first_label.upgrade().is_none());
-        assert!(Rc::ptr_eq(&second_label, &label(&mut second, raw)));
+        assert!(Arc::ptr_eq(&second_label, &label(&mut second, raw)));
     }
 
     #[test]
