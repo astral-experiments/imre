@@ -8900,10 +8900,9 @@ impl Context {
         }
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && ((self.is_abc_metaclass(winner) && self.class_attr(winner, "__init__").is_some())
-                || self
-                    .class_attr(winner, "mro")
-                    .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
+            && (self
+                .class_attr(winner, "mro")
+                .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
                 || ["__getattr__", "__getattribute__"]
                     .iter()
                     .any(|name| self.slot(winner, name).is_some()))
@@ -9041,12 +9040,6 @@ impl Context {
                         .is_some_and(|hook| Some(&hook) != self.builtins.get("type.__prepare__")))
         });
         let prepared = if let Some(meta) = prepares {
-            if self.is_abc_metaclass(meta) {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "custom ABC metaclass namespace preparation is unsupported",
-                ));
-            }
             let bases = self.alloc(Value::Tuple(copy_ids(&bases)?));
             let mapping = self.prepare_class_dictionary(meta, class_name, bases, &keywords)?;
             Some((bases, mapping))
