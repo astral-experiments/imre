@@ -449,6 +449,8 @@ pub(super) fn clear_algorithms() {
     GUARANTEED.with(RefCell::take);
 }
 
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
 /// Encode each input byte directly into two digits of the final ASCII string.
 pub(crate) fn hex_text(bytes: &[u8]) -> Result<Str> {
     let length = bytes.len().checked_mul(2).ok_or_else(Error::allocation)?;
@@ -486,18 +488,16 @@ fn hex_bytes(input: &[u8], letter_offset: u8) -> Result<Vec<u8>> {
 #[inline(never)]
 fn write_hex_digits(input: &[u8], letter_offset: u8, output: &mut [std::mem::MaybeUninit<u8>]) {
     let (pairs, _) = output.as_chunks_mut::<2>();
+    let digit = |nibble| {
+        if nibble < 10 {
+            b'0' + nibble
+        } else {
+            letter_offset + nibble
+        }
+    };
     for (&byte, pair) in input.iter().zip(pairs) {
-        pair[0].write(hex_digit(byte >> 4, letter_offset));
-        pair[1].write(hex_digit(byte & 15, letter_offset));
-    }
-}
-
-/// Maps one hexadecimal digit to its ASCII byte with the requested letter case.
-fn hex_digit(nibble: u8, letter_offset: u8) -> u8 {
-    if nibble < 10 {
-        b'0' + nibble
-    } else {
-        letter_offset + nibble
+        pair[0].write(digit(byte >> 4));
+        pair[1].write(digit(byte & 15));
     }
 }
 
@@ -534,8 +534,8 @@ pub(crate) fn hex_with_separator(
         let (triples, _) = rest.as_chunks_mut::<3>();
         for (triple, &byte) in triples.iter_mut().zip(remaining) {
             triple[0].write(separator);
-            triple[1].write(hex_digit(byte >> 4, b'a' - 10));
-            triple[2].write(hex_digit(byte & 15, b'a' - 10));
+            triple[1].write(HEX[usize::from(byte >> 4)]);
+            triple[2].write(HEX[usize::from(byte & 15)]);
         }
     } else {
         for (destination, source) in rest.chunks_mut(2 * step + 1).zip(remaining.chunks(step)) {
