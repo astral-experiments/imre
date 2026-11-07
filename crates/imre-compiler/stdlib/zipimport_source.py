@@ -1,8 +1,6 @@
 """Source package imports for the native module registry."""
 from _imre_importlib import _zip_path_importers as _path_importers
 
-_ENCODING_NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
-
 
 class zipimporter(_ZipResourceLoader):
     def invalidate_caches(self):
@@ -42,22 +40,7 @@ class zipimporter(_ZipResourceLoader):
 
     def get_code(self, fullname):
         filename = self.get_filename(fullname)
-        text = self.get_data(filename).decode('utf-8').removeprefix('\ufeff')
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        for line in text.split('\n', 2)[:2]:
-            line = line.lstrip(' \t\f')
-            if line and not line.startswith('#'):
-                break
-            for marker in ('coding:', 'coding='):
-                offset = line.find(marker)
-                while offset >= 0:
-                    offset += len(marker)
-                    while offset < len(line) and line[offset] in ' \t':
-                        offset += 1
-                    if offset < len(line) and line[offset] in _ENCODING_NAME_CHARS:
-                        raise NotImplementedError('encoding declarations in ZIP source are unsupported')
-                    offset = line.find(marker, offset)
-        return compile(text, filename, 'exec')
+        return compile(self.get_data(filename), filename, 'exec')
 
     def create_module(self, spec):
         # Use the standard module object allocated by module_from_spec.
