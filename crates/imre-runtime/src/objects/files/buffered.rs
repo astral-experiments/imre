@@ -715,17 +715,22 @@ pub(in crate::objects) fn decode_text_lines(bytes: &[u8], codec: Codec) -> Resul
             text.push_str(&decoder.decoded);
         }
         Ok(text)
-    } else if matches!(codec, Codec::ShiftJis) {
+    } else if matches!(codec, Codec::ShiftJis | Codec::Wide(_)) {
         let mut start = 0;
         let mut end = 0;
         for chunk in chunks.chain([&[][..]]) {
             end += chunk.len();
-            start += super::super::codecs::shift_jis::decode_chunk(
-                &mut text,
-                &bytes[start..end],
-                None,
-                chunk.is_empty(),
-            )?;
+            let input = &bytes[start..end];
+            start += if let Codec::Wide(format) = codec {
+                format.decode_text(&mut text, input, None, chunk.is_empty())?
+            } else {
+                super::super::codecs::shift_jis::decode_chunk(
+                    &mut text,
+                    input,
+                    None,
+                    chunk.is_empty(),
+                )?
+            };
         }
         Ok(super::super::codecs::universal_newlines(text))
     } else {

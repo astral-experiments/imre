@@ -1,6 +1,7 @@
 //! Native text codecs shared by the registry and text files.
 pub(crate) mod idna;
 pub(crate) mod shift_jis;
+mod wide;
 pub(super) mod writer;
 
 use super::bytes::{DecodeIssue, ascii_decode_error, owned_input};
@@ -44,7 +45,7 @@ static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"))
 static ISO8859_15: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(10, "iso8859_15"));
 static ISO8859_2: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(12, "iso8859_2"));
 
-const CODEC_NAMES: [&str; 13] = [
+const CODEC_NAMES: [&str; 17] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -58,6 +59,10 @@ const CODEC_NAMES: [&str; 13] = [
     "iso8859-15",
     "idna",
     "iso8859-2",
+    "utf-16-le",
+    "utf-16-be",
+    "utf-32-le",
+    "utf-32-be",
 ];
 
 thread_local! {
@@ -344,12 +349,18 @@ pub(crate) enum FixedUnicode {
 impl FixedUnicode {
     pub(crate) fn by_key(key: &str) -> Option<Self> {
         match key {
-            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => {
+            "utf_16_le" => Some(Self::Utf16(Utf16Order::Little)),
+            "utf_16_be" => Some(Self::Utf16(Utf16Order::Big)),
+            "utf_32_le" => Some(Self::Utf32Le),
+            "utf_32_be" => Some(Self::Utf32Be),
+            k if matches_alias(k, &["utf_16le", "unicodelittleunmarked"]) => {
                 Some(Self::Utf16(Utf16Order::Little))
             }
-            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Some(Self::Utf16(Utf16Order::Big)),
-            "utf_32_le" | "utf_32le" => Some(Self::Utf32Le),
-            "utf_32_be" | "utf_32be" => Some(Self::Utf32Be),
+            k if matches_alias(k, &["utf_16be", "unicodebigunmarked"]) => {
+                Some(Self::Utf16(Utf16Order::Big))
+            }
+            k if matches_alias(k, &["utf_32le"]) => Some(Self::Utf32Le),
+            k if matches_alias(k, &["utf_32be"]) => Some(Self::Utf32Be),
             _ => None,
         }
     }
@@ -508,6 +519,7 @@ pub(crate) enum Codec {
     Latin1,
     Ascii,
     CodePage(&'static CodePage),
+    Wide(FixedUnicode),
     ShiftJis,
     Idna,
 }
@@ -522,6 +534,10 @@ impl Codec {
             Self::CodePage(page) => page.index,
             Self::ShiftJis => 7,
             Self::Idna => 11,
+            Self::Wide(FixedUnicode::Utf16(Utf16Order::Little)) => 13,
+            Self::Wide(FixedUnicode::Utf16(Utf16Order::Big)) => 14,
+            Self::Wide(FixedUnicode::Utf32Le) => 15,
+            Self::Wide(FixedUnicode::Utf32Be) => 16,
         }
     }
 
@@ -547,6 +563,9 @@ impl Codec {
     }
 
     pub(crate) fn by_key(key: &str, value: &str) -> Result<Self> {
+        if let Some(format) = FixedUnicode::by_key(key) {
+            return Ok(Self::Wide(format));
+        }
         match key {
             "utf8" | "utf_8" | "u8" | "utf" | "utf8_ucs2" | "utf8_ucs4" | "cp65001" => {
                 Ok(Self::Utf8 { signature: false })
@@ -618,6 +637,9 @@ impl Codec {
 
     /// Decode a POSIX filename with the startup codec and Python's surrogateescape policy.
     pub(crate) fn decode_filesystem(self, data: &[u8]) -> Result<Vec<u32>> {
+        if let Self::Wide(format) = self {
+            return format.decode_filesystem(data);
+        }
         if matches!(self, Self::Idna) {
             return self
                 .decode(data, Some("surrogateescape"))
@@ -640,7 +662,7 @@ impl Codec {
                 Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
                 Self::Latin1 => Some(char::from(byte)),
                 Self::CodePage(page) => page.decode.decode(byte),
-                Self::Utf8 { .. } | Self::ShiftJis | Self::Idna => unreachable!(),
+                Self::Utf8 { .. } | Self::ShiftJis | Self::Idna | Self::Wide(_) => unreachable!(),
             };
             points.push(match ch {
                 Some(ch) => u32::from(ch),
@@ -696,6 +718,10 @@ impl Codec {
                 }
                 Ok(text)
             }
+            Self::Wide(format) => {
+                format.decode_text(&mut text, data, errors, true)?;
+                Ok(text)
+            }
             Self::Idna => idna::decode(data, errors),
             Self::ShiftJis => {
                 shift_jis::decode_chunk(&mut text, data, errors, true)?;
@@ -732,7 +758,7 @@ impl Codec {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
             Self::CodePage(page) => page.encode.get(&ch).copied(),
-            Self::Utf8 { .. } | Self::ShiftJis | Self::Idna => {
+            Self::Utf8 { .. } | Self::ShiftJis | Self::Idna | Self::Wide(_) => {
                 unreachable!("expected a single-byte encoding")
             }
         }
@@ -756,6 +782,7 @@ impl Codec {
 
     pub(crate) fn encoding_error_reason(self) -> (&'static str, &'static str) {
         match self {
+            Self::Wide(format) => (format.name(), "surrogates not allowed"),
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
             Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
@@ -772,6 +799,13 @@ impl Codec {
         error_input: impl FnOnce() -> Result<StrOwner>,
     ) -> Result<Cow<'a, [u8]>> {
         let (codec, reason) = match self {
+            Self::Wide(format) => {
+                return StrEncoder::Wide {
+                    format,
+                    signature: false,
+                }
+                .encode(text, errors.unwrap_or("strict"), error_input);
+            }
             Self::Idna => return idna::encode(text, errors, error_input).map(Cow::Owned),
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {

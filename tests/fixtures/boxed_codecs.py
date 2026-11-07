@@ -332,6 +332,7 @@ def current():
     check_text_encoding_flag()
     check_escape_decode()
     fixed_endian_encoders()
+    fixed_endian_streams()
     utf16_extended_decoder()
     check_shift_jis()
     check_raw_unicode_escape()
@@ -578,3 +579,28 @@ def utf16_extended_decoder():
     wire = b"\x00\xdc"
     assert utf_16_ex_decode(wire, "test.utf16_change_input", -1) == ("?BC", 4, -1)
     assert utf_16_ex_decode(wire, "test.utf16_change_input", -1, True) == ("?BC", 2, -1)
+
+
+def fixed_endian_streams():
+    from io import BytesIO
+
+    for name in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
+        entry = codecs.lookup(name)
+        module = __import__("encodings." + name.replace("-", "_"), fromlist=["*"])
+        assert entry.incrementaldecoder is module.IncrementalDecoder
+        text = "\ufeffA🙂"
+        wire = text.encode(name)
+        stream = BytesIO()
+        entry.streamwriter(stream).write(text)
+        assert stream.getvalue() == wire
+        stream.seek(0)
+        assert entry.streamreader(stream).read() == text
+        for split in range(len(wire) + 1):
+            decoder = entry.incrementaldecoder()
+            first = decoder.decode(wire[:split])
+            restored = entry.incrementaldecoder()
+            restored.setstate(decoder.getstate())
+            assert first + restored.decode(wire[split:], True) == text
+        primitive = getattr(codecs, name.replace("-", "_") + "_decode")
+        assert primitive(wire + b"x") == (text, len(wire))
+        assert module.decode(wire + b"x", "replace") == (text + "\ufffd", len(wire) + 1)

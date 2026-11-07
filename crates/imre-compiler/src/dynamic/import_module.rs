@@ -13,6 +13,12 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             ),
         ));
     }
+    if let Some((_, path)) = super::FIXED_UTF_PROVIDERS
+        .iter()
+        .find(|(id, _)| *id == name)
+    {
+        return Some((path, include_str!("../../stdlib/encodings/utf_fixed.py")));
+    }
     match name {
         "types" => {
             const UPSTREAM: &str = include_str!(

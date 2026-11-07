@@ -86,17 +86,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "codecs"
             if matches!(
                 function,
-                "encode"
-                    | "decode"
-                    | "register"
-                    | "unregister"
-                    | "lookup"
-                    | "escape_decode"
-                    | "utf_16_ex_decode"
-                    | "utf_32_ex_decode"
-                    | "utf_16_encode"
-                    | "utf_32_encode"
-            ) =>
+                "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode"
+            ) || stdlib::codecs::WideFunction::named(function).is_some() =>
         {
             Some(("_codecs", function))
         }

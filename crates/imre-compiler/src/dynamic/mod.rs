@@ -1393,6 +1393,7 @@ fn runtime_sources(
             RUNTIME_PROVIDERS
                 .iter()
                 .copied()
+                .chain(FIXED_UTF_PROVIDERS.iter().map(|(name, _)| *name))
                 .chain(threading)
                 .filter(move |name| !seen(name))
                 .filter_map(|name| {
@@ -1425,6 +1426,12 @@ pub(crate) fn builtin_inventory_sources(graph: &crate::modules::SourceGraph) -> 
 
 const NAMEDTUPLE_COLLECTIONS: &str = include_str!("../../stdlib/collections/namedtuple_repr.py");
 const SEALED_IO: &str = include_str!("../../stdlib/io.py");
+const FIXED_UTF_PROVIDERS: &[(&str, &str)] = &[
+    ("encodings.utf_16_le", "encodings/utf_16_le.py"),
+    ("encodings.utf_16_be", "encodings/utf_16_be.py"),
+    ("encodings.utf_32_le", "encodings/utf_32_le.py"),
+    ("encodings.utf_32_be", "encodings/utf_32_be.py"),
+];
 const RUNTIME_PROVIDERS: &[&str] = &[
     "__future__",
     "__hello__",
