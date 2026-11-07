@@ -105,6 +105,7 @@ def main(
     label: str = "assignment expression",
     description: str | None = __doc__,
     thinlto_build_timeout: int = 60,
+    build_timeouts: dict[str, int] | None = None,
     require_imported: bool = False,
     check_rejection: Callable[[str, str], None] | None = None,
 ) -> None:
@@ -134,6 +135,7 @@ def main(
         flags += ["--lto-linker", str(args.lto_linker.absolute())]
     if args.sanitize:
         flags.append("--sanitize")
+    default_timeout = thinlto_build_timeout if args.lto_linker and not args.sanitize else 60
     checks = 0
     with tempfile.TemporaryDirectory(prefix=f"imre-{fixtures.name}-") as directory:
         temporary = Path(directory)
@@ -166,7 +168,7 @@ def main(
                         *flags,
                     ],
                     temporary,
-                    timeout=thinlto_build_timeout if args.lto_linker and not args.sanitize else 60,
+                    timeout=(build_timeouts or {}).get(name, default_timeout),
                 )
                 assert built.returncode == 0 and not built.stderr, (
                     name,
