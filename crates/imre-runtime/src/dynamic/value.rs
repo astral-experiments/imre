@@ -3265,6 +3265,8 @@ pub(super) struct Heap {
     // Weak loader identities. The executable owns the initializer and any embedded bytes.
     pub(super) loader_sources: HashMap<Id, super::SourceModule>,
     frames: Vec<Frame>,
+    // Empty storage that the next native activation can reuse.
+    spare_frame_roots: Vec<Id>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
@@ -3492,6 +3494,7 @@ impl Heap {
             free_count: 0,
             immutable_hashes: HashMap::new(),
             loader_sources: HashMap::new(),
+            spare_frame_roots: Vec::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
@@ -4134,6 +4137,7 @@ impl Heap {
     }
     pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
         let mut activation = Frame::new(scope, code, owner, self.active_exception());
+        activation.live = std::mem::take(&mut self.spare_frame_roots);
         if let FrameOwner::Generator(id) = owner {
             let Value::Generator { frame, .. } = self.get(id) else {
                 unreachable!()
@@ -4147,7 +4151,7 @@ impl Heap {
     }
     /// Release the activation and report whether a returning function may have dropped a writer.
     pub fn leave(&mut self, value: Id, returning: bool) -> bool {
-        let frame = self.frames.pop().expect("returning native activation");
+        let mut frame = self.frames.pop().expect("returning native activation");
         if let FrameOwner::Generator(id) = frame.owner
             && let Some(location) = &frame.location
             && let Value::Generator { lineno, .. } = self.get_mut(id)
@@ -4197,6 +4201,11 @@ impl Heap {
                 self.check_finalizers_next_statement |= weak_released;
                 self.collect_next_statement |= coroutine_released;
             }
+        }
+        // Bound the retained allocation even after a call with many live temporaries.
+        if self.spare_frame_roots.capacity() == 0 && frame.live.capacity() <= 64 {
+            frame.live.clear();
+            self.spare_frame_roots = frame.live;
         }
         self.keep(value);
         finalizer_released
@@ -6663,6 +6672,24 @@ mod tests {
         heap.collect([root].into_iter());
         assert!(heap.slots[first as usize].value.is_none());
         assert!(heap.slots[second as usize].value.is_some());
+    }
+
+    #[test]
+    fn reuse_frame_storage_after_releasing_temporary_roots() {
+        let mut heap = Heap::new();
+        heap.enter(NONE, NONE, FrameOwner::Function(NONE));
+        let temporary = heap.alloc(Value::List(Vec::new()));
+        let allocation = heap.frames.last().unwrap().live.as_ptr();
+        heap.leave(NONE, true);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[temporary as usize].value.is_none());
+
+        heap.enter(NONE, NONE, FrameOwner::Function(NONE));
+        assert_eq!(heap.temporary_mark(), 0);
+        assert_eq!(heap.frames.last().unwrap().live.as_ptr(), allocation);
+        heap.reserve_temporaries(1024).unwrap();
+        heap.leave(NONE, true);
+        assert_eq!(heap.spare_frame_roots.capacity(), 0);
     }
 
     #[test]
