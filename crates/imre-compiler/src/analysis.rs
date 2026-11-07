@@ -186,15 +186,13 @@ impl Session {
             .fs()
             .write_file_all(SystemPathBuf::from(root).join("http/__init__.pyi"), http)
             .map_err(|e| e.to_string())?;
-        // Only use the augmented stdlib stub when the project did not supply inspect.
-        let inspect = vendored
-            .read_to_string("stdlib/inspect.pyi")
-            .map_err(|e| e.to_string())?;
+        // Refresh from the locked ty_vendored's vendor/typeshed/stdlib/inspect.pyi,
+        // retaining the private _sentinel: object declaration for inspect.getattr_static.
         system
             .fs()
             .write_file_all(
                 stdlib_stubs.join("inspect.pyi"),
-                format!("{inspect}\n_sentinel: object\n"),
+                include_str!("stubs/inspect.pyi"),
             )
             .map_err(|e| e.to_string())?;
         // CPython's POSIX which() accepts a byte search path independently of
