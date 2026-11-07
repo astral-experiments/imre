@@ -63,6 +63,20 @@ def current():
     for encoding in ("utf-16", "utf-32-be"):
         with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe, encoding=encoding) as child:
             assert child.communicate("A😀\r\nB") == ("A😀\nB", None)
+    escaped = subprocess.check_output(["/bin/printf", r"\300\230\r\n"],
+                                      encoding="cp1251", errors="surrogateescape")
+    assert escaped == "А\udc98\n"
+    assert escaped.encode("cp1251", "surrogateescape") == b"\xc0\x98\n"
+
+    # CP424 leaves both bytes undefined, but only the high byte can be escaped.
+    try:
+        subprocess.check_output(["/bin/printf", r"\200\160"], encoding="cp424", errors="surrogateescape")
+    except UnicodeDecodeError as exc:
+        assert exc.args == ("charmap", b"\x80p", 0, 1, "character maps to <undefined>")
+        assert (exc.start, exc.end) == (1, 2)
+    else:
+        raise AssertionError("escaped an undefined ASCII byte")
+
     cmd = ["cmp", "-", "/dev/null"]
     with subprocess.Popen(cmd, stdin=pipe, stdout=pipe, encoding="utf-16") as child:
         assert child.communicate("") == ("", None)
