@@ -2924,6 +2924,7 @@ pub(super) type WeakCallbacks = Vec<(Id, Id)>;
 
 /// Nonzero incoming edges identify unreachable cycles and their descendants.
 /// The workspace is reserved before marking, then reused after callbacks.
+#[derive(Default)]
 struct CycleSet {
     incoming: Vec<usize>,
     work: Vec<usize>,
@@ -2932,19 +2933,22 @@ struct CycleSet {
 
 impl CycleSet {
     fn new(len: usize) -> Result<Self> {
-        let mut incoming = Vec::new();
-        let mut work = Vec::new();
-        incoming
+        let mut cycles = Self::default();
+        cycles.prepare(len)?;
+        Ok(cycles)
+    }
+
+    /// Reserve a cycle graph whose incoming counts have already returned to zero.
+    fn prepare(&mut self, len: usize) -> Result<()> {
+        self.incoming
+            .try_reserve_exact(len.saturating_sub(self.incoming.len()))
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.work.clear();
+        self.work
             .try_reserve_exact(len)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        work.try_reserve_exact(len)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        incoming.resize(len, 0);
-        Ok(Self {
-            incoming,
-            work,
-            cyclic_callbacks: 0,
-        })
+        self.incoming.resize(len, 0);
+        Ok(())
     }
 
     fn members(&self) -> impl Iterator<Item = Id> + '_ {
@@ -2979,6 +2983,7 @@ pub(super) struct Heap {
     linked_string_constants: HashMap<i64, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
     full_collection: Option<CycleSet>,
+    prompt_cycles: CycleSet,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
@@ -3206,6 +3211,7 @@ impl Heap {
             loading_linked_constant: false,
             gc_order: GcOrder::EMPTY,
             full_collection: None,
+            prompt_cycles: CycleSet::default(),
             linked_string_constants: HashMap::new(),
             short_bytes: HashMap::new(),
             interned: HashMap::new(),
@@ -5256,12 +5262,14 @@ impl Heap {
         self.mark_reference_roots(globals, None);
         let small = self.small_unreachable();
         let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
-        let Ok(mut cycles) = CycleSet::new(size) else {
+        let mut cycles = std::mem::take(&mut self.prompt_cycles);
+        if cycles.prepare(size).is_err() {
+            self.prompt_cycles = cycles;
             self.clear_marks();
             self.collect_next_statement = true;
             return None;
-        };
-        if let Some(slots) = small {
+        }
+        let cyclic = if let Some(slots) = small {
             self.mark_cycles(
                 &mut cycles,
                 |index| slots[index],
@@ -5270,10 +5278,15 @@ impl Heap {
                         .binary_search(&slot)
                         .expect("unmarked child is a candidate")
                 },
-            );
+            )
         } else {
-            self.mark_cycles(&mut cycles, std::convert::identity, std::convert::identity);
+            self.mark_cycles(&mut cycles, std::convert::identity, std::convert::identity)
+        };
+        // Peeling an acyclic graph has already cleared every incoming count.
+        if cyclic {
+            cycles.incoming.fill(0);
         }
+        self.prompt_cycles = cycles;
         self.sweep()
     }
 
@@ -5324,7 +5337,7 @@ impl Heap {
         cycles: &mut CycleSet,
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
-    ) {
+    ) -> bool {
         let (_, cyclic) = self.identify_indexed_cycles(cycles, &slot_at, index_of);
         if cyclic {
             for index in cycles.members() {
@@ -5337,6 +5350,7 @@ impl Heap {
                 });
             }
         }
+        cyclic
     }
 
     /// Test a single just-released strong edge. Other pending finalizers, roots and
