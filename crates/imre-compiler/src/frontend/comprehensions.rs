@@ -990,6 +990,19 @@ mod tests {
     use crate::{CompileOptions, check, compile};
 
     #[test]
+    fn outer_await_acquires_a_synchronous_generator_iterator_in_its_caller() {
+        let source = r#"
+async def items() -> list[int]:
+    return [1, 2]
+
+async def total() -> int:
+    return sum(x for x in await items())
+"#;
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        super::super::lower(&graph).unwrap();
+    }
+
+    #[test]
     fn synchronous_consumer_requires_a_synchronous_generator_protocol() {
         let source = r#"
 async def identity(value: int) -> int:

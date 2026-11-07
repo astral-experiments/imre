@@ -4,11 +4,6 @@ use ruff_text_size::Ranged;
 use super::boolean::{Context as BooleanContext, Flow, Target};
 use super::{Body, CallArguments, DefinitionName, Function, permanent};
 
-enum Element<'a> {
-    Value(&'a ast::Expr),
-    Pair(&'a ast::Expr, &'a ast::Expr),
-}
-
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         let position = imre_ast::expression_position(
@@ -321,35 +316,10 @@ impl Function<'_, '_> {
                 }
                 self.join_format_parts(parts)
             }
-            ast::Expr::Generator(v) => {
-                if v.generators.iter().any(|generator| generator.is_async) {
-                    return self.unsupported("async generator expression");
-                }
-                let iterable = self.expr(&v.generators[0].iter);
-                let iter = self.op("iter", &[&iterable]);
-                let step = self.define(
-                    v.start(),
-                    DefinitionName::Plain("<genexpr>"),
-                    None,
-                    None,
-                    None,
-                    Body::Generator(&v.generators, &v.elt),
-                );
-                let targets = self.comprehension_targets(&v.generators);
-                self.op("generator", &[&step, &iter, &targets])
+            expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
+                self.comprehension(expr, plan)
             }
-            ast::Expr::ListComp(v) => {
-                self.comprehension("list", &v.generators, Element::Value(&v.elt))
-            }
-            ast::Expr::SetComp(v) => {
-                self.comprehension("set", &v.generators, Element::Value(&v.elt))
-            }
-            ast::Expr::DictComp(v) => match &v.key {
-                Some(key) => {
-                    self.comprehension("dict", &v.generators, Element::Pair(key, &v.value))
-                }
-                None => self.unsupported("dict unpacking comprehension"),
-            },
+            ast::Expr::DictComp(_) => self.unsupported("dict unpacking comprehension"),
             _ => self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(expr).kind())),
         }
     }
@@ -691,146 +661,5 @@ impl Function<'_, '_> {
             .into_iter()
             .reduce(|left, right| self.op("format_concat", &[&left, &right]))
             .unwrap_or_else(|| self.text(""))
-    }
-
-    /// Resume the innermost active loop, returning to its parent when it runs out of items.
-    pub(super) fn generator_step(
-        &mut self,
-        generators: &[ast::Comprehension],
-        element: &ast::Expr,
-    ) {
-        let outer = self.lookup(".iterator");
-        let loops: Vec<_> = (0..generators.len())
-            .map(|i| (self.name("b"), format!(".iterator.{i}")))
-            .collect();
-        let done = self.name("b");
-        if loops.len() > 1 {
-            // Only the initial call has the outer iterator in .iterator. Every yield is
-            // inside the last clause, with each active iterator saved in the frame.
-            let first = self.name("b");
-            let resumed = self.value(&format!("icmp eq i64 {outer}, 0"));
-            self.branch(&resumed, &loops.last().unwrap().0, &first);
-            self.label(&first);
-            self.bind(&loops[0].1, &outer);
-            self.bind(".iterator", "0");
-        }
-        self.jump(&loops[0].0);
-        for (i, generator) in generators.iter().enumerate() {
-            let (step, slot) = &loops[i];
-            let body = self.name("b");
-            let exhausted = if i == 0 { done.clone() } else { self.name("b") };
-            self.label(step);
-            let iter = if loops.len() == 1 {
-                outer.clone()
-            } else {
-                self.lookup(slot)
-            };
-            let more = self.op("more", &[&iter]);
-            let cond = self.value(&format!("icmp eq i64 {more}, 2"));
-            self.branch(&cond, &body, &exhausted);
-            self.label(&body);
-            self.checkpoint(element);
-            let item = self.op("next", &[&iter]);
-            self.assign(&generator.target, &item);
-            for filter in &generator.ifs {
-                let keep = self.name("b");
-                self.branch_expr(filter, &keep, step);
-                self.label(&keep);
-            }
-            if let Some(child) = generators.get(i + 1) {
-                let iterable = self.expr(&child.iter);
-                let iterator = self.op("iter", &[&iterable]);
-                self.bind(&loops[i + 1].1, &iterator);
-                self.jump(&loops[i + 1].0);
-            } else {
-                let item = self.expr(element);
-                let yielded = self.op("yielded", &[&item]);
-                self.end(&format!("ret i64 {yielded}"));
-            }
-            if i > 0 {
-                self.label(&exhausted);
-                self.bind(slot, "0");
-                self.jump(&loops[i - 1].0);
-            }
-        }
-        self.label(&done);
-    }
-
-    /// Encode all loop bindings before any comprehension iteration begins.
-    fn comprehension_targets(&mut self, generators: &[ast::Comprehension]) -> String {
-        let mut names = std::collections::HashSet::new();
-        for clause in generators {
-            crate::frontend::target_names(&clause.target, &mut names);
-        }
-        let mut names: Vec<_> = names.into_iter().collect();
-        names.sort_unstable();
-        self.text(&names.join(" "))
-    }
-
-    fn comprehension(
-        &mut self,
-        kind: &str,
-        generators: &[ast::Comprehension],
-        element: Element<'_>,
-    ) -> String {
-        if generators.iter().any(|g| g.is_async) {
-            return self.unsupported("async comprehension");
-        }
-        let output = self.op(kind, &[]);
-        let first = self.expr(&generators[0].iter);
-        let targets = self.comprehension_targets(generators);
-        let scope = self.op("comprehension_scope", &[&self.scope.clone(), &targets]);
-        let previous = std::mem::replace(&mut self.scope, scope);
-        let class_locals = self.class_locals.take();
-        self.comprehension_loop(generators, &first, &output, &element);
-        self.class_locals = class_locals;
-        self.scope = previous;
-        output
-    }
-
-    fn comprehension_loop(
-        &mut self,
-        generators: &[ast::Comprehension],
-        source: &str,
-        out: &str,
-        element: &Element<'_>,
-    ) {
-        let g = &generators[0];
-        let iter = self.op("iter", &[source]);
-        let mark = self.temporary_mark();
-        let step = self.name("b");
-        let body = self.name("b");
-        let done = self.name("b");
-        self.jump(&step);
-        self.label(&step);
-        self.line(&format!(
-            "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
-        ));
-        self.branch_iteration(&iter, &g.target, false, &body, &done);
-        self.label(&body);
-        self.bind_iteration(&iter, &g.target);
-        for test in &g.ifs {
-            let keep = self.name("b");
-            self.branch_expr(test, &keep, &step);
-            self.label(&keep);
-        }
-        if let Some(next) = generators.get(1) {
-            let source = self.expr(&next.iter);
-            self.comprehension_loop(&generators[1..], &source, out, element);
-        } else {
-            match element {
-                Element::Value(e) => {
-                    let v = self.expr(e);
-                    self.op("append", &[out, &v]);
-                }
-                Element::Pair(k, v) => {
-                    let k = self.expr(k);
-                    let v = self.expr(v);
-                    self.op("put", &[out, &k, &v]);
-                }
-            }
-        }
-        self.jump(&step);
-        self.label(&done);
     }
 }

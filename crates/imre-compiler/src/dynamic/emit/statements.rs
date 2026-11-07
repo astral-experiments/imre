@@ -751,6 +751,7 @@ impl Function<'_, '_> {
                 }
                 let kind = match &body {
                     Body::GeneratorFunction(_, flag) => *flag,
+                    Body::Generator(_, plan) if plan.body_suspends() => ASYNC_GENERATOR,
                     Body::Generator(..) | Body::YieldingLambda(_) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     _ => 0,
@@ -888,6 +889,14 @@ impl Function<'_, '_> {
                 };
                 let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
                 Some((first, text))
+            }
+            Body::Generator(expr, plan) if plan.body_suspends() => {
+                // The same resumable interpreter that runs async def bodies
+                // consumes this expression's canonical plan, with .0 supplied
+                // by the caller when the generator is created.
+                signature["generator_expression"] = json!(true);
+                let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
+                Some((expr.start(), format!("async def _():\n return ({text})")))
             }
             Body::YieldingLambda(expr) => {
                 signature["generator_lambda"] = json!(true);

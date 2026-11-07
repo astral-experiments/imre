@@ -1,19 +1,36 @@
-//! Semantic errors from yielding or returning within an asynchronous function's own scope.
+//! Validate suspension in functions, comprehensions and their enclosing scopes.
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextRange};
 
-/// Find an illegal `yield from` or a valued return in an async generator, even in dead code.
+use crate::comprehension::{Output, Plan};
+
+#[derive(Clone, Copy)]
+pub struct Error {
+    pub range: TextRange,
+    pub message: &'static str,
+    /// Code-generation errors include the location tuple in SyntaxError.args.
+    /// Symbol-table errors set the location attributes separately.
+    pub location_in_args: bool,
+}
+
 pub fn syntax_error(module: &ast::ModModule) -> Option<(TextRange, &'static str)> {
+    check(module.into()).map(|error| (error.range, error.message))
+}
+
+pub fn check(module: ast::ModRef<'_>) -> Option<Error> {
     let mut check = Check::default();
-    check.visit_body(&module.body);
-    let (range, message) = check.error?;
-    if crate::type_alias_error(&module.body).is_some()
-        || crate::repeated_keyword(module.into()).is_some_and(|kw| kw.start() < range.start())
+    match module {
+        ast::ModRef::Module(module) => check.visit_body(&module.body),
+        ast::ModRef::Expression(expr) => check.visit_expr(&expr.body),
+    }
+    let error = check.error?;
+    if matches!(module, ast::ModRef::Module(m) if crate::type_alias_error(&m.body).is_some())
+        || crate::repeated_keyword(module.into()).is_some_and(|kw| kw.start() < error.range.start())
     {
         return None;
     }
-    Some((range, message))
+    Some(error)
 }
 
 #[derive(Default)]
@@ -25,34 +42,70 @@ struct AsyncBody {
 #[derive(Default)]
 struct Check {
     current: Option<AsyncBody>,
-    error: Option<(TextRange, &'static str)>,
+    function: bool,
+    comprehension_yield_error: Option<&'static str>,
+    outer_iterable: bool,
+    error: Option<Error>,
 }
 
 impl Check {
-    fn outer_iterable(&mut self, clauses: &[ast::Comprehension]) {
-        if let Some(first) = clauses.first() {
-            self.visit_expr(&first.iter);
+    fn record(&mut self, range: TextRange, message: &'static str, location_in_args: bool) {
+        if self.error.is_none_or(|previous| {
+            previous.location_in_args
+                && (!location_in_args || range.start() < previous.range.start())
+        }) {
+            self.error = Some(Error {
+                range,
+                message,
+                location_in_args,
+            });
         }
     }
 
-    fn record(&mut self, range: TextRange, message: &'static str) {
-        if self
-            .error
-            .is_none_or(|(previous, _)| range.start() < previous.start())
-        {
-            self.error = Some((range, message));
-        }
-    }
-
-    fn scope(&mut self, body: &[Stmt], is_async: bool) {
+    fn scope(&mut self, body: &[Stmt], function: bool, is_async: bool) {
         let outer = std::mem::replace(&mut self.current, is_async.then(AsyncBody::default));
+        let enclosing_function = std::mem::replace(&mut self.function, function);
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.visit_body(body));
+        self.function = enclosing_function;
         if let Some(AsyncBody {
             yields: true,
             valued_return: Some(range),
         }) = std::mem::replace(&mut self.current, outer)
         {
-            self.record(range, "'return' with value in async generator");
+            self.record(range, "'return' with value in async generator", true);
+        }
+    }
+
+    fn comprehension(&mut self, expr: &Expr, plan: Plan<'_>) {
+        let previous = self.error.take();
+        let outer = std::mem::replace(&mut self.outer_iterable, true);
+        self.visit_expr(plan.outer);
+        self.outer_iterable = false;
+        let parent = self.comprehension_yield_error.replace(match plan.output {
+            Output::Generator(_) => "'yield' inside generator expression",
+            Output::List(_) => "'yield' inside list comprehension",
+            Output::Set(_) => "'yield' inside set comprehension",
+            Output::Dict(..) => "'yield' inside dict comprehension",
+        });
+        plan.visit_body(|operand| self.visit_expr(operand));
+        self.comprehension_yield_error = parent;
+        self.outer_iterable = outer;
+        // A deferred frame may suspend anywhere. Nested eager displays propagate
+        // their suspension to the outer display, whose scope determines legality.
+        if !matches!(plan.output, Output::Generator(_))
+            && parent.is_none()
+            && self.current.is_none()
+            && plan.body_suspends()
+            && self.error.is_none_or(|e| e.location_in_args)
+        {
+            self.record(
+                expr.range(),
+                "asynchronous comprehension outside of an asynchronous function",
+                false,
+            );
+        }
+        if let Some(err) = std::mem::replace(&mut self.error, previous) {
+            self.record(err.range, err.message, err.location_in_args);
         }
     }
 }
@@ -65,7 +118,7 @@ impl<'a> Visitor<'a> for Check {
                     self.visit_decorator(decorator);
                 }
                 self.visit_parameters(&f.parameters);
-                self.scope(&f.body, f.is_async);
+                self.scope(&f.body, true, f.is_async);
             }
             Stmt::ClassDef(c) => {
                 for decorator in &c.decorator_list {
@@ -76,7 +129,7 @@ impl<'a> Visitor<'a> for Check {
                 {
                     self.visit_arguments(args);
                 }
-                self.scope(&c.body, false);
+                self.scope(&c.body, false, false);
             }
             Stmt::TypeAlias(_) => {}
             _ => {
@@ -96,33 +149,60 @@ impl<'a> Visitor<'a> for Check {
     fn visit_annotation(&mut self, _: &'a Expr) {}
 
     fn visit_expr(&mut self, expr: &'a Expr) {
-        let Some(body) = &mut self.current else {
-            return;
-        };
-        match expr {
-            Expr::Yield(y) => {
-                body.yields = true;
-                if let Some(value) = &y.value {
-                    self.visit_expr(value);
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match expr {
+            Expr::Yield(_) | Expr::YieldFrom(_) => {
+                if let Some(message) = self.comprehension_yield_error {
+                    self.record(expr.range(), message, false);
+                } else if let Some(body) = &mut self.current {
+                    body.yields = true;
+                    if expr.is_yield_from_expr() {
+                        self.record(expr.range(), "'yield from' inside async function", true);
+                    }
+                } else if self.outer_iterable && !self.function {
+                    self.record(
+                        expr.range(),
+                        if expr.is_yield_from_expr() {
+                            "'yield from' outside function"
+                        } else {
+                            "'yield' outside function"
+                        },
+                        true,
+                    );
                 }
+                visitor::walk_expr(self, expr);
             }
-            Expr::YieldFrom(y) => {
-                body.yields = true;
-                self.record(y.range(), "'yield from' inside async function");
+            Expr::Await(_)
+                if self.outer_iterable
+                    && self.current.is_none()
+                    && self.comprehension_yield_error.is_none() =>
+            {
+                self.record(
+                    expr.range(),
+                    if self.function {
+                        "'await' outside async function"
+                    } else {
+                        "'await' outside function"
+                    },
+                    false,
+                );
             }
             Expr::Lambda(lambda) => {
                 if let Some(parameters) = &lambda.parameters {
                     self.visit_parameters(parameters);
                 }
+                // Defaults belong to the parent; a lambda body is an ordinary
+                // function, even when the expression appears in an async scope.
+                let mut lambda_scope = Self {
+                    function: true,
+                    ..Self::default()
+                };
+                lambda_scope.visit_expr(&lambda.body);
+                if let Some(e) = lambda_scope.error {
+                    self.record(e.range, e.message, e.location_in_args);
+                }
             }
-            // Only the outermost iterable is evaluated in the enclosing scope.
-            Expr::Generator(g) => self.outer_iterable(&g.generators),
-            Expr::ListComp(c) => self.outer_iterable(&c.generators),
-            Expr::SetComp(c) => self.outer_iterable(&c.generators),
-            Expr::DictComp(c) => self.outer_iterable(&c.generators),
-            _ => stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                visitor::walk_expr(self, expr)
-            }),
-        }
+            expr if let Some(plan) = Plan::from_expr(expr) => self.comprehension(expr, plan),
+            _ => visitor::walk_expr(self, expr),
+        });
     }
 }

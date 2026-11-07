@@ -508,6 +508,7 @@ impl Context {
             "generator" => self.generator(a, b, c),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
+            "async_iter" => self.async_for_iter(a),
             "break_iter" => {
                 self.release_loop_iterator(a);
                 Ok(NONE)
