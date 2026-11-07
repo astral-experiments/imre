@@ -3820,6 +3820,11 @@ impl Heap {
                 self.classes.push(id);
                 id
             }
+            Value::Socket(_) => {
+                let id = self.alloc_slot(value);
+                self.register_finalizer(id);
+                id
+            }
             value => self.alloc_slot(value),
         }
     }
