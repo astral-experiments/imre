@@ -316,6 +316,8 @@ def _initializer(owner_class, data, positional, qualname, frozen, slots):
     lines.extend('  ' + line for line in (body or ['pass']))
     lines.append(' return __init__')
     owner = _loaded_module(cls.__module__)
+    # The lazy annotation function keeps this frame after the slots class replaces cls.
+    del cls
     namespace = {}
     exec('\n'.join(lines), owner.__dict__ if owner is not None else {}, namespace)
     init = namespace['build'](tuple(constants))
@@ -526,6 +528,14 @@ def _decorate(cls, params):
         # can have a separate cell from the one shared by generated methods.
         if not repaired_user_cell:
             frozen_owner = cls
+        # Forward references in Field.type must resolve against the replacement class.
+        annotations = get_annotations(cls, format=Format.FORWARDREF)
+        for f in getattr(cls, _FIELDS).values():
+            try:
+                annotation = annotations[f.name]
+            except KeyError:
+                continue
+            f.type = annotation
     abc.update_abstractmethods(cls)
     return cls
 
@@ -561,8 +571,10 @@ def _add_slots(cls, real_fields, params, slot_bases):
     namespace['__slots__'] = slots if any(doc is not None for doc in slots.values()) else tuple(slots)
     for f in real_fields:
         namespace.pop(f.name, None)
-    namespace['__qualname__'] = cls.__qualname__
+    # The replacement's descriptors and subclass hooks see the simple type name.
+    qualname = cls.__qualname__
     newcls = _slotted_type(cls, namespace)
+    newcls.__qualname__ = qualname
 
     if params.frozen:
         if '__getstate__' not in namespace:

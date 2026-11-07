@@ -2496,11 +2496,15 @@ impl DictIterator {
         classes[usize::from(self.reverse)]
     }
 
-    pub(super) fn class(name: &str) -> Option<&'static str> {
+    pub(super) fn builtin_classes() -> impl Iterator<Item = &'static str> {
         Self::KEYS
             .into_iter()
             .chain(Self::VALUES)
             .chain(Self::ITEMS)
+    }
+
+    pub(super) fn class(name: &str) -> Option<&'static str> {
+        Self::builtin_classes()
             .chain([Self::ORDERED])
             .find(|&class| class == name)
     }
@@ -4546,12 +4550,13 @@ impl Heap {
         Ok(live)
     }
 
-    fn immediate_bases(&self, class: Id) -> &[Id] {
+    pub(super) fn immediate_bases(&self, class: Id) -> &[Id] {
         let Value::Class {
             scope, ancestors, ..
         } = self.get(class)
         else {
-            unreachable!("class registry entry")
+            // Static types publish their native bases through the context.
+            return &[];
         };
         let Value::Scope(data) = self.get(*scope) else {
             unreachable!()
@@ -4564,6 +4569,14 @@ impl Heap {
             Value::Tuple(bases) => bases,
             _ => &[],
         }
+    }
+
+    pub(super) fn register_native_type(&mut self, class: Id) {
+        self.classes.push(class);
+    }
+
+    pub(super) fn registered_types(&self) -> &[Id] {
+        &self.classes
     }
 
     pub(super) fn immediate_subclasses(&self, class: Id) -> Vec<Id> {
@@ -4581,10 +4594,11 @@ impl Heap {
 
     /// Every live descendant, including unbound local classes, with parents before children.
     pub(super) fn class_hierarchy(&self, class: Id) -> Vec<Id> {
-        let mut affected = Vec::new();
+        // A resurrected owner is live even after its former parent's weak link expired.
+        let mut affected = vec![(0, class)];
         for &id in &self.classes {
             if let Value::Class { ancestors, .. } = self.get(id)
-                && (id == class || ancestors.contains(&class))
+                && ancestors.contains(&class)
             {
                 affected.push((ancestors.len(), id));
             }
@@ -5574,6 +5588,9 @@ impl Heap {
             self.gc_schedule.record_survivors(generation, survivors);
         }
         self.promote_generation(generation);
+        // The per-base subclass links are weak references too. A callback or a
+        // finalizer can ask for __subclasses__ before the isolated objects are swept.
+        self.classes.retain(|&id| cycles.incoming[id as usize] == 0);
         let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());

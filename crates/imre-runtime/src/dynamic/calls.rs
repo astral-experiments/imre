@@ -1622,33 +1622,12 @@ impl Context {
                     || (cfg!(target_os = "linux") && name == "select.epoll")
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
+                    || builtins::CORE_RUNTIME_TYPES.contains(&name.as_str())
                     || matches!(
                         name.as_str(),
-                        "NoneType"
-                            | "NotImplementedType"
-                            | "ellipsis"
-                            | "float"
-                            | "code"
-                            | "coroutine"
-                            | "async_generator"
-                            | "cell"
-                            | "function"
-                            | "module"
-                            | "method"
-                            | "builtin_function_or_method"
-                            | "method-wrapper"
-                            | "wrapper_descriptor"
-                            | "classmethod_descriptor"
-                            | "method_descriptor"
-                            | "getset_descriptor"
-                            | "member_descriptor"
-                            | "dict_keys"
-                            | "dict_items"
-                            | "dict_values"
-                            | "odict_keys"
+                        "odict_keys"
                             | "odict_items"
                             | "odict_values"
-                            | "mappingproxy"
                             | KEY_WRAPPER
                             | "functools._PlaceholderType"
                             | LRU_CACHE_CLASS
@@ -1703,8 +1682,6 @@ impl Context {
                             | value::TEMPLATE_TYPE
                             | value::TEMPLATE_ITER_TYPE
                             | value::INTERPOLATION_TYPE
-                            | "traceback"
-                            | "frame"
                             | "typing.TypeVar"
                             | "typing.ParamSpec"
                             | "typing.ParamSpecArgs"
@@ -5105,6 +5082,13 @@ impl Context {
                     return Ok(self
                         .own_class_attr(obj, name)
                         .unwrap_or_else(|| self.heap.packed_tuple(Vec::new(), false)));
+                }
+                // A type's stored qualified name is metadata even if its str subclass is a descriptor.
+                if name == "__qualname__"
+                    && let Some(value) = self.own_class_attr(obj, name)
+                    && self.string_storage(value).is_some()
+                {
+                    return Ok(value);
                 }
                 if name == "__name__" {
                     let assigned = self

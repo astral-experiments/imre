@@ -194,9 +194,11 @@ impl Context {
                 "expected an ordinary dataclass type",
             ));
         };
-        let name = self.class_name(old).to_owned();
+        let name = self.lookup_attr(old, "__name__")?;
+        let name_text = self.str_value(name)?.to_owned();
         let module = self.scope_data(original).module.clone();
         let layout = super::value::ClassNamespace {
+            name_override: Some(name),
             member_slots: true,
             provider_annotations: self.has_class_annotation_provider(original),
             ..Default::default()
@@ -214,7 +216,12 @@ impl Context {
         let bases = self
             .class_bases_tuple(old)
             .expect("validated dataclass bases");
-        let class = self.allocate_class(name, scope, bases)?;
+        let class = self.allocate_class(name_text, scope, bases)?;
+        // The initial qualified name is type metadata, outside the __set_name__ member walk.
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.names.insert(crate::Str::new("__qualname__"), name);
         self.finish_namespace_class(class, scope, cell, None, Vec::new())
     }
 
@@ -720,21 +727,11 @@ impl Context {
         class_name: &str,
         scope: Id,
         slots: &[String],
-        ordinary_slots: bool,
     ) -> Result<Vec<String>> {
         let mut members = Vec::new();
         for original in slots {
-            if original == "__dict__" {
-                if ordinary_slots {
-                    // Ordinary instances already supply dictionary storage through their layout.
-                    continue;
-                }
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "dynamic __dict__ slot descriptors are unsupported",
-                ));
-            }
-            if original == "__weakref__" {
+            // Layout getsets supply the dictionary and weak references independently of named slots.
+            if matches!(original.as_str(), "__dict__" | "__weakref__") {
                 continue;
             }
             let owner = class_name.trim_start_matches('_');

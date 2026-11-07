@@ -3415,12 +3415,7 @@ impl Context {
                 .as_ref()
                 .is_some_and(|ns| ns.member_slots);
         let members = if member_slots {
-            self.prepare_slot_members(
-                &name,
-                scope,
-                slot_names.as_deref().unwrap_or_default(),
-                ordinary_slots,
-            )?
+            self.prepare_slot_members(&name, scope, slot_names.as_deref().unwrap_or_default())?
         } else {
             Vec::new()
         };

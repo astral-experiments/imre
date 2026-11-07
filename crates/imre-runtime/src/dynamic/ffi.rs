@@ -864,6 +864,11 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
     // Resolving the handler after an allocation failure must not grow the builtin cache.
     ctx.builtin("MemoryError");
+    // These are already-present runtime types, including the types of singletons,
+    // code, functions and iterators. Publish them before user-defined subclasses.
+    for name in builtins::core_types() {
+        ctx.builtin(name);
+    }
     ctx
 }
 
@@ -1925,7 +1930,12 @@ impl Context {
         annotation_scope: bool,
     ) -> Id {
         let owner = self.scope_data(scope);
-        let class_cell = owner.class_cell;
+        // A borrowed method only owns its defining class if its code captures __class__.
+        let code_data = self.code_object(code);
+        let class_cell = owner.class_cell.filter(|_| {
+            !code_data.closure_supported
+                || code_data.freevars.iter().any(|name| name == "__class__")
+        });
         let scope = if owner.exec_locals.is_some()
             || ((owner.class_body.is_some() || owner.class_namespace.is_some())
                 && !annotation_scope)
