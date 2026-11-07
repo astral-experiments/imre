@@ -9,13 +9,15 @@ use super::{Bytes, Error, FileState, Kind, Stream, close_file, errno_error};
 
 pub(crate) struct Random<F = File> {
     file: F,
-    buffer: Vec<u8>,
+    pub(crate) buffer: Vec<u8>,
     // Kernel and Python positions relative to the same window. The descriptor
     // can also move through fileno(), so an absolute starting offset can go stale.
-    raw_pos: usize,
-    pos: usize,
-    read_end: usize,
-    dirty: Option<Range<usize>>,
+    pub(crate) raw_pos: usize,
+    // An inactive window still has a raw cursor when raw.close later leaves the fd open.
+    flushed_raw_pos: usize,
+    pub(crate) pos: usize,
+    pub(crate) read_end: usize,
+    pub(crate) dirty: Option<Range<usize>>,
     truncating_name: Option<String>,
 }
 
@@ -82,6 +84,16 @@ impl FileState {
     }
 }
 
+impl<F> Random<F> {
+    pub(crate) fn last_raw_pos(&self) -> usize {
+        if self.dirty.is_some() || self.read_end != 0 {
+            self.raw_pos
+        } else {
+            self.flushed_raw_pos
+        }
+    }
+}
+
 impl<F: Read + Write + Seek> Random<F> {
     pub(crate) fn new(file: F, capacity: usize) -> Result<Self> {
         let mut buffer = Vec::new();
@@ -93,6 +105,7 @@ impl<F: Read + Write + Seek> Random<F> {
             file,
             buffer,
             raw_pos: 0,
+            flushed_raw_pos: 0,
             pos: 0,
             read_end: 0,
             dirty: None,
@@ -106,6 +119,7 @@ impl<F: Read + Write + Seek> Random<F> {
     }
 
     pub(crate) fn reset(&mut self) {
+        self.flushed_raw_pos = 0;
         self.raw_pos = 0;
         self.pos = 0;
         self.read_end = 0;
@@ -137,12 +151,19 @@ impl<F: Read + Write + Seek> Random<F> {
 
     /// Flush pending edits and leave the descriptor at the caller's logical position.
     pub(crate) fn flush(&mut self) -> io::Result<()> {
+        let active = self.dirty.is_some() || self.read_end != 0;
         self.write_back()?;
+        let flushed_raw_pos = if active {
+            self.raw_pos
+        } else {
+            self.flushed_raw_pos
+        };
         if self.raw_pos != self.pos {
             self.file
                 .seek(SeekFrom::Current(self.pos as i64 - self.raw_pos as i64))?;
         }
         self.reset();
+        self.flushed_raw_pos = flushed_raw_pos;
         Ok(())
     }
 
@@ -187,6 +208,9 @@ impl<F: Read + Write + Seek> Random<F> {
     }
 
     pub(crate) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if self.dirty.is_none() && self.read_end == 0 {
+            self.flushed_raw_pos = 0;
+        }
         if bytes.is_empty() {
             return Ok(());
         }
@@ -194,6 +218,7 @@ impl<F: Read + Write + Seek> Random<F> {
             self.flush()?;
             if bytes.len() > self.buffer.len() {
                 self.file.write_all(bytes)?;
+                self.flushed_raw_pos = 0;
                 return Ok(());
             }
         }

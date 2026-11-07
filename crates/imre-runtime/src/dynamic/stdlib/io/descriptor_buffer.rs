@@ -772,6 +772,35 @@ impl BufferedFd {
         Ok(())
     }
 
+    /// Hand a terminal close to the live Python raw without flushing or closing the outgoing backing.
+    pub(super) fn prepare_random_close(&self, ctx: &mut Context, receiver: Id) -> Result<()> {
+        let Value::Instance { class, .. } = ctx.heap.get(receiver) else {
+            return Ok(());
+        };
+        let Some(armed) = &self.drop_fallback else {
+            return Ok(());
+        };
+        let base = ctx.find_in_mro(*class, |candidate| {
+            (ctx.heap.get(candidate).io_kind() == Some("BufferedRandom")).then_some(candidate)
+        });
+        let native_flush = base.is_some_and(|base| {
+            ["flush", "__getattribute__"]
+                .iter()
+                .all(|name| ctx.class_attr(*class, name) == ctx.class_attr(base, name))
+        }) && ctx.raw_instance_field(receiver, "flush").is_none();
+        if native_flush && self.check_raw(ctx, receiver, "close").is_ok() {
+            return Ok(());
+        }
+        let mut slot = self.buffer.borrow_mut();
+        let Some(Buffer::Random(file)) = slot.as_mut() else {
+            unreachable!("explicit BufferedRandom close")
+        };
+        super::buffered_reader::adopt_for_close(ctx, receiver, self.raw, file)?;
+        armed.set(false);
+        slot.take();
+        Ok(())
+    }
+
     /// A raw method or Python signal handler can call back into its own buffer.
     fn check_reentry(&self, ctx: &Context) -> Result<()> {
         if self.callback_active.get() {
@@ -903,7 +932,7 @@ impl BufferedFd {
         if file_io::state(ctx, self.raw).is_none_or(|raw| raw.live_fd().is_none()) {
             return Err(Error::new("ValueError", "flush of closed file"));
         }
-        let (bytes, mut start) = {
+        let (bytes, start) = {
             let mut slot = self.buffer.borrow_mut();
             let Some(Buffer::Writer(writer)) = slot.as_mut() else {
                 unreachable!()
@@ -918,20 +947,15 @@ impl BufferedFd {
         ctx.heap.keep(backing);
         self.closing_window.set(Some((start, end)));
         self.callback_active.set(true);
-        let result = (|| {
-            while start < end {
-                let count =
-                    super::bytes_writer::write_window(ctx, self.raw, backing, start, end - start)?;
-                start += count;
-                self.closing_window.set(Some((start, end)));
-                ctx.dispatch_signals()?;
-            }
-            // A successful flush resets the raw offset, including for a raw.close veto.
+        let result =
+            super::bytes_writer::flush_window(ctx, self.raw, backing, start..end, |next, _| {
+                self.closing_window.set(Some((next, end)));
+            });
+        if result.is_ok() {
             self.closing_window.set(Some((0, 0)));
-            Ok(NONE)
-        })();
+        }
         self.callback_active.set(false);
-        result
+        result.map(|()| NONE)
     }
 
     pub(super) fn retired_write_offset(&self) -> Option<usize> {
@@ -1137,7 +1161,7 @@ impl BufferedFd {
                     return Ok(NONE);
                 }
                 if self.native_close_handle(ctx).is_none() {
-                    return super::native_writer::flush_and_close(ctx, receiver, |ctx| {
+                    return super::buffered_io::flush_and_close(ctx, receiver, |ctx| {
                         self.close_after_public_flush(ctx, receiver)
                     });
                 }

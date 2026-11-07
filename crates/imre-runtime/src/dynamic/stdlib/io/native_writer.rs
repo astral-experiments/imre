@@ -71,26 +71,6 @@ fn truncate_file(ctx: &mut Context, buffer: Id, size: Option<Id>) -> Result<Id> 
     Ok(ctx.int(size))
 }
 
-/// Run the public flush once, then close the raw even if flush raised.
-pub(super) fn flush_and_close(
-    ctx: &mut Context,
-    receiver: Id,
-    close_raw: impl FnOnce(&mut Context) -> Result<Id>,
-) -> Result<Id> {
-    // invoke keeps the exception alive across the raw close callback.
-    let flushed = super::text_wrapper::invoke_with(ctx, receiver, "flush", |ctx, method| {
-        descriptor_buffer::flush_before_close(ctx, receiver, method)
-    });
-    match (flushed, close_raw(ctx)) {
-        (Err(flush), Err(mut close)) => {
-            close.context = ctx.raised_instance(flush);
-            Err(close)
-        }
-        (Err(flush), _) => Err(flush),
-        (Ok(_), closed) => closed,
-    }
-}
-
 /// A native bound method can outlive a change to the writer's instance dictionary.
 pub(in crate::dynamic::stdlib) fn overridden_close(
     ctx: &mut Context,
@@ -106,7 +86,9 @@ pub(in crate::dynamic::stdlib) fn overridden_close(
     if closed {
         return None;
     }
-    Some(flush_and_close(ctx, receiver, close_raw))
+    Some(super::buffered_io::flush_and_close(
+        ctx, receiver, close_raw,
+    ))
 }
 
 pub(super) fn call(
@@ -232,9 +214,13 @@ pub(super) fn call(
             }
             "close" if buffer != receiver && !fd.closed() => {
                 fd.warn_on_close(ctx, receiver)?;
-                flush_and_close(ctx, receiver, |ctx| {
-                    fd.close_after_public_flush(ctx, receiver)
-                })
+                if owner == "BufferedRandom"
+                    && descriptor_buffer::backing(ctx, receiver) == Some(buffer)
+                    && !fd.closed()
+                {
+                    fd.prepare_random_close(ctx, receiver)?;
+                }
+                super::buffered_io::close(ctx, receiver)
             }
             _ => fd.call(ctx, receiver, name, args),
         });

@@ -58,32 +58,6 @@ fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> R
     Err(Error::new("TypeError", message))
 }
 
-/// A warning or flush override can replace the raw, even across backing types.
-pub(super) fn flush_and_close(ctx: &mut Context, receiver: Id) -> Result<Id> {
-    let flush = super::text_wrapper::invoke(ctx, receiver, "flush", vec![]);
-    if let Err(error) = &flush {
-        for root in error.roots() {
-            ctx.heap.keep(root);
-        }
-    }
-    let close = if let Some(buffer) = backing(ctx, receiver)
-        && let Value::File(handle) = ctx.heap.get(buffer)
-        && let BinaryFile::Descriptor(fd) = handle.as_ref()
-    {
-        fd.close_after_flush(ctx, receiver).map(|_| NONE)
-    } else {
-        super::buffered_reader::close_raw(ctx, receiver)
-    };
-    match (flush, close) {
-        (Err(flush), Err(mut close)) => {
-            close.context = ctx.raised_instance(flush);
-            Err(close)
-        }
-        (Err(flush), _) => Err(flush),
-        (_, result) => result,
-    }
-}
-
 pub(super) fn call(
     ctx: &mut Context,
     owner: &str,
@@ -166,7 +140,7 @@ pub(super) fn call(
         }
         if receiver != buffer && name == "close" && !fd.closed() {
             fd.warn_on_close(ctx, receiver)?;
-            return flush_and_close(ctx, receiver);
+            return super::buffered_io::close(ctx, receiver);
         }
         return fd.call(ctx, receiver, name, args);
     }

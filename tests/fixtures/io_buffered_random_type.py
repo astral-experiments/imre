@@ -390,3 +390,66 @@ assert replacement.closed and not old.closed and not rejected.closed and not inn
 old.close()
 rejected.close()
 inner.close()
+
+
+def queue_edit(raw, replacement):
+    buffered = io.BufferedRandom(raw, 4)
+    assert buffered.read(2) == b"ab"
+    assert buffered.write(b"ZZ") == 2
+    raw.write = replacement
+
+
+# Collection flushes the dirty read-ahead window through the current raw method.
+try:
+    with io.FileIO(path, "w+") as raw:
+        raw.write(b"abcdefgh")
+        raw.seek(0)
+        fd = raw.fileno()
+        calls = []
+
+        def partial_write(data):
+            calls.append(bytes(data))
+            return os.write(fd, b"M")
+
+        queue_edit(raw, partial_write)
+        assert raw.closed and calls == [b"ZZ", b"Z"]
+    with io.FileIO(path, "r") as saved:
+        assert saved.read() == b"abMMefgh"
+
+    with io.FileIO(path, "w+") as raw:
+        raw.seek(5)
+        stream = io.BufferedRandom(raw, 4)
+        assert stream.write(b"ZZ") == 2
+        failure = LookupError("write veto")
+        fd = raw.fileno()
+
+        def write_one(view):
+            if len(view) == 1:
+                raise failure
+            return os.write(fd, b"P")
+
+        raw.write = write_one
+        raw.close = lambda: None
+        try:
+            stream.close()
+        except LookupError as caught:
+            assert caught is failure
+        else:
+            raise AssertionError("lost raw write veto")
+        assert not stream.closed and stream.fileno() == fd
+        assert raw.tell() == 6 and stream.tell() == 5
+        assert os.pread(fd, 2, 5) == b"P"
+        del raw.close
+
+    with io.FileIO(path, "w+") as raw:
+        raw.write(b"0123456789")
+        raw.seek(3)
+        stream = io.BufferedRandom(raw, 4)
+        assert stream.read(2) == b"34" and raw.tell() == 7
+        stream.flush()
+        raw.close = lambda: None
+        stream.close()
+        assert raw.tell() == 5 and stream.tell() == 1
+        del raw.close
+finally:
+    os.unlink(path)
