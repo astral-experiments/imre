@@ -720,8 +720,9 @@ impl Checker<'_> {
         if self.is_class_receiver(root)
             || root.as_name_expr().is_some_and(|n| {
                 self.class_lexical.contains(n.id.as_str())
-                    || (self.names.contains_key(n.id.as_str())
-                        && self.mapping_class_import(n.id.as_str()))
+                    || self.names.get(n.id.as_str()).is_some_and(|&slot| {
+                        self.parameter_shadows_binding(n.id.as_str(), self.locals[slot])
+                    })
             })
         {
             None
