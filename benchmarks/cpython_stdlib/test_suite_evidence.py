@@ -254,6 +254,78 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "legacy labels"):
             run_evidence(unittest.TestSuite([case]), call, reference(case.id()), 0)
 
+    def test_pathlib_stat_receipt_promotion(self):
+        pathlib = Path(__file__).resolve().parent / "full" / "pathlib"
+        baseline = pathlib / "evidence-linux.json"
+        native_reports = json.loads(baseline.read_bytes())
+        historical_reports = deepcopy(native_reports)
+        methods = {f"test.test_pathlib.test_pathlib.{cls}.test_stat" for cls in ("PathTest", "PosixPathTest")}
+        for report in historical_reports:
+            for row in report["records"]:
+                if row["id"] not in methods:
+                    continue
+                row["classification"] = "host-driven-native-operation"
+                row["roles"] = roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython")
+                row["evidence"].update(
+                    operation="native construction, joinpath, stat and individual integer field reads",
+                    fixture="original CPython filesystem setup and teardown; Imre holds paths and stat results",
+                    calls={"new": 3, "join": 3, "stat": 3, "st_mode": 7, "st_ino": 7, "st_dev": 5},
+                    host_assertions={"assertIsInstance": 3, "assertEqual": 3, "assertNotEqual": 5},
+                    whole_body_blocker="unsupported assertIsInstance",
+                )
+                report["counts"]["host-driven-native-operation"] += 1
+                report["counts"]["native-body-host-fixture"] -= 1
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        commit = "a" * 40
+
+        def write(name, reports, measured=False):
+            if measured:
+                reports = deepcopy(reports)
+                for report in reports:
+                    for row in report["records"]:
+                        row.get("evidence", {}).pop("imre_commit", None)
+            path = directory / name
+            path.write_text(json.dumps(reports), encoding="utf-8")
+            return path
+
+        historical = write("historical.json", historical_reports)
+        host_measurement = write("host-measurement.json", historical_reports, measured=True)
+        native_measurement = write("native-measurement.json", native_reports, measured=True)
+        upgraded = directory / "upgraded.json"
+        check = [sys.executable, str(pathlib / "metadata_receipt.py"), "--stat"]
+        update = ["--imre-commit", commit, "--result", upgraded]
+
+        def with_revision(reports):
+            reports = deepcopy(reports)
+            for report in reports:
+                for row in report["records"]:
+                    cls, method = row["id"].rsplit(".", 2)[-2:]
+                    if cls in ("PathTest", "PosixPathTest") and method.startswith(("test_stat", "test_lstat")):
+                        row["evidence"]["imre_commit"] = commit
+            return reports
+
+        result = subprocess.run(check + ["--baseline", historical, host_measurement], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run(check + update + ["--baseline", historical, native_measurement],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(upgraded.read_bytes()), with_revision(native_reports))
+        result = subprocess.run(check + update + [host_measurement], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unverified", result.stderr)
+
+        report = historical_reports[0]
+        row = next(row for row in report["records"] if row["id"] in methods)
+        row.update(classification="blocked", outcome="blocked", reason="unsupported assertIsInstance",
+                   roles=dict.fromkeys(ROLES, "unobserved"))
+        report["counts"]["blocked"] += 1
+        report["counts"]["host-driven-native-operation"] -= 1
+        blocked = write("blocked.json", historical_reports)
+        result = subprocess.run(check + update + ["--baseline", blocked, host_measurement],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(upgraded.read_bytes()), with_revision(json.loads(historical.read_bytes())))
+
 
 class DefaultFixtureTests(unittest.TestCase):
     def fixture(self, body="", module_setup=""):

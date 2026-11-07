@@ -132,10 +132,10 @@ For the ten original stat/lstat occurrences, run the same evidence command
 with `--cohort stat --result /tmp/pathlib-stat.json`, then run
 `metadata_receipt.py --stat /tmp/pathlib-stat.json`. For both `Path` and
 `PosixPath`, four complete methods compare followed and unfollowed results
-natively under the original CPython filesystem fixtures. In `test_stat`
-CPython runs the body and its eleven assertions; Imre constructs three paths,
-joins them, calls stat three times and reads 19 integer fields. The adapter
-rejects any host pathlib, `os.stat` or `os.lstat` call in those bodies.
+natively under the original CPython filesystem fixtures. Imre also runs each
+complete `test_stat` body, including its eleven assertions on the results of
+three `stat` calls. CPython supplies the original filesystem fixtures at O0
+and O3.
 
 The constructor cohort (`--cohort segments`) measures seven original methods
 on `e6fda91` and again on `4375dae`. The two concrete classes run their complete unexpected-keyword
