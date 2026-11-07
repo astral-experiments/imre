@@ -2953,6 +2953,145 @@ pub(super) trait VisitReferences {
     }
 }
 
+/// Reusable edges from the context roots supplied to a full collection.
+#[derive(Default)]
+struct RootTrace {
+    roots: Vec<Id>,
+    next_roots: Vec<Id>,
+    flags: Vec<u8>,
+    covered: Vec<Id>,
+    frontier: Vec<Id>,
+    valid: bool,
+}
+
+impl RootTrace {
+    const COVERED: u8 = 1;
+    const FRONTIER: u8 = 2;
+    const VOLATILE: u8 = 4;
+
+    /// Revisit a mutated value through the ordinary marker on later collections.
+    fn changed(&mut self, index: usize) {
+        if let Some(flags) = self.flags.get_mut(index)
+            && *flags & Self::COVERED != 0
+        {
+            self.valid = false;
+            *flags |= Self::VOLATILE;
+        }
+    }
+
+    /// Discard the previous occupant's membership before a slot can be reused.
+    fn recycled(&mut self, index: usize) {
+        if let Some(flags) = self.flags.get_mut(index) {
+            if *flags & (Self::COVERED | Self::FRONTIER) != 0 {
+                self.valid = false;
+            }
+            *flags = 0;
+        }
+    }
+
+    /// Mark cached values directly and trace the remaining roots normally.
+    fn mark(&mut self, heap: &Heap, mut roots: impl Iterator<Item = Id>) {
+        self.next_roots.clear();
+        while let Some(id) = roots.next() {
+            if self.next_roots.try_reserve(1).is_err() {
+                heap.mark_reference_roots(
+                    self.next_roots.iter().copied().chain([id]).chain(roots),
+                    None,
+                );
+                return;
+            }
+            self.next_roots.push(id);
+        }
+        if !self.valid || self.roots != self.next_roots {
+            std::mem::swap(&mut self.roots, &mut self.next_roots);
+            self.valid = self.rebuild(heap);
+        }
+        if self.valid {
+            for &id in &self.covered {
+                heap.traces[id as usize].set(END);
+            }
+            heap.mark_reference_roots(self.frontier.iter().copied(), None);
+        } else {
+            heap.mark_reference_roots(self.roots.iter().copied(), None);
+        }
+    }
+
+    /// Record the reachable values whose outgoing edges change only through the heap.
+    fn rebuild(&mut self, heap: &Heap) -> bool {
+        for id in self.covered.drain(..).chain(self.frontier.drain(..)) {
+            self.flags[id as usize] &= Self::VOLATILE;
+        }
+        let slots = heap.slots.len();
+        if self
+            .flags
+            .try_reserve(slots.saturating_sub(self.flags.len()))
+            .is_err()
+        {
+            return false;
+        }
+        self.flags.resize(slots, 0);
+        for &root in &self.roots {
+            self.flags[root as usize] &= !Self::VOLATILE;
+        }
+        let mut builder = RootTraceBuilder {
+            heap,
+            flags: &mut self.flags,
+            covered: &mut self.covered,
+            frontier: &mut self.frontier,
+            failed: false,
+        };
+        builder.extend(&self.roots);
+        let mut next = 0;
+        while let Some(&id) = builder.covered.get(next) {
+            if builder.failed || heap.get(id).try_children(&mut builder).is_err() {
+                return false;
+            }
+            next += 1;
+        }
+        !builder.failed
+    }
+}
+
+/// Classify each child once, including when a container holds many identical handles.
+struct RootTraceBuilder<'a> {
+    heap: &'a Heap,
+    flags: &'a mut [u8],
+    covered: &'a mut Vec<Id>,
+    frontier: &'a mut Vec<Id>,
+    failed: bool,
+}
+
+impl VisitReferences for RootTraceBuilder<'_> {
+    fn push(&mut self, id: Id) {
+        let index = id as usize;
+        let flags = &mut self.flags[index];
+        if *flags & (RootTrace::COVERED | RootTrace::FRONTIER) != 0 || self.failed {
+            return;
+        }
+        let value = self.heap.get(id);
+        let direct = self.heap.slot_shapes[index].is_scalar_leaf()
+            || value.directly_stores_children()
+            || matches!(
+                value,
+                Value::Module {
+                    module_state: None,
+                    ..
+                }
+            );
+        let (ids, membership) = if direct && *flags & RootTrace::VOLATILE == 0 {
+            (&mut self.covered, RootTrace::COVERED)
+        } else {
+            (&mut self.frontier, RootTrace::FRONTIER)
+        };
+        if ids.try_reserve(1).is_err() {
+            self.failed = true;
+            return;
+        }
+        ids.push(id);
+        *flags |= membership;
+    }
+}
+
 struct FindReferences {
     targets: [Id; 2],
     found: bool,
@@ -3105,6 +3244,7 @@ enum FinalizerBindingSlot {
 /// Native frames hold temporaries until the next Python statement. A caller's
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
+    root_trace: RootTrace,
     slots: Vec<Slot>,
     pub(super) allocation_traces: super::allocation_traces::AllocationTraces,
     pub(super) loading_linked_constant: bool,
@@ -3332,6 +3472,7 @@ impl Heap {
             slots.push(Slot::new(Value::Int(crate::Int::from(n))));
         }
         let mut heap = Self {
+            root_trace: RootTrace::default(),
             traces: vec![Cell::new(END); slots.len()],
             generator_owners: GeneratorOwners::default(),
             slot_shapes: slots
@@ -3973,11 +4114,13 @@ impl Heap {
             .ok()?;
         let source = source.value.as_ref()?;
         let target = target.value.as_mut()?;
+        self.root_trace.changed(target_id);
         self.generator_owners.reconsider(target_id);
         Some((source, target))
     }
 
     fn prepare_slot_write(&mut self, index: usize) {
+        self.root_trace.changed(index);
         self.generator_owners.reconsider(index);
         if !self.slot_shapes[index].is_scalar_leaf() {
             return;
@@ -5485,7 +5628,9 @@ impl Heap {
     /// A prompt collection models a reference decrement. Preserve cycles until
     /// an automatic or explicit full collection, including cycles created in callbacks.
     pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<WeakCallbacks> {
-        self.mark_reference_roots(globals, None);
+        let mut trace = std::mem::take(&mut self.root_trace);
+        trace.mark(self, globals);
+        self.root_trace = trace;
         let small = self.small_unreachable();
         let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
         let mut cycles = std::mem::take(&mut self.prompt_cycles);
@@ -6142,6 +6287,7 @@ impl Heap {
                     }
                     self.immutable_hashes.remove(&(id as Id));
                 }
+                self.root_trace.recycled(id);
                 let slot = &mut self.slots[id];
                 if slot.has_gc_header {
                     self.gc_schedule.freed();
@@ -6472,6 +6618,57 @@ mod tests {
             let hash = Value::Hash(SharedHash::new(provider.create(class, &[])));
             assert_eq!(hash.has_gc_header(&heap), expected);
         }
+    }
+
+    #[test]
+    fn full_collection_rechecks_mutated_root_edges_and_reused_slots() {
+        let mut heap = Heap::new();
+        let original = heap.alloc(Value::List(Vec::new()));
+        let root = heap.alloc(Value::List(vec![original]));
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.root_trace.valid);
+
+        let replacement = heap.alloc(Value::List(Vec::new()));
+        let (_, target) = heap.source_and_target(original, root).unwrap();
+        *target = Value::List(vec![replacement]);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[original as usize].value.is_none());
+        assert!(heap.slots[replacement as usize].value.is_some());
+
+        let reused = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(reused, original);
+        *heap.get_mut(root) = Value::List(vec![reused]);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[replacement as usize].value.is_none());
+        heap.collect([reused].into_iter());
+        assert!(heap.slots[root as usize].value.is_none());
+        assert!(heap.slots[reused as usize].value.is_some());
+    }
+
+    #[test]
+    fn full_collection_follows_new_children_of_a_volatile_descendant() {
+        let mut heap = Heap::new();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let root = heap.alloc(Value::Tuple(vec![child]));
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+
+        let first = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(child) = Value::List(vec![first]);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.root_trace.frontier.contains(&child));
+
+        let second = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(child) = Value::List(vec![second]);
+        assert!(heap.root_trace.valid);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[first as usize].value.is_none());
+        assert!(heap.slots[second as usize].value.is_some());
     }
 
     #[test]
