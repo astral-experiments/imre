@@ -520,19 +520,32 @@ pub(crate) fn hex_with_separator(
     result
         .try_reserve_exact(capacity)
         .map_err(|_| Error::allocation())?;
-    let mut next = if group > 0 {
+    let first = if group > 0 {
         (bytes.len() - 1) % step + 1
     } else {
         step
     };
-    for (index, &byte) in bytes.iter().enumerate() {
-        if index == next {
-            result.push(separator);
-            next += step;
+    let output = &mut result.spare_capacity_mut()[..capacity];
+    let (first_output, rest) = output.split_at_mut(2 * first);
+    write_hex_digits(&bytes[..first], b'a' - 10, first_output);
+    let remaining = &bytes[first..];
+    if step == 1 {
+        // One separator and two digits have a fixed stride for every input byte.
+        let (triples, _) = rest.as_chunks_mut::<3>();
+        for (triple, &byte) in triples.iter_mut().zip(remaining) {
+            triple[0].write(separator);
+            triple[1].write(HEX[usize::from(byte >> 4)]);
+            triple[2].write(HEX[usize::from(byte & 15)]);
         }
-        result.push(HEX[(byte >> 4) as usize]);
-        result.push(HEX[(byte & 15) as usize]);
+    } else {
+        for (destination, source) in rest.chunks_mut(2 * step + 1).zip(remaining.chunks(step)) {
+            destination[0].write(separator);
+            write_hex_digits(source, b'a' - 10, &mut destination[1..]);
+        }
     }
+    // SAFETY: the first group writes two digits per byte. Each remaining group
+    // also writes its leading separator, including a shorter last group.
+    unsafe { result.set_len(capacity) };
     Ok(result)
 }
 
