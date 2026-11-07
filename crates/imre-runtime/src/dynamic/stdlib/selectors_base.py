@@ -1,4 +1,5 @@
 # BaseSelector from CPython 3.14.5, Lib/selectors.py.
+import math
 from abc import ABCMeta, abstractmethod
 
 

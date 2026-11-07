@@ -19,6 +19,7 @@ struct Registration {
 
 pub(in crate::dynamic) struct Selector {
     poll: Option<Poll>,
+    globals: Id,
     keys: Id,
     mapping: Id,
 }
@@ -155,43 +156,33 @@ fn poll_mask(n: i64) -> i16 {
 }
 
 /// Select waits in seconds; poll rounds positive seconds up to milliseconds.
-fn timeout(ctx: &mut Context, value: Id, poll: bool) -> Result<Option<Duration>> {
+fn timeout(ctx: &mut Context, value: Id, poll_globals: Option<Id>) -> Result<Option<Duration>> {
     if value == NONE {
         return Ok(None);
     }
-    if !poll {
+    let Some(globals) = poll_globals else {
         let zero = ctx.int(0);
         let seconds = builtins::call(ctx, "max", &[value, zero], &[])?;
         return super::select::timeout(ctx, Some(&seconds), false);
-    }
-    let s = match ctx.heap.get(value) {
-        Value::Float(value) => *value,
-        _ => {
-            let integer = ctx.as_int(value)?;
-            if integer.cmp(&crate::Int::from(0)).is_le() {
-                return Ok(Some(Duration::ZERO));
-            }
-            crate::floats::int_to_float(&integer)
-                .map_err(|_| Error::new("OverflowError", "int too large to convert to float"))?
-        }
     };
-    if s.is_nan() {
-        return Err(Error::new(
-            "ValueError",
-            "cannot convert float NaN to integer",
-        ));
+    let zero = ctx.int(0);
+    let nonpositive = ctx.binary("<=", value, zero)?;
+    if ctx.truth(nonpositive)? {
+        return Ok(Some(Duration::ZERO));
     }
-    let ms = (s.max(0.0) * 1000.0).ceil();
-    if ms.is_infinite() {
-        return Err(Error::new(
-            "OverflowError",
-            "cannot convert float infinity to integer",
-        ));
-    }
-    if ms > f64::from(i32::MAX) {
-        return Err(Error::new("OverflowError", "timeout is too large"));
-    }
-    Ok(Some(Duration::from_millis(ms as u64)))
+    let math = if matches!(ctx.heap.get(globals), Value::Scope(_)) {
+        ctx.lookup(globals, "math")?
+    } else {
+        ctx.lookup_attr(globals, "math")?
+    };
+    let ceil = ctx.lookup_attr(math, "ceil")?;
+    // Resolve the callable before multiplication, which can replace math.ceil.
+    ctx.heap.reserve_temporaries(1)?;
+    ctx.heap.keep(ceil);
+    let scale = ctx.alloc(Value::Float(1000.0));
+    let scaled = ctx.binary("*", value, scale)?;
+    let millis = ctx.call(ceil, vec![scaled], Vec::new())?;
+    super::select::timeout(ctx, Some(&millis), true)
 }
 
 impl Registration {
@@ -234,7 +225,7 @@ fn missing<T>(ctx: &mut Context, fileobj: Id) -> Result<T> {
 
 impl Selector {
     pub(in crate::dynamic) fn trace(&self, roots: &mut impl VisitReferences) {
-        roots.extend([self.keys, self.mapping]);
+        roots.extend([self.keys, self.mapping, self.globals]);
     }
 
     /// Resolve Python keys after the native wait releases the selector borrow; int subclasses may compare in Python.
@@ -406,14 +397,20 @@ pub(super) fn call(
     };
     if matches!(name, "PollSelector" | "SelectSelector") {
         builtins::bind(name, args, kwargs, [])?;
+        let module = ctx.module("selectors")?;
+        // Python selector methods keep their defining globals across sys.modules changes.
+        let globals = match *ctx.heap.get(module) {
+            Value::Module { scope, .. } => scope,
+            _ => module,
+        };
         let handle = Rc::new(RefCell::new(Selector {
+            globals,
             poll: (name == "PollSelector").then(Poll::default),
             keys: ctx.dict(Vec::new()),
             mapping: NONE,
         }));
         let selector = ctx.alloc(Value::Selector(handle.clone()));
         ctx.heap.keep(selector);
-        let module = ctx.module("selectors")?;
         let class = ctx.lookup_attr(module, "_SelectorMapping")?;
         let view = ctx.call(class, vec![selector], Vec::new())?;
         handle.borrow_mut().mapping = view;
@@ -542,8 +539,11 @@ pub(super) fn call(
         }
         "select" => {
             let [seconds] = builtins::bind(name, args, kwargs, ["timeout"])?;
-            let poll = handle.borrow().poll.is_some();
-            let timeout = timeout(ctx, seconds.unwrap_or(NONE), poll)?;
+            let globals = {
+                let selector = handle.borrow();
+                selector.poll.as_ref().map(|_| selector.globals)
+            };
+            let timeout = timeout(ctx, seconds.unwrap_or(NONE), globals)?;
             Selector::select(ctx, &handle, timeout)
         }
         "__enter__" | "close" => {
@@ -581,6 +581,7 @@ mod tests {
         });
         let selector = Rc::new(RefCell::new(Selector {
             poll: None,
+            globals: NONE,
             keys: NONE,
             mapping: NONE,
         }));
