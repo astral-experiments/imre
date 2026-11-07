@@ -57,6 +57,8 @@ mod python_hash;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod run_start;
 
+mod binomial;
+use binomial::integer_comb;
 mod prefix_words;
 
 use objects::exceptions::{Error, Kind, Result, finish};
@@ -1118,43 +1120,6 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
         }
         _ => fail("SystemError", "invalid integer operation"),
     };
-    Ok(Int::new(result))
-}
-
-/// Compute math.comb for either entry point after both arguments have been indexed.
-fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
-    let (n, k) = (n.big(), k.big());
-    if n.is_negative() {
-        return Err(Error::new(
-            Kind::ValueError,
-            "n must be a non-negative integer",
-        ));
-    }
-    if k.is_negative() {
-        return Err(Error::new(
-            Kind::ValueError,
-            "k must be a non-negative integer",
-        ));
-    }
-    if k > n {
-        return Ok(Int::from(0));
-    }
-    let complement = n.as_ref() - k.as_ref();
-    let steps = k.into_owned().min(complement).to_i64().ok_or_else(|| {
-        Error::new(
-            Kind::OverflowError,
-            "min(n - k, k) must not exceed 9223372036854775807",
-        )
-    })?;
-    // C(n, d) = C(n, d - 1) * (n - d + 1) / d. The division is exact,
-    // and the unbounded product does not need a GCD to prevent overflow.
-    let mut factor = n.into_owned();
-    let mut result = BigInt::from(1);
-    for divisor in 1..=steps {
-        result *= &factor;
-        result /= divisor;
-        factor -= 1;
-    }
     Ok(Int::new(result))
 }
 
