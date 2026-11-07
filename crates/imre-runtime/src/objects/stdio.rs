@@ -284,8 +284,8 @@ pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usiz
             let ascii = match kind.raw() {
                 0 => Some("None"),
                 1 => Some(if word == 0 { "False" } else { "True" }),
-                // SAFETY: the checked caller roots this integer for the duration of the write.
                 2 => {
+                    // SAFETY: the checked caller roots this integer for the duration of the write.
                     if let Some(value) = unsafe { crate::Int::borrow(word) }.as_small() {
                         Some(digits.format(value))
                     } else {
