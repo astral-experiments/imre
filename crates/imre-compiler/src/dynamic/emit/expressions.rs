@@ -109,7 +109,12 @@ impl Function<'_, '_> {
                             .as_deref()
                             .map_or_else(|| "0".into(), |e| self.expr(e))
                     });
-                    return self.op_at("get_slice", &[&object, &start, &stop], span);
+                    self.take_matching_check();
+                    let position =
+                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
+                    return self.checked(&format!(
+                        "call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {object}, i64 {start}, i64 {stop}, ptr {position})"
+                    ));
                 }
                 let key = self.expr(&v.slice);
                 self.op_at("get", &[&object, &key], span)

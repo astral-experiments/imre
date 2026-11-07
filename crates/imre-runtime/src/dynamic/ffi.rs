@@ -337,7 +337,6 @@ impl Context {
                 Ok(NONE)
             }
             "get" => self.get_item(a, b),
-            "get_slice" => self.get_slice(a, b, c),
             "delitem" => {
                 self.delete_item(a, b)?;
                 Ok(NONE)
@@ -1386,6 +1385,24 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
         .map_err(|error| Error::new("UnicodeError", error.to_string()))
         .and_then(|name| ctx.lookup(scope, name));
     finish(ctx, result)
+}
+
+/// Read a contiguous slice and attribute failures to the subscription expression.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_slice_at(
+    ctx: *mut Context,
+    receiver: Id,
+    start: Id,
+    stop: Id,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: generated native code owns its context and supplies a static span or null.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.get_slice(receiver, start, stop);
+    finish_at(ctx, result, span)
 }
 
 #[unsafe(no_mangle)]
