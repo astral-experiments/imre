@@ -561,16 +561,18 @@ class Decimal(object):
             if intpart is not None:
                 # finite number
                 fracpart = m.group('frac') or ''
-                raw_exp = m.group('exp') or '0'
-                exp_digits = _coefficient_digits(raw_exp.lstrip('+-'))
-                # Larger magnitudes cannot fit even after subtracting the fraction.
-                if len(exp_digits) > len(str(max(MAX_EMAX + len(fracpart), -MIN_ETINY))):
-                    if context is None:
-                        context = getcontext()
-                    return context._raise_error(InvalidOperation, [InvalidOperation])
-                exp = int(exp_digits)
-                if raw_exp.startswith('-'):
-                    exp = -exp
+                raw_exp = m.group('exp')
+                exp = 0
+                if raw_exp is not None:
+                    exp_digits = _coefficient_digits(raw_exp.lstrip('+-'))
+                    # Larger magnitudes cannot fit even after subtracting the fraction.
+                    if len(exp_digits) > len(str(max(MAX_EMAX + len(fracpart), -MIN_ETINY))):
+                        if context is None:
+                            context = getcontext()
+                        return context._raise_error(InvalidOperation, [InvalidOperation])
+                    exp = int(exp_digits)
+                    if raw_exp.startswith('-'):
+                        exp = -exp
                 coeff = _coefficient_digits(intpart+fracpart)
                 exp -= len(fracpart)
                 if exp < MIN_ETINY or exp + len(coeff) - 1 > MAX_EMAX:
