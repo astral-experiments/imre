@@ -160,12 +160,7 @@ impl Context {
         } else if unpack_iterator {
             super::stdlib::structure::release_iterator(self, owner);
         } else if async_generator {
-            if let Err(error) = self.finalize_async_generator(owner) {
-                eprintln!(
-                    "Exception ignored while finalizing asynchronous generator: {}",
-                    error.report(&self.heap)
-                );
-            }
+            self.finalize_async_generator(owner);
         } else if let Some(frame) = generator_frame {
             if self.heap.is_unstarted_coroutine(owner) {
                 // A warning recorder can keep its source and subsequently await it.
@@ -179,9 +174,12 @@ impl Context {
                     );
                 }
             } else if let Err(error) = self.close_generator_frame(frame, owner) {
-                eprintln!(
-                    "Exception ignored while calling __del__: {}",
-                    error.report(&self.heap)
+                super::unraisable::report(
+                    self,
+                    error,
+                    true,
+                    Some(owner),
+                    "Exception ignored while closing generator",
                 );
             }
         } else if let Some(slot) = if exact_socket {

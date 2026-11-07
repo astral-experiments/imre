@@ -104,7 +104,7 @@ impl Context {
             state: State::Initial,
         }))
     }
-    pub(super) fn finalize_async_generator(&mut self, owner: Id) -> Result<Id> {
+    pub(super) fn finalize_async_generator(&mut self, owner: Id) {
         let Value::AsyncGenerator {
             frame,
             closed,
@@ -115,12 +115,23 @@ impl Context {
             unreachable!()
         };
         if matches!(self.heap.get(frame), Value::Generator { offset: None, .. }) {
-            return Ok(NONE);
+            return;
         }
-        if let Some(hook) = finalizer.filter(|&hook| hook != NONE && !closed) {
-            return self.call(hook, vec![owner], Vec::new());
+        let (result, message) =
+            if let Some(hook) = finalizer.filter(|&hook| hook != NONE && !closed) {
+                (
+                    self.call(hook, vec![owner], Vec::new()),
+                    "Exception ignored while finalizing generator",
+                )
+            } else {
+                (
+                    self.generator_close(frame),
+                    "Exception ignored while closing generator",
+                )
+            };
+        if let Err(error) = result {
+            super::unraisable::report(self, error, true, Some(owner), message);
         }
-        self.generator_close(frame)
     }
     fn set_async_operation_state(&mut self, operation: Id, next: State) {
         let Value::AsyncGeneratorOperation { state, .. } = self.heap.get_mut(operation) else {

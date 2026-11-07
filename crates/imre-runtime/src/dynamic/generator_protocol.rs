@@ -351,9 +351,12 @@ impl Context {
                         self.call(method, Vec::new(), Vec::new())?;
                     }
                     Err(missing) if self.is_attribute_error(&missing) => {}
-                    Err(other) => eprintln!(
-                        "Exception ignored while closing generator: {}",
-                        other.report(&self.heap)
+                    Err(other) => super::unraisable::report(
+                        self,
+                        other,
+                        true,
+                        Some(iter),
+                        "Exception ignored while closing generator",
                     ),
                 }
                 return Err(error);
