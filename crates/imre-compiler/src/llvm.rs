@@ -4821,8 +4821,8 @@ impl Emitter<'_, '_> {
             && read_only_integer(left)
             && read_only_integer(right)
         {
-            let left = self.comparison_operand(left);
-            let right = self.comparison_operand(right);
+            let left = self.read_only_integer_operand(left);
+            let right = self.read_only_integer_operand(right);
             let result = self.compare(*op, &left.value, &right.value);
             self.release_operand(&left);
             self.release_operand(&right);
@@ -4873,12 +4873,9 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Requires both complete operands of a two-value integer comparison to
-    /// pass `read_only_integer`. A direct local roots the list, and neither
-    /// operand can remove or replace its elements before the comparison uses
-    /// this unretained word. Only the immediate get is borrowed; arithmetic and
-    /// nested reads keep their ordinary owned-result lowering.
-    fn comparison_operand(&mut self, expression: &Expr) -> Operand {
+    /// Borrows a direct integer-list read under its local root. Callers prove the
+    /// entire operation is read-only, so the element stays live through its use.
+    fn read_only_integer_operand(&mut self, expression: &Expr) -> Operand {
         debug_assert!(read_only_integer(expression));
         if let ExprKind::Builtin(Builtin::ListGet, args) = &expression.kind
             && let [receiver, index] = args.as_slice()
@@ -5121,6 +5118,10 @@ impl Emitter<'_, '_> {
                         index + 1 == expressions.len(),
                         &mut probe_fields,
                     )
+                } else if matches!(builtin, Builtin::IntBitCount | Builtin::IntBitLength)
+                    && read_only_integer(arg)
+                {
+                    self.read_only_integer_operand(arg)
                 } else if borrow_probe
                     || (index == 0
                         && matches!(
