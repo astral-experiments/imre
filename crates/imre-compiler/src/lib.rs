@@ -1012,6 +1012,18 @@ mod tests {
             "def waiting():\n    return waiting()\n\ndef witness() -> str:\n    return 'x'.replace(waiting(), 'y')\n\nprint('steady')\n",
         )
         .unwrap();
+        std::fs::write(
+            original.join("stalled_forwards.py"),
+            concat!(
+                "def left(x: int):\n    return right(x)\n\n",
+                "def right(x: int):\n    return left(x)\n\n",
+                "def forward(x: int):\n    return leaf(x)\n\n",
+                "def leaf(x: int):\n    return x + 1\n\n",
+                "def bad(x: int):\n    return unknown\n\n",
+                "print(forward(3))\n",
+            ),
+        )
+        .unwrap();
         let check = |directory: &std::path::Path| {
             let program = super::compile_file(
                 &directory.join("display.py"),
@@ -1022,6 +1034,10 @@ mod tests {
             assert!(program.llvm_ir.contains("call ptr @imre_dyn_new("));
             super::check_file(&directory.join("replace.py"), None).unwrap();
             for (file, diagnostic) in [
+                (
+                    "stalled_forwards.py",
+                    "14:12: Imre: name is not a local value; globals and first-class functions are unsupported",
+                ),
                 (
                     "saved.py",
                     "5:26: Imre: isinstance requires supported static classes",

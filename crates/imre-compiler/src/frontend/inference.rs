@@ -318,12 +318,21 @@ enum SignatureUse {
     },
 }
 
+/// Return information required the next time discovery visits this signature.
+#[derive(Clone, Copy)]
+enum ReturnDiscovery {
+    Declared,
+    Body,
+    Waiting(u32),
+    Forwarded,
+}
+
 struct Pending {
     inferred_params: Vec<bool>,
     params: Vec<Option<Type>>,
     none_defaults: Vec<usize>,
     returns: Option<Type>,
-    infer_return: bool,
+    discovery: ReturnDiscovery,
 }
 
 /// Each missing slot is filled once from a checked call or a fully checked body.
@@ -355,7 +364,11 @@ impl Inference {
             params,
             none_defaults,
             returns,
-            infer_return: returns.is_none(),
+            discovery: if returns.is_some() {
+                ReturnDiscovery::Declared
+            } else {
+                ReturnDiscovery::Body
+            },
         });
         id
     }
@@ -432,7 +445,7 @@ impl Inference {
         let mut pending = self.pending.borrow_mut();
         pending[id].params[index] = Some(ty);
         for function in &mut *pending {
-            if function.infer_return {
+            if !matches!(function.discovery, ReturnDiscovery::Declared) {
                 function.returns = None;
             }
         }
@@ -446,7 +459,7 @@ impl Inference {
         let mut pending = self.pending.borrow_mut();
         pending[id].params[index] = Some(parent);
         for function in &mut *pending {
-            if function.infer_return
+            if !matches!(function.discovery, ReturnDiscovery::Declared)
                 && let (Some(Type::Class(child)), Type::Class(parent)) = (function.returns, parent)
                 && parsers.child_of(child, parent)
             {
@@ -455,6 +468,45 @@ impl Inference {
         }
         self.widened.set(true);
         self.revision.set(self.revision.get() + 1);
+    }
+
+    /// Revisit forwarded returns after widening or before choosing a terminal diagnostic.
+    fn revisit_forwarded_returns(&self) {
+        for signature in self.pending.borrow_mut().iter_mut() {
+            if matches!(
+                signature.discovery,
+                ReturnDiscovery::Waiting(_) | ReturnDiscovery::Forwarded
+            ) {
+                signature.discovery = ReturnDiscovery::Body;
+            }
+        }
+    }
+
+    /// A direct call with fixed parameter types has no other evidence to discover
+    /// while its callee's return is unknown. The final checker still visits the body.
+    fn forwards_declared_parameters(
+        &self,
+        function: &ast::StmtFunctionDef,
+        signature: &Signature,
+        callee: usize,
+    ) -> bool {
+        let [ast::Stmt::Return(ret)] = function.body.as_slice() else {
+            return false;
+        };
+        let Some(ast::Expr::Call(call)) = ret.value.as_deref() else {
+            return false;
+        };
+        let pending = self.pending.borrow();
+        !matches!(pending[signature.id].discovery, ReturnDiscovery::Declared)
+            && !pending[signature.id].inferred_params.contains(&true)
+            && !pending[callee].inferred_params.contains(&true)
+            && pending[callee].returns.is_none()
+            && matches!(call.func.as_ref(), ast::Expr::Name(_))
+            && call.arguments.keywords.is_empty()
+            && call.arguments.args.iter().all(|arg| {
+                matches!(arg, ast::Expr::Name(name)
+                if signature.params.iter().any(|param| param.name == name.id.as_str()))
+            })
     }
 
     /// Learn evidence from an expected callable, then answer the requested signature query.
@@ -487,11 +539,15 @@ impl Inference {
             }
         }
         let pending = self.pending.borrow();
-        let signature = &pending[signature.id];
-        signature
+        let candidate = &pending[signature.id];
+        candidate
             .returns
-            .filter(|_| !needs_parameters || signature.params.iter().all(Option::is_some))
-            .ok_or(Failure::PendingSignature { module, range })
+            .filter(|_| !needs_parameters || candidate.params.iter().all(Option::is_some))
+            .ok_or(Failure::PendingSignature {
+                signature: signature.id,
+                module,
+                range,
+            })
     }
 
     pub(super) fn callable_signature(
@@ -569,7 +625,15 @@ impl Inference {
         classes: &mut ClassInfo,
         types: &Types,
     ) -> std::result::Result<(), Diagnostic> {
-        while self.widened.replace(false) || self.unresolved() {
+        loop {
+            let widened = self.widened.replace(false);
+            if !widened && !self.unresolved() {
+                break;
+            }
+            if widened {
+                self.revisit_forwarded_returns();
+            }
+            let mut skipped = false;
             for (_, _, signature) in definitions.iter_mut() {
                 self.update(signature);
             }
@@ -602,12 +666,24 @@ impl Inference {
                 if graph.modules[*module].archive.is_some() {
                     continue; // Native declarations must be fully annotated.
                 }
-                let (ready, infer_return) = {
-                    let pending = self.pending.borrow();
-                    let pending = &pending[signature.id];
+                let (ready, infer_return, retrying) = {
+                    let signatures = self.pending.borrow();
+                    let pending = &signatures[signature.id];
+                    let skip = match pending.discovery {
+                        ReturnDiscovery::Waiting(callee) => {
+                            signatures[callee as usize].returns.is_none()
+                        }
+                        ReturnDiscovery::Forwarded => true,
+                        _ => false,
+                    };
+                    if skip && !self.widened.get() {
+                        skipped = true;
+                        continue;
+                    }
                     (
                         pending.params.iter().all(Option::is_some),
                         pending.returns.is_none(),
+                        matches!(pending.discovery, ReturnDiscovery::Waiting(_)),
                     )
                 };
                 if !ready {
@@ -662,7 +738,18 @@ impl Inference {
                     Ok::<_, Failure>(())
                 })();
                 if let Err(diagnostic) = result {
+                    if let Failure::PendingSignature {
+                        signature: callee, ..
+                    } = &diagnostic
+                        && self.forwards_declared_parameters(function, &signature, *callee)
+                        && let Ok(callee) = u32::try_from(*callee)
+                    {
+                        self.pending.borrow_mut()[signature.id].discovery =
+                            ReturnDiscovery::Waiting(callee);
+                    }
                     errors.push((*module, diagnostic));
+                } else if retrying {
+                    self.pending.borrow_mut()[signature.id].discovery = ReturnDiscovery::Forwarded;
                 }
             }
             let module = &graph.modules[graph.entry];
@@ -686,6 +773,11 @@ impl Inference {
                 errors.push((graph.entry, diagnostic));
             }
             if self.revision.get() == before {
+                // Reproduce the canonical diagnostic pass if discovery stalls.
+                if skipped && self.unresolved() {
+                    self.revisit_forwarded_returns();
+                    continue;
+                }
                 if let Some((module, range)) = conflicting_returns {
                     let mut report = Diagnostic::at(
                         &graph.modules[module].source,
