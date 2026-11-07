@@ -2,6 +2,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+const STDLIB: &str = "{installed_base}/lib/imre{py_version_short}";
 const SITE_PACKAGES: &str = "{base}/lib/imre{py_version_short}/site-packages";
 
 pub const SCHEME_NAMES: &[&str] = &["posix_prefix", "posix_user", "venv"];
@@ -155,6 +156,11 @@ impl InterpreterLayout {
             .find(|cfg| cfg.is_file())
     }
 
+    /// A venv shares the base interpreter's standard library, including with -S.
+    pub fn stdlib_dir(&self) -> PathBuf {
+        self.expand_path(&self.base_prefix, STDLIB)
+    }
+
     /// Ordered installation sites; the venv participates even when the base cannot.
     pub fn site_packages(&self, site_initialized: bool) -> impl Iterator<Item = PathBuf> + '_ {
         std::iter::once(&self.prefix)
@@ -190,7 +196,7 @@ impl InterpreterLayout {
             ("posix_user", "include") => "{userbase}/include/python{py_version_short}",
             ("posix_user", "scripts") => "{userbase}/bin",
             ("posix_user", "data") => "{userbase}",
-            ("posix_prefix" | "venv", "stdlib") => "{base}/lib/imre{py_version_short}",
+            ("posix_prefix" | "venv", "stdlib") => STDLIB,
             ("posix_prefix" | "venv", "platstdlib") => "{platbase}/lib/imre{py_version_short}",
             ("posix_prefix" | "venv", "purelib") => SITE_PACKAGES,
             ("posix_prefix" | "venv", "platlib") => {
@@ -212,6 +218,8 @@ impl InterpreterLayout {
         let prefix = if scheme == "posix_user" {
             userbase = Self::user_base()?;
             &userbase
+        } else if template == STDLIB {
+            &self.base_prefix
         } else {
             &self.prefix
         };

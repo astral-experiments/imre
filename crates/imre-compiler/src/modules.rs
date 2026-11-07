@@ -3608,7 +3608,7 @@ impl SourceGraph {
             root.clone(),
             &options.extension_paths,
             &options.python_archive_indices,
-            options.implicit_sites(),
+            options.installed_dirs(),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3669,7 +3669,7 @@ impl SourceGraph {
             root,
             &options.extension_paths,
             &options.python_archive_indices,
-            options.implicit_sites(),
+            options.installed_dirs(),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;
@@ -4129,11 +4129,11 @@ struct Loader<'a> {
 }
 
 impl<'a> Loader<'a> {
-    fn new(
+    fn new<'p>(
         root: PathBuf,
         extension_paths: &[PathBuf],
         python_archive_indices: &[usize],
-        site_dirs: &[PathBuf],
+        installed_dirs: impl IntoIterator<Item = &'p PathBuf>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
@@ -4165,7 +4165,7 @@ impl<'a> Loader<'a> {
         }
         let archive_roots = search_roots.len();
         let mut inputs = crate::SourceInputs::default();
-        for site in site_dirs {
+        for site in installed_dirs {
             let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
             inputs
                 .directories

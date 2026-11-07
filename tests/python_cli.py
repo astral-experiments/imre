@@ -217,7 +217,24 @@ def check_installed_site(imre, root, run):
     init.write_text("def value(): return 23\n")
     result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
+    # Files installed in the standard library are available before site runs.
+    tariff = site.parent / "installed_tariff.py"
+    tariff.write_text("def freight(weight: int) -> int: return weight * 2\n")
+    static = "from installed_tariff import freight; print(freight(3))"
+    runtime = "import importlib, sys; print(importlib.import_module(sys.argv[1]).freight(3))"
+    for args in (("-ESB", "-c", static), ("-ISB", "-c", runtime, tariff.stem)):
+        result = run(launcher, *args, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"6\n", b""), result
     check_symlinked_venv(launcher, site, root.resolve(), run)
+
+    # Discovering a filesystem library must not switch a checked program's backend.
+    (site.parent / "sitecustomize.py").write_text("print('stdlib hook')\n")
+    checked = run(launcher, "-EB", "-c", static, timeout=300)
+    assert (checked.returncode, checked.stdout, checked.stderr) == (0, b"6\n", b""), checked
+    # An object program already starts the shared interpreter, so its hook runs once.
+    boxed = run(launcher, "-EB", "-c", runtime, tariff.stem, timeout=300)
+    assert (boxed.returncode, boxed.stdout, boxed.stderr) == (0, b"stdlib hook\n6\n", b""), boxed
+
 
 
 def check_symlinked_venv(launcher, base_site, root, run):
@@ -249,7 +266,15 @@ def check_symlinked_venv(launcher, base_site, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, b"True True True True\nTrue False " + str(enabled).encode() + b"\n", b"",
         ), result
-
+    # -S suppresses site-packages but preserves the base standard library in a venv.
+    code = (
+        "import sysconfig; from installed_tariff import freight; "
+        "print(sysconfig.get_path('stdlib'), freight(4))"
+    )
+    result = run(link, "-ISB", "-c", code, timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0, f"{base_site.parent} 8\n".encode(), b"",
+    ), result
 
 
 def check_sysconfig_build(imre, root, run):

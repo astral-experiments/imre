@@ -112,12 +112,16 @@ pub struct CompileOptions {
     pub bundled_provider_archive: Option<PathBuf>,
     /// Compiler-owned archive for a Python launcher missing its installed companion.
     pub stdlib_fallback: Option<PathBuf>,
+    /// The base interpreter's installed filesystem standard library, when present.
+    pub stdlib_dir: Option<PathBuf>,
     /// Existing user and prefix package directories in the launcher's search order.
     pub site_dirs: Vec<PathBuf>,
     /// User directory with .pth files to process during Python startup.
     pub user_site_pth: Option<PathBuf>,
     /// A source sitecustomize module is visible before the command path is prepended.
     pub sitecustomize: bool,
+    /// An installed stdlib hook can run on object startup without selecting that backend.
+    pub stdlib_sitecustomize: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
     /// Indices in extension_paths admitted as ZIPs from PYTHONPATH during Python startup.
@@ -137,15 +141,16 @@ impl CompileOptions {
             })
     }
 
-    fn implicit_sites(&self) -> &[PathBuf] {
-        if self
+    fn installed_dirs(&self) -> impl Iterator<Item = &PathBuf> {
+        let sites = if self
             .python_startup()
             .is_some_and(|(flags, _)| flags.no_site)
         {
-            &[]
+            &[][..]
         } else {
-            &self.site_dirs
-        }
+            self.site_dirs.as_slice()
+        };
+        self.stdlib_dir.iter().chain(sites)
     }
 
     fn load_graph(
