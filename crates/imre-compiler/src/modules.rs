@@ -5651,7 +5651,11 @@ impl<'a> Loader<'a> {
             )),
             needs_textwrap(TEXTWRAP_WRAPPER).then_some((
                 TEXTWRAP_WRAPPER,
-                include_str!("../stdlib/textwrap/wrapper.py"),
+                concat!(
+                    include_str!("../stdlib/textwrap/wrapper.py"),
+                    "\n\n",
+                    include_str!("../stdlib/textwrap/functions_typed.py"),
+                ),
             )),
         ];
         for (implementation, source) in bundles.into_iter().flatten() {
