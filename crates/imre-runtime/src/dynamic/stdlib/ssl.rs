@@ -46,7 +46,8 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "default_verify_paths",
         "default_verify_flags",
         "set_alpn_protocols",
-        "set_post_handshake_auth",
+        "post_handshake_auth",
+        "verify_client_post_handshake",
         "get_ciphers",
         "set_ciphers",
         "set_ecdh_curve",
@@ -675,22 +676,24 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
-        ("set_post_handshake_auth", &[handle, enabled]) => {
-            let Value::Bool(enabled) = *ctx.heap.get(enabled) else {
-                return Err(Error::new(
-                    "TypeError",
-                    "expected bool for post_handshake_auth",
-                ));
-            };
-            let mut context = context(ctx, handle)?.borrow_mut();
-            if context.protocol != provider::Protocol::Client && enabled {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "server post-handshake client authentication is unsupported",
-                ));
-            }
-            context.set_post_handshake_auth(enabled);
+        ("post_handshake_auth", &[handle]) => Ok(super::builtins::boolean(
+            context(ctx, handle)?.borrow().post_handshake_auth,
+        )),
+        ("post_handshake_auth", &[handle, value]) => {
+            let enabled = ctx.truth(value)?;
+            context(ctx, handle)?.borrow_mut().post_handshake_auth = enabled;
             Ok(NONE)
+        }
+        ("verify_client_post_handshake", &[handle]) => {
+            let result = match ctx.heap.get(handle) {
+                Value::TlsBioSession(ssl) => ssl.borrow().verify_client_post_handshake(),
+                _ => session(ctx, handle)?
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(closed)?
+                    .verify_client_post_handshake(),
+            };
+            trust_result(ctx, result)
         }
         ("load_cert_chain", &[handle, certfile, keyfile, password]) => {
             load_cert_chain(ctx, handle, certfile, keyfile, password)

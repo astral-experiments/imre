@@ -129,6 +129,50 @@ else:
 cin.write(record)
 assert client.read() == b"one session"
 
+# The server requests a client certificate after TLS 1.3 has authenticated
+# the server. OpenSSL sends the request and response during application I/O.
+client_ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+client_ctx.post_handshake_auth = True
+client_ctx.load_cert_chain(certdata + "/keycert4.pem")
+server_ctx.load_verify_locations(certdata + "/pycacert.pem")
+server_ctx.verify_mode = ssl.CERT_REQUIRED
+server_ctx.post_handshake_auth = True
+
+
+def post_handshake_request():
+    client, server, cin, cout, sin, sout = connect("localhost")
+    assert server.getpeercert() is None
+    assert server.verify_client_post_handshake() is None
+    assert server.write(b"identify") == 8
+    cin.write(sout.read())
+    assert client.read() == b"identify"
+    assert client.write(b"response") == 8
+    sin.write(cout.read())
+    return client, server, cin, sout
+
+
+client, server, cin, sout = post_handshake_request()
+assert server.read() == b"response"
+assert ("DNS", "fakehostname") in server.getpeercert()["subjectAltName"]
+print("post-handshake client", server.getpeercert()["subjectAltName"])
+
+# A self-signed client fails deferred verification on the server's next read.
+client_ctx.load_cert_chain(certdata + "/keycert.pem")
+client, server, cin, sout = post_handshake_request()
+try:
+    server.read()
+except ssl.SSLCertVerificationError as error:
+    assert error.verify_code == 18 and error.reason == "CERTIFICATE_VERIFY_FAILED"
+else:
+    raise AssertionError("accepted an untrusted client certificate")
+cin.write(sout.read())
+try:
+    client.read()
+except ssl.SSLError as error:
+    assert error.reason == "TLSV1_ALERT_UNKNOWN_CA"
+else:
+    raise AssertionError("missing unknown CA alert")
+
 # Incompatible versions produce a local error on the server and an alert on the client.
 server_ctx.maximum_version = ssl.TLSVersion.TLSv1_2
 client_ctx.minimum_version = ssl.TLSVersion.TLSv1_3

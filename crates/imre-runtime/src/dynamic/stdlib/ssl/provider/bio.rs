@@ -102,11 +102,16 @@ impl Api {
         if kind == super::SSL_ERROR_SYSCALL && os_error.raw_os_error() != Some(0) {
             return BioFailure::Tls(Failure::Io(os_error));
         }
-        self.ssl_failure_kind(kind, operation)
+        self.ssl_failure_kind(ssl, kind, operation)
     }
 
     /// Interpret SSL_get_error after handling syscall errno.
-    pub(super) fn ssl_failure_kind(&self, kind: i32, operation: &str) -> BioFailure {
+    pub(super) fn ssl_failure_kind(
+        &self,
+        ssl: NonNull<c_void>,
+        kind: i32,
+        operation: &str,
+    ) -> BioFailure {
         match kind {
             super::SSL_ERROR_WANT_READ => BioFailure::WantRead,
             super::SSL_ERROR_WANT_WRITE => BioFailure::WantWrite,
@@ -119,6 +124,14 @@ impl Api {
                 const PROTOCOL_IS_SHUTDOWN: std::ffi::c_ulong = (20 << 23) | 207;
                 // SAFETY: this thread's last error belongs to the failed SSL operation.
                 let code = unsafe { (self.ERR_peek_last_error)() };
+                // An SSL_read can verify a client certificate after the initial
+                // handshake. Keep its X509 verification code on both transports.
+                const CERTIFICATE_VERIFY_FAILED: std::ffi::c_ulong = (20 << 23) | 134;
+                if code == CERTIFICATE_VERIFY_FAILED
+                    && let Err(error) = self.verify_peer(ssl.as_ptr(), false)
+                {
+                    return BioFailure::Tls(error);
+                }
                 match code {
                     super::UNEXPECTED_EOF => return BioFailure::UnexpectedEof,
                     PROTOCOL_IS_SHUTDOWN => return BioFailure::ProtocolIsShutdown,
@@ -178,10 +191,7 @@ impl BioSession {
         server: bool,
     ) -> std::result::Result<Self, Failure> {
         let api = ctx.api;
-        api.clear();
-        // SAFETY: SSL_new acquires a reference to the live context.
-        let handle = NonNull::new(unsafe { (api.SSL_new)(ctx.handle.as_ptr()) })
-            .ok_or_else(|| api.error("SSL_new"))?;
+        let handle = ctx.new_connection(server)?;
         let session = Self {
             api,
             handle,
@@ -291,6 +301,12 @@ impl BioSession {
 
     pub(in crate::dynamic) fn pending(&self) -> std::result::Result<usize, BioFailure> {
         self.api.ssl_pending(self.handle)
+    }
+
+    pub(in crate::dynamic) fn verify_client_post_handshake(
+        &self,
+    ) -> std::result::Result<(), Failure> {
+        self.api.verify_client_post_handshake(self.handle)
     }
 
     pub(in crate::dynamic) fn peer_certificate(

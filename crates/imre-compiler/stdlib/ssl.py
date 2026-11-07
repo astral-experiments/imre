@@ -312,7 +312,7 @@ class Purpose(_ASN1Object, _Enum):
 class SSLContext:
     """TLS settings, trusted certificates and local certificate chains."""
 
-    __slots__ = ("_ctx", "_post_handshake_auth", "__dict__")
+    __slots__ = ("_ctx", "__dict__")
 
     def __new__(cls, protocol=None, *args, **kwargs):
         if protocol is None:
@@ -337,7 +337,6 @@ class SSLContext:
             raise ValueError("invalid or unsupported protocol version %i" % protocol)
         self = object.__new__(cls)
         __class__._ctx.__set__(self, ctx)
-        __class__._post_handshake_auth.__set__(self, False)
         return self
 
     @property
@@ -431,13 +430,15 @@ class SSLContext:
 
     @property
     def post_handshake_auth(self):
-        return self._post_handshake_auth
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("post_handshake_auth", self)
+        return _imre_ssl.post_handshake_auth(__class__._ctx.__get__(self))
 
     @post_handshake_auth.setter
     def post_handshake_auth(self, enabled):
-        enabled = bool(enabled)
-        _call(_imre_ssl.set_post_handshake_auth, self._ctx, enabled)
-        self._post_handshake_auth = enabled
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("post_handshake_auth", self)
+        _imre_ssl.post_handshake_auth(__class__._ctx.__get__(self), enabled)
 
     def session_stats(self, /):
         if not issubclass(type(self), __class__):
@@ -620,6 +621,9 @@ class SSLObject:
         """Advance the handshake, raising SSLWantReadError when more peer data is needed."""
         self._bio_call(_imre_ssl.bio_handshake)
 
+    def verify_client_post_handshake(self):
+        _check_context_result(_imre_ssl.verify_client_post_handshake(self._sslobj))
+
     def unwrap(self):
         """Send and receive TLS close notifications through the memory BIOs."""
         self._bio_call(_imre_ssl.bio_shutdown)
@@ -759,6 +763,11 @@ class SSLSocket:
         if not _imre_ssl.is_session(self._session):
             return 0
         return _tls_result(_call(_imre_ssl.pending, self._session), self.server_hostname)
+
+    def verify_client_post_handshake(self):
+        if not _imre_ssl.is_session(self._session):
+            raise ValueError("No SSL wrapper around " + str(self))
+        _check_context_result(_imre_ssl.verify_client_post_handshake(self._session))
 
     def unwrap(self):
         if not _imre_ssl.is_session(self._session):
