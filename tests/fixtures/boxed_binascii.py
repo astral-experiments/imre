@@ -27,6 +27,8 @@ def current():
     from binascii import a2b_qp
 
     print(a2b_qp("tag_name=5F=FF", header=True))
+    print(a2b_qp((b"x" * 64 + b"=4A") * 2 + b"=QZ=\rignored\n=x=09_"))
+    print(a2b_qp(b"u_x=2D" * 7 + b"a" * 130 + b"=5F_", header=True))
     print(a2b_qp(memoryview(b".=00==z=\rdiscard\n!")[1:-1]))
     raw = bytearray(b"=41")
     try:
