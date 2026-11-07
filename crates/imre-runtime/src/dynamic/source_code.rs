@@ -14,9 +14,9 @@ use imre_ast::comprehension::{
     InvalidTarget, Output, Plan, outer_clause, try_collect_target_names,
 };
 use ruff_python_ast as ast;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextRange};
 
-use super::value::{Body, ExecGlobals, Location};
+use super::value::{Body, ExecGlobals, ExpressionPosition, Location, TracebackAnchor};
 use super::*;
 
 #[derive(Clone)]
@@ -30,7 +30,7 @@ pub(super) struct Program {
     filename: SourceFilename,
     // All nested code shares a source map. Prelinked suspended suites start in a synthetic header.
     source_lines: Rc<[usize]>,
-    linked_body_line: Option<u32>,
+    linked_body_line: Option<(u32, Option<i64>)>,
     // Check earlier scope declarations before reporting a misplaced future import.
     syntax_limit: Option<ruff_text_size::TextRange>,
     pub name: String,
@@ -291,8 +291,8 @@ enum Instruction {
     ClassAnnotator(Rc<Program>),
     ClassStart,
     ClassEnd,
-    Yield(Option<ast::Expr>),
-    YieldResult,
+    Yield(Option<ast::Expr>, TextRange),
+    YieldResult(TextRange),
     MakeGenerator(ast::Expr),
     Return(Option<ast::Expr>),
     ReturnSent,
@@ -325,7 +325,7 @@ enum Instruction {
     StoreAttribute(ast::Identifier),
     StoreSubscript,
     EndAsyncFor,
-    Await(Option<ast::Expr>),
+    Await(Option<ast::Expr>, TextRange),
     SaveOperand(Option<ast::Expr>),
     BuildSequence {
         tuple: bool,
@@ -342,7 +342,7 @@ enum Instruction {
         unpack: bool,
     },
     FinishDisplay,
-    Binary(&'static str, ruff_text_size::TextRange, bool),
+    Binary(&'static str, TextRange, TracebackAnchor, bool),
     NextComparison {
         end: usize,
         condition: bool,
@@ -356,12 +356,14 @@ enum Instruction {
     LoadResult(ast::Expr),
     Unary(ast::UnaryOp),
     Attribute {
+        range: TextRange,
         name: ast::Identifier,
         method: bool,
     },
     JumpResult(usize),
     SaveCallMethod(ast::ExprAttribute),
     CallSaved {
+        anchor: TracebackAnchor,
         positional: usize,
         keywords: Vec<ast::Identifier>,
         position: value::ExpressionPosition,
@@ -399,7 +401,7 @@ enum Instruction {
     ClearException(String),
     StartFinally,
     EndFinally,
-    Delegate,
+    Delegate(Option<TextRange>),
     BindSent(Vec<ast::Expr>),
 }
 
@@ -1446,7 +1448,7 @@ impl Program {
                 | Instruction::Iter(Some(e), _)
                 | Instruction::CollectItem { value: Some(e), .. }
                 | Instruction::ExceptMatch(e, _)
-                | Instruction::Await(Some(e))
+                | Instruction::Await(Some(e), _)
                 | Instruction::SaveOperand(Some(e)) => strings.visit_expr(e),
                 Instruction::Attribute { name, .. } | Instruction::StoreNamed(name) => {
                     strings.heap.code_name(name.as_str());
@@ -1609,7 +1611,7 @@ impl Program {
                 | Instruction::ClassStart
                 | Instruction::ClassEnd
                 | Instruction::CheckAnnotationFormat => {}
-                Instruction::Yield(e) | Instruction::Return(e) | Instruction::Next(e, _) => {
+                Instruction::Yield(e, _) | Instruction::Return(e) | Instruction::Next(e, _) => {
                     if let Some(e) = e {
                         strings.visit_expr(e);
                     }
@@ -1628,8 +1630,8 @@ impl Program {
                     }
                 }
                 Instruction::ReturnSent
-                | Instruction::YieldResult
-                | Instruction::Await(None)
+                | Instruction::YieldResult(_)
+                | Instruction::Await(None, _)
                 | Instruction::SaveOperand(None)
                 | Instruction::BuildSequence { .. }
                 | Instruction::BuildSlice(_)
@@ -1638,7 +1640,7 @@ impl Program {
                 | Instruction::InsertDict { .. }
                 | Instruction::InsertSet { .. }
                 | Instruction::FinishDisplay
-                | Instruction::Binary(_, _, _)
+                | Instruction::Binary(_, _, _, _)
                 | Instruction::NextComparison { .. }
                 | Instruction::Branch { value: None, .. }
                 | Instruction::Unary(_)
@@ -1664,7 +1666,7 @@ impl Program {
                 | Instruction::EnterExcept { .. }
                 | Instruction::StartFinally
                 | Instruction::EndFinally
-                | Instruction::Delegate => {}
+                | Instruction::Delegate(_) => {}
             }
         }
         let (class_cell, mut functions) = strings.scan(&mut self.unlowered_yield)?;
@@ -1956,18 +1958,29 @@ impl Program {
     }
 
     pub(super) fn expression_range(&self, range: ruff_text_size::TextRange) -> Option<[u32; 4]> {
-        // Prelinked suspended suites are reparsed behind a synthetic function header.
-        // Its columns need not match the original file.
-        if self.linked_body_line.is_some() || self.source_lines.is_empty() {
+        if self.source_lines.is_empty() {
             return None;
         }
         let point = |offset: ruff_text_size::TextSize| {
             let byte = offset.to_usize();
             let line = self.source_lines.partition_point(|&start| start <= byte);
-            (line as u32, (byte - self.source_lines[line - 1]) as u32)
+            let column = byte - self.source_lines[line - 1];
+            if let Some((body_line, column_delta)) = self.linked_body_line {
+                // The synthetic header and prefix replace only the text before the suite.
+                let line = u32::try_from(line).ok()?.checked_sub(2)?;
+                let column = if line == 0 {
+                    // Older native definitions did not record this first-line displacement.
+                    i64::try_from(column).ok()? + column_delta?
+                } else {
+                    column as i64
+                };
+                Some((body_line + line, u32::try_from(column).ok()?))
+            } else {
+                Some((line as u32, column as u32))
+            }
         };
-        let (start_line, start_col) = point(range.start());
-        let (end_line, end_col) = point(range.end());
+        let (start_line, start_col) = point(range.start())?;
+        let (end_line, end_col) = point(range.end())?;
         Some([start_line, end_line, start_col, end_col])
     }
 
@@ -1980,7 +1993,7 @@ impl Program {
             .partition_point(|&start| start <= offset.to_usize()) as u32;
         Some(
             self.linked_body_line
-                .map_or(line, |base| base + line.saturating_sub(2)),
+                .map_or(line, |(base, _)| base + line.saturating_sub(2)),
         )
     }
 
@@ -2052,6 +2065,7 @@ impl Program {
         let line = plan.line;
         let method =
             imre_ast::direct_method(&call, &self.method_imports, self.private_names.as_deref());
+        let anchor = TracebackAnchor::delimiter(call.range(), call.func.end(), b'(');
         let position = value::ExpressionPosition::Source {
             offset: method.map_or_else(|| call.start(), |field| field.attr.start()),
             range: call.range(),
@@ -2065,6 +2079,7 @@ impl Program {
                 self.instructions.push((
                     line,
                     Instruction::Attribute {
+                        range: field.range,
                         name: field.attr,
                         method: true,
                     },
@@ -2095,6 +2110,7 @@ impl Program {
         self.instructions.push((
             line,
             Instruction::CallSaved {
+                anchor,
                 positional,
                 keywords,
                 position,
@@ -2153,10 +2169,10 @@ impl Program {
         match expr {
             ast::Expr::Yield(y) => {
                 let op = match y.value {
-                    None => Instruction::Yield(None),
+                    None => Instruction::Yield(None, y.range),
                     Some(value) => match self.lower_operand(*value, plan)? {
-                        Some(expr) => Instruction::Yield(Some(expr)),
-                        None => Instruction::YieldResult,
+                        Some(expr) => Instruction::Yield(Some(expr), y.range),
+                        None => Instruction::YieldResult(y.range),
                     },
                 };
                 self.instructions.push((line, op));
@@ -2165,21 +2181,25 @@ impl Program {
                 let iterable = self.lower_operand(*y.value, plan)?;
                 self.instructions
                     .push((line, Instruction::Iter(iterable, false)));
-                self.instructions.push((line, Instruction::Delegate));
+                self.instructions
+                    .push((line, Instruction::Delegate(Some(y.range))));
             }
             ast::Expr::Await(a) => {
                 let value = self.lower_operand(*a.value, plan)?;
-                self.instructions.push((line, Instruction::Await(value)));
-                self.instructions.push((line, Instruction::Delegate));
+                self.instructions
+                    .push((line, Instruction::Await(value, a.range)));
+                self.instructions
+                    .push((line, Instruction::Delegate(Some(a.range))));
             }
             ast::Expr::Call(call) => self.lower_awaited_call(call, plan)?,
             ast::Expr::Tuple(tuple) => self.lower_sequence(tuple.elts, true, plan)?,
             ast::Expr::List(list) => self.lower_sequence(list.elts, false, plan)?,
             ast::Expr::Subscript(item) => {
+                let anchor = TracebackAnchor::delimiter(item.range, item.value.end(), b'[');
                 self.save_operand(*item.value, plan)?;
                 self.save_operand(*item.slice, plan)?;
                 self.instructions
-                    .push((line, Instruction::Binary("get", item.range, false)));
+                    .push((line, Instruction::Binary("get", item.range, anchor, false)));
             }
             ast::Expr::Slice(slice) => {
                 let parts = [slice.lower, slice.upper, slice.step];
@@ -2239,7 +2259,12 @@ impl Program {
                 }
                 self.instructions.push((
                     line,
-                    Instruction::Binary(binary.op.as_str(), binary.range, false),
+                    Instruction::Binary(
+                        binary.op.as_str(),
+                        binary.range,
+                        TracebackAnchor::Hidden,
+                        false,
+                    ),
                 ));
             }
             ast::Expr::Compare(c) => self.lower_comparison(c, plan, false)?,
@@ -2268,6 +2293,7 @@ impl Program {
                 self.instructions.push((
                     line,
                     Instruction::Attribute {
+                        range: a.range,
                         name: a.attr,
                         method: false,
                     },
@@ -2286,7 +2312,7 @@ impl Program {
     /// Only the async pull and its await are protected by END_ASYNC_FOR.
     fn lower_async_next(&mut self, line: u32, target: Option<ast::Expr>) {
         self.instructions.push((line, Instruction::AsyncNext));
-        self.instructions.push((line, Instruction::Delegate));
+        self.instructions.push((line, Instruction::Delegate(None)));
         self.instructions
             .push((line, Instruction::BindAsyncItem(target)));
     }
@@ -2351,8 +2377,10 @@ impl Program {
         for (i, (op, operand)) in c.ops.into_vec().into_iter().zip(operands).enumerate() {
             self.save_operand(operand, plan)?;
             let more = i + 1 < length;
-            self.instructions
-                .push((line, Instruction::Binary(op.as_str(), c.range, more)));
+            self.instructions.push((
+                line,
+                Instruction::Binary(op.as_str(), c.range, TracebackAnchor::Hidden, more),
+            ));
             if more {
                 done.push(self.instructions.len());
                 self.instructions
@@ -3143,7 +3171,7 @@ impl Program {
                             self.instructions.push((line, Instruction::CallAsyncEnter));
                             self.instructions
                                 .push((line, Instruction::AwaitWithResult("__aenter__")));
-                            self.instructions.push((line, Instruction::Delegate));
+                            self.instructions.push((line, Instruction::Delegate(None)));
                             Instruction::EnterAsyncWith {
                                 target: item.optional_vars,
                                 handler: 0,
@@ -3163,7 +3191,7 @@ impl Program {
                             self.instructions.push((line, Instruction::CallAsyncExit));
                             self.instructions
                                 .push((line, Instruction::AwaitWithResult("__aexit__")));
-                            self.instructions.push((line, Instruction::Delegate));
+                            self.instructions.push((line, Instruction::Delegate(None)));
                             self.instructions.push((line, Instruction::TestAsyncExit));
                             self.instructions.push((line, Instruction::FinishAsyncExit));
                         } else {
@@ -4816,6 +4844,7 @@ impl Context {
             private_scope: Option<(&'a str, bool)>,
             #[serde(default)]
             generator_lambda: bool,
+            body_column_delta: Option<i64>,
             #[serde(default)]
             generator_expression: bool,
             #[serde(default)]
@@ -4837,7 +4866,7 @@ impl Context {
         );
         program.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         program.source_lines = lines.clone();
-        program.linked_body_line = Some(body_line);
+        program.linked_body_line = Some((body_line, signature.body_column_delta));
         program.method_imports = Rc::new(signature.method_imports);
         program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
@@ -5085,7 +5114,7 @@ impl Context {
         // try/finally still needs its own finalizer below.
         let delegate_needs_close = matches!(&result, Ok(Step::Yield(_, ip))
         if matches!(&self.code_object(code).body, Body::Source(program)
-            if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate))))
+            if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate(_)))))
         && active.last().is_none_or(|&iter| {
             !matches!(
                 self.heap.get(iter),
@@ -5267,13 +5296,13 @@ impl Context {
                         _,
                         Instruction::BindSent(_)
                             | Instruction::ReturnSent
-                            | Instruction::YieldResult
+                            | Instruction::YieldResult(_)
                             | Instruction::MakeGenerator(_)
                             | Instruction::StoreNamed(_)
                             | Instruction::InsertDict { .. }
                             | Instruction::InsertSet { .. }
-                            | Instruction::Delegate
-                            | Instruction::Await(None)
+                            | Instruction::Delegate(_)
+                            | Instruction::Await(None, _)
                             | Instruction::SaveOperand(None)
                             | Instruction::Branch { value: None, .. }
                             | Instruction::NextComparison { .. }
@@ -5294,7 +5323,7 @@ impl Context {
                     cursor.sent = NONE;
                 }
                 let inject =
-                    cursor.thrown.is_some() && !matches!(op, Some((_, Instruction::Delegate)));
+                    cursor.thrown.is_some() && !matches!(op, Some((_, Instruction::Delegate(_))));
                 let site = if inject {
                     index.saturating_sub(1)
                 } else {
@@ -5336,7 +5365,7 @@ impl Context {
                         span: None,
                     };
                     if std::mem::take(&mut cursor.nested_resume)
-                        && matches!(op, Some((_, Instruction::Delegate)))
+                        && matches!(op, Some((_, Instruction::Delegate(_))))
                         && !self.heap.collection_requested()
                     {
                         // The parent already checked for unreachable objects. Resuming its
@@ -5360,6 +5389,19 @@ impl Context {
                     interrupt
                 };
                 let transfer = if let Some(mut error) = raised {
+                    if inject
+                        && index != 0
+                        && let Some((
+                            _,
+                            Instruction::Yield(_, range) | Instruction::YieldResult(range),
+                        )) = code.instructions.get(site)
+                    {
+                        error = self.source_failure(
+                            error,
+                            ExpressionPosition::at(*range),
+                            TracebackAnchor::Uniform,
+                        );
+                    }
                     self.record_exception_frame(&mut error, None);
                     if cursor.protected.is_empty() {
                         return Err(error);
@@ -5436,6 +5478,13 @@ impl Context {
                                 let reraising = matches!(op, Instruction::Raise(s) if s.exc.is_none())
                                     && self.heap.active_exception() != NONE;
                                 if !reraising {
+                                    if let Instruction::Delegate(Some(range)) = op {
+                                        error = self.source_failure(
+                                            error,
+                                            ExpressionPosition::at(*range),
+                                            TracebackAnchor::Uniform,
+                                        );
+                                    }
                                     self.record_exception_frame(&mut error, None);
                                 }
                                 if cursor.protected.is_empty() {
@@ -6014,12 +6063,17 @@ impl Context {
                 let value = iterators.pop().expect("target value");
                 self.put_item(object, key, value)?;
             }
-            Instruction::Await(expr) => {
+            Instruction::Await(expr, range) => {
                 let value = match expr {
                     Some(expr) => eval(self, expr)?,
                     None => std::mem::replace(sent, NONE),
                 };
-                iterators.push(self.await_iterator(value, None)?);
+                let iter = self.at_source_position(
+                    ExpressionPosition::at(*range),
+                    TracebackAnchor::Uniform,
+                    |ctx| ctx.await_iterator(value, None),
+                )?;
+                iterators.push(iter);
             }
             Instruction::SaveOperand(expr) => {
                 let value = match expr {
@@ -6077,12 +6131,25 @@ impl Context {
             }
             Instruction::FinishDisplay => *sent = iterators.pop().expect("active display"),
             Instruction::Unary(op) => *sent = self.source_unary(*op, *sent)?,
-            Instruction::Attribute { name, method } => {
-                *sent = if *method {
-                    self.source_method(*sent, name.as_str())?
-                } else {
-                    self.lookup_attr(*sent, name.as_str())?
-                };
+            Instruction::Attribute {
+                range,
+                name,
+                method,
+            } => {
+                *sent = self.at_source_position(
+                    ExpressionPosition::Source {
+                        offset: name.start(),
+                        range: *range,
+                    },
+                    TracebackAnchor::Uniform,
+                    |ctx| {
+                        if *method {
+                            ctx.source_method(*sent, name.as_str())
+                        } else {
+                            ctx.lookup_attr(*sent, name.as_str())
+                        }
+                    },
+                )?;
             }
             Instruction::JumpResult(end) => *ip = *end,
             Instruction::Branch {
@@ -6115,17 +6182,13 @@ impl Context {
                     *ip = *end;
                 }
             }
-            Instruction::Binary(op, range, keep_right) => {
+            Instruction::Binary(op, range, anchor, keep_right) => {
                 let right = iterators.pop().expect("saved right operand");
                 let left = iterators.pop().expect("saved left operand");
-                let previous = self
-                    .heap
-                    .replace_expression(value::ExpressionPosition::Source {
-                        offset: range.start(),
-                        range: *range,
+                let result =
+                    self.at_source_position(ExpressionPosition::at(*range), *anchor, |ctx| {
+                        ctx.op(op, left, right, NONE)
                     });
-                let result = self.op(op, left, right, NONE);
-                self.heap.replace_expression(previous);
                 if *keep_right && result.is_ok() {
                     iterators.push(right);
                 } else {
@@ -6140,6 +6203,7 @@ impl Context {
                 iterators.push(method);
             }
             Instruction::CallSaved {
+                anchor,
                 positional,
                 keywords,
                 position,
@@ -6151,17 +6215,17 @@ impl Context {
                     .map(ToString::to_string)
                     .zip(named.iter().copied())
                     .collect();
-                let previous = self.heap.replace_expression(*position);
-                let result = self.call_in_scope(scope, iterators[start], pos.to_vec(), kwargs);
-                self.heap.replace_expression(previous);
+                let result = self.at_source_position(*position, *anchor, |ctx| {
+                    ctx.call_in_scope(scope, iterators[start], pos.to_vec(), kwargs)
+                });
                 for operand in iterators.drain(start..).rev() {
                     self.heap.weak_edge_removed(operand);
                 }
                 self.heap.release_unbound_finalizers();
                 *sent = self.check_call_return(result?)?;
             }
-            Instruction::Next(_, _) | Instruction::Delegate => {
-                let delegated = matches!(op, Instruction::Delegate);
+            Instruction::Next(_, _) | Instruction::Delegate(_) => {
+                let delegated = matches!(op, Instruction::Delegate(_));
                 let iter = *iterators.last().expect("active source iterator");
                 let owner = self.source_loop_owner(iter);
                 let item = if let Some(outcome) = advanced.take() {
@@ -6213,7 +6277,7 @@ impl Context {
             Instruction::MakeGenerator(expr) => {
                 *sent = self.source_genexpr(code, scope, expr, Some(*sent))?;
             }
-            Instruction::YieldResult => {
+            Instruction::YieldResult(_) => {
                 let value = if code.kind == FunctionKind::AsyncGenerator {
                     self.wrap_async_generator_yield(*sent)
                 } else {
@@ -6221,13 +6285,13 @@ impl Context {
                 };
                 return Ok(Some(Step::Yield(value, *ip)));
             }
-            Instruction::Yield(e) | Instruction::Return(e) => {
+            Instruction::Yield(e, _) | Instruction::Return(e) => {
                 let v = e
                     .as_ref()
                     .map(|e| eval(self, e))
                     .transpose()?
                     .unwrap_or(NONE);
-                return Ok(Some(if matches!(op, Instruction::Yield(_)) {
+                return Ok(Some(if matches!(op, Instruction::Yield(_, _)) {
                     // An await suspends through Delegate. Only a value explicitly yielded by
                     // the async generator completes its pending __anext__ or asend operation.
                     let item = if code.kind == FunctionKind::AsyncGenerator {
@@ -6659,7 +6723,14 @@ impl Context {
         field: &ast::ExprAttribute,
     ) -> Result<Id> {
         let receiver = self.source_expr(code, scope, &field.value)?;
-        self.source_method(receiver, field.attr.as_str())
+        self.at_source_position(
+            ExpressionPosition::Source {
+                offset: field.attr.start(),
+                range: field.range,
+            },
+            TracebackAnchor::Uniform,
+            |ctx| ctx.source_method(receiver, field.attr.as_str()),
+        )
     }
 
     fn source_unary(&mut self, op: ast::UnaryOp, value: Id) -> Result<Id> {
@@ -6680,20 +6751,23 @@ impl Context {
     }
 
     fn source_expr(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
-        let position = imre_ast::expression_position(
+        let offset = imre_ast::expression_position(
             expr,
             &code.method_imports,
             code.private_names.as_deref(),
         );
-        let previous = self
-            .heap
-            .replace_expression(value::ExpressionPosition::Source {
-                offset: position,
-                range: expr.range(),
-            });
+        let previous = self.heap.replace_expression(ExpressionPosition::Source {
+            offset,
+            range: expr.range(),
+        });
         let result = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             self.source_expr_inner(code, scope, expr)
         });
+        let result = if matches!(expr, ast::Expr::Name(_)) {
+            self.source_result(result, TracebackAnchor::Uniform)
+        } else {
+            result
+        };
         self.heap.replace_expression(previous);
         let value = result?;
         self.heap.keep(value);
@@ -7398,7 +7472,8 @@ impl Context {
             }
             Expr::Attribute(v) => {
                 let base = eval(self, &v.value)?;
-                self.lookup_attr(base, v.attr.as_str())
+                let result = self.lookup_attr(base, v.attr.as_str());
+                self.source_result(result, TracebackAnchor::Uniform)
             }
             Expr::Slice(v) => {
                 let mut parts = [NONE; 3];
@@ -7412,13 +7487,18 @@ impl Context {
             Expr::Subscript(v) => {
                 let base = eval(self, &v.value)?;
                 let k = eval(self, &v.slice)?;
-                self.get_item(base, k)
+                let result = self.get_item(base, k);
+                self.source_result(
+                    result,
+                    TracebackAnchor::delimiter(v.range, v.value.end(), b'['),
+                )
             }
             Expr::BoolOp(_) => Ok(self.source_bool_operand(code, scope, expr)?.0),
             Expr::BinOp(v) => {
                 let a = eval(self, &v.left)?;
                 let b = eval(self, &v.right)?;
-                self.op(v.op.as_str(), a, b, NONE)
+                let result = self.op(v.op.as_str(), a, b, NONE);
+                self.source_result(result, TracebackAnchor::Hidden)
             }
             Expr::UnaryOp(v) => {
                 let value = eval(self, &v.operand)?;
@@ -7472,10 +7552,12 @@ impl Context {
                     self.extend_source_items(&mut args, value, Some(f))?;
                 }
                 let result = if let Some(mapping) = mapping {
-                    self.call_with_keyword_dict(scope, f, args, mapping)?
+                    self.call_with_keyword_dict(scope, f, args, mapping)
                 } else {
-                    self.call_in_scope(scope, f, args, kwargs)?
+                    self.call_in_scope(scope, f, args, kwargs)
                 };
+                let anchor = TracebackAnchor::delimiter(v.range(), v.func.end(), b'(');
+                let result = self.source_result(result, anchor)?;
                 self.finish_call_operands(mark, result);
                 self.check_call_return(result)
             }

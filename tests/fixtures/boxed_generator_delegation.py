@@ -209,7 +209,36 @@ def delegate(child):
     yield from child
 
 
+def suspended_positions():
+    import traceback
+
+    class Gate:
+        def __await__(self):
+            return (yield "ready")
+
+    async def lookup(table):
+        return (
+            table[
+                await Gate()
+            ]
+        )
+
+    for inject in (False, True):
+        work = lookup({})
+        assert work.send(None) == "ready"
+        try:
+            if inject:
+                work.throw(LookupError("injected"))
+            else:
+                work.send("absent")
+        except LookupError as error:
+            for frame in traceback.extract_tb(error.__traceback__):
+                if frame.name == "lookup":
+                    print(frame.lineno, frame.end_lineno, frame.colno, frame.end_colno)
+
+
 def current():
+    suspended_positions()
     closed = []
 
     def tracked(label):

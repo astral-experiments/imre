@@ -132,8 +132,8 @@ impl Program {
                     let value = self.lower_suspension(element.clone(), line, true)?;
                     let op = if matches!(output, Output::Generator(_)) {
                         match value {
-                            Some(expr) => Instruction::Yield(Some(expr)),
-                            None => Instruction::YieldResult,
+                            Some(expr) => Instruction::Yield(Some(expr), element.range()),
+                            None => Instruction::YieldResult(element.range()),
                         }
                     } else {
                         Instruction::CollectItem {

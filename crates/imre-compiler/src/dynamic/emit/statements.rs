@@ -289,19 +289,7 @@ impl Function<'_, '_> {
                 self.label(&dead);
             }
             self.checkpoint(stmt);
-            self.simple_call = match stmt {
-                ast::Stmt::Assign(v)
-                    if matches!(v.targets.as_slice(), [ast::Expr::Name(_)])
-                        && matches!(&*v.value, ast::Expr::Call(_)) =>
-                {
-                    Some(v.value.range())
-                }
-                ast::Stmt::Return(v) => v.value.as_deref().and_then(|e| match e {
-                    ast::Expr::Call(c) if matches!(&*c.func, ast::Expr::Name(_)) => Some(e.range()),
-                    _ => None,
-                }),
-                _ => None,
-            };
+            self.simple_call = imre_ast::unhighlighted_call(stmt);
             match stmt {
                 ast::Stmt::Expr(v) => {
                     if !matches!(&*v.value, ast::Expr::StringLiteral(_)) {
@@ -888,7 +876,7 @@ impl Function<'_, '_> {
                     "async def"
                 };
                 let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
-                Some((first, text))
+                Some((first, indent.len(), text))
             }
             Body::Generator(expr, plan) if plan.body_suspends() => {
                 // The same resumable interpreter that runs async def bodies
@@ -896,23 +884,33 @@ impl Function<'_, '_> {
                 // by the caller when the generator is created.
                 signature["generator_expression"] = json!(true);
                 let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
-                Some((expr.start(), format!("async def _():\n return ({text})")))
+                Some((
+                    expr.start(),
+                    " return (".len(),
+                    format!("async def _():\n return ({text})"),
+                ))
             }
             Body::YieldingLambda(expr) => {
                 signature["generator_lambda"] = json!(true);
                 let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
-                Some((expr.start(), format!("def _():\n return ({text})")))
+                Some((
+                    expr.start(),
+                    " return (".len(),
+                    format!("def _():\n return ({text})"),
+                ))
             }
             _ => None,
         }
-        .map(|(first, text)| {
+        .map(|(first, prefix, text)| {
+            let (line, column) = self.source.line_and_column(first);
+            signature["body_column_delta"] = json!(column as i64 - prefix as i64);
             if !self.source.method_imports.is_empty() {
                 signature["method_imports"] = json!(self.source.method_imports);
             }
             if let Some(owner) = self.source.private_names.suite_owner(first) {
                 signature["private_scope"] = json!([owner, self.source.string_annotations]);
             }
-            (self.output.data(text.as_bytes()), self.source.line(first))
+            (self.output.data(text.as_bytes()), line)
         });
         let mut closure_names = ClosureNames {
             string_annotations: self.source.string_annotations,
