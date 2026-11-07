@@ -1758,7 +1758,21 @@ impl Context {
         }
         let required = count - usize::from(star.is_some());
         let prefix = star.unwrap_or(count);
-        let iter = self.iterator(value)?;
+        let iter = self.iterator(value).map_err(|error| {
+            // __iter__ may have changed the type's slots before raising.
+            if self.is_builtin_error(&error, "TypeError")
+                && !self.has_iter_slot(value)
+                && !self.is_sequence(value)
+            {
+                let name = stdlib::diagnostic_type_name(self, value);
+                let name = &name[..name.floor_char_boundary(200)];
+                return Error::new(
+                    "TypeError",
+                    format!("cannot unpack non-iterable {name} object"),
+                );
+            }
+            error
+        })?;
         let mut unpacked = Vec::new();
         unpacked
             .try_reserve_exact(count)
@@ -1872,6 +1886,40 @@ impl Context {
             return Ok(self.alloc(Value::Tuple(items)));
         }
         Ok(buffer)
+    }
+
+    /// Test tp_iter without binding a descriptor, including a declaration set to None.
+    fn has_iter_slot(&self, value: Id) -> bool {
+        let native = |kind: &str| {
+            abstract_class::native_collection_method(kind, "__iter__")
+                || matches!(
+                    kind,
+                    "array.array"
+                        | "_contextvars.Context"
+                        | "typing._CallableType"
+                        | "enum.EnumType"
+                )
+        };
+        if let Some(class) = self.heap.get(value).instance_class() {
+            return self
+                .find_in_mro(class, |base| {
+                    (self.own_class_attr(base, "__iter__").is_some()
+                        || matches!(self.heap.get(base), Value::Native(kind) if native(kind)))
+                    .then_some(())
+                })
+                .is_some();
+        }
+        self.is_native_iterator(value)
+            || self.heap.get(value).is_weak_proxy()
+            || matches!(
+                self.heap.get(value),
+                Value::GenericAlias(_)
+                    | Value::TypeAlias { .. }
+                    | Value::TypeVarTuple { .. }
+                    | Value::Template { .. }
+                    | Value::NamedTuple { .. }
+            )
+            || self.builtin_type_name(value).is_some_and(native)
     }
 
     /// Check the Python sequence protocol without consuming iterators.

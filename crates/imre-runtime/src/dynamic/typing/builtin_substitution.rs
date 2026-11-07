@@ -128,37 +128,6 @@ fn substitute(ctx: &mut Context, owner: Id, args: Id, params: &[Id], item: Id) -
     })
 }
 
-/// Py_TYPE(param)->tp_iter tests the declaration, even when __iter__ is None.
-/// Binding the method or trying sequence iteration would run unrelated user code.
-fn has_iter_slot(ctx: &Context, param: Id) -> bool {
-    let native = |kind: &str| {
-        crate::dynamic::abstract_class::native_collection_method(kind, "__iter__")
-            || matches!(
-                kind,
-                "array.array" | "_contextvars.Context" | "typing._CallableType" | "enum.EnumType"
-            )
-    };
-    if let Some(class) = ctx.heap.get(param).instance_class() {
-        return ctx
-            .find_in_mro(class, |base| {
-                (ctx.own_class_attr(base, "__iter__").is_some()
-                    || matches!(ctx.heap.get(base), Value::Native(kind) if native(kind)))
-                .then_some(())
-            })
-            .is_some();
-    }
-    ctx.is_native_iterator(param)
-        || matches!(
-            ctx.heap.get(param),
-            Value::GenericAlias(_)
-                | Value::TypeAlias { .. }
-                | Value::TypeVarTuple { .. }
-                | Value::Template { .. }
-                | Value::NamedTuple { .. }
-        )
-        || ctx.builtin_type_name(param).is_some_and(native)
-}
-
 /// Objects without a substitution hook can expose their parameters and handle their own subscription.
 fn substitute_nested(ctx: &mut Context, arg: Id, params: &[Id], values: &[Id]) -> Result<Id> {
     let Some(metadata) = ctx.optional_attr(arg, "__parameters__")? else {
@@ -174,7 +143,7 @@ fn substitute_nested(ctx: &mut Context, arg: Id, params: &[Id], values: &[Id]) -
     for p in nested {
         if let Some(i) = params.iter().position(|&param| param == p) {
             let value = values[i];
-            if has_iter_slot(ctx, p)
+            if ctx.has_iter_slot(p)
                 && let Some(items) = ctx.tuple_items(value)?
             {
                 args.extend(items);
