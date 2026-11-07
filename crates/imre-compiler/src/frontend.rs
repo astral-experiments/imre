@@ -6699,7 +6699,10 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
-        if let Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) = self.resolve(expression) {
+        if let Some(Binding::Intrinsic(
+            Intrinsic::Declaration(symbol) | Intrinsic::RuntimeImport(symbol),
+        )) = self.resolve(expression)
+        {
             return Err(error(
                 self.source,
                 expression,
@@ -9748,7 +9751,9 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
-            Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) => {
+            Some(Binding::Intrinsic(
+                Intrinsic::Declaration(symbol) | Intrinsic::RuntimeImport(symbol),
+            )) => {
                 return Err(error(
                     self.source,
                     call,

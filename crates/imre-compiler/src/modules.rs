@@ -647,6 +647,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    RuntimeSource(&'static str),
     ContextVars,
     ContextVarsNative,
     Importlib,
@@ -793,6 +794,7 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    RuntimeImport(&'static str),
     Context,
     ContextVar,
     ContextToken,
@@ -1275,6 +1277,8 @@ impl IntrinsicModule {
             "_datetime" => Some(Self::DatetimeNative),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
+            "concurrent" => Some(Self::RuntimeSource("concurrent")),
+            "concurrent.futures" => Some(Self::RuntimeSource("concurrent.futures")),
             "contextvars" => Some(Self::ContextVars),
             "_contextvars" => Some(Self::ContextVarsNative),
             "inspect" => Some(Self::Inspect),
@@ -2987,6 +2991,11 @@ impl SourceModule {
                 return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(export)));
             }
         }
+        if self.is_bundled("unittest.mock") && name == "ThreadingMock" {
+            return Some(Binding::Intrinsic(Intrinsic::RuntimeImport(
+                "unittest.mock",
+            )));
+        }
         if self.is_bundled("unittest.mock") && boxed_mock_export(name) {
             return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                 "unittest.mock objects",
@@ -3043,6 +3052,7 @@ pub(crate) struct SourceGraph {
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
     pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
+    pub(crate) runtime_initializer: Option<String>,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
     pub(crate) return_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) entry_profile: entry_profile::Profile,
@@ -4111,6 +4121,7 @@ struct Loader<'a> {
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
+    runtime_initializer: Option<String>,
     wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
@@ -4192,6 +4203,7 @@ impl<'a> Loader<'a> {
             zip_files: zip_inputs.files,
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
+            runtime_initializer: None,
             wildcard_import: None,
             root,
             modules: Vec::new(),
@@ -4375,13 +4387,18 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             float_components: Default::default(),
-            needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
+            // An import that cannot be initialized here must not turn an unused
+            // object-capable namespace into a reason to box the caller.
+            needs_object_runtime: std::cell::Cell::new(
+                self.needs_object_imports && self.runtime_initializer.is_none(),
+            ),
             has_native_bytearray: Default::default(),
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
             object_builtin_errors: Default::default(),
+            runtime_initializer: self.runtime_initializer,
             deferred_object_error: self.wildcard_import.into(),
             return_errors: Default::default(),
             entry_profile: profile
@@ -4847,6 +4864,18 @@ impl<'a> Loader<'a> {
         binding: Binding,
         node: &impl Ranged,
     ) -> Result<(), String> {
+        // Resolve names for the checked graph, but never erase a provider's initializer.
+        // An independently selected object entry will execute the normal Python import.
+        if let Binding::IntrinsicModule(IntrinsicModule::RuntimeSource(owner))
+        | Binding::Intrinsic(Intrinsic::RuntimeImport(owner)) = binding
+        {
+            self.runtime_initializer.get_or_insert_with(|| {
+                self.modules[module].error(
+                    node,
+                    &format!("{owner} requires runtime import initialization"),
+                )
+            });
+        }
         if self.modules[module].bindings.get(name) == Some(&Binding::ConditionalValue) {
             self.modules[module].bindings.insert(name.into(), binding);
             return Ok(());
@@ -4909,8 +4938,22 @@ impl<'a> Loader<'a> {
                 if import.names.iter().any(|alias| alias.name.as_str() == "*") {
                     // The module initializer chooses its exports. Still resolve the
                     // dependency so checked files retain their ordinary diagnostics.
-                    if import.level != 0 || self.intrinsic_module(&name, None)?.is_none() {
+                    let module = if import.level == 0 {
+                        self.intrinsic_module(&name, None)?
+                    } else {
+                        None
+                    };
+                    if module.is_none() {
                         self.load_module(&name)?;
+                    }
+                    if let Some(IntrinsicModule::RuntimeSource(owner)) = module {
+                        self.runtime_initializer.get_or_insert_with(|| {
+                            self.modules[id].error(
+                                import,
+                                &format!("{owner} requires runtime import initialization"),
+                            )
+                        });
+                        return Ok(());
                     }
                     self.needs_object_imports = true;
                     self.wildcard_import.get_or_insert_with(|| {
