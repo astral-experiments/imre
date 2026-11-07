@@ -463,7 +463,16 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
-        "inspect" => bundled_source!("inspect.py"),
+        // The checked graph compiles cleandoc directly. Keep that definition in
+        // the same module namespace when compiling the full object provider.
+        "inspect" => Some((
+            "inspect.py",
+            concat!(
+                include_str!("../stdlib/inspect_cleandoc.py"),
+                "\n",
+                include_str!("../stdlib/inspect.py")
+            ),
+        )),
         "itertools" => bundled_source!("itertools.py"),
         "signal" if cfg!(unix) => bundled_source!("signal.py"),
         "typing" => bundled_source!("typing.py"),
@@ -575,7 +584,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/cookiejar.py"
             ),
         )),
-        "http.server" => bundled_source!("http/server.py"),
+        "http.server" => Some((
+            "http/server.py",
+            concat!(
+                include_str!("../stdlib/http/server.py"),
+                "\n",
+                include_str!("../stdlib/http/server_files.py"),
+            ),
+        )),
         "locale" => bundled_source!("locale.py"),
         "_imre_gettext_locale" => bundled_source!("_imre_gettext_locale.py"),
         // CPython 3.14.5 Lib/colorsys.py. See licenses/CPython.txt.
@@ -4190,6 +4206,7 @@ const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
 const CONTEXTLIB_EXIT_STACK: &str = "__imre_contextlib_exit_stack__";
 const METADATA_VERSION: &str = "__imre_metadata_version__";
+const INSPECT_CLEANDOC: &str = include_str!("../stdlib/inspect_cleandoc.py");
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
@@ -5607,7 +5624,7 @@ impl<'a> Loader<'a> {
             .then_some((TEMPFILE_SPOOL, include_str!("../stdlib/tempfile/spool.py"))),
             (module == Some(IntrinsicModule::Inspect)
                 && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "cleandoc")))
-            .then_some((INSPECT_FUNCTIONS, include_str!("../stdlib/inspect.py"))),
+            .then_some((INSPECT_FUNCTIONS, INSPECT_CLEANDOC)),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 concat!(
@@ -5769,10 +5786,8 @@ impl<'a> Loader<'a> {
                 None
             }
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
-            // Keep the bundled implementation behind inspect's complete stdlib type stub.
-            "inspect" => {
-                bundled_runtime_source(name).map(|(_, source)| ("<imre stdlib>/inspect.py", source))
-            }
+            // Keep the checked definition behind inspect's complete stdlib type stub.
+            "inspect" => Some(("<imre stdlib>/inspect.py", INSPECT_CLEANDOC)),
             // Keep the public typeshed decorator signatures available alongside this singleton.
             "dataclasses" => Some((
                 "<imre stdlib>/dataclasses.py",
@@ -5842,6 +5857,8 @@ impl<'a> Loader<'a> {
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
             "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
+            // The checked socketserver provides the synchronous server and handler bases.
+            "http.server" => bundled_source!("http/server.py"),
             _ => bundled_runtime_source(name),
         };
         if let Some((filename, source)) = bundled {
