@@ -9,12 +9,12 @@ use std::sync::{
     mpsc,
 };
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::builtins::boolean;
 use super::stdlib::hashlib::digest::SharedHash;
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::locks::{PrimitiveLock, thread_ident, timeout_float, timeout_int};
+use crate::objects::locks::{PrimitiveLock, thread_ident};
 
 type WorkerStatus = std::result::Result<(), String>;
 
@@ -24,9 +24,29 @@ struct NativeJoin {
     failure: Option<(&'static str, String)>,
 }
 
+#[derive(Clone, Copy, Default, PartialEq)]
+enum State {
+    #[default]
+    New,
+    Running,
+    Detached,
+    Done,
+}
+
+impl State {
+    fn join_pending(self) -> bool {
+        self == Self::Running
+    }
+
+    fn worker_pending(self) -> bool {
+        matches!(self, Self::Running | Self::Detached)
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Handle {
-    running: Mutex<bool>,
+    state: Mutex<State>,
+    ident: std::sync::OnceLock<usize>,
     exiting: Condvar,
     native: Mutex<NativeJoin>,
 }
@@ -37,30 +57,85 @@ struct WorkerExit(Weak<Handle>);
 impl Drop for WorkerExit {
     fn drop(&mut self) {
         if let Some(handle) = self.0.upgrade() {
-            *handle.running.lock().unwrap() = false;
+            *handle.state.lock().unwrap() = State::Done;
             handle.exiting.notify_all();
         }
     }
 }
 
 impl Handle {
-    fn spawn(worker: impl FnOnce() -> WorkerStatus + Send + 'static) -> std::io::Result<Arc<Self>> {
-        let handle = Arc::new(Self {
-            running: Mutex::new(true),
-            ..Self::default()
-        });
-        let exit = WorkerExit(Arc::downgrade(&handle));
-        let thread = thread::Builder::new().spawn(move || {
-            // Publish exit after the worker drops its Context, also when unwinding.
-            let _exit = exit;
-            worker()
-        })?;
-        handle.native.lock().unwrap().thread = Some(thread);
-        Ok(handle)
+    pub(super) fn check_new(&self) -> Result<()> {
+        if *self.state.lock().unwrap() == State::New {
+            Ok(())
+        } else {
+            Err(Error::new("RuntimeError", "thread already started"))
+        }
+    }
+
+    fn spawn(
+        self: &Arc<Self>,
+        worker: impl FnOnce() -> WorkerStatus + Send + 'static,
+    ) -> Result<()> {
+        let mut native = self.native.lock().unwrap();
+        {
+            let mut state = self.state.lock().unwrap();
+            if *state != State::New {
+                return Err(Error::new("RuntimeError", "thread already started"));
+            }
+            *state = State::Running;
+        }
+        let exit = WorkerExit(Arc::downgrade(self));
+        native.thread = Some(
+            thread::Builder::new()
+                .spawn(move || {
+                    // Publish exit after the worker drops its Context, also when unwinding.
+                    let _exit = exit;
+                    worker()
+                })
+                .map_err(|_| Error::new("RuntimeError", "can't start new thread"))?,
+        );
+        Ok(())
+    }
+
+    pub(super) fn ident(&self) -> usize {
+        self.ident.get().copied().unwrap_or(0)
+    }
+
+    fn awaiting_exit(&self) -> bool {
+        self.state.lock().unwrap().worker_pending()
     }
 
     fn running(&self) -> bool {
-        *self.running.lock().unwrap()
+        *self.state.lock().unwrap() == State::Running
+    }
+
+    pub(super) fn is_done(&self) -> bool {
+        let state = *self.state.lock().unwrap();
+        if state == State::Done {
+            drop(self.joined());
+        }
+        matches!(state, State::Done | State::Detached)
+    }
+
+    pub(super) fn set_done(&self) -> Result<()> {
+        let mut native = self.native.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        if *state == State::New {
+            return Err(Error::new("RuntimeError", "thread not started"));
+        }
+        // Detach without waiting. Running still owns the callback's counted roots
+        // until the actual OS worker exits, independently of the Python handle.
+        // Exit notification can precede the first join or detach of the OS handle.
+        let detached = native.thread.take().is_some();
+        if *state == State::Running {
+            *state = if detached {
+                State::Detached
+            } else {
+                State::Done
+            };
+        }
+        self.exiting.notify_all();
+        Ok(())
     }
 
     // After the exit signal, all observers synchronize with the same native join.
@@ -79,30 +154,74 @@ impl Handle {
         if self.running() {
             return true;
         }
-        // An is_alive() caller may join first. Keep any failure for the next explicit join.
         drop(self.joined());
         false
     }
 
-    fn join(&self, timeout: Option<Duration>) -> Result<()> {
-        let running = self.running.lock().unwrap();
-        let running = match timeout {
+    fn wait(&self, timeout: Option<Duration>, pending: fn(State) -> bool) -> bool {
+        let state = self.state.lock().unwrap();
+        let state = match timeout {
             Some(limit) => {
                 self.exiting
-                    .wait_timeout_while(running, limit, |r| *r)
+                    .wait_timeout_while(state, limit, |s| pending(*s))
                     .unwrap()
                     .0
             }
-            None => self.exiting.wait_while(running, |r| *r).unwrap(),
+            None => self.exiting.wait_while(state, |s| pending(*s)).unwrap(),
         };
-        if *running {
-            return Ok(());
-        }
-        drop(running);
-        if let Some((kind, message)) = self.joined().failure.take() {
+        !pending(*state)
+    }
+
+    fn join(&self, timeout: Option<Duration>) -> Result<()> {
+        if self.wait(timeout, State::join_pending)
+            && let Some((kind, message)) = self.joined().failure.take()
+        {
             return Err(Error::new(kind, message));
         }
         Ok(())
+    }
+
+    pub(super) fn join_public(&self, ctx: &mut Context, timeout: Option<Duration>) -> Result<()> {
+        match *self.state.lock().unwrap() {
+            State::New => return Err(Error::new("RuntimeError", "thread not started")),
+            State::Running if self.ident() == thread_ident() => {
+                return Err(Error::new("RuntimeError", "Cannot join current thread"));
+            }
+            State::Running if ctx.finalizing.load(Ordering::Acquire) => {
+                return Err(Error::new(
+                    "PythonFinalizationError",
+                    "cannot join thread at interpreter shutdown",
+                ));
+            }
+            _ => {}
+        }
+        if self.wait_interruptible(ctx, timeout)? {
+            self.join(Some(Duration::ZERO))?;
+        }
+        Ok(())
+    }
+
+    /// The condvar can restart after EINTR. Dispatch Python outside both handle locks.
+    fn wait_interruptible(&self, ctx: &mut Context, timeout: Option<Duration>) -> Result<bool> {
+        #[cfg(unix)]
+        if crate::signals::is_main() && timeout != Some(Duration::ZERO) {
+            let start = Instant::now();
+            loop {
+                let remaining = timeout.map(|limit| limit.saturating_sub(start.elapsed()));
+                let interval = Duration::from_millis(50);
+                if self.wait(
+                    Some(remaining.map_or(interval, |left| left.min(interval))),
+                    State::join_pending,
+                ) {
+                    return Ok(true);
+                }
+                if timeout.is_some_and(|limit| start.elapsed() >= limit) {
+                    return Ok(false);
+                }
+                ctx.dispatch_signals()?;
+            }
+        }
+        Ok(self.wait(timeout, State::join_pending))
     }
 }
 
@@ -126,7 +245,7 @@ pub(super) struct Registry {
 
 impl Context {
     /// Look up worker inputs only when the default Python attribute accesses cannot run user code.
-    fn thread_operands(&self, owner: Id) -> Result<[Id; 3]> {
+    fn thread_operands(&self, owner: Id) -> Result<[Id; 4]> {
         let unsupported = || {
             Error::new(
                 "NotImplementedError",
@@ -161,6 +280,7 @@ impl Context {
             "_args",
             "_kwargs",
             "_handle",
+            "_os_thread_handle",
             "_ident",
             "_native_id",
         ] {
@@ -196,6 +316,7 @@ impl Context {
             field("_target").ok_or_else(unsupported)?,
             field("_args").ok_or_else(unsupported)?,
             field("_kwargs").ok_or_else(unsupported)?,
+            field("_os_thread_handle").ok_or_else(unsupported)?,
         ])
     }
 
@@ -284,7 +405,7 @@ impl Context {
         }
         self.workers
             .entries
-            .retain(|entry| entry.owner.is_some() || entry.handle.running());
+            .retain(|entry| entry.owner.is_some() || entry.handle.awaiting_exit());
     }
 }
 
@@ -315,7 +436,10 @@ impl Registry {
     fn join_non_daemon(&self) {
         for worker in &self.entries {
             if !worker.daemon {
-                let _ = worker.handle.join(None);
+                // Explicit detach completes Python joins before the real worker exits.
+                // Non-daemon shutdown still waits for its final bootstrap references.
+                worker.handle.wait(None, State::worker_pending);
+                drop(worker.handle.joined());
             }
         }
     }
@@ -398,7 +522,12 @@ pub(super) fn check_start(ctx: &Context) -> Result<()> {
 }
 
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
-fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -> Result<Started> {
+fn launch(
+    ctx: &Context,
+    operation: Operation,
+    detached_label: Option<String>,
+    handle: Arc<Handle>,
+) -> Result<Started> {
     let (ready, started) = mpsc::sync_channel(0);
     let (operand_bound, wait_for_operand) = match &operation {
         Operation::Python(callback) if callback.awaits_receiver() => {
@@ -412,7 +541,7 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
     let worker_active = Arc::clone(&active);
     let fault_workers =
         matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
-    let handle = Handle::spawn(move || {
+    handle.spawn(move || {
         // A failed bootstrap publishes no identity and contributes nothing to the live count.
         let mut prefix = None;
         let mut update = None;
@@ -479,8 +608,7 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
             }
         }
         Ok(())
-    })
-    .map_err(|_| Error::new("RuntimeError", "can't start new thread"))?;
+    })?;
     let (ident, native_id) = match started.recv() {
         Ok(Ok(identity)) => identity,
         failure => {
@@ -492,6 +620,7 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
             return Err(Error::new("RuntimeError", reason));
         }
     };
+    let _ = handle.ident.set(ident);
     if let Some(received) = wait_for_operand {
         // The caller is the only Python evaluator that can change this cell. An
         // early worker error also ends the wait and follows the usual reporting path.
@@ -511,7 +640,7 @@ pub(super) fn start_detached(
     callback: Operation,
     label: String,
 ) -> Result<(usize, Arc<AtomicBool>)> {
-    let worker = launch(ctx, callback, Some(label))?;
+    let worker = launch(ctx, callback, Some(label), Arc::default())?;
     Ok((worker.ident, worker.active))
 }
 
@@ -587,25 +716,6 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     ))
 }
 
-fn timeout(ctx: &mut Context, value: Id) -> Result<Option<Duration>> {
-    if value == NONE {
-        return Ok(None);
-    }
-    if let Value::Float(seconds) = *ctx.heap.get(value) {
-        return Ok(timeout_float(true, seconds)?);
-    }
-    let seconds = ctx.index_value(value)?.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!(
-                "'{}' object cannot be interpreted as an integer or float",
-                ctx.type_name(value)
-            ),
-        )
-    })?;
-    Ok(timeout_int(true, &seconds)?)
-}
-
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -639,7 +749,12 @@ pub(super) fn call(
                     "native workers cannot enter a Python context",
                 ));
             }
-            let [target, pos, kw] = ctx.thread_operands(owner)?;
+            let [target, pos, kw, handle_id] = ctx.thread_operands(owner)?;
+            let Value::ThreadHandle(handle) = ctx.heap.get(handle_id) else {
+                return Err(Error::new("TypeError", "'handle' must be a _ThreadHandle"));
+            };
+            let handle = Arc::clone(handle);
+            handle.check_new()?;
             let (operation, roots) = worker_target(ctx, target, pos, kw)?;
             let Value::Bool(daemon) = *ctx.heap.get(daemon) else {
                 return Err(Error::new("TypeError", "expected a boolean daemon flag"));
@@ -663,13 +778,12 @@ pub(super) fn call(
                 active,
                 ident,
                 native_id: tid,
-            } = match launch(ctx, operation, None) {
+            } = match launch(ctx, operation, None, Arc::clone(&handle)) {
                 Ok(worker) => worker,
                 Err(error) => {
                     // Once native startup is attempted CPython consumes the handle,
                     // even if the OS refuses to create a thread. No identity is published.
-                    let consumed = ctx.alloc(Value::ThreadHandle(Arc::new(Handle::default())));
-                    ctx.set_attr(owner, "_handle", consumed)?;
+                    ctx.set_attr(owner, "_handle", handle_id)?;
                     return Err(error);
                 }
             };
@@ -681,45 +795,58 @@ pub(super) fn call(
                 active,
                 ident,
             });
-            let handle = ctx.alloc(Value::ThreadHandle(handle));
             let ident = ctx.alloc(Value::Int(crate::Int::from_usize(ident)));
             let tid = tid.map_or(NONE, |id| {
                 ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
             });
-            Ok(ctx.alloc(Value::Tuple(vec![handle, ident, tid])))
+            Ok(ctx.alloc(Value::Tuple(vec![handle_id, ident, tid])))
         }
         ("shutdown", &[]) => {
+            // A signal handler may start a worker or reap entries. Keep only the
+            // native handle across dispatch, then look up the next live worker.
+            while let Some(handle) = ctx.workers.entries.iter().find_map(|worker| {
+                (!worker.daemon && worker.handle.awaiting_exit())
+                    .then(|| Arc::clone(&worker.handle))
+            }) {
+                if let Err(error) = handle.wait_interruptible(ctx, None) {
+                    super::unraisable::report(
+                        ctx,
+                        error,
+                        false,
+                        None,
+                        "Exception ignored while joining a thread in _thread._shutdown()",
+                    );
+                    return Ok(NONE);
+                }
+                // Explicit detach completes handle joins. CPython keeps this entry
+                // in its shutdown list until the worker exits, without running a
+                // pending Python handler while waiting on the completed handle.
+                handle.wait(None, State::worker_pending);
+                drop(handle.joined());
+            }
             ctx.workers.join_non_daemon();
             ctx.reap_thread_operands();
             Ok(NONE)
         }
-        ("join", &[handle, limit]) => {
-            let limit = timeout(ctx, limit)?;
-            let Value::ThreadHandle(worker) = ctx.heap.get(handle) else {
-                return Err(Error::new("TypeError", "expected a thread handle"));
-            };
-            if ctx.finalizing.load(Ordering::Acquire)
-                && ctx
-                    .workers
-                    .live()
-                    .any(|entry| Arc::ptr_eq(&entry.handle, worker))
-            {
-                return Err(Error::new(
-                    "PythonFinalizationError",
-                    "cannot join thread at interpreter shutdown",
-                ));
-            }
-            let worker = Arc::clone(worker);
-            worker.join(limit)?;
-            ctx.reap_thread_operands();
-            Ok(NONE)
-        }
+        ("join", [_, _]) => super::thread_handle::method(ctx, "join", args, kwargs),
         ("alive", &[handle]) => {
             let Value::ThreadHandle(worker) = ctx.heap.get(handle) else {
                 return Err(Error::new("TypeError", "expected a thread handle"));
             };
             let worker = Arc::clone(worker);
             Ok(boolean(worker.alive()))
+        }
+        ("attach_current", &[handle]) => {
+            let Value::ThreadHandle(handle) = ctx.heap.get(handle) else {
+                return Err(Error::new("TypeError", "expected a thread handle"));
+            };
+            let mut state = handle.state.lock().unwrap();
+            if *state != State::New {
+                return Err(Error::new("RuntimeError", "thread already started"));
+            }
+            handle.ident.set(thread_ident()).expect("unstarted handle");
+            *state = State::Running;
+            Ok(NONE)
         }
         ("current", &[main]) => {
             let ident = thread_ident();

@@ -10,6 +10,15 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some(attr) = symbol.strip_prefix("_thread._ThreadHandle.")
+            && let Some(&name) = thread_handle::METHODS.iter().find(|&&name| name == attr)
+        {
+            return Some(Self {
+                owner: thread_handle::CLASS,
+                name,
+                method: name != "__repr__",
+            });
+        }
         if let Some(owner) = super::builtins::exception_init_descriptor(symbol) {
             return Some(Self {
                 owner,
@@ -500,6 +509,7 @@ impl BuiltinDescriptor {
             "list_iterator"
             | "tuple_iterator"
             | "memory_iterator"
+            | thread_handle::CLASS
             | value::BZ2_COMPRESS_TYPE
             | value::BZ2_DECOMPRESS_TYPE
             | value::LZMA_COMPRESS_TYPE

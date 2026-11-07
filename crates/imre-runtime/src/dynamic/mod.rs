@@ -59,6 +59,7 @@ mod stdlib;
 mod super_object;
 mod templatelib;
 mod thread_callback;
+mod thread_handle;
 mod thread_local;
 mod thread_lock;
 mod thread_rlock;
@@ -437,6 +438,7 @@ impl Context {
             | (value::BZ2_COMPRESS_TYPE, Value::Bz2Compressor(_))
             | (value::BZ2_DECOMPRESS_TYPE, Value::Bz2Decompressor(_))
             | (value::REGEX_MATCH_TYPE, Value::RegexMatch(_))
+            | (thread_handle::CLASS, Value::ThreadHandle(_))
             | (thread_local::CLASS, Value::ThreadLocal(_)) => true,
             _ => false,
         }
@@ -2702,6 +2704,9 @@ impl Context {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
             self.builtins.insert("object.__class__".into(), descriptor);
         }
+        if name == thread_handle::CLASS {
+            thread_handle::install(self, value);
+        }
         let codec_members = match name {
             value::BZ2_COMPRESS_TYPE => Some((
                 value::BZ2_COMPRESS_TYPE,
@@ -3907,6 +3912,8 @@ impl Context {
                 self.bind(scope, "make_signals", factory);
             }
             "_thread" => {
+                let handle = self.builtin(thread_handle::CLASS);
+                self.bind(scope, "_ThreadHandle", handle);
                 for name in ["allocate_lock", "allocate"] {
                     let factory = self.builtin(&format!("_thread.{name}"));
                     self.bind(scope, name, factory);
