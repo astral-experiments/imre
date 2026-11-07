@@ -119,6 +119,9 @@ impl Session {
                 "def capture_start() -> None: ...\ndef capture_take() -> str: ...\ndef display(value: object, /) -> None: ...\ndef ascii_output(text: str, /) -> str: ...\ndef exception_name(exc: BaseException, /) -> str: ...\ndef execute(test: object, debug: bool, /) -> None: ...\n",
             ),
             ("hashlib", include_str!("analysis/hashlib.pyi")),
+            // The pinned typeshed stub admits integer shell flags and the check_output
+            // keywords whose conflicts are reported at runtime (see licenses/typeshed.txt).
+            ("subprocess", include_str!("stubs/subprocess.pyi")),
             (
                 "tomli",
                 "from tomllib import load as load, loads as loads\n",
@@ -210,34 +213,6 @@ impl Session {
                 format!("{inspect}\n_sentinel: object\n"),
             )
             .map_err(|e| e.to_string())?;
-        // Popen tests and programs pass shell=0/1. Preserve all of typeshed's
-        // overloads while admitting the integer truth values CPython accepts.
-        let subprocess = vendored
-            .read_to_string("stdlib/subprocess.pyi")
-            .map_err(|error| error.to_string())?
-            .replace("shell: bool =", "shell: bool | int =");
-        // check_output accepts **kwargs and reports these conflicts before
-        // launching. Code that catches those ValueErrors must reach the runtime.
-        let mut checked = false;
-        let subprocess: String = subprocess
-            .split_inclusive('\n')
-            .flat_map(|line| {
-                if line.trim_start().starts_with("def check_output(") {
-                    checked = true;
-                }
-                let extra = if checked && line.trim() == "*," {
-                    checked = false;
-                    "        stdout: object = ...,\n        check: object = ...,\n        capture_output: bool = False,\n"
-                } else {
-                    ""
-                };
-                [line, extra]
-            })
-            .collect();
-        system
-            .fs()
-            .write_file_all(SystemPathBuf::from(root).join("subprocess.pyi"), subprocess)
-            .map_err(|error| error.to_string())?;
         // CPython's POSIX which() accepts a byte search path independently of
         // the command's type. The cross-platform typeshed overloads omit it.
         system
