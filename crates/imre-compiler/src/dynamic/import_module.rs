@@ -36,29 +36,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/encodings/reader_utf_8_sig.py")
             ),
         )),
-        "types" => {
-            const UPSTREAM: &str = include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"
-            );
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "types.py",
-                SOURCE.get_or_init(|| {
-                    let start = UPSTREAM.find("def new_class(").unwrap();
-                    let (helpers, _) = UPSTREAM[start..]
-                        .split_once("def get_original_bases(")
-                        .unwrap();
-                    let descriptor = UPSTREAM.find("class DynamicClassAttribute:").unwrap();
-                    let coroutine = UPSTREAM.find("def coroutine(func):").unwrap();
-                    format!(
-                        "{helpers}{}\n{}\n{}",
-                        include_str!("../../stdlib/types_original_bases.py"),
-                        &UPSTREAM[descriptor..coroutine],
-                        include_str!("../../stdlib/types_coroutine.py"),
-                    )
-                }),
-            ))
-        }
+        "types" => bundled_source!("types.py"),
         "reprlib" => bundled_source!("reprlib.py"),
         // The scalar Decimal stays available for checked serializers.
         "decimal" => Some(("decimal.py", include_str!("../../stdlib/decimal_boxed.py"))),
