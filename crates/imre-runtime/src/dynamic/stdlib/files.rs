@@ -98,6 +98,15 @@ impl BinaryFile {
     }
 
     /// All aliases observe closure through the same buffered stream.
+    /// A callback may check frame roots while a file operation holds its state.
+    pub(in crate::dynamic) fn owns_open_descriptor(&self) -> bool {
+        match self {
+            Self::Reader { slot, .. } => !slot.try_borrow().is_ok_and(|slot| slot.is_none()),
+            Self::Writer { file, .. } => !file.try_borrow().is_ok_and(|file| file.closed()),
+            _ => !self.closed(),
+        }
+    }
+
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
             Self::Descriptor(fd) => fd.closed(),
@@ -281,11 +290,7 @@ pub(super) fn binary_method(
                     Ok(NONE)
                 }
                 ("close", []) | ("__exit__", [_, _, _]) => {
-                    let result = file.close().map_err(crate::objects::errno_error);
-                    if file.closed() {
-                        ctx.heap.forget_closed_descriptor(receiver);
-                    }
-                    result?;
+                    file.close().map_err(crate::objects::errno_error)?;
                     Ok(NONE)
                 }
                 ("__enter__", []) if file.closed() => {
@@ -376,9 +381,7 @@ pub(super) fn binary_method(
     }
     let mut slot = slot.borrow_mut();
     if matches!(name, "__exit__" | "close") {
-        let source = slot.take();
-        ctx.heap.forget_closed_descriptor(receiver);
-        if let Some(ReadSource::Socket(mut raw)) = source {
+        if let Some(ReadSource::Socket(mut raw)) = slot.take() {
             raw.close().map_err(os_error)?;
         }
         return Ok(NONE);
@@ -664,11 +667,7 @@ pub(super) fn text_method(
             if ctx.heap.default_stderr == Some(receiver) {
                 ctx.check_thread_reporter_mutable()?;
             }
-            let result = file.close();
-            if file.closed() {
-                ctx.heap.forget_closed_descriptor(receiver);
-            }
-            result?;
+            file.close()?;
             Ok(NONE)
         }
         "__enter__" if file.closed() => {

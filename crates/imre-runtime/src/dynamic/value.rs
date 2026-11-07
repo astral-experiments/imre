@@ -1610,6 +1610,18 @@ impl Context {
 }
 
 impl Value {
+    /// Whether releasing this native value can still flush or close a descriptor.
+    fn owns_open_descriptor(&self) -> bool {
+        match self {
+            Self::TextFile(file) => !file.closed(),
+            Self::File(file) => file.owns_open_descriptor(),
+            #[cfg(target_os = "linux")]
+            Self::Epoll(epoll) => epoll.fd() >= 0,
+            Self::Socket(socket) => crate::objects::socket::fd(socket) >= 0,
+            _ => false,
+        }
+    }
+
     pub(super) fn native_file_dict(&self) -> Option<Id> {
         match self {
             Self::TextFile(file) => Some(file.dictionary),
@@ -4934,6 +4946,18 @@ impl Heap {
         next
     }
 
+    /// Retire closed file, socket, and poll handles before tracing unrelated heap objects.
+    pub(super) fn retire_closed_descriptors(&mut self) -> bool {
+        let previous = self.descriptor_owners.len();
+        self.descriptor_owners.retain(|&id| {
+            self.slots[id as usize]
+                .value
+                .as_ref()
+                .is_some_and(Value::owns_open_descriptor)
+        });
+        self.descriptor_owners.len() != previous
+    }
+
     /// Track a descriptor whose flush or close is visible when its last owner disappears.
     pub(super) fn alloc_descriptor_owner(&mut self, value: Value) -> Result<Id> {
         self.descriptor_owners
@@ -4943,17 +4967,6 @@ impl Heap {
         self.descriptor_owners.push(id);
         self.frames.last_mut().unwrap().created_finalizer = true;
         Ok(id)
-    }
-
-    /// Once the file has closed, dropping its last owner cannot flush or close a descriptor.
-    pub(super) fn forget_closed_descriptor(&mut self, id: Id) {
-        if let Some(index) = self
-            .descriptor_owners
-            .iter()
-            .rposition(|&owner| owner == id)
-        {
-            self.descriptor_owners.swap_remove(index);
-        }
     }
 
     /// Recheck the strong path from a caller-held method to the sole pending finalizer.
@@ -5753,14 +5766,7 @@ impl Heap {
         self.descriptor_owners.retain(|&id| {
             let slot = &self.slots[id as usize];
             self.traces[id as usize].get() != UNMARKED
-                && match &slot.value {
-                    Some(Value::TextFile(file)) => !file.closed(),
-                    Some(Value::File(file)) => !file.closed(),
-                    #[cfg(target_os = "linux")]
-                    Some(Value::Epoll(epoll)) => epoll.fd() >= 0,
-                    Some(Value::Socket(socket)) => crate::objects::socket::fd(socket) >= 0,
-                    _ => false,
-                }
+                && slot.value.as_ref().is_some_and(Value::owns_open_descriptor)
         });
         self.interned
             .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
