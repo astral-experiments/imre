@@ -5358,24 +5358,25 @@ impl Context {
         let replaced = self.replacing_finalizer(scope, name, value);
         let scope = self.binding_scope(scope, name);
         let frame = self.scope_data(scope);
-        if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
+        let target = if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
             if matches!(self.heap.get(locals), Value::List(_)) {
                 return Err(Error::new(
                     "TypeError",
                     "list indices must be integers or slices, not str",
                 ));
             }
-            let key = self.heap.code_name(name);
-            self.put_item(locals, key, value)?;
-        } else if let Some(globals) = self.scope_data(scope).exec_globals {
-            let key = self.heap.code_name(name);
-            let storage = self
-                .dict_storage(globals.dict)
-                .expect("exec globals dictionary");
-            self.put_item(storage, key, value)?;
+            locals
+        } else if frame.parent.is_none()
+            && let Some(namespace) = frame.binding_namespace(name)
+        {
+            self.dict_storage(namespace)
+                .expect("module globals dictionary")
         } else {
             self.bind(scope, name, value);
-        }
+            return Ok(replaced);
+        };
+        let key = self.heap.code_name(name);
+        self.put_item(target, key, value)?;
         Ok(replaced)
     }
 
