@@ -2102,6 +2102,7 @@ impl IntrinsicModule {
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Gzip, "compress") => Intrinsic::ScopedObjectExport("gzip.compress"),
             (Self::Gzip, "decompress") => Intrinsic::ScopedObjectExport("gzip.decompress"),
+            (Self::Types, "FunctionType") => Intrinsic::ObjectOnlyExport("types.FunctionType"),
             (Self::Types, "GenericAlias") => Intrinsic::ScopedObjectExport("types.GenericAlias"),
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,

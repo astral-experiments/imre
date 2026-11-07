@@ -833,6 +833,25 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "function_type_for_selected_callback": {
+        "handlers.py": (
+            "import sys\n\n"
+            "def increment(n: int) -> int:\n"
+            "    return n + 1\n\n"
+            "def double(n: int) -> int:\n"
+            "    return n * 2\n\n"
+            "if len(sys.argv) > 1:\n"
+            "    selected = double\n"
+            "else:\n"
+            "    selected = increment\n"
+        ),
+        "main.py": (
+            "from handlers import selected\n"
+            "from types import FunctionType\n\n"
+            "copied = FunctionType(selected.__code__, globals(), \"copied\")\n"
+            "print(type(copied) is FunctionType, copied is not selected, copied(40))\n"
+        ),
+    },
     "imported_tabs": {"main.py": IMPORT, "helper.py": "def f(value: int) -> int:\n\treturn value\n"},
     "inspect_shadow": {
         "main.py": "from inspect import f\nprint(f(2))\n",
@@ -1995,7 +2014,7 @@ def main() -> None:
                 slow_optimized = name in {
                     "boxed_unittest_lazy_import", "builtin_importer", "bundled_source_loader_data", "frozen_importer",
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
-                    "lzma_formats_and_error",
+                    "function_type_for_selected_callback", "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
                     "source_loader_external_code", "warn_named_helper", "zip_source_spec",
                 }
