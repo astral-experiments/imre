@@ -74,6 +74,8 @@ fn write_code_pages(out_dir: &Path) {
     let names = std::fs::read_to_string(names_file).unwrap();
     let tables = std::fs::read(tables_file).unwrap();
     let mut output = String::new();
+    // Every encoder uses the same zero row for empty pages.
+    let mut rows = vec![[0_u8; 256]];
     for (index, name) in [
         (4, "cp1251"),
         (5, "cp424"),
@@ -90,8 +92,7 @@ fn write_code_pages(out_dir: &Path) {
             .unwrap();
         let table: usize = table.parse().unwrap();
         let mut pages = [0_u8; 256];
-        // Empty entries use byte zero. Its unique meaning comes from the decoding table.
-        let mut rows = vec![[0_u8; 256]];
+        let mut page_count = 0;
         let mut ascii_identity = true;
         for (byte, encoded) in tables[table * 512..(table + 1) * 512]
             .chunks_exact(2)
@@ -101,21 +102,30 @@ fn write_code_pages(out_dir: &Path) {
             if (byte < 128 || scalar < 128) && usize::from(scalar) != byte {
                 ascii_identity = false;
             }
-            // Byte zero is recovered from the decoding table. At most 255 other
-            // bytes can populate pages, leaving index zero for the empty page.
-            if byte == 0 || scalar == 0xfffe {
+            if scalar == 0xfffe {
                 continue;
             }
-            let row = &mut pages[usize::from(scalar >> 8)];
+            let page = usize::from(scalar >> 8);
+            page_count = page_count.max(page + 1);
+            if byte == 0 {
+                continue; // Its unique meaning comes from the decoding table.
+            }
+            let row = &mut pages[page];
             if *row == 0 {
-                *row = u8::try_from(rows.len()).unwrap();
+                *row = u8::try_from(rows.len()).expect("native code-page row index fits in a byte");
                 rows.push([0; 256]);
             }
             rows[usize::from(*row)][usize::from(scalar & 255)] = byte as u8;
         }
         let symbol = name.to_ascii_uppercase();
-        writeln!(output, "static {symbol}: CodePage = CodePage {{ index: {index}, module_name: {name:?}, decode: Charmap::at({table}), ascii_identity: {ascii_identity}, pages: {pages:?}, bytes: &{rows:?} }};").unwrap();
+        writeln!(output, "static {symbol}: CodePage = CodePage {{ index: {index}, module_name: {name:?}, decode: Charmap::at({table}), ascii_identity: {ascii_identity}, pages: &{:?} }};", &pages[..page_count]).unwrap();
     }
+    writeln!(
+        output,
+        "static CODE_PAGE_ROWS: [[u8; 256]; {}] = {rows:?};",
+        rows.len()
+    )
+    .unwrap();
     std::fs::write(out_dir.join("code_pages.rs"), output).unwrap();
 }
 

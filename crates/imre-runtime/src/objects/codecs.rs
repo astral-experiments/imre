@@ -16,8 +16,7 @@ pub(crate) struct CodePage {
     index: usize,
     pub(crate) module_name: &'static str,
     decode: Charmap,
-    pages: [u8; 256],
-    bytes: &'static [[u8; 256]],
+    pages: &'static [u8],
     ascii_identity: bool,
 }
 
@@ -26,7 +25,7 @@ impl CodePage {
     fn encode(&self, ch: char) -> Option<u8> {
         let scalar = ch as usize;
         let &page = self.pages.get(scalar >> 8)?;
-        let byte = self.bytes[usize::from(page)][scalar & 255];
+        let byte = CODE_PAGE_ROWS[usize::from(page)][scalar & 255];
         (byte != 0 || self.decode.decode(0) == Some(ch)).then_some(byte)
     }
 }
