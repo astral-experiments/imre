@@ -92,6 +92,16 @@ impl BuiltinDescriptor {
                 method: true,
             });
         }
+        if let Some((owner, _)) = symbol
+            .strip_suffix(".__call__")
+            .and_then(stdlib::operator::callable_type)
+        {
+            return Some(Self {
+                owner,
+                name: "__call__",
+                method: false,
+            });
+        }
         let slots = match symbol.rsplit_once('.') {
             Some((weakref::CALLABLE_PROXY_TYPE, attr)) => Some((
                 weakref::CALLABLE_PROXY_TYPE,

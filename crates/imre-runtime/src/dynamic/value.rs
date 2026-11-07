@@ -1742,6 +1742,7 @@ impl Value {
             Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => {
                 "member_descriptor"
             }
+            Self::AttrGetter(_) => "operator.attrgetter",
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::MethodCaller { .. } => "operator.methodcaller",
             Self::Code(_) => "code",
