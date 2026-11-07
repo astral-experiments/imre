@@ -238,6 +238,24 @@ def current():
         text.close()
         assert binary.closed
 
+    for size in (2, 8 * 1024 * 1024 + 1):
+        with open("wrapped-binary-data", "rt", buffering=size, encoding="utf-8") as reader:
+            assert reader.buffer.read1() == "雪!".encode()[:size]
+            reader.seek(0)
+            assert reader.read() == "雪!"
+
+    with open("wrapped-binary-data", buffering=1, encoding="utf-8") as reader:
+        assert reader.line_buffering and reader.read(1) == "雪"
+
+    for method in ("readinto", "close"):
+        with open("wrapped-binary-data", "rb", buffering=0) as source:
+            with open(source.fileno(), "r", buffering=2, encoding="utf-8", closefd=False) as reader:
+                raw = reader.buffer.raw
+                original = getattr(raw, method)
+                setattr(raw, method, lambda *args: original(*args))
+                assert reader.buffer.read1(2) == "雪".encode()[:2]
+            assert raw.closed and not source.closed
+
     with open("wrapped-binary-data") as reader:
         fd = reader.fileno()
         assert io.TextIOWrapper.fileno(reader) == fd
