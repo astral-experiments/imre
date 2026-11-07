@@ -2105,18 +2105,9 @@ fn receive_from(
     Ok((count, peer, len))
 }
 
-pub(crate) fn recv_into(
-    s: &Object,
-    buffer: &mut [u8],
-    flags: i32,
-    until: Option<Deadline>,
-) -> Result<usize> {
-    if buffer.is_empty() {
-        return Ok(0);
-    }
-    // SAFETY: buffer exposes this many exclusively writable bytes.
-    unsafe { receive_until(fd(s), buffer.as_mut_ptr(), buffer.len(), flags, until) }
-        .map_err(errno_error)
+pub(crate) fn recv_into_once(raw: RawFd, buffer: &mut [u8], flags: i32) -> io::Result<usize> {
+    // SAFETY: buffer exposes this many exclusively writable bytes during this syscall.
+    unsafe { receive_once(raw, buffer.as_mut_ptr(), buffer.len(), flags) }
 }
 
 /// # Safety

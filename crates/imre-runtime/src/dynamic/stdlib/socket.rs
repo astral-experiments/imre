@@ -1145,19 +1145,29 @@ fn receive_into(
                 };
                 return Err(Error::new("ValueError", message));
             }
-            retry(ctx, socket, |ctx, until| {
-                let target = ctx
-                    .writable_storage_bytes(storage)?
-                    .get_mut(span.start..span.start + size)
-                    .ok_or_else(|| {
-                        Error::new("BufferError", "underlying buffer has changed size")
-                    })?;
-                if method == "recv_into" {
-                    Ok((native::recv_into(socket, target, flags, until)?, None))
-                } else {
-                    let (count, peer) = native::recv_from_into(socket, target, flags, until)?;
-                    Ok((count, Some(peer)))
+            let range = span.start..span.start + size;
+            if method == "recv_into" {
+                // Validate even an empty destination before waiting. Keep only the storage id
+                // and byte range across a poll or a returning Python signal handler.
+                if receive_buffer(ctx, storage, range.clone())?.is_empty() {
+                    return Ok((0, None));
                 }
+                let count = native::read_socket(
+                    socket,
+                    ctx,
+                    Context::dispatch_signals,
+                    |_, raw, end| Ok(native::poll_interruptible(raw, libc::POLLIN, Some(end))),
+                    |ctx, raw| {
+                        let target = receive_buffer(ctx, storage, range.clone())?;
+                        Ok(native::recv_into_once(raw, target, flags))
+                    },
+                )?;
+                return Ok((count, None));
+            }
+            retry(ctx, socket, |ctx, until| {
+                let target = receive_buffer(ctx, storage, range.clone())?;
+                let (count, peer) = native::recv_from_into(socket, target, flags, until)?;
+                Ok((count, Some(peer)))
             })
         },
     )?;
@@ -1167,6 +1177,16 @@ fn receive_into(
     };
     let peer = pack_socket_name(ctx, peer)?;
     Ok(ctx.alloc(Value::Tuple(vec![count, peer])))
+}
+
+fn receive_buffer(
+    ctx: &mut Context,
+    storage: Id,
+    range: std::ops::Range<usize>,
+) -> Result<&mut [u8]> {
+    ctx.writable_storage_bytes(storage)?
+        .get_mut(range)
+        .ok_or_else(|| Error::new("BufferError", "underlying buffer has changed size"))
 }
 
 fn setsockopt(
