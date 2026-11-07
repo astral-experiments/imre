@@ -2394,13 +2394,14 @@ impl Context {
         }
         let globals = self.finalizer_path_roots();
         let streams = super::stdlib::io::rooted_standard_streams(self);
-        streams.as_ref().is_some_and(|roots| {
+        if streams.as_ref().is_some_and(|roots| {
             self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + roots.len()
-                && (!self.heap.has_weak_values
-                    || self.heap.weak_values_kept_by(globals[0], globals[1]))
                 && self.heap.finalizers_kept_by(roots)
-        }) || self
-            .heap
+        }) {
+            return !self.heap.has_weak_values
+                || self.heap.weak_values_kept_by(globals[0], globals[1]);
+        }
+        self.heap
             .cached_finalizers_kept(globals, streams.as_ref(), Some(retained_current))
     }
 
