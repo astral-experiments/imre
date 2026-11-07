@@ -834,6 +834,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "hex",
     "ljust",
     "lstrip",
+    "pop",
     "replace",
     "resize",
     "reverse",

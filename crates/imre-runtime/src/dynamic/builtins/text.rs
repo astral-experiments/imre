@@ -455,6 +455,16 @@ pub(super) fn fromhex(
     }
 }
 
+/// Decode a bytearray position or size before inspecting its potentially mutated storage.
+fn bytearray_index(ctx: &mut Context, value: Id) -> Result<isize> {
+    crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
 /// Apply a bytearray method to the underlying storage of an exact or subclass receiver.
 pub(super) fn bytearray_method(
     ctx: &mut Context,
@@ -502,14 +512,38 @@ pub(super) fn bytearray_method(
         }
         return Ok(NONE);
     }
+    if method == "pop" {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!("{name}() takes no keyword arguments")));
+        }
+        let index = match args {
+            [] => -1,
+            [index] => bytearray_index(ctx, *index)?,
+            _ => {
+                return Err(type_error(format!(
+                    "pop expected at most 1 argument, got {}",
+                    args.len()
+                )));
+            }
+        };
+        // __index__ can resize the bytearray or acquire a new buffer export.
+        let storage = ctx.scalar_value(receiver);
+        let len = ctx.bytes_like(storage)?.len();
+        if len == 0 {
+            return Err(Error::new("IndexError", "pop from empty bytearray"));
+        }
+        let index = crate::normalized_index(index, len)
+            .ok_or_else(|| Error::new("IndexError", "pop index out of range"))?;
+        ctx.check_bytearray_resize(storage)?;
+        let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        let byte = data.remove(index);
+        return Ok(ctx.int(i64::from(byte)));
+    }
     let argument = one_positional_arg(name, args, kwargs)?;
     if method == "resize" {
-        let size = crate::signed_index(&ctx.index_integer(argument)?).ok_or_else(|| {
-            Error::new(
-                "OverflowError",
-                "Python int too large to convert to C ssize_t",
-            )
-        })?;
+        let size = bytearray_index(ctx, argument)?;
         let size = usize::try_from(size).map_err(|_| {
             Error::new(
                 "ValueError",
