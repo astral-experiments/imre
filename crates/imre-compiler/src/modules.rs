@@ -313,39 +313,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "_weakrefset" => bundled_source!("_weakrefset.py"),
         "abc" => bundled_source!("abc.py"),
         "quopri" => bundled_source!("quopri.py"),
-        "base64" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "base64.py",
-                SOURCE.get_or_init(|| {
-                    const UPSTREAM: &str = include_str!(
-                        "../../../benchmarks/cpython_stdlib/full/base64/upstream/Lib/base64.py"
-                    );
-                    let from = |start: &str| {
-                        &UPSTREAM[UPSTREAM.find(start).expect("pinned base64 section")..]
-                    };
-                    let section = |start: &str, end: &str| {
-                        from(start)
-                            .split_once(end)
-                            .expect("pinned base64 section end")
-                            .0
-                    };
-                    [
-                        "import binascii\nimport struct\n",
-                        // The runtime supplies the URL-safe codecs.
-                        section("bytes_types =", "_urlsafe_encode_translation ="),
-                        section("# Base32 encoding/decoding", "_b32tab2 ="),
-                        include_str!("../stdlib/base32.py"),
-                        section("def b32encode(s):", "# RFC 3548, Base 16"),
-                        section("def b16decode(", "# Ascii85 encoding/decoding"),
-                        include_str!("../stdlib/base85_encode.py"),
-                        section("def a85decode(", "# The following code is originally taken"),
-                        from("def b85decode("),
-                    ]
-                    .join("\n")
-                }),
-            ))
-        }
+        "base64" => bundled_source!("base64.py"),
         // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
         "code" => bundled_source!("code.py"),
         "codecs" => bundled_source!("codecs.py"),
