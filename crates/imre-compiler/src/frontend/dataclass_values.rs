@@ -162,6 +162,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::BytesIO
         | Type::BinaryIO
         | Type::Iterator
+        | Type::Range
         | Type::Callable(_) => false,
         Type::Class(_) => true,
         _ => types
@@ -280,7 +281,8 @@ pub(super) fn validate(
 fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
-        Type::Logger
+        Type::Range
+            | Type::Logger
             | Type::LogManager
             | Type::TimedFileHandler
             | Type::ProcessSelectorClass

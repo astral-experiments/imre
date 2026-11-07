@@ -164,6 +164,7 @@ impl Verifier<'_> {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
             Type::ModuleSpec(id) => self.module.types.module_spec_fields(id),
+            Type::Range => vec![Type::Int; 3],
             Type::SysImplementation => crate::version::implementation_fields(&self.module.types),
             Type::CompletedProcess(capture, cmd) => {
                 return match field {
@@ -557,18 +558,19 @@ impl Verifier<'_> {
             ExprKind::Field(receiver, field) => self.field(receiver.ty, *field, value.ty),
             ExprKind::Builtin(operation, args) => {
                 match operation {
-                    Builtin::ExceptionRecordFields => {
-                        let Type::Class(id) = value.ty else {
-                            return Err("exception payload construction needs a record".to_owned());
+                    Builtin::RecordFromFields => {
+                        let layout: &[Type] = match value.ty {
+                            Type::Range => &[Type::Int; 3],
+                            Type::Class(id) => self
+                                .module
+                                .class_fields
+                                .get(id)
+                                .ok_or("unknown class layout")?,
+                            _ => return Err("nominal record layout required".into()),
                         };
-                        let layout = self
-                            .module
-                            .class_fields
-                            .get(id)
-                            .ok_or("unknown exception payload")?;
                         require(
                             layout.len() == args.len(),
-                            "exception payload field count differs from its layout",
+                            "record field count differs from its layout",
                         )?;
                         for (field, expected) in args.iter().zip(layout) {
                             same(field.ty, *expected)?;

@@ -77,6 +77,8 @@ pub(crate) enum Type {
     Union(usize),
     /// An owned tagged reference to a string list or a fixed tuple of strings.
     StringIterable,
+    /// Immutable start, stop and step. Each iteration gets its own cursor.
+    Range,
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
     /// A first-class cursor whose next operation transfers one exact element type.
@@ -371,6 +373,7 @@ impl std::fmt::Display for Type {
             Self::BytesIO => "io.BytesIO",
             Self::SourceModule => "module",
             Self::Path => "pathlib.Path",
+            Self::Range => "range",
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
@@ -1274,8 +1277,8 @@ pub(crate) enum Builtin {
     MappingObjectGet,
     ExceptionTupleView,
     ExceptionKeywordSuggestion,
-    /// A new, completely initialized record for a proven forwarding constructor.
-    ExceptionRecordFields,
+    /// A new nominal record whose arguments initialize its complete checked layout.
+    RecordFromFields,
     /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
     ExceptionFormatterResult(bool),
     ExceptionArgs,

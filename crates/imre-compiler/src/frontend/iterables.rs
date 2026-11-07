@@ -501,26 +501,7 @@ impl Checker<'_> {
             Iteration::Range(args) => {
                 let args = args.into_iter().map(&mut capture).collect::<Vec<_>>();
                 if let [_, _, step] = args.as_slice() {
-                    body.push(Statement::If(
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Compare(
-                                vec![step.clone(), Expr::integer(0)],
-                                vec![Compare::Equal],
-                            ),
-                        },
-                        vec![Statement::Raise(Some(Expr {
-                            ty: Type::Exception,
-                            kind: ExprKind::Exception {
-                                kind: exception_kind("ValueError").unwrap(),
-                                message: Some(Box::new(Expr {
-                                    ty: Type::Str,
-                                    kind: ExprKind::Str("range() arg 3 must not be zero".into()),
-                                })),
-                            },
-                        }))],
-                        Vec::new(),
-                    ));
+                    body.push(pipelines::check_range_step(step.clone()));
                 }
                 Iteration::Range(args)
             }

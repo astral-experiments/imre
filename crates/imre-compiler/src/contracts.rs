@@ -136,7 +136,7 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet | Self::ObjectTextProject => Contract::new(true, PreservesOwners),
+            Self::MappingObjectGet | Self::ObjectTextProject | Self::RecordFromFields => Contract::new(true, PreservesOwners),
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
@@ -144,8 +144,7 @@ impl Builtin {
             | Self::ObjectStreamProject
             | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity
-            | Self::ExceptionKeywordSuggestion
-            | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
+            | Self::ExceptionKeywordSuggestion => Contract::new(false, PreservesOwners),
             // Formatting a projected task-group member may call its own __repr__.
             Self::ExceptionFieldRepr
             | Self::ExceptionRepr

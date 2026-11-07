@@ -145,6 +145,7 @@ pub(super) fn semantics(
                 field_metadata(output, name, layout.into_iter()),
             )
         }
+        Type::Range => return "null".to_owned(),
         Type::SysImplementation => (
             0,
             2,
