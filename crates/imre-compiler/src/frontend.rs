@@ -10061,6 +10061,29 @@ impl<'a> Checker<'a> {
                     .integer_product(call)
                     .map_err(|_| self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport("_signal.pause"))) => {
+                if call.arguments.is_empty() {
+                    return Ok(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::SignalPause, vec![]),
+                    });
+                }
+                calls::reject_unpacking(call, self.source)?;
+                let message = if call.arguments.keywords.is_empty() {
+                    format!(
+                        "_signal.pause() takes no arguments ({} given)",
+                        call.arguments.args.len()
+                    )
+                } else {
+                    "_signal.pause() takes no keyword arguments".to_owned()
+                };
+                return self.positional_argument_error(
+                    call,
+                    &[],
+                    Type::None,
+                    unpacking::string(message),
+                );
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport("struct._clearcache"))) => {
                 if let ast::Expr::Attribute(attr) = call.func.as_ref()
                     && self

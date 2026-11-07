@@ -108,7 +108,12 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_signal"
             if matches!(
                 function,
-                "default_int_handler" | "getsignal" | "set_wakeup_fd" | "siginterrupt" | "signal"
+                "default_int_handler"
+                    | "getsignal"
+                    | "pause"
+                    | "set_wakeup_fd"
+                    | "siginterrupt"
+                    | "signal"
             ) =>
         {
             Some((module, function))
@@ -3023,6 +3028,9 @@ impl Context {
                     "__doc__" if symbol == "_typing._idfunc" => return Ok(NONE),
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.pause" => {
+                        return Ok(self.text("Wait until a signal arrives."));
+                    }
                     "__doc__" if symbol == "_signal.signal" => {
                         return Ok(self.text("Set the action for the given signal.\n\nThe action can be SIG_DFL, SIG_IGN, or a callable Python object.\nThe previous action is returned.  See getsignal() for possible return values.\n\n*** IMPORTANT NOTICE ***\nA signal handler function is called with two arguments:\nthe first is the signal number, the second is the interrupted stack frame."));
                     }
@@ -3359,6 +3367,7 @@ impl Context {
                                 | "gc.disable"
                                 | "gc.isenabled"
                                 | "gc.get_threshold"
+                                | "_signal.pause"
                                 | "_signal.sigpending"
                                 | "_signal.valid_signals"
                                 | "_thread.allocate"

@@ -1185,6 +1185,7 @@ pub(crate) enum Builtin {
     TimeExtras,
     TimeExtra(bool),
     TimeSleep,
+    SignalPause,
     WarningFilter {
         category: u32,
         invalid: u32,

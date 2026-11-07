@@ -1795,6 +1795,9 @@ impl IntrinsicModule {
             }
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
             (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            (Self::Signal | Self::SignalNative, "pause") if cfg!(unix) => {
+                Intrinsic::ScopedObjectExport("_signal.pause")
+            }
             (Self::Signal | Self::SignalNative, "alarm") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("_signal.alarm")
             }

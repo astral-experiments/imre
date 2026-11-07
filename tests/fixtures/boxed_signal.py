@@ -24,6 +24,9 @@ valid.clear()
 assert signal.SIGINT in signal.valid_signals()
 
 assert signal.alarm is _signal.alarm
+assert signal.pause is _signal.pause
+assert signal.pause.__doc__ == "Wait until a signal arrives."
+
 assert signal.alarm(Delay()) == 0
 try:
     for args, kwargs in (([], {}), ([0, 0], {}), ([], {"seconds": 0}), ([1 << 40], {}), ([0.5], {})):
@@ -155,6 +158,25 @@ def check_handlers():
 
 
 check_handlers()
+
+
+def check_pause():
+    seen = []
+
+    def handler(signum, frame):
+        seen.append(signum)
+
+    old = signal.signal(signal.SIGALRM, handler)
+    try:
+        signal.alarm(1)
+        assert signal.pause() is None
+        assert seen == [signal.SIGALRM]
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
+check_pause()
 
 
 def check_buffered_read_eintr(mode):

@@ -296,7 +296,7 @@ impl Builtin {
             ),
             Self::WarningScopeEnter | Self::WarningScopeExit => Contract::new(false, PreservesLists),
             Self::TimeExtras | Self::TimeExtra(_) => Contract::new(false, PreservesLists),
-            Self::Mktime | Self::MktimeOffset | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep
+            Self::Mktime | Self::MktimeOffset | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep | Self::SignalPause
             | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningFormat { .. }
