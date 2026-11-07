@@ -9,6 +9,31 @@ use std::collections::HashSet;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 
+/// Ruff parses PEP 798 comprehensions, but CPython 3.14 rejects a double star
+/// here before considering the enclosing expression's symbol-table errors.
+pub fn dict_unpacking_error<T>(
+    parsed: &ruff_python_parser::Parsed<T>,
+) -> Option<(ruff_text_size::TextRange, &'static str)> {
+    use ruff_python_ast::token::TokenKind;
+    use ruff_text_size::Ranged;
+
+    parsed.unsupported_syntax_errors().iter().find_map(|error| {
+        if !matches!(
+            error.kind,
+            ruff_python_parser::UnsupportedSyntaxErrorKind::UnpackingInComprehension(_)
+        ) {
+            return None;
+        }
+        let star = parsed.tokens().in_range(error.range).first()?;
+        (star.kind() == TokenKind::DoubleStar).then(|| {
+            (
+                star.range(),
+                "dict unpacking cannot be used in dict comprehension",
+            )
+        })
+    })
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Output<'a> {
     List(&'a ast::Expr),

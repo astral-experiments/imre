@@ -22,7 +22,8 @@ pub mod startup;
 pub mod strings;
 mod type_aliases;
 pub mod zlib;
-pub use type_aliases::{generic_class_arguments_error, type_alias_error};
+pub use type_aliases::annotation_scope_error as type_alias_error;
+pub use type_aliases::{annotation_scope_error, generic_class_arguments_error};
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
