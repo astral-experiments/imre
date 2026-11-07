@@ -4651,10 +4651,14 @@ impl Context {
             "is not" => return Ok(builtins::boolean(a != b)),
             _ => {}
         }
-        if matches!(op, "==" | "!=")
-            && let (Value::Int(left), Value::Int(right)) = (self.heap.get(a), self.heap.get(b))
-        {
-            return Ok(builtins::boolean(left.cmp(right).is_eq() == (op == "==")));
+        if let (Value::Int(left), Value::Int(right)) = (self.heap.get(a), self.heap.get(b)) {
+            if matches!(op, "==" | "!=") {
+                return Ok(builtins::boolean(left.cmp(right).is_eq() == (op == "==")));
+            }
+            if let Some(code) = integer_binary_code(op) {
+                let result = crate::integer_binary(left, right, code)?;
+                return Ok(self.alloc(Value::Int(result)));
+            }
         }
         if matches!(a, FALSE | TRUE) && matches!(b, FALSE | TRUE) {
             match op {
@@ -5113,24 +5117,8 @@ impl Context {
             }
             crate::integer_power::power(&x, &y)?
         } else {
-            let code = match op {
-                "+" => 0,
-                "-" => 1,
-                "*" => 2,
-                "//" => 3,
-                "%" => 4,
-                "&" => 5,
-                "|" => 6,
-                "^" => 7,
-                "<<" => 8,
-                ">>" => 9,
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("unsupported operator {op}"),
-                    ));
-                }
-            };
+            let code = integer_binary_code(op)
+                .ok_or_else(|| Error::new("TypeError", format!("unsupported operator {op}")))?;
             crate::integer_binary(&x, &y, code)?
         };
         let class = if matches!(op, "&" | "|" | "^") {
@@ -5140,6 +5128,23 @@ impl Context {
         };
         self.flag_or_integer(class, result)
     }
+}
+
+/// Map an integer operator to the operation implemented by the integer runtime.
+fn integer_binary_code(op: &str) -> Option<u32> {
+    Some(match op {
+        "+" => 0,
+        "-" => 1,
+        "*" => 2,
+        "//" => 3,
+        "%" => 4,
+        "&" => 5,
+        "|" => 6,
+        "^" => 7,
+        "<<" => 8,
+        ">>" => 9,
+        _ => return None,
+    })
 }
 
 /// Return the comparison performed by a rich comparison slot.
