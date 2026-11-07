@@ -114,7 +114,7 @@ The paired pass rate is 78.2% (10,428 of 13,327) for the original 25 families an
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
-in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover 78 originals in these 44 families and [eight supplemental Decimal originals](docs/stdlib-omissions.md#decimal).
+in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover 79 originals in these 44 families and [eight supplemental Decimal originals](docs/stdlib-omissions.md#decimal).
 At either optimization level, a test can exercise typed native code, boxed native code that calls the runtime, or Python source loaded during execution. [Compiler design](docs/design.md#boxed-compilation)
 
 The [supplemental `test_urllib2` decision](docs/stdlib-omissions.md#test_urllib2) covers the single packaging-specific error in a separate 80-case replay.
@@ -178,9 +178,9 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `uuid` | 48 | 120 | 1 | Both native builds passed 47 of 120 originals on the public squash, including 47 of 48 frozen CPython-positive cases. An earlier host also passed the IP-dependent lookup. The private enum layout check has a [documented omission decision](docs/stdlib-omissions.md#uuid). [Public change](https://github.com/astral-experiments/imre/pull/5313). |
 | `warnings` | 181 | 187 | 0 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| `zipfile` | 368 | 383 | 0 | The earlier 367 pairs include 32 Zstandard originals and two archive-execution tests whose Bash fixture launched CPython with `-E` and no `-O` (Python optimization level 0). `TestPath.test_encoding_warnings` added one pair with `-X warn_default_encoding` on stock, O0 and O3. Default runs skipped it. [#5854](https://github.com/astral-experiments/imre/pull/5854) · [#5899](https://github.com/astral-experiments/imre/pull/5899) · [Flagged run revision](https://github.com/astral-experiments/imre/commit/ea7b0bf455931d2d77d41cece413a80050bc66a4) |
+| `zipfile` | 368 | 383 | 1 | The earlier 367 pairs include 32 Zstandard originals and two archive-execution tests whose Bash fixture launched CPython with `-E` and no `-O` (Python optimization level 0). `TestPath.test_encoding_warnings` added one pair with `-X warn_default_encoding` on stock, O0 and O3. Default runs skipped it. [#5854](https://github.com/astral-experiments/imre/pull/5854) · [#5899](https://github.com/astral-experiments/imre/pull/5899) · [Flagged run revision](https://github.com/astral-experiments/imre/commit/ea7b0bf455931d2d77d41cece413a80050bc66a4) |
 | `zoneinfo` | 228 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). |
-| **Measured total (19 of 19 families)** | **2,460** | **2,875** | **12** |  |
+| **Measured total (19 of 19 families)** | **2,460** | **2,875** | **13** |  |
 
 ### Whole-suite baselines for later additions
 
