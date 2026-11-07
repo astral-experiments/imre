@@ -271,6 +271,7 @@ pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usiz
     let write =
         |text: &str, owner: Option<&crate::StrOwner>| write_piece(Some(&stream), text, owner);
     let result = (|| {
+        let mut wide_digits = String::new();
         for (i, (&kind, &word)) in kinds.iter().zip(words).enumerate() {
             if i > 0 {
                 write(" ", None)?;
@@ -284,9 +285,23 @@ pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usiz
                 0 => Some("None"),
                 1 => Some(if word == 0 { "False" } else { "True" }),
                 // SAFETY: the checked caller roots this integer for the duration of the write.
-                2 => unsafe { crate::Int::borrow(word) }
-                    .as_small()
-                    .map(|n| digits.format(n)),
+                2 => {
+                    if let Some(value) = unsafe { crate::Int::borrow(word) }.as_small() {
+                        Some(digits.format(value))
+                    } else {
+                        wide_digits.clear();
+                        // SAFETY: the checked integer remains rooted while its digits are written.
+                        // This formatter also enforces the active integer string conversion limit.
+                        if unsafe { super::values::write_int_repr(&mut wide_digits, word) }.is_err()
+                        {
+                            if super::exceptions::imre_error_pending() != 0 {
+                                return Ok(());
+                            }
+                            return Err(Error::allocation());
+                        }
+                        Some(wide_digits.as_str())
+                    }
+                }
                 _ => None,
             };
             let borrowed;
