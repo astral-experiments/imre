@@ -1,4 +1,33 @@
+def capture_float(value: float):
+    return lambda: (value, value + 1)
+
+
 def current():
+    import sys
+
+    def factory(float, rebind=False):
+        def capture(value: float):
+            return lambda: (value, value + 1)
+        if rebind:
+            float = str
+        return capture
+
+    capture_from_factory = factory(float)
+    if sys.implementation.name == "imre":
+        for shadowed in (factory(str), factory(float, rebind=True)):
+            try:
+                shadowed(3)
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("shadowed float annotation admitted an integer")
+
+    for capture in (capture_float, capture_from_factory):
+        for original in (3, 1 << 2000, 0.5):
+            value, total = capture(original)()
+            assert value is original and type(value) is type(original)
+            assert total == original + 1
+
     class Price(float):
         def __ceil__(self):
             return "custom ceil"
