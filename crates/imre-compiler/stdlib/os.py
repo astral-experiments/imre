@@ -37,6 +37,7 @@ if sys.platform == "linux":
     )
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
+    from posix import pidfd_open
     from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
     from posix import GRND_NONBLOCK, GRND_RANDOM, getrandom
     from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice

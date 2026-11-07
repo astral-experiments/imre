@@ -1,3 +1,4 @@
+import errno
 import locale
 import os
 import posix
@@ -72,6 +73,18 @@ def current():
             os.close(write_fd)
             os.close(read_fd)
         assert mkfifo in supports_dir_fd
+        from os import pidfd_open
+        assert pidfd_open is posix.pidfd_open
+        try:
+            fd = pidfd_open(pid=os.getpid(), flags=0)
+        except OSError as error:
+            if error.errno != errno.ENOSYS and not isinstance(error, PermissionError):
+                raise
+        else:
+            try:
+                assert not os.get_inheritable(fd)
+            finally:
+                os.close(fd)
         from os import MFD_CLOEXEC, memfd_create
         assert memfd_create is posix.memfd_create and MFD_CLOEXEC == posix.MFD_CLOEXEC
         for flags, inherited in ((0, True), (MFD_CLOEXEC + (1 << 70), False)):
