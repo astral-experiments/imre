@@ -3156,6 +3156,16 @@ impl Context {
                 self.format_elements(self.itemgetter_keys(*keys), active)
             ),
             Value::Instance { class, .. } => self.default_object_repr(id, *class),
+            Value::Socket(socket) => {
+                use crate::objects::socket::{family, fd, kind, proto};
+                format!(
+                    "<socket object, fd={}, family={}, type={}, proto={}>",
+                    fd(socket),
+                    family(socket),
+                    kind(socket),
+                    proto(socket),
+                )
+            }
             _ => "<object>".to_owned(),
         };
         if recursive.is_some() {

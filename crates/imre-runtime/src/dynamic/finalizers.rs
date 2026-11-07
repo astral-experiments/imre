@@ -127,7 +127,9 @@ impl Context {
                 ..
             }
         );
-        let found = scan.is_some()
+        let exact_socket = matches!(self.heap.get(owner), Value::Socket(_));
+        let found = exact_socket
+            || scan.is_some()
             || generator_frame.is_some()
             || async_generator
             || unpack_iterator
@@ -139,11 +141,7 @@ impl Context {
         }
         // The selected slot owns the implicit close. An override can resurrect the
         // socket or release its fd through os.close without calling the base slot.
-        if let Value::Instance {
-            socket: Some(socket),
-            ..
-        } = self.heap.get(owner)
-        {
+        if let Some(socket) = self.heap.get(owner).socket_handle() {
             crate::objects::socket::hand_finalization_to_python(socket);
         }
         // Binding a descriptor can itself run Python. Install the once-only bit and
@@ -185,11 +183,16 @@ impl Context {
                     error.report(&self.heap)
                 );
             }
-        } else if let Some(slot) = self.slot(owner, "__del__") {
+        } else if let Some(slot) = if exact_socket {
+            Some(self.builtin("socket.socket.__del__"))
+        } else {
+            self.slot(owner, "__del__")
+        } {
             self.heap.keep(slot);
             // CPython calls method descriptors unbound, including ordinary
             // functions. Only custom descriptors resolve __get__ before the call.
-            let unbound = matches!(self.heap.get(slot), Value::Function { .. })
+            let unbound = exact_socket
+                || matches!(self.heap.get(slot), Value::Function { .. })
                 || matches!(self.heap.get(slot), Value::Native(name)
                     if super::wrapper_descriptor::BuiltinDescriptor::lookup(name).is_some());
             let target = if unbound {
