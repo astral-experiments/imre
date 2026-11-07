@@ -35,6 +35,39 @@ fn cached_operand_rechecks_the_frame_and_its_current_edge() {
 }
 
 #[test]
+fn a_bound_method_keeps_its_receiver_alive_until_the_binding_is_removed() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let scope = ctx.scope("sample", None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let class = ctx.builtin("object");
+    let receiver = ctx.instance(class, None);
+    ctx.heap.register_finalizer(receiver);
+    let callable = ctx.builtin("repr");
+    let method = ctx.alloc(Value::Method {
+        callable,
+        receiver,
+        explicit: false,
+    });
+    let globals = ctx.finalizer_path_roots();
+    let heap = &mut ctx.heap;
+    let Value::Scope(bindings) = heap.get_mut(scope) else {
+        unreachable!()
+    };
+    bindings.names.insert("callback".into(), method);
+    heap.release_temporaries_since(0);
+
+    heap.learn_finalizer_paths(globals, None);
+    assert!(heap.finalizer_roots.contains(receiver));
+    assert!(heap.finalizer_roots.valid(heap, globals));
+
+    let Value::Scope(bindings) = heap.get_mut(scope) else {
+        unreachable!()
+    };
+    bindings.names.clear();
+    assert!(!heap.finalizer_roots.valid(heap, globals));
+}
+
+#[test]
 fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let class = ctx.builtin("object");
