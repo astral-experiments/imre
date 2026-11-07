@@ -197,6 +197,30 @@ pub(super) fn call(
     if name == "b2a_qp" {
         return b2a_qp(ctx, args, kwargs);
     }
+    if matches!(name, "hexlify" | "b2a_hex") {
+        let [Some(data), sep, group] = crate::dynamic::builtins::bind_builtin_arguments(
+            name,
+            args,
+            kwargs,
+            ["data", "sep", "bytes_per_sep"],
+            1,
+        )?
+        else {
+            unreachable!()
+        };
+        let bytes = ctx.with_read_buffer(data, |ctx, view| {
+            let group = crate::dynamic::builtins::hex_group(ctx, group)?;
+            let sep = sep
+                .map(|sep| crate::dynamic::builtins::hex_separator(ctx, sep, false))
+                .transpose()?;
+            Ok(crate::objects::hex_with_separator(
+                ctx.native_buffer_bytes(view)?,
+                sep,
+                group,
+            )?)
+        })?;
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
     if matches!(name, "a2b_hex" | "unhexlify") {
         if !kwargs.is_empty() {
             return Err(Error::new(

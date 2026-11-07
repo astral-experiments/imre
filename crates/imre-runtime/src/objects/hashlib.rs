@@ -465,12 +465,20 @@ pub(crate) fn hex_text(bytes: &[u8]) -> Result<Str> {
 
 /// Encode contiguous input directly into the returned uppercase byte buffer.
 pub(crate) fn uppercase_hex_bytes(input: &[u8]) -> Result<Vec<u8>> {
+    hex_bytes(input, b'A' - 10)
+}
+
+fn hex_bytes(input: &[u8], letter_offset: u8) -> Result<Vec<u8>> {
     let length = input.len().checked_mul(2).ok_or_else(Error::allocation)?;
     let mut output = Vec::new();
     output
         .try_reserve_exact(length)
         .map_err(|_| Error::allocation())?;
-    write_hex_digits(input, b'A' - 10, &mut output.spare_capacity_mut()[..length]);
+    write_hex_digits(
+        input,
+        letter_offset,
+        &mut output.spare_capacity_mut()[..length],
+    );
     // SAFETY: each input byte initialized exactly two output bytes.
     unsafe { output.set_len(length) };
     Ok(output)
@@ -493,10 +501,14 @@ fn write_hex_digits(input: &[u8], letter_offset: u8, output: &mut [std::mem::May
     }
 }
 
-pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32) -> Result<Str> {
+pub(crate) fn hex_with_separator(
+    bytes: &[u8],
+    separator: Option<u8>,
+    group: i32,
+) -> Result<Vec<u8>> {
     let step = group.unsigned_abs() as usize;
     let Some(separator) = separator.filter(|_| step > 0 && step < bytes.len()) else {
-        return hex_text(bytes);
+        return hex_bytes(bytes, b'a' - 10);
     };
     let separators = (bytes.len() - 1) / step;
     let capacity = bytes
@@ -504,7 +516,10 @@ pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32
         .checked_mul(2)
         .and_then(|n| n.checked_add(separators))
         .ok_or_else(Error::allocation)?;
-    let mut result = Str::try_with_capacity(capacity).map_err(|_| Error::allocation())?;
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(capacity)
+        .map_err(|_| Error::allocation())?;
     let mut next = if group > 0 {
         (bytes.len() - 1) % step + 1
     } else {
@@ -512,11 +527,11 @@ pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32
     };
     for (index, &byte) in bytes.iter().enumerate() {
         if index == next {
-            result.push(char::from(separator));
+            result.push(separator);
             next += step;
         }
-        result.push(char::from(HEX[(byte >> 4) as usize]));
-        result.push(char::from(HEX[(byte & 15) as usize]));
+        result.push(HEX[(byte >> 4) as usize]);
+        result.push(HEX[(byte & 15) as usize]);
     }
     Ok(result)
 }
