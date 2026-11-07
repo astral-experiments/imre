@@ -110,6 +110,12 @@ with client, server:
 
 client, server = connect("localhost")
 with client, server:
+    try:
+        client.getpeercert()
+    except ValueError as exc:
+        assert str(exc) == "handshake not done yet"
+    else:
+        raise AssertionError("returned a certificate before the handshake")
     want_read(server.do_handshake)
     want_read(client.do_handshake)
     for _ in range(8):
@@ -124,6 +130,8 @@ with client, server:
             break
     else:
         raise AssertionError("TLS handshake did not finish")
+    assert client.getpeercert(binary_form=True) == leaf
+    assert client.getpeercert()["subject"] and server.getpeercert() is None
     assert client.get_verified_chain()[0] == leaf
     assert client.send(b"p\x00ng") == 4
     assert server.recv(64) == b"p\x00ng"
@@ -131,6 +139,13 @@ with client, server:
     assert client.recv(64) == b"p\xffng"
     server.settimeout(0.25)
     assert server.gettimeout() == 0.25 and server.getblocking()
+
+    class ClosePeer:
+        def __bool__(self):
+            client.close()
+            return True
+
+    assert client.getpeercert(ClosePeer()) == leaf
 assert client.fileno() == -1 and client.gettimeout() == 0.0
 assert server.fileno() == -1 and server.gettimeout() == 0.25
 

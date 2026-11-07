@@ -634,7 +634,7 @@ class SSLSocket:
     """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
 
     __slots__ = ("_session", "_context", "_server_hostname", "server_side", "_io_refs", "_closed",
-                 "do_handshake_on_connect", "suppress_ragged_eofs")
+                 "do_handshake_on_connect", "suppress_ragged_eofs", "_connected")
 
     def __new__(cls, *args, **kwargs):
         # The native wrap call takes ownership of the descriptor after allocation.
@@ -689,7 +689,9 @@ class SSLSocket:
             peer.server_side = bool(server_side)
             peer.do_handshake_on_connect = do_handshake_on_connect
             peer.suppress_ragged_eofs = suppress_ragged_eofs
-            if _imre_ssl.is_session(result) and do_handshake_on_connect:
+            connected = _imre_ssl.is_session(result)
+            peer._connected = connected
+            if connected and do_handshake_on_connect:
                 if peer.gettimeout() == 0.0:
                     raise ValueError("do_handshake_on_connect should not be specified for non-blocking sockets")
                 peer.do_handshake()
@@ -757,6 +759,19 @@ class SSLSocket:
             child.close()
             raise
         return peer, address
+
+    def _checkClosed(self, msg=None):
+        pass
+
+    def _check_connected(self):
+        if not self._connected:
+            self.getpeername()
+
+    def getpeercert(self, binary_form=False):
+        """Return the peer certificate as a dictionary or DER bytes, or None."""
+        self._checkClosed()
+        self._check_connected()
+        return _call(_imre_ssl.getpeercert, self._session, binary_form)
 
     def get_verified_chain(self):
         """Return the verified certificate chain as a list of DER-encoded certificates."""
