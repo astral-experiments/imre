@@ -4296,32 +4296,11 @@ impl Context {
                 self.bind(scope, "float_repr_style", float_repr_style);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
-                for name in [
-                    #[cfg(target_os = "linux")]
-                    "_get_cpu_count_config",
-                    "get_coroutine_origin_tracking_depth",
-                    "set_coroutine_origin_tracking_depth",
-                ] {
+                for &name in stdlib::SYS_EAGER_FUNCTIONS {
                     let callable = self.builtin(&format!("sys.{name}"));
                     self.bind(scope, name, callable);
                 }
-                for name in [
-                    "audit",
-                    "addaudithook",
-                    "getsizeof",
-                    "getrecursionlimit",
-                    "get_asyncgen_hooks",
-                    "set_asyncgen_hooks",
-                    "is_finalizing",
-                    "setrecursionlimit",
-                    "_getframe",
-                    "_getframemodulename",
-                    "displayhook",
-                    "excepthook",
-                    "unraisablehook",
-                    "get_int_max_str_digits",
-                    "set_int_max_str_digits",
-                ] {
+                for &name in stdlib::SYS_BOUND_FUNCTIONS {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,

@@ -131,6 +131,42 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
     Ok(module)
 }
 
+pub(super) const SYS_BOUND_FUNCTIONS: &[&str] = &[
+    "audit",
+    "addaudithook",
+    "getsizeof",
+    "getrecursionlimit",
+    "get_asyncgen_hooks",
+    "set_asyncgen_hooks",
+    "is_finalizing",
+    "setrecursionlimit",
+    "_getframe",
+    "_getframemodulename",
+    "displayhook",
+    "excepthook",
+    "unraisablehook",
+    "get_int_max_str_digits",
+    "set_int_max_str_digits",
+];
+
+pub(super) const SYS_EAGER_FUNCTIONS: &[&str] = &[
+    #[cfg(target_os = "linux")]
+    "_get_cpu_count_config",
+    "get_coroutine_origin_tracking_depth",
+    "set_coroutine_origin_tracking_depth",
+];
+
+pub(super) const SYS_LAZY_FUNCTIONS: &[&str] = &[
+    "exit",
+    "exc_info",
+    "exception",
+    "intern",
+    "_is_interned",
+    "getdefaultencoding",
+    "getfilesystemencoding",
+    "getfilesystemencodeerrors",
+];
+
 pub(super) fn is_module(name: &str) -> bool {
     use imre_ast::providers::{Provider, provider};
     match provider(name) {
@@ -554,6 +590,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "native_spec_info"
             | "native_source"
             | "native_code"
+            | "is_builtin_module"
+            | "create_builtin_module"
+            | "exec_builtin_module"
             | "create_native_module"
             | "exec_native_module"
             | "warn_import"
@@ -852,18 +891,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("functools", "Placeholder") => functools::placeholder(ctx),
         ("functools", "_PlaceholderType") => ctx.builtin("functools._PlaceholderType"),
-        (
-            "sys",
-            "exit"
-            | "exc_info"
-            | "exception"
-            | "intern"
-            | "_is_interned"
-            | "getdefaultencoding"
-            | "getfilesystemencoding"
-            | "getfilesystemencodeerrors",
-        )
-        | ("sysconfig", "_getuserbase" | "get_path_names" | "get_platform")
+        ("sys", name) if SYS_LAZY_FUNCTIONS.contains(&name) => ctx.builtin(&format!("sys.{name}")),
+        ("sysconfig", "_getuserbase" | "get_path_names" | "get_platform")
         | ("site", "getsitepackages")
         | ("os", "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
@@ -2429,6 +2458,16 @@ pub(super) fn call(
             ("registered_path_spec", [name, path], []) => {
                 return ctx.registered_path_spec(*name, *path);
             }
+            ("is_builtin_module", [name], []) => {
+                return Ok(builtins::boolean(
+                    ctx.is_builtin_module(ctx.str_value(*name)?)?,
+                ));
+            }
+            ("create_builtin_module", [name], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx.create_builtin_module(&name);
+            }
+            ("exec_builtin_module", [module], []) => return ctx.exec_builtin_module(*module),
             ("create_native_module", [name], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
                 return ctx.create_native_module(&name);
