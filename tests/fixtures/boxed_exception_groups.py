@@ -15,6 +15,15 @@ class InvalidNotes:
 
 
 def current():
+    from types import GenericAlias
+    from typing import TypeVar
+
+    item = TypeVar("item")
+    for origin in (BaseExceptionGroup, ExceptionGroup, Batch):
+        alias = origin[item]
+        assert type(alias) is GenericAlias and alias.__origin__ is origin
+        assert alias.__args__ == (item,) and alias[ValueError] == origin[ValueError]
+
     class ReportedException(BaseException):
         @property
         def __class__(self):

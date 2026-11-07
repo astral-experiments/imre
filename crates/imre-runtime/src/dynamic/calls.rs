@@ -423,7 +423,7 @@ impl Context {
                 match name {
                     name if kind == "BaseExceptionGroup"
                         && (super::exception_group::METHODS.contains(&name)
-                            || matches!(name, "message" | "exceptions")) =>
+                            || matches!(name, "__class_getitem__" | "message" | "exceptions")) =>
                     {
                         self.builtins
                             .get(&format!("BaseExceptionGroup.{name}"))
@@ -4898,7 +4898,7 @@ impl Context {
                         ))
                     || (matches!(class.as_str(), "BaseExceptionGroup" | "ExceptionGroup")
                         && (super::exception_group::METHODS.contains(&name)
-                            || matches!(name, "message" | "exceptions")))
+                            || matches!(name, "__class_getitem__" | "message" | "exceptions")))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "complex" && super::complex::METHODS.contains(&name))
@@ -4918,7 +4918,14 @@ impl Context {
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
                 if let Some(method) = self.class_attr(obj, name) {
-                    if class == stdlib::functools::PARTIAL_CLASS && name == "__class_getitem__" {
+                    if name == "__class_getitem__"
+                        && matches!(
+                            class.as_str(),
+                            stdlib::functools::PARTIAL_CLASS
+                                | "BaseExceptionGroup"
+                                | "ExceptionGroup"
+                        )
+                    {
                         return Ok(self.bind_native_classmethod(method, obj));
                     }
                     return Ok(method);
