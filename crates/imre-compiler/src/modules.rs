@@ -394,32 +394,18 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/tokenize.py"
             ),
         )),
-        "collections" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("collections/__init__.py", SOURCE.get_or_init(|| {
-                const UPSTREAM: &str = include_str!(
-                    "../../../benchmarks/cpython_stdlib/full/collections/upstream/Lib/collections/__init__.py"
-                );
-                let (_, wrappers) = UPSTREAM
-                    .split_once("### UserDict\n")
-                    .expect("CPython 3.14.5 UserDict section");
-                let (ordered, _) = UPSTREAM
-                    .split_once("### OrderedDict\n")
-                    .and_then(|(_, tail)| tail.split_once("### namedtuple\n"))
-                    .expect("CPython 3.14.5 OrderedDict section");
-                // Define the Python class in the fresh module's globals and let the
-                // upstream module select _collections.OrderedDict when it is available.
-                concat!(
-                    include_str!("../stdlib/collections/__init__.py"),
-                    "\n",
-                    include_str!("../stdlib/collections/namedtuple_repr.py"),
-                    "\n",
-                    include_str!("../stdlib/collections/recursive_repr.py"),
-                    "\nimport _collections_abc\nimport sys as _sys\n",
-                    "from _weakref import proxy as _proxy\nfrom operator import eq as _eq\n",
-                ).to_owned() + ordered + wrappers
-            })))
-        }
+        "collections" => Some((
+            "collections/__init__.py",
+            concat!(
+                include_str!("../stdlib/collections/__init__.py"),
+                "\n",
+                include_str!("../stdlib/collections/namedtuple_repr.py"),
+                "\n",
+                include_str!("../stdlib/collections/recursive_repr.py"),
+                "\n",
+                include_str!("../stdlib/collections/containers.py"),
+            ),
+        )),
         // CPython 3.14.5 Lib/configparser.py.
         "configparser" => bundled_source!("configparser.py"),
         "contextlib" => Some((
