@@ -784,6 +784,11 @@ REJECTED = {
         "space/child.py": "value = 3\n",
         "helper.py": "from space.child import value\ndef result() -> int:\n    return 'wrong'\nresult()\n",
     }, "expected int, got str"),
+    "previously_bound_child": ({
+        "main.py": "import package\n",
+        "package/__init__.py": "from . import token\nfrom .token import token\n",
+        "package/token.py": "token = 42\n",
+    }, "cannot be rebound"),
     "child_overwrites_definition": ({"main.py": "import package.child\n", "package/__init__.py": "def child() -> int:\n    return 1\n", "package/child.py": HELPER}, "overwrite"),
     "entry_self_import": ({"main.py": "import main\n"}, "entry module"),
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
@@ -1803,6 +1808,15 @@ ACCEPTED = {
         "pkg/__init__.py": "",
         "pkg/parent.py": "def increment(n: int) -> int:\n    return n + 1\nfrom . import child\nobserved = child.result\n",
         "pkg/child.py": "from .parent import increment\nresult = increment(41)\n",
+    },
+    "child_export_shadows_module": {
+        "package/__init__.py": "from .token import number as token\n",
+        "package/token.py": "number = 42\n",
+        "main.py": (
+            "import package\nfrom package import token\nimport package.token as alias\n"
+            "from package.token import number as direct\n"
+            "print(package.token)\nprint(token)\nprint(alias)\nprint(direct)\n"
+        ),
     },
     "partial_child_shared_storage": {
         "main.py": "import pkg.parent\n",
