@@ -2725,6 +2725,27 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_methodcaller.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
+        (root / "weather_report.py").write_text("def report(temp):\n    return f'{temp} C'\n")
+        compare("-Bm", "inspect", "weather_report:report")
+        (root / "weather_metadata.py").write_text("import weather_report\nprint(weather_report.__spec__.cached)\n")
+        metadata = run(imre, "-Bm", "weather_metadata")
+        details = run(imre, "-Bm", "inspect", "--details", "weather_report:report")
+        assert metadata.returncode == details.returncode == 0, (metadata.stderr, details.stderr)
+        assert details.stdout.splitlines()[2:4] == [b"Cached: " + metadata.stdout.rstrip(b"\n"), b"Line: 0"]
+        (root / "station_cache.py").write_text("__cached__ = 'project cache'\ndef report(): pass\n")
+        compare("-Bm", "inspect", "--details", "station_cache:report")
+        compare("-Bm", "inspect", "sys", status=1, stderr=b"Can't get info for builtin modules.\n")
+        local_inspect = root / "inspect.py"
+        local_inspect.write_text("origin = 'local inspect'\nif __name__ == '__main__': print(origin)\n")
+        try:
+            compare("-Bm", "inspect", "sys")
+            compare("-B", "-c", "import inspect; print(inspect.origin)")
+            (root / "local_inspect_api.py").write_text(
+                "import inspect\nprint(inspect.origin, hasattr(inspect, '_signature_layout'))\n"
+            )
+            compare("-Bm", "local_inspect_api")
+        finally:
+            local_inspect.unlink()
         static_fixture = Path(__file__).with_name("fixtures") / "boxed_getattr_static.py"
         compare("-IB", static_fixture, native_args=("run", static_fixture, "--runtime-imports", "--quiet"))
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"

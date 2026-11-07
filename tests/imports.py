@@ -815,6 +815,10 @@ REJECTED = {
                    "def identity(n: int) -> int: return n\nidentity('wrong')\n",
     }, "expected int, got str"),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
+    "inspect_shadow_invalid_return": ({
+        "main.py": "from inspect import f\nprint(f(2))\n",
+        "inspect.py": HELPER + "\ndef uncalled() -> int:\n    return 'wrong'\n",
+    }, "expected int, got str"),
     "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
@@ -825,6 +829,10 @@ REJECTED = {
 
 ACCEPTED = {
     "imported_tabs": {"main.py": IMPORT, "helper.py": "def f(value: int) -> int:\n\treturn value\n"},
+    "inspect_shadow": {
+        "main.py": "from inspect import f\nprint(f(2))\n",
+        "inspect.py": HELPER,
+    },
     "methodcaller_module_alias": {
         "main.py": "import operator as op\nprint(op.methodcaller('upper')('ok'))\n",
     },

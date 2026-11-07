@@ -196,14 +196,15 @@ impl Session {
             .fs()
             .write_file_all(SystemPathBuf::from(root).join("http/__init__.pyi"), http)
             .map_err(|e| e.to_string())?;
-        // typeshed omits inspect's private default; preserve all its public signatures.
+        // Only use the augmented stdlib stub when the project did not supply inspect.
+        let stdlib_stubs = intrinsic.join(".stdlib-stubs");
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
             .map_err(|e| e.to_string())?;
         system
             .fs()
             .write_file_all(
-                SystemPathBuf::from(root).join("inspect.pyi"),
+                stdlib_stubs.join("inspect.pyi"),
                 format!("{inspect}\n_sentinel: object\n"),
             )
             .map_err(|e| e.to_string())?;
@@ -255,6 +256,7 @@ impl Session {
                 .map_err(|error| error.to_string())?;
             roots.push(SystemPathBuf::from(path));
         }
+        roots.push(stdlib_stubs);
         settings.search_paths = ty_module_resolver::SearchPathSettings::new(roots)
             .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
             .map_err(|error| error.to_string())?;

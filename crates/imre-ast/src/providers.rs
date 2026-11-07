@@ -79,9 +79,9 @@ pub fn provider(name: &str) -> Option<Provider> {
     is_builtin(name).then_some(Provider::Builtin)
 }
 
-/// Native extension modules that are searched after the application path.
+/// Native providers that are searched after the application path.
 pub fn is_native_fallback(name: &str) -> bool {
-    matches!(name, "_bz2" | "_zstd")
+    matches!(name, "_bz2" | "_zstd" | "inspect")
         || cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
 }
 
