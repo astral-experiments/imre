@@ -383,6 +383,27 @@ type(name, bases, dict, **kwds) -> a new type"#
   kwdefaults
     a dictionary that specifies the default keyword argument values"#
         }
+        "method" => "Create a bound instance method object.",
+        "classmethod" => {
+            r#"Convert a function to be a class method.
+
+A class method receives the class as implicit first argument,
+just like an instance method receives the instance.
+To declare a class method, use this idiom:
+
+  class C:
+      @classmethod
+      def f(cls, arg1, arg2, argN):
+          ...
+
+It can be called either on the class (e.g. C.f()) or on an instance
+(e.g. C().f()).  The instance is ignored except for its class.
+If a class method is called for a derived class, the derived class
+object is passed as the implied first argument.
+
+Class methods are different than C++ or Java static methods.
+If you want those, see the staticmethod builtin."#
+        }
         "frozenset" => r#"Build an immutable unordered collection of unique elements."#,
         "_abc_data" => r#"Internal state held by ABC machinery."#,
         _ => return None,
@@ -1651,6 +1672,10 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "_getset_descriptor_doc" {
+        let receiver = noargs_method_receiver(ctx, "getset_descriptor", "__doc__", args, kwargs)?;
+        return ctx.getset_documentation(receiver);
+    }
     if name == "_wrapper_descriptor_doc" {
         let receiver = noargs_method_receiver(ctx, "wrapper_descriptor", "__doc__", args, kwargs)?;
         return ctx.lookup_attr(receiver, "__doc__");
@@ -2280,7 +2305,7 @@ pub(super) fn call(
                     || Context::dict_view_owner(owner).is_some()
                 {
                     ctx.builtin_slot_accepts(values[0], owner)
-                } else if owner == "wrapper_descriptor" {
+                } else if matches!(owner, "wrapper_descriptor" | "getset_descriptor") {
                     return Err(ctx.readonly_getset_error(owner, field, values[0]));
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))

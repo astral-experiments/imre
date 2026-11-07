@@ -432,6 +432,9 @@ impl Context {
             (_, Value::DictView { .. }) => {
                 Self::dict_view_owner(self.type_name(object)) == Some(owner)
             }
+            ("getset_descriptor", Value::GetSetDescriptor { .. } | Value::LayoutDescriptor(..)) => {
+                true
+            }
             ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
             ("generic_alias_iterator", Value::GenericAliasIterator(_))
             | ("bool", Value::Bool(_))
@@ -2740,6 +2743,17 @@ impl Context {
         true
     }
 
+    /// Give a descriptor type its own read-only documentation descriptor.
+    fn descriptor_doc_member(&mut self, owner: &'static str) -> Id {
+        let get = self.builtin(&format!("_{owner}_doc"));
+        self.alloc(Value::GetSetDescriptor {
+            owner,
+            name: "__doc__",
+            get,
+            set: None,
+        })
+    }
+
     /// Register a builtin number's read-only fields and expose the declaring descriptors.
     fn install_numeric_dictionary(
         &mut self,
@@ -3161,14 +3175,14 @@ impl Context {
                 let dictionary = self.dict(entries);
                 self.native_type_dicts.insert(value, dictionary);
             }
+            "getset_descriptor" => {
+                let doc = self.descriptor_doc_member("getset_descriptor");
+                let key = self.heap.code_name("__doc__");
+                let dictionary = self.dict(vec![(key, doc)]);
+                self.native_type_dicts.insert(value, dictionary);
+            }
             "wrapper_descriptor" => {
-                let get = self.builtin("_wrapper_descriptor_doc");
-                let doc = self.alloc(Value::GetSetDescriptor {
-                    owner: "wrapper_descriptor",
-                    name: "__doc__",
-                    get,
-                    set: None,
-                });
+                let doc = self.descriptor_doc_member("wrapper_descriptor");
                 let bind = self.builtin("wrapper_descriptor.__get__");
                 let entries = vec![
                     (self.heap.code_name("__get__"), bind),
