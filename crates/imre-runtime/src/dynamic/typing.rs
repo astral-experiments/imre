@@ -3392,7 +3392,11 @@ impl Context {
         }
         // Calls already resolve __call__ through descriptor binding. Other dunder
         // names can replace special methods or class metadata with their own layout.
-        let ordinary_slots = layout != ClassLayout::Specialized
+        let module_layout = slot_names.as_deref().is_some_and(|slots| !slots.is_empty())
+            && ancestors.iter().any(
+                |&base| matches!(self.heap.get(base), Value::Native(name) if name == "module"),
+            );
+        let ordinary_slots = (layout != ClassLayout::Specialized || module_layout)
             && slot_names.as_deref().is_some_and(|names| {
                 names.iter().all(|name| {
                     !name.starts_with("__")
@@ -3493,9 +3497,18 @@ impl Context {
         namespace.bases = bases;
         namespace.supplied_bases = supplied_bases.filter(|&tuple| tuple != bases);
         namespace.mro = mro;
-        for field in members {
+        let module_start = if module_layout && !members.is_empty() {
+            Some(self.module_slot_start(class)?)
+        } else {
+            None
+        };
+        for (index, field) in members.into_iter().enumerate() {
             let name = self.text(&field);
-            let descriptor = self.alloc(Value::SlotMember { owner: class, name });
+            let descriptor = self.alloc(Value::SlotMember {
+                owner: class,
+                name,
+                module_offset: module_start.map(|start| start + index),
+            });
             self.bind_local(scope, &field, descriptor);
         }
         Ok(class)

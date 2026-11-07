@@ -3780,6 +3780,7 @@ impl Context {
             origin,
             initializing: source.is_some(),
             module_state: None,
+            module_slots: None,
             constructor: None,
         });
         if name == "builtins" {
@@ -4757,7 +4758,11 @@ impl Context {
             {
                 // Keep the iterator state outside Python attribute lookup, even on subclasses.
                 let name = self.text("_batched_state");
-                let member = self.alloc(Value::SlotMember { owner, name });
+                let member = self.alloc(Value::SlotMember {
+                    owner,
+                    name,
+                    module_offset: None,
+                });
                 self.bind(scope, "_batched_state", member);
             }
             if name == "re"

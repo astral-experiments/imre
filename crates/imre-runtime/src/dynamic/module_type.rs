@@ -132,6 +132,15 @@ impl Context {
         match self.default_get_attr(module, name) {
             Err(error) if self.is_attribute_error(&error) => {
                 let Some(hook) = self.scope_name(scope, "__getattr__") else {
+                    // ModuleType reports a failed descriptor lookup in the module's namespace.
+                    if let Value::Module {
+                        constructor: Some(class),
+                        ..
+                    } = *self.heap.get(module)
+                        && self.class_attr(class, name).is_some()
+                    {
+                        return Err(self.missing_module_attribute(scope, name));
+                    }
                     return Err(error);
                 };
                 let attribute = original.unwrap_or_else(|| self.text(name));
@@ -165,6 +174,10 @@ impl Context {
             Err(error) if self.is_attribute_error(&error) => {}
             result => return result,
         }
+        Err(self.missing_module_attribute(scope, name))
+    }
+
+    fn missing_module_attribute(&self, scope: Id, name: &str) -> Error {
         let prefix = self
             .scope_name(scope, "__name__")
             .and_then(|value| self.str_value(value).ok());
@@ -172,10 +185,10 @@ impl Context {
             || "module".to_owned(),
             |prefix| format!("module '{prefix}'"),
         );
-        Err(Error::new(
+        Error::new(
             "AttributeError",
             format!("{kind} has no attribute '{name}'"),
-        ))
+        )
     }
 
     pub(super) fn module_dir(&mut self, module: Id, scope: Id) -> Result<Id> {
@@ -300,6 +313,18 @@ impl Context {
         Ok((class, Vec::new()))
     }
 
+    /// A new module member follows all named slots in the effective storage base.
+    pub(super) fn module_slot_start(&mut self, class: Id) -> Result<usize> {
+        let (mut base, _) = self.module_slot_layout(class)?;
+        let mut count = 0;
+        while matches!(self.heap.get(base), Value::Class { .. }) {
+            let (parent, slots) = self.module_slot_layout(base)?;
+            count += slots.len();
+            base = parent;
+        }
+        Ok(count)
+    }
+
     /// Allocate an empty module namespace without publishing the module in sys.modules.
     pub(super) fn allocate_module(&mut self, class: Id) -> Id {
         let scope = self.scope("", None);
@@ -310,6 +335,7 @@ impl Context {
             initializing: false,
             constructor: Some(class),
             module_state: None,
+            module_slots: None,
         })
     }
 

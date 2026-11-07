@@ -762,12 +762,19 @@ impl Context {
     }
 
     fn check_slot_receiver(&self, member: Id, receiver: Id) -> Result<(Id, bool)> {
-        let Value::SlotMember { owner, name } = *self.heap.get(member) else {
+        let Value::SlotMember {
+            owner,
+            name,
+            module_offset,
+        } = *self.heap.get(member)
+        else {
             unreachable!()
         };
         let finalizing = self.heap.get(owner).io_kind() == Some("TextIOWrapper")
             && self.str_value(name)? == "_finalizing";
         if matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
+            || module_offset.is_some()
+                && matches!(self.heap.get(receiver), Value::Module { constructor: Some(class), .. } if self.direct_subclass(*class, owner))
         {
             return Ok((name, finalizing));
         }
@@ -795,6 +802,37 @@ impl Context {
 
     pub(super) fn read_slot_member(&self, member: Id, receiver: Id) -> Result<Id> {
         let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
+        if let Value::Module {
+            module_slots,
+            constructor: Some(class),
+            ..
+        } = self.heap.get(receiver)
+            && let Value::SlotMember {
+                module_offset: Some(offset),
+                ..
+            } = self.heap.get(member)
+        {
+            let name = self.str_value(name)?;
+            return module_slots
+                .as_ref()
+                .and_then(|slots| slots.get(offset))
+                .copied()
+                .ok_or_else(|| {
+                    let qualname = self.class_qualname(*class);
+                    let module = self
+                        .own_class_attr(*class, "__module__")
+                        .and_then(|name| self.str_value(name).ok())
+                        .filter(|name| !matches!(*name, "__main__" | "builtins"));
+                    let owner = module.map_or_else(
+                        || qualname.to_owned(),
+                        |module| format!("{module}.{qualname}"),
+                    );
+                    Error::new(
+                        "AttributeError",
+                        format!("'{owner}' object has no attribute '{name}'"),
+                    )
+                });
+        }
         let Value::Instance { member_values, .. } = self.heap.get(receiver) else {
             unreachable!()
         };
@@ -814,6 +852,33 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
+        if let Value::SlotMember {
+            module_offset: Some(offset),
+            ..
+        } = *self.heap.get(member)
+            && let Value::Module { module_slots, .. } = self.heap.get_mut(receiver)
+        {
+            let old = if let Some(value) = value {
+                module_slots
+                    .get_or_insert_with(Default::default)
+                    .insert(offset, value)
+            } else {
+                let previous = module_slots
+                    .as_mut()
+                    .and_then(|slots| slots.remove(&offset));
+                if previous.is_none() {
+                    return Err(Error::new(
+                        "AttributeError",
+                        self.str_value(name)?.to_owned(),
+                    ));
+                }
+                previous
+            };
+            if let Some(old) = old {
+                self.heap.weak_edge_removed(old);
+            }
+            return Ok(());
+        }
         if finalizing {
             let value = value
                 .ok_or_else(|| Error::new("TypeError", "can't delete numeric/char attribute"))?;

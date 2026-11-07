@@ -1136,10 +1136,6 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
-                            | "module.__init__"
-                            | "module.__dir__"
-                            | "module.__repr__"
-                            | "module.__getattribute__"
                             | "object.__str__"
                             | "bytes.count"
                             | "bytes.decode"
@@ -2881,7 +2877,9 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::SlotMember { owner, name: field } => match name {
+            Value::SlotMember {
+                owner, name: field, ..
+            } => match name {
                 "__name__" => return Ok(field),
                 "__objclass__" => return Ok(owner),
                 "__doc__" => return Ok(NONE),
@@ -2924,6 +2922,9 @@ impl Context {
             Value::LayoutDescriptor(owner, field) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text(field)),
+                "__doc__" if matches!(field, "__annotations__" | "__annotate__") => {
+                    return Ok(NONE);
+                }
                 "__doc__" => {
                     return Ok(self.text(match field {
                         "__dict__" => "dictionary for instance variables",
