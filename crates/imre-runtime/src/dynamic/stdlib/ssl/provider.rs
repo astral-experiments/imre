@@ -161,6 +161,7 @@ functions! {
     SSL_CTX_load_verify_locations(Handle, *const c_char, *const c_char) -> c_int;
     SSL_new(Handle) -> Handle;
     SSL_free(Handle) -> ();
+    SSL_up_ref(Handle) -> c_int;
     SSL_set_fd(Handle, c_int) -> c_int;
     SSL_set0_rbio(Handle, Handle) -> ();
     SSL_set0_wbio(Handle, Handle) -> ();
@@ -976,27 +977,27 @@ impl Context {
     }
 
     /// Release the Python-visible context borrow before invoking any password callback.
-    pub(super) fn credentials(&self) -> Result<Credentials, Failure> {
+    pub(super) fn credentials(&self) -> Result<OwnedSsl, Failure> {
         self.api.clear();
         // SAFETY: the new SSL holds its own reference to this context.
         let handle = NonNull::new(unsafe { (self.api.SSL_new)(self.handle.as_ptr()) })
             .ok_or_else(|| self.api.error("SSL_new"))?;
-        Ok(Credentials {
+        Ok(OwnedSsl {
             api: self.api,
             handle,
         })
     }
 }
 
-/// A private SSL stages the key, certificate and chain until all three can be installed.
-pub(super) struct Credentials {
+/// One owned OpenSSL reference, independent of the socket descriptor.
+pub(super) struct OwnedSsl {
     api: &'static Api,
     handle: NonNull<c_void>,
 }
 
-impl Drop for Credentials {
+impl Drop for OwnedSsl {
     fn drop(&mut self) {
-        // SAFETY: release the SSL_new reference and all staged credentials.
+        // SAFETY: release the reference acquired by SSL_new or SSL_up_ref.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
     }
 }
@@ -1035,7 +1036,15 @@ unsafe extern "C" fn copy_password(
     }
 }
 
-impl Credentials {
+impl OwnedSsl {
+    fn retain(api: &'static Api, handle: NonNull<c_void>) -> Result<Self, Failure> {
+        // SAFETY: the calling session owns the live SSL throughout this increment.
+        if unsafe { (api.SSL_up_ref)(handle.as_ptr()) } != 1 {
+            return Err(api.error("SSL_up_ref"));
+        }
+        Ok(Self { api, handle })
+    }
+
     pub(super) fn load_cert_chain(
         self,
         certfile: &CStr,
@@ -1232,6 +1241,10 @@ enum Operation<'a> {
 }
 
 impl Session {
+    pub(super) fn retain_ssl(&self) -> Result<OwnedSsl, Failure> {
+        OwnedSsl::retain(self.api, self.handle)
+    }
+
     pub(super) fn socket(&self) -> &crate::ObjectOwner {
         self.socket.as_ref().expect("live TLS transport")
     }

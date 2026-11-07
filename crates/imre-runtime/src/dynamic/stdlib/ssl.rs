@@ -79,6 +79,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "bio_write",
         "bio_pending",
         "bio_getpeercert",
+        "getpeercert",
         "bio_shutdown",
         "channel_binding",
         "hostname_checks_common_name",
@@ -844,11 +845,22 @@ pub(super) fn call(
             } => Ok(*server_hostname),
             _ => Err(Error::new("TypeError", "expected a TLS memory BIO session")),
         },
-        ("bio_getpeercert", &[handle, binary]) => {
+        ("getpeercert" | "bio_getpeercert", &[handle, binary]) => {
+            // The bound SSL must survive __bool__, which can handshake or close the Python peer.
+            let ssl = if name == "bio_getpeercert" {
+                bio_session(ctx, handle)?.borrow().retain_ssl()
+            } else {
+                let Value::TlsSession(state) = ctx.heap.get(handle) else {
+                    return Err(Error::new(
+                        "AttributeError",
+                        "'NoneType' object has no attribute 'getpeercert'",
+                    ));
+                };
+                state.borrow().as_ref().ok_or_else(closed)?.retain_ssl()
+            }
+            .map_err(|e| provider_error(ctx, e))?;
             let binary = ctx.truth(binary)?;
-            bio_session(ctx, handle)?
-                .borrow()
-                .peer_certificate(ctx, binary)
+            ssl.peer_certificate(ctx, binary)
         }
         ("bio_read", &[handle, size, buffer]) => {
             let session = bio_session(ctx, handle)?;
