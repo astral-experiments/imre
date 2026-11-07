@@ -272,3 +272,38 @@ finally:
     sys.modules["_colorize"] = saved_colorize
     sys.stderr = previous_stderr
 assert output.chunks == ['  File "worker.py", line 7, in run\n    consume()\n', '']
+
+
+
+class Gate:
+    def __await__(self):
+        return (yield "ready")
+
+
+async def spaced_subscription(table):
+    return (table)  [await Gate()]
+
+
+work = spaced_subscription({})
+print(work.send(None))
+try:
+    work.send("missing")
+except KeyError as error:
+    stream = io.StringIO()
+    print_exception(error, file=stream, limit=-1)
+    print(next(line.strip() for line in stream.getvalue().splitlines() if "~" in line))
+
+
+
+def bare_yield():
+    yield "ready"
+
+
+work = bare_yield()
+print(next(work))
+try:
+    work.throw(LookupError("injected"))
+except LookupError as error:
+    stream = io.StringIO()
+    print_exception(error, file=stream, limit=-1)
+    print(stream.getvalue().splitlines()[-2].strip())

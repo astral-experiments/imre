@@ -1000,11 +1000,7 @@ impl Function<'_, '_> {
         if text.get(start..end)?.contains(&b'\n') {
             return None;
         }
-        let split = prefix_end
-            + text
-                .get(prefix_end..end)?
-                .iter()
-                .position(|&b| b == opener)?;
+        let split = imre_ast::traceback_delimiter(text, prefix_end, end, opener)?;
         let (line, col) = self.source.line_and_column(range.start());
         Some([line, col, col + (split - start), col + (end - start)])
     }

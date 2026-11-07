@@ -235,6 +235,34 @@ pub fn captured_thread_locks<'a>(
     }
 }
 
+/// CPython omits the caret for the whole call in these assignment and return statements.
+pub fn unhighlighted_call(stmt: &ast::Stmt) -> Option<ruff_text_size::TextRange> {
+    match stmt {
+        ast::Stmt::Assign(v)
+            if matches!(v.targets.as_slice(), [ast::Expr::Name(_)])
+                && matches!(&*v.value, ast::Expr::Call(_)) =>
+        {
+            Some(v.value.range())
+        }
+        ast::Stmt::Return(v) => v.value.as_deref().and_then(|e| match e {
+            ast::Expr::Call(c) if matches!(&*c.func, ast::Expr::Name(_)) => Some(e.range()),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+/// Locate the delimiter after a call target or subscription receiver on a traceback line.
+pub fn traceback_delimiter(
+    source: &[u8],
+    prefix_end: usize,
+    end: usize,
+    opener: u8,
+) -> Option<usize> {
+    let suffix = source.get(prefix_end..end)?;
+    Some(prefix_end + suffix.iter().position(|&b| b == opener)?)
+}
+
 /// Python locates attribute loads and optimized method calls at the attribute name.
 pub fn expression_position(
     expr: &ast::Expr,

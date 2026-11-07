@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use icu_properties::{CodePointMapData, props::EastAsianWidth};
 
+use crate::dynamic::value::{TracebackAnchor, TracebackSpan};
+
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 
 /// Traceback text is converted to a Python object only at the public return or write boundary.
@@ -61,7 +63,33 @@ struct FrameLine<'a> {
     embedded_source: Option<&'a str>,
     name: &'a str,
     line: i64,
-    span: Option<[u32; 3]>,
+    span: Option<TracebackSpan>,
+}
+
+/// Match the simple-call exception in CPython's single-line caret formatter.
+fn unhighlighted_call(raw: &str, start: usize, end: usize) -> bool {
+    let text = raw.trim_start();
+    let indent = raw.len() - text.len();
+    let (Some(prefix), Some(through)) = (raw.get(indent..start), raw.get(indent..end)) else {
+        return false;
+    };
+    if prefix.is_empty() {
+        return false;
+    }
+    let Ok(parsed) = ruff_python_parser::parse_module(text) else {
+        return false;
+    };
+    let Some(range) = parsed
+        .syntax()
+        .body
+        .first()
+        .and_then(imre_ast::unhighlighted_call)
+    else {
+        return false;
+    };
+    // traceback compares the AST's offsets with character offsets in the dedented display.
+    range.start().to_usize() == prefix.chars().count()
+        && range.end().to_usize() == through.chars().count()
 }
 
 fn display_width(text: &str) -> usize {
@@ -82,7 +110,7 @@ impl<'a> FrameLine<'a> {
         ctx: &'a Context,
         code: Id,
         line: i64,
-        span: Option<[u32; 3]>,
+        span: Option<TracebackSpan>,
         locals: &'a str,
         path: Option<&'a Path>,
     ) -> Result<Self> {
@@ -134,13 +162,41 @@ impl<'a> FrameLine<'a> {
             return out;
         }
         let _ = writeln!(out, "    {line}");
-        if let Some([start, split, end]) = self.span.map(|s| s.map(|v| v as usize)) {
+        if let Some([start, split, end]) = self
+            .span
+            .filter(|s| i64::from(s.end_line) == self.line)
+            .and_then(|s| {
+                let end = s.end as usize;
+                let split = match s.anchor {
+                    TracebackAnchor::Uniform => s.start as usize,
+                    TracebackAnchor::Column(column) => column as usize,
+                    TracebackAnchor::Hidden => return None,
+                    TracebackAnchor::DelimiterAfter(_, b'(')
+                        if unhighlighted_call(raw, s.start as usize, end) =>
+                    {
+                        return None;
+                    }
+                    TracebackAnchor::DelimiterAfter(prefix, opener) => {
+                        imre_ast::traceback_delimiter(
+                            raw.as_bytes(),
+                            (s.start + prefix) as usize,
+                            end,
+                            opener,
+                        )?
+                    }
+                };
+                Some([s.start as usize, split, end])
+            })
+        {
             let indent = raw.len() - raw.trim_start().len();
             if let (Some(prefix), Some(primary), Some(secondary)) = (
                 raw.get(indent..start),
                 raw.get(start..split),
                 raw.get(split..end),
-            ) {
+            ) && (!primary.is_empty()
+                || !prefix.trim().is_empty()
+                || !raw[end..].trim().is_empty())
+            {
                 let _ = writeln!(
                     out,
                     "    {}{}{}",
@@ -174,9 +230,14 @@ pub(super) fn tb_position(ctx: &mut Context, tb: Id) -> Id {
     };
     let line = ctx.int(lineno);
     let positions = match span {
-        Some([start, _, end]) => vec![
+        Some(TracebackSpan {
+            end_line,
+            start,
+            end,
+            ..
+        }) => vec![
             line,
-            line,
+            ctx.int(i64::from(end_line)),
             ctx.int(i64::from(start)),
             ctx.int(i64::from(end)),
         ],
@@ -617,7 +678,7 @@ fn format_result_frames(
     captured_frames(ctx, &captured, lines)
 }
 
-type CapturedFrame = (Id, i64, Option<[u32; 3]>, String);
+type CapturedFrame = (Id, i64, Option<TracebackSpan>, String);
 
 fn captured_frames(
     ctx: &mut Context,

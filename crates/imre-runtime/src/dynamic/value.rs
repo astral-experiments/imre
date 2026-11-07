@@ -101,11 +101,37 @@ pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TracebackAnchor {
+    Uniform,
+    Column(u32),
+    DelimiterAfter(u32, u8),
+    Hidden,
+}
+
+impl TracebackAnchor {
+    pub(super) fn delimiter(
+        range: ruff_text_size::TextRange,
+        prefix: ruff_text_size::TextSize,
+        opener: u8,
+    ) -> Self {
+        Self::DelimiterAfter(u32::from(prefix - range.start()), opener)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TracebackSpan {
+    pub end_line: u32,
+    pub start: u32,
+    pub anchor: TracebackAnchor,
+    pub end: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
     pub file: std::sync::Arc<str>,
     pub line: u32,
-    pub span: Option<[u32; 3]>,
+    pub span: Option<TracebackSpan>,
 }
 
 /// Immutable construction-time fields independent of BaseException.args.
@@ -120,6 +146,7 @@ pub(super) struct GroupData {
 pub(super) struct Trace {
     // Pending activations precede the already exposed, mutable Python traceback.
     pending_frames: Vec<(Location, Id)>,
+    pub(super) source_position: Option<(u32, TracebackSpan)>,
     pub instance: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
@@ -424,12 +451,61 @@ impl Context {
         if let Some(position) = frame.call_position {
             return Some(position);
         }
-        match (frame.expression, &self.code_object(frame.code).body) {
-            (ExpressionPosition::Source { range, .. }, Body::Source(program)) => {
-                program.expression_range(range)
-            }
-            _ => None,
+        frame.source_range(&self.heap, frame.expression)
+    }
+
+    /// Preserve the innermost operation before restoring its caller's live expression.
+    pub(super) fn at_source_position<T>(
+        &mut self,
+        position: ExpressionPosition,
+        anchor: TracebackAnchor,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let previous = self.heap.replace_expression(position);
+        let result = operation(self);
+        let result = self.source_result(result, anchor);
+        self.heap.replace_expression(previous);
+        result
+    }
+
+    pub(super) fn source_result<T>(&self, result: Result<T>, anchor: TracebackAnchor) -> Result<T> {
+        result.map_err(|error| {
+            let position = self
+                .heap
+                .frames
+                .last()
+                .expect("active source frame")
+                .expression;
+            self.source_failure(error, position, anchor)
+        })
+    }
+
+    pub(super) fn source_failure(
+        &self,
+        mut error: Error,
+        position: ExpressionPosition,
+        anchor: TracebackAnchor,
+    ) -> Error {
+        if error
+            .trace
+            .as_ref()
+            .is_some_and(|trace| trace.source_position.is_some())
+        {
+            return error;
         }
+        let frame = self.heap.frames.last().expect("active source frame");
+        if let Some([line, end_line, start, end]) = frame.source_range(&self.heap, position) {
+            error.tracing().source_position = Some((
+                line,
+                TracebackSpan {
+                    end_line,
+                    start,
+                    anchor,
+                    end,
+                },
+            ));
+        }
+        error
     }
 
     /// Return the same Python frame to introspection and traceback construction.
@@ -570,13 +646,24 @@ impl Context {
     }
 
     pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
+        let position = error.trace.as_mut().and_then(|t| t.source_position.take());
+        if let Some((line, _)) = position {
+            self.heap.set_statement_line(line);
+        }
         let failure = match self.materialize_frame(self.heap.frames.len() - 1) {
             Err(failure) => failure,
             Ok(None) => return,
             Ok(Some((mut loc, frame))) => {
                 if let Some(&[line, start, split, end]) = span {
                     loc.line = line;
-                    loc.span = Some([start, split, end]);
+                    loc.span = Some(TracebackSpan {
+                        end_line: line,
+                        start,
+                        anchor: TracebackAnchor::Column(split),
+                        end,
+                    });
+                } else if let Some((_, span)) = position {
+                    loc.span = Some(span);
                 }
                 let active = self.heap.active_exception();
                 if error.context == NONE
@@ -1457,7 +1544,7 @@ pub(super) enum Value {
         frame: Id,
         next: Id,
         lineno: i64,
-        span: Option<[u32; 3]>,
+        span: Option<TracebackSpan>,
     },
     PythonFrame {
         // The original namespace outlives execution of a module or class body.
@@ -3478,6 +3565,15 @@ pub(super) enum ExpressionPosition {
     },
 }
 
+impl ExpressionPosition {
+    pub(super) fn at(range: ruff_text_size::TextRange) -> Self {
+        Self::Source {
+            offset: range.start(),
+            range,
+        }
+    }
+}
+
 struct Frame {
     owner: FrameOwner,
     scope: Id,
@@ -3494,6 +3590,19 @@ struct Frame {
 }
 
 impl Frame {
+    fn source_range(&self, heap: &Heap, position: ExpressionPosition) -> Option<[u32; 4]> {
+        let ExpressionPosition::Source { range, .. } = position else {
+            return None;
+        };
+        let Value::Code(code) = heap.get(self.code) else {
+            return None;
+        };
+        let Body::Source(program) = &code.body else {
+            return None;
+        };
+        program.expression_range(range)
+    }
+
     fn line(&self, heap: &Heap, location: &Location) -> u32 {
         match self.expression {
             ExpressionPosition::Line(line) => line,
