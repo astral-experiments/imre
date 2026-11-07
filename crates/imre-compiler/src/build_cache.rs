@@ -53,10 +53,27 @@ struct Manifest {
     executable: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ManifestRecord {
+    #[serde(flatten)]
+    manifest: Manifest,
+    checksum: String,
+}
+
+impl Manifest {
+    // Bind the complete dependency list and executable to the request that produced them.
+    fn checksum(&self, link_recipe: &blake3::Hash) -> Option<String> {
+        let mut hasher = blake3::Hasher::new_keyed(link_recipe.as_bytes());
+        serde_json::to_writer(&mut hasher, self).ok()?;
+        Some(hasher.finalize().to_hex().to_string())
+    }
+}
+
 pub struct Cache {
     pub root: PathBuf,
     manifest: PathBuf,
     object_recipe: blake3::Hash,
+    link_recipe: blake3::Hash,
     toolchain: NativeToolchain,
     runtime: PathBuf,
     previous: Option<Manifest>,
@@ -583,12 +600,17 @@ impl Cache {
         let manifest = root.join(format!("{}.json", link_recipe.to_hex()));
         let previous = fs::read(&manifest)
             .ok()
-            .and_then(|bytes| serde_json::from_slice::<Manifest>(&bytes).ok())
+            .and_then(|bytes| serde_json::from_slice::<ManifestRecord>(&bytes).ok())
+            .and_then(|record| {
+                (record.manifest.checksum(&link_recipe)? == record.checksum)
+                    .then_some(record.manifest)
+            })
             .filter(|m| m.native.iter().all(|(p, stamp)| Stamp::read(p) == *stamp));
         Some(Self {
             root,
             manifest,
             object_recipe,
+            link_recipe,
             toolchain: toolchain.clone(),
             runtime: runtime.resolved,
             previous,
@@ -754,11 +776,15 @@ impl Cache {
         let executable = file_hash(file).ok()?;
         let object = self.root.join(&executable);
         fs::rename(file, &object).ok()?;
-        let record = Manifest {
+        let manifest = Manifest {
             sources,
             native,
             search_dirs,
             executable,
+        };
+        let record = ManifestRecord {
+            checksum: manifest.checksum(&self.link_recipe)?,
+            manifest,
         };
         let mut temp = NamedTempFile::new_in(&self.root).ok()?;
         serde_json::to_writer(&mut temp, &record).ok()?;
