@@ -929,6 +929,21 @@ class Private:
             case (__item,):
                 return __item
 """, scope)
+    exec("""
+def pick(value, allow):
+    a = b = "before"
+    match value:
+        case (tuple() | list()) as items if not items:
+            return items
+        case [a, b, 0] | [b, a, 1] if allow:
+            return a, b
+    return b, a
+""", scope)
+    pick = scope["pick"]
+    assert pick([], False) == [] and pick((), False) == ()
+    assert pick([1, 2, 1], True) == (2, 1)
+    assert pick([1, 2, 1], False) == (1, 2)
+    assert pick([1, 2, 2], True) == ("before", "before")
     assert scope["Private"]().unpack((42,)) == 42
     nested = scope["nested"]
 
@@ -1005,6 +1020,24 @@ class Private:
     exec("match (Dropped(), Compare()):\n    case (_, 1): pass", scope)
     assert calls == ["dropped", "compared"]
 
+    class Token:
+        def __init__(self, name):
+            self.name = name
+
+        def __del__(self):
+            calls.append(self.name)
+
+    class Trial(list):
+        def __iter__(self):
+            calls.append("unpack")
+            return iter((Token("a"), Token("b"), 2, Token("later")))
+
+    scope["trial"] = Trial([0] * 4)
+    for pattern, attempts in (("[a, b, 0, c] | [b, a, 1, c]", 2), ("[a, b, (0 | 1), c]", 1)):
+        calls.clear()
+        exec("match trial:\n    case " + pattern + ": pass", scope)
+        assert calls == ["unpack", "later", "a", "b"] * attempts
+
     class Compared(Dropped):
         def __eq__(self, other):
             return calls
@@ -1026,6 +1059,8 @@ class Private:
     assert picker.pick(3) == 3
 
     for pattern, text, start, end, location_arg in (
+        ("[a] | [b]", "alternative patterns bind different names", 10, 19, True),
+        ("_ | 0", "wildcard makes remaining patterns unreachable", 10, 11, True),
         ("[a, a]", "multiple assignments to name 'a' in pattern", 14, 15, True),
         ("[a, *a]", "multiple assignments to name 'a' in pattern", 14, 16, True),
         ("[a, a, *a, *b]", "multiple starred names in sequence pattern", 10, 24, True),
