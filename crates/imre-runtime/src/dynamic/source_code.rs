@@ -4898,13 +4898,16 @@ impl Context {
         // The public async-generator object owns its first-iteration/finalization hooks.
         let async_generator =
             self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
-        // Closing an exact range iterator or repeat cannot call Python. A
-        // suspended outer try/finally still needs its own finalizer below.
+        // These built-in iterators have no close hook. A suspended outer
+        // try/finally still needs its own finalizer below.
         let delegate_needs_close = matches!(&result, Ok(Step::Yield(_, ip))
         if matches!(&self.code_object(code).body, Body::Source(program)
             if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate))))
         && active.last().is_none_or(|&iter| {
-            !matches!(self.heap.get(iter), Value::RangeIterator(_) | Value::Repeat(_))
+            !matches!(
+                self.heap.get(iter),
+                Value::Iterator { .. } | Value::RangeIterator(_) | Value::Repeat(_)
+            )
         }));
         let Value::Generator {
             running,
