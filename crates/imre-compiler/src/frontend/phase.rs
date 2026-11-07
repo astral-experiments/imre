@@ -39,7 +39,11 @@ pub(crate) struct Diagnostic<M = String> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Failure<M = String> {
     Diagnostic(Diagnostic<M>),
-    PendingSignature { module: ModuleId, range: TextRange },
+    PendingSignature {
+        signature: usize,
+        module: ModuleId,
+        range: TextRange,
+    },
 }
 
 impl<M> Diagnostic<M> {
@@ -131,7 +135,15 @@ impl From<&str> for Failure {
 impl Failure<&'static str> {
     pub(super) fn at(self, source: &str, site: &impl Ranged) -> Failure {
         match self {
-            Self::PendingSignature { module, range } => Failure::PendingSignature { module, range },
+            Self::PendingSignature {
+                signature,
+                module,
+                range,
+            } => Failure::PendingSignature {
+                signature,
+                module,
+                range,
+            },
             Self::Diagnostic(report) => {
                 Failure::Diagnostic(Diagnostic::at(source, site, report.message.to_owned()))
             }
@@ -161,7 +173,7 @@ impl Failure {
     pub(super) fn terminal_in(self, graph: &SourceGraph, module: ModuleId) -> Diagnostic {
         match self {
             Self::Diagnostic(d) => d.in_module(graph, module),
-            Self::PendingSignature { module, range } => Diagnostic::at(
+            Self::PendingSignature { module, range, .. } => Diagnostic::at(
                 &graph.modules[module].source,
                 &range,
                 "inference is waiting for a function return type".to_owned(),
