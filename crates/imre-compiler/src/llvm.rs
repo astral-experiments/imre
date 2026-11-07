@@ -5095,12 +5095,7 @@ impl Emitter<'_, '_> {
             } => {
                 let method_name = self.byte_array(method.bytes().chain([0]).collect());
                 let kind_bytes = self.byte_array(kinds.clone());
-                let words = self.entry_alloca(format!("[{} x i64]", args.len()));
-                for (i, arg) in args.iter().enumerate() {
-                    let word = self.word(&arg.value);
-                    let slot = self.instruction(format!("getelementptr i64, ptr {words}, i64 {i}"));
-                    self.line(format!("store i64 {word}, ptr {slot}"));
-                }
+                let words = self.argument_words(&args);
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_extension_call(ptr @PyInit_{module}, ptr @{method_name}, ptr @{kind_bytes}, ptr {words}, i64 {}, i32 {result_kind})",
                     args.len()
@@ -9461,6 +9456,24 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_stderr_line", &[&args[0].value]);
                 none()
             }
+            Builtin::Print if args.len() > 1 || matches!(args[0].value.ty, Type::Union(_)) => {
+                let kinds = self.byte_array(
+                    args.iter()
+                        .map(|arg| {
+                            u8::try_from(representation_kind(arg.value.ty, &self.module.types))
+                                .expect(
+                                    "checked print operands have non-nullable scalar or union tags",
+                                )
+                        })
+                        .collect(),
+                );
+                let words = self.argument_words(&args);
+                self.checked_line(format!(
+                    "call void @imre_print_scalars(ptr @{kinds}, ptr {words}, i64 {})",
+                    args.len()
+                ));
+                none()
+            }
             Builtin::Print => {
                 match args[0].value.ty {
                     Type::Int => self.void_call("imre_print_int", &[&args[0].value]),
@@ -9487,6 +9500,17 @@ impl Emitter<'_, '_> {
             self.release(field);
         }
         result
+    }
+
+    /// Store evaluated operands in their native word representations for a borrowed ABI call.
+    fn argument_words(&mut self, args: &[Operand]) -> String {
+        let words = self.entry_alloca(format!("[{} x i64]", args.len()));
+        for (i, arg) in args.iter().enumerate() {
+            let word = self.word(&arg.value);
+            let slot = self.instruction(format!("getelementptr i64, ptr {words}, i64 {i}"));
+            self.line(format!("store i64 {word}, ptr {slot}"));
+        }
+        words
     }
 
     /// Read-only lookups never take ownership of the key, even on a miss in a
@@ -11369,6 +11393,7 @@ declare i64 @imre_length_result(i64)
 declare i64 @imre_int_binary(i64, i64, i32)
 declare i32 @imre_int_compare(i64, i64)
 declare void @imre_print_int(i64)
+declare void @imre_print_scalars(ptr, ptr, i64)
 declare void @imre_print_bool(i32)
 declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)
