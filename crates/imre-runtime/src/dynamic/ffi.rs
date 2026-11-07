@@ -1748,6 +1748,43 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
     })
 }
 
+/// Call with positional values followed by values for statically named keywords.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    positional: usize,
+    mut names: *const c_char,
+    keywords: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
+    // SAFETY: the compiler supplies its context, optional static position and initialized handles.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    scoped_call(ctx, span, |ctx| {
+        // SAFETY: the entry-block array holds all operands throughout this call.
+        let values = unsafe { live_handles(values, positional + keywords) };
+        let (args, named) = values.split_at(positional);
+        let args = copy_ids(args)?;
+        let mut kwargs = Vec::new();
+        kwargs
+            .try_reserve_exact(keywords)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for &value in named {
+            // SAFETY: the emitter stores one NUL-terminated UTF-8 identifier for each value.
+            let name = unsafe { cstr(names) };
+            kwargs.push((copy_label(name)?, value));
+            // SAFETY: this advances to the next identifier or one past the final NUL.
+            names = unsafe { names.add(name.len() + 1) };
+        }
+        let result = ctx.call_in_scope(scope, callable, args, kwargs)?;
+        ctx.finish_call_operands(mark, result);
+        ctx.check_call_return(result)
+    })
+}
+
 /// Clear the recorded call position and publish the return value or exception.
 fn scoped_call(
     ctx: &mut Context,

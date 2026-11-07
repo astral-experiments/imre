@@ -197,18 +197,22 @@ impl Function<'_, '_> {
             ast::Expr::Call(v) => {
                 let mark = self.temporary_mark();
                 // Cap the fixed entry-block scratch space even for calls in cold branches.
-                let direct = v.arguments.args.len() <= 64
-                    && v.arguments.keywords.is_empty()
+                let fixed = v.arguments.args.len() + v.arguments.keywords.len() <= 64
                     && !v
                         .arguments
                         .args
                         .iter()
-                        .any(|value| matches!(value, ast::Expr::Starred(_)));
+                        .any(|value| matches!(value, ast::Expr::Starred(_)))
+                    && v.arguments
+                        .keywords
+                        .iter()
+                        .all(|keyword| keyword.arg.is_some());
+                let direct = fixed && v.arguments.keywords.is_empty();
                 let single_spread = match v.arguments.args.as_ref() {
                     [ast::Expr::Starred(star)] => Some(star),
                     _ => None,
                 };
-                let packed = (!direct && single_spread.is_none()).then(|| self.op("list", &[]));
+                let packed = (!fixed && single_spread.is_none()).then(|| self.op("list", &[]));
                 let mut bound_receiver = None;
                 let callable = if let Some(field) = imre_ast::direct_method(
                     v,
@@ -258,6 +262,8 @@ impl Function<'_, '_> {
                 } else if let Some(args) = packed {
                     let kwargs = self.arguments(&args, &v.arguments, &callable);
                     CallArguments::Packed { args, kwargs }
+                } else if !v.arguments.keywords.is_empty() {
+                    self.fixed_keyword_arguments(&v.arguments)
                 } else {
                     let values: Vec<_> = bound_receiver
                         .iter()
@@ -579,6 +585,25 @@ impl Function<'_, '_> {
             }
         }
         self.keyword_arguments(syntax, callable)
+    }
+
+    /// Evaluate operands in Python order, then publish the handles after nested calls finish.
+    fn fixed_keyword_arguments(&mut self, syntax: &ast::Arguments) -> CallArguments {
+        let mut values: Vec<_> = syntax.args.iter().map(|arg| self.expr(arg)).collect();
+        let positional = values.len();
+        let mut names = Vec::with_capacity(syntax.keywords.len());
+        for keyword in &syntax.keywords {
+            names.push(keyword.arg.as_ref().expect("fixed keyword").as_str());
+            values.push(self.expr(&keyword.value));
+        }
+        let names = self.output.data(names.join("\0").as_bytes());
+        let (array, _) = self.handle_array(&values);
+        CallArguments::FixedKeywords {
+            array,
+            positional,
+            names,
+            keywords: syntax.keywords.len(),
+        }
     }
 
     /// Evaluate keyword expressions and merge mappings in source order.
