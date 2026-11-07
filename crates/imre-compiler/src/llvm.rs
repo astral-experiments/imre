@@ -4471,7 +4471,7 @@ impl Emitter<'_, '_> {
                         .module
                         .class_metadata
                         .get(class)
-                        .is_some_and(|metadata| metadata.dataclass_eq) =>
+                        .is_some_and(|metadata| metadata.field_equality) =>
                 {
                     let equal = self.instruction(format!(
                         "call i32 @imre_record_equal(ptr {}, ptr {})",

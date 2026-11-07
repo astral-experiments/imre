@@ -98,7 +98,7 @@ pub(super) fn semantics(
             let Some(metadata) = module.class_metadata.get(class) else {
                 return "null".to_owned();
             };
-            let flags = u32::from(metadata.dataclass_eq)
+            let flags = u32::from(metadata.field_equality)
                 | (u32::from(metadata.dataclass_repr) << 1)
                 | (u32::from(metadata.toml_hash) << 2)
                 | (u32::from(metadata.value_struct) << 3)

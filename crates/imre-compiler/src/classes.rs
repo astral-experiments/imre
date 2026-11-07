@@ -92,6 +92,10 @@ pub(crate) struct Class {
 }
 
 impl Class {
+    pub(crate) fn is_uuid(&self, graph: &SourceGraph) -> bool {
+        self.name == "UUID" && graph.modules[self.definition.module].is_bundled("uuid")
+    }
+
     pub(crate) fn has_literal_hook(&self, name: &str) -> bool {
         self.init_hooks
             .get(name)

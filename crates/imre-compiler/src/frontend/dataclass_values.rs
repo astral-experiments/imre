@@ -349,7 +349,8 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 .filter(|method| !method.asynchronous && classes.has_repr_override(id))
                 .map(|method| method.id),
             value_struct: class.dataclass.is_some_and(|options| options.value_struct),
-            dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
+            field_equality: class.is_uuid(graph)
+                || class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
             toml_hash: class.toml_hash,
             initializer_fields: (class.generated_initializer
@@ -368,7 +369,8 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 .iter()
                 .map(|field| ir::ClassFieldMetadata {
                     name: field.name.clone(),
-                    compare: field.compare,
+                    // A UUID's integer determines equality even when its input was a bool.
+                    compare: field.compare && (!class.is_uuid(graph) || field.name == "_value"),
                     repr: field.repr,
                     repr_text: graph.modules[class.definition.module].bundled
                         && graph.modules[class.definition.module].name == "unittest.mock"

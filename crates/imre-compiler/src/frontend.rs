@@ -228,10 +228,11 @@ impl ClassInfo {
             .iter()
             .enumerate()
             .filter_map(|(id, class)| {
-                class
-                    .dataclass
-                    .is_some_and(|options| options.frozen && options.eq)
-                    .then_some(id)
+                (class.is_uuid(graph)
+                    || class
+                        .dataclass
+                        .is_some_and(|options| options.frozen && options.eq))
+                .then_some(id)
             })
             .collect::<HashSet<_>>();
         types.set_hashable_records(hashable.clone());
@@ -325,6 +326,12 @@ impl ClassInfo {
         loop {
             let before = hashable.len();
             hashable.retain(|&id| {
+                // A UUID-typed key may hold a subclass with different equality or hashing.
+                if declarations.definitions[id].is_uuid(graph)
+                    && !types.concrete_subclasses(id).is_empty()
+                {
+                    return false;
+                }
                 declarations.definitions[id].toml_hash
                     || declarations.definitions[id]
                         .dataclass
@@ -2699,6 +2706,13 @@ impl<'a> Checker<'a> {
                     attribute,
                     "argparse namespace fields are read-only",
                 ));
+            }
+            if declaration.fields.iter().any(|field| {
+                field.name == attribute.attr.as_str()
+                    && field.module != self.module
+                    && self.graph.modules[field.module].is_bundled("uuid")
+            }) {
+                return Err(error(self.source, attribute, "UUID fields are read-only"));
             }
             if declaration
                 .dataclass
@@ -7731,10 +7745,26 @@ impl<'a> Checker<'a> {
                 }) {
                     return json::compare(values, &compare.ops, self.source, expression);
                 }
+                let uuid_and_scalar = |uuid: Type, other: Type| {
+                    matches!(uuid, Type::Class(id) if self.classes.declarations.definitions[id].is_uuid(self.graph))
+                        && self.types.immutable_key_field(uuid)
+                        && matches!(
+                            other,
+                            Type::Int
+                                | Type::Bool
+                                | Type::Float
+                                | Type::Str
+                                | Type::StrLiteral(_)
+                                | Type::Bytes
+                                | Type::None
+                        )
+                };
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
                     && let [left, right] = values.as_slice()
                     && (matches!(left.ty, Type::Enum(_) | Type::BuiltinClass)
-                        || matches!(right.ty, Type::Enum(_) | Type::BuiltinClass))
+                        || matches!(right.ty, Type::Enum(_) | Type::BuiltinClass)
+                        || uuid_and_scalar(left.ty, right.ty)
+                        || uuid_and_scalar(right.ty, left.ty))
                     && left.ty != right.ty
                     && [left.ty, right.ty].into_iter().all(|ty| {
                         self.types.payload(ty).is_none() && self.types.members(ty).is_none()
@@ -11821,7 +11851,30 @@ impl<'a> Checker<'a> {
             if matches!(value.ty, Type::CmpKey(..)) {
                 return Ok(self.cmp_key_hash(value.clone()));
             }
-            let builtin = match value.ty {
+            // UUID hashes its integer value; the bool discriminator of UUID.int
+            // affects its Python type but never participates in equality or hashing.
+            let args = match value.ty {
+                Type::Class(id)
+                    if self.classes.declarations.definitions[id].is_uuid(self.graph)
+                        && self.types.immutable_key_field(value.ty) =>
+                {
+                    let fields = &self.classes.declarations.definitions[id].fields;
+                    let field = fields
+                        .iter()
+                        .position(|field| field.name == "_value")
+                        .unwrap();
+                    vec![Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Field(Box::new(value.clone()), field),
+                    }]
+                }
+                ty if ty == Type::Bool || self.types.is_bool_or_int(ty) => {
+                    vec![self.int_method_receiver(value.clone(), call)?]
+                }
+                _ => args,
+            };
+            let builtin = match args[0].ty {
+                Type::Int => Builtin::IntHash,
                 Type::Deque(_) => {
                     return Ok(calls::type_error(
                         Type::Int,

@@ -13,6 +13,11 @@ from comprehensions import require_result, run
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
 STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
+    "uuid_subclass_key": (
+        "from uuid import UUID\nclass Ticket(UUID):\n    pass\n"
+        "def lookup(key: UUID, query: UUID) -> str:\n    return {key: 'found'}[query]\n"
+        "print(lookup(Ticket(int=1), UUID(int=1)))"
+    ),
     "decimal_ordering": 'from decimal import Decimal\nprint(Decimal("1.00") < Decimal(1))',
     "decimal_float_equality": 'from decimal import Decimal\nprint(Decimal("1.00") == 1.0)',
     "decimal_fallback_invalid_call": (
