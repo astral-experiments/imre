@@ -68,7 +68,13 @@ impl<'a> Links<'a> {
             Value::Map { inputs, .. } | Value::Zip { inputs, .. } => {
                 ([None; 2], Members::Sequence(inputs))
             }
-            Value::Generator { iterators, .. } => ([None; 2], Members::Sequence(iterators)),
+            Value::Coroutine { .. } | Value::CoroutineWrapper(_) => {
+                ([value.suspended_owner(), None], Members::None)
+            }
+            Value::Generator { iterators, .. } => (
+                [value.suspended_owner(), None],
+                Members::Sequence(iterators),
+            ),
             Value::Method {
                 receiver, callable, ..
             } => ([Some(*receiver), Some(*callable)], Members::None),
@@ -91,7 +97,16 @@ impl<'a> Links<'a> {
                     Some(MemoryStream::Wrapper(wrapper)) => wrapper.buffer_id(),
                     _ => None,
                 };
-                ([*namespace, *dictionary], Members::Names(fields, stream))
+                let extra = stream.or_else(|| {
+                    // A sparse singleton can still have a large bucket allocation.
+                    value
+                        .stored_member_edges(|slots| {
+                            slots.len() == 1 && slots.allocation_size() <= 256
+                        })
+                        .next()
+                        .map(|[_, value]| value)
+                });
+                ([*namespace, *dictionary], Members::Names(fields, extra))
             }
             Value::File(file) if let BinaryFile::Descriptor(fd) = file.as_ref() => {
                 ([Some(fd.raw), None], Members::None)
@@ -112,7 +127,7 @@ impl<'a> Links<'a> {
                 Members::None => 0,
                 Members::Sequence(items) => items.len(),
                 Members::Scope(names) => names.len(),
-                Members::Names(names, buffer) => names.len() + usize::from(buffer.is_some()),
+                Members::Names(names, extra) => names.len() + usize::from(extra.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
                 Members::Entries(entries) => entries.len() * 2,
             }
@@ -134,7 +149,7 @@ impl<'a> Links<'a> {
             Members::None => None,
             Members::Sequence(items) => items.get(index).copied(),
             Members::Scope(names) => names.get_index(index).map(|(_, id)| *id),
-            Members::Names(names, buffer) if index == names.len() => buffer,
+            Members::Names(names, extra) if index == names.len() => extra,
             Members::Names(names, _) => names.get_index(index).map(|(_, id)| *id),
             Members::Keys(entries) => entries.get(index).map(|(key, _)| *key),
             Members::Values(entries) => entries.get(index).map(|(_, value)| *value),
