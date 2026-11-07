@@ -53,6 +53,7 @@ enum Members<'a> {
 }
 
 impl<'a> Links<'a> {
+    #[inline(always)]
     fn from(value: &'a Value, dict_keys: bool) -> Self {
         let (direct, members) = match value {
             Value::Module { scope, .. } => ([Some(*scope), None], Members::None),
@@ -120,6 +121,7 @@ impl<'a> Links<'a> {
             && (slot - self.direct.len()).is_multiple_of(2)
     }
 
+    #[inline(always)]
     fn get(&self, index: usize) -> Option<Id> {
         if let Some(&edge) = self.direct.get(index) {
             return edge;
