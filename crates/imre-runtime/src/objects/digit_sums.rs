@@ -36,7 +36,7 @@ fn totals(mut bytes: &[u8], tables: &Tables) -> Option<[u64; 2]> {
     if bytes.len() >= 16 && std::is_x86_feature_detected!("ssse3") {
         let (blocks, tail) = bytes.as_chunks::<16>();
         // SAFETY: the feature was detected and every block contains sixteen bytes.
-        sum = unsafe { x86_blocks(blocks, tables) }?;
+        sum = unsafe { x86_blocks(blocks, tables) }?.map(u64::from);
         bytes = tail;
     }
     #[cfg(all(
@@ -64,15 +64,16 @@ fn totals(mut bytes: &[u8], tables: &Tables) -> Option<[u64; 2]> {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
-unsafe fn x86_blocks(blocks: &[[u8; 16]], tables: &Tables) -> Option<[u64; 2]> {
+unsafe fn x86_blocks(blocks: &[[u8; 16]], tables: &Tables) -> Option<[u32; 2]> {
     use std::arch::x86_64::*;
     // SAFETY: each array spans exactly one unaligned SIMD load.
     let [right, left] = tables
         .each_ref()
         .map(|t| unsafe { _mm_loadu_si128(t.as_ptr().cast()) });
     let zero = _mm_setzero_si128();
-    let mask = _mm_set1_epi16(0xff);
-    let mut sums = [zero; 2];
+    // Each eight-byte half contributes to one right-aligned stride.
+    let parity = _mm_setr_epi8(1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14);
+    let mut sums = zero;
     for block in blocks {
         // SAFETY: as_chunks proved that all sixteen bytes belong to the string.
         let raw = unsafe { _mm_loadu_si128(block.as_ptr().cast()) };
@@ -80,12 +81,19 @@ unsafe fn x86_blocks(blocks: &[[u8; 16]], tables: &Tables) -> Option<[u64; 2]> {
         if _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_subs_epu8(d, _mm_set1_epi8(9)), zero)) != 0xffff {
             return None;
         }
-        let a = _mm_andnot_si128(mask, _mm_shuffle_epi8(right, d));
-        let b = _mm_and_si128(mask, _mm_shuffle_epi8(left, d));
-        sums[0] = _mm_add_epi64(sums[0], _mm_sad_epu8(a, zero));
-        sums[1] = _mm_add_epi64(sums[1], _mm_sad_epu8(b, zero));
+        let digits = _mm_shuffle_epi8(d, parity);
+        let right_terms = _mm_shuffle_epi8(right, digits);
+        let left_terms = _mm_shuffle_epi8(left, digits);
+        let terms = _mm_castpd_si128(_mm_move_sd(
+            _mm_castsi128_pd(left_terms),
+            _mm_castsi128_pd(right_terms),
+        ));
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(terms, zero));
     }
-    Some(sums.map(|v| _mm_cvtsi128_si64(_mm_add_epi64(v, _mm_unpackhi_epi64(v, v))) as u64))
+    Some([
+        _mm_cvtsi128_si32(sums) as u32,
+        _mm_cvtsi128_si32(_mm_unpackhi_epi64(sums, sums)) as u32,
+    ])
 }
 
 #[cfg(all(
