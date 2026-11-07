@@ -55,6 +55,26 @@ def check_generator_loops():
     start("outer", on_close=others.clear)
     assert closed[-2:] == ["outer", "other"]
 
+    def delegate(values):
+        yield from values
+
+    inner = suspended("delegated generator")
+    outer = delegate(inner)
+    assert next(outer) == 1
+    del outer
+    assert closed[-1] == "delegated generator"
+
+    def guarded():
+        try:
+            yield from [1, 2]
+        finally:
+            closed.append("outer finally")
+
+    outer = guarded()
+    assert next(outer) == 1
+    del outer
+    assert closed[-1] == "outer finally"
+
     def leave_cycle():
         back = []
         generator = suspended("cycle", back)
