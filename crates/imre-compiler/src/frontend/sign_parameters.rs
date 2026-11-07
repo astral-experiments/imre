@@ -74,11 +74,7 @@ impl Checker<'_> {
         ty: Type,
         sign_only: bool,
     ) -> Result<Expr, String> {
-        if !sign_only {
-            return self.expr_expected(argument, ty);
-        }
-        let value = self.expr(argument)?;
-        self.direct_value(value, argument, ty, true)
+        calls::Supplied::Source(argument).checked(self, ty, sign_only)
     }
 
     pub(super) fn direct_value(

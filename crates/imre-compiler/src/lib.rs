@@ -464,7 +464,10 @@ fn object_fallback<T>(
     if options.entry_profile.is_some()
         || (checked_file
             && graph.as_ref().is_some_and(|g| {
-                error.kind == LoweringKind::ReturnType || g.imports_struct_decorator()
+                matches!(
+                    error.kind,
+                    LoweringKind::ReturnType | LoweringKind::DeclaredArgument
+                ) || g.imports_struct_decorator()
             }))
     {
         return Err(error.to_string());
