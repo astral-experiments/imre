@@ -3077,7 +3077,7 @@ assert namespace["found"] is import_members.found is sys.modules["import_members
         ):
             result = run(imre, "-B", "-c", code)
             assert result.returncode != 0 and not result.stdout, result
-        for flags, extra in (("-B", {"PYTHONSAFEPATH": "1"}), ("-IB", {})):
+        for flags, extra in (("-B", {"PYTHONSAFEPATH": "1"}), ("-EPB", {}), ("-IB", {})):
             result = run(imre, flags, "-c", "print('before'); import neighbor", extra=extra, timeout=180)
             assert result.returncode == 1 and result.stdout == b"before\n" and b"neighbor" in result.stderr, result
         compare("-B", "pkg/app.py")
