@@ -386,6 +386,9 @@ impl Context {
                     .get("typing._Final")
                     .and_then(|&base| self.own_class_attr(base, name))
             }
+            Value::Native(kind) if kind == "type" && name == "__text_signature__" => {
+                self.builtins.get("type.__text_signature__").copied()
+            }
             Value::Native(kind) if kind == "type" && name == "__prepare__" => {
                 self.builtins.get("type.__prepare__").copied()
             }
@@ -2396,6 +2399,10 @@ impl Context {
                 metaclass: Some(meta),
                 ..
             } => self.class_attr(meta, name).map(|member| (meta, member)),
+            Value::Class { .. } if name == "__text_signature__" => {
+                let meta = self.builtin("type");
+                self.own_class_attr(meta, name).map(|member| (meta, member))
+            }
             _ => None,
         };
         if let Some((meta, member)) = metaclass_member
@@ -3414,6 +3421,15 @@ impl Context {
                 if class == "generator" && super::generator_protocol::generator_method(name) =>
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
+            }
+            Value::Native(ref class) if class == "type" && name == "__text_signature__" => {
+                return Ok(NONE);
+            }
+            Value::Native(ref class) if class == "object" && name == "__text_signature__" => {
+                return Ok(self.text("()"));
+            }
+            Value::Native(ref class) if class == "tuple" && name == "__text_signature__" => {
+                return Ok(self.text("(iterable=(), /)"));
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "classmethod" | "staticmethod")
@@ -5933,6 +5949,18 @@ impl Context {
             let owner = self.builtin("typing.TypeVar");
             return Ok(self.own_class_attr(owner, name));
         }
+        if name == "__text_signature__"
+            && matches!(
+                self.heap.get(obj),
+                Value::Class {
+                    metaclass: None,
+                    ..
+                }
+            )
+        {
+            let meta = self.builtin("type");
+            return Ok(self.own_class_attr(meta, name));
+        }
         let Some(member) = self.slot(obj, name) else {
             return Ok(None);
         };
@@ -6074,6 +6102,23 @@ impl Context {
         }
     }
 
+    /// Read the Argument Clinic header from the original doc using the current type name.
+    fn class_text_signature(&self, class: Id) -> Option<&str> {
+        let Value::Class { scope, .. } = *self.heap.get(class) else {
+            return None;
+        };
+        let doc = self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()?
+            .original_doc?;
+        let doc = self.str_value(doc).ok()?.split('\0').next()?;
+        let name = self.class_name(class).rsplit('.').next()?;
+        let signature = doc.strip_prefix(name)?;
+        let (header, _) = signature.split_once(value::TEXT_SIGNATURE_END)?;
+        (header.starts_with('(') && !header.contains("\n\n")).then(|| &signature[..=header.len()])
+    }
+
     pub(super) fn read_layout_descriptor(
         &mut self,
         owner: Id,
@@ -6082,6 +6127,15 @@ impl Context {
     ) -> Result<Id> {
         match name {
             "__class__" => self.exact_type(receiver),
+            "__text_signature__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                // Native types publish their existing constructor metadata on the type itself.
+                if matches!(self.heap.get(receiver), Value::Native(_)) {
+                    return Ok(self.optional_attr(receiver, name)?.unwrap_or(NONE));
+                }
+                let text = self.class_text_signature(receiver).map(str::to_owned);
+                Ok(text.map_or(NONE, |text| self.text(text)))
+            }
             "__weakref__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 Ok(self
@@ -6119,6 +6173,13 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         match name {
+            "__text_signature__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                Err(Error::new(
+                    "AttributeError",
+                    "attribute '__text_signature__' of 'type' objects is not writable",
+                ))
+            }
             "__dict__" => {
                 let class = self.layout_receiver_class(owner, name, receiver)?;
                 if let Some((_, set)) = self.native_dictionary_getset(class) {

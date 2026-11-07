@@ -3478,10 +3478,18 @@ impl Context {
         {
             self.bind_local(scope, "__hash__", NONE);
         }
+        let original_doc = self
+            .namespace_binding(self.scope_data(scope), "__doc__")
+            .and_then(|doc| self.string_storage(doc))
+            .filter(|&doc| {
+                self.str_value(doc)
+                    .is_ok_and(|text| text.contains(super::value::TEXT_SIGNATURE_END))
+            });
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         let namespace = fields.class_namespace.get_or_insert_with(Default::default);
+        namespace.original_doc = original_doc;
         namespace.member_slots = member_slots;
         namespace.slot_names = slot_names;
         namespace.bases = bases;

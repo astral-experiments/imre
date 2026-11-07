@@ -925,6 +925,8 @@ impl fmt::Display for Error {
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
+pub(super) const TEXT_SIGNATURE_END: &str = ")\n--\n\n";
+
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
@@ -942,6 +944,8 @@ pub(super) struct ClassNamespace {
     pub defining_module: Option<Id>,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
     pub name_override: Option<Id>,
+    /// Original string storage for a possible Argument Clinic header, independent of later __doc__ writes.
+    pub original_doc: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     /// Slot replacement removed the original type's own instance layout descriptors.
@@ -2075,6 +2079,7 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.supplied_bases);
                     visit.extend(class.name_override);
+                    visit.extend(class.original_doc);
                     visit.extend(class.annotation_dict_cell);
                     visit.extend(class.conditional_cell);
                     if let Some((fields, _)) = &class.annotation_scratch {
