@@ -163,6 +163,8 @@ struct ClassInfo {
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
+    /// Declared record types whose truth must be selected by concrete layout.
+    truth_dispatch: HashSet<usize>,
     keyword_copies: HashSet<usize>,
     /// Original base called by a constructor with statically forwarded packs.
     forwarded_initializers: HashMap<usize, DefinitionId>,
@@ -207,21 +209,26 @@ impl ClassInfo {
                 })
                 .collect(),
         );
-        types.set_custom_truth(
-            declarations
-                .definitions
-                .iter()
-                .enumerate()
-                .filter_map(|(id, class)| {
-                    (class.mapping
-                        || class
-                            .methods
-                            .iter()
-                            .any(|method| method.name.as_str() == "__bool__"))
-                    .then_some(id)
-                })
-                .collect(),
-        );
+        let mut custom_truth = HashSet::new();
+        let mut truth_dispatch = HashSet::new();
+        for (id, class) in declarations.definitions.iter().enumerate() {
+            if class.mapping
+                || class
+                    .methods
+                    .iter()
+                    .any(|method| method.name.as_str() == "__bool__")
+            {
+                custom_truth.insert(id);
+                if class.mapping {
+                    truth_dispatch.insert(id);
+                }
+                if class.abstract_methods.is_empty() {
+                    // A concrete subclass can inhabit a variable annotated with any base.
+                    truth_dispatch.extend(class.bases.iter().copied());
+                }
+            }
+        }
+        types.set_custom_truth(custom_truth);
         // Permit forward references while reading field annotations. Refine
         // these candidates once every record's concrete field types are known.
         let mut hashable = declarations
@@ -402,6 +409,7 @@ impl ClassInfo {
         let parsers = argparse::Parsers::collect(graph, types, &mut declarations, &mut fields)?;
         Ok(Self {
             parsers,
+            truth_dispatch,
             methods: vec![HashMap::new(); fields.len()],
             setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
@@ -3763,7 +3771,7 @@ impl<'a> Checker<'a> {
             self.names.get(name).is_some_and(|&slot| {
                 self.types
                     .payload(self.locals[slot])
-                    .is_some_and(|payload| self.types.truthiness(payload) == Some(true))
+                    .is_some_and(|payload| self.known_truth(payload) == Some(true))
             })
         };
         for (name, present) in narrowing::facts(test, truth, &always_truthy) {
@@ -7000,6 +7008,13 @@ impl<'a> Checker<'a> {
                 Intrinsic::Fnmatch(ir::FnmatchOperation::Match { normcase }) => {
                     return Ok(fnmatch::function(self.types, normcase));
                 }
+                Intrinsic::OperatorNot => {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "checked operator.not_ requires a direct call",
+                    ));
+                }
                 Intrinsic::BuiltinsHex => {
                     return Err(self.scoped_builtin_error("builtins.hex", expression));
                 }
@@ -10066,6 +10081,30 @@ impl<'a> Checker<'a> {
                 let value = self.expr(arg)?;
                 return stdlib::unary_float_builtin(builtin, value)
                     .ok_or_else(|| self.scoped_builtin_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::OperatorNot)) => {
+                if let [arg] = call.arguments.args.as_ref()
+                    && call.arguments.keywords.is_empty()
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "_operator",
+                        "not_",
+                    )
+                {
+                    // A function argument is evaluated as a value before its truth is tested.
+                    let value = self.expr(arg)?;
+                    let truth = self.test_truth(value, arg)?;
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Not(Box::new(truth)),
+                    });
+                }
+                return Err(error(
+                    self.source,
+                    call,
+                    "checked operator.not_ requires a resolved call with one positional argument",
+                ));
             }
             Some(Binding::Intrinsic(Intrinsic::MathPerm)) => return self.math_perm(call),
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(

@@ -41,9 +41,10 @@ operator_functions! {
     "delitem" => Self::DelItem,
     "index" => Self::Index,
     "length_hint" => Self::LengthHint,
-    // Checked identity calls have their own expression lowering and no dunder aliases.
+    // Checked entries give their runtime operation and whether operator exports a dunder alias.
     checked {
-        "is_" => Self::Binary("is"),
-        "is_not" => Self::Binary("is not"),
+        "not_" => (Self::Unary("not"), true),
+        "is_" => (Self::Binary("is"), false),
+        "is_not" => (Self::Binary("is not"), false),
     }
 }

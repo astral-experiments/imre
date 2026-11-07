@@ -3028,6 +3028,12 @@ impl Context {
                     "__text_signature__" if symbol == "_typing._idfunc" => {
                         return Ok(self.text("($module, x, /)"));
                     }
+                    "__doc__" if symbol == "operator.not_" => {
+                        return Ok(self.text("Same as not a."));
+                    }
+                    "__text_signature__" if symbol == "operator.not_" => {
+                        return Ok(self.text("($module, a, /)"));
+                    }
                     "__doc__" if symbol == "posix.getgrouplist" => {
                         return Ok(self.text("Returns a list of groups to which a user belongs.\n\n  user\n    username to lookup\n  group\n    base group id of the user"));
                     }

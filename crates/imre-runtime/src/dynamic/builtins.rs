@@ -665,6 +665,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
         ],
         "float" => &[
             "__abs__",
+            "__bool__",
             "__ceil__",
             "__eq__",
             "__floor__",
@@ -2260,6 +2261,9 @@ pub(super) fn call(
                     "__add__" | "__bool__" | "__hash__" | "__index__" | "__pow__"
                 ) =>
             {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
+            "float" | "complex" if method == "__bool__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
