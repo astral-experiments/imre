@@ -100,7 +100,7 @@ pub(crate) fn emit(
     bundled_root: &Path,
     providers: &HashSet<String>,
     split: bool,
-    source_only_provider: Option<&str>,
+    source_initializers: &HashSet<PathBuf>,
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
     let mut units = Vec::new();
     let mut used_archive = false;
@@ -113,7 +113,7 @@ pub(crate) fn emit(
     let mut main = format!(
         "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
-    if source_only_provider.is_some() {
+    if !source_initializers.is_empty() {
         output
             .functions
             .push_str("declare void @imre_dyn_register_bundled_source(ptr, ptr, ptr, ptr, i64)\n");
@@ -123,7 +123,7 @@ pub(crate) fn emit(
         let bundled = path.starts_with(bundled_root);
         let module_name = output.data(name.as_bytes());
         let file = output.data(path.as_os_str().as_encoded_bytes());
-        if bundled && source_only_provider == Some(name.as_str()) {
+        if source_initializers.contains(path) {
             let text = output.data(source.as_bytes());
             writeln!(
                 main,
@@ -1080,7 +1080,8 @@ mod tests {
         );
         let symbols = HashSet::from([symbol.clone()]);
         let refs = |modules: &[_]| {
-            let (units, used) = emit(modules, "{}", true, root, &symbols, false, None).unwrap();
+            let (units, used) =
+                emit(modules, "{}", true, root, &symbols, false, &HashSet::new()).unwrap();
             let ir = &units[0].llvm_ir;
             assert!(used);
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
@@ -1102,7 +1103,7 @@ mod tests {
                 root,
                 &symbols,
                 false,
-                None
+                &HashSet::new()
             )
             .unwrap()
             .1
@@ -1116,7 +1117,7 @@ mod tests {
             root,
             &symbols,
             false,
-            Some("example"),
+            &HashSet::from([bundled.1.clone()]),
         )
         .unwrap();
         assert!(!used);
@@ -1144,7 +1145,7 @@ mod tests {
             root,
             &symbols,
             true,
-            None,
+            &HashSet::new(),
         )
         .unwrap();
         assert!(used);

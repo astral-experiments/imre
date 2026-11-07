@@ -2014,6 +2014,29 @@ def main():
                 expected.stderr,
             )
 
+        late_future = root / "late_future.py"
+        for prefix, line in (("import __future__\n", 2),
+                             ("def f():\n    class C[T](x): pass\n    global x\n", 4)):
+            late_future.write_text(prefix + "from __future__ import annotations\n")
+            rejected = run(imre, "check", late_future)
+            assert rejected.returncode == 1, rejected
+            assert f"late_future.py:{line}:1".encode() in rejected.stderr, rejected
+
+        future_caller = root / "future_caller.py"
+        future_caller.write_text(
+            "print('before')\ntry:\n    import future_dependency\n"
+            "except SyntaxError as exc:\n    print(exc.lineno, exc.offset)\n"
+            "with open('future_dependency.py', 'w') as f:\n    f.write('value = 37\\n')\n"
+            "try:\n    import future_dependency\n    print(future_dependency.value)\n"
+            "except SyntaxError:\n    print('stale source')\n"
+        )
+        for exe in (sys.executable, imre):
+            (root / "future_dependency.py").write_text(
+                "print('dependency ran')\nfrom __future__ import annotations\n"
+            )
+            retried = run(exe, "-B", future_caller)
+            assert (retried.returncode, retried.stdout, retried.stderr) == (0, b"before\n2 1\n37\n", b""), retried
+
         module_pkg = root / "module_pkg"
         module_pkg.mkdir()
         (module_pkg / "__init__.py").write_text("import sys\nassert sys.argv[0] == '-m'\n")
