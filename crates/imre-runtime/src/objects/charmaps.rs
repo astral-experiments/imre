@@ -8,20 +8,9 @@ pub(super) struct Charmap(&'static [u8]);
 
 impl Charmap {
     /// Each pinned table contains 256 little-endian Unicode scalars.
-    pub(super) fn at(index: usize) -> Self {
-        Self(&TABLES[index * 512..(index + 1) * 512])
-    }
-
-    /// Find the table index maintained with CPython's codec aliases.
-    pub(super) fn named(name: &str) -> Option<Self> {
-        NAMES
-            .lines()
-            .filter_map(|line| line.split_once(' '))
-            .find(|(alias, _)| *alias == name)?
-            .1
-            .parse()
-            .ok()
-            .map(Self::at)
+    pub(super) const fn at(index: usize) -> Self {
+        let (_, tail) = TABLES.split_at(index * 512);
+        Self(tail.split_at(512).0)
     }
 
     /// U+FFFE is the charmap sentinel for an undefined input byte.
