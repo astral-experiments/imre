@@ -2981,6 +2981,17 @@ impl Context {
             }
             Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
+                    "__text_signature__"
+                        if matches!(symbol.as_str(), "operator.is_" | "operator.is_not") =>
+                    {
+                        return Ok(self.text("($module, a, b, /)"));
+                    }
+                    "__doc__" if symbol == "operator.is_" => {
+                        return Ok(self.text("Same as a is b."));
+                    }
+                    "__doc__" if symbol == "operator.is_not" => {
+                        return Ok(self.text("Same as a is not b."));
+                    }
                     "__text_signature__" if module == "time" => {
                         return Ok(stdlib::time::text_signature(function)
                             .map_or(NONE, |sig| self.text(sig)));

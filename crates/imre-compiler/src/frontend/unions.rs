@@ -803,14 +803,9 @@ impl Checker<'_> {
     /// Recognize exact builtin type comparisons on a local with an erased payload.
     pub(super) fn exact_object_type<'n>(
         &self,
-        compare: &'n ast::ExprCompare,
-    ) -> Option<(&'n ast::Expr, KnownClass, bool)> {
-        let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref() else {
-            return None;
-        };
-        let [left, right] = compare.operands.as_ref() else {
-            return None;
-        };
+        left: &'n ast::Expr,
+        right: &'n ast::Expr,
+    ) -> Option<(&'n ast::Expr, KnownClass)> {
         let (call, name) = if let Some(call) = left.as_call_expr() {
             (call, right)
         } else {
@@ -843,7 +838,7 @@ impl Checker<'_> {
                 .session
                 .is_known_class(self.module, &call.func, KnownClass::Type)
             && self.graph.session.is_known_class(self.module, name, class))
-        .then_some((value, class, *op == ast::CmpOp::Is))
+        .then_some((value, class))
     }
 
     /// A later walrus write invalidates earlier tests even inside the same and/or.
@@ -853,17 +848,19 @@ impl Checker<'_> {
         test: &ast::Expr,
         truth: bool,
     ) -> HashMap<String, Vec<(Vec<InstanceType>, bool)>> {
+        if let Some((left, op, right)) = self.identity_test(test)
+            && let Some((expr, KnownClass::Str)) = self.exact_object_type(left, right)
+            && let Some(name) = expr.as_name_expr()
+        {
+            return HashMap::from([(
+                name.id.to_string(),
+                vec![(
+                    vec![InstanceType::ExactText],
+                    truth == (op == ast::CmpOp::Is),
+                )],
+            )]);
+        }
         match test {
-            ast::Expr::Compare(compare)
-                if let Some((expr, KnownClass::Str, positive)) =
-                    self.exact_object_type(compare)
-                    && let Some(name) = expr.as_name_expr() =>
-            {
-                HashMap::from([(
-                    name.id.to_string(),
-                    vec![(vec![InstanceType::ExactText], truth == positive)],
-                )])
-            }
             ast::Expr::Call(call)
                 if self.unshadowed_builtin(&call.func, "isinstance")
                     && call.arguments.args.len() == 2
