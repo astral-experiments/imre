@@ -98,6 +98,8 @@ def _signature_from_class(obj, sigcls, follow_wrapper_chains, signature_of_metho
         text_signature = getattr(base, "__text_signature__", None)
         if text_signature:
             return _signature_fromstr(sigcls, base, text_signature)
+    else:
+        uses_object_defaults = False
     if any(base is type for base in mro) and obj is not type:
         raise ValueError(f"callable {obj!r} is not supported by signature")
     if uses_object_defaults:

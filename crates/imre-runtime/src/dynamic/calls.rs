@@ -3418,6 +3418,12 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
             }
+            Value::Native(ref class) if class == "type" && name == "__text_signature__" => {
+                return Ok(NONE);
+            }
+            Value::Native(ref class) if class == "object" && name == "__text_signature__" => {
+                return Ok(self.text("()"));
+            }
             Value::Native(ref class) if class == "tuple" && name == "__text_signature__" => {
                 return Ok(self.text("(iterable=(), /)"));
             }
@@ -5933,7 +5939,13 @@ impl Context {
             return Ok(self.own_class_attr(owner, name));
         }
         if name == "__text_signature__"
-            && matches!(self.heap.get(obj), Value::Class { metaclass: None, .. })
+            && matches!(
+                self.heap.get(obj),
+                Value::Class {
+                    metaclass: None,
+                    ..
+                }
+            )
         {
             let meta = self.builtin("type");
             return Ok(self.own_class_attr(meta, name));
@@ -6084,11 +6096,15 @@ impl Context {
         let Value::Class { scope, .. } = *self.heap.get(class) else {
             return None;
         };
-        let doc = self.scope_data(scope).class_namespace.as_ref()?.original_doc?;
+        let doc = self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()?
+            .original_doc?;
         let doc = self.str_value(doc).ok()?.split('\0').next()?;
         let name = self.class_name(class).rsplit('.').next()?;
         let signature = doc.strip_prefix(name)?;
-        let (header, _) = signature.split_once(")\n--\n\n")?;
+        let (header, _) = signature.split_once(value::TEXT_SIGNATURE_END)?;
         (header.starts_with('(') && !header.contains("\n\n")).then(|| &signature[..=header.len()])
     }
 
@@ -6102,6 +6118,10 @@ impl Context {
             "__class__" => self.exact_type(receiver),
             "__text_signature__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
+                // Native types publish their existing constructor metadata on the type itself.
+                if matches!(self.heap.get(receiver), Value::Native(_)) {
+                    return Ok(self.optional_attr(receiver, name)?.unwrap_or(NONE));
+                }
                 let text = self.class_text_signature(receiver).map(str::to_owned);
                 Ok(text.map_or(NONE, |text| self.text(text)))
             }
@@ -6144,7 +6164,10 @@ impl Context {
         match name {
             "__text_signature__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
-                Err(Error::new("AttributeError", "attribute '__text_signature__' of 'type' objects is not writable"))
+                Err(Error::new(
+                    "AttributeError",
+                    "attribute '__text_signature__' of 'type' objects is not writable",
+                ))
             }
             "__dict__" => {
                 let class = self.layout_receiver_class(owner, name, receiver)?;

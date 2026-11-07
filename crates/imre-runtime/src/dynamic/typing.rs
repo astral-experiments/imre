@@ -3485,7 +3485,11 @@ impl Context {
         }
         let original_doc = self
             .namespace_binding(self.scope_data(scope), "__doc__")
-            .and_then(|doc| self.string_storage(doc));
+            .and_then(|doc| self.string_storage(doc))
+            .filter(|&doc| {
+                self.str_value(doc)
+                    .is_ok_and(|text| text.contains(super::value::TEXT_SIGNATURE_END))
+            });
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };

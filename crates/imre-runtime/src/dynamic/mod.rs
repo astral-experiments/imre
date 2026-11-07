@@ -2773,7 +2773,8 @@ impl Context {
             self.builtins.insert("object.__class__".into(), descriptor);
         } else if name == "type" {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__text_signature__"));
-            self.builtins.insert("type.__text_signature__".into(), descriptor);
+            self.builtins
+                .insert("type.__text_signature__".into(), descriptor);
         }
         if name == thread_handle::CLASS {
             thread_handle::install(self, value);
