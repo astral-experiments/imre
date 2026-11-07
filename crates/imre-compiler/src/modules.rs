@@ -1044,6 +1044,7 @@ pub(crate) enum Intrinsic {
     CodecLookup,
     CodecGetWriter,
     CodecBom(&'static [u8]),
+    CodecNativeBom(&'static [u8], &'static [u8]),
     HashNew,
     HashFileDigest,
     HmacCompareDigest,
@@ -2137,10 +2138,20 @@ impl IntrinsicModule {
             (Self::UnicodeData, "is_normalized") => Intrinsic::UnicodeNormalize { check: true },
             (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
             (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
-            (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
-            (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
-            (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
-            (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
+            (Self::Codecs, "BOM_LE" | "BOM32_LE" | "BOM_UTF16_LE") => {
+                Intrinsic::CodecBom(b"\xff\xfe")
+            }
+            (Self::Codecs, "BOM_BE" | "BOM32_BE" | "BOM_UTF16_BE") => {
+                Intrinsic::CodecBom(b"\xfe\xff")
+            }
+            (Self::Codecs, "BOM64_LE" | "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
+            (Self::Codecs, "BOM64_BE" | "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
+            (Self::Codecs, "BOM" | "BOM_UTF16") => {
+                Intrinsic::CodecNativeBom(b"\xff\xfe", b"\xfe\xff")
+            }
+            (Self::Codecs, "BOM_UTF32") => {
+                Intrinsic::CodecNativeBom(b"\xff\xfe\0\0", b"\0\0\xfe\xff")
+            }
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
             (Self::Socket, "MsgFlag") => Intrinsic::ScopedObjectExport("socket.MsgFlag"),
             #[cfg(any(target_os = "linux", target_os = "macos"))]

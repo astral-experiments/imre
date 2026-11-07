@@ -1047,6 +1047,7 @@ pub(crate) enum Builtin {
     AccumulateCursor,
     SysStdout,
     SysHasStdout,
+    TargetLittleEndian,
     SysOriginalOutput {
         stderr: bool,
     },

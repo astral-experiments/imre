@@ -1,6 +1,7 @@
 """Base classes for the native codec registry."""
 
 
+from sys import byteorder as _byteorder
 from _codecs import _imre_codec_functions, lookup
 
 # Stateless functions backing the built-in encoding modules.
@@ -10,10 +11,22 @@ utf_8_encode = _imre_codec_functions('utf-8')[0]
 
 # CPython 3.14.5, Lib/codecs.py.
 BOM_UTF8 = b'\xef\xbb\xbf'
-BOM_UTF16_LE = b'\xff\xfe'
-BOM_UTF16_BE = b'\xfe\xff'
+BOM_LE = BOM_UTF16_LE = b'\xff\xfe'
+BOM_BE = BOM_UTF16_BE = b'\xfe\xff'
 BOM_UTF32_LE = b'\xff\xfe\x00\x00'
 BOM_UTF32_BE = b'\x00\x00\xfe\xff'
+
+if _byteorder == 'little':
+    BOM = BOM_UTF16 = BOM_UTF16_LE
+    BOM_UTF32 = BOM_UTF32_LE
+else:
+    BOM = BOM_UTF16 = BOM_UTF16_BE
+    BOM_UTF32 = BOM_UTF32_BE
+
+BOM32_LE = BOM_UTF16_LE
+BOM32_BE = BOM_UTF16_BE
+BOM64_LE = BOM_UTF32_LE
+BOM64_BE = BOM_UTF32_BE
 
 
 class CodecInfo(tuple):

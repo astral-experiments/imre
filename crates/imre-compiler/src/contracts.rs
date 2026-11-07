@@ -654,6 +654,7 @@ impl Builtin {
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
+            | Self::TargetLittleEndian
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append
             | Self::AppendInWindow(_)

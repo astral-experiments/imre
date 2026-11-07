@@ -6953,6 +6953,22 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
                 }
+                Intrinsic::CodecNativeBom(little, big) => {
+                    let bytes = |mark: &[u8]| {
+                        Box::new(Expr {
+                            ty: Type::Bytes,
+                            kind: ExprKind::Bytes(mark.to_vec()),
+                        })
+                    };
+                    let test = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::TargetLittleEndian, vec![]),
+                    };
+                    return Ok(Expr {
+                        ty: Type::Bytes,
+                        kind: ExprKind::Conditional(Box::new(test), bytes(little), bytes(big)),
+                    });
+                }
                 // Specialized lookups and mutations are handled at their call sites.
                 // When the mapping itself escapes, preserve its identity and live views.
                 Intrinsic::Environ | Intrinsic::EnvironBytes => {
