@@ -23,9 +23,9 @@ impl Function<'_, '_> {
             },
             &[&iterable],
         );
-        let mut names: Vec<_> = plan.target_names().into_iter().collect();
-        names.sort_unstable();
-        let targets = self.text(&names.join(" "));
+        let names: indexmap::IndexSet<String> = plan.collect_target_names();
+        let declaration: Vec<_> = names.iter().map(String::as_str).collect();
+        let targets = self.text(&declaration.join(" "));
         if let ast::Expr::Generator(generator) = expr {
             let function = self.define(
                 generator.start(),
@@ -33,7 +33,7 @@ impl Function<'_, '_> {
                 None,
                 None,
                 None,
-                Body::Generator(generator, plan),
+                Body::Generator(generator, plan, names),
             );
             return self.op("generator", &[&function, &iterator, &targets]);
         }

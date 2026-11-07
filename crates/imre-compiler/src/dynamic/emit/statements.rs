@@ -691,7 +691,7 @@ impl Function<'_, '_> {
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
         type_params: Option<&ast::TypeParams>,
-        body: Body<'_>,
+        mut body: Body<'_>,
     ) -> String {
         let (name, global) = match name {
             DefinitionName::Binding(identifier) => (
@@ -739,7 +739,7 @@ impl Function<'_, '_> {
                 }
                 let kind = match &body {
                     Body::GeneratorFunction(_, flag) => *flag,
-                    Body::Generator(_, plan) if plan.body_suspends() => ASYNC_GENERATOR,
+                    Body::Generator(_, plan, _) if plan.body_suspends() => ASYNC_GENERATOR,
                     Body::Generator(..) | Body::YieldingLambda(_) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     _ => 0,
@@ -878,7 +878,7 @@ impl Function<'_, '_> {
                 let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
                 Some((first, indent.len(), text))
             }
-            Body::Generator(expr, plan) if plan.body_suspends() => {
+            Body::Generator(expr, plan, _) if plan.body_suspends() => {
                 // The same resumable interpreter that runs async def bodies
                 // consumes this expression's canonical plan, with .0 supplied
                 // by the caller when the generator is created.
@@ -920,7 +920,7 @@ impl Function<'_, '_> {
             ),
             ..ClosureNames::default()
         };
-        match &body {
+        match &mut body {
             Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
                 closure_names.visit_body(stmts)
             }
@@ -934,7 +934,7 @@ impl Function<'_, '_> {
                     signature["class_globals"] = json!(bindings.globals);
                 }
                 closure_names.nonlocals = bindings.nonlocals;
-                if !generic
+                if !*generic
                     && let Some(reads) =
                         class_metadata::method_class_reads(stmts, self.source.string_annotations)
                 {
@@ -946,9 +946,12 @@ impl Function<'_, '_> {
             Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
                 closure_names.visit_expr(expr)
             }
-            Body::Generator(_, plan) => {
-                closure_names =
-                    class_metadata::generator_scope(plan, self.source.string_annotations);
+            Body::Generator(_, plan, names) => {
+                closure_names = class_metadata::generator_scope(
+                    plan,
+                    std::mem::take(names),
+                    self.source.string_annotations,
+                );
                 if self.class_locals.is_some() && !self.annotation_lookup {
                     signature["method_class_cell"] =
                         json!(closure_names.reads.contains("__class__"));
