@@ -2,6 +2,7 @@
 
 use super::super::{Heap, builtins::zeroed_bytes, value::IoOpenTypes};
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use crate::dynamic::value::SlotStorage;
 
 /// Release one native owner's strong edge before the next observable state change.
 fn release_child(ctx: &mut Context, child: Option<Id>) -> Result<()> {
@@ -604,7 +605,7 @@ fn class(
         let member = ctx.alloc(Value::SlotMember {
             owner,
             name,
-            module_offset: None,
+            storage: SlotStorage::Instance,
         });
         ctx.bind(scope, "_finalizing", member);
     }

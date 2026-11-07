@@ -1138,6 +1138,13 @@ pub(super) struct IoOpenTypes {
     pub wrapper: Id,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) enum SlotStorage {
+    Instance,
+    Module(usize),
+    ReadOnlyText(Id),
+}
+
 #[derive(Clone)]
 pub(super) enum Value {
     None,
@@ -1421,7 +1428,7 @@ pub(super) enum Value {
     SlotMember {
         owner: Id,
         name: Id,
-        module_offset: Option<usize>,
+        storage: SlotStorage,
     },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
@@ -2275,7 +2282,16 @@ impl Value {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);
             }
-            Self::SlotMember { owner, name, .. } => visit.extend([*owner, *name]),
+            Self::SlotMember {
+                owner,
+                name,
+                storage,
+            } => {
+                visit.extend([*owner, *name]);
+                if let SlotStorage::ReadOnlyText(text) = storage {
+                    visit.push(*text);
+                }
+            }
             Self::Instance {
                 class,
                 fields,

@@ -43,7 +43,7 @@ pub(super) mod tempfile;
 pub(super) mod termios;
 pub(super) mod time;
 mod tokenize;
-mod unicodedata;
+pub(super) mod unicodedata;
 pub(super) mod zstd;
 pub(super) use files::BinaryFile;
 pub(super) use socket::{
@@ -583,9 +583,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked",
         ) => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "unidata_version") => ctx.text(imre_ast::UNICODE_DATA_VERSION),
-        ("unicodedata", "normalize" | "decomposition" | "east_asian_width" | "category") => {
-            ctx.builtin(&format!("unicodedata.{name}"))
-        }
+        (
+            "unicodedata",
+            "normalize" | "is_normalized" | "decomposition" | "east_asian_width" | "category",
+        ) => ctx.builtin(&format!("unicodedata.{name}")),
         ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
         (
             "_imp",
@@ -2001,37 +2002,13 @@ pub(super) fn call(
     if name == "unicodedata.decomposition" {
         return unicodedata::decomposition(ctx, args, !kwargs.is_empty());
     }
-    if name == "unicodedata.normalize" {
-        if !kwargs.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "unicodedata.normalize() takes no keyword arguments",
-            ));
-        }
-        let [form, text] = args else {
-            return Err(Error::new(
-                "TypeError",
-                format!("normalize expected 2 arguments, got {}", args.len()),
-            ));
-        };
-        let string = |value, position| {
-            ctx.str_value(value).map_err(|_| {
-                let kind = if value == NONE {
-                    "None"
-                } else {
-                    ctx.type_name(value)
-                };
-                Error::new(
-                    "TypeError",
-                    format!("normalize() argument {position} must be str, not {kind}"),
-                )
-            })
-        };
-        return Ok(
-            match crate::objects::normalize_unicode(string(*form, 1)?, string(*text, 2)?)? {
-                Some(normalized) => ctx.text(normalized.into_string()),
-                None => ctx.scalar_value(*text),
-            },
+    if matches!(name, "unicodedata.normalize" | "unicodedata.is_normalized") {
+        return unicodedata::normalization(
+            ctx,
+            "unicodedata",
+            &name["unicodedata.".len()..],
+            args,
+            !kwargs.is_empty(),
         );
     }
     if let Some(operation) = name.strip_prefix("math.") {

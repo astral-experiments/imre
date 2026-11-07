@@ -1,6 +1,7 @@
 //! Namespace-based class construction and object-valued slot descriptors.
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use crate::dynamic::value::SlotStorage;
 use ruff_python_stdlib::identifiers::is_identifier;
 
 /// Python mangles private member names with the name of the declaring class.
@@ -767,11 +768,11 @@ impl Context {
         Ok(members)
     }
 
-    fn check_slot_receiver(&self, member: Id, receiver: Id) -> Result<(Id, bool)> {
+    fn check_slot_receiver(&self, member: Id, receiver: Id) -> Result<(Id, bool, SlotStorage)> {
         let Value::SlotMember {
             owner,
             name,
-            module_offset,
+            storage,
         } = *self.heap.get(member)
         else {
             unreachable!()
@@ -779,15 +780,18 @@ impl Context {
         let finalizing = self.heap.get(owner).io_kind() == Some("TextIOWrapper")
             && self.str_value(name)? == "_finalizing";
         if matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
-            || module_offset.is_some()
+            || matches!(storage, SlotStorage::Module(_))
                 && matches!(self.heap.get(receiver), Value::Module { constructor: Some(class), .. } if self.direct_subclass(*class, owner))
         {
-            return Ok((name, finalizing));
+            return Ok((name, finalizing, storage));
         }
         let owner_name = if finalizing {
             "_io.TextIOWrapper"
         } else {
-            self.class_name(owner)
+            self.heap
+                .get(owner)
+                .heap_type()
+                .unwrap_or_else(|| self.class_name(owner))
         };
         let receiver_name = self.type_name(receiver);
         let prefix = if finalizing
@@ -806,22 +810,22 @@ impl Context {
         ))
     }
 
-    pub(super) fn read_slot_member(&self, member: Id, receiver: Id) -> Result<Id> {
-        let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
+    pub(super) fn read_slot_member(&mut self, member: Id, receiver: Id) -> Result<Id> {
+        let (name, finalizing, storage) = self.check_slot_receiver(member, receiver)?;
+        if let SlotStorage::ReadOnlyText(text) = storage {
+            return Ok(self.text(self.str_value(text)?.to_owned()));
+        }
         if let Value::Module {
             module_slots,
             constructor: Some(class),
             ..
         } = self.heap.get(receiver)
-            && let Value::SlotMember {
-                module_offset: Some(offset),
-                ..
-            } = self.heap.get(member)
+            && let SlotStorage::Module(offset) = storage
         {
             let name = self.str_value(name)?;
             return module_slots
                 .as_ref()
-                .and_then(|slots| slots.get(offset))
+                .and_then(|slots| slots.get(&offset))
                 .copied()
                 .ok_or_else(|| {
                     let qualname = self.class_qualname(*class);
@@ -857,11 +861,11 @@ impl Context {
         receiver: Id,
         value: Option<Id>,
     ) -> Result<()> {
-        let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
-        if let Value::SlotMember {
-            module_offset: Some(offset),
-            ..
-        } = *self.heap.get(member)
+        let (name, finalizing, storage) = self.check_slot_receiver(member, receiver)?;
+        if matches!(storage, SlotStorage::ReadOnlyText(_)) {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
+        if let SlotStorage::Module(offset) = storage
             && let Value::Module { module_slots, .. } = self.heap.get_mut(receiver)
         {
             let old = if let Some(value) = value {

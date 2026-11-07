@@ -2,6 +2,7 @@
 
 use crate::StrOwner;
 mod expandtabs;
+pub(crate) mod legacy;
 mod lowercase;
 mod normalization;
 pub(crate) mod translate;
@@ -14,7 +15,7 @@ pub(crate) use lowercase::{
     Case, capitalize, case_map, case_map_points, python_islower, python_istitle,
 };
 pub(super) use lowercase::{lowercase, lowercase_chars};
-pub(crate) use normalization::normalize_unicode;
+pub(crate) use normalization::{Form, normalize_unicode};
 
 use num_traits::{Signed, ToPrimitive};
 use std::fmt::Write;

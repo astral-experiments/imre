@@ -2,6 +2,7 @@
 
 mod builtin_substitution;
 
+use crate::dynamic::value::SlotStorage;
 use std::collections::{HashMap, HashSet};
 
 use super::value::EMPTY_TUPLE;
@@ -3533,7 +3534,9 @@ impl Context {
             let descriptor = self.alloc(Value::SlotMember {
                 owner: class,
                 name,
-                module_offset: module_start.map(|start| start + index),
+                storage: module_start.map_or(SlotStorage::Instance, |start| {
+                    SlotStorage::Module(start + index)
+                }),
             });
             self.bind_local(scope, &field, descriptor);
         }

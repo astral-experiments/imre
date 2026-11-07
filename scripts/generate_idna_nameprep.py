@@ -18,10 +18,6 @@ def classification(point):
     char = chr(point)
     if any(check(char) for check in PROHIBITED):
         return "P"
-    if stringprep.in_table_d1(char):
-        return "R"
-    if stringprep.in_table_d2(char):
-        return "L"
     return "-"
 
 
@@ -35,10 +31,9 @@ def generate(output):
     for point in range(sys.maxunicode + 1):
         char = chr(point)
         mapped = "" if stringprep.in_table_b1(char) else stringprep.map_table_b2(char)
-        decomposed = unicodedata.ucd_3_2_0.normalize("NFKD", mapped)
-        # Ordinary cases use Imre's Unicode 16 lowercase and decomposition.
-        if decomposed != unicodedata.normalize("NFKD", char.lower()):
-            print("M", f"{point:X}", *(f"{ord(c):X}" for c in decomposed), file=output)
+        # Apply the shared UCD 3.2 normalizer after RFC 3454 case folding.
+        if mapped != char.lower():
+            print("M", f"{point:X}", *(f"{ord(c):X}" for c in mapped), file=output)
 
 
 if __name__ == "__main__":

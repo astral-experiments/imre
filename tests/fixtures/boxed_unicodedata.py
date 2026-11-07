@@ -26,6 +26,24 @@ def current():
             print(str(error))
         else:
             raise AssertionError("non-character accepted")
+    legacy = unicodedata.ucd_3_2_0
+    assert type(legacy) is unicodedata.UCD
+    assert legacy.unidata_version == "3.2.0"
+    for ch, category in [(Text("a"), "Ll"), ("\u0221", "Cn"), ("\u00ad", "Pd"), ("\udfff", "Cs")]:
+        assert legacy.category(ch) == category
+    # These three cases distinguish CPython's historical decomposition,
+    # current ordering and current composition data.
+    for form, source, expected in (
+        ("NFC", "\U0002f868", "\U0002136a"),
+        ("NFKC", "\u1d2c", "\u1d2c"),
+        ("NFD", "a\u0315\u1ab0", "a\u1ab0\u0315"),
+        ("NFC", "\u1b05\u1b35", "\u1b06"),
+        ("NFKD", "\ud800\u212b", "\ud800A\u030a"),
+    ):
+        assert legacy.normalize(form, source) == expected
+        assert legacy.is_normalized(form, source) == (source == expected)
+    assert legacy.bidirectional("\u2801") == "ON"
+    assert legacy.bidirectional("\u1885") == "L"
     assert sys.maxunicode == 0x10FFFF
     for value in (Text("\u01FA"), "\u2100", "\uAC00", "\uAC01", "\ud800", chr(sys.maxunicode)):
         print(unicodedata.decomposition(value))

@@ -1,6 +1,7 @@
 //! Object operations for native Python functions with dynamically loaded modules.
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
+use crate::dynamic::value::SlotStorage;
 pub(crate) use stdlib::hashlib::digest::State as DigestState;
 pub(crate) use stdlib::provider_available;
 
@@ -4412,6 +4413,7 @@ impl Context {
                     self.bind(scope, name, class);
                 }
             }
+            "unicodedata" if source.is_none() => stdlib::unicodedata::install(self, module, scope)?,
             "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [
@@ -4820,7 +4822,7 @@ impl Context {
                 let member = self.alloc(Value::SlotMember {
                     owner,
                     name,
-                    module_offset: None,
+                    storage: SlotStorage::Instance,
                 });
                 self.bind(scope, "_batched_state", member);
             }
