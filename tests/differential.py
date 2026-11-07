@@ -61,6 +61,9 @@ REJECTED = {
     "second_line_cookie": '# comment\n# coding=latin-1\nprint("é")\n',
     "ascii_cookie": '# coding: ascii\nprint("é")\n',
     "tab_indentation": 'if True:\n\tif True:\n   print(1)\n',
+    "ambiguous_tab": 'if True:\n        print(1)\n\tprint(2)\n',
+    "deep_join_indentation": 'if True:\n if True:\n  if True:\n\t\\\nprint(1)\n',
+    "malformed_join_after_mixed_suite": 'if True:\n  \tif True:\n \t  print(1)\npass\nif True:\n    \\print(2)\n',
     "form_feed_indentation": 'if True:\n \f print(1)\n',
     "normalized_none_binding": 'ℕone = 1\nprint(ℕone)\n',
     "normalized_true_binding": '𝑇rue = 1\nprint(𝑇rue)\n',
@@ -69,6 +72,8 @@ REJECTED = {
 }
 
 SOURCE_BOUNDARIES = {
+    "mixed_suite": 'if True:\n  \tif True:\n \t  print(1)\n  \tprint(2)\n',
+    "joined_tab": 'if True:\n\t\\\n print(1)\n        print(2)\n',
     "crlf_literal": 'x = """a\r\nb"""\r\nprint(len(x))\r\nprint(x == "a\\nb")\r\n',
     "cr_literal": 'x = """a\rb"""\rprint(len(x))\rprint(x == "a\\nb")\r',
     "raw_crlf_literal": 'x = r"""a\r\nb"""\nprint(len(x))\nprint(x == "a\\nb")\n',

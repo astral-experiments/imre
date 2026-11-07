@@ -538,9 +538,10 @@ fn scan_imports(
     getter: Option<&mut Imports>,
 ) -> Result<Imports, String> {
     let normalized = crate::normalize_source(source, kind)?;
-    crate::analysis::check_source_complexity(&normalized).map_err(str::to_owned)?;
-    let parsed = ruff_python_parser::parse_module(&normalized).map_err(|e| e.to_string())?;
-    crate::analysis::check_indentation(&normalized, parsed.tokens())?;
+    let input = imre_ast::indentation::prepare(&normalized);
+    crate::analysis::check_source_complexity(&input.text).map_err(str::to_owned)?;
+    let parsed = input.parse_module()?;
+    crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
     let mut imports = Imports::default();
     let mut body = parsed.into_syntax().body;
     imports.private_names = imre_ast::lower(&mut body);

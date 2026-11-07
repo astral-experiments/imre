@@ -308,18 +308,21 @@ impl Session {
         kind: crate::SourceKind,
     ) -> Result<ParsedModuleRef, String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
-        check_source_complexity(source).map_err(|error| format!("{path}: {error}"))?;
-        let file = self.write_file(path, source)?;
+        let input = imre_ast::indentation::prepare(source);
+        check_source_complexity(&input.text).map_err(|error| format!("{path}: {error}"))?;
+        let file = self.write_file(path, &input.text)?;
         let parsed = self.parsed(file);
+        if let Some(issue) = input.first_issue(parsed.errors().first()) {
+            return Err(format!("{path}: {issue}"));
+        }
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
         check_scope_syntax(source, parsed.syntax()).map_err(|error| format!("{path}:{error}"))?;
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
-        // The parser has already checked Python indentation; file inputs additionally
-        // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.
+        // Source files additionally restrict form feeds in suite and replacement-field indentation.
         if kind == crate::SourceKind::File {
-            check_indentation(source, parsed.tokens())
+            check_form_feeds(source, parsed.tokens())
                 .map_err(|error| format!("{path}: {error}"))?;
         }
         let mut limits = SuiteLimits {
@@ -389,12 +392,21 @@ impl Session {
     }
 
     /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
-    pub(crate) fn replace_source(&mut self, module: usize, source: String) -> ParsedModuleRef {
+    pub(crate) fn replace_source(
+        &mut self,
+        module: usize,
+        source: String,
+    ) -> Result<ParsedModuleRef, String> {
+        let source =
+            match imre_ast::indentation::parser_source(&source).map_err(|e| e.to_string())? {
+                std::borrow::Cow::Borrowed(_) => source,
+                std::borrow::Cow::Owned(input) => input,
+            };
         let file = self.files[module];
         let original = ruff_db::source::source_text(&self.db, file);
         let value = original.with_text(source, &Default::default());
         file.set_source_text_override(&mut self.db).to(Some(value));
-        self.parsed(file)
+        Ok(self.parsed(file))
     }
 
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
@@ -1877,8 +1889,11 @@ fn check_handler_count(tokens: &Tokens) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Enforce the source-file indentation policy at the beginning of each logical statement.
-pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
+/// Apply the file-level restriction on form feeds, including formatted-string replacement fields.
+pub(crate) fn check_form_feeds(source: &str, tokens: &Tokens) -> Result<(), String> {
+    if !source.contains('\x0c') {
+        return Ok(());
+    }
     use TokenKind::*;
     let mut statement_start = true;
     let mut formatted_strings = 0;
@@ -1901,10 +1916,10 @@ pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), Str
         if statement_start {
             let prefix = &source[..usize::from(token.start())];
             let indentation = prefix.rsplit_once('\n').map_or(prefix, |(_, line)| line);
-            if indentation.contains(['\t', '\x0c']) {
+            if indentation.contains('\x0c') {
                 let line = prefix.lines().count();
                 return Err(format!(
-                    "line {line}: indentation must use spaces, not tabs or form feeds"
+                    "line {line}: form feeds are unsupported in indentation"
                 ));
             }
             statement_start = false;

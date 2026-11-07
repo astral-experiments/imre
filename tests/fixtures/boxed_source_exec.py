@@ -89,6 +89,30 @@ def async_generator_syntax():
 
 
 def syntax_members():
+    for prefix in ("\t", "\t\\\n\t"):
+        try:
+            compile("if True:\n    pass\n" + prefix + "\\ppass\n", "bad_join.py", "exec")
+        except SyntaxError as error:
+            assert type(error) is SyntaxError
+        else:
+            raise AssertionError("invalid line continuation was accepted")
+
+    # Unexpected indentation can still produce an ordinary parser error after a leading join.
+    try:
+        compile("if True:\n    pass\n\t\\\npass\n", "bad_join.py", "exec")
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("unexpected indentation was accepted")
+
+    try:
+        compile("if True:\n    pass\n\tpass\0", "bad_join.py", "exec")
+    except SyntaxError as error:
+        assert type(error) is SyntaxError
+        assert error.args == ("source code string cannot contain null bytes",)
+    else:
+        raise AssertionError("source with a NUL was accepted")
+
     try:
         compile(b"# coding: unknown-encoding\n", "dir/one.py", "exec")
     except SyntaxError as error:

@@ -221,7 +221,8 @@ impl Output {
         file: &str,
         bundled: bool,
     ) -> Result<String, String> {
-        let parsed = ruff_python_parser::parse_module(source)
+        let parsed = imre_ast::indentation::prepare(source)
+            .parse_module()
             .map_err(|err| format!("{}: {err}", path.display()))?;
         crate::analysis::check_scope_syntax(source, parsed.syntax())
             .map_err(|error| format!("{}:{error}", path.display()))?;

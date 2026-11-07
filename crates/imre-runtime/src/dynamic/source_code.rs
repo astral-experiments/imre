@@ -1186,12 +1186,45 @@ pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Resul
 
 pub(super) const MAX_INDENT_LEVELS: usize = 99;
 
-pub(super) struct IndentationLimit {
+pub(super) struct IndentationDiagnostic {
+    kind: &'static str,
+    message: &'static str,
+    column: i64,
+    end_column: i64,
     row: i64,
     text: String,
 }
 
-impl IndentationLimit {
+impl IndentationDiagnostic {
+    pub(super) fn from_issue(
+        source: &str,
+        issue: imre_ast::indentation::Error,
+        file_input: bool,
+    ) -> Self {
+        let start = source[..issue.offset].rfind('\n').map_or(0, |i| i + 1);
+        let mut text = source[start..]
+            .split_inclusive('\n')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        if file_input && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        let (column, end_column) = if issue.kind == "TabError" {
+            (1, 0)
+        } else {
+            (text.chars().count() as i64, -1)
+        };
+        Self {
+            kind: issue.kind,
+            message: issue.message,
+            column,
+            end_column,
+            row: issue.line as i64,
+            text,
+        }
+    }
+
     /// Locate the first excess logical indent, unless parsing already failed earlier.
     pub(super) fn find<T>(
         parsed: &ruff_python_parser::Parsed<T>,
@@ -1221,7 +1254,14 @@ impl IndentationLimit {
                     if file_input && !text.ends_with('\n') {
                         text.push('\n');
                     }
-                    return Some(Self { row, text });
+                    return Some(Self {
+                        kind: "IndentationError",
+                        message: "too many levels of indentation",
+                        column: 1,
+                        end_column: 0,
+                        row,
+                        text,
+                    });
                 }
                 Indent => depth += 1,
                 Dedent => depth = depth.saturating_sub(1),
@@ -1232,17 +1272,20 @@ impl IndentationLimit {
     }
 
     pub(super) fn raise(self, ctx: &mut Context, filename: Id) -> Result<Id> {
-        let message = "too many levels of indentation";
+        let message = self.message;
+        if self.kind == "NotImplementedError" {
+            return Err(Error::new(self.kind, message));
+        }
         let msg = ctx.text(message);
         let row = ctx.int(self.row);
-        let column = ctx.int(1);
-        let end_column = ctx.int(0);
+        let column = ctx.int(self.column);
+        let end_column = ctx.int(self.end_column);
         let text = ctx.text(self.text);
         let details = ctx.alloc(Value::Tuple(vec![
             filename, row, column, text, row, end_column,
         ]));
         let args = [msg, details];
-        let mut error = ctx.exception("IndentationError", &args);
+        let mut error = ctx.exception(self.kind, &args);
         error.message = format!("{message}{}", ctx.syntax_suffix(filename, row)?);
         ctx.retain_syntax_fields(&mut error, ctx.syntax_fields(&args))?;
         Err(error)
@@ -3617,6 +3660,9 @@ impl Context {
             }
             _ => Cow::Borrowed(self.str_value(source)?),
         };
+        if source.contains('\0') {
+            return Err(self.source_decode_error(crate::objects::SourceDecodeError::Null, filename));
+        }
         let filename_id = filename;
         let filename = filename_text;
         let source = if strip_indent {
@@ -3631,16 +3677,32 @@ impl Context {
         } else {
             source
         };
-        let parsed = ruff_python_parser::parse_unchecked(source, parser_mode.into());
+        let input = if parser_mode == Mode::Module {
+            imre_ast::indentation::prepare(source)
+        } else {
+            imre_ast::indentation::Source::original(source)
+        };
+        let parsed = ruff_python_parser::parse_unchecked(&input.text, parser_mode.into());
         // In single mode, a second statement is an error before its suite is read.
         let first_statement_end = match (interactive, parsed.syntax()) {
             (true, ast::Mod::Module(module)) => module.body.first().map(Ranged::end),
             _ => None,
         };
         if let Some(limit) =
-            IndentationLimit::find(&parsed, source, mode == "exec", first_statement_end)
+            IndentationDiagnostic::find(&parsed, source, mode == "exec", first_statement_end)
         {
             return limit.raise(self, filename_id);
+        }
+        if let Some(issue) = input.first_issue(parsed.errors().first()) {
+            if interactive
+                && let ast::Mod::Module(module) = parsed.syntax()
+                && module.body.len() > 1
+                && module.body[1].start().to_usize() < issue.offset
+            {
+                check_single_input(&module.body, parsed.tokens())?;
+            }
+            return IndentationDiagnostic::from_issue(source, issue, mode == "exec")
+                .raise(self, filename_id);
         }
         let lines: Rc<[usize]> =
             line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
@@ -4527,7 +4589,9 @@ impl Context {
             return Ok(());
         };
         let body_line = *body_line;
-        let parsed = ruff_python_parser::parse_module(source)
+        let input = imre_ast::indentation::parser_source(source)
+            .map_err(|err| Error::new(err.kind, err.to_string()))?;
+        let parsed = ruff_python_parser::parse_module(&input)
             .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
         let spellings = string_replacements(source, parsed.tokens());
         let template_expressions =

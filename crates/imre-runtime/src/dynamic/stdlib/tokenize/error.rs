@@ -79,18 +79,12 @@ impl Failure {
         err
     }
 
-    pub(super) fn indent(source: &str, base: i64, tab: bool) -> Self {
-        let (kind, msg) = if tab {
-            (
-                "TabError",
-                "inconsistent use of tabs and spaces in indentation",
-            )
-        } else {
-            (
-                "IndentationError",
-                "unindent does not match any outer indentation level",
-            )
-        };
+    pub(super) fn indent(
+        source: &str,
+        base: i64,
+        mismatch: imre_ast::indentation::Mismatch,
+    ) -> Self {
+        let (kind, msg) = mismatch.diagnostic();
         Self::line_end(source, base, 0, kind, msg)
     }
 

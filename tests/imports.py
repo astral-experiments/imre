@@ -811,10 +811,10 @@ REJECTED = {
     "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
     "imported_surrogate": ({"main.py": IMPORT, "helper.py": '"\\ud800"\n' + HELPER}, "surrogate"),
     "imported_encoding": ({"main.py": IMPORT, "helper.py": "# coding: latin1\n" + HELPER}, "encoding"),
-    "imported_tabs": ({"main.py": IMPORT, "helper.py": "def f(value: int) -> int:\n\treturn value\n"}, "indentation"),
 }
 
 ACCEPTED = {
+    "imported_tabs": {"main.py": IMPORT, "helper.py": "def f(value: int) -> int:\n\treturn value\n"},
     "methodcaller_module_alias": {
         "main.py": "import operator as op\nprint(op.methodcaller('upper')('ok'))\n",
     },
