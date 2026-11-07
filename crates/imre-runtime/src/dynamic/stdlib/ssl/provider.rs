@@ -1296,12 +1296,10 @@ pub(crate) struct Session {
     sni: sni::Connection,
     api: &'static Api,
     handle: NonNull<c_void>,
-    socket: crate::ObjectOwner,
-    endpoint: socket::TlsEndpoint,
+    pub(super) endpoint: socket::TlsEndpoint,
     hostname: Option<CString>,
     server: bool,
     handshake_complete: bool,
-    read_shutdown: bool,
 }
 
 enum Operation<'a> {
@@ -1329,7 +1327,7 @@ impl Session {
     }
 
     pub(super) fn socket(&self) -> &crate::ObjectOwner {
-        &self.socket
+        self.endpoint.socket()
     }
 
     pub(crate) fn wrap(
@@ -1345,12 +1343,10 @@ impl Session {
             sni: sni::Connection::new(ctx),
             api,
             handle,
-            endpoint: socket::TlsEndpoint::new(&socket),
-            socket,
+            endpoint: socket::TlsEndpoint::new(socket),
             hostname: None,
             server,
             handshake_complete: false,
-            read_shutdown: false,
         };
         if let Some(host) = host {
             session.hostname =
@@ -1440,9 +1436,7 @@ impl Session {
         // must never let a later SSL operation use its replacement.
         // A suspended callback must return to its original OpenSSL operation.
         // Detach the old BIO first so even a reused fd cannot receive TLS records.
-        if !self.endpoint.matches(&self.socket)
-            && !self.sni.detach_closing_socket(self.api, self.handle)?
-        {
+        if !self.endpoint.matches() && !self.sni.detach_closing_socket(self.api, self.handle)? {
             return Err(Failure::Io(std::io::Error::from_raw_os_error(libc::EBADF)).into());
         }
         let api = self.api;
@@ -1609,7 +1603,7 @@ impl Session {
     ) -> Result<usize, bio::BioFailure> {
         // SSL_read after a local read shutdown can treat the kernel EOF as a
         // fatal TLS truncation. Drain authenticated bytes without touching that EOF.
-        if out.is_empty() || (self.read_shutdown && self.pending()? == 0) {
+        if out.is_empty() || (self.endpoint.read_shut && self.pending()? == 0) {
             return Ok(0);
         }
         let result = self.transfer(Operation::Read(out), until, "The read operation timed out");
@@ -1618,15 +1612,6 @@ impl Session {
 
     pub(in crate::dynamic) fn pending(&self) -> Result<usize, bio::BioFailure> {
         self.api.ssl_pending(self.handle, self.hostname.as_deref())
-    }
-
-    pub(super) fn transport_shutdown(&mut self, how: i32) -> super::Result<()> {
-        if !self.endpoint.matches(self.socket()) {
-            return Err(super::closed());
-        }
-        socket::shutdown(self.socket(), how)?;
-        self.read_shutdown |= matches!(how, libc::SHUT_RD | libc::SHUT_RDWR);
-        Ok(())
     }
 
     /// Exchange close notifications while the session still owns the socket.

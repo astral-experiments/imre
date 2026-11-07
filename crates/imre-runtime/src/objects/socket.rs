@@ -109,39 +109,103 @@ pub(crate) fn check_tls_mode(socket: &Object, connected: bool) -> Result<()> {
 }
 
 /// The socket BIO borrows a number. Reinitializing the Python object may replace its endpoint.
+#[derive(Clone)]
 pub(crate) struct TlsEndpoint {
+    socket: crate::ObjectOwner,
     fd: RawFd,
     generation: u64,
     #[cfg(target_os = "linux")]
     cookie: Option<u64>,
+    retired_file: Option<(libc::dev_t, libc::ino_t)>,
+    pub(crate) read_shut: bool,
+    write_shut: bool,
 }
 
 impl TlsEndpoint {
-    pub(crate) fn new(socket: &Object) -> Self {
-        state(socket, |s| Self {
-            fd: s.fd,
-            generation: s.generation,
+    pub(crate) fn new(socket: crate::ObjectOwner) -> Self {
+        let (fd, generation) = state(&socket, |s| (s.fd, s.generation));
+        Self {
+            socket,
+            fd,
+            generation,
             #[cfg(target_os = "linux")]
-            cookie: socket_cookie(s.fd),
+            cookie: socket_cookie(fd),
+            retired_file: None,
+            read_shut: false,
+            write_shut: false,
+        }
+    }
+
+    pub(crate) fn fully_shut(&self) -> bool {
+        self.read_shut && self.write_shut
+    }
+
+    /// Record only directions that the kernel successfully shut down.
+    pub(crate) fn shutdown(&mut self, how: i32) -> Result<()> {
+        if !self.matches() {
+            return Err(errno_error(io::Error::from_raw_os_error(libc::EBADF)));
+        }
+        shutdown(&self.socket, how)?;
+        self.read_shut |= how == libc::SHUT_RD || how == libc::SHUT_RDWR;
+        self.write_shut |= how == libc::SHUT_WR || how == libc::SHUT_RDWR;
+        if self.fully_shut() && self.retired_file.is_none() {
+            self.retired_file = socket_file(self.fd);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn socket(&self) -> &crate::ObjectOwner {
+        &self.socket
+    }
+
+    /// Ask the kernel for terminal errors and readiness without exposing queued wire bytes.
+    pub(crate) fn read_eof<E: From<Error>>(
+        &self,
+        flags: i32,
+        check_signals: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E> {
+        retry_read(self.socket(), check_signals, |until| {
+            if !self.matches() {
+                return Err(io::Error::from_raw_os_error(libc::EBADF));
+            }
+            // SAFETY: a zero-length receive cannot write to the empty destination.
+            unsafe { receive_until(self.socket(), [].as_mut_ptr(), 0, flags, until) }.map(|_| ())
         })
     }
 
-    pub(crate) fn matches(&self, socket: &Object) -> bool {
-        state(socket, |s| {
+    pub(crate) fn matches(&self) -> bool {
+        state(&self.socket, |s| {
             if s.fd != self.fd {
                 return false;
             }
-            if s.generation == self.generation {
+            // Keep the live TLS data path on the generation check. A retired
+            // transport must also verify the fd before consulting SO_ERROR or
+            // repeating shutdown, since dup2 can replace it at the same number.
+            let same_generation = s.generation == self.generation;
+            if same_generation && !self.fully_shut() {
                 return true;
             }
-            // On Linux the cookie distinguishes a repeated init on the live socket
-            // from a different socket installed at precisely the same fd number.
             #[cfg(target_os = "linux")]
-            return self.cookie.is_some() && self.cookie == socket_cookie(s.fd);
-            #[cfg(not(target_os = "linux"))]
-            false
+            if let (Some(expected), Some(actual)) = (self.cookie, socket_cookie(s.fd)) {
+                return expected == actual;
+            }
+            self.fully_shut()
+                && self.retired_file.is_some()
+                && self.retired_file == socket_file(s.fd)
         })
     }
+}
+
+/// Retain a fallback identity for the retired descriptor if SO_COOKIE becomes unavailable.
+fn socket_file(fd: RawFd) -> Option<(libc::dev_t, libc::ino_t)> {
+    let mut stat = std::mem::MaybeUninit::uninit();
+    // SAFETY: fstat initializes the entire structure on success.
+    if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } < 0 {
+        return None;
+    }
+    // SAFETY: the preceding fstat succeeded.
+    let stat = unsafe { stat.assume_init() };
+    (stat.st_ino != 0).then_some((stat.st_dev, stat.st_ino))
 }
 
 #[cfg(target_os = "linux")]
@@ -1871,6 +1935,9 @@ pub(crate) fn recv_into(
     flags: i32,
     until: Option<Deadline>,
 ) -> Result<usize> {
+    if buffer.is_empty() {
+        return Ok(0);
+    }
     // SAFETY: buffer exposes this many exclusively writable bytes.
     unsafe { receive_until(s, buffer.as_mut_ptr(), buffer.len(), flags, until) }
         .map_err(errno_error)
@@ -1885,9 +1952,6 @@ unsafe fn receive_until(
     flags: i32,
     until: Option<Deadline>,
 ) -> io::Result<usize> {
-    if len == 0 {
-        return Ok(0);
-    }
     let fd = fd(socket);
     socket_call_interruptible(fd, libc::POLLIN, until, || {
         // SAFETY: the caller supplies len writable bytes. Flags can make the

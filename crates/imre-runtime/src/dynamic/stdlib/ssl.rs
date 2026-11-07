@@ -126,24 +126,39 @@ fn retained_session(ctx: &Context, handle: Id) -> Result<Option<provider::OwnedS
     let session = match ctx.heap.get(handle) {
         Value::TlsBioSession { session, .. } => Some(session.borrow().retain_ssl()),
         Value::TlsSession(session, _) => session.borrow().as_ref().map(|ssl| ssl.retain_ssl()),
-        Value::TlsListener(_) | Value::None => None,
+        Value::TlsTransport(_) | Value::None => None,
         _ => return Err(Error::new("TypeError", "expected a TLS session")),
     };
     session.transpose().map_err(|e| provider_error(ctx, e))
 }
 
 fn without_session(ctx: &Context, handle: Id) -> bool {
-    matches!(ctx.heap.get(handle), Value::TlsListener(_) | Value::None)
+    matches!(ctx.heap.get(handle), Value::TlsTransport(_) | Value::None)
 }
 
-/// Pending sockets must never consume or emit application bytes before TLS authenticates them.
-fn pending_io_error(ctx: &Context, handle: Id, errno: i32) -> Error {
-    match ctx.heap.get(handle) {
-        Value::TlsListener(s) if socket::fd(s) >= 0 => {
-            errno_error(io::Error::from_raw_os_error(errno)).into()
-        }
-        _ => closed(),
+/// Inactive TLS transports can report an error or EOF without reading from the socket.
+fn inactive_io(ctx: &Context, handle: Id, pending_errno: i32) -> Result<()> {
+    let Value::TlsTransport(endpoint) = ctx.heap.get(handle) else {
+        return Err(closed());
+    };
+    if !endpoint.matches() {
+        return Err(closed());
     }
+    let errno = if endpoint.fully_shut() {
+        socket::get_option(endpoint.socket(), libc::SOL_SOCKET, libc::SO_ERROR)?
+    } else {
+        pending_errno
+    };
+    if errno == 0 {
+        Ok(())
+    } else {
+        Err(errno_error(io::Error::from_raw_os_error(errno)).into())
+    }
+}
+
+fn inactive_write<T>(ctx: &Context, handle: Id) -> Result<T> {
+    inactive_io(ctx, handle, libc::EPIPE)?;
+    Err(errno_error(io::Error::from_raw_os_error(libc::EPIPE)).into())
 }
 
 fn memory_bio<'a>(ctx: &'a Context, id: Id, arg: &str) -> Result<&'a RefCell<provider::bio::Bio>> {
@@ -717,7 +732,7 @@ pub(super) fn call(
                     .borrow()
                     .as_ref()
                     .and_then(|s| s.selected_alpn_protocol()),
-                Value::None | Value::TlsListener(_) | Value::Socket(_) => None,
+                Value::None | Value::TlsTransport(_) | Value::Socket(_) => None,
                 _ => return Err(Error::new("TypeError", "expected a TLS connection")),
             };
             let Some(bytes) = selected else {
@@ -1016,7 +1031,7 @@ pub(super) fn call(
             let raw = raw.clone();
             socket::check_tls_mode(&raw, connected)?;
             if !connected {
-                return Ok(ctx.alloc(Value::TlsListener(raw)));
+                return Ok(ctx.alloc(Value::TlsTransport(Box::new(socket::TlsEndpoint::new(raw)))));
             }
             let host = hostname.map(|id| ctx.str_value(id)).transpose()?;
             let result =
@@ -1035,13 +1050,22 @@ pub(super) fn call(
         ))),
         ("transport_shutdown", &[handle, how]) => {
             let how = super::socket::integer(ctx, how)?;
-            match ctx.heap.get(handle) {
-                Value::TlsListener(socket) => socket::shutdown(socket, how)?,
-                _ => session(ctx, handle)?
-                    .borrow_mut()
-                    .as_mut()
-                    .ok_or_else(closed)?
-                    .transport_shutdown(how)?,
+            match ctx.heap.get_mut(handle) {
+                Value::TlsTransport(endpoint) => endpoint.shutdown(how)?,
+                Value::TlsSession(state, _) => {
+                    let mut state = state.borrow_mut();
+                    let live = state.as_mut().ok_or_else(closed)?;
+                    live.endpoint.shutdown(how)?;
+                    if live.endpoint.fully_shut() {
+                        // A suspended read may also hold this state. Retire its SSL before
+                        // keeping just the guarded transport for error, EOF and final close.
+                        let endpoint = live.endpoint.clone();
+                        state.take();
+                        drop(state);
+                        *ctx.heap.get_mut(handle) = Value::TlsTransport(Box::new(endpoint));
+                    }
+                }
+                _ => return Err(closed()),
             }
             Ok(NONE)
         }
@@ -1055,7 +1079,7 @@ pub(super) fn call(
                 }
                 Ok(NONE)
             }
-            Value::TlsListener(_) | Value::None => Ok(NONE),
+            Value::TlsTransport(_) | Value::None => Ok(NONE),
             _ => Err(Error::new("TypeError", "expected a TLS socket")),
         },
         ("hostname_checks_common_name", &[handle]) => Ok(super::builtins::boolean(
@@ -1131,7 +1155,7 @@ pub(super) fn call(
                 if let Some(&flags) = flags.first() {
                     ctx.index_c_int(flags)?;
                 }
-                return Err(pending_io_error(ctx, *handle, libc::EPIPE));
+                return inactive_write(ctx, *handle);
             }
             ctx.with_buffer_export(*data, |ctx| {
                 let result = sni::drive(ctx, *handle, |ctx| {
@@ -1150,19 +1174,56 @@ pub(super) fn call(
                 bio_count(ctx, result)
             })
         }
-        ("recv", [handle, size, flags @ ..]) if flags.len() <= 1 => {
+        ("recv", [handle, size, args @ ..]) if args.len() <= 2 => {
+            let buffer = args.get(1).copied();
             if !without_session(ctx, *handle) {
-                return socket_read(ctx, *handle, *size, NONE);
+                return socket_read(ctx, *handle, *size, buffer.unwrap_or(NONE));
             }
-            let size = usize::try_from(ctx.as_integer(*size)?)
-                .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
-            if let Some(&flags) = flags.first() {
-                ctx.index_c_int(flags)?;
+            let receive = |ctx: &mut Context, capacity: Option<usize>| -> Result<()> {
+                let amount = super::socket::receive_size(ctx, *size)?;
+                let flags = args
+                    .first()
+                    .map(|&id| ctx.index_c_int(id))
+                    .transpose()?
+                    .unwrap_or(0);
+                let method = if capacity.is_some() {
+                    "recv_into"
+                } else {
+                    "recv"
+                };
+                let amount = usize::try_from(amount).map_err(|_| {
+                    Error::new("ValueError", format!("negative buffersize in {method}"))
+                })?;
+                if capacity.is_some_and(|cap| amount > cap) {
+                    return Err(Error::new(
+                        "ValueError",
+                        "buffer too small for requested bytes",
+                    ));
+                }
+                if amount != 0 || capacity.is_some_and(|cap| cap != 0) {
+                    match ctx.heap.get(*handle) {
+                        Value::TlsTransport(endpoint) if endpoint.fully_shut() => {
+                            let endpoint = endpoint.as_ref().clone();
+                            endpoint.read_eof(flags, || ctx.dispatch_signals())?;
+                        }
+                        _ => inactive_io(ctx, *handle, libc::ENOTCONN)?,
+                    }
+                }
+                Ok(())
+            };
+            if let Some(buffer) = buffer {
+                // A pending listener keeps SSLSocket.recv_into's existing flags and read errors.
+                if !matches!(ctx.heap.get(*handle), Value::TlsTransport(e) if e.fully_shut()) {
+                    return Ok(NONE);
+                }
+                ctx.with_writable_byte_span(buffer, "recv_into() argument 1", |ctx, _, span| {
+                    receive(ctx, Some(span.len()))?;
+                    Ok(ctx.int(0))
+                })
+            } else {
+                receive(ctx, None)?;
+                Ok(ctx.alloc(Value::Bytes(Vec::new())))
             }
-            if size == 0 {
-                return Ok(ctx.alloc(Value::Bytes(Vec::new())));
-            }
-            Err(pending_io_error(ctx, *handle, libc::ENOTCONN))
         }
         _ => Err(Error::new(
             "TypeError",

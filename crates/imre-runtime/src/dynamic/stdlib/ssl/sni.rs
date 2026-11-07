@@ -268,6 +268,7 @@ pub(super) fn drive<T>(
                 .ok_or_else(closed)?
                 .resolve_sni(alert),
             Value::TlsBioSession { session, .. } => session.borrow().resolve_sni(alert),
+            Value::TlsTransport(_) => return super::inactive_write(ctx, id),
             _ => unreachable!(),
         };
         resumed.map_err(|error| provider_error(ctx, error))?;

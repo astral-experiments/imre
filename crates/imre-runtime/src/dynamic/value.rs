@@ -1241,7 +1241,7 @@ pub(super) enum Value {
         super::stdlib::ssl::Owner,
     ),
     #[cfg(unix)]
-    TlsListener(crate::ObjectOwner),
+    TlsTransport(Box<crate::objects::socket::TlsEndpoint>),
     #[cfg(unix)]
     TlsBioSession {
         session: std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>,
@@ -1710,7 +1710,9 @@ impl Value {
             #[cfg(unix)]
             Self::TlsSession(..) => "_imre_ssl.Session",
             #[cfg(unix)]
-            Self::TlsListener(_) => "_imre_ssl.Listener",
+            Self::TlsTransport(endpoint) if endpoint.fully_shut() => "_imre_ssl.Shutdown",
+            #[cfg(unix)]
+            Self::TlsTransport(_) => "_imre_ssl.Listener",
             #[cfg(unix)]
             Self::TlsBioSession { .. } => "_imre_ssl.BioSession",
             Self::Context(_) => "_contextvars.Context",
@@ -2515,7 +2517,7 @@ impl Value {
             | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
-            Self::MemoryBio(_) | Self::TlsListener(_) => {}
+            Self::MemoryBio(_) | Self::TlsTransport(_) => {}
             #[cfg(unix)]
             Self::TlsContext(_, sni) => visit.push(sni.callback),
             #[cfg(unix)]

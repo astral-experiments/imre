@@ -29,7 +29,7 @@ for how in (77, "invalid"):
         hello = remote.recv(16384)
         assert hello[:1] == b"\x16" and b"secret after failed shutdown" not in hello
 
-# A closed transport half must not discard authenticated data or expose raw bytes.
+# Keep the open direction authenticated until the transport is shut in both directions.
 certs = sys.argv[1]
 context.load_verify_locations(certs + "/ssl_cert.pem")
 server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -62,5 +62,14 @@ with context.wrap_socket(left, server_hostname="localhost", do_handshake_on_conn
         client.sendall(b"a" + b"b" * 49)
         assert server.recv(1) == b"a" and server.pending() == 49
         server.shutdown(socket.SHUT_RDWR)
-        assert server.pending() == 49 and server.recv(64) == b"b" * 49
-        assert server.recv(1) == b""
+        assert server.pending() == 0 and server.recv(64) == b""
+        data = bytearray(b"x" * 49)
+        assert server.recv_into(data, flags=socket.MSG_PEEK) == 0
+        assert data == b"x" * 49
+        if sys.platform == "linux":
+            try:
+                server.recv(1, socket.MSG_OOB)
+            except OSError as exc:
+                assert exc.errno == errno.EINVAL
+            else:
+                raise AssertionError("accepted an urgent read on a shut Unix stream")
