@@ -218,7 +218,6 @@ fn iter_unpack(ctx: &mut Context, record: Id, source: Id) -> Result<Id> {
             format!("iterative unpacking requires a buffer of a multiple of {size} bytes"),
         ));
     }
-    ctx.heap.note_buffer_view(ctx.view_storage_id(buffer));
     let id = ctx.alloc(Value::StructUnpackIterator {
         record: Some(record),
         buffer: Some(buffer),

@@ -704,10 +704,7 @@ impl Context {
     }
 
     fn view_storage_id(&self, owner: Id) -> Id {
-        match self.heap.get(owner) {
-            Value::BytesIoBuffer { storage, .. } => *storage,
-            _ => self.scalar_value(owner),
-        }
+        self.heap.view_storage_id(owner)
     }
 
     fn owner_bytes(&self, owner: Id) -> Result<&[u8]> {
@@ -828,7 +825,6 @@ impl Context {
                 view,
                 wrapper,
             });
-            self.heap.note_buffer_view(view);
             let Value::MemoryView { lease, .. } = self.heap.get_mut(outer) else {
                 unreachable!()
             };
@@ -871,13 +867,6 @@ impl Context {
                 ));
             }
         };
-        let storage = self.view_storage_id(owner);
-        if matches!(
-            self.heap.get(storage),
-            Value::Array(_) | Value::ByteArray(_) | Value::BytesIoStorage(_)
-        ) {
-            self.heap.note_buffer_view(storage);
-        }
         let readonly = matches!(
             self.heap.get(object),
             Value::MemoryView { readonly: true, .. }

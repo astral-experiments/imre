@@ -31,4 +31,16 @@ def current():
     data.insert(-100, 0)
     data.insert(100, 255)
     assert data == b"\x00abcXd\xff"
+    parent = memoryview(data)
+    child = parent[1:]
+    parent.release()
+    try:
+        data.insert(0, 1)
+    except BufferError:
+        assert bytes(child) == b"abcXd\xff"
+    else:
+        raise AssertionError("inserted while a derived view still held the buffer")
+    child.release()
+    data.insert(0, 1)
+    assert data[0] == 1
     print("bytearray insert")

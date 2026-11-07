@@ -1822,13 +1822,6 @@ pub(super) fn search(
     }
     if matches!(method, "scanner" | "finditer") {
         // The scanner exports its subject until destruction; a Match only retains it.
-        let storage = ctx.view_storage_id(string);
-        if matches!(
-            ctx.heap.get(storage),
-            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
-        ) {
-            ctx.heap.note_buffer_view(storage);
-        }
         let scanner = ctx.alloc(Value::RegexScanner {
             pattern: receiver,
             subject: string,
