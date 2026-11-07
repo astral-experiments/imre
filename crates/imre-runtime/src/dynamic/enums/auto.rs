@@ -31,8 +31,11 @@ pub(in crate::dynamic) struct EnumNamespace {
 }
 
 impl Context {
-    pub(in crate::dynamic) fn enum_namespace(&self, bases: &[Id]) -> Option<Box<EnumNamespace>> {
-        let (base, kind) = bases.iter().rev().find_map(|&base| {
+    pub(in crate::dynamic) fn enum_namespace(
+        &self,
+        bases: &[Id],
+    ) -> Result<Option<Box<EnumNamespace>>> {
+        let Some((base, kind)) = bases.iter().rev().find_map(|&base| {
             [
                 ("enum.IntFlag", EnumKind::IntFlag),
                 ("enum.Flag", EnumKind::Flag),
@@ -43,14 +46,22 @@ impl Context {
             .into_iter()
             .find(|(name, _)| self.has_base(base, name))
             .map(|(_, kind)| (base, kind))
-        })?;
-        Some(Box::new(EnumNamespace {
+        }) else {
+            return Ok(None);
+        };
+        if bases.last() != Some(&base) {
+            return Err(Error::new(
+                "TypeError",
+                "new enumerations should be created as `EnumName([mixin_type, ...] [data_type,] enum_type)`",
+            ));
+        }
+        Ok(Some(Box::new(EnumNamespace {
             kind,
             members: indexmap::IndexSet::new(),
             generator: self.class_attr(base, "_generate_next_value_"),
             history: Vec::new(),
             generated: false,
-        }))
+        })))
     }
 
     pub(in crate::dynamic) fn enum_auto_class(&mut self) -> Result<Id> {

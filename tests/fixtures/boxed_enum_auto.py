@@ -40,6 +40,35 @@ def current():
     else:
         raise AssertionError("partially named strict combination accepted")
 
+    class Permission(Flag):
+        pass
+
+    class WireMask(IntFlag):
+        pass
+
+    class WireAccess(Permission, WireMask):
+        READ = 1
+
+    class StrictAccess(WireMask, Permission):
+        READ = 1
+
+    assert WireAccess._boundary_ is WireMask._boundary_
+    assert StrictAccess._boundary_ is Permission._boundary_
+    assert int(WireAccess(3)) == 3
+    assert 3 not in StrictAccess
+
+    ran = []
+    class TrailingMixin:
+        pass
+
+    try:
+        class BadOrder(WireMask, TrailingMixin):
+            ran.append(True)
+    except TypeError:
+        assert not ran
+    else:
+        raise AssertionError("accepted a trailing non-enum base")
+
     from enum import EJECT
 
     class Unknown(int):
