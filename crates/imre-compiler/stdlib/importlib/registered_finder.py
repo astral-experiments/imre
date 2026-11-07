@@ -1,5 +1,7 @@
 """Combine registered native modules with the filesystem entry that contains them."""
-from _imre_importlib import registered_path, registered_path_spec
+from _imre_importlib import (
+    _installed_source_members, _installed_stdlib, registered_path, registered_path_spec,
+)
 
 
 # Keep the identity installed in sys.meta_path when callers rebind the public export.

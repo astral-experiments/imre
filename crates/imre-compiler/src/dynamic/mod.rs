@@ -1269,22 +1269,6 @@ pub(crate) fn compile(
     for (name, file, body) in runtime_sources(|name| seen.contains(name), threading) {
         sources.push((name.into(), Path::new(bundled_root).join(file), body.into()));
     }
-    if let Some(archive) = &options.stdlib_fallback {
-        // Both bootstrap names use this bundled source. One may be supplied only by
-        // the runtime providers above, after the application's imports were scanned.
-        let origin = Path::new(bundled_root).join("importlib/_bootstrap_external.py");
-        let literal = serde_json::to_string(archive).map_err(|e| e.to_string())?;
-        for (name, path, source) in &mut sources {
-            if *path == origin
-                && matches!(
-                    name.as_str(),
-                    "_frozen_importlib_external" | "importlib._bootstrap_external"
-                )
-            {
-                source.push_str(&format!("\n_installed_stdlib = {literal}\n"));
-            }
-        }
-    }
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
@@ -1320,8 +1304,12 @@ pub(crate) fn compile(
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    let stdlib_fallback =
+        serde_json::to_value(&options.stdlib_fallback).map_err(|e| e.to_string())?;
     let config = serde_json::json!({
         "bundled_root":bundled_root,
+        "stdlib_fallback":stdlib_fallback,
+        "stdlib_members":include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")),
         "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":options.path_entry || !safe_path,
         "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},

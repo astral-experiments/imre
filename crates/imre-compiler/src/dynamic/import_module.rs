@@ -260,23 +260,14 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/importlib/_bootstrap.py"),
         )),
         "importlib._bootstrap" => bundled_source!("importlib/_bootstrap.py"),
-        "_frozen_importlib_external" | "importlib._bootstrap_external" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "importlib/_bootstrap_external.py",
-                SOURCE.get_or_init(|| {
-                    let loaders = include_str!("../../stdlib/importlib/_bootstrap_external.py");
-                    let finders = include_str!("../../stdlib/importlib/registered_finder.py");
-                    let members: Vec<_> =
-                        include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt"))
-                            .lines()
-                            .collect();
-                    let members = serde_json::to_string(&members)
-                        .expect("stdlib source paths serialize as strings");
-                    format!("{loaders}\n\n\n_installed_source_members = {members}\n{finders}")
-                }),
-            ))
-        }
+        "_frozen_importlib_external" | "importlib._bootstrap_external" => Some((
+            "importlib/_bootstrap_external.py",
+            concat!(
+                include_str!("../../stdlib/importlib/_bootstrap_external.py"),
+                "\n\n\n",
+                include_str!("../../stdlib/importlib/registered_finder.py"),
+            ),
+        )),
         // CPython 3.14.5 Lib/uuid.py with a public Enum declaration for SafeUUID.
         "uuid" => Some(("uuid.py", include_str!("../../stdlib/uuid_boxed.py"))),
         "asyncio" => bundled_source!("asyncio/__init__.py"),

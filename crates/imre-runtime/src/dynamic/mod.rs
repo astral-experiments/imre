@@ -4045,19 +4045,26 @@ impl Context {
                     self.finder_external
                 };
                 self.bind(scope, "_finder_external", finder);
-                // The Python launcher (or standalone program) owns its installed sources.
+            }
+            "_imre_importlib" => {
+                // Both bootstrap modules import the index used to build the installed archive.
+                let members = self.config["stdlib_members"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .lines()
+                    .map(|member| self.heap.owned_text(member.into()))
+                    .collect();
+                let members = self.alloc(Value::Tuple(members));
+                self.bind(scope, "_installed_source_members", members);
                 let archive = self.interpreter_layout.as_ref().map_or_else(
                     |_| self.executable.with_file_name("imre-stdlib.zip"),
                     |layout| layout.stdlib_archive.clone(),
                 );
-                let archive = if archive.is_absolute() {
-                    archive.to_str().map_or(NONE, |path| self.text(path))
-                } else {
-                    NONE
-                };
+                let archive = self.config["stdlib_fallback"]
+                    .as_str()
+                    .or_else(|| archive.to_str().filter(|_| archive.is_absolute()))
+                    .map_or(NONE, |path| self.heap.owned_text(path.into()));
                 self.bind(scope, "_installed_stdlib", archive);
-            }
-            "_imre_importlib" => {
                 // All bootstrap instances invalidate the finders used by the native path search.
                 if self.zip_path_importers == NONE {
                     self.zip_path_importers = self.dict(Vec::new());
