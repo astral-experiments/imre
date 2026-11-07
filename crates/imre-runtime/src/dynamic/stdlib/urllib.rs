@@ -1,7 +1,8 @@
 //! URL operations used by runtime-imported request handlers.
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::dynamic::builtins::bind;
+use crate::dynamic::builtins::{bind, boolean};
+use crate::dynamic::copy_ids;
 use crate::objects::{UrlInput, urlquote, urlsplit};
 
 mod join;
@@ -101,14 +102,8 @@ pub(super) fn call(
                 name == "urlparse",
             )
         }
-        "urlunsplit" => {
-            let [parts] = bind(name, args, kwargs, ["components"])?;
-            unsplit::<5>(ctx, required(parts, name, "components")?)
-        }
-        "urlunparse" => {
-            let [parts] = bind(name, args, kwargs, ["components"])?;
-            unsplit::<6>(ctx, required(parts, name, "components")?)
-        }
+        "urlunsplit" => unsplit::<5>(ctx, args, kwargs),
+        "urlunparse" => unsplit::<6>(ctx, args, kwargs),
         "_netloc_property" => {
             let [netloc, field] = bind(name, args, kwargs, ["netloc", "field"])?;
             let field = required(field, name, "field")?;
@@ -287,53 +282,94 @@ fn property(ctx: &mut Context, netloc: Id, index: u32) -> Result<Id> {
     })
 }
 
-fn unsplit<const N: usize>(ctx: &mut Context, components: Id) -> Result<Id> {
-    let items = ctx.items(components)?;
-    if items.is_empty() {
-        return Err(Error::new("IndexError", "tuple index out of range"));
+/// Check the evaluated fields without invoking truth or decoding protocols.
+fn plain_components<const N: usize>(ctx: &Context, components: &[Id]) -> Option<([Id; N], bool)> {
+    let items: [Id; N] = components.try_into().ok()?;
+    let bytes = match ctx.heap.get(items[0]) {
+        Value::Str(_) => false,
+        Value::Bytes(_) => true,
+        _ => return None,
+    };
+    // In text mode a falsey path keeps its value for slicing, concatenation
+    // or %s formatting with params. Only optional fields can be omitted.
+    if !bytes && items[2] == NONE {
+        return None;
     }
-    if items.len() != N {
-        let message = if items.len() > N {
-            format!(
-                "too many values to unpack (expected {}, got {})",
-                N + 1,
-                items.len() + 1
-            )
-        } else {
-            format!(
-                "not enough values to unpack (expected {}, got {})",
-                N + 1,
-                items.len() + 1
-            )
-        };
-        return Err(Error::new("ValueError", message));
+    let plain = items.iter().all(|&id| match ctx.heap.get(id) {
+        Value::Str(_) => !bytes,
+        Value::Bytes(value) => bytes && value.is_ascii(),
+        _ => id == NONE,
+    });
+    plain.then_some((items, bytes))
+}
+
+fn component_text(ctx: &Context, id: Id) -> &str {
+    match ctx.heap.get(id) {
+        Value::Str(s) => s,
+        Value::Bytes(b) => std::str::from_utf8(b).expect("validated ASCII URL component"),
+        _ if id == NONE => "",
+        _ => unreachable!("validated plain URL component"),
     }
-    let bytes = matches!(input(ctx, items[0])?, UrlInput::Bytes(_));
-    let mut text = [NONE; N];
-    for (field, id) in text.iter_mut().zip(items) {
-        let value = input(ctx, id)?;
-        if bytes != matches!(value, UrlInput::Bytes(_)) && !value.as_bytes().is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "Cannot mix str and non-str arguments",
-            ));
+}
+
+fn unsplit<const N: usize>(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [components, fallback] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "expected URL components and their coercion function",
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "expected positional URL components",
+        ));
+    }
+    // Tuple subclasses such as ParseResult inherit immutable storage. Consult
+    // the live type slot because a subclass can replace __iter__.
+    let sequence = match ctx.heap.get(*components) {
+        Value::Tuple(_) | Value::List(_) => *components,
+        _ if let Some((storage, _)) = ctx.sequence_payload(*components)
+            && matches!(ctx.heap.get(storage), Value::Tuple(_))
+            && ctx.slot(*components, "__iter__").is_none_or(
+                |slot| matches!(ctx.heap.get(slot), Value::Native(name) if name == "tuple.__iter__"),
+            ) =>
+        {
+            storage
         }
-        *field = match value {
-            UrlInput::Text(_) => id,
-            UrlInput::Bytes(_) => {
-                let decoded = value.decoded()?.to_owned();
-                ctx.text(decoded)
-            }
+        _ => ctx.collect_iterable(*components, false)?,
+    };
+    let (Value::Tuple(fields) | Value::List(fields)) = ctx.heap.get(sequence) else {
+        unreachable!("expanded URL fields")
+    };
+    let Some((items, bytes)) = plain_components::<N>(ctx, fields) else {
+        // Keep a stable view across the call into Python. Immutable tuple
+        // storage is already a snapshot, including for standard URL results.
+        let snapshot = match ctx.heap.get(sequence) {
+            Value::List(items) => ctx.alloc(Value::Tuple(copy_ids(items)?)),
+            _ => sequence,
         };
-    }
-    let registered = if !ctx.str_value(text[0])?.is_empty() && ctx.str_value(text[1])?.is_empty() {
+        return ctx.call(*fallback, vec![snapshot, boolean(N == 6)], Vec::new());
+    };
+    let scheme = component_text(ctx, items[0]);
+    let registered = if !scheme.is_empty() && component_text(ctx, items[1]).is_empty() {
+        // Membership may run Python that clears the original list and collects.
+        ctx.heap.reserve_temporaries(N)?;
+        for id in items {
+            ctx.heap.keep(id);
+        }
+        let scheme = if bytes {
+            ctx.text(component_text(ctx, items[0]).to_owned())
+        } else {
+            items[0]
+        };
         let module = ctx.module("urllib.parse")?;
         let schemes = ctx.lookup_attr(module, "uses_netloc")?;
-        ctx.contains(text[0], schemes)?
+        ctx.contains(scheme, schemes)?
     } else {
         false
     };
-    let fields = text.map(|id| ctx.str_value(id).expect("coerced URL component"));
+    let fields = items.map(|id| component_text(ctx, id));
     let out = match *fields.as_slice() {
         [s, n, p, q, f] => urlsplit::join_fields([s, n, p, q, f], registered)?,
         [s, n, p, params, q, f] => {
@@ -341,6 +377,9 @@ fn unsplit<const N: usize>(ctx: &mut Context, components: Id) -> Result<Id> {
         }
         _ => unreachable!("URL result arity"),
     };
+    if !bytes && out == fields[2] {
+        return Ok(items[2]);
+    }
     Ok(if bytes {
         ctx.alloc(Value::Bytes(out.into_bytes()))
     } else {
