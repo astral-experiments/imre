@@ -175,11 +175,7 @@ pub unsafe extern "C" fn imre_object_is_exact_tuple(value: *const Object) -> boo
             .0
             .with(super::exceptions::projected_word)
             .is_some_and(|(kind, word)| {
-                kind.raw() == 6
-                    && records::descriptor(word as *const usize)
-                        .semantics
-                        .as_ref()
-                        .is_some_and(|s| s.kind == 1 && s.flags & records::EXACT_TUPLE != 0)
+                kind.raw() == 6 && records::imre_record_is_exact_tuple(word as *const usize)
             })
     }
 }

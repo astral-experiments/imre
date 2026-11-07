@@ -1227,41 +1227,13 @@ pub(crate) fn compile(
             }
         }
     }
-    // Cold imports can use the canonical threading factory when its Python dependencies
-    // are already registered. Check before adding the minimal collections fallback below.
-    let threading = ["_weakrefset", "collections", "warnings"]
-        .into_iter()
-        .all(|required| {
-            sources
-                .iter()
-                .any(|(name, path, _)| name == required && path.starts_with(bundled_root))
-        })
-        .then_some("threading");
-    // Native modules can construct named tuples even without a source-level collections import.
-    if !seen.contains("collections") {
-        sources.push((
-            "collections".into(),
-            Path::new(bundled_root).join("collections/__init__.py"),
-            NAMEDTUPLE_COLLECTIONS.into(),
-        ));
-    }
-    // The sealed io module also needs its Python protocols when imported indirectly.
-    sources.push((
-        "io".into(),
-        Path::new(bundled_root).join("io.py"),
-        SEALED_IO.into(),
-    ));
-    // These modules and their dependencies must be available when selected by name at runtime.
-    for name in RUNTIME_PROVIDERS.iter().copied().chain(threading) {
-        if !seen.contains(name)
-            && let Some((file, source)) = import_module::boxed_source(name)
-        {
-            sources.push((
-                name.into(),
-                Path::new(bundled_root).join(file),
-                source.into(),
-            ));
-        }
+    let threading = source_threading(|required| {
+        sources
+            .iter()
+            .any(|(name, path, _)| name == required && path.starts_with(bundled_root))
+    });
+    for (name, file, body) in runtime_sources(|name| seen.contains(name), threading) {
+        sources.push((name.into(), Path::new(bundled_root).join(file), body.into()));
     }
     if let Some(archive) = &options.stdlib_fallback {
         // Both bootstrap names use this bundled source. One may be supplied only by
@@ -1382,6 +1354,61 @@ pub(crate) fn compile(
             .cloned()
             .collect(),
     }))
+}
+
+/// The full threading factory needs these Python dependencies before the startup fallbacks.
+fn source_threading(mut registered: impl FnMut(&str) -> bool) -> Option<&'static str> {
+    ["_weakrefset", "collections", "warnings"]
+        .into_iter()
+        .all(&mut registered)
+        .then_some("threading")
+}
+
+/// Python registrations provided by the launcher even without a direct source import.
+fn runtime_sources(
+    seen: impl Fn(&str) -> bool,
+    threading: Option<&'static str>,
+) -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    let collections = (!seen("collections")).then_some((
+        "collections",
+        "collections/__init__.py",
+        NAMEDTUPLE_COLLECTIONS,
+    ));
+    collections
+        .into_iter()
+        .chain([("io", "io.py", SEALED_IO)])
+        .chain(
+            RUNTIME_PROVIDERS
+                .iter()
+                .copied()
+                .chain(threading)
+                .filter(move |name| !seen(name))
+                .filter_map(|name| {
+                    let (file, source) = import_module::boxed_source(name)?;
+                    Some((name, file, source))
+                }),
+        )
+}
+
+/// Carry the checked program's Python source registrations to the runtime finder classifier.
+pub(crate) fn builtin_inventory_sources(graph: &crate::modules::SourceGraph) -> String {
+    let threading =
+        source_threading(|name| graph.modules.iter().any(|m| m.bundled && m.name == name));
+    let defaults = runtime_sources(
+        |name| graph.modules.iter().any(|m| m.name == name),
+        threading,
+    );
+    let mut names: Vec<_> = graph
+        .modules
+        .iter()
+        .filter(|m| m.bundled)
+        .map(|m| m.name.as_str())
+        .chain(defaults.map(|(name, _, _)| name))
+        .filter(|name| imre_ast::providers::provider(name).is_some())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names.join("\0")
 }
 
 const NAMEDTUPLE_COLLECTIONS: &str = include_str!("../../stdlib/collections/namedtuple_repr.py");

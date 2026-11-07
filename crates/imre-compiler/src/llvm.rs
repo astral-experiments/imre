@@ -643,17 +643,14 @@ fn emit_program(
     for (id, bytes) in emitter.strings.iter().enumerate() {
         let name = emitter.output.string_name(id, "str");
         let owner = emitter.output.string_owner(id);
-        let output = emitter.output.global(
-            owner,
-            &name,
-            "unnamed_addr constant",
-            format_args!("[{} x i8]", bytes.len()),
+        emitter.output.byte_constant(owner, &name, bytes);
+    }
+    if let Some(sources) = &module.builtin_module_sources {
+        emitter.output.byte_constant(
+            emitter.output.entry,
+            "imre_builtin_sources",
+            sources.as_bytes(),
         );
-        output.push_str("c\"");
-        for byte in bytes {
-            write!(output, "\\{byte:02X}").unwrap();
-        }
-        output.push_str("\"\n");
     }
     emitter.enum_table();
     emitter.literal_pool();
@@ -6474,6 +6471,32 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::StringTupleContains => self.call(
+                "imre_str_tuple_contains",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::SysBuiltinModuleNames => {
+                let sources = self
+                    .module
+                    .builtin_module_sources
+                    .as_ref()
+                    .expect("inventory registration manifest");
+                let names = self.output.global_ref("imre_builtin_sources".to_owned());
+                let frozen = self
+                    .module
+                    .command_flags
+                    .as_ref()
+                    .is_none_or(|flags| flags.frozen_modules);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_sys_builtin_module_names(ptr @{names}, i64 {}, i1 {frozen})",
+                        sources.len()
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::SysStdlibModuleNames => {
                 let names = self.call("imre_sys_stdlib_module_names", returns, &[]);
                 self.check_error();
@@ -7257,7 +7280,9 @@ impl Emitter<'_, '_> {
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Hash, &[&args[0].value]),
             Builtin::HashName => self.call("imre_hash_name", Type::Str, &[&args[0].value]),
             Builtin::HashType => self.call("imre_hash_type", Type::BuiltinClass, &[&args[0].value]),
-            Builtin::HashIdentity => self.call("imre_hash_identity", Type::Int, &[&args[0].value]),
+            Builtin::PointerIdentity => {
+                self.call("imre_pointer_identity", Type::Int, &[&args[0].value])
+            }
             Builtin::HashBlockSize => {
                 self.call("imre_hash_block_size", Type::Int, &[&args[0].value])
             }
@@ -7531,8 +7556,14 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::ObjectIsExactTuple => {
-                self.call("imre_object_is_exact_tuple", returns, &[&args[0].value])
+            Builtin::IsExactTuple => {
+                let value = &args[0].value;
+                let function = if matches!(value.ty, Type::VarTuple(_) | Type::Tuple(_)) {
+                    "imre_record_is_exact_tuple"
+                } else {
+                    "imre_object_is_exact_tuple"
+                };
+                self.call(function, returns, &[value])
             }
             Builtin::ObjectTextProject => {
                 self.call("imre_object_exact_text", returns, &[&args[0].value])
@@ -10921,7 +10952,7 @@ declare ptr @imre_sha1_new(ptr)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_name(ptr)
 declare ptr @imre_hash_type(ptr)
-declare i64 @imre_hash_identity(ptr)
+declare i64 @imre_pointer_identity(ptr)
 declare i64 @imre_hash_digest_size(ptr)
 declare i64 @imre_hash_block_size(ptr)
 declare ptr @imre_codec_lookup(ptr)
@@ -11034,6 +11065,7 @@ declare ptr @imre_contextvars_enter(ptr)
 declare void @imre_contextvars_leave(ptr, ptr)
 declare i64 @imre_contextvars_len(ptr)
 declare zeroext i1 @imre_object_is_exact_tuple(ptr)
+declare zeroext i1 @imre_record_is_exact_tuple(ptr)
 declare ptr @imre_object_exact_text(ptr)
 declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
@@ -11391,6 +11423,8 @@ declare i64 @imre_sys_getrecursionlimit()
 declare void @imre_sys_setrecursionlimit(i64)
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
+declare i1 @imre_str_tuple_contains(ptr, ptr)
+declare ptr @imre_sys_builtin_module_names(ptr, i64, i1)
 declare ptr @imre_sys_stdlib_module_names()
 declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)

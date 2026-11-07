@@ -800,7 +800,7 @@ impl Checker<'_> {
         }
     }
 
-    /// Recognize exact builtin type comparisons on a local with an erased payload.
+    /// Recognize exact builtin type comparisons on erased values and typed tuples.
     pub(super) fn exact_object_type<'n>(
         &self,
         left: &'n ast::Expr,
@@ -826,13 +826,22 @@ impl Checker<'_> {
         if !call.arguments.keywords.is_empty() || !self.unshadowed_builtin(&call.func, "type") {
             return None;
         }
-        let slot = *self.names.get(value.as_name_expr()?.id.as_str())?;
-        let ty = self
-            .narrowed
-            .get(&slot)
-            .copied()
-            .unwrap_or(self.locals[slot]);
-        (ty == Type::ObjectValue
+        let local_type = value
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+            .map(|slot| {
+                self.narrowed
+                    .get(slot)
+                    .copied()
+                    .unwrap_or(self.locals[*slot])
+            });
+        let exact_tuple = class == KnownClass::Tuple
+            && (matches!(local_type, Some(Type::VarTuple(_)))
+                // Typeshed exposes the native inventory as Sequence[str].
+                || (self.has_static_namespace_root(value)
+                    && self.resolve(value) == Some(Binding::Intrinsic(Intrinsic::SysBuiltinModuleNames)))
+                || self.graph.session.is_string_tuple(self.module, value));
+        ((local_type == Some(Type::ObjectValue) || exact_tuple)
             && self
                 .graph
                 .session

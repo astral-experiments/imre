@@ -647,6 +647,7 @@ mod tests {
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),

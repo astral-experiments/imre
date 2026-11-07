@@ -336,16 +336,26 @@ impl Checker<'_> {
         node: &impl Ranged,
     ) -> Result<Expr, String> {
         if let Some((value, class)) = self.exact_object_type(left, right) {
-            let predicate = match class {
-                ty_python_semantic::types::KnownClass::Str => {
+            let value = self.expr(value)?;
+            let predicate = match (class, value.ty) {
+                (ty_python_semantic::types::KnownClass::Str, Type::ObjectValue) => {
                     Builtin::IsInstance(vec![ir::InstanceType::ExactText])
                 }
-                ty_python_semantic::types::KnownClass::Tuple => Builtin::ObjectIsExactTuple,
-                _ => unreachable!("only exact str and tuple comparisons"),
+                (
+                    ty_python_semantic::types::KnownClass::Tuple,
+                    Type::ObjectValue | Type::VarTuple(_) | Type::Tuple(_),
+                ) => Builtin::IsExactTuple,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        node,
+                        "unsupported value layout for an exact type comparison",
+                    ));
+                }
             };
             let test = Expr {
                 ty: Type::Bool,
-                kind: ExprKind::Builtin(predicate, vec![self.expr(value)?]),
+                kind: ExprKind::Builtin(predicate, vec![value]),
             };
             return Ok(if op == ast::CmpOp::Is {
                 test
@@ -790,6 +800,7 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types.iter().all(|ty| matches!(ty, Type::VarTuple(_)))
             || types == [Type::NativeModule; 2]
             || types == [Type::ModuleNamespace; 2]
             || types

@@ -5,6 +5,7 @@ from _thread import RLock
 from _imre_importlib import (
     _import_lock,
     is_builtin_module as _is_builtin_module,
+    builtin_names_contains as _builtin_names_contains,
     frozen_info as _frozen_info,
     frozen_code as _frozen_code,
     create_builtin_module as _create_builtin_module,
@@ -89,7 +90,7 @@ def _import_warning(message, line):
 
 
 def _require_builtin(fullname):
-    if not isinstance(fullname, str) or not _is_builtin_module(fullname):
+    if not _builtin_names_contains(sys, fullname):
         raise ImportError(f'{fullname!r} is not a built-in module', name=fullname)
 
 
@@ -101,7 +102,7 @@ class BuiltinImporter:
     @classmethod
     def find_spec(cls, fullname, path=None, target=None):
         if _is_builtin_module(fullname):
-            return ModuleSpec(fullname, cls, origin=cls._ORIGIN)
+            return spec_from_loader(fullname, cls, origin=cls._ORIGIN)
         return None
 
     @staticmethod

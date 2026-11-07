@@ -1150,12 +1150,16 @@ fn lower_graph(
     }
     python_frames.push(true); // The program entry runs a Python module body.
     let mut names = false;
+    let mut uses_builtin_module_names = false;
     let source_functions = python_frames.iter().filter(|&&frame| frame).count();
     let mut generator_sites = 0;
     let mut count = false;
     for function in functions.iter().chain([&entry]) {
         ir::walk_expressions(&function.body, &mut |value| match value.kind {
             ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
+            ExprKind::Builtin(Builtin::SysBuiltinModuleNames, _) => {
+                uses_builtin_module_names = true
+            }
             ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
             ExprKind::Builtin(Builtin::GeneratorFrameEnter(_), _) => generator_sites += 1,
             _ => {}
@@ -1221,6 +1225,8 @@ fn lower_graph(
     }
     let lowered = (
         ir::Module {
+            builtin_module_sources: uses_builtin_module_names
+                .then(|| crate::dynamic::builtin_inventory_sources(graph)),
             command_flags: graph
                 .command_startup
                 .as_ref()
@@ -7103,6 +7109,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysBuiltinModuleNames if self.has_static_namespace_root(expression) => {
+                    return Ok(Expr {
+                        ty: self.types.var_tuple(Type::Str),
+                        kind: ExprKind::Builtin(Builtin::SysBuiltinModuleNames, vec![]),
+                    });
+                }
                 Intrinsic::SysStdlibModuleNames => {
                     return Ok(Expr {
                         ty: Type::FrozenStrings,
@@ -7508,6 +7520,13 @@ impl<'a> Checker<'a> {
                     if let Some(fields) = self.types.fields(receiver.ty) {
                         return self.tuple_contains(key, receiver, &fields, compare);
                     }
+                    if self.types.var_tuple_element(receiver.ty) == Some(Type::Str)
+                        && matches!(key.ty, Type::Int | Type::None | Type::Bool | Type::Float)
+                    {
+                        let result = Expr::boolean(compare.ops[0] == ast::CmpOp::NotIn);
+                        let result = self.evaluated_receiver(Some(receiver), result);
+                        return Ok(self.evaluated_receiver(Some(key), result));
+                    }
                     let receiver = if receiver.ty == Type::ModuleNamespace {
                         errno::op(ir::ErrnoOperation::Keys, Type::StringKeys, vec![receiver])
                     } else {
@@ -7541,6 +7560,8 @@ impl<'a> Checker<'a> {
                         (ty, Builtin::StructListContains)
                     } else if receiver.ty == Type::ListInt {
                         (self.types.optional(Type::Int), Builtin::IntListContains)
+                    } else if self.types.var_tuple_element(receiver.ty) == Some(Type::Str) {
+                        (Type::Str, Builtin::StringTupleContains)
                     } else if self.types.element(receiver.ty) == Some(Type::Str) {
                         (Type::Str, Builtin::StringListContains)
                     } else {
@@ -12329,10 +12350,10 @@ impl<'a> Checker<'a> {
                 );
             }
             "id" if args.len() == 1
-                && args[0].ty == Type::Hash
+                && matches!(args[0].ty, Type::Hash | Type::VarTuple(_))
                 && self.unshadowed_builtin(&call.func, "id") =>
             {
-                (Builtin::HashIdentity, Type::Int)
+                (Builtin::PointerIdentity, Type::Int)
             }
             "id" if args.len() == 1
                 && !self.names.contains_key("id")

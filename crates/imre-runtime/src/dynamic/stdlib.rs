@@ -169,13 +169,16 @@ pub(super) const SYS_LAZY_FUNCTIONS: &[&str] = &[
 ];
 
 pub(super) fn is_module(name: &str) -> bool {
-    use imre_ast::providers::{Provider, provider};
-    match provider(name) {
-        Some(Provider::Builtin) => true,
+    imre_ast::providers::provider(name).is_some_and(provider_available)
+}
+
+pub(crate) fn provider_available(provider: imre_ast::providers::Provider) -> bool {
+    use imre_ast::providers::Provider;
+    match provider {
+        Provider::Builtin => true,
         #[cfg(unix)]
-        Some(Provider::Ssl) => ssl::provider::available(),
-        Some(Provider::Hashlib) => hashlib::openssl::provider().is_some(),
-        None => false,
+        Provider::Ssl => ssl::provider::available(),
+        Provider::Hashlib => hashlib::openssl::provider().is_some(),
     }
 }
 
@@ -598,6 +601,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "frozen_info"
             | "frozen_code"
             | "is_builtin_module"
+            | "builtin_names_contains"
             | "create_builtin_module"
             | "exec_builtin_module"
             | "create_native_module"
@@ -2560,9 +2564,14 @@ pub(super) fn call(
                     ctx.frozen_code(&name)
                 };
             }
+            ("builtin_names_contains", [sys, key], []) => {
+                return Ok(super::builtins::boolean(
+                    ctx.builtin_names_contains(*sys, *key)?,
+                ));
+            }
             ("is_builtin_module", [name], []) => {
                 return Ok(builtins::boolean(
-                    ctx.is_builtin_module(ctx.str_value(*name)?)?,
+                    ctx.is_builtin_module(ctx.str_value(*name)?),
                 ));
             }
             ("create_builtin_module", [name], []) => {

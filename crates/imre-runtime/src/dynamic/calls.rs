@@ -5740,6 +5740,13 @@ impl Context {
                 super::method_decorator::update_attribute(self, obj, dictionary, name, None)
             }
             Value::Module { scope, .. } => {
+                if name == "builtin_module_names" && self.pending_builtin_names_scope == Some(scope)
+                {
+                    self.pending_builtin_names_scope = None;
+                    if self.scope_name(scope, name).is_none() {
+                        return Ok(());
+                    }
+                }
                 self.update_module_annotations(scope, name, None)?;
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));

@@ -470,6 +470,8 @@ pub(crate) enum SourceFrame {
 pub(crate) struct Module {
     /// Interpreter settings already selected by the Python-style launcher.
     pub command_flags: Option<crate::CommandFlags>,
+    /// NUL-separated source registrations that mask native providers in this image.
+    pub builtin_module_sources: Option<String>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -1126,6 +1128,7 @@ pub(crate) enum Builtin {
     LiteralStringView,
     IntListContains,
     StringListContains,
+    StringTupleContains,
     StructListContains,
     StringContains,
     /// Immutable byte subsequence; operands are evaluated needle first.
@@ -1150,6 +1153,7 @@ pub(crate) enum Builtin {
         field: u32,
     },
     SysImplementation,
+    SysBuiltinModuleNames,
     SysStdlibModuleNames,
     SysStreamText {
         descriptor: u8,
@@ -1273,7 +1277,7 @@ pub(crate) enum Builtin {
     ObjectRecordProject(usize),
     ObjectStreamProject,
     ObjectTextProject,
-    ObjectIsExactTuple,
+    IsExactTuple,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
@@ -1460,7 +1464,7 @@ pub(crate) enum Builtin {
     HashUpdateFile,
     HashName,
     HashType,
-    HashIdentity,
+    PointerIdentity,
     HashDigestSize,
     HashBlockSize,
     HashDigest {
@@ -2628,7 +2632,7 @@ impl InstanceType {
             Self::Deque => matches!(ty, Type::Deque(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::VarTuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(

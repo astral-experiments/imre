@@ -174,13 +174,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     )
                         .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
                         .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
-                    // Imre's built-in finder already classifies native modules without Python source.
-                    let main = UPSTREAM[UPSTREAM.find("def _main():").unwrap()..].replace(
-                        "module.__name__ in sys.builtin_module_names",
-                        "importlib.machinery.BuiltinImporter.find_spec(module.__name__) is not None",
-                    )
                     // A source module can have a spec but no legacy cached attribute.
-                    .replace(
+                    let main = UPSTREAM[UPSTREAM.find("def _main():").unwrap()..].replace(
                         "        print('Cached: {}'.format(module.__cached__))",
                         concat!(
                             "        try:\n",

@@ -70,6 +70,7 @@ impl Builtin {
             }
             Self::SplitIntSource(_) | Self::SplitTextSource(_) | Self::SplitTextLen | Self::StringSliceEqual => Contract::new(false, PreservesLists),
             Self::SplitTextField(_) => Contract::new(true, PreservesLists),
+            Self::StringTupleContains => Contract::new(false, PreservesLists),
             Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
@@ -140,7 +141,7 @@ impl Builtin {
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
-            | Self::ObjectIsExactTuple
+            | Self::IsExactTuple
             | Self::ObjectStreamProject
             | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity
@@ -571,7 +572,7 @@ impl Builtin {
             | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
             | Self::HashDigestSize
-            | Self::HashIdentity
+            | Self::PointerIdentity
             | Self::HashBlockSize
             | Self::ActiveException
             | Self::SysIntern
@@ -765,6 +766,7 @@ impl Builtin {
             | Self::ExceptionFieldIdentity { .. }
             | Self::SysThreadInfo
             | Self::SysThreadText { .. }
+            | Self::SysBuiltinModuleNames
             | Self::SysStdlibModuleNames
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform

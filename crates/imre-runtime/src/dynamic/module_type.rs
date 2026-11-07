@@ -124,6 +124,9 @@ impl Context {
         scope: Id,
         name: &str,
     ) -> Result<Id> {
+        if name == "builtin_module_names" {
+            self.publish_builtin_module_names(scope)?;
+        }
         let field = self.scope_name(scope, name);
         if field.is_some() || self.class_attr(class, name).is_some() {
             return self.instance_attribute(module, class, field, name);

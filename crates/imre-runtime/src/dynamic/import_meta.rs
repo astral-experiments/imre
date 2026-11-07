@@ -1,7 +1,7 @@
 //! Connect the running interpreter's import registry to its native module initializers.
 use std::path::{Path, PathBuf};
 
-use crate::objects::exceptions::string_repr;
+use crate::objects::{builtin_module_names, exceptions::string_repr};
 
 use super::{
     Context, ModuleInitializer, SourceModule,
@@ -193,30 +193,58 @@ impl Context {
         {
             return Ok(vec![path.parent().unwrap().to_owned()]);
         }
-        if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
+        if builtin_module_names::is_native_package(name) {
             return Ok(vec![PathBuf::from(format!("<imre stdlib>/{name}"))]);
         }
         Ok(Vec::new())
     }
 
-    /// The public built-in finder owns sealed native modules without Python source or a package path.
-    pub(super) fn is_builtin_module(&self, name: &str) -> Result<bool> {
-        if !stdlib::is_module(name)
-            || imre_ast::providers::is_native_fallback(name)
-            || self.is_frozen(name)
-            || self.bundled_registration(name).is_some()
-        {
-            return Ok(false);
+    /// Populate the original sys dictionary once, when its inventory is first
+    /// observed. Looking up optional providers can open a host library.
+    pub(super) fn publish_builtin_module_names(&mut self, scope: Id) -> Result<()> {
+        if self.pending_builtin_names_scope != Some(scope) {
+            return Ok(());
         }
-        Ok(self.native_locations(name, None)?.is_empty())
+        if self.scope_name(scope, "builtin_module_names").is_none() {
+            let names = builtin_module_names::names(|name| self.is_builtin_module(name))?;
+            let items = names.into_iter().map(|name| self.text(name)).collect();
+            let names = self.heap.packed_tuple(items, false);
+            self.bind(scope, "builtin_module_names", names);
+        }
+        self.pending_builtin_names_scope = None;
+        Ok(())
+    }
+
+    /// A native import can check the original inventory without discovering unrelated
+    /// optional providers. An exposed or overridden binding uses Python membership.
+    pub(super) fn builtin_names_contains(&mut self, sys: Id, key: Id) -> Result<bool> {
+        if let Value::Module {
+            scope,
+            constructor: None,
+            ..
+        } = *self.heap.get(sys)
+            && self.pending_builtin_names_scope == Some(scope)
+            && self.scope_name(scope, "builtin_module_names").is_none()
+            && let Value::Str(name) = self.heap.get(key)
+        {
+            return Ok(self.is_builtin_module(name));
+        }
+        let names = self.lookup_attr(sys, "builtin_module_names")?;
+        self.contains(key, names)
+    }
+
+    /// The public built-in finder owns sealed native modules without Python source or a package path.
+    pub(super) fn is_builtin_module(&self, name: &str) -> bool {
+        builtin_module_names::owns(
+            name,
+            || self.is_frozen(name),
+            || self.bundled_registration(name).is_some(),
+        )
     }
 
     pub(super) fn native_spec_info(&mut self, name: &str, path: Id, bundled: bool) -> Result<Id> {
         let sealed = self.sealed_native(name);
-        if self.is_frozen(name)
-            || sealed == bundled
-            || (!bundled && self.is_builtin_module(name)?)
-        {
+        if self.is_frozen(name) || sealed == bundled || (!bundled && self.is_builtin_module(name)) {
             return Ok(NONE);
         }
         let source = self.bundled_source(name);
@@ -261,6 +289,9 @@ impl Context {
 
     /// Allocate a fresh built-in, respecting the two single-phase interpreter modules.
     pub(super) fn create_builtin_module(&mut self, name: &str) -> Result<Id> {
+        if !self.is_builtin_module(name) {
+            return Ok(NONE);
+        }
         if matches!(name, "sys" | "builtins") {
             let name = self.text(name);
             return self.meta_call(NONE, "_create_core_module", vec![name]);
