@@ -1218,6 +1218,7 @@ impl Intrinsic {
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
     pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
+    pub(crate) const TYPING_IO: Self = Self::ObjectOnlyExport("typing.IO");
     pub(crate) const TYPING_PROTOCOL: Self = Self::ObjectRuntimeExport("typing.Protocol");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
     pub(crate) const TYPING_SEQUENCE: Self = Self::ObjectRuntimeExport("typing.Sequence");
@@ -2052,6 +2053,7 @@ impl IntrinsicModule {
             (Self::Typing, "Mapping") => Intrinsic::TYPING_MAPPING,
             (Self::Typing, "Protocol") => Intrinsic::TYPING_PROTOCOL,
             (Self::Typing, "Final") => Intrinsic::Final,
+            (Self::Typing, "IO") => Intrinsic::TYPING_IO,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
             (Self::Typing, "Optional") => Intrinsic::Optional,
