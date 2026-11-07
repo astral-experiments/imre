@@ -2,7 +2,7 @@ import gc
 import weakref
 from dataclasses import FrozenInstanceError, dataclass, field, fields
 from inspect import getattr_static
-from typing import Generic, TypeVar
+from typing import Generic, Protocol, TypeVar
 
 
 def current():
@@ -49,6 +49,33 @@ def current():
     clone = object.__new__(Slotted)
     clone.__setstate__(obj.__getstate__())
     assert clone == obj
+
+    hooks = []
+
+    class Group(Protocol):
+        __slots__ = ()
+
+        def __init_subclass__(cls):
+            super().__init_subclass__()
+            hooks.append((cls, __class__))
+
+        def owner(self):
+            return __class__
+
+    class Bounds(Group):
+        value: int
+
+        def owners(self):
+            return (__class__, super().owner())
+
+        def __iter__(self):
+            yield self.value
+
+    slotted = dataclass(frozen=True, slots=True)(Bounds)
+    assert hooks == [(Bounds, Group), (slotted, Group)]
+    instance = slotted(7)
+    assert tuple(instance) == (7,) and not hasattr(instance, '__dict__')
+    assert instance.owners() == (slotted, Group)
 
     registrations = []
 
