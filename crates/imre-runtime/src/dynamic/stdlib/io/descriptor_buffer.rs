@@ -21,6 +21,35 @@ pub(super) fn backing(ctx: &Context, receiver: Id) -> Option<Id> {
     }
 }
 
+/// Only the native flush bound to this explicit writer can drain its descriptor buffer.
+/// A Python flush override (including a veto) runs unchanged.
+pub(super) fn flush_before_close(ctx: &mut Context, receiver: Id, method: Id) -> Result<Id> {
+    if let Value::Method {
+        callable,
+        receiver: bound,
+        ..
+    } = *ctx.heap.get(method)
+        && bound == receiver
+        && let Value::IoMethod {
+            owner,
+            name: "flush",
+            ..
+        } = *ctx.heap.get(callable)
+        && ctx.heap.get(owner).io_kind() == Some("BufferedWriter")
+        && let Some(buffer) = backing(ctx, receiver).filter(|&id| id != receiver)
+        && let Value::File(handle) = ctx.heap.get(buffer)
+    {
+        let handle = handle.clone();
+        if let files::BinaryFile::Descriptor(fd) = handle.as_ref()
+            && ctx.raw_instance_field(fd.raw, "write").is_some()
+            && matches!(*fd.buffer.borrow(), Some(Buffer::Writer(_)))
+        {
+            return fd.flush_live_writer(ctx, receiver);
+        }
+    }
+    ctx.call(method, vec![], Vec::new())
+}
+
 /// An explicit buffered wrapper retains the caller's FileIO and controls its close.
 fn wrapper_fallback(ctx: &Context, owner: Id) -> Option<(Id, &BufferedFd, &Cell<bool>)> {
     let Value::Instance {
@@ -596,6 +625,8 @@ pub(in crate::dynamic) struct BufferedFd {
     drop_fallback: Option<Cell<bool>>,
     handle: Rc<RawFile>,
     callback_active: Cell<bool>,
+    // Write cursor and end of the window handed to a Python writer during close.
+    closing_window: Cell<Option<(usize, usize)>>,
     pub(super) active: super::native_writer::ActiveCall,
     buffer: RefCell<Option<Buffer>>,
 }
@@ -636,6 +667,7 @@ impl BufferedFd {
             handle,
             drop_fallback: None,
             callback_active: Cell::new(false),
+            closing_window: Cell::new(None),
             active: super::native_writer::ActiveCall::default(),
             buffer: RefCell::new(Some(buffer)),
         })
@@ -658,6 +690,7 @@ impl BufferedFd {
             writing: true,
             drop_fallback: None,
             callback_active: Cell::new(false),
+            closing_window: Cell::new(None),
             active: super::native_writer::ActiveCall::default(),
             buffer: RefCell::new(Some(Buffer::Random(buffer))),
         })
@@ -671,6 +704,7 @@ impl BufferedFd {
             writing: !reading,
             drop_fallback: None,
             callback_active: Cell::new(false),
+            closing_window: Cell::new(None),
             active: super::native_writer::ActiveCall::default(),
             buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
         }
@@ -728,6 +762,7 @@ impl BufferedFd {
     }
 
     pub(super) fn warn_on_close(&self, ctx: &mut Context, receiver: Id) -> Result<()> {
+        self.check_terminal_reentry(ctx, receiver)?;
         self.check_reentry(ctx)?;
         if ctx.raw_instance_field(receiver, "_finalizing") == Some(TRUE) {
             self.callback_active.set(true);
@@ -858,6 +893,61 @@ impl BufferedFd {
             crate::compact_bytes(&mut data);
         }
         Ok(ctx.alloc(Value::Bytes(data)))
+    }
+
+    /// Give the raw writer a window into the acknowledged bytes. Close retires this buffer
+    /// even on error. The shared descriptor and the unwritten count stay visible to callbacks.
+    fn flush_live_writer(&self, ctx: &mut Context, receiver: Id) -> Result<Id> {
+        self.check_terminal_reentry(ctx, receiver)?;
+        self.check_reentry(ctx)?;
+        if file_io::state(ctx, self.raw).is_none_or(|raw| raw.live_fd().is_none()) {
+            return Err(Error::new("ValueError", "flush of closed file"));
+        }
+        let (bytes, mut start) = {
+            let mut slot = self.buffer.borrow_mut();
+            let Some(Buffer::Writer(writer)) = slot.as_mut() else {
+                unreachable!()
+            };
+            (
+                std::mem::take(&mut writer.buffer),
+                std::mem::take(&mut writer.written),
+            )
+        };
+        let end = bytes.len();
+        let backing = ctx.alloc(Value::ByteArray(bytes));
+        ctx.heap.keep(backing);
+        self.closing_window.set(Some((start, end)));
+        self.callback_active.set(true);
+        let result = (|| {
+            while start < end {
+                let count =
+                    super::bytes_writer::write_window(ctx, self.raw, backing, start, end - start)?;
+                start += count;
+                self.closing_window.set(Some((start, end)));
+                ctx.dispatch_signals()?;
+            }
+            // A successful flush resets the raw offset, including for a raw.close veto.
+            self.closing_window.set(Some((0, 0)));
+            Ok(NONE)
+        })();
+        self.callback_active.set(false);
+        result
+    }
+
+    pub(super) fn retired_write_offset(&self) -> Option<usize> {
+        let (written, _) = self.closing_window.get()?;
+        self.buffer.borrow().is_none().then_some(written)
+    }
+
+    fn check_terminal_reentry(&self, ctx: &mut Context, receiver: Id) -> Result<()> {
+        if self.closing_window.get().is_some() && self.callback_active.get() {
+            let repr = ctx.checked_format(receiver, true)?;
+            return Err(Error::new(
+                "RuntimeError",
+                format!("reentrant call inside {repr}"),
+            ));
+        }
+        Ok(())
     }
 
     /// Drive write and flush one syscall at a time. The buffer owns flush progress;
@@ -1079,6 +1169,22 @@ impl BufferedFd {
                 },
             )
         };
+        // close retires its buffer even when the raw vetoes close and keeps its fd.
+        // Descriptor queries still use the live raw. Buffered operations require storage.
+        if let Some(offset) = self.retired_write_offset() {
+            match name {
+                "flush" | "write" => return Err(closed()),
+                "fileno" | "writable" | "seekable" | "isatty" => {
+                    return super::text_wrapper::invoke(ctx, self.raw, name, vec![]);
+                }
+                "tell" => {
+                    let value = super::text_wrapper::invoke(ctx, self.raw, "tell", vec![])?;
+                    let position = super::bytes_writer::position(ctx, value)?;
+                    return Ok(ctx.int((position - offset as i64).max(0)));
+                }
+                _ => {}
+            }
+        }
         let size = if let ("read1", [n]) = (name, args) {
             Some(ctx.index_integer(*n)?.to_i64().ok_or_else(|| {
                 Error::new(
@@ -1094,7 +1200,7 @@ impl BufferedFd {
         if name == "seek" {
             let target = args[0];
             let whence = files::buffered_whence(ctx, args.get(1).copied())?;
-            if self.closed() {
+            if self.closed() || self.retired_write_offset().is_some() {
                 return Err(closed());
             }
             let seekable = ctx.lookup_attr(self.raw, "seekable")?;
@@ -1109,6 +1215,7 @@ impl BufferedFd {
             if self.closed() {
                 return Err(Error::new("ValueError", "I/O operation on closed file"));
             }
+            self.check_terminal_reentry(ctx, receiver)?;
             self.check_raw(ctx, receiver, name)?;
             self.check_reentry(ctx)?;
             let mut slot = self.buffer.borrow_mut();
@@ -1118,6 +1225,9 @@ impl BufferedFd {
                 .seek(offset, whence)
                 .map_err(|err| buffer_error(ctx, err))?;
             return Ok(ctx.int(position as i64));
+        }
+        if matches!(name, "write" | "flush" | "truncate") {
+            self.check_terminal_reentry(ctx, receiver)?;
         }
         self.check_raw(ctx, receiver, name)?;
         let fd = self.handle.live_fd().ok_or_else(closed)?;
@@ -1168,7 +1278,14 @@ impl BufferedFd {
                 }
                 Ok(NONE)
             }
-            "tell" => Ok(ctx.int(buffer.position().map_err(os_error)? as i64)),
+            "tell" => {
+                let pos = buffer.position().map_err(os_error)?;
+                let pending = self
+                    .closing_window
+                    .get()
+                    .map_or(0, |(written, end)| end - written);
+                Ok(ctx.int((pos + pending as u64) as i64))
+            }
             "peek" => {
                 self.check_reentry(ctx)?;
                 let data = match buffer {

@@ -1,3 +1,4 @@
+import errno
 import gc
 import io
 import os
@@ -201,5 +202,57 @@ try:
     raw.close = close_once
     assert stream.close() is None and stream.close() is None
     assert raw.closed and close_calls == [None]
+
+    def stage_rebound_writer(raw):
+        writer = NativeWriter(raw, 8)
+        assert writer.write(b"abc") == 3
+        assert os.fstat(raw.fileno()).st_size == 0
+        raw.write = write_prefix
+
+    raw = io.FileIO(path, "w")
+    fd = raw.fileno()
+    writes = []
+
+    def write_prefix(view):
+        assert view.readonly and view.obj is None
+        writes.append(bytes(view))
+        return os.write(fd, b"X")
+
+    stage_rebound_writer(raw)
+    gc.collect()
+    assert raw.closed and writes == [b"abc", b"bc", b"c"]
+    with io.FileIO(path, "r") as check:
+        assert check.read() == b"XXX"
+
+    with io.FileIO(path, "w") as raw:
+        stream = NativeWriter(raw, 8)
+        assert stream.write(b"abc") == 3
+        fd = raw.fileno()
+        raw.write = write_prefix
+        raw.close = lambda: None
+        stream.close()
+        assert not stream.closed and stream.fileno() == fd and stream.tell() == 3
+        raises(ValueError, stream.flush)
+        raises(ValueError, stream.write, b"lost")
+        del raw.close
+
+    with io.FileIO(path, "w") as raw:
+        stream = NativeWriter(raw, 8)
+        assert stream.write(b"abc") == 3
+
+        def would_block(view):
+            try:
+                os.open(path + ".missing", os.O_RDONLY)
+            except FileNotFoundError:
+                return None
+
+        raw.write = would_block
+        try:
+            stream.close()
+        except BlockingIOError as error:
+            assert error.errno == errno.ENOENT and error.characters_written == 0
+        else:
+            raise AssertionError("close ignored a blocked raw write")
+        assert raw.closed
 finally:
     os.unlink(path)

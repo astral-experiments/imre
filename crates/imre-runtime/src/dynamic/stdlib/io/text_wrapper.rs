@@ -114,11 +114,22 @@ pub(in crate::dynamic) struct Wrapper {
 }
 
 pub(super) fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> Result<Id> {
+    invoke_with(ctx, obj, name, |ctx, method| {
+        ctx.call(method, args, Vec::new())
+    })
+}
+
+pub(super) fn invoke_with(
+    ctx: &mut Context,
+    obj: Id,
+    name: &str,
+    call: impl FnOnce(&mut Context, Id) -> Result<Id>,
+) -> Result<Id> {
     let mark = ctx.heap.temporary_mark();
     ctx.heap.keep(obj);
     let result = ctx
         .lookup_attr(obj, name)
-        .and_then(|f| ctx.call(f, args, Vec::new()));
+        .and_then(|method| call(ctx, method));
     ctx.heap.release_temporaries_since(mark);
     match &result {
         Ok(value) => ctx.heap.keep(*value),
