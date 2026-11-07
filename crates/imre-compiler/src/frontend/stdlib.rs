@@ -2,6 +2,43 @@
 
 use super::*;
 
+fn replace_arguments(call: &ast::ExprCall) -> Option<(&ast::Expr, &ast::Expr, Option<&ast::Expr>)> {
+    match (&*call.arguments.args, &*call.arguments.keywords) {
+        ([old, new], []) => Some((old, new, None)),
+        ([old, new, count], []) => Some((old, new, Some(count))),
+        ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => {
+            Some((old, new, Some(&kw.value)))
+        }
+        _ => None,
+    }
+}
+
+/// The receiver fixes the method, and the completed operand has a builtin non-string class.
+fn fixed_replace_operand(call: &ast::ExprCall, operand: &ast::Expr) -> bool {
+    let Some(method) = call.func.as_attribute_expr() else {
+        return false;
+    };
+    if method.attr.as_str() != "replace" || !method.value.is_string_literal_expr() {
+        return false;
+    }
+    match operand {
+        ast::Expr::List(_) | ast::Expr::Tuple(_) | ast::Expr::Set(_) | ast::Expr::Dict(_) => true,
+        ast::Expr::UnaryOp(op) => {
+            matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                && op.operand.is_number_literal_expr()
+        }
+        _ => operand.is_literal_expr() && !operand.is_string_literal_expr(),
+    }
+}
+
+/// Select an existing ty overload diagnostic after the typed frontend stopped lowering.
+pub(crate) fn literal_replace_mismatch(call: &ast::ExprCall) -> bool {
+    !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+        && replace_arguments(call).is_some_and(|(old, new, _)| {
+            fixed_replace_operand(call, old) || fixed_replace_operand(call, new)
+        })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum JoinStyle {
     Plain,
@@ -777,32 +814,11 @@ impl Checker<'_> {
         receiver: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let (old, new, count) = match (&*call.arguments.args, &*call.arguments.keywords) {
-            ([old, new], []) => (old, new, None),
-            ([old, new, count], []) => (old, new, Some(count)),
-            ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => (old, new, Some(&kw.value)),
-            _ => return Err(self.object_builtin_error("str.replace", call)),
+        let Some((old, new, count)) = replace_arguments(call) else {
+            return Err(self.object_builtin_error("str.replace", call));
         };
-        let check_literal = self.graph.check_only
-            && call
-                .func
-                .as_attribute_expr()
-                .is_some_and(|method| method.value.is_string_literal_expr());
         let mut string_argument = |node: &ast::Expr| {
-            // Only the finished operand's conversion is an error. Its contents
-            // may require Python operations even when its own class is fixed.
-            let fixed_class = match node {
-                ast::Expr::List(_)
-                | ast::Expr::Tuple(_)
-                | ast::Expr::Set(_)
-                | ast::Expr::Dict(_) => true,
-                ast::Expr::UnaryOp(op) => {
-                    matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
-                        && op.operand.is_number_literal_expr()
-                }
-                _ => node.is_literal_expr() && !node.is_string_literal_expr(),
-            };
-            if check_literal && fixed_class {
+            if self.graph.session.explicit_check && fixed_replace_operand(call, node) {
                 let value = self
                     .expr(node)
                     .map_err(|_| self.object_builtin_error("str.replace", call))?;

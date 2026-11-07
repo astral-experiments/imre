@@ -3067,8 +3067,6 @@ pub(crate) enum SetLayoutHint {
 }
 
 pub(crate) struct SourceGraph {
-    /// Explicit checks may diagnose conversions that executables perform at runtime.
-    pub(crate) check_only: bool,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
@@ -4468,7 +4466,6 @@ impl<'a> Loader<'a> {
             checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
         }
         let mut graph = SourceGraph {
-            check_only: false,
             doctest_imports,
             command_startup: None,
             virtual_command: false,

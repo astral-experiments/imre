@@ -112,6 +112,7 @@ pub(crate) use sign_parameters::only_compares_zero;
 mod single_dispatch;
 mod socket;
 mod stdlib;
+pub(crate) use stdlib::literal_replace_mismatch;
 mod string_io;
 mod string_lists;
 mod sys;
