@@ -81,6 +81,27 @@ def current():
     del cursor
     data.extend(b"y")
 
+    view = memoryview(bytearray(b"_id=12!"))[1:]
+    pattern = re.compile(rb"id=([0-9]+)")
+    scanner = pattern.scanner(view)
+    matches = pattern.finditer(view)
+    hit = next(matches)
+    assert hit.string is view and hit.span(1) == (3, 5)
+    view[3:5] = b"34"
+    assert hit.group(1) == scanner.search().group(1) == b"34"
+    for message in ("memoryview has 2 exported buffers", "memoryview has 1 exported buffer"):
+        try:
+            view.release()
+        except BufferError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("released a view exported to a live scanner")
+        assert next(matches, None) is None
+    assert scanner.search() is None
+    del scanner
+    view.release()
+    assert hit.span(1) == (3, 5)
+
     numbers = array("i", [513, -1])
     raw = numbers.tobytes()
     match = re.compile(b"(?s)(..)").search(numbers, 1, 3)

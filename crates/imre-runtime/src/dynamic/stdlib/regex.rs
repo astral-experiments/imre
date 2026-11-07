@@ -1821,21 +1821,17 @@ pub(super) fn search(
         };
     }
     if matches!(method, "scanner" | "finditer") {
-        let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
-            // Keep the export alive for the scanner's lifetime. A Match keeps only the subject.
-            Value::ByteArray(_) | Value::Array(_) => Some(ctx.new_memoryview(string)?),
-            Value::MemoryView { .. } => {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "exporting a memoryview to a regex scanner is unsupported",
-                ));
-            }
-            _ => None,
-        };
+        // The scanner exports its subject until destruction; a Match only retains it.
+        let storage = ctx.view_storage_id(string);
+        if matches!(
+            ctx.heap.get(storage),
+            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
+        ) {
+            ctx.heap.note_buffer_view(storage);
+        }
         let scanner = ctx.alloc(Value::RegexScanner {
             pattern: receiver,
             subject: string,
-            buffer_view,
             initial_start: start,
             start: Some(start),
             end,
