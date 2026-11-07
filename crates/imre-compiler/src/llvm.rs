@@ -3404,8 +3404,10 @@ impl Emitter<'_, '_> {
                         continue;
                     }
                     let value = self.operand(value);
-                    self.append(&list, &value.value);
-                    self.release_operand(&value);
+                    if !self.try_append_owned(&list, &value) {
+                        self.append(&list, &value.value);
+                        self.release_operand(&value);
+                    }
                 }
                 list
             }
@@ -9426,18 +9428,7 @@ impl Emitter<'_, '_> {
                         "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
                         args[0].value.operand, args[1].value.operand
                     ));
-                } else if matches!(args[1].ownership, Ownership::Owned)
-                    && self.append_takes_owner(args[0].value.ty, args[1].value.ty)
-                {
-                    let item = &args[1].value;
-                    let word = self.word(item);
-                    self.checked_status(format!(
-                        "call i32 @imre_seq_append_owned(ptr {}, i64 {word}, i32 {})",
-                        args[0].value.operand,
-                        representation_kind(item.ty, &self.module.types)
-                    ));
-                    // The failure branch already emitted cleanup with this owner armed.
-                    self.forget(item);
+                } else if self.try_append_owned(&args[0].value, &args[1]) {
                     self.release_operand(&args[0]);
                     return none();
                 } else if let Some(window) = self.byte_output_window(&expressions[0]) {
@@ -10261,6 +10252,24 @@ impl Emitter<'_, '_> {
                 }
                 _ => false,
             }
+    }
+
+    /// Transfer a temporary into a compatible sequence only after its append succeeds.
+    fn try_append_owned(&mut self, list: &Value, item: &Operand) -> bool {
+        if !matches!(item.ownership, Ownership::Owned)
+            || !self.append_takes_owner(list.ty, item.value.ty)
+        {
+            return false;
+        }
+        let word = self.word(&item.value);
+        self.checked_status(format!(
+            "call i32 @imre_seq_append_owned(ptr {}, i64 {word}, i32 {})",
+            list.operand,
+            representation_kind(item.value.ty, &self.module.types)
+        ));
+        // The failure branch retains this temporary in its cleanup.
+        self.forget(&item.value);
+        true
     }
 
     fn append(&mut self, list: &Value, value: &Value) {
@@ -13485,6 +13494,15 @@ def total(text: str) -> int:
                 "{observer}"
             );
         }
+    }
+
+    #[test]
+    fn sequence_literals_transfer_temporary_items_and_retain_borrowed_owners() {
+        let body = function_body(
+            "def build(name: str) -> list[str]:\n    return [name + '!', name, name + '?']\nprint(len(build('x')))",
+        );
+        assert_eq!(body.matches("call i32 @imre_seq_append_owned(").count(), 2);
+        assert_eq!(body.matches("call i32 @imre_seq_append(").count(), 1);
     }
 
     #[test]
