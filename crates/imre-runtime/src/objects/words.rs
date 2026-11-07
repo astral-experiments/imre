@@ -37,6 +37,11 @@ impl WordKind {
         u32::from(self.0)
     }
 
+    /// These representations can be copied and dropped as raw machine words.
+    pub(super) fn is_bitwise_copy(self) -> bool {
+        matches!(self.base(), 0 | 1 | 10) || self.raw() == 7
+    }
+
     pub(super) fn can_queue_release(self) -> bool {
         matches!(self.base(), 5 | 6 | 9 | 14)
     }
@@ -322,6 +327,58 @@ impl Words {
         Ok(())
     }
 
+    /// Acquire all owners together when each output word can then be copied directly.
+    fn retain_repeated_words(&self, copies: usize) -> bool {
+        // SAFETY: all non-null words are rooted by this buffer and have its declared type.
+        unsafe {
+            match self.kind.base() {
+                3 | 11 => StrOwner::retain_repeated_words(&self.values, copies),
+                4 => crate::ListOwner::retain_repeated_words(&self.values, copies),
+                5 => crate::ObjectOwner::retain_repeated_words(&self.values, copies),
+                _ => return self.kind.is_bitwise_copy(),
+            }
+        }
+        true
+    }
+
+    /// Repeat the resolved sequence, acquiring shared owners only for reference-bearing kinds.
+    pub(super) fn repeated(&self, count: usize) -> Result<Self, super::exceptions::Error> {
+        let length = self
+            .values
+            .len()
+            .checked_mul(count)
+            .filter(|&length| length <= super::MAX_LIST_LEN)
+            .ok_or_else(|| super::Error::new(super::Kind::MemoryError, "list is too large"))?;
+        let mut result = Self::new(self.kind.raw());
+        result
+            .values
+            .try_reserve_exact(length)
+            .map_err(|_| super::exceptions::Error::allocation())?;
+        if length == 0 {
+            return Ok(result);
+        }
+        // The full result has capacity before any additional strong owners are acquired.
+        if self.retain_repeated_words(count) {
+            if let [word] = self.values.as_slice() {
+                result.values.resize(length, *word);
+            } else {
+                for _ in 0..count {
+                    result.values.extend_from_slice(&self.values);
+                }
+            }
+        } else {
+            for _ in 0..count {
+                for &word in &self.values {
+                    // SAFETY: the source buffer owns a rooted word of this homogeneous kind.
+                    result
+                        .values
+                        .push(unsafe { self.kind.acquire(word) }.into_word());
+                }
+            }
+        }
+        Ok(result)
+    }
+
     pub(super) fn copy_strings(&self) -> Result<Self, super::exceptions::Error> {
         debug_assert!(self.plan().is_none());
         self.check_kind(3);
@@ -535,6 +592,9 @@ impl Drop for Words {
             drop(unsafe { allocator_api2::boxed::Box::from_raw(self.values[0] as *mut Deferred) });
             return;
         }
+        if self.kind.is_bitwise_copy() {
+            return;
+        }
         if self.values.spilled() && self.kind.can_queue_release() {
             records::release_sequence_words(self.kind, std::mem::take(&mut self.values).into_vec());
             return;
@@ -549,6 +609,25 @@ impl Drop for Words {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_nullable_words_keep_each_alias_alive() {
+        let owner = StrOwner::new(Str::const_new("alias"));
+        let mut source = Words::new(NULLABLE | 3);
+        let first = StrOwner::into_raw(owner.clone()) as usize;
+        let second = StrOwner::into_raw(owner.clone()) as usize;
+        source.values.extend_from_slice(&[first, 0, second]);
+
+        let Ok(result) = source.repeated(3) else {
+            panic!("small repetition must fit")
+        };
+        assert_eq!(StrOwner::strong_count(&owner), 9);
+        assert_eq!(result.values.as_slice(), &[first, 0, second].repeat(3));
+        drop(source);
+        assert_eq!(StrOwner::strong_count(&owner), 7);
+        drop(result);
+        assert_eq!(StrOwner::strong_count(&owner), 1);
+    }
 
     #[test]
     #[cfg(target_pointer_width = "64")]

@@ -27,11 +27,11 @@ pub(crate) struct Shared<T>(NonNull<Allocation<T>>);
 pub(crate) struct Weak<T>(Option<NonNull<Allocation<T>>>);
 
 #[inline]
-fn increment(count: &Cell<usize>) {
+fn increment(count: &Cell<usize>, additional: usize) {
     count.set(
         count
             .get()
-            .checked_add(1)
+            .checked_add(additional)
             .unwrap_or_else(|| std::process::abort()),
     );
 }
@@ -126,6 +126,19 @@ impl<T> Shared<T> {
         std::mem::forget(Self::clone(&owner));
     }
 
+    /// Acquire `copies` references for each input word, including repeated aliases.
+    ///
+    /// # Safety
+    /// Every non-null word must point to a live value owned by this Shared type.
+    pub(crate) unsafe fn retain_repeated_words(words: &[usize], copies: usize) {
+        for &word in words {
+            if let Some(allocation) = NonNull::new(word as *mut Allocation<T>) {
+                // SAFETY: a raw Shared value points to the first field of its live allocation.
+                increment(&unsafe { allocation.as_ref() }.strong, copies);
+            }
+        }
+    }
+
     pub(crate) unsafe fn decrement_strong_count(pointer: *const T) {
         // SAFETY: the caller transfers exactly one live strong count.
         drop(unsafe { Self::from_raw(pointer) });
@@ -142,7 +155,7 @@ impl<T> Shared<T> {
 
     pub(crate) fn downgrade(this: &Self) -> Weak<T> {
         // SAFETY: this strong owner keeps the allocation live.
-        increment(&unsafe { this.0.as_ref() }.weak);
+        increment(&unsafe { this.0.as_ref() }.weak, 1);
         Weak(Some(this.0))
     }
 
@@ -205,7 +218,7 @@ impl<T> Shared<T> {
 impl<T> Clone for Shared<T> {
     fn clone(&self) -> Self {
         // SAFETY: self owns a live count in this single-threaded allocation.
-        increment(&unsafe { self.0.as_ref() }.strong);
+        increment(&unsafe { self.0.as_ref() }.strong, 1);
         Self(self.0)
     }
 }
@@ -301,7 +314,7 @@ impl<T> Weak<T> {
         if strong.get() == 0 {
             return None;
         }
-        increment(strong);
+        increment(strong, 1);
         Some(Shared(pointer))
     }
 }
@@ -310,7 +323,7 @@ impl<T> Clone for Weak<T> {
     fn clone(&self) -> Self {
         if let Some(pointer) = self.0 {
             // SAFETY: this weak owner keeps the counter live.
-            increment(&unsafe { pointer.as_ref() }.weak);
+            increment(&unsafe { pointer.as_ref() }.weak, 1);
         }
         Self(self.0)
     }
