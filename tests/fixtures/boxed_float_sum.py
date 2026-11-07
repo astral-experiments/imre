@@ -44,3 +44,24 @@ def current():
             return ('rounded', value)
 
     print(sum([0.1] * 10 + [Extra()]))
+
+    class ConsumeNext:
+        def __radd__(self, prefix):
+            print("prefix", prefix, next(active))
+            return prefix + 100
+
+    class StopSum:
+        def __radd__(self, prefix):
+            raise LookupError(prefix)
+
+    for reverse in (False, True):
+        operands = [1, 2, ConsumeNext(), 7, 11]
+        active = reversed(operands[::-1]) if reverse else iter(operands)
+        print(sum(active, 10), list(active))
+        operands = [1, 2, StopSum(), 7, 11]
+        active = reversed(operands[::-1]) if reverse else iter(operands)
+        try:
+            sum(active)
+        except LookupError as error:
+            print(error.args, list(active))
+    print(sum(iter([1, 2, 2 ** 63 - 1, 4])))

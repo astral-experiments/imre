@@ -314,7 +314,6 @@ pub(in crate::dynamic) fn from_numeric_slots(ctx: &mut Context, value: Id) -> Re
     Ok(None)
 }
 
-/// Sum a boxed iterable, retaining low-order bits independently on each numerical axis.
 /// Read only exact integer and boolean operands that fit the native accumulator.
 fn small_integer(value: &Value) -> Option<i64> {
     match value {
@@ -324,24 +323,46 @@ fn small_integer(value: &Value) -> Option<i64> {
     }
 }
 
-/// Reduce a native iterator without advancing it until every operand is known to be exact.
+/// A completed reduction or the exact prefix preceding the first Python addition.
+enum IntegerSliceSum {
+    Complete(crate::Int),
+    Prefix { sum: i64, consumed: usize },
+}
+
+/// The iterator has already yielded the first item. Count only subsequent exact additions.
+fn integer_prefix<'a>(
+    ctx: &Context,
+    mut sum: i64,
+    items: impl Iterator<Item = &'a Id>,
+) -> IntegerSliceSum {
+    for (consumed, &item) in items.enumerate() {
+        let Some(next) = small_integer(ctx.heap.get(item)).and_then(|value| sum.checked_add(value))
+        else {
+            return IntegerSliceSum::Prefix { sum, consumed };
+        };
+        sum = next;
+    }
+    IntegerSliceSum::Complete(sum.into())
+}
+
+/// Reduce as much of the native iterator as possible without invoking Python code.
 #[inline(never)]
 fn integer_slice_sum(
     ctx: &Context,
     initial: &crate::Int,
     first: Id,
     items: IteratorSlice<'_>,
-) -> Option<crate::Int> {
-    let add = |sum: i64, &id: &Id| sum.checked_add(small_integer(ctx.heap.get(id))?);
+) -> Option<IntegerSliceSum> {
+    let first_sum = || {
+        initial
+            .to_i64()?
+            .checked_add(small_integer(ctx.heap.get(first))?)
+    };
     match items {
-        IteratorSlice::Values(items) => std::iter::once(&first)
-            .chain(items)
-            .try_fold(initial.to_i64()?, add)
-            .map(crate::Int::from),
-        IteratorSlice::Reversed(items) => std::iter::once(&first)
-            .chain(items.iter().rev())
-            .try_fold(initial.to_i64()?, add)
-            .map(crate::Int::from),
+        IteratorSlice::Values(items) => Some(integer_prefix(ctx, first_sum()?, items.iter())),
+        IteratorSlice::Reversed(items) => {
+            Some(integer_prefix(ctx, first_sum()?, items.iter().rev()))
+        }
         IteratorSlice::Bytes(bytes) | IteratorSlice::ReversedBytes(bytes) => {
             // Each chunk vectorizes in a machine word. Even the largest byte slice fits in i128.
             let mut subtotal = i128::from(small_integer(ctx.heap.get(first))?);
@@ -350,17 +371,20 @@ fn integer_slice_sum(
             }
             if let Some(start) = initial.to_i64() {
                 let result = i128::from(start) + subtotal;
-                return Some(match i64::try_from(result) {
+                return Some(IntegerSliceSum::Complete(match i64::try_from(result) {
                     Ok(value) => crate::Int::from(value),
                     Err(_) => crate::Int::new(result.into()),
-                });
+                }));
             }
-            Some(crate::Int::new(initial.big().as_ref() + subtotal))
+            Some(IntegerSliceSum::Complete(crate::Int::new(
+                initial.big().as_ref() + subtotal,
+            )))
         }
         _ => None,
     }
 }
 
+/// Sum a boxed iterable, retaining low-order bits independently on each numerical axis.
 pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id> {
     let iterator = ctx.iterator(source)?;
     let mut total = start.unwrap_or_else(|| ctx.int(0));
@@ -390,11 +414,35 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
         && matches!(ctx.heap.get(iterator), Value::Iterator { .. })
         && let Some(sum) = integer_slice_sum(ctx, initial, item, ctx.iterator_remaining(iterator)?)
     {
-        if let Value::Iterator { sequence, .. } = ctx.heap.get_mut(iterator) {
-            *sequence = None;
+        let Value::Iterator {
+            sequence,
+            offset,
+            reverse,
+            ..
+        } = ctx.heap.get_mut(iterator)
+        else {
+            unreachable!()
+        };
+        match sum {
+            IntegerSliceSum::Complete(value) => {
+                *sequence = None;
+                ctx.heap.release_temporaries_since(mark);
+                return Ok(ctx.alloc(Value::Int(value)));
+            }
+            IntegerSliceSum::Prefix { sum, consumed } => {
+                if *reverse {
+                    *offset -= consumed;
+                } else {
+                    *offset += consumed;
+                }
+                ctx.heap.release_temporaries_since(mark);
+                let Some(next) = next_item(ctx)? else {
+                    return Ok(ctx.int(sum));
+                };
+                item = next;
+                total = ctx.int(sum);
+            }
         }
-        ctx.heap.release_temporaries_since(mark);
-        return Ok(ctx.alloc(Value::Int(sum)));
     }
 
     if let Value::Int(initial) = ctx.heap.get(total)
