@@ -1,7 +1,7 @@
 """Exercise the native codecs used by filesystem encodings and JSON byte-order marks."""
 import codecs
 import sys
-from codecs import BOM_UTF8, lookup
+from codecs import BOM, BOM_UTF32, BOM_UTF8, lookup
 
 
 def encoding_name() -> str:
@@ -92,6 +92,15 @@ def main() -> None:
     print(repr(codecs.BOM_UTF16_LE))
     print(repr(codecs.BOM_UTF32_BE))
     print(repr(codecs.BOM_UTF32_LE))
+    print(repr(BOM))
+    print(repr(BOM_UTF32))
+    print(BOM is codecs.BOM_UTF16)
+    print(BOM is codecs.BOM_LE)
+    print(BOM_UTF32 is codecs.BOM64_LE)
+    print(BOM is codecs.BOM_BE)
+    print(BOM_UTF32 is codecs.BOM64_BE)
+    print(codecs.BOM32_LE is codecs.BOM_UTF16_LE)
+    print(codecs.BOM32_BE is codecs.BOM_UTF16_BE)
 
 
 main()

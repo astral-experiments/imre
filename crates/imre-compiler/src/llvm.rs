@@ -6267,6 +6267,16 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::TargetLittleEndian => {
+                // Lane zero holds the byte at the lowest address in the LLVM target's layout.
+                let first =
+                    self.instruction("extractelement <2 x i8> bitcast (i16 1 to <2 x i8>), i32 0");
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp eq i8 {first}, 1")),
+                    small_integer: false,
+                }
+            }
             Builtin::SysOriginalOutput { stderr } => Value {
                 ty: returns,
                 operand: self.instruction(format!(

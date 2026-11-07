@@ -177,6 +177,7 @@ def check_escape_decode():
 
 def check_boms():
     from codecs import BOM_UTF8, BOM_UTF16_BE, BOM_UTF16_LE, BOM_UTF32_BE, BOM_UTF32_LE
+    from sys import byteorder
 
     for name, mark, expected in (
         ("BOM_UTF8", BOM_UTF8, b"\xef\xbb\xbf"),
@@ -187,6 +188,13 @@ def check_boms():
     ):
         assert type(mark) is bytes and mark == expected
         assert getattr(codecs, name) is mark
+
+    assert codecs.BOM_LE is codecs.BOM32_LE is BOM_UTF16_LE
+    assert codecs.BOM_BE is codecs.BOM32_BE is BOM_UTF16_BE
+    assert codecs.BOM64_LE is BOM_UTF32_LE
+    assert codecs.BOM64_BE is BOM_UTF32_BE
+    assert codecs.BOM is codecs.BOM_UTF16 is (BOM_UTF16_LE if byteorder == "little" else BOM_UTF16_BE)
+    assert codecs.BOM_UTF32 is (BOM_UTF32_LE if byteorder == "little" else BOM_UTF32_BE)
 
 
 def check_utf8_incremental_encoder():
