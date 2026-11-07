@@ -285,13 +285,52 @@ impl Context {
         if !kwargs.is_empty() {
             return Err(Error::new("TypeError", "unexpected enum decorator keyword"));
         }
-        let lineage = self.linearized_bases(&[*base], false)?;
-        let Value::Class { ancestors, .. } = self.heap.get_mut(*class) else {
+        let Value::Class { scope: source, .. } = *self.heap.get(*class) else {
             return Err(Error::new("TypeError", "enum decorator requires a class"));
         };
-        *ancestors = lineage;
-        self.populate_enum(*class, Some(*base))?;
-        Ok(*class)
+        // _simple_enum constructs a new type from the template's own namespace.
+        // Give it the enum base at allocation so lookup and __mro__ agree.
+        let name = self.class_name(*class).to_owned();
+        let module = self.scope_data(source).module.clone();
+        let dictionary = self.class_namespace_dict(source, false);
+        let members = self
+            .dict_entries(dictionary)
+            .expect("class dictionary")
+            .to_vec();
+        for &(key, value) in &members {
+            self.heap.keep(key);
+            self.heap.keep(value);
+        }
+        let scope = self.scope(&module, None);
+        self.heap.keep(scope);
+        let Value::Scope(fields) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        fields.class_body = Some(Vec::new());
+        let qualname = self.text(&name);
+        self.bind_local(scope, "__qualname__", qualname);
+        let mut declarations = Vec::new();
+        for (key, value) in members {
+            let key = self.str_value(key)?.to_owned();
+            if matches!(key.as_str(), "__dict__" | "__weakref__") {
+                continue;
+            }
+            if key.starts_with('_') || self.is_enum_descriptor(value)? {
+                self.bind_local(scope, &key, value);
+            } else {
+                declarations.push((key, value));
+            }
+        }
+        if self.scope_name(scope, "__doc__").unwrap_or(NONE) == NONE {
+            let doc = self.text("An enumeration.");
+            self.bind_local(scope, "__doc__", doc);
+        }
+        // Descriptors see the new type and its empty member map. Each member
+        // becomes visible only after its constructor returns.
+        let maps = self.enum_member_maps(scope);
+        let class = self.allocate_enum_class(name, scope, *base)?;
+        self.install_enum_members(class, Some(*base), maps, declarations, true)?;
+        Ok(class)
     }
 
     /// Index the first declared member for each value, retaining aliases in the name map.
@@ -318,12 +357,31 @@ impl Context {
                 .map(|(name, value)| (name.to_owned(), value))
                 .collect(),
         };
+        let maps = self.enum_member_maps(scope);
+        self.install_enum_members(class, base, maps, declarations, classified)
+    }
+
+    fn enum_member_maps(&mut self, scope: Id) -> (Id, Id) {
         let names = self.dict(Vec::new());
         let values = self.dict(Vec::new());
         self.bind(scope, "_member_map_", names);
         self.bind(scope, "_value2member_map_", values);
         let proxy = self.alloc(Value::MappingProxy(names));
         self.bind(scope, "__members__", proxy);
+        (names, values)
+    }
+
+    fn install_enum_members(
+        &mut self,
+        class: Id,
+        base: Option<Id>,
+        (names, values): (Id, Id),
+        declarations: Vec<(String, Id)>,
+        classified: bool,
+    ) -> Result<()> {
+        let Value::Class { scope, .. } = *self.heap.get(class) else {
+            unreachable!()
+        };
         if let Some(data_type) = base.filter(|&base| self.has_base(base, "float")) {
             return self.populate_float_enum(class, scope, data_type, names, values, declarations);
         }

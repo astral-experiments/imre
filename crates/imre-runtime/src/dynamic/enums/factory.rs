@@ -68,12 +68,22 @@ impl Context {
             self.bind(scope, "__qualname__", qualname);
         }
         self.str_value(self.scope_name(scope, "__qualname__").unwrap())?;
+        let class = self.allocate_enum_class(class_name, scope, base)?;
+        self.populate_enum(class, scalar)?;
+        Ok(class)
+    }
+
+    pub(super) fn allocate_enum_class(
+        &mut self,
+        class_name: String,
+        scope: Id,
+        base: Id,
+    ) -> Result<Id> {
         let class = self.allocate_class(class_name, scope, vec![base])?;
         self.heap.keep(class);
         self.install_instance_dictionary_descriptor(class, scope);
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope, None)?;
-        self.populate_enum(class, scalar)?;
         Ok(class)
     }
 }
