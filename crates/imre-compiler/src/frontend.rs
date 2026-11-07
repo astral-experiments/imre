@@ -9769,17 +9769,31 @@ impl<'a> Checker<'a> {
                 let cursor = self.prepare_cursor(source, element);
                 return self.collect_set(cursor, input);
             }
-            let key = key
-                .or_else(|| {
-                    let (key, _) = self.types.mapping(source.ty)?;
-                    self.graph.has_object_constructor_fallback.set(true);
-                    Some(key)
-                })
-                .ok_or_else(|| self.object_builtin_error("set", call))?;
-            return Ok(Expr {
-                ty: self.types.set(key),
-                kind: ExprKind::Builtin(Builtin::KeySet, vec![source]),
-            });
+            if let Some(key) = key.or_else(|| {
+                let (key, _) = self.types.mapping(source.ty)?;
+                self.graph.has_object_constructor_fallback.set(true);
+                Some(key)
+            }) {
+                return Ok(Expr {
+                    ty: self.types.set(key),
+                    kind: ExprKind::Builtin(Builtin::KeySet, vec![source]),
+                });
+            }
+            if matches!(
+                source.ty,
+                Type::ListInt | Type::List(_) | Type::VarTuple(_) | Type::Str | Type::Bytes
+            ) || self
+                .types
+                .homogeneous_tuple_element(source.ty)
+                .is_some_and(|ty| self.types.hashable_key(ty))
+            {
+                self.graph.has_object_constructor_fallback.set(true);
+                return self
+                    .prepare_container(source, false, input, false)
+                    .and_then(|items| self.collect_set(items, input))
+                    .map_err(|_| self.object_builtin_error("set", call));
+            }
+            return Err(self.object_builtin_error("set", call));
         }
         if let Some(cached) = self.local_cached_value(&call.func) {
             return self.invoke(call, cached);
