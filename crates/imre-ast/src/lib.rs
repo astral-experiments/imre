@@ -34,6 +34,44 @@ pub fn wildcard_pattern(pattern: &ast::Pattern) -> bool {
         || matches!(pattern, ast::Pattern::MatchStar(p) if p.name.is_none())
 }
 
+/// The sequence protocol operations required by one validated sequence pattern.
+pub struct SequencePatternPlan {
+    /// A sole star does not call len. Otherwise require exactly or at least this many items.
+    pub length: Option<(ast::CmpOp, usize)>,
+    pub items: SequencePatternItems,
+}
+
+pub enum SequencePatternItems {
+    /// Every item is a wildcard. The subject need not be indexed or iterated.
+    Ignore,
+    /// Fetch only inspected items on either side of this ignored star.
+    IndexAround(usize),
+    /// Unpack in iteration order, collecting a list at the optional capture.
+    Unpack(Option<usize>),
+}
+
+/// Use the same observable length, indexing and iteration policy in both boxed backends.
+pub fn sequence_pattern_plan(patterns: &[ast::Pattern]) -> SequencePatternPlan {
+    let star = patterns
+        .iter()
+        .position(|p| matches!(p, ast::Pattern::MatchStar(_)));
+    let length = match star {
+        None => Some((ast::CmpOp::Eq, patterns.len())),
+        Some(_) if patterns.len() > 1 => Some((ast::CmpOp::GtE, patterns.len() - 1)),
+        _ => None,
+    };
+    let items = if patterns.iter().all(wildcard_pattern) {
+        SequencePatternItems::Ignore
+    } else if let Some(index) = star
+        && wildcard_pattern(&patterns[index])
+    {
+        SequencePatternItems::IndexAround(index)
+    } else {
+        SequencePatternItems::Unpack(star)
+    };
+    SequencePatternPlan { length, items }
+}
+
 /// Wildcard imports can only publish names in a module body, including its conditional suites.
 pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<ruff_text_size::TextRange> {
     #[derive(Default)]

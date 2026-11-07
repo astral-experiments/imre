@@ -1,5 +1,5 @@
 //! Structural patterns and their case guards for runtime-loaded Python.
-use imre_ast::wildcard_pattern as wildcard;
+use imre_ast::{SequencePatternItems, sequence_pattern_plan, wildcard_pattern as wildcard};
 use ruff_python_ast as ast;
 
 use super::Function;
@@ -65,42 +65,39 @@ impl Function<'_, '_> {
         let sequence = self.op("match_sequence", &[value]);
         let condition = self.truth(&sequence);
         self.pattern_check(&condition, failed);
-        let star = patterns
-            .iter()
-            .position(|p| matches!(p, ast::Pattern::MatchStar(_)));
-        if star.is_none() || patterns.len() > 1 {
+        let plan = sequence_pattern_plan(patterns);
+        if let Some((op, count)) = plan.length {
             let len = self.op("match_sequence_length", &[value]);
-            let required = self.integer(patterns.len() - usize::from(star.is_some()));
-            let valid = self.op(if star.is_some() { ">=" } else { "==" }, &[&len, &required]);
+            let required = self.integer(count);
+            let valid = self.op(op.as_str(), &[&len, &required]);
             let condition = self.truth(&valid);
             self.pattern_check(&condition, failed);
         }
-        if patterns.iter().all(wildcard) {
-            return;
-        }
-        if let Some(star) = star
-            && wildcard(&patterns[star])
-        {
-            for (i, child) in patterns.iter().enumerate().filter(|(_, p)| !wildcard(p)) {
-                let index = if i < star {
-                    self.integer(i)
-                } else {
-                    // Earlier subpatterns may have changed the subject's length.
-                    let len = self.op("match_sequence_length", &[value]);
-                    let offset = self.integer(patterns.len() - i);
-                    self.op("-", &[&len, &offset])
-                };
-                let item = self.op("get", &[value, &index]);
-                self.pattern(child, &item, failed, captures, names);
+        match plan.items {
+            SequencePatternItems::Ignore => {}
+            SequencePatternItems::IndexAround(star) => {
+                for (i, child) in patterns.iter().enumerate().filter(|(_, p)| !wildcard(p)) {
+                    let index = if i < star {
+                        self.integer(i)
+                    } else {
+                        // Earlier subpatterns may have changed the subject's length.
+                        let len = self.op("match_sequence_length", &[value]);
+                        let offset = self.integer(patterns.len() - i);
+                        self.op("-", &[&len, &offset])
+                    };
+                    let item = self.op("get", &[value, &index]);
+                    self.pattern(child, &item, failed, captures, names);
+                }
             }
-        } else {
-            let count = self.integer(patterns.len());
-            let star = star.map_or_else(|| "0".to_owned(), |i| self.integer(i));
-            let items = self.op("unpack", &[value, &count, &star]);
-            for (i, child) in patterns.iter().enumerate() {
-                let index = self.integer(i);
-                let item = self.op("get", &[&items, &index]);
-                self.pattern(child, &item, failed, captures, names);
+            SequencePatternItems::Unpack(star) => {
+                let count = self.integer(patterns.len());
+                let star = star.map_or_else(|| "0".to_owned(), |i| self.integer(i));
+                let items = self.op("unpack", &[value, &count, &star]);
+                for (i, child) in patterns.iter().enumerate() {
+                    let index = self.integer(i);
+                    let item = self.op("get", &[&items, &index]);
+                    self.pattern(child, &item, failed, captures, names);
+                }
             }
         }
     }

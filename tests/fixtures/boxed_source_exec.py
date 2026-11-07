@@ -925,6 +925,24 @@ class Private:
     assert nested((("tag", 1), True)) == "guard passed"
     assert nested("ab") is None and nested(b"ab") is None
 
+    class Indexed(Logged):
+        def __getitem__(self, index):
+            calls.append(index)
+            return super().__getitem__(index)
+
+    scope["seq"] = Indexed(("crates", "sample", "resources", "fixture"))
+    calls.clear()
+    exec("match seq:\n    case ['crates', _, 'resources', *_]: matched = True", scope)
+    assert scope.pop("matched") and calls == ["len", 0, 2]
+    calls.clear()
+    exec("match seq:\n    case [first, *_, last]: result = first, last", scope)
+    assert scope["result"] == ("crates", "fixture") and calls == ["len", 0, "len", 3]
+    calls.clear()
+    exec("match seq:\n    case [*_]: pass", scope)
+    assert calls == []
+    exec("match seq:\n    case [first, *middle, last]: result = middle", scope)
+    assert scope["result"] == ["sample", "resources"] and calls == ["len", "iter"]
+
     class Broken(list):
         def __iter__(self):
             raise ValueError("iterator failed")
@@ -983,12 +1001,20 @@ class Private:
     assert picker.pick({"key": 1, "value": 2}) == {"value": 2}
     assert picker.pick(3) == 3
 
-    try:
-        compile("match value:\n    case [a, a]: pass", "<match>", "exec")
-    except SyntaxError:
-        pass
-    else:
-        raise AssertionError("duplicate sequence capture accepted")
+    for pattern, text, start, end, location_arg in (
+        ("[a, a]", "multiple assignments to name 'a' in pattern", 14, 15, True),
+        ("[a, *a]", "multiple assignments to name 'a' in pattern", 14, 16, True),
+        ("[a, a, *a, *b]", "multiple starred names in sequence pattern", 10, 24, True),
+        ("[*a, *__debug__]", "cannot assign to __debug__", 15, 25, False),
+    ):
+        try:
+            compile("match value:\n    case " + pattern + ": pass", "<match>", "exec")
+        except SyntaxError as error:
+            location = ("<match>", 2, start, None, 2, end)
+            assert error.msg == text and (error.offset, error.end_offset) == (start, end)
+            assert error.args == ((text, location) if location_arg else (text,))
+        else:
+            raise AssertionError("invalid sequence pattern accepted")
 
 
 def source_genexpr():
