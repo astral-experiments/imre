@@ -186,6 +186,16 @@ pub(crate) fn float_logarithm(x: f64, log: fn(f64) -> f64) -> Result<f64> {
     Ok(log(x))
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_degrees(value: f64) -> f64 {
+    value.to_degrees()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_radians(value: f64) -> f64 {
+    value.to_radians()
+}
+
 pub(crate) fn log1p(value: f64) -> Result<f64> {
     if value <= -1.0 {
         return Err(Error::new(

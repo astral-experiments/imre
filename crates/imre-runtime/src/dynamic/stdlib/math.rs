@@ -307,6 +307,8 @@ pub(super) fn call(
     let checked_unary: Option<fn(f64) -> crate::Result<f64>> = match operation {
         "acos" => Some(crate::floats::acos),
         "asin" => Some(crate::floats::asin),
+        "degrees" => Some(|x| Ok(crate::floats::imre_float_degrees(x))),
+        "radians" => Some(|x| Ok(crate::floats::imre_float_radians(x))),
         "log1p" => Some(crate::floats::log1p),
         _ => None,
     };
