@@ -2699,6 +2699,19 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::AttrGetter(_) | Value::ItemGetter(_) | Value::MethodCaller { .. }
+                if name == "__text_signature__" =>
+            {
+                return Ok(self.text("(obj, /)"));
+            }
+            Value::AttrGetter(_) | Value::ItemGetter(_) | Value::MethodCaller { .. }
+                if name == "__call__" =>
+            {
+                let symbol = format!("{}.__call__", self.type_name(obj));
+                let descriptor = self.builtin(&symbol);
+                let class = self.exact_type(obj)?;
+                return self.bind_attribute(descriptor, obj, class);
+            }
             Value::KeyWrapper { object, .. } => match name {
                 "obj" => return Ok(object.unwrap_or(NONE)),
                 "__hash__" | "__doc__" => return Ok(NONE),
@@ -4899,12 +4912,20 @@ impl Context {
                 return Ok(self.builtin(&format!("{}.{name}", super::namedtuple::GETTER)));
             }
             Value::Native(ref class)
-                if matches!(
-                    class.as_str(),
-                    "operator.itemgetter" | "operator.methodcaller"
-                ) && name == "__reduce__" =>
+                if let Some((owner, signature)) = stdlib::operator::callable_type(class) =>
             {
-                return Ok(self.builtin(&format!("{class}.__reduce__")));
+                match name {
+                    "__text_signature__" => return Ok(self.text(signature)),
+                    "__name__" | "__qualname__" => {
+                        return Ok(self.text(owner.trim_start_matches("operator.")));
+                    }
+                    "__module__" => return Ok(self.text("operator")),
+                    "__call__" => return Ok(self.builtin(&format!("{owner}.__call__"))),
+                    "__reduce__" if owner != "operator.attrgetter" => {
+                        return Ok(self.builtin(&format!("{owner}.__reduce__")));
+                    }
+                    _ => {}
+                }
             }
             Value::Native(ref class)
                 if (class == "range" && super::range::METHODS.contains(&name))
@@ -7426,6 +7447,28 @@ impl Context {
             }
             Value::Native(name) if name == "method_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "method_descriptor", &args, &kwargs)
+            }
+            Value::Native(ref name)
+                if let Some((owner, _)) = name
+                    .strip_suffix(".__call__")
+                    .and_then(stdlib::operator::callable_type) =>
+            {
+                let Some((&receiver, rest)) = args.split_first() else {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("descriptor '__call__' of '{owner}' object needs an argument"),
+                    ));
+                };
+                if !self.builtin_slot_accepts(receiver, owner) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "descriptor '__call__' requires a '{owner}' object but received a '{}'",
+                            self.type_name(receiver)
+                        ),
+                    ));
+                }
+                self.call(receiver, rest.to_vec(), kwargs)
             }
             Value::Native(name) if name == stdlib::flags::TYPE => Err(Error::new(
                 "TypeError",

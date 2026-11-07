@@ -1,6 +1,20 @@
 use super::{Context, Error, Id, Result, Value};
 use std::ops::RangeInclusive;
 
+/// Native operator callable types and their Argument Clinic constructor signatures.
+const CALLABLE_TYPES: [(&str, &str); 3] = [
+    ("operator.attrgetter", "(attr, /, *attrs)"),
+    ("operator.itemgetter", "(item, /, *items)"),
+    ("operator.methodcaller", "(name, /, *args, **kwargs)"),
+];
+
+pub(in crate::dynamic) fn callable_type(name: &str) -> Option<(&'static str, &'static str)> {
+    CALLABLE_TYPES
+        .iter()
+        .copied()
+        .find(|(owner, _)| *owner == name)
+}
+
 fn check_args(
     name: &str,
     args: &[Id],
@@ -289,9 +303,9 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, owner: Id, scope: Id, modul
             ctx.bind(scope, &alias, function);
         }
     }
-    for name in ["attrgetter", "itemgetter", "methodcaller"] {
-        let class = ctx.builtin(&format!("operator.{name}"));
-        ctx.bind(scope, name, class);
+    for (owner, _) in CALLABLE_TYPES {
+        let class = ctx.builtin(owner);
+        ctx.bind(scope, owner.trim_start_matches("operator."), class);
     }
 }
 
