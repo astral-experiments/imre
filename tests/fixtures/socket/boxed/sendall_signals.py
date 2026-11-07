@@ -1,5 +1,7 @@
+import os
 import signal
 import socket
+import time
 
 
 payload = b"x" * (1024 * 1024)
@@ -98,6 +100,39 @@ try:
         accepted, address = listener.accept()
         with accepted:
             assert address == sender.getsockname()
+
+    if hasattr(os, "fork"):
+        sender, receiver = socket.socketpair()
+        with sender, receiver:
+            notice, notify = os.pipe()
+            pid = os.fork()
+            if pid == 0:
+                status = 1
+                try:
+                    os.close(notify)
+                    if os.read(notice, 1) == b"R":
+                        # Let the interrupted receive encounter the still-empty socket.
+                        time.sleep(0.05)
+                        sender.sendall(b"L")
+                        status = 0
+                finally:
+                    os._exit(status)
+            os.close(notice)
+
+            def change_timeout(signum, frame):
+                receiver.settimeout(0.5)
+                os.write(notify, b"R")
+
+            try:
+                signal.signal(signal.SIGALRM, change_timeout)
+                signal.alarm(1)
+                received = receiver.recv(1)
+                assert received == b"L"
+            finally:
+                signal.alarm(0)
+                os.close(notify)
+                _, status = os.waitpid(pid, 0)
+            assert status == 0
 finally:
     signal.alarm(0)
     signal.signal(signal.SIGALRM, previous)
