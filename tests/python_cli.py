@@ -4534,7 +4534,12 @@ for name in ("md4", "ripemd160"):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":
                 check_slice_stack(imre, imports, root, env)
-            elif fixture == "boxed_codec_registry.py":
+            elif fixture in (
+                "boxed_codec_registry.py",
+                "boxed_gc_generator_loop.py",
+                "boxed_gc_returned_stream.py",
+                "boxed_weak_frame_return.py",
+            ):
                 compare("-IB", "-c", imports)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
