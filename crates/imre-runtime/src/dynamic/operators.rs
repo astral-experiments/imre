@@ -3627,6 +3627,7 @@ impl Context {
         }
         let bounds = super::slice::sequence_components(self, parts)?;
         let len = match self.heap.get(obj) {
+            Value::Str(text) if self.heap.is_ascii_str(obj) => text.len(),
             Value::Str(text) => match bounds {
                 // A forward slice with nonnegative bounds only needs to know that
                 // its stop is in range. The iterator's lower bound proves that
