@@ -107,6 +107,19 @@ pub(super) fn call(
             format!("math.{operation}() takes no keyword arguments"),
         ));
     }
+    if operation == "factorial" {
+        let &[n] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "math.factorial() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let n = ctx.index_integer(n)?;
+        return Ok(ctx.alloc(Value::Int(crate::integer_factorial(&n)?)));
+    }
     if operation == "comb" {
         let &[n, k] = args else {
             return Err(Error::new(

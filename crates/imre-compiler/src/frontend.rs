@@ -9940,27 +9940,31 @@ impl<'a> Checker<'a> {
                 return stdlib::unary_float_builtin(Builtin::Abs, value)
                     .ok_or_else(|| self.scoped_builtin_error("math.fabs", call));
             }
-            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.comb")))
-                if call.arguments.keywords.is_empty()
-                    && let [n, k] = call.arguments.args.as_ref()
-                    && self.graph.session.is_stdlib_function(
-                        self.module,
-                        &call.func,
-                        "math",
-                        "comb",
-                    ) =>
-            {
-                let n = self.expr(n)?;
-                let k = self.expr(k)?;
-                if matches!(n.ty, Type::Int | Type::Bool) && matches!(k.ty, Type::Int | Type::Bool)
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("math.comb" | "math.factorial"),
+            ))) if call.arguments.keywords.is_empty() => {
+                let (member, op) = match (name, call.arguments.args.len()) {
+                    ("math.comb", 2) => ("comb", Builtin::MathComb),
+                    ("math.factorial", 1) => ("factorial", Builtin::MathFactorial),
+                    _ => return Err(self.scoped_builtin_error(name, call)),
+                };
+                if self
+                    .graph
+                    .session
+                    .is_stdlib_function(self.module, &call.func, "math", member)
                 {
-                    return Ok(Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Builtin(
-                            Builtin::MathComb,
-                            vec![powers::integer(n), powers::integer(k)],
-                        ),
-                    });
+                    let args = call
+                        .arguments
+                        .args
+                        .iter()
+                        .map(|arg| self.expr(arg).map(powers::integer))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if args.iter().all(|arg| arg.ty == Type::Int) {
+                        return Ok(Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Builtin(op, args),
+                        });
+                    }
                 }
                 return Err(self.scoped_builtin_error(name, call));
             }
