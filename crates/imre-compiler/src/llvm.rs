@@ -12173,6 +12173,13 @@ mod tests {
     }
 
     #[test]
+    fn set_constructors_iterate_concrete_sequences() {
+        let source = "def from_list(xs: list[int]) -> set[int]:\n    return set(xs)\ndef from_bytes(xs: bytes) -> set[int]:\n    return set(xs)\ndef from_text(xs: str) -> set[str]:\n    return set(xs)\nprint(len(from_list([1, 2])), len(from_bytes(b'ab')), len(from_text('abc')))\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call void @imre_set_add(").count(), 3);
+    }
+
+    #[test]
     fn fixed_patterns_compile_once_across_search_sites() {
         let llvm = compile(
             "import re\n\ndef first(text: str) -> int:\n    if m := re.search('a+', text):\n        return m.start()\n    return -1\nprint(first('aa'))\nprint(bool(re.compile('a+').search('b')))\n",
