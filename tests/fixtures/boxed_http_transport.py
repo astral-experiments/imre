@@ -9,8 +9,9 @@ def current():
         def set_raw(self, name, value):
             super().set_raw(name, value.upper())
 
-    headers = parse_headers(io.BytesIO(b"X: first\rX: second\n\n"), RecordingMessage)
+    headers = parse_headers(io.BytesIO(b"X: first\r: missing name\rX: second\n\n"), RecordingMessage)
     assert headers.items() == [("X", "FIRST"), ("X", "SECOND")]
+    assert [type(defect).__name__ for defect in headers.defects] == ["InvalidHeaderDefect"]
 
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
