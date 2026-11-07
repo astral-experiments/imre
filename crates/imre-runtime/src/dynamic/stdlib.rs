@@ -931,6 +931,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "_imre_json",
             "scan_once"
+            | "scan_with_pairs_hook"
             | "is_constants_lookup"
             | "surrogate_text"
             | "encoder_state"
@@ -3263,6 +3264,7 @@ pub(super) fn call(
         "_imre_json.surrogate_text" => (1, &[]),
         "_imre_json.is_constants_lookup" => (2, &[]),
         "_imre_json.scan_once" => (3, &[]),
+        "_imre_json.scan_with_pairs_hook" => (4, &[]),
         "hmac._digest_native" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.HMAC.update" => (2, &[]),
@@ -3471,6 +3473,14 @@ pub(super) fn call(
             argument(args, 0)?,
             argument(args, 1)?,
             argument(args, 2)?,
+            NONE,
+        )?,
+        "_imre_json.scan_with_pairs_hook" => json::scan_once(
+            ctx,
+            argument(args, 0)?,
+            argument(args, 2)?,
+            argument(args, 3)?,
+            argument(args, 1)?,
         )?,
         "functools._reduce_iterator" => {
             let function = argument(args, 0)?;

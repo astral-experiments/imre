@@ -1,5 +1,5 @@
 from _json import scanstring as _scanner_scanstring
-from _imre_json import is_constants_lookup as _is_constants_lookup, scan_once as _native_scan_once
+from _imre_json import is_constants_lookup as _is_constants_lookup, scan_once as _native_scan_once, scan_with_pairs_hook as _native_scan_pairs
 
 
 def _scanner_arguments(function, names, args, kwargs):
@@ -52,10 +52,13 @@ class Scanner:
         except ImportError:
             constants = None
         constant = self.parse_constant
-        if (self.strict and self.object_hook is None and self.object_pairs_hook is None
-                and self.parse_float is float and self.parse_int is int
-                and _is_constants_lookup(constants, constant)):
-            scan = partial(_native_scan_once, constant)
+        if (self.strict and self.parse_float is float and self.parse_int is int
+                and _is_constants_lookup(constants, constant)
+                and (self.object_pairs_hook is not None or self.object_hook is None)):
+            if self.object_pairs_hook is None:
+                scan = partial(_native_scan_once, constant)
+            else:
+                scan = partial(_native_scan_pairs, constant, self.object_pairs_hook)
         else:
             from json.decoder import JSONArray, JSONObject
             from json.scanner import _make_scan_once, NUMBER_RE
