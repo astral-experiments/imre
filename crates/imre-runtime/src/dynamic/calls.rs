@@ -137,7 +137,14 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "binascii" if matches!(function, "a2b_qp" | "b2a_qp" | "crc32") => Some((module, function)),
+        "binascii"
+            if matches!(
+                function,
+                "a2b_qp" | "b2a_qp" | "crc32" | "b2a_hex" | "hexlify"
+            ) =>
+        {
+            Some((module, function))
+        }
         "zlib" if function == "compressobj" => Some((module, function)),
         "_lzma"
             if matches!(
@@ -2982,6 +2989,13 @@ impl Context {
                         if let Some(original) = self.threads.system_module {
                             return Ok(original);
                         }
+                    }
+                    "__text_signature__"
+                        if matches!(symbol.as_str(), "binascii.b2a_hex" | "binascii.hexlify") =>
+                    {
+                        return Ok(
+                            self.text("($module, /, data, sep=<unrepresentable>, bytes_per_sep=1)")
+                        );
                     }
                     "__text_signature__" if symbol == "binascii.b2a_qp" => {
                         return Ok(self.text(

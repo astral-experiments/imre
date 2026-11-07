@@ -23,7 +23,8 @@ pub(super) use collections::{
     remove_table_entry, set_add, set_member, sort_values, update as update_dict, update_set,
 };
 pub(super) use text::{
-    bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
+    bytes_from_iterable, bytes_percent, format_conversion, format_value, hex_group, hex_separator,
+    percent, zeroed_bytes,
 };
 
 /// Drop the temporary bound method before a caller uses its result.

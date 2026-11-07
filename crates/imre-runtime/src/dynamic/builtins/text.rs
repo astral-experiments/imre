@@ -318,36 +318,49 @@ pub(super) fn bytes_hex(
 ) -> Result<Id> {
     let (receiver, rest) = method_receiver_args(ctx, owner, "hex", args, &[])?;
     let [sep, group] = bind_method_arguments("hex", rest, kwargs, ["sep", "bytes_per_sep"], 2)?;
-    let group = match group {
-        Some(id) => ctx.index_integer(id)?.big().to_i32().ok_or_else(|| {
-            Error::new("OverflowError", "Python int too large to convert to C int")
-        })?,
-        None => 1,
-    };
-    let separator = if let Some(sep) = sep {
-        let len = ctx.with_buffer_export(receiver, |ctx| super::call(ctx, "len", &[sep], &[]))?;
-        if ctx.as_integer(len)? != 1 {
-            return Err(Error::new("ValueError", "sep must be length 1."));
-        }
-        let byte = match ctx.heap.get(ctx.scalar_value(sep)) {
-            // A str subclass may override __len__. CPython still requires one-byte storage.
-            Value::Str(text) if text.chars().all(|ch| u32::from(ch) <= 0xff) => {
-                Some(text.as_bytes().first().copied().unwrap_or(0))
-            }
-            Value::Str(_) | Value::SurrogateStr(_) => None,
-            Value::Bytes(bytes) => Some(bytes.first().copied().unwrap_or(0)),
-            _ => return Err(type_error("sep must be str or bytes.")),
-        };
-        Some(
-            byte.filter(u8::is_ascii)
-                .ok_or_else(|| Error::new("ValueError", "sep must be ASCII."))?,
-        )
-    } else {
-        None
-    };
+    let group = hex_group(ctx, group)?;
+    let separator = sep
+        .map(|sep| ctx.with_buffer_export(receiver, |ctx| hex_separator(ctx, sep, true)))
+        .transpose()?;
     let bytes = ctx.bytes_like(receiver)?;
+    if separator.is_none() || group == 0 {
+        return Ok(ctx.text(crate::objects::hash_hex(bytes)?.into_string()));
+    }
     let output = crate::objects::hex_with_separator(bytes, separator, group)?;
-    Ok(ctx.text(output.into_string()))
+    Ok(ctx.text(String::from_utf8(output).expect("ASCII separator and hex digits")))
+}
+
+pub(in crate::dynamic) fn hex_group(ctx: &mut Context, group: Option<Id>) -> Result<i32> {
+    match group {
+        Some(id) => {
+            ctx.index_integer(id)?.big().to_i32().ok_or_else(|| {
+                Error::new("OverflowError", "Python int too large to convert to C int")
+            })
+        }
+        None => Ok(1),
+    }
+}
+
+pub(in crate::dynamic) fn hex_separator(
+    ctx: &mut Context,
+    sep: Id,
+    ascii_only: bool,
+) -> Result<u8> {
+    let len = super::call(ctx, "len", &[sep], &[])?;
+    if ctx.as_integer(len)? != 1 {
+        return Err(Error::new("ValueError", "sep must be length 1."));
+    }
+    let byte = match ctx.heap.get(ctx.scalar_value(sep)) {
+        // A str subclass may override __len__. CPython still requires one-byte storage.
+        Value::Str(text) if text.chars().all(|ch| u32::from(ch) <= 0xff) => {
+            Some(text.chars().next().unwrap_or_default() as u8)
+        }
+        Value::Str(_) | Value::SurrogateStr(_) => None,
+        Value::Bytes(bytes) => Some(bytes.first().copied().unwrap_or(0)),
+        _ => return Err(type_error("sep must be str or bytes.")),
+    };
+    byte.filter(|byte| !ascii_only || byte.is_ascii())
+        .ok_or_else(|| Error::new("ValueError", "sep must be ASCII."))
 }
 
 /// Decode one contiguous ASCII buffer, accepting whitespace only between complete pairs.
