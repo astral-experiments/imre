@@ -1106,6 +1106,7 @@ impl std::ops::Deref for BoxedTextFile {
 /// State that belongs to a single initialization of a native module.
 #[derive(Clone, Copy)]
 pub(super) enum NativeModuleState {
+    PendingBuiltin,
     LocaleError(Id),
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     TermiosError(Id),
@@ -1120,6 +1121,7 @@ pub(super) enum NativeModuleState {
 impl NativeModuleState {
     fn references(self, visit: &mut impl VisitReferences) {
         match self {
+            Self::PendingBuiltin => {}
             Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => {
                 visit.push(class)
             }

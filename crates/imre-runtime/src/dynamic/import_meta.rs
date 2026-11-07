@@ -16,6 +16,7 @@ impl Context {
         let core = self.module("_frozen_importlib")?;
         self.bootstrap_module = core;
         let external = self.module("_frozen_importlib_external")?;
+        let builtin = self.lookup_attr(core, "BuiltinImporter")?;
         let native = self.lookup_attr(core, "_NativeImporter")?;
         let bundled = self.lookup_attr(core, "_BundledImporter")?;
         let path = self.lookup_attr(external, "PathFinder")?;
@@ -28,12 +29,21 @@ impl Context {
         }
         hooks.extend([registered_hook, file_hook]);
         let sys = self.module("sys")?;
-        let meta = self.alloc(Value::List(vec![native, path, bundled]));
+        let meta = self.alloc(Value::List(vec![builtin, native, path, bundled]));
         let hooks = self.alloc(Value::List(hooks));
         let cache = self.dict(Vec::new());
         self.set_attr(sys, "meta_path", meta)?;
         self.set_attr(sys, "path_hooks", hooks)?;
         self.set_attr(sys, "path_importer_cache", cache)?;
+        let init = self.lookup_attr(core, "_init_builtin_specs")?;
+        let names = stdlib::SYS_LAZY_FUNCTIONS
+            .iter()
+            .chain(stdlib::SYS_EAGER_FUNCTIONS)
+            .chain(stdlib::SYS_BOUND_FUNCTIONS)
+            .map(|&name| self.text(name))
+            .collect();
+        let names = self.alloc(Value::Tuple(names));
+        self.call(init, vec![names], vec![])?;
         self.import_registry_installed = true;
         Ok(())
     }
@@ -155,9 +165,21 @@ impl Context {
         Ok(Vec::new())
     }
 
+    /// The public built-in finder owns sealed native modules without Python source or a package path.
+    pub(super) fn is_builtin_module(&self, name: &str) -> Result<bool> {
+        if !stdlib::is_module(name)
+            || imre_ast::providers::is_native_fallback(name)
+            || self.is_frozen(name)
+            || self.bundled_registration(name).is_some()
+        {
+            return Ok(false);
+        }
+        Ok(self.native_locations(name, None)?.is_empty())
+    }
+
     pub(super) fn native_spec_info(&mut self, name: &str, path: Id, bundled: bool) -> Result<Id> {
         let sealed = self.sealed_native(name);
-        if sealed == bundled {
+        if sealed == bundled || (!bundled && self.is_builtin_module(name)?) {
             return Ok(NONE);
         }
         let source = self.bundled_source(name);
@@ -200,6 +222,49 @@ impl Context {
             self.text("built-in")
         };
         Ok(self.alloc(Value::Tuple(vec![origin, paths])))
+    }
+
+    /// Allocate a fresh built-in, respecting the two single-phase interpreter modules.
+    pub(super) fn create_builtin_module(&mut self, name: &str) -> Result<Id> {
+        if matches!(name, "sys" | "builtins") {
+            let name = self.text(name);
+            return self.meta_call(NONE, "_create_core_module", vec![name]);
+        }
+        let module = self.create_native_module(name)?;
+        let Value::Module {
+            scope,
+            module_state,
+            ..
+        } = self.heap.get_mut(module)
+        else {
+            unreachable!()
+        };
+        *module_state = Some(super::value::NativeModuleState::PendingBuiltin);
+        let scope = *scope;
+        // module_from_spec attaches the spec, loader and parent after creation.
+        self.bind(scope, "__loader__", NONE);
+        self.bind(scope, "__spec__", NONE);
+        self.bind(scope, "__package__", NONE);
+        Ok(module)
+    }
+
+    /// Run the initializer only for an object created by the built-in loader.
+    pub(super) fn exec_builtin_module(&mut self, module: Id) -> Result<Id> {
+        use super::value::NativeModuleState;
+        let Value::Module { module_state, .. } = self.heap.get_mut(module) else {
+            return Ok(NONE);
+        };
+        if !matches!(module_state, Some(NativeModuleState::PendingBuiltin)) {
+            return Ok(NONE);
+        }
+        *module_state = None;
+        if let Err(error) = self.exec_native_module(module) {
+            if let Value::Module { module_state, .. } = self.heap.get_mut(module) {
+                *module_state = Some(NativeModuleState::PendingBuiltin);
+            }
+            return Err(error);
+        }
+        Ok(NONE)
     }
 
     pub(super) fn create_native_module(&mut self, name: &str) -> Result<Id> {

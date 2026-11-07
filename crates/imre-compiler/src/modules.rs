@@ -1633,6 +1633,9 @@ impl IntrinsicModule {
             }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibMachinery, "BuiltinImporter") => {
+                Intrinsic::ScopedObjectExport("importlib.machinery.BuiltinImporter")
+            }
             (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "NamespaceLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.NamespaceLoader")
             }

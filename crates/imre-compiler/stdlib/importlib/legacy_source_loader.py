@@ -4,6 +4,9 @@ import sys
 from _thread import RLock
 from _imre_importlib import (
     _import_lock,
+    is_builtin_module as _is_builtin_module,
+    create_builtin_module as _create_builtin_module,
+    exec_builtin_module as _exec_builtin_module,
     create_native_module as _create_native_module,
     exec_native_module as _exec_native_module,
     native_spec_info as _native_spec_info,
@@ -81,6 +84,76 @@ def _find_and_load(name, import_):
 
 def _import_warning(message, line):
     _warn_import(None if _is_frozen else globals(), message, line)
+
+
+def _require_builtin(fullname):
+    if not isinstance(fullname, str) or not _is_builtin_module(fullname):
+        raise ImportError(f'{fullname!r} is not a built-in module', name=fullname)
+
+
+class BuiltinImporter:
+    """Find and initialize modules built into this interpreter."""
+
+    _ORIGIN = "built-in"
+
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        if _is_builtin_module(fullname):
+            return ModuleSpec(fullname, cls, origin=cls._ORIGIN)
+        return None
+
+    @staticmethod
+    def create_module(spec):
+        name = spec.name
+        _require_builtin(name)
+        return _create_builtin_module(name)
+
+    @staticmethod
+    def exec_module(module):
+        _exec_builtin_module(module)
+
+    @classmethod
+    def get_code(cls, fullname):
+        _require_builtin(fullname)
+        return None
+
+    @classmethod
+    def get_source(cls, fullname):
+        _require_builtin(fullname)
+        return None
+
+    @classmethod
+    def is_package(cls, fullname):
+        _require_builtin(fullname)
+        return False
+
+    @classmethod
+    def load_module(cls, fullname):
+        return _load_module_shim(cls, fullname)
+
+
+def _init_builtin_specs(sys_functions):
+    # Recreating single-phase modules restores their initial exports. Interpreter
+    # configuration and streams belong to the running interpreter's sys object.
+    global _core_exports
+    methods = {name: getattr(sys, name) for name in sys_functions}
+    _core_exports = {'sys': methods, 'builtins': vars(sys.modules['builtins']).copy()}
+    for name, values in _core_exports.items():
+        values.update(__name__=name, __doc__=sys.modules[name].__doc__,
+                      __package__=None, __loader__=None, __spec__=None)
+    for name, module in tuple(sys.modules.items()):
+        spec = BuiltinImporter.find_spec(name)
+        if spec is not None:
+            _init_module_attrs(spec, module)
+
+
+def _create_core_module(name):
+    module = sys.modules.get(name)
+    if not isinstance(module, type(sys)):
+        module = _new_module(name)
+        sys.modules[name] = module
+    vars(module).update(_core_exports[name])
+    return module
 
 
 class _NativeImporter:

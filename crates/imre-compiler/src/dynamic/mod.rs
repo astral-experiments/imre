@@ -37,7 +37,7 @@ struct Imports {
     pkgutil_names: HashSet<String>,
     get_data_names: HashSet<String>,
     machinery_names: HashSet<String>,
-    typed_machinery_receivers: HashSet<String>,
+    machinery_attributes: HashSet<(String, String)>,
 }
 
 fn literal_path(expr: &Expr) -> Option<PathBuf> {
@@ -68,22 +68,13 @@ fn literal_path(expr: &Expr) -> Option<PathBuf> {
     }
 }
 
-// Ordinary files keep their typed ModuleSpec diagnostics unless the graph
-// requests the source importer. Explicit runtime imports can use the boxed class.
-fn typed_machinery_export(name: &str) -> bool {
-    name == "ModuleSpec"
-}
-
 impl Imports {
-    fn needs_typed_machinery(&self) -> bool {
-        !self
-            .machinery_names
-            .is_disjoint(&self.typed_machinery_receivers)
+    fn uses_machinery_export(&self, export: &str) -> bool {
+        self.machinery_attributes
+            .iter()
+            .any(|(receiver, attr)| attr == export && self.machinery_names.contains(receiver))
             || self.names.iter().any(|(level, name)| {
-                *level == 0
-                    && name
-                        .strip_prefix("importlib.machinery.")
-                        .is_some_and(typed_machinery_export)
+                *level == 0 && name.strip_prefix("importlib.machinery.") == Some(export)
             })
     }
 
@@ -409,11 +400,12 @@ impl<'a> Visitor<'a> for Imports {
         if cfg!(unix) && self.sys_path(e) {
             self.add(0, "importlib");
         }
-        if let Expr::Attribute(a) = e
-            && typed_machinery_export(a.attr.as_str())
-            && let Some(receiver) = UnqualifiedName::from_expr(&a.value)
+        if let Expr::Attribute(attr) = e
+            && matches!(attr.attr.as_str(), "ModuleSpec" | "BuiltinImporter")
+            && let Some(receiver) = UnqualifiedName::from_expr(&attr.value)
         {
-            self.typed_machinery_receivers.insert(receiver.to_string());
+            self.machinery_attributes
+                .insert((receiver.to_string(), attr.attr.to_string()));
         }
         if let Expr::Attribute(attr) = e
             && let Expr::Name(module) = &*attr.value
@@ -974,7 +966,7 @@ pub(crate) fn compile(
             && !registered_imports.called
             && (!provider_script || owner == "__main__")
             && !through_getter
-            && imports.needs_typed_machinery()
+            && imports.uses_machinery_export("ModuleSpec")
             && !matches!(operation, Some(ObjectOperation::CheckedEntry))
             && (owner == "__main__"
                 || machinery_graph
@@ -984,6 +976,15 @@ pub(crate) fn compile(
         }
         uses_exec |= imports.uses_exec;
         computed_import |= imports.computed_import;
+        // A checked caller can request the loader before its other annotated calls are lowered.
+        if !options.runtime_imports
+            && options.python_startup().is_none()
+            && imports.uses_machinery_export("BuiltinImporter")
+            && let Some(graph) = typed_graph
+            && (owner == "__main__" || graph.modules.iter().any(|m| !m.bundled && m.name == owner))
+        {
+            graph.require_fallback_calls();
+        }
         let mut names = imports.names;
         if owner == "importlib" {
             // Filesystem modules can import the loader protocols through either public module.
