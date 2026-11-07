@@ -237,21 +237,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/unittest/loader_boxed.py"),
         )),
         "threading" => bundled_source!("threading.py"),
-        "textwrap" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("textwrap.py", SOURCE.get_or_init(|| {
-                // The boxed ABI can forward the original **kwargs, preserving omitted
-                // options and dispatching construction through the module's TextWrapper.
-                const WRAPPER: &str = include_str!("../../stdlib/textwrap/wrapper.py");
-                const UPSTREAM: &str = include_str!(
-                    "../../../../benchmarks/cpython_stdlib/full/textwrap/upstream/Lib/textwrap.py"
-                );
-                let (implementation, _) = WRAPPER.split_once("\ndef wrap(").unwrap();
-                let first = UPSTREAM.find("\ndef wrap(").unwrap();
-                let (functions, _) = UPSTREAM[first..].split_once("\nif __name__").unwrap();
-                format!("{implementation}{functions}")
-            })))
-        }
+        "textwrap" => Some((
+            "textwrap.py",
+            // The public functions forward the caller's **kwargs to the module's TextWrapper.
+            concat!(
+                include_str!("../../stdlib/textwrap/wrapper.py"),
+                "\n\n",
+                include_str!("../../stdlib/textwrap/functions_boxed.py"),
+                "\n",
+            ),
+        )),
         "importlib.resources._adapters" => bundled_source!("importlib/resources/_adapters.py"),
         "importlib.resources" => bundled_source!("importlib/resources/__init__.py"),
         "importlib.readers" => bundled_source!("importlib/readers.py"),
