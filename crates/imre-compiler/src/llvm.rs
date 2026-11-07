@@ -10937,6 +10937,11 @@ declare ptr @imre_functools_placeholder(i32)
 @imre_socket_sol_socket = external constant i64
 @imre_socket_so_type = external constant i64
 @imre_socket_so_reuseaddr = external constant i64
+@imre_socket_ipv6_recvhoplimit = external constant i64
+@imre_socket_ipv6_hoplimit = external constant i64
+@imre_socket_ipv6_recvtclass = external constant i64
+@imre_socket_ipv6_tclass = external constant i64
+@imre_socket_ipproto_udplite = external constant i64
 @imre_socket_ipproto_tcp = external constant i64
 @imre_socket_tcp_nodelay = external constant i64
 @imre_socket_somaxconn = external constant i64

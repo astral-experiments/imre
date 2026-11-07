@@ -141,6 +141,16 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("NI_NOFQDN", libc::NI_NOFQDN),
     ("NI_NUMERICHOST", libc::NI_NUMERICHOST),
     ("NI_NUMERICSERV", libc::NI_NUMERICSERV),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("IPV6_RECVHOPLIMIT", libc::IPV6_RECVHOPLIMIT),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("IPV6_HOPLIMIT", libc::IPV6_HOPLIMIT),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("IPV6_RECVTCLASS", libc::IPV6_RECVTCLASS),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("IPV6_TCLASS", libc::IPV6_TCLASS),
+    #[cfg(target_os = "linux")]
+    ("IPPROTO_UDPLITE", libc::IPPROTO_UDPLITE),
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
     ("SOL_SOCKET", libc::SOL_SOCKET),
     #[cfg(any(target_os = "linux", target_os = "macos"))]

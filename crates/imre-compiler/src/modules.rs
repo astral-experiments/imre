@@ -2244,6 +2244,26 @@ impl IntrinsicModule {
             (Self::Socket, "fromfd") => Intrinsic::ScopedObjectExport("socket.fromfd"),
             (Self::Socket, "SocketIO") => Intrinsic::ScopedObjectExport("socket.SocketIO"),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "IPV6_RECVHOPLIMIT") => {
+                Intrinsic::SocketConstant("ipv6_recvhoplimit")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "IPV6_HOPLIMIT") => {
+                Intrinsic::SocketConstant("ipv6_hoplimit")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "IPV6_RECVTCLASS") => {
+                Intrinsic::SocketConstant("ipv6_recvtclass")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "IPV6_TCLASS") => {
+                Intrinsic::SocketConstant("ipv6_tclass")
+            }
+            #[cfg(target_os = "linux")]
+            (Self::Socket | Self::SocketNative, "IPPROTO_UDPLITE") => {
+                Intrinsic::SocketConstant("ipproto_udplite")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             (Self::Socket | Self::SocketNative, "SCM_RIGHTS") => {
                 Intrinsic::IntConstant(i64::from(libc::SCM_RIGHTS))
             }
