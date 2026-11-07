@@ -248,3 +248,23 @@ view["request_id"] = 17
 captured = StackSummary.extract(walk_tb(tb), capture_locals=True)
 view["request_id"] = 42
 assert captured[-1].locals == {"request_id": "17"}
+
+from traceback import print_list
+
+
+def redirecting_frames():
+    sys.stderr = io.StringIO()
+    yield ("worker.py", 7, "run", "    consume()")
+
+
+previous_stderr = sys.stderr
+saved_colorize = sys.modules["_colorize"]
+output = Writer()
+try:
+    sys.stderr = output
+    sys.modules["_colorize"] = None
+    assert print_list(redirecting_frames()) is None
+finally:
+    sys.modules["_colorize"] = saved_colorize
+    sys.stderr = previous_stderr
+assert output.chunks == ['  File "worker.py", line 7, in run\n    consume()\n', '']
