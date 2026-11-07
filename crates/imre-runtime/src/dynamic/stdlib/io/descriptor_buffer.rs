@@ -438,8 +438,7 @@ impl Read for Descriptor {
 
 impl Write for Descriptor {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        // SAFETY: the buffer is readable for its length. The kernel validates the fd.
-        count(unsafe { libc::write(self.fd()?, buf.as_ptr().cast(), buf.len()) })
+        file_io::write_once(self.fd()?, buf)
     }
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
@@ -762,7 +761,7 @@ impl BufferedFd {
     }
 
     /// Run Python with the logical buffer lock held, but without a Rust borrow.
-    fn dispatch_read_signal(&self, ctx: &mut Context) -> Result<()> {
+    fn dispatch_buffer_signal(&self, ctx: &mut Context) -> Result<()> {
         self.callback_active.set(true);
         let result = ctx.dispatch_signals();
         self.callback_active.set(false);
@@ -783,7 +782,7 @@ impl BufferedFd {
                     return Ok(ctx.alloc(Value::Bytes(bytes)));
                 }
                 Ok(None) => {
-                    if let Err(error) = self.dispatch_read_signal(ctx) {
+                    if let Err(error) = self.dispatch_buffer_signal(ctx) {
                         if !ctx.has_errno(&error, libc::EINTR) {
                             return Err(error);
                         }
@@ -837,7 +836,7 @@ impl BufferedFd {
                 Ok(_) => {}
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => {
                     drop(slot);
-                    let result = self.dispatch_read_signal(ctx);
+                    let result = self.dispatch_buffer_signal(ctx);
                     // The buffered readinto loop also retries a handler's OSError(EINTR).
                     if let Err(error) = result
                         && !ctx.has_errno(&error, libc::EINTR)
@@ -861,6 +860,68 @@ impl BufferedFd {
             crate::compact_bytes(&mut data);
         }
         Ok(ctx.alloc(Value::Bytes(data)))
+    }
+
+    /// Drive write and flush one syscall at a time. The buffer owns flush progress;
+    /// sent counts direct input bytes. Neither borrow survives a Python callback.
+    fn write_buffered(&self, ctx: &mut Context, fd: RawFd, input: Option<Id>) -> Result<()> {
+        let mut retry_fd = Some(fd);
+        let mut sent = 0;
+        loop {
+            let result = {
+                let mut slot = self.buffer.borrow_mut();
+                let Some(Buffer::Writer(writer)) = slot.as_mut() else {
+                    return Err(Error::new("ValueError", "write to closed file"));
+                };
+                let data = match input {
+                    Some(input) => {
+                        let bytes = files::output_bytes(ctx, input)?;
+                        if writer.try_buffer(&bytes[sent..]) {
+                            return Ok(());
+                        }
+                        Some(bytes)
+                    }
+                    None if writer.buffer.is_empty() => return Ok(()),
+                    None => None,
+                };
+                // EINTR resumes the same raw syscall. After a successful write or
+                // an explicitly raised InterruptedError, the next raw call is new.
+                let fd = if let Some(fd) = retry_fd {
+                    fd
+                } else {
+                    let raw = native_raw(ctx, self.raw, &["write"], "BufferedWriter")?;
+                    let fd = raw.live_fd().ok_or_else(file_io::closed)?;
+                    raw.check_direction(false)?;
+                    retry_fd = Some(fd);
+                    fd
+                };
+                let write = |_: &mut Descriptor, bytes: &[u8]| file_io::write_once(fd, bytes);
+                if let Some(bytes) = data {
+                    writer.write_step(bytes, &mut sent, write)
+                } else {
+                    writer
+                        .flush_step(write)
+                        .map(|()| true)
+                        .map_err(|e| BlockedWrite::error(e, 0))
+                }
+            };
+            match result {
+                Ok(false) => return Ok(()),
+                Ok(true) => {
+                    self.dispatch_buffer_signal(ctx)?;
+                    retry_fd = None;
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                    if let Err(handler) = self.dispatch_buffer_signal(ctx) {
+                        if !ctx.has_errno(&handler, libc::EINTR) {
+                            return Err(handler);
+                        }
+                        retry_fd = None;
+                    }
+                }
+                Err(error) => return Err(buffer_error(ctx, error)),
+            }
+        }
     }
 
     /// Realign the raw offset first and let the live FileIO truncate implement its size protocol.
@@ -891,22 +952,26 @@ impl BufferedFd {
     }
 
     fn close(&self, mut ctx: Option<&mut Context>, flush: bool) -> Result<()> {
-        let pending = match self.buffer.borrow_mut().take() {
-            Some(Buffer::Pipe(pipe)) => pipe.close().map_err(Into::into),
-            Some(Buffer::Random(mut file)) if flush && !self.closed() => {
-                file.flush().map_err(os_error)
-            }
-            Some(Buffer::Writer(mut writer)) if flush && !self.closed() => {
-                writer.flush().map_err(|error| {
+        let pending = {
+            let mut slot = self.buffer.borrow_mut();
+            match slot.as_mut() {
+                Some(Buffer::Pipe(pipe)) => pipe.close().map_err(Into::into),
+                Some(Buffer::Random(file)) if flush && !self.closed() => {
+                    file.flush().map_err(os_error)
+                }
+                Some(Buffer::Writer(writer)) if flush && !self.closed() => {
                     if let Some(ctx) = ctx.as_deref_mut() {
-                        buffer_error(ctx, error)
+                        let fd = self.handle.live_fd().expect("open writer");
+                        drop(slot);
+                        self.write_buffered(ctx, fd, None)
                     } else {
-                        os_error(error)
+                        writer.flush().map_err(os_error)
                     }
-                })
+                }
+                _ => Ok(()),
             }
-            _ => Ok(()),
         };
+        self.buffer.borrow_mut().take();
         match (pending, self.handle.close(), ctx) {
             (Err(mut flush), Err(mut close), Some(ctx)) => {
                 if flush.context == NONE {
@@ -1042,7 +1107,10 @@ impl BufferedFd {
                 }
                 match buffer {
                     Buffer::Random(file) => file.flush().map_err(os_error)?,
-                    Buffer::Writer(w) => w.flush().map_err(|err| buffer_error(ctx, err))?,
+                    Buffer::Writer(_) => {
+                        drop(slot);
+                        self.write_buffered(ctx, fd, None)?;
+                    }
                     Buffer::Pipe(pipe) => pipe.flush()?,
                     Buffer::Reader(_) => {}
                 }
@@ -1160,7 +1228,14 @@ impl BufferedFd {
                 let count = data.len();
                 match buffer {
                     Buffer::Pipe(pipe) => pipe.write(data)?,
-                    Buffer::Writer(w) => w.write_all(data).map_err(|err| buffer_error(ctx, err))?,
+                    Buffer::Writer(writer) => {
+                        if !writer.try_buffer(data) {
+                            drop(slot);
+                            ctx.with_buffer_export(args[0], |ctx| {
+                                self.write_buffered(ctx, fd, Some(args[0]))
+                            })?;
+                        }
+                    }
                     Buffer::Random(file) => file.write(data).map_err(os_error)?,
                     Buffer::Reader(_) => unreachable!(),
                 }
