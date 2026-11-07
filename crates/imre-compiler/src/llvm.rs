@@ -4164,6 +4164,54 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Counts the bits of a tagged magnitude, falling back to arbitrary precision for a pointer.
+    fn integer_bit_query(&mut self, value: &Value, count_ones: bool) -> Value {
+        if value.small_integer {
+            return self.small_integer_bit_query(value, count_ones);
+        }
+        let tagged = self.instruction(format!("trunc i64 {} to i1", value.operand));
+        let (small, wide, done) = (self.label(), self.label(), self.label());
+        self.branch(&tagged, &small, &wide);
+        self.start(&small);
+        let immediate = self.small_integer_bit_query(value, count_ones);
+        self.jump(&done);
+        self.start(&wide);
+        let symbol = if count_ones {
+            "imre_int_bit_count"
+        } else {
+            "imre_int_bit_length"
+        };
+        let generic = self.call(symbol, Type::Int, &[value]);
+        self.forget(&generic);
+        let wide_exit = self.current.clone();
+        self.jump(&done);
+        self.start(&done);
+        let operand = self.instruction(format!(
+            "phi i64 [{}, %{small}], [{}, %{wide_exit}]",
+            immediate.operand, generic.operand
+        ));
+        self.owned(Value {
+            ty: Type::Int,
+            operand,
+            small_integer: false,
+        })
+    }
+
+    /// The signed 63-bit payload has a representable absolute value even at its lower bound.
+    fn small_integer_bit_query(&mut self, value: &Value, count_ones: bool) -> Value {
+        let raw = self.instruction(format!("ashr i64 {}, 1", value.operand));
+        let magnitude = self.instruction(format!("call i64 @llvm.abs.i64(i64 {raw}, i1 true)"));
+        let bits = if count_ones {
+            self.instruction(format!("call i64 @llvm.ctpop.i64(i64 {magnitude})"))
+        } else {
+            let zeros = self.instruction(format!(
+                "call i64 @llvm.ctlz.i64(i64 {magnitude}, i1 false)"
+            ));
+            self.instruction(format!("sub nuw nsw i64 64, {zeros}"))
+        };
+        self.tag_small(&bits)
+    }
+
     /// Look up a factorial when the operand and result are both proven tagged integers.
     fn bounded_factorial(&mut self, expression: &Expr, value: &Value) -> Option<Value> {
         let n = self.ranges.integer(expression)?;
@@ -7940,8 +7988,9 @@ impl Emitter<'_, '_> {
                     };
                     self.call(symbol, Type::Int, &[&args[0].value, &args[1].value])
                 }),
-            Builtin::IntBitCount => self.call("imre_int_bit_count", Type::Int, &[&args[0].value]),
-            Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
+            Builtin::IntBitCount | Builtin::IntBitLength => {
+                self.integer_bit_query(&args[0].value, matches!(builtin, Builtin::IntBitCount))
+            }
             Builtin::Sumprod if returns == Type::Int => {
                 self.output.local_helper(
                     "imre_tagged_sumprod",
@@ -11877,6 +11926,9 @@ declare ptr @imre_list_slice(ptr, i64, i64, i64)
 declare ptr @imre_seq_slice(ptr, i64, i64, i64)
 declare void @imre_assert_fail()
 declare void @imre_range_step_zero()
+declare i64 @llvm.abs.i64(i64, i1 immarg)
+declare i64 @llvm.ctpop.i64(i64)
+declare i64 @llvm.ctlz.i64(i64, i1 immarg)
 declare void @llvm.assume(i1)
 declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
