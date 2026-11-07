@@ -1921,8 +1921,19 @@ impl Context {
         };
         let fields =
             super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
+        let names = self.code_object(code).freevars.clone();
+        let entries = self
+            .dict_entries(defaults)
+            .expect("function defaults are a dict")
+            .to_vec();
+        // Only default values and implicit class cells need the parameter metadata here.
         let signature = self.code_object(code).parameters;
-        let signature: serde_json::Value = if signature == NONE {
+        let signature: serde_json::Value = if signature == NONE
+            || (entries.is_empty()
+                && !names
+                    .iter()
+                    .any(|name| matches!(name.as_str(), "__class__" | "__classdict__")))
+        {
             serde_json::Value::Null
         } else {
             serde_json::from_str(
@@ -1931,10 +1942,6 @@ impl Context {
             )
             .expect("function parameters are valid JSON")
         };
-        let entries = self
-            .dict_entries(defaults)
-            .expect("function defaults are a dict")
-            .to_vec();
         let lookup = |name: &str| {
             entries.iter().find_map(|&(key, value)| {
                 matches!(self.heap.get(key), Value::Str(text) if text == name).then_some(value)
@@ -1971,7 +1978,6 @@ impl Context {
         } else {
             self.dict(keyword)
         };
-        let names = self.code_object(code).freevars.clone();
         let mut cells = Vec::new();
         for name in &names {
             if name == "__classdict__" && signature["annotation_class"] == true {
