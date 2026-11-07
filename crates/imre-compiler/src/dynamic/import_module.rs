@@ -262,42 +262,20 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "importlib._bootstrap" => bundled_source!("importlib/_bootstrap.py"),
         "_frozen_importlib_external" | "importlib._bootstrap_external" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("importlib/_bootstrap_external.py", SOURCE.get_or_init(|| {
-                // A create_module hook can convert a file package into a namespace spec.
-                const UPSTREAM: &str = include_str!(
-                    "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap_external.py"
-                );
-                let section = |start, end| {
-                    let begin = UPSTREAM.find(start).unwrap();
-                    UPSTREAM[begin..].split_once(end).unwrap().0
-                };
-                // Preserve FileFinder’s package, loader and cache ordering for filesystem entries.
-                let spec = section("_POPULATE = object()", "def _bless_my_loader(")
-                    .replace("_get_supported_file_loaders()", "_file_loader_defaults(location)");
-                let members: Vec<_> = include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt"))
-                    .lines()
-                    .collect();
-                let members = serde_json::to_string(&members)
-                    .expect("stdlib source paths serialize as strings");
-                let installed_sources = format!("_installed_source_members = {members}");
-                [
-                    include_str!("../../stdlib/importlib/source_loader.py"),
-                    section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _unpack_uint16("),
-                    section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
-                    section("def _get_cached(", "def _calc_mode("),
-                    section("def _classify_pyc(", "def _validate_timestamp_pyc("),
-                    section("def _compile_bytecode(", "def _code_to_timestamp_pyc("),
-                    section("class SourcelessFileLoader(", "class ExtensionFileLoader("),
-                    &spec,
-                    &section("class _NamespacePath:", "class FileFinder:")
-                        .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",
-                                 "_warn_import(globals(), 'sys.path_hooks is empty', 1224, _is_frozen)"),
-                    section("class FileFinder:", "class AppleFrameworkLoader("),
-                    &installed_sources,
-                    include_str!("../../stdlib/importlib/registered_finder.py"),
-                    section("def _set_bootstrap_module(", "def _install("),
-                ].join("\n")
-            })))
+            Some((
+                "importlib/_bootstrap_external.py",
+                SOURCE.get_or_init(|| {
+                    let loaders = include_str!("../../stdlib/importlib/_bootstrap_external.py");
+                    let finders = include_str!("../../stdlib/importlib/registered_finder.py");
+                    let members: Vec<_> =
+                        include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt"))
+                            .lines()
+                            .collect();
+                    let members = serde_json::to_string(&members)
+                        .expect("stdlib source paths serialize as strings");
+                    format!("{loaders}\n\n\n_installed_source_members = {members}\n{finders}")
+                }),
+            ))
         }
         // CPython 3.14.5 Lib/uuid.py with a public Enum declaration for SafeUUID.
         "uuid" => Some(("uuid.py", include_str!("../../stdlib/uuid_boxed.py"))),
