@@ -272,12 +272,12 @@ impl Context {
                 self.lookup(a, &name)
             }
             "assign" | "assign_target" | "assign_named_target" => {
+                let name = self.copy_name(b)?;
                 let scope = if op == "assign_named_target" {
-                    self.named_expression_scope(a)
+                    self.named_expression_scope(a, &name)
                 } else {
                     a
                 };
-                let name = self.copy_name(b)?;
                 let replaced = self.store_source_name(scope, &name, c)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
                     Ok(flag(replaced))

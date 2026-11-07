@@ -1143,6 +1143,8 @@ impl std::ops::DerefMut for DeclaredLocals {
 
 #[derive(Clone, Default)]
 pub(super) struct ClosureScope {
+    /// A synthetic parent exposes captured cells and forwards other walrus stores to globals.
+    pub environment: bool,
     pub declared: DeclaredLocals,
     pub declared_complete: bool,
     pub nonlocals: HashSet<String>,

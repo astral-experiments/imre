@@ -247,6 +247,19 @@ def current():
         finally:
             closed.append(label)
 
+    def acquire():
+        source = tracked("input")
+        binding = "initial"
+        stream = ((binding, item) for item in [next(source)])
+        binding = "updated"
+        return stream
+
+    stream = acquire()
+    assert closed == ["input"]
+    assert next(stream) == ("updated", 1)
+    stream.close()
+    closed.clear()
+
     def stop(iterator):
         for _ in iterator:
             return

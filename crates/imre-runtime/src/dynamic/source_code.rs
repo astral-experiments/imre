@@ -7328,7 +7328,7 @@ impl Context {
     }
 
     fn store_named_result(&mut self, scope: Id, name: &str, value: Id, mark: usize) -> Result<()> {
-        if self.store_source_name(self.named_expression_scope(scope), name, value)?
+        if self.store_source_name(self.named_expression_scope(scope, name), name, value)?
             && self.heap.named_assignment(mark, value)
         {
             self.finish_binding_release();
