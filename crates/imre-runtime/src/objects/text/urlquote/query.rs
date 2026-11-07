@@ -23,10 +23,9 @@ fn component(input: &[u8], bytes: bool, encoding: &str, errors: &str) -> Result<
         (encoded_bytes(unquoted(&input)?)? as usize, 8)
     } else {
         let text = if input.contains(&b'%') {
-            check_option(encoding)?;
-            check_option(errors)?;
-            let codec = Codec::lookup(encoding)?;
-            let decoded = decode_text(&input, |span| codec.decode(span, Some(errors)))?;
+            // The UTF-8 input was split on whole scalars and ASCII delimiters.
+            let text = std::str::from_utf8(&input).unwrap();
+            let decoded = decode_component(UrlInput::Text(text), Some(encoding), Some(errors))?;
             crate::checked_owned_str(decoded.into())?
         } else {
             // SAFETY: A text component has only been split on whole scalars and ASCII delimiters.

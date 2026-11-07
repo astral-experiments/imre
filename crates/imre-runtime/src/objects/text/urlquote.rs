@@ -173,29 +173,6 @@ fn unquoted(input: &[u8]) -> Result<Cow<'_, [u8]>> {
     }
 }
 
-fn decode_text<E: From<Error>>(
-    input: &[u8],
-    mut decode: impl FnMut(&[u8]) -> std::result::Result<String, E>,
-) -> std::result::Result<String, E> {
-    let mut out = String::new();
-    out.try_reserve_exact(input.len())
-        .map_err(|_| Error::allocation())?;
-    for span in input.chunk_by(|a, b| a.is_ascii() == b.is_ascii()) {
-        let decoded;
-        let text = if span[0].is_ascii() {
-            decoded = decode(&unquoted(span)?)?;
-            decoded.as_str()
-        } else {
-            // SAFETY: an ASCII boundary cannot bisect a scalar in the original string.
-            unsafe { std::str::from_utf8_unchecked(span) }
-        };
-        out.try_reserve(text.len())
-            .map_err(|_| Error::allocation())?;
-        out.push_str(text);
-    }
-    Ok(out)
-}
-
 /// Decode percent escapes in ASCII spans, or decode the entire bytes argument.
 ///
 /// # Safety
@@ -238,18 +215,40 @@ pub(crate) fn decode_component(
     encoding: Option<&str>,
     errors: Option<&str>,
 ) -> Result<String> {
-    decode_component_with(input, encoding, errors, |codec, data, errors| {
-        codec.decode(data, Some(errors))
-    })
+    let mut out = String::new();
+    visit_unquoted(input, encoding, errors, |part| {
+        let decoded;
+        let text = match part {
+            UnquotedPart::Literal(text) => text,
+            UnquotedPart::Encoded(codec, data, errors) => {
+                decoded = codec.decode(data, Some(errors))?;
+                if out.is_empty() {
+                    out = decoded;
+                    return Ok(());
+                }
+                &decoded
+            }
+        };
+        out.try_reserve(text.len())
+            .map_err(|_| Error::allocation())?;
+        out.push_str(text);
+        Ok::<_, Error>(())
+    })?;
+    Ok(out)
 }
 
-/// Supply the decoder used on percent-decoded ASCII spans, retaining non-ASCII text verbatim.
-pub(crate) fn decode_component_with<E: From<Error>>(
+/// Only ASCII runs of a text URL pass through the requested byte codec.
+pub(crate) enum UnquotedPart<'a> {
+    Literal(&'a str),
+    Encoded(Codec, &'a [u8], &'a str),
+}
+
+pub(crate) fn visit_unquoted<E: From<Error>>(
     input: UrlInput<'_>,
     encoding: Option<&str>,
     errors: Option<&str>,
-    mut decode: impl FnMut(Codec, &[u8], &str) -> std::result::Result<String, E>,
-) -> std::result::Result<String, E> {
+    mut visit: impl FnMut(UnquotedPart<'_>) -> std::result::Result<(), E>,
+) -> std::result::Result<(), E> {
     let bytes = matches!(input, UrlInput::Bytes(_));
     if bytes && encoding.is_none() {
         return Err(Error::new(
@@ -271,13 +270,21 @@ pub(crate) fn decode_component_with<E: From<Error>>(
     check_option(errors)?;
     let input = input.as_bytes();
     if input.is_empty() {
-        Ok(String::new())
-    } else if bytes {
-        decode(Codec::lookup(encoding)?, &unquoted(input)?, errors)
-    } else {
-        let codec = Codec::lookup(encoding)?;
-        decode_text(input, |span| decode(codec, span, errors))
+        return Ok(());
     }
+    let codec = Codec::lookup(encoding)?;
+    if bytes {
+        return visit(UnquotedPart::Encoded(codec, &unquoted(input)?, errors));
+    }
+    for span in input.chunk_by(|a, b| a.is_ascii() == b.is_ascii()) {
+        if span[0].is_ascii() {
+            visit(UnquotedPart::Encoded(codec, &unquoted(span)?, errors))?;
+        } else {
+            // ASCII boundaries cannot bisect a UTF-8 scalar.
+            visit(UnquotedPart::Literal(std::str::from_utf8(span).unwrap()))?;
+        }
+    }
+    Ok(())
 }
 
 mod query;
