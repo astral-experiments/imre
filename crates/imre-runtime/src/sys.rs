@@ -7,7 +7,7 @@ pub(crate) mod cpu_count;
 mod recursion;
 
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
-pub(crate) use recursion::{recursion_limit, set_recursion_limit};
+pub(crate) use recursion::{recursion_limit, set_recursion_limit, with_recursion_frame};
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};

@@ -2113,6 +2113,22 @@ pub(super) fn rendered(text: Str) -> Rendered {
     StrOwner::try_new(text).map_err(|_| std::fmt::Error)
 }
 
+/// Adopt a checked display result. A failing callback retains its Python exception.
+///
+/// # Safety
+/// A non-null pointer transfers one owned native string.
+pub(super) unsafe fn display_result(text: *const Str) -> Rendered {
+    if text.is_null() {
+        return Err(std::fmt::Error);
+    }
+    // SAFETY: the display method returned one owner even if an error is pending.
+    let text = unsafe { StrOwner::from_raw(text) };
+    if imre_error_pending() != 0 {
+        return Err(std::fmt::Error);
+    }
+    Ok(text)
+}
+
 pub(super) fn finish_display(result: Rendered) -> *const Str {
     if imre_error_pending() != 0 {
         return std::ptr::null();

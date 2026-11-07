@@ -64,22 +64,44 @@ pub(super) unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize)
 }
 
 pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rendered {
-    if kind.raw() == 3 && !repr {
-        // SAFETY: the owning field roots the exact string.
-        return Ok(unsafe { StrOwner::acquire_word(word) });
-    }
-    let mut out = String::new();
-    let mut writer = values::ReprWriter(&mut out);
-    // SAFETY: the exception or its projected view roots this argument and
-    // releases all storage borrows before requesting its Python representation.
+    // SAFETY: the caller roots the concrete argument and releases storage borrows
+    // before display. Only the outer value receives str; its container members get repr.
     unsafe {
-        if repr {
-            values::try_write_argument_repr(&mut writer, word, kind)?;
-        } else if !write_string_value(&mut writer, kind, word)? {
-            values::try_write_repr(&mut writer, word, kind)?;
+        if !repr {
+            match kind.raw() {
+                3 => return Ok(StrOwner::acquire_word(word)),
+                6 => {
+                    let descriptor = records::descriptor(word as *const usize);
+                    if let Some((method, needs_frame)) = descriptor.str_method() {
+                        let call = || method.call(kind.acquire(word));
+                        let text = if needs_frame {
+                            crate::sys::with_recursion_frame(call).ok_or(std::fmt::Error)?
+                        } else {
+                            call()
+                        };
+                        return super::exceptions::display_result(text);
+                    }
+                    if descriptor.has_uncompiled_str() {
+                        return rendered(word_repr(kind, word)?.into());
+                    }
+                }
+                5 if object(word as *const Object)
+                    .0
+                    .with(|s| matches!(s, Storage::Exception(_))) =>
+                {
+                    let text = super::exceptions::imre_exception_message(word as *const Object);
+                    return super::exceptions::display_result(text);
+                }
+                _ => {}
+            }
         }
+        let mut out = String::new();
+        let mut writer = values::ReprWriter(&mut out);
+        if repr || !write_string_value(&mut writer, kind, word)? {
+            values::try_write_argument_repr(&mut writer, word, kind)?;
+        }
+        rendered(out.into())
     }
-    rendered(out.into())
 }
 
 /// Write the string form of a rooted string, path or enum. Other values use their repr.
@@ -123,19 +145,7 @@ pub(super) fn word_repr(kind: WordKind, word: usize) -> Result<String, std::fmt:
 
 /// Transfer the formatted string only after all visited fields and callbacks succeed.
 pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *const Str {
-    // SAFETY: all descendants stay rooted in the original immutable boxed value.
-    unsafe {
-        if !repr
-            && kind.raw() == 5
-            && object(word as *const Object)
-                .0
-                .with(|s| matches!(s, Storage::Exception(_)))
-        {
-            // The storage borrow ends before a user-defined __str__ can be called.
-            return super::exceptions::imre_exception_message(word as *const Object);
-        }
-        finish_display(word_text(kind, word, repr))
-    }
+    finish_display(word_text(kind, word, repr))
 }
 
 /// Project a concrete Python scalar or tuple into an owning object value.

@@ -26,6 +26,15 @@ pub extern "C" fn imre_recursion_leave() {
     DEPTH.set(DEPTH.get() - 1);
 }
 
+/// Run a checked callback whose compiled body does not count its own frame.
+pub(crate) fn with_recursion_frame<T>(call: impl FnOnce() -> T) -> Option<T> {
+    imre_recursion_enter();
+    let result = (crate::objects::exceptions::imre_error_pending() == 0).then(call);
+    // Both an entry rejected at the limit and a callback raising an exception leave here.
+    imre_recursion_leave();
+    result
+}
+
 /// Enter a Python source frame whose module name can be inspected by a callee.
 ///
 /// # Safety
