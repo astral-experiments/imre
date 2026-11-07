@@ -1,9 +1,15 @@
+import _ssl
 import ssl
 import struct
 
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 initial = ctx.verify_flags
 assert isinstance(initial, ssl.VerifyFlags)
+assert ssl.VerifyFlags(_ssl.VERIFY_CRL_CHECK_CHAIN) is ssl.VERIFY_CRL_CHECK_CHAIN
+assert ssl.VERIFY_CRL_CHECK_CHAIN is ssl.VerifyFlags.__members__["VERIFY_CRL_CHECK_CHAIN"]
+assert ssl.AlertDescription(_ssl.ALERT_DESCRIPTION_CLOSE_NOTIFY) is ssl.ALERT_DESCRIPTION_CLOSE_NOTIFY
+assert ssl.SSLErrorNumber(_ssl.SSL_ERROR_WANT_READ) is ssl.SSL_ERROR_WANT_READ
+assert type(_ssl.SSL_ERROR_WANT_READ) is int
 assert not initial & ssl.VERIFY_CRL_CHECK_LEAF
 assert bool(ssl.VERIFY_CRL_CHECK_LEAF)
 other = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

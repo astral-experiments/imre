@@ -31,12 +31,44 @@ def current():
 
     assert not isinstance(Access.READ, int)
     assert (Access.READ | Access.PAIR) is Access(7)
+    assert len(Access) == 1 and list(Access) == [Access.READ]
+    assert Access.PAIR in Access and Access(7) in Access
     try:
         Access(3)
     except ValueError:
         pass
     else:
         raise AssertionError("partially named strict combination accepted")
+
+    from enum import EJECT
+
+    class Unknown(int):
+        pass
+
+    mode = Unknown(8)
+    Ejecting = IntFlag("Ejecting", {"READ": 1}, boundary=EJECT)
+    assert Ejecting(mode) is mode
+    assert mode not in Ejecting
+
+    class Policy(IntFlag, boundary=EJECT):
+        READ = 1
+        WRITE = 4
+
+        @classmethod
+        def _missing_(cls, value):
+            calls.append(value)
+            return super()._missing_(value)
+
+    calls = []
+    assert Policy(mode) is mode and mode not in Policy
+    assert calls == [mode, mode]
+
+    class Foreign(IntEnum):
+        BOTH = 5
+
+    joined = Policy(Foreign.BOTH)
+    assert joined.value is Foreign.BOTH and joined is (Policy.READ | Policy.WRITE)
+    assert calls[-1] is Foreign.BOTH
 
     Modes = Flag("Modes", "READ WRITE")
     assert (Modes.READ | Modes.WRITE) is Modes(3)

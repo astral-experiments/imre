@@ -11,7 +11,7 @@ import warnings as _warnings
 from operator import index as _index
 from _ssl import MemoryBIO
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
-from _ssl import SSLError, nid2obj as _nid2obj, txt2obj as _txt2obj
+from _ssl import SSLError, SSL_ERROR_SSL as _SSL_ERROR_SSL, nid2obj as _nid2obj, txt2obj as _txt2obj
 from collections import namedtuple
 from enum import Enum as _Enum, IntEnum as _IntEnum, IntFlag as _IntFlag, _simple_enum
 
@@ -19,11 +19,6 @@ from _ssl import HAS_SNI, HAS_ECDH, HAS_NPN, HAS_ALPN, HAS_PSK, HAS_PHA
 
 CHANNEL_BINDING_TYPES = ["tls-unique"]
 HAS_NEVER_CHECK_COMMON_NAME = hasattr(_ssl, "HOSTFLAG_NEVER_CHECK_SUBJECT")
-SSL_ERROR_SSL = 1
-SSL_ERROR_WANT_READ = 2
-SSL_ERROR_WANT_WRITE = 3
-SSL_ERROR_ZERO_RETURN = 6
-SSL_ERROR_EOF = 8
 
 
 class TLSVersion(_IntEnum):
@@ -42,67 +37,31 @@ for _flag in ("HAS_SSLv2", "HAS_SSLv3", "HAS_TLSv1", "HAS_TLSv1_1", "HAS_TLSv1_2
 del _flag
 
 
-class _SSLMethod(_IntEnum):
-    if hasattr(_ssl, "PROTOCOL_SSLv3"):
-        PROTOCOL_SSLv3 = _ssl.PROTOCOL_SSLv3
-    PROTOCOL_TLS = _ssl.PROTOCOL_TLS
-    PROTOCOL_TLSv1 = _ssl.PROTOCOL_TLSv1
-    PROTOCOL_TLSv1_1 = _ssl.PROTOCOL_TLSv1_1
-    PROTOCOL_TLSv1_2 = _ssl.PROTOCOL_TLSv1_2
-    PROTOCOL_TLS_CLIENT = _ssl.PROTOCOL_TLS_CLIENT
-    PROTOCOL_TLS_SERVER = _ssl.PROTOCOL_TLS_SERVER
-
-
-def _options_enum():
-    # Enum._convert_ sorts by value and name for a consistent canonical alias.
-    members = sorted((getattr(_ssl, name), name) for name in dir(_ssl) if name.startswith("OP_"))
-    fields = {name: value for value, name in members}
+def _enum_from_constants(base, name, prefix, exclude=None):
+    # Enum._convert_ sorts by value and then name to select the canonical alias.
+    members = [(key, value) for key, value in vars(_ssl).items()
+               if key.startswith(prefix) and key != exclude]
+    try:
+        members.sort(key=lambda item: (item[1], item[0]))
+    except TypeError:
+        members.sort(key=lambda item: item[0])
+    fields = dict(members)
     fields["__module__"] = __name__
-    return _simple_enum(_IntFlag)(type("Options", (), fields))
+    cls = _simple_enum(base)(type(name, (), fields))
+    globals().update(cls.__members__)
+    return cls
 
 
-Options = _options_enum()
-globals().update(Options.__members__)
-del _options_enum
+_SSLMethod = _enum_from_constants(_IntEnum, "_SSLMethod", "PROTOCOL_", "PROTOCOL_SSLv23")
+Options = _enum_from_constants(_IntFlag, "Options", "OP_")
+AlertDescription = _enum_from_constants(_IntEnum, "AlertDescription", "ALERT_DESCRIPTION_")
+SSLErrorNumber = _enum_from_constants(_IntEnum, "SSLErrorNumber", "SSL_ERROR_")
+VerifyFlags = _enum_from_constants(_IntFlag, "VerifyFlags", "VERIFY_")
+VerifyMode = _enum_from_constants(_IntEnum, "VerifyMode", "CERT_")
+del _enum_from_constants
 
-
-class VerifyMode(_IntEnum):
-    CERT_NONE = 0
-    CERT_OPTIONAL = 1
-    CERT_REQUIRED = 2
-
-
-# X509_V_FLAG_* values in the OpenSSL 3 public ABI used by the provider.
-class VerifyFlags(_IntFlag):
-    VERIFY_DEFAULT = 0
-    VERIFY_CRL_CHECK_LEAF = 4
-    VERIFY_CRL_CHECK_CHAIN = 12
-    VERIFY_X509_STRICT = 32
-    VERIFY_ALLOW_PROXY_CERTS = 64
-    VERIFY_X509_TRUSTED_FIRST = 32768
-    VERIFY_X509_PARTIAL_CHAIN = 524288
-
-
-VERIFY_DEFAULT = VerifyFlags.VERIFY_DEFAULT
-VERIFY_CRL_CHECK_LEAF = VerifyFlags.VERIFY_CRL_CHECK_LEAF
-VERIFY_CRL_CHECK_CHAIN = VerifyFlags.VERIFY_CRL_CHECK_CHAIN
-VERIFY_X509_STRICT = VerifyFlags.VERIFY_X509_STRICT
-VERIFY_ALLOW_PROXY_CERTS = VerifyFlags.VERIFY_ALLOW_PROXY_CERTS
-VERIFY_X509_TRUSTED_FIRST = VerifyFlags.VERIFY_X509_TRUSTED_FIRST
-VERIFY_X509_PARTIAL_CHAIN = VerifyFlags.VERIFY_X509_PARTIAL_CHAIN
-if hasattr(_ssl, "PROTOCOL_SSLv3"):
-    PROTOCOL_SSLv3 = _SSLMethod.PROTOCOL_SSLv3
-PROTOCOL_TLS = _SSLMethod.PROTOCOL_TLS
-PROTOCOL_TLSv1 = _SSLMethod.PROTOCOL_TLSv1
-PROTOCOL_TLSv1_1 = _SSLMethod.PROTOCOL_TLSv1_1
-PROTOCOL_TLSv1_2 = _SSLMethod.PROTOCOL_TLSv1_2
-PROTOCOL_TLS_CLIENT = _SSLMethod.PROTOCOL_TLS_CLIENT
-PROTOCOL_TLS_SERVER = _SSLMethod.PROTOCOL_TLS_SERVER
 PROTOCOL_SSLv23 = _SSLMethod.PROTOCOL_SSLv23 = PROTOCOL_TLS
 _PROTOCOL_NAMES = {value: name for name, value in _SSLMethod.__members__.items()}
-CERT_NONE = VerifyMode.CERT_NONE
-CERT_OPTIONAL = VerifyMode.CERT_OPTIONAL
-CERT_REQUIRED = VerifyMode.CERT_REQUIRED
 
 
 @_simple_enum(_IntEnum)
@@ -223,7 +182,7 @@ def _call(function, *args):
     try:
         return function(*args)
     except _imre_ssl.Error as exc:
-        raise SSLError(SSL_ERROR_SSL, str(exc)) from None
+        raise SSLError(_SSL_ERROR_SSL, str(exc)) from None
 
 
 def _check_context_result(result):
@@ -244,7 +203,7 @@ def _check_role(protocol, server_side):
 
 def _raise_verify_error(code, message):
     error = SSLCertVerificationError(
-        SSL_ERROR_SSL, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: " + message
+        _SSL_ERROR_SSL, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: " + message
     )
     error.verify_code = code
     error.verify_message = message
@@ -528,13 +487,13 @@ class SSLContext:
 
 
 _TLS_ERRORS = {
-    "WANT_READ": (SSLWantReadError, SSL_ERROR_WANT_READ, "The operation did not complete (read)", None),
-    "WANT_WRITE": (SSLWantWriteError, SSL_ERROR_WANT_WRITE, "The operation did not complete (write)", None),
-    "ZERO_RETURN": (SSLZeroReturnError, SSL_ERROR_ZERO_RETURN, "TLS/SSL connection has been closed (EOF)", None),
-    "EOF": (SSLEOFError, SSL_ERROR_EOF, "EOF occurred in violation of protocol", None),
-    "UNEXPECTED_EOF_WHILE_READING": (SSLEOFError, SSL_ERROR_EOF, "EOF occurred in violation of protocol", "SSL"),
-    "PROTOCOL_IS_SHUTDOWN": (SSLError, SSL_ERROR_SSL, "protocol is shutdown", "SSL"),
-    "SHUTDOWN_WHILE_IN_INIT": (SSLError, SSL_ERROR_SSL, "shutdown while in init", "SSL"),
+    "WANT_READ": (SSLWantReadError, _ssl.SSL_ERROR_WANT_READ, "The operation did not complete (read)", None),
+    "WANT_WRITE": (SSLWantWriteError, _ssl.SSL_ERROR_WANT_WRITE, "The operation did not complete (write)", None),
+    "ZERO_RETURN": (SSLZeroReturnError, _ssl.SSL_ERROR_ZERO_RETURN, "TLS/SSL connection has been closed (EOF)", None),
+    "EOF": (SSLEOFError, _ssl.SSL_ERROR_EOF, "EOF occurred in violation of protocol", None),
+    "UNEXPECTED_EOF_WHILE_READING": (SSLEOFError, _ssl.SSL_ERROR_EOF, "EOF occurred in violation of protocol", "SSL"),
+    "PROTOCOL_IS_SHUTDOWN": (SSLError, _SSL_ERROR_SSL, "protocol is shutdown", "SSL"),
+    "SHUTDOWN_WHILE_IN_INIT": (SSLError, _SSL_ERROR_SSL, "shutdown while in init", "SSL"),
 }
 
 
@@ -544,7 +503,7 @@ def _tls_result(result):
         reason, message = result
         if isinstance(reason, int):
             _raise_verify_error(reason, message)
-        kind, code, library = SSLError, SSL_ERROR_SSL, "SSL"
+        kind, code, library = SSLError, _SSL_ERROR_SSL, "SSL"
     elif isinstance(result, str):
         reason = result
         kind, code, message, library = _TLS_ERRORS[reason]

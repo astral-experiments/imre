@@ -503,6 +503,11 @@ impl Context {
                 if let Some(value) = self.own_class_attr(class, name) {
                     return self.bind_attribute(value, instance, owner).map(Some);
                 }
+                // Native Enum bases have real class namespaces. An inherited
+                // descriptor must bind at its defining class to the original owner.
+                if self.enum_scopes.contains_key(&class) && self.class_attr(class, name).is_some() {
+                    continue;
+                }
                 // Resolve inherited object methods at their real position, after any Python mixin.
                 if let Value::Native(kind) = self.heap.get(class)
                     && !matches!(

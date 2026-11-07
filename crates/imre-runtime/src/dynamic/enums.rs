@@ -57,21 +57,34 @@ impl Context {
                 format!("unexpected keyword argument to {name}"),
             ));
         }
+        let flag = self.has_base(class, "enum.Flag");
+        if flag {
+            let names = self.lookup_attr(class, "_member_map_")?;
+            if !self.truth(names)? {
+                let name = self.class_name(class);
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "<flag '{name}'> has no members; specify `names=()` if you meant to create a new, empty, enum"
+                    ),
+                ));
+            }
+        }
         if matches!(self.heap.get(*value), Value::Instance { class: actual, .. } if *actual == class)
         {
             return Ok(*value);
         }
-        if self.float_enum_names(class).is_some() {
-            if let Some(member) = self.float_enum_lookup(class, values, *value)? {
+        if flag || self.float_enum_names(class).is_some() {
+            if let Some(member) = self.indexed_enum_lookup(class, values, *value)? {
                 return Ok(member);
             }
         } else if let Some(member) = self.member_for_value(values, *value) {
             return Ok(member);
         }
-        if self.has_base(class, "enum.Flag")
-            && let Ok(bits) = self.as_int(*value)
-        {
-            return self.flag_combination(class, bits);
+        if flag {
+            let missing = self.lookup_attr(class, "_missing_")?;
+            let result = self.call(missing, vec![*value], Vec::new());
+            return self.check_flag_missing(class, *value, result);
         }
         let name = if self.float_enum_names(class).is_some() {
             self.class_qualname(class)
@@ -84,21 +97,86 @@ impl Context {
         ))
     }
 
+    /// Flag._missing_ supplies the default construction policy; subclasses can override it.
+    pub(in crate::dynamic) fn flag_missing(&mut self, class: Id, value: Id) -> Result<Id> {
+        let bits = self
+            .as_int(value)
+            .map_err(|_| self.invalid_enum_value(class, value))?;
+        self.flag_combination(class, value, bits)
+    }
+
+    fn invalid_enum_value(&self, class: Id, value: Id) -> Error {
+        Error::new(
+            "ValueError",
+            format!(
+                "{} is not a valid {}",
+                self.repr(value),
+                self.class_qualname(class)
+            ),
+        )
+    }
+
+    fn check_flag_missing(&mut self, class: Id, value: Id, result: Result<Id>) -> Result<Id> {
+        let mut error = match result {
+            Ok(member) if self.instance_of(member, class) => return Ok(member),
+            Ok(member)
+                if self.module_value("enum", "EJECT") == self.class_attr(class, "_boundary_")
+                    && self.as_int(member).is_ok() =>
+            {
+                return Ok(member);
+            }
+            Ok(NONE) => return Err(self.invalid_enum_value(class, value)),
+            Ok(other) => Error::new(
+                "TypeError",
+                format!(
+                    "error in {}._missing_: returned {} instead of None or a valid member",
+                    self.class_name(class),
+                    self.repr(other)
+                ),
+            ),
+            Err(error)
+                if self.is_builtin_error(&error, "ValueError")
+                    || !self.is_builtin_error(&error, "Exception") =>
+            {
+                return Err(error);
+            }
+            Err(error) => error,
+        };
+        error.context = self.raised_instance(self.invalid_enum_value(class, value));
+        Err(error)
+    }
+
+    /// Enum class membership includes its declared aliases and constructible flag combinations.
+    pub(super) fn flag_contains(&mut self, class: Id, item: Id) -> Result<bool> {
+        if self.instance_of(item, class) {
+            return Ok(true);
+        }
+        let missing = self.lookup_attr(class, "_missing_")?;
+        let result = self.call(missing, vec![item], Vec::new());
+        match result {
+            Ok(member) => Ok(self.instance_of(member, class)),
+            Err(error) if self.is_builtin_error(&error, "ValueError") => {
+                self.declared_flag_value(class, item)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn declared_flag_value(&mut self, class: Id, item: Id) -> Result<bool> {
+        if let Some(unhashable) = self.class_attr(class, "_unhashable_values_")
+            && self.contains(item, unhashable)?
+        {
+            return Ok(true);
+        }
+        let declared = self.lookup_attr(class, "_hashable_values_")?;
+        self.contains(item, declared)
+    }
+
     /// Intern a combination without adding a new declaration to __members__.
-    fn flag_combination(&mut self, class: Id, bits: crate::Int) -> Result<Id> {
+    fn flag_combination(&mut self, class: Id, original: Id, bits: crate::Int) -> Result<Id> {
         use num_bigint::BigInt;
         use num_traits::{One, Signed, Zero};
 
-        let names = self.lookup_attr(class, "_member_map_")?;
-        if !self.truth(names)? {
-            let name = self.class_name(class);
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "<flag '{name}'> has no members; specify `names=()` if you meant to create a new, empty, enum"
-                ),
-            ));
-        }
         // populate_enum retains the original declarations in __members__. The
         // single-bit mask and order do not depend on a later name-map replacement.
         let declared = self.lookup_attr(class, "__members__")?;
@@ -123,31 +201,58 @@ impl Context {
                 singles.push((member, bit));
             }
         }
-        let strict = !self.has_base(class, "enum.IntFlag");
+        let boundary = self.class_attr(class, "_boundary_");
+        let policy = |name| boundary.is_some() && self.module_value("enum", name) == boundary;
+        let strict = if boundary.is_none() {
+            !self.has_base(class, "enum.IntFlag")
+        } else {
+            policy("STRICT")
+        };
+        // A pseudo-member keeps the supplied object as its .value until a
+        // boundary operation produces a different Python value.
+        let mut key = original;
         let mut value = bits.big().into_owned();
         let limit = BigInt::one() << mask.bits();
         let all_bits = &limit - 1u8;
-        if strict
-            && (value < -&limit || value > all_bits || !(&value & (&all_bits ^ &mask)).is_zero())
-        {
-            let name = self.class_qualname(class);
-            return Err(Error::new(
-                "ValueError",
-                format!("{value} is not a valid {name}"),
-            ));
+        if value < -&limit || value > all_bits || !(&value & (&all_bits ^ &mask)).is_zero() {
+            if strict {
+                let name = self.class_qualname(class);
+                return Err(Error::new(
+                    "ValueError",
+                    format!("{value} is not a valid {name}"),
+                ));
+            } else if policy("EJECT") {
+                return Ok(original);
+            } else if policy("CONFORM") {
+                let declared = self.alloc(Value::Int(crate::Int::new(mask.clone())));
+                key = self.binary("&", key, declared)?;
+                value = self.as_int(key)?.big().into_owned();
+            } else if let Some(boundary) = boundary
+                && !policy("KEEP")
+            {
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "{} unknown flag boundary {}",
+                        self.repr(class),
+                        self.repr(boundary)
+                    ),
+                ));
+            } else if value.is_negative() {
+                let limit = BigInt::one() << mask.bits().max(value.bits());
+                let high = self.alloc(Value::Int(crate::Int::new(limit)));
+                key = self.binary("+", high, key)?;
+                value = self.as_int(key)?.big().into_owned();
+            }
         }
         let mut negative_alias = None;
         if value.is_negative() {
-            let skipped = &all_bits ^ &mask;
-            if value >= -&limit && (&value & skipped).is_zero() {
-                negative_alias = Some(self.alloc(Value::Int(bits)));
-                value += limit;
-            } else {
-                value += BigInt::one() << mask.bits().max(value.bits());
-            }
+            negative_alias = Some(key);
+            let high = self.alloc(Value::Int(crate::Int::new(limit)));
+            key = self.binary("+", high, key)?;
+            value = self.as_int(key)?.big().into_owned();
         }
 
-        let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
         let member = if !self.has_base(class, "int") {
             self.instance(class, None)
         } else {
@@ -390,6 +495,17 @@ impl Context {
         let mut singles_mask = num_bigint::BigInt::default();
         let mut previous_single = num_bigint::BigInt::default();
         let mut definition_order = false;
+        let (ordered, declared_values) = if flag {
+            let ordered = self.alloc(Value::List(Vec::new()));
+            self.bind(scope, "_member_names_", ordered);
+            let declared = self.alloc(Value::List(Vec::new()));
+            self.bind(scope, "_hashable_values_", declared);
+            let unhashable = self.dict(Vec::new());
+            self.bind(scope, "_unhashable_values_map_", unhashable);
+            (ordered, declared)
+        } else {
+            (NONE, NONE)
+        };
         let mut single_count = 0;
         let new = self.class_attr(class, "__new__");
         for (name, raw) in declarations {
@@ -424,6 +540,10 @@ impl Context {
             };
             if flag && canonical == member {
                 use num_traits::{Signed, Zero};
+                let Value::List(declared) = self.heap.get_mut(declared_values) else {
+                    unreachable!()
+                };
+                declared.push(value);
                 let order = self.int(single_count);
                 self.default_set_attr(member, "_sort_order_", order)?;
                 if let Ok(bits) = self.as_int(value) {
@@ -433,6 +553,10 @@ impl Context {
                         singles_mask |= bit.as_ref();
                         definition_order |= bit.as_ref() < &previous_single;
                         previous_single = bit.into_owned();
+                        let Value::List(declared) = self.heap.get_mut(ordered) else {
+                            unreachable!()
+                        };
+                        declared.push(key);
                         single_count += 1;
                     }
                 }
@@ -441,6 +565,9 @@ impl Context {
             self.bind(scope, &name, canonical);
         }
         if flag {
+            if let Some(boundary) = self.class_attr(class, "_boundary_") {
+                self.bind(scope, "_boundary_", boundary);
+            }
             let full = self.alloc(Value::Int(crate::Int::new(flag_mask)));
             self.bind(scope, "_flag_mask_", full);
             self.bind(

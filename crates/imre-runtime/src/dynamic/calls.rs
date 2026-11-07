@@ -9227,11 +9227,7 @@ impl Context {
             .iter()
             .position(|(name, _)| name == "metaclass")
             .map(|index| keywords.remove(index).1);
-        if enum_namespace.is_some()
-            && keywords
-                .iter()
-                .any(|(name, _)| matches!(name.as_str(), "boundary" | "_simple"))
-        {
+        if enum_namespace.is_some() && keywords.iter().any(|(name, _)| name == "_simple") {
             return Err(Error::new(
                 "NotImplementedError",
                 "boxed enum metaclass options are unsupported",
@@ -9420,6 +9416,12 @@ impl Context {
                 }
             }
             return Ok(class);
+        }
+        if let Some(kind) = enum_kind
+            && let Some(index) = keywords.iter().position(|(name, _)| name == "boundary")
+        {
+            let (_, boundary) = keywords.remove(index);
+            self.bind_enum_boundary(scope, kind, boundary)?;
         }
         let exposed_body = self.finish_class_namespace(scope)?;
         // NamedTupleMeta visits the original values, including defaults replaced by tuple getters.
