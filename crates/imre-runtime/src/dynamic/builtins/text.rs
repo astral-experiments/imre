@@ -512,10 +512,42 @@ pub(super) fn bytearray_method(
         }
         return Ok(NONE);
     }
-    if method == "pop" {
-        if !kwargs.is_empty() {
-            return Err(type_error(format!("{name}() takes no keyword arguments")));
+    if matches!(method, "insert" | "pop") && !kwargs.is_empty() {
+        return Err(type_error(format!("{name}() takes no keyword arguments")));
+    }
+    if method == "insert" {
+        let [index, item] = args else {
+            return Err(type_error(format!(
+                "insert expected 2 arguments, got {}",
+                args.len()
+            )));
+        };
+        let index = bytearray_index(ctx, *index)?;
+        let byte = ctx.byte_value(*item)?;
+        // Either __index__ can resize the receiver or change its active exports.
+        let storage = ctx.scalar_value(receiver);
+        let len = ctx.bytes_like(storage)?.len();
+        if len == isize::MAX as usize {
+            return Err(Error::new(
+                "OverflowError",
+                "cannot add more objects to bytearray",
+            ));
         }
+        ctx.check_bytearray_resize(storage)?;
+        let position = if index < 0 {
+            len.saturating_add_signed(index)
+        } else {
+            len.min(index as usize)
+        };
+        let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        data.try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        data.insert(position, byte);
+        return Ok(NONE);
+    }
+    if method == "pop" {
         let index = match args {
             [] => -1,
             [index] => bytearray_index(ctx, *index)?,

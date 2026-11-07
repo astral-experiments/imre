@@ -834,6 +834,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "endswith",
     "extend",
     "hex",
+    "insert",
     "ljust",
     "lstrip",
     "pop",
