@@ -3894,18 +3894,18 @@ impl Emitter<'_, '_> {
         self.release_operand(&receiver);
     }
 
+    fn promote_int_to_float(&mut self, value: &Value) -> Value {
+        if value.ty == Type::Int {
+            self.call("imre_int_float", Type::Float, &[value])
+        } else {
+            value.clone()
+        }
+    }
+
     fn binary(&mut self, op: Binary, left: &Value, right: &Value) -> Value {
         if left.ty == Type::Float || right.ty == Type::Float {
-            let left = if left.ty == Type::Int {
-                self.call("imre_int_float", Type::Float, &[left])
-            } else {
-                left.clone()
-            };
-            let right = if right.ty == Type::Int {
-                self.call("imre_int_float", Type::Float, &[right])
-            } else {
-                right.clone()
-            };
+            let left = self.promote_int_to_float(left);
+            let right = self.promote_int_to_float(right);
             let operand = match op {
                 Binary::Add | Binary::Subtract | Binary::Multiply => {
                     let instruction = match op {
@@ -7056,14 +7056,7 @@ impl Emitter<'_, '_> {
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::FloatDivmod => {
-                let [left, right] = [0, 1].map(|index| {
-                    let arg = &args[index].value;
-                    if arg.ty == Type::Int {
-                        self.call("imre_int_float", Type::Float, &[arg])
-                    } else {
-                        arg.clone()
-                    }
-                });
+                let [left, right] = [0, 1].map(|i| self.promote_int_to_float(&args[i].value));
                 let fields = self.entry_alloca("[2 x double]");
                 let status = self.instruction(format!(
                     "call i32 @imre_float_divmod(double {}, double {}, ptr {fields})",
@@ -7964,6 +7957,11 @@ impl Emitter<'_, '_> {
             Builtin::FloatAcos => self.call("imre_float_acos", Type::Float, &[&args[0].value]),
             Builtin::FloatAsin => self.call("imre_float_asin", Type::Float, &[&args[0].value]),
             Builtin::FloatAtan => self.call("atan", Type::Float, &[&args[0].value]),
+            Builtin::FloatFmod => {
+                // Conversion can raise. Both argument expressions have already run.
+                let [left, right] = [0, 1].map(|i| self.promote_int_to_float(&args[i].value));
+                self.call("imre_float_fmod", Type::Float, &[&left, &right])
+            }
             Builtin::FloatDegrees | Builtin::FloatRadians => {
                 // Use the same rounded scale as the Rust runtime, keeping the multiplication
                 // visible to LLVM after the argument's Python float conversion.
@@ -10933,6 +10931,7 @@ declare double @imre_int_float(i64)
 declare i64 @imre_sumprod_int_lists(ptr, ptr)
 declare double @imre_sumprod_float_lists(ptr, ptr)
 declare ptr @imre_sumprod_number_lists(ptr, ptr)
+declare double @imre_float_fmod(double, double)
 declare double @imre_float_acos(double)
 declare double @imre_float_asin(double)
 declare double @atan(double)

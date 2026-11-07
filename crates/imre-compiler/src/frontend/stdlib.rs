@@ -121,6 +121,40 @@ fn positional_template(mut rest: &str, arguments: usize) -> Option<String> {
 }
 
 impl Checker<'_> {
+    pub(super) fn math_fmod(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        if !args.keywords.is_empty() || args.args.len() != 2 {
+            let message = if args.keywords.is_empty() {
+                format!("fmod expected 2 arguments, got {}", args.args.len())
+            } else {
+                "math.fmod() takes no keyword arguments".to_owned()
+            };
+            return self.positional_argument_error(
+                call,
+                &["x", "y"],
+                Type::Float,
+                unpacking::string(message),
+            );
+        }
+        let mut values = Vec::with_capacity(2);
+        for arg in &args.args {
+            let value = powers::integer(self.expr(arg)?);
+            if !matches!(value.ty, Type::Int | Type::Float) {
+                return Err(error(
+                    self.source,
+                    arg,
+                    "math.fmod requires an integer or float",
+                ));
+            }
+            values.push(value);
+        }
+        Ok(Expr {
+            ty: Type::Float,
+            kind: ExprKind::Builtin(Builtin::FloatFmod, values),
+        })
+    }
+
     /// Keep argument evaluation ahead of index conversion, including when k evaluates to None.
     pub(super) fn math_perm(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let args = &call.arguments;

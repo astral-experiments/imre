@@ -164,7 +164,7 @@ pub(super) fn call(
     }
     if matches!(
         operation,
-        "atan2" | "copysign" | "ldexp" | "pow" | "remainder"
+        "atan2" | "copysign" | "fmod" | "ldexp" | "pow" | "remainder"
     ) {
         let &[first, second] = args else {
             return Err(Error::new(
@@ -176,6 +176,7 @@ pub(super) fn call(
         let result = match operation {
             "atan2" => first.atan2(as_double(ctx, second)?),
             "copysign" => first.copysign(as_double(ctx, second)?),
+            "fmod" => crate::floats::fmod(first, as_double(ctx, second)?)?,
             "pow" => real_power(first, as_double(ctx, second)?)?,
             "remainder" => ieee_remainder(first, as_double(ctx, second)?)?,
             _ => scale_by_power_of_two(ctx, first, second)?,
