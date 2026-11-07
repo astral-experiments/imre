@@ -1025,11 +1025,12 @@ impl Context {
             stdlib::datetime::validate_classmethod_receiver(self, "dict", "fromkeys", owner)?;
             return Ok(self.bind_native_classmethod(value, owner));
         }
-        if matches!(self.heap.get(value), Value::Native(name) if name == "functools.partial.__class_getitem__")
+        if let Value::Native(symbol) = self.heap.get(value)
+            && let Some(class) = typing::generic_alias_method_owner(symbol)
         {
             stdlib::datetime::validate_classmethod_receiver(
                 self,
-                stdlib::functools::PARTIAL_CLASS,
+                class,
                 "__class_getitem__",
                 owner,
             )?;
@@ -4074,6 +4075,9 @@ impl Context {
                         return Ok(self.heap.code_name(module));
                     }
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__class_getitem__" if let Some(method) = self.own_class_attr(obj, name) => {
+                        return self.bind_attribute(method, NONE, obj);
+                    }
                     "MISSING" if class == "_contextvars.Token" => return Ok(self.token_missing),
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
@@ -4693,6 +4697,12 @@ impl Context {
                     && (builtin.starts_with("weakref.") || builtin.starts_with("_weakref.")) =>
             {
                 return Ok(self.text(builtin.split('.').next().unwrap().to_owned()));
+            }
+            Value::ContextVar { .. } | Value::ContextToken { .. }
+                if name == "__class_getitem__" =>
+            {
+                let owner = self.exact_type(obj)?;
+                return self.lookup_attr(owner, name);
             }
             Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
