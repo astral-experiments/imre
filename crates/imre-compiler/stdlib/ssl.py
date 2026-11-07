@@ -745,6 +745,12 @@ class SSLSocket(_socket.socket):
             raise ValueError("non-zero flags not allowed in calls to send() on %s" % self.__class__)
         return _tls_result(_call(_imre_ssl.send, self._session, data, flags))
 
+    def sendfile(self, file, offset=0, count=None):
+        if self._session is not None:
+            # The kernel would write plaintext to the underlying descriptor.
+            return self._sendfile_use_send(file, offset, count)
+        return super().sendfile(file, offset, count)
+
     def sendall(self, data, flags=0):
         if self._session is None:
             return super().sendall(data, flags)
