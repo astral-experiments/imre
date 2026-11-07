@@ -942,6 +942,8 @@ pub(super) struct ClassNamespace {
     pub defining_module: Option<Id>,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
     pub name_override: Option<Id>,
+    /// Immutable string storage of the docstring supplied at type creation.
+    pub original_doc: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     /// Slot replacement removed the original type's own instance layout descriptors.
@@ -2075,6 +2077,7 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.supplied_bases);
                     visit.extend(class.name_override);
+                    visit.extend(class.original_doc);
                     visit.extend(class.annotation_dict_cell);
                     visit.extend(class.conditional_cell);
                     if let Some((fields, _)) = &class.annotation_scratch {

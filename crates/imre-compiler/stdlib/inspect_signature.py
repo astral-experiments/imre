@@ -70,18 +70,14 @@ def _signature_from_class(obj, sigcls, follow_wrapper_chains, signature_of_metho
     # definition of each, preserving the order in which their classes appear.
     seen = set()
     uses_object_defaults = True
-    for base in getattr(obj, "__mro__", (obj,)):
+    mro = getattr(obj, "__mro__", (obj,))
+    for base in mro:
         if base is object:
-            if uses_object_defaults:
-                return sigcls()
             break
         namespace = getattr(base, "__dict__", None)
         if namespace is None:
-            # A native base can publish a signature without a Python constructor.
-            text_signature = getattr(base, "__text_signature__", None)
-            if text_signature:
-                return _signature_fromstr(sigcls, base, text_signature)
-            break
+            uses_object_defaults = False
+            continue
         for name, default in (("__new__", object.__new__), ("__init__", object.__init__)):
             if name not in seen and name in namespace:
                 seen.add(name)
@@ -96,6 +92,16 @@ def _signature_from_class(obj, sigcls, follow_wrapper_chains, signature_of_metho
                 if name == "__new__":
                     return signature_of_method(method, True)
                 return signature_of_method(*_bind_signature_method(method, obj))
+    for base in mro:
+        if base is object:
+            break
+        text_signature = getattr(base, "__text_signature__", None)
+        if text_signature:
+            return _signature_fromstr(sigcls, base, text_signature)
+    if any(base is type for base in mro) and obj is not type:
+        raise ValueError(f"callable {obj!r} is not supported by signature")
+    if uses_object_defaults:
+        return sigcls()
     raise ValueError(f"no signature found for builtin type {obj!r}")
 
 
