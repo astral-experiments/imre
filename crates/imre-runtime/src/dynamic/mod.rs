@@ -420,7 +420,7 @@ impl Context {
             (weakref::PROXY_TYPE | weakref::CALLABLE_PROXY_TYPE, Value::Weak(wr)) => {
                 wr.kind.class() == owner
             }
-            ("builtin_function_or_method" | "method", _) => {
+            ("builtin_function_or_method" | "method" | "wrapper_descriptor", _) => {
                 self.builtin_type_name(object) == Some(owner)
             }
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
@@ -3136,6 +3136,22 @@ impl Context {
                     entries.push((self.heap.code_name("__sizeof__"), size));
                     entries.push((self.heap.code_name("__hash__"), NONE));
                 }
+                let dictionary = self.dict(entries);
+                self.native_type_dicts.insert(value, dictionary);
+            }
+            "wrapper_descriptor" => {
+                let get = self.builtin("_wrapper_descriptor_doc");
+                let doc = self.alloc(Value::GetSetDescriptor {
+                    owner: "wrapper_descriptor",
+                    name: "__doc__",
+                    get,
+                    set: None,
+                });
+                let bind = self.builtin("wrapper_descriptor.__get__");
+                let entries = vec![
+                    (self.heap.code_name("__get__"), bind),
+                    (self.heap.code_name("__doc__"), doc),
+                ];
                 let dictionary = self.dict(entries);
                 self.native_type_dicts.insert(value, dictionary);
             }

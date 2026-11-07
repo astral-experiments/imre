@@ -3033,7 +3033,7 @@ impl Context {
                 format!("{variance}{}", self.display(var.name))
             }
             Value::GetSetDescriptor { owner, name, .. }
-                if matches!(*owner, "int" | "float")
+                if matches!(*owner, "int" | "float" | "wrapper_descriptor")
                     || crate::objects::HashState::is_provider_class(owner)
                     || *owner == super::value::TEMPLATE_TYPE
                     || stdlib::datetime::members(owner).is_some() =>

@@ -1562,6 +1562,20 @@ impl Context {
         }
     }
 
+    /// A read-only getset can be installed on another class without changing its receiver.
+    pub(super) fn readonly_getset_error(&self, owner: &str, name: &str, receiver: Id) -> Error {
+        if owner == "wrapper_descriptor"
+            && let Err(error) =
+                builtins::noargs_method_receiver(self, owner, name, &[receiver], &[])
+        {
+            return error;
+        }
+        Error::new(
+            "AttributeError",
+            format!("attribute '{name}' of '{owner}' objects is not writable"),
+        )
+    }
+
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
         Some(match self.heap.get(obj) {
             Value::Module { .. } => self.type_name(obj),
@@ -4030,6 +4044,7 @@ impl Context {
                 owner,
                 "int"
                     | "float"
+                    | "wrapper_descriptor"
                     | super::deque::CLASS
                     | super::thread_handle::CLASS
                     | "typing.Union"
@@ -4059,7 +4074,9 @@ impl Context {
                     "__doc__"
                         if matches!(
                             owner,
-                            stdlib::datetime::isocalendar::CLASS | super::thread_handle::CLASS
+                            stdlib::datetime::isocalendar::CLASS
+                                | super::thread_handle::CLASS
+                                | "wrapper_descriptor"
                         ) || matches!(
                             self.heap.get(get),
                             Value::IoMethod {
@@ -4093,6 +4110,7 @@ impl Context {
                                 owner,
                                 "int"
                                     | "float"
+                                    | "wrapper_descriptor"
                                     | "typing.Union"
                                     | "typing.TypeAliasType"
                                     | "_ssl.MemoryBIO"
@@ -4947,6 +4965,12 @@ impl Context {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
             Value::Native(ref class)
+                if class == "wrapper_descriptor"
+                    && let Some(member) = self.own_class_attr(obj, name) =>
+            {
+                return Ok(member);
+            }
+            Value::Native(ref class)
                 if matches!(
                     class.as_str(),
                     "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor"
@@ -5676,10 +5700,7 @@ impl Context {
                     return Ok(());
                 }
                 Value::GetSetDescriptor { owner, name, .. } => {
-                    return Err(Error::new(
-                        "AttributeError",
-                        format!("attribute '{name}' of '{owner}' objects is not writable"),
-                    ));
+                    return Err(self.readonly_getset_error(owner, name, obj));
                 }
                 _ => {}
             }
@@ -5995,6 +6016,10 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
+        if name == "__doc__" && self.builtin_type_name(obj) == Some("wrapper_descriptor") {
+            let class = self.builtin("wrapper_descriptor");
+            return Ok(self.own_class_attr(class, name));
+        }
         if matches!(
             self.heap.get(obj),
             Value::LzmaDecompressor(_)
@@ -6780,10 +6805,7 @@ impl Context {
                     self.call(set, vec![obj, value], Vec::new())?;
                     return Ok(());
                 }
-                return Err(Error::new(
-                    "AttributeError",
-                    format!("attribute '{name}' of '{owner}' objects is not writable"),
-                ));
+                return Err(self.readonly_getset_error(owner, name, obj));
             }
             if matches!(self.heap.get(descriptor), Value::SlotMember { .. }) {
                 return self.write_slot_member(descriptor, obj, Some(value));
