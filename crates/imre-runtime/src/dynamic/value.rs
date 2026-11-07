@@ -5055,6 +5055,8 @@ impl Heap {
                     Value::List(_)
                         | Value::Tuple(_)
                         | Value::Dict(_)
+                        | Value::Function { .. }
+                        | Value::Code(_)
                         | Value::Instance {
                             property: None,
                             weak_reference: None,

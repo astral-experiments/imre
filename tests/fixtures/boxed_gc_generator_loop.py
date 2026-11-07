@@ -31,6 +31,13 @@ def check_generator_loops():
     assert next(returned) == 2
     returned.close()
 
+    start("function doc", lambda generator: setattr(start, "__doc__", generator))
+    assert next(start.__doc__) == 2
+    assert "function doc" not in closed
+    start.__doc__ = None
+    gc.collect()
+    assert closed[-1] == "function doc"
+
     error = SyntaxError()
 
     def attach(generator):
