@@ -233,13 +233,20 @@ pub(in crate::dynamic) fn text_descriptor_chain(heap: &Heap, stream: Id) -> Opti
         return None;
     };
     let buffer = wrapper.buffer.get()?;
-    let Value::File(file) = heap.get(buffer) else {
-        return None;
+    let raw = match heap.get(buffer) {
+        Value::Instance {
+            memory_stream: Some(MemoryStream::Reader(reader)),
+            ..
+        } => reader.raw.get()?,
+        Value::File(file) => {
+            let super::BinaryFile::Descriptor(fd) = file.as_ref() else {
+                return None;
+            };
+            fd.raw
+        }
+        _ => return None,
     };
-    let super::BinaryFile::Descriptor(fd) = file.as_ref() else {
-        return None;
-    };
-    Some([stream, buffer, fd.raw])
+    Some([stream, buffer, raw])
 }
 
 /// Select the default text encoding from the interpreter's startup configuration.

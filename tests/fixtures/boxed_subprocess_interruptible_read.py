@@ -77,6 +77,28 @@ def exchange(directory, bufsize, raising, both_pipes=False):
 
 
 def current():
+    with subprocess.Popen(["/bin/printf", "abcdMORE"], stdout=subprocess.PIPE, bufsize=4) as child:
+        reader = child.stdout
+        assert reader.read(1) == b"a"
+        raw = reader.raw
+        refused = OSError("refused raw read")
+        sizes = []
+
+        def veto(window):
+            sizes.append(len(window))
+            raise refused
+
+        raw.readinto = veto
+        target = bytearray(b"????????")
+        try:
+            reader.readinto(target)
+        except OSError as error:
+            assert error is refused
+        else:
+            raise AssertionError("buffer ignored raw.readinto")
+        assert sizes == [5] and target == b"bcd?????"
+        assert raw.read(4) == b"MORE"
+
     with tempfile.TemporaryDirectory() as directory:
         exchange(directory, -1, False)
         exchange(directory, 0, True)

@@ -194,7 +194,7 @@ const RANDOM_RAW_METHODS: &[&str] = &[
     "read", "readall", "readinto", "write",
 ];
 
-fn native_handle(ctx: &Context, raw: Id, methods: &[&str]) -> Option<Rc<RawFile>> {
+pub(super) fn native_handle(ctx: &Context, raw: Id, methods: &[&str]) -> Option<Rc<RawFile>> {
     // Going straight to the descriptor is valid only while the Python raw methods
     // are native. The instance dictionary can change after the buffer is created.
     if ctx
@@ -290,8 +290,6 @@ pub(super) fn initialize(
         .unwrap_or(super::DEFAULT_BUFFER_SIZE);
     // Use the raw stream's methods for overrides and the fallible byte buffer for large requests.
     if owner == "BufferedReader"
-        && (native_handle(ctx, raw, methods).is_none()
-            || capacity > crate::text_output::MAX_DEFAULT_BUFFER_SIZE as i64)
         && (backing(ctx, receiver).is_none() || explicit_reader_raw(ctx, receiver).is_some())
     {
         return super::buffered_reader::initialize(ctx, receiver, raw, capacity);

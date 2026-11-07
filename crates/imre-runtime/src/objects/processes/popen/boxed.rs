@@ -390,6 +390,10 @@ impl BoxedPipe {
         })
     }
 
+    pub(crate) fn take_input_buffer(&self) -> Result<Vec<u8>> {
+        self.with_file(FileState::take_pipe_buffer)
+    }
+
     pub(crate) fn take_read_ahead(&self) -> Result<Vec<u8>> {
         self.with_file(FileState::take_pipe_read_ahead)
     }
