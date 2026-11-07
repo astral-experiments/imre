@@ -93,6 +93,27 @@ def current():
     plugin.__spec__ = ModuleSpec("billing", None, origin=Origin())
     assert repr(plugin) == "<module 'billing' (<module 'billing' (ready)>)>"
 
+    import _frozen_importlib as bootstrap
+
+    helper = bootstrap._module_repr
+    try:
+        bootstrap._module_repr = lambda obj: "custom " + obj.__name__
+        assert repr(fresh) == "custom " + fresh.__name__
+    finally:
+        bootstrap._module_repr = helper
+    seen = []
+
+    def read(obj, name, default):
+        seen.append(name)
+        return getattr(obj, name, default)
+
+    try:
+        bootstrap.getattr = read
+        repr(ModuleType("plain"))
+        assert seen == ["__loader__", "__spec__"]
+    finally:
+        del bootstrap.getattr
+
     reference = _weakref.ref(child)
     assert reference() is child
     del child

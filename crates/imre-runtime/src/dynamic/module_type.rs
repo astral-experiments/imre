@@ -9,6 +9,20 @@ pub(super) const METHODS: &[&str] = &[
     "__dir__",
 ];
 
+/// Return an ordinary module's representation, or zero to continue in the frozen Python body.
+///
+/// # Safety
+/// The generated function supplies its active context and bound Python frame.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_plain_module_repr(context: *mut Context, frame: Id) -> Id {
+    // SAFETY: the compiler passes the live interpreter for the duration of the call.
+    let ctx = unsafe { &mut *context };
+    match ctx.plain_module_repr(frame) {
+        Some(rendered) => ctx.text(rendered),
+        None => 0,
+    }
+}
+
 impl Context {
     /// Publish the module type's own descriptors in type-dictionary order.
     pub(super) fn install_module_namespace(&mut self, class: Id) {
@@ -345,6 +359,70 @@ impl Context {
     /// Use the bootstrap's module repr for created modules, honoring their live spec.
     pub(super) fn module_base_repr(&mut self, module: Id) -> Result<Id> {
         self.meta_call(NONE, "_module_repr", vec![module])
+    }
+
+    /// Render ordinary module fields when every lookup in the frozen helper is inert.
+    fn plain_module_repr(&self, frame: Id) -> Option<String> {
+        // Attribute loads and the missing-file handler can themselves enter Python calls.
+        self.check_call_depth(4).ok()?;
+        let module = self.scope_name(frame, "module")?;
+        let Value::Module {
+            scope,
+            constructor: Some(class),
+            ..
+        } = *self.heap.get(module)
+        else {
+            return None;
+        };
+        let Value::Module {
+            scope: bootstrap_scope,
+            ..
+        } = *self.heap.get(self.bootstrap_module)
+        else {
+            return None;
+        };
+        if self.root_scope(frame) != bootstrap_scope
+            || self.builtins.get("module") != Some(&class)
+            || self.scope_name(scope, "__loader__") != Some(NONE)
+            || self.scope_name(scope, "__spec__") != Some(NONE)
+            || self.scope_name(scope, "__getattr__").is_some()
+        {
+            return None;
+        }
+        let builtins = self
+            .scope_data(bootstrap_scope)
+            .exec_globals
+            .map(|globals| globals.builtins)
+            .or(self.source_builtins)?;
+        let (Value::Dict(globals), Value::Dict(builtins)) = (
+            self.heap.get(self.bootstrap_globals),
+            self.heap.get(builtins),
+        ) else {
+            return None;
+        };
+        let original = |name| {
+            let value = match globals.text_item(&self.heap, name).continue_value()? {
+                Some(value) => value,
+                None => builtins.text_item(&self.heap, name).continue_value()??,
+            };
+            (self.builtins.get(name) == Some(&value)).then_some(())
+        };
+        original("getattr")?;
+        let Value::Str(name) = self.heap.get(self.scope_name(scope, "__name__")?) else {
+            return None;
+        };
+        if let Some(file) = self.scope_name(scope, "__file__") {
+            let Value::Str(file) = self.heap.get(file) else {
+                return None;
+            };
+            return Some(format!(
+                "<module {} from {}>",
+                super::string_repr(name),
+                super::string_repr(file)
+            ));
+        }
+        original("AttributeError")?;
+        Some(format!("<module {}>", super::string_repr(name)))
     }
 
     /// Apply ModuleType's native slots, including explicit base initialization by subclasses.

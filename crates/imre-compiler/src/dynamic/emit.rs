@@ -27,6 +27,7 @@ declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_permanent_sequence(ptr, ptr, i64, i1)
 declare i64 @imre_dyn_lookup(ptr, i64, ptr, i64)
+declare i64 @imre_dyn_plain_module_repr(ptr, i64)
 declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
@@ -308,6 +309,7 @@ impl Output {
         };
         let location = SourceMap {
             // These CPython providers validate their public arguments in Python.
+            frozen_importlib: bundled && name == "_frozen_importlib",
             python_annotations: bundled && matches!(name, "_py_warnings" | "tomllib._parser"),
             module_start,
             docs,
@@ -359,6 +361,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    frozen_importlib: bool,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
@@ -557,6 +560,15 @@ impl Output {
                 }
             }
             Body::Statements(stmts) => {
+                if source.frozen_importlib && f.prefix == "_module_repr.<locals>." {
+                    let rendered =
+                        f.value("call i64 @imre_dyn_plain_module_repr(ptr %ctx, i64 %scope)");
+                    let ready = f.value(&format!("icmp ne i64 {rendered}, 0"));
+                    f.branch(&ready, "ordinary_module", "live_module");
+                    f.label("ordinary_module");
+                    f.end(&format!("ret i64 {rendered}"));
+                    f.label("live_module");
+                }
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
