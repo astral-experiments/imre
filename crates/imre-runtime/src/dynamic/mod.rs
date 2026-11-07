@@ -151,6 +151,7 @@ pub(crate) struct Context {
     /// Filesystem bytes of the installed startup entry. An empty entry follows the current cwd.
     startup_path0: Option<Vec<u32>>,
     default_encoding: Id,
+    displaced_sni_callbacks: std::collections::HashSet<Id>,
     audit_hooks: Vec<Id>,
     fork_hooks: [Vec<Id>; 3],
     // The fatal handler borrows its descriptor while Python retains the destination.

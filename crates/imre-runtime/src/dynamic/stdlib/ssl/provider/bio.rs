@@ -65,7 +65,7 @@ impl Bio {
 }
 
 pub(in crate::dynamic) struct BioSession {
-    alpn: std::rc::Rc<super::alpn::Alpn>,
+    sni: super::sni::Connection,
     api: &'static Api,
     handle: NonNull<c_void>,
     hostname: Option<CString>,
@@ -75,6 +75,7 @@ pub(in crate::dynamic) struct BioSession {
 
 /// An SSL I/O failure, including the direction needed to retry an incomplete operation.
 pub(in crate::dynamic) enum BioFailure {
+    ClientHello(Option<Vec<u8>>),
     WantRead,
     WantWrite,
     ZeroReturn,
@@ -130,7 +131,9 @@ impl Api {
         kind: i32,
         operation: &str,
     ) -> BioFailure {
+        const SSL_ERROR_WANT_ASYNC: i32 = 9;
         match kind {
+            SSL_ERROR_WANT_ASYNC => super::sni::paused(self, ssl.as_ptr()),
             super::SSL_ERROR_WANT_READ => BioFailure::WantRead,
             super::SSL_ERROR_WANT_WRITE => BioFailure::WantWrite,
             super::SSL_ERROR_ZERO_RETURN => BioFailure::ZeroReturn,
@@ -219,6 +222,20 @@ impl Api {
 }
 
 impl BioSession {
+    pub(in crate::dynamic::stdlib::ssl) fn resolve_sni(
+        &self,
+        alert: Option<i32>,
+    ) -> std::result::Result<(), Failure> {
+        self.sni.resolve(alert)
+    }
+
+    pub(in crate::dynamic::stdlib::ssl) fn set_context(
+        &mut self,
+        ctx: &super::Context,
+    ) -> std::result::Result<(), Failure> {
+        self.sni.set_context(self.handle.as_ptr(), ctx)
+    }
+
     pub(in crate::dynamic) fn wrap(
         ctx: &super::Context,
         incoming: &Bio,
@@ -229,7 +246,7 @@ impl BioSession {
         let api = ctx.api;
         let handle = ctx.new_connection(server)?;
         let mut session = Self {
-            alpn: ctx.alpn.clone(),
+            sni: super::sni::Connection::new(ctx),
             api,
             handle,
             hostname: None,
@@ -257,24 +274,32 @@ impl BioSession {
     }
 
     pub(in crate::dynamic) fn selected_alpn_protocol(&self) -> Option<Vec<u8>> {
-        self.alpn.selected(self.handle)
+        self.sni.selected_alpn_protocol(self.handle)
     }
 
-    pub(in crate::dynamic) fn handshake(&mut self) -> std::result::Result<(), BioFailure> {
+    fn control(&mut self, entry: super::sni::Entry) -> std::result::Result<(), BioFailure> {
         self.api.clear();
         super::clear_errno();
-        // SAFETY: the SSL and both of its memory BIOs remain live across every retry.
-        let rc = unsafe { (self.api.SSL_do_handshake)(self.handle.as_ptr()) };
+        let rc = self.sni.invoke(self.api, self.handle, entry);
         let result = if rc == 1 {
             Ok(())
         } else {
-            Err(self.api.ssl_failure(
-                self.handle,
-                self.hostname.as_deref(),
-                rc,
-                "SSL_do_handshake",
-            ))
+            Err(self
+                .api
+                .ssl_failure(self.handle, self.hostname.as_deref(), rc, entry.label()))
         };
+        self.sni.finish(self.api, self.handle);
+        result
+    }
+
+    pub(in crate::dynamic) fn handshake(&mut self) -> std::result::Result<(), BioFailure> {
+        self.sni.prepare(
+            self.api,
+            self.handle,
+            self.server,
+            super::sni::Entry::Handshake,
+        )?;
+        let result = self.control(super::sni::Entry::Handshake);
         let result =
             self.api
                 .finish_handshake(self.handle, self.hostname.as_deref(), self.server, result);
@@ -289,8 +314,21 @@ impl BioSession {
     ) -> std::result::Result<usize, BioFailure> {
         // Reads and writes can initiate a handshake. Apply the same peer checks
         // as do_handshake before OpenSSL releases or sends application bytes.
-        if !self.handshake_complete {
+        self.sni.check_reentry()?;
+        if !self.handshake_complete
+            || (label == "SSL_write"
+                && self
+                    .sni
+                    .continue_before_write(self.api, self.handle, self.server))
+        {
             self.handshake()?;
+        }
+        if label == "SSL_read"
+            && self
+                .sni
+                .prepare(self.api, self.handle, self.server, super::sni::Entry::Peek)?
+        {
+            self.control(super::sni::Entry::Peek)?;
         }
         self.api.clear();
         super::clear_errno();
@@ -346,6 +384,7 @@ impl BioSession {
     }
 
     pub(in crate::dynamic) fn shutdown(&mut self) -> std::result::Result<(), BioFailure> {
+        self.sni.check_reentry()?;
         let ssl = self.handle.as_ptr();
         self.api.clear();
         super::clear_errno();
@@ -375,6 +414,7 @@ impl BioSession {
 
 impl Drop for BioSession {
     fn drop(&mut self) {
+        self.sni.cancel(self.api, self.handle);
         // SAFETY: releasing the SSL drops the references taken to its context and BIOs.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
     }

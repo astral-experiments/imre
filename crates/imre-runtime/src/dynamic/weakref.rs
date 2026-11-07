@@ -32,6 +32,7 @@ impl Kind {
 #[derive(Clone, Copy)]
 pub(super) struct Reference {
     pub kind: Kind,
+    pub internal: bool,
     pub target: Option<Id>,
     pub callback: Id,
     pub hash: Option<i64>,
@@ -580,7 +581,7 @@ pub(super) fn call(
                     ),
                 ));
             };
-            let refs = ctx.heap.weak_references(*target);
+            let refs = ctx.heap.python_weak_references(*target);
             if function.ends_with("count") {
                 Ok(ctx.int(refs.len() as i64))
             } else {

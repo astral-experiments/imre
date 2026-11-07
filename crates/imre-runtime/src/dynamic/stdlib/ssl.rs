@@ -6,6 +6,8 @@ use super::{Context, Error, FALSE, Id, NONE, Result, Value};
 use crate::objects::{errno_error, socket};
 
 pub(crate) mod provider;
+mod sni;
+pub(in crate::dynamic) use sni::{Owner, Registration};
 
 const PROVIDER_ERROR: &str = "_imre_ssl.Error";
 
@@ -32,6 +34,8 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "generic_context",
         "protocol",
         "verify_mode",
+        "sni_callback",
+        "set_context",
         "check_hostname",
         "num_tickets",
         "security_level",
@@ -88,7 +92,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
 
 fn context(ctx: &Context, id: Id) -> Result<&RefCell<provider::Context>> {
     match ctx.heap.get(id) {
-        Value::TlsContext(handle) => Ok(handle),
+        Value::TlsContext(handle, _) => Ok(handle),
         _ => Err(Error::new("TypeError", "expected a TLS context")),
     }
 }
@@ -109,7 +113,7 @@ fn context_for_role(ctx: &Context, id: Id, server: bool) -> Result<&RefCell<prov
 
 fn session(ctx: &Context, id: Id) -> Result<&RefCell<Option<provider::Session>>> {
     match ctx.heap.get(id) {
-        Value::TlsSession(handle) => Ok(handle),
+        Value::TlsSession(handle, _) => Ok(handle),
         Value::None => Err(closed()),
         _ => Err(Error::new("TypeError", "expected a TLS session")),
     }
@@ -155,6 +159,9 @@ fn bio_session(ctx: &Context, handle: Id) -> Result<Rc<RefCell<provider::bio::Bi
 fn bio_failure(ctx: &mut Context, error: provider::bio::BioFailure) -> Result<Id> {
     use provider::bio::BioFailure;
     let status = match error {
+        BioFailure::ClientHello(_) => {
+            return Err(Error::new("RuntimeError", "unhandled TLS ClientHello"));
+        }
         BioFailure::WantRead => "WANT_READ",
         BioFailure::WantWrite => "WANT_WRITE",
         BioFailure::ZeroReturn => "ZERO_RETURN",
@@ -187,9 +194,10 @@ fn bio_count(
 
 fn read_plaintext(
     ctx: &mut Context,
+    handle: Id,
     size: Id,
     buffer: Id,
-    read: impl FnOnce(&mut [u8]) -> std::result::Result<usize, provider::bio::BioFailure>,
+    mut read: impl FnMut(&mut [u8]) -> std::result::Result<usize, provider::bio::BioFailure>,
 ) -> Result<Id> {
     // __index__ may resize the destination or reenter the TLS session.
     let size = ctx
@@ -223,9 +231,14 @@ fn read_plaintext(
         } else {
             size as usize
         };
-        let dest = &mut ctx.writable_storage_bytes(storage)?[range.start..range.start + size];
-        let result = read(dest);
-        return bio_count(ctx, result);
+        return ctx.with_buffer_export(buffer, |ctx| {
+            let result = sni::drive(ctx, handle, |ctx| {
+                let dest =
+                    &mut ctx.writable_storage_bytes(storage)?[range.start..range.start + size];
+                Ok(read(dest))
+            })?;
+            bio_count(ctx, result)
+        });
     }
 
     let size = usize::try_from(size)
@@ -239,7 +252,7 @@ fn read_plaintext(
     // Match CPython's allocation check, but SSL_read_ex returns data from at
     // most one 16 KiB TLS record. Only that prefix needs initializing.
     data.resize(size.min(16 * 1024), 0);
-    match read(&mut data) {
+    match sni::drive(ctx, handle, |_| Ok(read(&mut data)))? {
         Ok(count) => {
             data.truncate(count);
             crate::compact_bytes(&mut data);
@@ -250,11 +263,11 @@ fn read_plaintext(
 }
 
 fn socket_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id> {
-    let Value::TlsSession(socket) = ctx.heap.get(handle) else {
+    let Value::TlsSession(socket, _) = ctx.heap.get(handle) else {
         return Err(closed());
     };
     let socket = Rc::clone(socket);
-    read_plaintext(ctx, size, buffer, |data| {
+    read_plaintext(ctx, handle, size, buffer, |data| {
         // The length's __index__ may have closed or unwrapped this socket.
         let mut socket = socket.borrow_mut();
         let session = socket.as_mut().ok_or_else(|| {
@@ -484,7 +497,17 @@ pub(super) fn call(
                 )?;
             }
             let handle = provider::Context::new(method).map_err(|e| provider_error(ctx, e))?;
-            Ok(ctx.alloc(Value::TlsContext(Rc::new(RefCell::new(handle)))))
+            Ok(ctx.alloc(Value::TlsContext(
+                Rc::new(RefCell::new(handle)),
+                sni::Registration::EMPTY,
+            )))
+        }
+        ("sni_callback", [handle, callback @ ..]) if callback.len() <= 1 => {
+            sni::callback(ctx, *handle, callback.first().copied())
+        }
+        ("set_context", &[session, handle, public_context]) => {
+            sni::set_context(ctx, session, handle, public_context)?;
+            Ok(NONE)
         }
         ("protocol", &[handle]) => {
             let protocol = context(ctx, handle)?.borrow().protocol;
@@ -663,7 +686,7 @@ pub(super) fn call(
         ("selected_alpn_protocol", &[handle]) => {
             let selected = match ctx.heap.get(handle) {
                 Value::TlsBioSession { session, .. } => session.borrow().selected_alpn_protocol(),
-                Value::TlsSession(session) => session
+                Value::TlsSession(session, _) => session
                     .borrow()
                     .as_ref()
                     .and_then(|s| s.selected_alpn_protocol()),
@@ -787,8 +810,20 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
-        ("wrap_bio", &[handle, incoming, outgoing, hostname, side]) => {
+        (
+            "wrap_bio",
+            &[
+                handle,
+                incoming,
+                outgoing,
+                hostname,
+                side,
+                public_context,
+                weak_owner,
+            ],
+        ) => {
             let server = ctx.truth(side)?;
+            let owner = Owner::new(handle, public_context, weak_owner);
             let handle = context_for_role(ctx, handle, server)?.borrow();
             let incoming = memory_bio(ctx, incoming, "incoming")?.borrow();
             let outgoing = memory_bio(ctx, outgoing, "outgoing")?.borrow();
@@ -823,6 +858,7 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::TlsBioSession {
                 session: Rc::new(RefCell::new(result)),
                 server_hostname: hostname,
+                owner,
             }))
         }
         ("bio_server_hostname", &[handle]) => match ctx.heap.get(handle) {
@@ -836,7 +872,7 @@ pub(super) fn call(
             let ssl = if name == "bio_getpeercert" {
                 bio_session(ctx, handle)?.borrow().retain_ssl()
             } else {
-                let Value::TlsSession(state) = ctx.heap.get(handle) else {
+                let Value::TlsSession(state, _) = ctx.heap.get(handle) else {
                     return Err(Error::new(
                         "AttributeError",
                         "'NoneType' object has no attribute 'getpeercert'",
@@ -850,7 +886,9 @@ pub(super) fn call(
         }
         ("bio_read", &[handle, size, buffer]) => {
             let session = bio_session(ctx, handle)?;
-            read_plaintext(ctx, size, buffer, |data| session.borrow_mut().read(data))
+            read_plaintext(ctx, handle, size, buffer, |data| {
+                session.borrow_mut().read(data)
+            })
         }
         ("read", &[handle, size, buffer]) => socket_read(ctx, handle, size, buffer),
         ("pending", &[handle]) => {
@@ -862,14 +900,15 @@ pub(super) fn call(
             bio_count(ctx, result)
         }
         ("tls_shutdown" | "do_handshake", &[handle]) => {
-            let mut state = session(ctx, handle)?.borrow_mut();
-            let session = state.as_mut().ok_or_else(closed)?;
-            let result = if name == "do_handshake" {
-                session.handshake()
-            } else {
-                session.shutdown()
-            };
-            drop(state);
+            let result = sni::drive(ctx, handle, |ctx| {
+                let mut state = session(ctx, handle)?.borrow_mut();
+                let session = state.as_mut().ok_or_else(closed)?;
+                Ok(if name == "do_handshake" {
+                    session.handshake()
+                } else {
+                    session.shutdown()
+                })
+            })?;
             match result {
                 Ok(()) => Ok(NONE),
                 Err(error) => bio_failure(ctx, error),
@@ -877,10 +916,13 @@ pub(super) fn call(
         }
         ("bio_write", &[handle, data]) => {
             ctx.check_buffer_exporter(data)?;
-            let result = bio_session(ctx, handle)?
-                .borrow_mut()
-                .write(ctx.native_buffer_bytes(data)?);
-            bio_count(ctx, result)
+            let session = bio_session(ctx, handle)?;
+            ctx.with_buffer_export(data, |ctx| {
+                let result = sni::drive(ctx, handle, |ctx| {
+                    Ok(session.borrow_mut().write(ctx.native_buffer_bytes(data)?))
+                })?;
+                bio_count(ctx, result)
+            })
         }
         ("bio_pending", &[handle]) => {
             let result = bio_session(ctx, handle)?.borrow().pending();
@@ -888,17 +930,29 @@ pub(super) fn call(
         }
         ("bio_handshake" | "bio_shutdown", &[handle]) => {
             let session = bio_session(ctx, handle)?;
-            let result = if name == "bio_handshake" {
-                session.borrow_mut().handshake()
-            } else {
+            let result = if name == "bio_shutdown" {
                 session.borrow_mut().shutdown()
+            } else {
+                sni::drive(ctx, handle, |_| Ok(session.borrow_mut().handshake()))?
             };
             match result {
                 Ok(()) => Ok(NONE),
                 Err(error) => bio_failure(ctx, error),
             }
         }
-        ("wrap", [handle, raw, hostname, side, connected]) => {
+        (
+            "wrap",
+            [
+                handle,
+                raw,
+                hostname,
+                side,
+                connected,
+                public_context,
+                weak_owner,
+            ],
+        ) => {
+            let owner = Owner::new(*handle, *public_context, *weak_owner);
             let connected = ctx.truth(*connected)?;
             let server = ctx.truth(*side)?;
             let configuration = context_for_role(ctx, *handle, server)?;
@@ -941,19 +995,25 @@ pub(super) fn call(
             let result =
                 provider::Session::wrap(&context(ctx, *handle)?.borrow(), raw, host, server);
             match result {
-                Ok(session) => {
-                    Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))
-                }
+                Ok(session) => Ok(ctx.alloc(Value::TlsSession(
+                    Rc::new(RefCell::new(Some(session))),
+                    owner,
+                ))),
                 Err(error) => bio_failure(ctx, error),
             }
         }
         ("is_session", &[handle]) => Ok(super::builtins::boolean(matches!(
             ctx.heap.get(handle),
-            Value::TlsSession(s) if s.borrow().is_some()
+            Value::TlsSession(s, _) if s.borrow().is_some()
         ))),
         ("release_session", &[handle]) => match ctx.heap.get(handle) {
-            Value::TlsSession(state) => {
-                state.borrow_mut().take();
+            Value::TlsSession(state, _) => {
+                // An in-flight OpenSSL operation still needs its callback result. The
+                // Python socket owns the fd and may close it before that operation resumes.
+                let mut state = state.borrow_mut();
+                if !state.as_ref().is_some_and(provider::Session::sni_suspended) {
+                    state.take();
+                }
                 Ok(NONE)
             }
             Value::TlsListener(_) | Value::None => Ok(NONE),
@@ -1033,26 +1093,29 @@ pub(super) fn call(
             if flags.len() == 1 || (flags.is_empty() && name == "sendall") =>
         {
             ctx.check_buffer_exporter(*data)?;
-            let data = ctx.native_buffer_bytes(*data)?;
+            ctx.native_buffer_bytes(*data)?;
             if without_session(ctx, *handle) {
                 if let Some(&flags) = flags.first() {
                     ctx.index_c_int(flags)?;
                 }
                 return Err(pending_io_error(ctx, *handle, libc::EPIPE));
             }
-            let mut state = session(ctx, *handle)?.borrow_mut();
-            let session = state.as_mut().ok_or_else(closed)?;
-            if name == "sendall" {
-                let result = session.sendall(data);
-                drop(state);
-                return match result {
-                    Ok(()) => Ok(NONE),
-                    Err(error) => bio_failure(ctx, error),
-                };
-            }
-            let result = session.send(data);
-            drop(state);
-            bio_count(ctx, result)
+            ctx.with_buffer_export(*data, |ctx| {
+                let result = sni::drive(ctx, *handle, |ctx| {
+                    let mut state = session(ctx, *handle)?.borrow_mut();
+                    let session = state.as_mut().ok_or_else(closed)?;
+                    let data = ctx.native_buffer_bytes(*data)?;
+                    Ok(if name == "sendall" {
+                        session.sendall(data).map(|()| 0)
+                    } else {
+                        session.send(data)
+                    })
+                })?;
+                if result.is_ok() && name == "sendall" {
+                    return Ok(NONE);
+                }
+                bio_count(ctx, result)
+            })
         }
         ("recv", [handle, size, flags @ ..]) if flags.len() <= 1 => {
             if !without_session(ctx, *handle) {

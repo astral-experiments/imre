@@ -13,6 +13,7 @@ pub(super) mod certificate;
 pub(super) mod ciphers;
 pub(in crate::dynamic) mod objects;
 mod reasons;
+mod sni;
 mod trust;
 pub(super) use trust::CaData;
 pub(in crate::dynamic) mod versions;
@@ -78,6 +79,8 @@ macro_rules! functions {
 
 functions! {
     optional {
+        ASYNC_is_capable() -> c_int;
+        ASYNC_pause_job() -> c_int;
         SSLv3_method() -> Handle;
         TLSv1_method() -> Handle;
         TLSv1_1_method() -> Handle;
@@ -118,6 +121,14 @@ functions! {
     SSL_get_certificate(Handle) -> Handle;
     SSL_get_privatekey(Handle) -> Handle;
     SSL_CTX_use_cert_and_key(Handle, Handle, Handle, Handle, c_int) -> c_int;
+    SSL_CTX_callback_ctrl(Handle, c_int, Option<unsafe extern "C" fn()>) -> c_long;
+    SSL_get_options(Handle) -> u64;
+    SSL_version(Handle) -> c_int;
+    SSL_peek(Handle, *mut c_void, c_int) -> c_int;
+    SSL_get_servername(Handle, c_int) -> *const c_char;
+    SSL_set_ex_data(Handle, c_int, Handle) -> c_int;
+    SSL_get_ex_data(Handle, c_int) -> Handle;
+    SSL_set_SSL_CTX(Handle, Handle) -> Handle;
     SSL_CTX_new(Handle) -> Handle;
     SSL_CTX_free(Handle) -> ();
     SSL_CTX_ctrl(Handle, c_int, c_long, Handle) -> c_long;
@@ -163,6 +174,7 @@ functions! {
     SSL_free(Handle) -> ();
     SSL_up_ref(Handle) -> c_int;
     SSL_set_fd(Handle, c_int) -> c_int;
+    SSL_get_rbio(Handle) -> Handle;
     SSL_set0_rbio(Handle, Handle) -> ();
     SSL_set0_wbio(Handle, Handle) -> ();
     SSL_set_accept_state(Handle) -> ();
@@ -568,8 +580,14 @@ const SSL_VERIFY_FAIL_IF_NO_PEER_CERT: c_int = 2;
 const SSL_VERIFY_POST_HANDSHAKE: c_int = 8;
 const VERIFY_REQUIRED: c_int = SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
 
-pub(crate) struct Context {
+// Every SSL keeps the callback argument of its original and selected SSL_CTX alive.
+struct ContextCallbacks {
     alpn: Rc<alpn::Alpn>,
+    sni_enabled: std::cell::Cell<bool>,
+}
+
+pub(crate) struct Context {
+    callbacks: Rc<ContextCallbacks>,
     api: &'static Api,
     handle: NonNull<c_void>,
     pub(super) protocol: Protocol,
@@ -615,7 +633,10 @@ impl Context {
         let handle = NonNull::new(unsafe { (api.SSL_CTX_new)(select()) })
             .ok_or_else(|| api.error("SSL_CTX_new"))?;
         let mut ctx = Self {
-            alpn: Rc::new(alpn::Alpn::new(api)),
+            callbacks: Rc::new(ContextCallbacks {
+                alpn: Rc::new(alpn::Alpn::new(api)),
+                sni_enabled: Default::default(),
+            }),
             api,
             handle,
             protocol,
@@ -871,7 +892,7 @@ impl Context {
     }
 
     pub(crate) fn set_alpn_protocols(&mut self, protocols: &[u8]) -> Result<(), Failure> {
-        self.alpn.configure(self.handle, protocols)
+        self.callbacks.alpn.configure(self.handle, protocols)
     }
 
     fn new_connection(&self, server: bool) -> Result<NonNull<c_void>, Failure> {
@@ -1218,13 +1239,19 @@ impl Context {
 
 impl Drop for Context {
     fn drop(&mut self) {
+        // An SSL can retain this original SSL_CTX after its Python context was replaced.
+        // Retire its callback before that remaining OpenSSL reference can use it as fallback.
+        if self.callbacks.sni_enabled.get() {
+            let _ = self.set_sni_callback(false);
+        }
         // SAFETY: release the reference acquired by SSL_CTX_new exactly once.
         unsafe { (self.api.SSL_CTX_free)(self.handle.as_ptr()) };
     }
 }
 
 pub(crate) struct Session {
-    alpn: Rc<alpn::Alpn>,
+    sni_deadline: Option<Option<socket::Deadline>>,
+    sni: sni::Connection,
     api: &'static Api,
     handle: NonNull<c_void>,
     socket: crate::ObjectOwner,
@@ -1235,7 +1262,7 @@ pub(crate) struct Session {
 }
 
 enum Operation<'a> {
-    Handshake,
+    Control(sni::Entry),
     Read(&'a mut [u8]),
     Write(&'a [u8]),
     Shutdown,
@@ -1244,6 +1271,18 @@ enum Operation<'a> {
 impl Session {
     pub(super) fn retain_ssl(&self) -> Result<OwnedSsl, Failure> {
         OwnedSsl::retain(self.api, self.handle)
+    }
+
+    pub(super) fn resolve_sni(&self, alert: Option<c_int>) -> Result<(), Failure> {
+        self.sni.resolve(alert)
+    }
+
+    pub(super) fn set_context(&mut self, ctx: &Context) -> Result<(), Failure> {
+        self.sni.set_context(self.handle.as_ptr(), ctx)
+    }
+
+    pub(super) fn sni_suspended(&self) -> bool {
+        self.sni.suspended()
     }
 
     pub(super) fn socket(&self) -> &crate::ObjectOwner {
@@ -1259,7 +1298,8 @@ impl Session {
         let api = ctx.api;
         let handle = ctx.new_connection(server)?;
         let mut session = Self {
-            alpn: Rc::clone(&ctx.alpn),
+            sni_deadline: None,
+            sni: sni::Connection::new(ctx),
             api,
             handle,
             endpoint: socket::TlsEndpoint::new(&socket),
@@ -1282,7 +1322,8 @@ impl Session {
 
     pub(super) fn handshake(&mut self) -> Result<(), bio::BioFailure> {
         self.handshake_until(
-            socket::deadline(self.socket()),
+            self.sni_deadline
+                .unwrap_or_else(|| socket::deadline(self.socket())),
             "The handshake operation timed out",
         )
     }
@@ -1292,13 +1333,29 @@ impl Session {
         until: Option<socket::Deadline>,
         timeout_message: &'static str,
     ) -> Result<(), bio::BioFailure> {
-        let result = self
-            .socket_io(Operation::Handshake, until, timeout_message)
-            .map(|_| ());
+        // A recursive handshake can be rejected while an established read is
+        // suspended. Only an actual OpenSSL handshake updates the connection state.
+        self.sni
+            .prepare(self.api, self.handle, self.server, sni::Entry::Handshake)?;
+        let result = self.control_until(sni::Entry::Handshake, until, timeout_message);
         let result =
             self.api
                 .finish_handshake(self.handle, self.hostname.as_deref(), self.server, result);
         self.handshake_complete = result.is_ok();
+        result
+    }
+
+    fn control_until(
+        &mut self,
+        entry: sni::Entry,
+        until: Option<socket::Deadline>,
+        message: &'static str,
+    ) -> Result<(), bio::BioFailure> {
+        let result = self
+            .socket_io(Operation::Control(entry), until, message)
+            .map(|_| ());
+        self.sni_deadline = matches!(result, Err(bio::BioFailure::ClientHello(_))).then_some(until);
+        self.sni.finish(self.api, self.handle);
         result
     }
 
@@ -1308,9 +1365,24 @@ impl Session {
         operation: Operation<'_>,
         timeout_message: &'static str,
     ) -> Result<usize, bio::BioFailure> {
-        let until = socket::deadline(self.socket());
-        if !self.handshake_complete {
+        let until = self
+            .sni_deadline
+            .unwrap_or_else(|| socket::deadline(self.socket()));
+        self.sni.check_reentry()?;
+        if !self.handshake_complete
+            || (matches!(operation, Operation::Write(_))
+                && self
+                    .sni
+                    .continue_before_write(self.api, self.handle, self.server))
+        {
             self.handshake_until(until, timeout_message)?;
+        }
+        if matches!(operation, Operation::Read(_))
+            && self
+                .sni
+                .prepare(self.api, self.handle, self.server, sni::Entry::Peek)?
+        {
+            self.control_until(sni::Entry::Peek, until, timeout_message)?;
         }
         self.socket_io(operation, until, timeout_message)
     }
@@ -1323,7 +1395,11 @@ impl Session {
     ) -> Result<usize, bio::BioFailure> {
         // The BIO retains the original fd number. A base close, detach or reinitializer
         // must never let a later SSL operation use its replacement.
-        if !self.endpoint.matches(&self.socket) {
+        // A suspended callback must return to its original OpenSSL operation.
+        // Detach the old BIO first so even a reused fd cannot receive TLS records.
+        if !self.endpoint.matches(&self.socket)
+            && !self.sni.detach_closing_socket(self.api, self.handle)?
+        {
             return Err(Failure::Io(std::io::Error::from_raw_os_error(libc::EBADF)).into());
         }
         let api = self.api;
@@ -1339,7 +1415,9 @@ impl Session {
             let (rc, label) = unsafe {
                 match &mut operation {
                     Operation::Shutdown => ((api.SSL_shutdown)(ssl), "SSL_shutdown"),
-                    Operation::Handshake => ((api.SSL_do_handshake)(ssl), "SSL_do_handshake"),
+                    Operation::Control(entry) => {
+                        (self.sni.invoke(api, self.handle, *entry), entry.label())
+                    }
                     Operation::Read(buf) => (
                         (api.SSL_read_ex)(ssl, buf.as_mut_ptr().cast(), buf.len(), &mut n),
                         "SSL_read",
@@ -1388,6 +1466,9 @@ impl Session {
                 _ if until.is_some_and(|end| end.remaining().is_zero()) => {
                     Err(io::ErrorKind::TimedOut.into())
                 }
+                Some(_) if socket::fd(self.socket()) < 0 => {
+                    Err(io::Error::from_raw_os_error(libc::EBADF))
+                }
                 Some(events) => socket::poll_socket(socket::fd(self.socket()), events, until),
                 None => Ok(()),
             };
@@ -1407,7 +1488,7 @@ impl Session {
     }
 
     pub(super) fn selected_alpn_protocol(&self) -> Option<Vec<u8>> {
-        self.alpn.selected(self.handle)
+        self.sni.selected_alpn_protocol(self.handle)
     }
 
     pub(crate) fn channel_binding(&self) -> Option<Vec<u8>> {
@@ -1497,6 +1578,7 @@ impl Session {
 
     /// Exchange close notifications while the session still owns the socket.
     pub(in crate::dynamic) fn shutdown(&mut self) -> Result<(), bio::BioFailure> {
+        self.sni.check_reentry()?;
         self.socket_io(
             Operation::Shutdown,
             socket::deadline(self.socket()),
@@ -1508,6 +1590,8 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        let _ = self.sni.detach_closing_socket(self.api, self.handle);
+        self.sni.cancel(self.api, self.handle);
         // SAFETY: free the SSL and its non-closing BIO. The Python socket owns the fd.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
     }

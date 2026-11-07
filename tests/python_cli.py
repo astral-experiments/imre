@@ -3607,6 +3607,11 @@ def report(text):
                     "-IB", alpn, certdata,
                     native_args=("run", alpn, "--quiet", "--", certdata), native_timeout=600,
                 )
+                sni = fixtures / "ssl_sni.py"
+                compare(
+                    "-IB", sni, certdata,
+                    native_args=("run", sni, "--quiet", "--", certdata), native_timeout=600,
+                )
                 dh_params = fixtures / "ssl_dh_params.py"
                 compare(
                     "-IB", dh_params, certdata,

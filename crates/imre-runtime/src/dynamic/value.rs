@@ -1231,15 +1231,22 @@ pub(super) enum Value {
     #[cfg(unix)]
     MemoryBio(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::Bio>>),
     #[cfg(unix)]
-    TlsContext(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::Context>>),
+    TlsContext(
+        std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::Context>>,
+        super::stdlib::ssl::Registration,
+    ),
     #[cfg(unix)]
-    TlsSession(std::rc::Rc<std::cell::RefCell<Option<super::stdlib::ssl::provider::Session>>>),
+    TlsSession(
+        std::rc::Rc<std::cell::RefCell<Option<super::stdlib::ssl::provider::Session>>>,
+        super::stdlib::ssl::Owner,
+    ),
     #[cfg(unix)]
     TlsListener(crate::ObjectOwner),
     #[cfg(unix)]
     TlsBioSession {
         session: std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>,
         server_hostname: Id,
+        owner: super::stdlib::ssl::Owner,
     },
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
@@ -1699,9 +1706,9 @@ impl Value {
             #[cfg(unix)]
             Self::MemoryBio(_) => "_ssl.MemoryBIO",
             #[cfg(unix)]
-            Self::TlsContext(_) => "_imre_ssl.Context",
+            Self::TlsContext(..) => "_imre_ssl.Context",
             #[cfg(unix)]
-            Self::TlsSession(_) => "_imre_ssl.Session",
+            Self::TlsSession(..) => "_imre_ssl.Session",
             #[cfg(unix)]
             Self::TlsListener(_) => "_imre_ssl.Listener",
             #[cfg(unix)]
@@ -1905,6 +1912,7 @@ impl Value {
             | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
+            Self::Weak(reference) if reference.internal => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
         }
@@ -2482,14 +2490,20 @@ impl Value {
             | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
-            Self::MemoryBio(_)
-            | Self::TlsContext(_)
-            | Self::TlsSession(_)
-            | Self::TlsListener(_) => {}
+            Self::MemoryBio(_) | Self::TlsListener(_) => {}
+            #[cfg(unix)]
+            Self::TlsContext(_, sni) => visit.push(sni.callback),
+            #[cfg(unix)]
+            Self::TlsSession(_, owner) => visit.extend(owner.references()),
             #[cfg(unix)]
             Self::TlsBioSession {
-                server_hostname, ..
-            } => visit.push(*server_hostname),
+                server_hostname,
+                owner,
+                ..
+            } => {
+                visit.push(*server_hostname);
+                visit.extend(owner.references());
+            }
             Self::ZstdDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::Bz2Decompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::LzmaDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
@@ -3363,6 +3377,22 @@ impl Heap {
         self.weak.get(&target).map_or(&[], Vec::as_slice)
     }
 
+    /// Python enumerates its refs and proxies. A native handle shares their
+    /// clearing and slot-reuse rules, but has no Python weakref object.
+    pub fn python_weak_references(&self, target: Id) -> &[Id] {
+        let refs = self.weak_references(target);
+        if let Some((&last, visible)) = refs.split_last()
+            && matches!(self.get(last), Value::Weak(wr) if wr.internal)
+        {
+            return visible;
+        }
+        refs
+    }
+
+    pub fn native_weak_reference(&mut self, target: Id) -> Result<Id> {
+        self.allocate_weak_reference(target, NONE, super::weakref::Kind::Reference, None, true)
+    }
+
     pub fn new_weak_reference(
         &mut self,
         target: Id,
@@ -3370,26 +3400,43 @@ impl Heap {
         kind: super::weakref::Kind,
         subclass: Option<Id>,
     ) -> Result<Id> {
+        self.allocate_weak_reference(target, callback, kind, subclass, false)
+    }
+
+    fn allocate_weak_reference(
+        &mut self,
+        target: Id,
+        callback: Id,
+        kind: super::weakref::Kind,
+        subclass: Option<Id>,
+        internal: bool,
+    ) -> Result<Id> {
         let references = self.weak_references(target);
         if subclass.is_none() && callback == NONE
             && let Some(&id) = references.iter().find(|&&id|
-                matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
+                matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.internal == internal && wr.callback == NONE))
         {
             return Ok(id);
         }
         // Callback-free canonical references precede proxies, then callbacks in newest-first order.
-        let index = references
-            .iter()
-            .position(|&id| match self.get(id) {
-                Value::Weak(wr) => {
-                    wr.callback != NONE
-                        || (subclass.is_none()
-                            && callback == NONE
-                            && kind == super::weakref::Kind::Reference)
-                }
-                _ => true,
-            })
-            .unwrap_or(references.len());
+        // One shared native handle, if present, follows every Python wrapper.
+        let index = if internal {
+            references.len()
+        } else {
+            references
+                .iter()
+                .position(|&id| match self.get(id) {
+                    Value::Weak(wr) => {
+                        wr.internal
+                            || wr.callback != NONE
+                            || (subclass.is_none()
+                                && callback == NONE
+                                && kind == super::weakref::Kind::Reference)
+                    }
+                    _ => true,
+                })
+                .unwrap_or(references.len())
+        };
         let mut new_references = Vec::new();
         if let Some(references) = self.weak.get_mut(&target) {
             references.try_reserve(1)
@@ -3403,6 +3450,7 @@ impl Heap {
             target: Some(target),
             callback,
             kind,
+            internal,
             hash: None,
         };
         let id = if let Some(owner) = subclass {

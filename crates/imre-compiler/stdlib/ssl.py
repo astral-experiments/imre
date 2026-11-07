@@ -8,6 +8,7 @@ import socket as _socket
 import sys
 import warnings as _warnings
 from operator import index as _index
+from _weakref import ref as _ref
 from _ssl import MemoryBIO
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
 from _ssl import SSLError, SSL_ERROR_SSL as _SSL_ERROR_SSL, nid2obj as _nid2obj, txt2obj as _txt2obj
@@ -266,7 +267,7 @@ class Purpose(_ASN1Object, _Enum):
 class SSLContext:
     """TLS settings, trusted certificates and local certificate chains."""
 
-    __slots__ = ("_ctx", "__dict__")
+    __slots__ = ("_ctx", "__dict__", "__weakref__")
 
     def __new__(cls, protocol=None, *args, **kwargs):
         if protocol is None:
@@ -471,6 +472,31 @@ class SSLContext:
             return hostname.encode("idna").decode("ascii")
         return hostname.decode("ascii")
 
+    @property
+    def sni_callback(self):
+        return _call(_imre_ssl.sni_callback, __class__._ctx.__get__(self))
+
+    @sni_callback.setter
+    def sni_callback(self, callback):
+        _call(_imre_ssl.sni_callback, __class__._ctx.__get__(self), callback)
+
+    @sni_callback.deleter
+    def sni_callback(self):
+        _call(_imre_ssl.sni_callback, __class__._ctx.__get__(self), None)
+        raise TypeError("not a callable object")
+
+    def set_servername_callback(self, server_name_callback):
+        if server_name_callback is None:
+            self.sni_callback = None
+        else:
+            if not callable(server_name_callback):
+                raise TypeError("not a callable object")
+
+            def shim_cb(sslobj, servername, sslctx):
+                return server_name_callback(sslobj, self._encode_hostname(servername), sslctx)
+
+            self.sni_callback = shim_cb
+
     def wrap_bio(self, incoming, outgoing, server_side=False, server_hostname=None, session=None):
         return self.sslobject_class._create(incoming, outgoing, server_side=server_side,
                                             server_hostname=self._encode_hostname(server_hostname),
@@ -517,6 +543,16 @@ def _tls_result(result):
     raise error
 
 
+def _set_context(session, context):
+    if not issubclass(type(context), SSLContext):
+        raise TypeError("The value must be a SSLContext")
+    _tls_result(_call(_imre_ssl.set_context, session, SSLContext._ctx.__get__(context), context))
+
+
+def _bio_handshake(session):
+    return _tls_result(_call(_imre_ssl.bio_handshake, session))
+
+
 class SSLObject:
     """A TLS connection driven by caller-owned incoming and outgoing memory BIOs."""
 
@@ -534,7 +570,7 @@ class SSLObject:
             raise NotImplementedError("setting a session on a memory BIO is unsupported")
         self = cls.__new__(cls)
         self._sslobj = _call(_imre_ssl.wrap_bio, native_context, incoming, outgoing,
-                             server_hostname, server_side)
+                             server_hostname, server_side, context, _ref(self))
         self._context = context
         self._server_side = server_side
         return self
@@ -542,6 +578,11 @@ class SSLObject:
     @property
     def context(self):
         return self._context
+
+    @context.setter
+    def context(self, context):
+        _set_context(self._sslobj, context)
+        self._context = context
 
     @property
     def server_side(self):
@@ -572,7 +613,7 @@ class SSLObject:
 
     def do_handshake(self):
         """Advance the handshake, raising SSLWantReadError when more peer data is needed."""
-        self._bio_call(_imre_ssl.bio_handshake)
+        self._sslobj.do_handshake()
 
     def selected_alpn_protocol(self):
         return _imre_ssl.selected_alpn_protocol(self._sslobj)
@@ -658,7 +699,7 @@ class SSLSocket(_socket.socket):
                 connected = True
             peer.settimeout(sock_timeout)
             result = _call(_imre_ssl.wrap, context._ctx, peer, server_hostname,
-                           bool(server_side), connected)
+                           bool(server_side), connected, context, _ref(peer))
             result = _tls_result(result)
             SSLSocket._session.__set__(peer, result)
             connected = _imre_ssl.is_session(result)
@@ -678,6 +719,15 @@ class SSLSocket(_socket.socket):
     @property
     def context(self):
         return self._context
+
+    @context.setter
+    def context(self, context):
+        self._context = context
+        if not _imre_ssl.is_session(self._session):
+            # The public context changes even when there is no underlying SSL object.
+            setattr(None, "context", context)
+        else:
+            _set_context(self._session, context)
 
     @property
     def server_hostname(self):
