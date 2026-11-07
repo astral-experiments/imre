@@ -238,6 +238,7 @@ struct CallParameters {
     return_type: Option<String>,
     types: serde_json::Value,
     integer_sign_parameters: serde_json::Value,
+    annotation_references: Option<Box<serde_json::Value>>,
 }
 
 impl CallParameters {
@@ -289,6 +290,9 @@ impl CallParameters {
                 .get_mut("types")
                 .map(serde_json::Value::take)
                 .unwrap_or_default(),
+            annotation_references: metadata
+                .get_mut("annotation_references")
+                .map(|references| Box::new(references.take())),
             integer_sign_parameters: metadata
                 .get_mut("integer_sign_parameters")
                 .map(serde_json::Value::take)

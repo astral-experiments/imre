@@ -8220,7 +8220,7 @@ impl Context {
                 }
                 // Defaults belong to the function. Validate the arguments supplied by the caller
                 // and report binding errors first, including missing keyword-only arguments.
-                let supplied_types = self.check_supplied_types(local, &sig, &name);
+                let supplied_types = self.check_supplied_types(callable, local, &sig, &name);
                 let mut missing = Vec::new();
                 for (index, n) in pos.iter().enumerate() {
                     if !self.scope_data(local).names.contains_key(n.as_str()) {
@@ -8279,6 +8279,8 @@ impl Context {
                 let value = result?;
                 if let Some(expected) = sig.return_type.as_deref() {
                     self.require_scalar(
+                        callable,
+                        "return",
                         value,
                         expected,
                         false,
@@ -8329,11 +8331,19 @@ impl Context {
     }
 
     /// Check scalar annotations on values that were explicitly bound by this call.
-    fn check_supplied_types(&self, local: Id, sig: &CallParameters, name: &str) -> Result<()> {
+    fn check_supplied_types(
+        &self,
+        function: Id,
+        local: Id,
+        sig: &CallParameters,
+        name: &str,
+    ) -> Result<()> {
         if let Some(types) = sig.types.as_object() {
             for (param, expected) in types {
                 if let Some(&id) = self.scope_data(local).names.get(param.as_str()) {
                     self.require_scalar(
+                        function,
+                        param,
                         id,
                         expected.as_str().unwrap_or_default(),
                         sig.integer_sign_parameters[param] == true,
@@ -8345,14 +8355,185 @@ impl Context {
         Ok(())
     }
 
+    /// The outer None means that Python could intercept this dictionary lookup.
+    fn scalar_dict_name(&self, dict: Id, name: &str) -> Option<Option<Id>> {
+        let Value::Dict(entries) = self.heap.get(dict) else {
+            return None;
+        };
+        entries.lookup_text(&self.heap, name).continue_value()
+    }
+
+    fn scalar_scope_name(&self, scope: Id, name: &str) -> Option<Option<Id>> {
+        let frame = self.scope_data(scope);
+        match frame
+            .exec_globals
+            .map(|globals| globals.dict)
+            .or_else(|| frame.binding_namespace(name))
+        {
+            Some(dict) => self.scalar_dict_name(dict, name),
+            None => Some(self.scope_name(scope, name)),
+        }
+    }
+
+    /// Read a name or a single member of an ordinary module without running Python.
+    fn module_type_reference(&self, scope: Id, reference: &str) -> Option<Id> {
+        if reference == "None" {
+            return Some(NONE);
+        }
+        let (name, member) = reference
+            .split_once('.')
+            .map_or((reference, None), |(name, member)| (name, Some(member)));
+        let frame = self.scope_data(scope);
+        // A method may capture just its class dictionary ahead of its globals.
+        let (scope, local) = if let Some(parent) = frame.parent {
+            let cells = &frame.closure.cells;
+            if cells.len() != 1 {
+                return None;
+            }
+            let Value::Cell(Some(dict)) = *self.heap.get(*cells.get("__classdict__")?) else {
+                return None;
+            };
+            (parent, self.scalar_dict_name(dict, name)?)
+        } else {
+            (scope, None)
+        };
+        let frame = self.scope_data(scope);
+        if frame.parent.is_some() || frame.exec_locals.is_some() {
+            return None;
+        }
+        let binding = if let Some(value) = local {
+            value
+        } else if let Some(value) = self.scalar_scope_name(scope, name)? {
+            value
+        } else if let Some(dict) = frame
+            .exec_globals
+            .map(|globals| globals.builtins)
+            .or(self.source_builtins)
+        {
+            self.scalar_dict_name(dict, name)??
+        } else {
+            *self.builtins.get(name)?
+        };
+        let Some(member) = member else {
+            return Some(binding);
+        };
+        let Value::Module {
+            scope, constructor, ..
+        } = *self.heap.get(binding)
+        else {
+            return None;
+        };
+        if constructor.is_some_and(|class| self.builtins.get("module") != Some(&class)) {
+            return None;
+        }
+        self.scalar_scope_name(scope, member)?
+    }
+
+    /// Use published annotations first. An unread generated provider can prove a
+    /// module binding without executing it, including when transferred to another function.
+    fn checked_annotation(&self, function: Id, slot: &str) -> Result<Option<Id>> {
+        let Value::Function {
+            fields,
+            scope: owner,
+            ..
+        } = *self.heap.get(function)
+        else {
+            unreachable!()
+        };
+        let published = if let Some(dict) = fields.annotations {
+            let Some(value) = self.scalar_dict_name(dict, slot).flatten() else {
+                return Ok(None);
+            };
+            match self.heap.get(value) {
+                Value::Str(text) => Some(text.as_str()),
+                _ => return Ok(Some(value)),
+            }
+        } else {
+            None
+        };
+        let Value::Function { scope, code, .. } = *self.heap.get(fields.annotate) else {
+            return Ok(None);
+        };
+        let provider = self.code_object(code);
+        if !provider.closure_supported || provider.parameters == NONE {
+            return Ok(None);
+        }
+        let sig = self.parsed_parameters(code)?;
+        let Some(name) = sig
+            .annotation_references
+            .as_ref()
+            .and_then(|slots| slots[slot].as_str())
+        else {
+            return Ok(None);
+        };
+        let postponed = provider.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
+        if published.is_some_and(|text| !postponed || text != name) {
+            return Ok(None);
+        }
+        // A postponed string belongs to the receiving function's type-hint namespace.
+        let scope = if postponed {
+            if !matches!(self.heap.get(fields.type_params), Value::Tuple(params) if params.is_empty())
+            {
+                return Ok(None);
+            }
+            self.root_scope(owner)
+        } else {
+            scope
+        };
+        Ok(self.module_type_reference(scope, name))
+    }
+
     fn require_scalar(
         &self,
+        function: Id,
+        slot: &str,
         value: Id,
         expected: &str,
         integer_sign: bool,
         context: std::fmt::Arguments<'_>,
     ) -> Result<()> {
+        let scalar = |id| match self.heap.get(id) {
+            Value::Native(name)
+                if self.builtins.get(name) == Some(&id)
+                    && matches!(name.as_str(), "str" | "bytes" | "int" | "bool" | "float") =>
+            {
+                Some(name.as_str())
+            }
+            _ => None,
+        };
+        let bound = self.checked_annotation(function, slot)?.and_then(|target| {
+            let family = match self.heap.get(target) {
+                Value::Class { ancestors, .. } => ancestors.iter().find_map(|&base| scalar(base)),
+                Value::None => Some("None"),
+                _ => scalar(target),
+            }?;
+            Some((target, family))
+        });
         let boxed = self.heap.get(value);
+        let expected = if let Some((target, family)) = bound {
+            if let Value::Instance { class, .. } = boxed
+                && (*class == target
+                    || self
+                        .published_mro(*class)
+                        .is_some_and(|mro| mro.contains(&target)))
+            {
+                return Ok(());
+            }
+            if matches!(self.heap.get(target), Value::Class { .. }) {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{context} requires {family}"),
+                ));
+            }
+            family
+        } else if matches!(
+            expected,
+            "str" | "bytes" | "int" | "bool" | "float" | "None"
+        ) {
+            expected
+        } else {
+            return Ok(());
+        };
         // A boxed comparison can read the integer's sign from the original object.
         if (integer_sign && matches!((expected, boxed), ("float", Value::Int(_))))
             || matches!(

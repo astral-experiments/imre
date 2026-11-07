@@ -732,17 +732,29 @@ impl Function<'_, '_> {
             if self.source.barry_as_flufl {
                 annotation_flags |= FUTURE_BARRY_AS_BDFL;
             }
-            let sig = self.text(
-                &json!({
-                    "posonly": ["format"],
-                    "code_flags": annotation_flags,
-                    "scope_reads": reads,
-                    "scope_complete": true,
-                    "scope_locals_complete": true,
-                    "annotation_class": class.is_some(),
-                })
-                .to_string(),
-            );
+            let mut metadata = json!({
+                "posonly": ["format"],
+                "code_flags": annotation_flags,
+                "scope_reads": reads,
+                "scope_complete": true,
+                "scope_locals_complete": true,
+                "annotation_class": class.is_some(),
+            });
+            if !self.source.python_annotations && type_params.is_none() {
+                for (slot, expr) in &entries {
+                    if let Some(reference) = scalar_reference(expr) {
+                        let root = reference.split('.').next().unwrap();
+                        if class
+                            .as_ref()
+                            .is_some_and(|class| class.globals.contains(root))
+                        {
+                            continue;
+                        }
+                        metadata["annotation_references"][slot] = json!(reference);
+                    }
+                }
+            }
+            let sig = self.text(&metadata.to_string());
             let code = self.output.definition(
                 self.source,
                 String::new(),
@@ -902,8 +914,8 @@ impl Function<'_, '_> {
             if self.source.python_annotations {
                 return None;
             }
-            scalar_annotation(expr).filter(|name| {
-                !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == *name))
+            scalar_reference(expr).filter(|name| {
+                !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == name))
             })
         };
         if generator.is_none() {
@@ -1501,17 +1513,16 @@ impl Function<'_, '_> {
     }
 }
 
-fn scalar_annotation(expr: &ast::Expr) -> Option<&'static str> {
+/// Names that can refer directly to a type without calling Python.
+fn scalar_reference(expr: &ast::Expr) -> Option<String> {
     match expr {
-        ast::Expr::NoneLiteral(_) => Some("None"),
-        ast::Expr::Name(n) => match n.id.as_str() {
-            "int" => Some("int"),
-            "str" => Some("str"),
-            "bool" => Some("bool"),
-            "bytes" => Some("bytes"),
-            "float" => Some("float"),
-            _ => None,
-        },
+        ast::Expr::NoneLiteral(_) => Some("None".to_owned()),
+        ast::Expr::Name(name) if !name.id.starts_with("__") => Some(name.id.to_string()),
+        ast::Expr::Attribute(attr) => {
+            let module = attr.value.as_name_expr()?;
+            (!module.id.starts_with("__") && !attr.attr.starts_with("__"))
+                .then(|| format!("{}.{}", module.id, attr.attr))
+        }
         _ => None,
     }
 }

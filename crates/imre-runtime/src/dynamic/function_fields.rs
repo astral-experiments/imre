@@ -10,8 +10,8 @@ pub(super) struct FunctionFields {
     pub module: Id,
     pub doc: Id,
     pub annotate: Id,
-    annotations: Option<Id>,
-    type_params: Id,
+    pub(super) annotations: Option<Id>,
+    pub(super) type_params: Id,
     /// The writable namespace, or `NONE` until it is first exposed.
     pub(super) dict: Id,
 }
