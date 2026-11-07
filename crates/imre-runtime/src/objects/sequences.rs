@@ -88,6 +88,13 @@ impl SliceIndices {
 
     /// Normalizes rooted optional integer bounds with a known nonzero step.
     unsafe fn with_step(length: usize, start: usize, stop: usize, step: isize) -> Self {
+        // SAFETY: both optional integer bounds remain rooted throughout normalization.
+        let (first, last) = unsafe { (slice_component(start), slice_component(stop)) };
+        Self::from_bounds(length, first, last, step)
+    }
+
+    /// Normalizes already decoded bounds against the current sequence length.
+    fn from_bounds(length: usize, start: Option<isize>, stop: Option<isize>, step: isize) -> Self {
         let reverse = step < 0;
         let length = length as isize;
         let (lower, upper) = if reverse {
@@ -99,12 +106,10 @@ impl SliceIndices {
             let value = if value < 0 { value + length } else { value };
             value.clamp(lower, upper)
         };
-        // SAFETY: each bound remains rooted; conversion cannot call user code.
-        let start = unsafe { slice_component(start) }
+        let start = start
             .map(normalize)
             .unwrap_or(if reverse { upper } else { lower });
-        // SAFETY: the stop has the same nullable integer representation.
-        let stop = unsafe { slice_component(stop) }
+        let stop = stop
             .map(normalize)
             .unwrap_or(if reverse { lower } else { upper });
         let distance = if reverse { start - stop } else { stop - start };
@@ -310,8 +315,7 @@ pub unsafe extern "C" fn imre_str_slice_equal(
             return forward_region(text, first, last);
         }
         let length = text.chars().count();
-        // SAFETY: both bounds stay rooted and the stride is one.
-        let slice = unsafe { SliceIndices::with_step(length, start, stop, 1) };
+        let slice = SliceIndices::from_bounds(length, first, last, 1);
         contiguous_slice(text, length, &slice)
     }
     // SAFETY: the caller roots both immutable strings and their bounds.
