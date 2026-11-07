@@ -9,7 +9,7 @@ pub(crate) use credentials::{
     setreuid,
 };
 #[cfg(target_os = "linux")]
-pub(crate) use credentials::{getresgid, getresuid};
+pub(crate) use credentials::{getresgid, getresuid, setresgid, setresuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
