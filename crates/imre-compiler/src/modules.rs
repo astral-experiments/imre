@@ -698,6 +698,7 @@ pub(crate) enum IntrinsicModule {
     Locale,
     LocaleNative,
     Functools,
+    FunctoolsNative,
     Calendar,
     Fractions,
     Fnmatch,
@@ -888,7 +889,7 @@ pub(crate) enum Intrinsic {
     CachedProperty,
     NewType,
     Partial,
-    Placeholder,
+    Placeholder(crate::ir::PlaceholderKind),
     Reduce,
     CmpToKey,
     TomlDumps,
@@ -1246,6 +1247,7 @@ impl IntrinsicModule {
                 | Self::StringFormatting
                 | Self::CollectionsNative
                 | Self::DatetimeNative
+                | Self::FunctoolsNative
                 | Self::SignalNative
         )
     }
@@ -1278,6 +1280,7 @@ impl IntrinsicModule {
             "_locale" => Some(Self::LocaleNative),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "_functools" => Some(Self::FunctoolsNative),
             "calendar" => Some(Self::Calendar),
             "fractions" => Some(Self::Fractions),
             "fnmatch" => Some(Self::Fnmatch),
@@ -1843,8 +1846,13 @@ impl IntrinsicModule {
             (Self::Fnmatch, "translate") => Intrinsic::Fnmatch(FnmatchOperation::Translate),
             (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
-            (Self::Functools, "partial") => Intrinsic::Partial,
-            (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
+            (Self::Functools | Self::FunctoolsNative, "partial") => Intrinsic::Partial,
+            (Self::Functools | Self::FunctoolsNative, "Placeholder") => {
+                Intrinsic::Placeholder(crate::ir::PlaceholderKind::Value)
+            }
+            (Self::Functools | Self::FunctoolsNative, "_PlaceholderType") => {
+                Intrinsic::Placeholder(crate::ir::PlaceholderKind::Class)
+            }
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::Functools, "cmp_to_key") => Intrinsic::CmpToKey,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,

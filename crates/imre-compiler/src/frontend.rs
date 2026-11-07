@@ -6944,9 +6944,7 @@ impl<'a> Checker<'a> {
                     return Ok(self.linecache_mapping());
                 }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
-                Intrinsic::Placeholder => {
-                    return Ok(partials::singleton(ir::PlaceholderKind::Value));
-                }
+                Intrinsic::Placeholder(kind) => return Ok(partials::singleton(kind)),
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
@@ -9757,12 +9755,8 @@ impl<'a> Checker<'a> {
                 };
                 return self.typed_expr(value);
             }
-            Some(Binding::Intrinsic(Intrinsic::Placeholder)) => {
-                return self.placeholder_call(
-                    call,
-                    partials::singleton(ir::PlaceholderKind::Value),
-                    ir::PlaceholderKind::Value,
-                );
+            Some(Binding::Intrinsic(Intrinsic::Placeholder(kind))) => {
+                return self.placeholder_call(call, partials::singleton(kind), kind);
             }
             Some(Binding::Intrinsic(Intrinsic::SingleDispatch)) => {
                 return self.single_dispatch(call);
