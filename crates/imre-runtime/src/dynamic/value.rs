@@ -2996,6 +2996,7 @@ impl RootTrace {
             }
             self.next_roots.push(id);
         }
+        self.add_frame_containers(heap);
         if !self.valid || self.roots != self.next_roots {
             std::mem::swap(&mut self.roots, &mut self.next_roots);
             self.valid = self.rebuild(heap);
@@ -3007,6 +3008,36 @@ impl RootTrace {
             heap.mark_reference_roots(self.frontier.iter().copied(), None);
         } else {
             heap.mark_reference_roots(self.roots.iter().copied(), None);
+        }
+    }
+
+    /// Include large containers that the active scopes already keep alive.
+    fn add_frame_containers(&mut self, heap: &Heap) {
+        for frame in &heap.frames {
+            let Value::Scope(scope) = heap.get(frame.scope) else {
+                continue;
+            };
+            for &id in scope.names.values() {
+                if self
+                    .flags
+                    .get(id as usize)
+                    .is_some_and(|flags| flags & Self::VOLATILE != 0)
+                {
+                    continue;
+                }
+                let len = match heap.get(id) {
+                    Value::List(items) | Value::Tuple(items) => items.len(),
+                    Value::Dict(entries) => entries.len(),
+                    _ => continue,
+                };
+                // Small containers are cheaper to walk as ordinary frame roots.
+                if len >= 256 {
+                    if self.next_roots.try_reserve(1).is_err() {
+                        return;
+                    }
+                    self.next_roots.push(id);
+                }
+            }
         }
     }
 
@@ -6703,6 +6734,49 @@ mod tests {
         heap.collect([reused].into_iter());
         assert!(heap.slots[root as usize].value.is_none());
         assert!(heap.slots[reused as usize].value.is_some());
+    }
+
+    #[test]
+    fn cached_frame_containers_follow_the_current_binding_and_children() {
+        let mut heap = Heap::new();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let original = heap.alloc(Value::Tuple(vec![child; 256]));
+        *heap.get_mut(child) = Value::List(vec![original]);
+        let mut frame = Scope::new(String::new(), None);
+        frame.names.insert(crate::Str::new("items"), original);
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
+        heap.frames[0].scope = scope;
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(heap.root_trace.roots.contains(&original));
+        assert!(heap.slots[child as usize].value.is_some());
+
+        let replacement = heap.alloc(Value::List(vec![NONE; 256]));
+        let Value::Scope(frame) = heap.get_mut(scope) else {
+            unreachable!()
+        };
+        *frame.names.get_mut("items").unwrap() = replacement;
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(!heap.root_trace.roots.contains(&original));
+        assert!(heap.root_trace.roots.contains(&replacement));
+        // Prompt collections retain the unbound cycle until cyclic GC runs.
+        assert!(heap.slots[original as usize].value.is_some());
+        heap.begin_collection(std::iter::empty(), 2).unwrap();
+        heap.finish_full_collection(std::iter::empty());
+        assert!(heap.slots[original as usize].value.is_none());
+        assert!(heap.slots[child as usize].value.is_none());
+
+        let latest = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(replacement) = Value::List(vec![latest; 256]);
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[latest as usize].value.is_some());
+        assert!(!heap.root_trace.roots.contains(&replacement));
+        heap.frames[0].scope = NONE;
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[replacement as usize].value.is_none());
+        assert!(heap.slots[latest as usize].value.is_none());
     }
 
     #[test]
