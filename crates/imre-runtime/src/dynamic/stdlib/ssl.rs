@@ -1077,7 +1077,8 @@ pub(super) fn call(
                     .unwrap_or(0);
                 let length = usize::try_from(length)
                     .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
-                let bytes = socket::recv(&raw, length, flags)?;
+                let bytes =
+                    socket::recv_with_signals(&raw, length, flags, || ctx.dispatch_signals())?;
                 return Ok(ctx.alloc(Value::Bytes(bytes)));
             }
             if !without_session(ctx, *handle) {

@@ -1,6 +1,6 @@
 //! The Python argument conversion and exported buffers for the native message syscalls.
 use super::{
-    Context, Error, Id, NONE, Result, Value, address, native, pack_socket_name, receive_size,
+    Context, Error, Id, NONE, Result, Value, address, native, pack_socket_name, receive_size, retry,
 };
 use crate::dynamic::{copy_ids, raw_read_window::IoVectors};
 use crate::objects::Object;
@@ -196,26 +196,6 @@ fn control_item(ctx: &mut Context, item: Id) -> Result<[Id; 3]> {
             format!("{NAME} must be tuple of length 3, not {}", v.len()),
         )
     })
-}
-
-/// Recreate any pointers into the Python heap after a returning signal handler.
-fn retry<T>(
-    ctx: &mut Context,
-    socket: &Object,
-    mut attempt: impl FnMut(&mut Context, Option<native::Deadline>) -> Result<T>,
-) -> Result<T> {
-    let until = native::deadline(socket);
-    loop {
-        match attempt(ctx, until) {
-            Err(err) if ctx.has_errno(&err, libc::EINTR) => {
-                ctx.dispatch_signals()?;
-                if until.is_some_and(|end| end.remaining().is_zero()) {
-                    return Err(Error::new("TimeoutError", "timed out"));
-                }
-            }
-            result => return result,
-        }
-    }
 }
 
 fn send(ctx: &mut Context, socket: &Object, receiver: Id, args: &[Id], flags: i32) -> Result<Id> {

@@ -1057,6 +1057,26 @@ fn receive_size(ctx: &mut Context, value: Id) -> Result<isize> {
     })
 }
 
+/// Recreate any pointers into the Python heap after a returning signal handler.
+fn retry<T>(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    mut attempt: impl FnMut(&mut Context, Option<native::Deadline>) -> Result<T>,
+) -> Result<T> {
+    let until = native::deadline(socket);
+    loop {
+        match attempt(ctx, until) {
+            Err(err) if ctx.has_errno(&err, libc::EINTR) => {
+                ctx.dispatch_signals()?;
+                if until.is_some_and(|end| end.remaining().is_zero()) {
+                    return Err(Error::new("TimeoutError", "timed out"));
+                }
+            }
+            result => return result,
+        }
+    }
+}
+
 fn receive_into(
     ctx: &mut Context,
     method: &str,
@@ -1094,22 +1114,29 @@ fn receive_into(
             let nbytes = usize::try_from(nbytes).map_err(|_| {
                 Error::new("ValueError", format!("negative buffersize in {method}"))
             })?;
-            let bytes = &mut ctx.writable_storage_bytes(storage)?[span];
-            let size = if nbytes == 0 { bytes.len() } else { nbytes };
-            let target = bytes.get_mut(..size).ok_or_else(|| {
+            let size = if nbytes == 0 { span.len() } else { nbytes };
+            if size > span.len() {
                 let message = if method == "recv_into" {
                     "buffer too small for requested bytes"
                 } else {
                     "nbytes is greater than the length of the buffer"
                 };
-                Error::new("ValueError", message)
-            })?;
-            if method == "recv_into" {
-                Ok((native::recv_into(socket, target, flags)?, None))
-            } else {
-                let (count, peer) = native::recv_from_into(socket, target, flags)?;
-                Ok((count, Some(peer)))
+                return Err(Error::new("ValueError", message));
             }
+            retry(ctx, socket, |ctx, until| {
+                let target = ctx
+                    .writable_storage_bytes(storage)?
+                    .get_mut(span.start..span.start + size)
+                    .ok_or_else(|| {
+                        Error::new("BufferError", "underlying buffer has changed size")
+                    })?;
+                if method == "recv_into" {
+                    Ok((native::recv_into(socket, target, flags, until)?, None))
+                } else {
+                    let (count, peer) = native::recv_from_into(socket, target, flags, until)?;
+                    Ok((count, Some(peer)))
+                }
+            })
         },
     )?;
     let count = ctx.int(count as i64);
@@ -1274,7 +1301,7 @@ pub(super) fn endpoint_method(
             Ok(NONE)
         }
         "accept" => {
-            let (child, peer) = native::accept(socket)?;
+            let (child, peer) = native::accept(socket, || ctx.dispatch_signals())?;
             let peer = pack_socket_name(ctx, peer)?;
             let child = new_socket(ctx, child)?;
             Ok(ctx.alloc(Value::Tuple(vec![child, peer])))
@@ -1612,7 +1639,7 @@ pub(super) fn call(
                 .unwrap_or(0);
             let size = usize::try_from(n)
                 .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom"))?;
-            let (data, peer) = native::recv_from(&s, size, flags)?;
+            let (data, peer) = native::recv_from(&s, size, flags, || ctx.dispatch_signals())?;
             let data = ctx.alloc(Value::Bytes(data));
             let peer = pack_socket_name(ctx, peer)?;
             return Ok(ctx.alloc(Value::Tuple(vec![data, peer])));
@@ -1620,7 +1647,8 @@ pub(super) fn call(
         "recv" => {
             let n = usize::try_from(ctx.as_integer(argument(args, 0)?)?)
                 .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
-            let bytes = native::recv(&s, n, int_option(ctx, args, kwargs, 1, "flags", 0)?)?;
+            let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
+            let bytes = native::recv_with_signals(&s, n, flags, || ctx.dispatch_signals())?;
             return Ok(ctx.alloc(Value::Bytes(bytes)));
         }
         "send" | "sendall" => {

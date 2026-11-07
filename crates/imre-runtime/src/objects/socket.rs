@@ -300,6 +300,26 @@ fn retry<T>(until: Option<Deadline>, mut call: impl FnMut() -> io::Result<T>) ->
     }
 }
 
+/// Dispatch signals before retrying a read and keep the original timeout across handlers.
+fn retry_read<T, E: From<Error>>(
+    socket: &Object,
+    mut check_signals: impl FnMut() -> std::result::Result<(), E>,
+    mut read: impl FnMut(Option<Deadline>) -> io::Result<T>,
+) -> std::result::Result<T, E> {
+    let until = deadline(socket);
+    loop {
+        match read(until) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                check_signals()?;
+                if until.is_some_and(|end| end.remaining().is_zero()) {
+                    return Err(errno_error(timed_out()).into());
+                }
+            }
+            result => return result.map_err(|error| errno_error(error).into()),
+        }
+    }
+}
+
 /// Return a single deadline for an entire socket operation, including retries and sendall.
 #[derive(Clone, Copy)]
 pub(crate) struct Deadline {
@@ -1638,24 +1658,28 @@ pub unsafe extern "C" fn imre_socket_sockname(
     )
 }
 
-pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, SocketName)> {
-    let raw = fd(s);
-    let (child, addr, len) = socket_call(raw, libc::POLLIN, deadline(s), || {
-        peer_call(|a, n| {
-            // SAFETY: peer_call provides a fresh address and resets its capacity on every attempt.
-            unsafe {
-                #[cfg(target_os = "linux")]
-                {
-                    libc::accept4(raw, a, n, libc::SOCK_CLOEXEC)
+pub(crate) fn accept<E: From<Error>>(
+    s: &Object,
+    check_signals: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<(crate::ObjectOwner, SocketName), E> {
+    let (child, addr, len) = retry_read(s, check_signals, |until| {
+        let raw = fd(s);
+        socket_call_interruptible(raw, libc::POLLIN, until, || {
+            peer_call(|a, n| {
+                // SAFETY: peer_call provides a fresh address and resets its capacity on every attempt.
+                unsafe {
+                    #[cfg(target_os = "linux")]
+                    {
+                        libc::accept4(raw, a, n, libc::SOCK_CLOEXEC)
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        libc::accept(raw, a, n)
+                    }
                 }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    libc::accept(raw, a, n)
-                }
-            }
+            })
         })
-    })
-    .map_err(errno_error)?;
+    })?;
     let child = handle(child, true, family(s), kind(s), proto(s))?;
     if get_timeout(s).is_some_and(|d| !d.is_zero()) {
         // The accepted fd may inherit O_NONBLOCK on BSD, but its Python timeout defaults to None.
@@ -1673,7 +1697,7 @@ pub unsafe extern "C" fn imre_socket_accept(
     layout: *const RecordDescriptor,
     addr_layout: *const RecordDescriptor,
 ) -> *mut usize {
-    let result = accept(s).and_then(|(child, a)| {
+    let result = accept(s, super::stdlib::check_interrupt).and_then(|(child, a)| {
         let a = a.ipv4()?;
         // SAFETY: both descriptors match these transferred owners. No fallible syscall remains.
         unsafe {
@@ -1733,6 +1757,15 @@ pub(crate) fn zeroed_receive_buffer(size: usize) -> Result<Vec<u8>> {
 }
 
 pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
+    recv_with_signals(s, size, flags, super::stdlib::check_interrupt)
+}
+
+pub(crate) fn recv_with_signals<E: From<Error>>(
+    s: &Object,
+    size: usize,
+    flags: i32,
+    check_signals: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<Vec<u8>, E> {
     let mut bytes = Vec::<u8>::new();
     if size != 0 {
         if flags & libc::MSG_TRUNC != 0 {
@@ -1743,9 +1776,10 @@ pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
                 .try_reserve_exact(size)
                 .map_err(|_| Error::allocation())?;
         }
-        // SAFETY: the allocation has at least size writable bytes.
-        let received =
-            unsafe { receive(s, bytes.as_mut_ptr(), size, flags) }.map_err(errno_error)?;
+        let received = retry_read(s, check_signals, |until| {
+            // SAFETY: this private allocation has at least size writable bytes.
+            unsafe { receive_until(s, bytes.as_mut_ptr(), size, flags, until) }
+        })?;
         let n = received.min(size);
         // SAFETY: the kernel initialized the returned prefix or MSG_TRUNC
         // selected initialized storage. A reported packet length can exceed size.
@@ -1760,9 +1794,17 @@ pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
 }
 
 /// Receive one message and preserve the source address, including a missing stream peer.
-pub(crate) fn recv_from(s: &Object, size: usize, flags: i32) -> Result<(Vec<u8>, SocketName)> {
+pub(crate) fn recv_from<E: From<Error>>(
+    s: &Object,
+    size: usize,
+    flags: i32,
+    check_signals: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<(Vec<u8>, SocketName), E> {
     let mut bytes = zeroed_receive_buffer(size)?;
-    let (count, peer) = recv_from_into(s, &mut bytes, flags)?;
+    let (count, addr, len) = retry_read(s, check_signals, |until| {
+        receive_from(s, &mut bytes, flags, until)
+    })?;
+    let peer = unpack_socket_name(&addr, len)?;
     // MSG_TRUNC may report the full datagram size even when fewer bytes were copied.
     if count > size {
         bytes
@@ -1781,11 +1823,22 @@ pub(crate) fn recv_from_into(
     s: &Object,
     buffer: &mut [u8],
     flags: i32,
+    until: Option<Deadline>,
 ) -> Result<(usize, SocketName)> {
+    let (count, addr, len) = receive_from(s, buffer, flags, until).map_err(errno_error)?;
+    Ok((count, unpack_socket_name(&addr, len)?))
+}
+
+fn receive_from(
+    s: &Object,
+    buffer: &mut [u8],
+    flags: i32,
+    until: Option<Deadline>,
+) -> io::Result<(usize, libc::sockaddr_storage, libc::socklen_t)> {
     // SAFETY: zero initializes the entire socket-address storage, including padding.
     let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let raw = fd(s);
-    let (count, len) = socket_call(raw, libc::POLLIN, deadline(s), || {
+    let (count, len) = socket_call_interruptible(raw, libc::POLLIN, until, || {
         let mut len = size_of_val(&peer) as libc::socklen_t;
         // SAFETY: buffer and peer remain writable up to their respective capacities.
         let count = unsafe {
@@ -1800,24 +1853,45 @@ pub(crate) fn recv_from_into(
         };
         let count = usize::try_from(count).map_err(|_| io::Error::last_os_error())?;
         Ok((count, len))
-    })
-    .map_err(errno_error)?;
-    Ok((count, unpack_socket_name(&peer, len)?))
+    })?;
+    Ok((count, peer, len))
 }
 
-pub(crate) fn recv_into(s: &Object, buffer: &mut [u8], flags: i32) -> Result<usize> {
+pub(crate) fn recv_into(
+    s: &Object,
+    buffer: &mut [u8],
+    flags: i32,
+    until: Option<Deadline>,
+) -> Result<usize> {
     // SAFETY: buffer exposes this many exclusively writable bytes.
-    unsafe { receive(s, buffer.as_mut_ptr(), buffer.len(), flags) }.map_err(errno_error)
+    unsafe { receive_until(s, buffer.as_mut_ptr(), buffer.len(), flags, until) }
+        .map_err(errno_error)
 }
 
 /// # Safety
 /// The caller retains exclusive access to len writable bytes at buffer.
 unsafe fn receive(socket: &Object, buffer: *mut u8, len: usize, flags: i32) -> io::Result<usize> {
+    let until = deadline(socket);
+    // SAFETY: the caller provides the same writable buffer through every attempt.
+    retry(until, || unsafe {
+        receive_until(socket, buffer, len, flags, until)
+    })
+}
+
+/// # Safety
+/// The caller provides len writable bytes for this attempt.
+unsafe fn receive_until(
+    socket: &Object,
+    buffer: *mut u8,
+    len: usize,
+    flags: i32,
+    until: Option<Deadline>,
+) -> io::Result<usize> {
     if len == 0 {
         return Ok(0);
     }
     let fd = fd(socket);
-    socket_call(fd, libc::POLLIN, deadline(socket), || {
+    socket_call_interruptible(fd, libc::POLLIN, until, || {
         // SAFETY: the caller supplies len writable bytes. Flags can make the
         // returned count differ from the number of bytes actually copied.
         let n = unsafe { libc::recv(fd, buffer.cast(), len, flags) };
