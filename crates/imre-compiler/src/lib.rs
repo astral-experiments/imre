@@ -225,7 +225,7 @@ pub struct SourceInputs {
     pub boxed_imports: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
-    /// Existing namespace portions and the canonical directories they resolve to.
+    /// Import search directories and the canonical directories they resolve to.
     #[serde(default)]
     pub directories: Vec<(PathBuf, PathBuf)>,
 }
