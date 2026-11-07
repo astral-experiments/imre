@@ -2936,7 +2936,32 @@ impl Context {
             }
             _ => {
                 // An exact instance wins before the class's metaclass can intercept the check.
-                if self.heap.get(value).instance_class() == Some(class) {
+                let instance = self.heap.get(value);
+                if instance.instance_class() == Some(class) {
+                    return Ok(true);
+                }
+                // Plain builtin values keep their type in the value variant. Compare the
+                // canonical class handle so a user class with the same name still dispatches.
+                if matches!(
+                    instance,
+                    Value::None
+                        | Value::Bool(_)
+                        | Value::Int(_)
+                        | Value::Float(_)
+                        | Value::Complex(_)
+                        | Value::Str(_)
+                        | Value::SurrogateStr(_)
+                        | Value::Bytes(_)
+                        | Value::ByteArray(_)
+                        | Value::List(_)
+                        | Value::Tuple(_)
+                        | Value::Dict(_)
+                        | Value::Set { .. }
+                ) && self
+                    .builtin_type_name(value)
+                    .and_then(|name| self.builtins.get(name))
+                    == Some(&class)
+                {
                     return Ok(true);
                 }
                 // A declared Protocol uses typing's stricter public check, even when it

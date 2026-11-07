@@ -167,6 +167,10 @@ def reported_instance_checks():
     class Reported(metaclass=Reject):
         pass
 
+    named_like_str = Reject("str", (), {})
+    assert isinstance("text", str)
+    assert not isinstance("text", named_like_str)
+
     class Proxy:
         __class__ = Reported
 
