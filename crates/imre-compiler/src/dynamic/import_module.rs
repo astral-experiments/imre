@@ -194,7 +194,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
-                        "import abc\nimport collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _abstract_flags, _frame_position",
+                        "import abc\nimport collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _abstract_flags, _frame_position\nfrom operator import attrgetter",
                         section("TPFLAGS_IS_ABSTRACT =", "def ismethoddescriptor(object):"),
                         &descriptors,
                         section("def isfunction(object):", "# A marker for markcoroutinefunction"),
@@ -205,6 +205,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "class EndOfBlock("),
                         &source_blocks,
+                        section("def walktree(", "# ------------------------------------------------ argument list extraction"),
                         section("AGEN_CREATED =", "_NonUserDefinedCallables ="),
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
