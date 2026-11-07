@@ -9,13 +9,13 @@ use crate::dynamic::{
 };
 
 #[repr(C)]
-struct OptionEntry {
+struct ConstantEntry {
     name: *const c_char,
     value: u64,
 }
 
 unsafe extern "C" {
-    fn imre_ssl_options(version: std::ffi::c_ulong, count: *mut usize) -> *const OptionEntry;
+    fn imre_ssl_constants(version: std::ffi::c_ulong, count: *mut usize) -> *const ConstantEntry;
 }
 
 pub(in crate::dynamic) fn ssl_error(ctx: &Context, module: Id, message: &str) -> Error {
@@ -174,6 +174,25 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
         ctx.bind(scope, name, value);
     }
 
+    // Modules/_ssl.c assigns these Python error numbers and certificate policies.
+    for (name, code) in [
+        ("SSL_ERROR_SSL", super::SSL_ERROR_SSL),
+        ("SSL_ERROR_WANT_READ", super::SSL_ERROR_WANT_READ),
+        ("SSL_ERROR_WANT_WRITE", super::SSL_ERROR_WANT_WRITE),
+        ("SSL_ERROR_WANT_X509_LOOKUP", 4),
+        ("SSL_ERROR_SYSCALL", super::SSL_ERROR_SYSCALL),
+        ("SSL_ERROR_ZERO_RETURN", super::SSL_ERROR_ZERO_RETURN),
+        ("SSL_ERROR_WANT_CONNECT", 7),
+        ("SSL_ERROR_EOF", 8),
+        ("SSL_ERROR_INVALID_ERROR_CODE", 10),
+        ("CERT_NONE", 0),
+        ("CERT_OPTIONAL", 1),
+        ("CERT_REQUIRED", 2),
+    ] {
+        let value = ctx.int(i64::from(code));
+        ctx.bind(scope, name, value);
+    }
+
     // These are library build capabilities, independent of runtime cipher policy.
     for (name, available) in [
         ("HAS_SNI", true),
@@ -191,14 +210,14 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
     let mut count = 0;
     // SAFETY: the header shim writes count and returns a static array of that many
     // initialized entries, including a nonempty fallback on a version mismatch.
-    let options = unsafe {
-        let table = imre_ssl_options(runtime_version, &mut count);
+    let constants = unsafe {
+        let table = imre_ssl_constants(runtime_version, &mut count);
         std::slice::from_raw_parts(table, count)
     };
-    for option in options {
+    for constant in constants {
         // SAFETY: each name is an ASCII string literal owned by the static table.
-        let name = unsafe { CStr::from_ptr(option.name) }.to_str().unwrap();
-        let value = ctx.alloc(Value::Int(crate::Int::new(option.value.into())));
+        let name = unsafe { CStr::from_ptr(constant.name) }.to_str().unwrap();
+        let value = ctx.alloc(Value::Int(crate::Int::new(constant.value.into())));
         ctx.bind(scope, name, value);
     }
     super::versions::install(ctx, scope, runtime_version);

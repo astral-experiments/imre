@@ -33,7 +33,8 @@ def want_read(operation):
     try:
         operation()
     except ssl.SSLWantReadError as error:
-        assert error.errno == ssl.SSL_ERROR_WANT_READ
+        assert type(error.errno) is int
+        assert ssl.SSLErrorNumber(error.errno) is ssl.SSL_ERROR_WANT_READ
     else:
         raise AssertionError("expected SSLWantReadError")
 
