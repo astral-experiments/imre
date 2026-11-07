@@ -5618,6 +5618,10 @@ impl Context {
     ) -> Result<()> {
         let key = self.text(name);
         match self.delete_item(dictionary, key) {
+            Ok(()) => {
+                self.finish_binding_release();
+                Ok(())
+            }
             Err(error) if error.kind == "KeyError" => Err(self.missing_attribute(obj, name)),
             result => result,
         }
@@ -5901,6 +5905,7 @@ impl Context {
                     .shift_remove(name)
                     .ok_or_else(|| self.missing_attribute(obj, name))?;
                 self.heap.weak_edge_removed(value);
+                self.finish_binding_release();
                 Ok(())
             }
             Value::Native(ref class) if self.builtin_type_name(obj) == Some("type") => {
