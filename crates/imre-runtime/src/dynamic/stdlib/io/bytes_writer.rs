@@ -51,7 +51,7 @@ pub(in crate::dynamic) fn pending_callback_write(heap: &Heap, value: &Value) -> 
 }
 
 /// Bypass Python only on an exact BytesIO whose write method is still native.
-fn native_writer(heap: &Heap, raw: Id) -> Option<Rc<BytesIo>> {
+fn native_writer(heap: &Heap, raw: Id) -> Option<BytesIo> {
     if let Value::Instance {
         class,
         memory_stream: Some(MemoryStream::Bytes(stream)),
@@ -60,7 +60,7 @@ fn native_writer(heap: &Heap, raw: Id) -> Option<Rc<BytesIo>> {
         && heap.get(*class).io_kind() == Some("BytesIO")
         && heap.raw_instance_field(raw, "write").is_none()
     {
-        return Some(stream.clone());
+        return Some(*stream);
     }
     None
 }

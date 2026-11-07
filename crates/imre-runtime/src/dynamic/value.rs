@@ -1196,7 +1196,7 @@ pub(super) enum Value {
     Array(super::array::Array),
     Bytes(Vec<u8>),
     RawReadWindow(super::raw_read_window::Window),
-    BytesIoStorage(Option<std::rc::Rc<crate::objects::Memory>>),
+    BytesIoStorage(Box<super::stdlib::io::BytesIoStorage>),
     BytesIoBuffer {
         stream: Id,
         storage: Id,
@@ -2125,7 +2125,8 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
-            Self::BytesIoStorage(_) | Self::BufferWrapper => {}
+            Self::BytesIoStorage(state) => visit.extend(state.snapshot.get()),
+            Self::BufferWrapper => {}
             Self::BytesIoBuffer { stream, storage } => visit.extend([*stream, *storage]),
             Self::RawReadWindow(window) => visit.push(window.backing),
             Self::PythonBufferLease {
@@ -2407,8 +2408,7 @@ impl Value {
                         visit.extend(pair.writer);
                     }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
-                        visit.push(stream.storage);
-                        visit.extend(stream.snapshot.get())
+                        visit.push(stream.storage)
                     }
                     Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
                         stream.children(visit)

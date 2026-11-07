@@ -714,10 +714,7 @@ impl Context {
             Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
             Value::Array(a) => Ok(a.as_bytes()),
             Value::RawReadWindow(w) => self.window_bytes(*w),
-            Value::BytesIoStorage(Some(file)) => Ok(file.storage()),
-            Value::BytesIoStorage(None) => {
-                Err(Error::new("ValueError", "I/O operation on closed file."))
-            }
+            Value::BytesIoStorage(state) => Ok(state.file()?.storage()),
             _ => Err(Error::new(
                 "TypeError",
                 format!(
@@ -731,7 +728,7 @@ impl Context {
     fn view_element_count(&self, owner: Id) -> Result<usize> {
         match self.heap.get(self.view_storage_id(owner)) {
             Value::Array(a) => Ok(a.len()),
-            Value::BytesIoStorage(Some(file)) => Ok(file.bytes().len()),
+            Value::BytesIoStorage(state) => Ok(state.file()?.bytes().len()),
             _ => Ok(self.owner_bytes(owner)?.len()),
         }
     }
@@ -753,9 +750,7 @@ impl Context {
         match value {
             Value::ByteArray(bytes) => Ok(bytes.as_mut_slice()),
             Value::Array(a) => Ok(a.as_bytes_mut()?),
-            Value::BytesIoStorage(Some(file)) => {
-                Ok(std::rc::Rc::make_mut(file).storage_mut()?.as_mut_slice())
-            }
+            Value::BytesIoStorage(state) => Ok(state.file_mut()?.storage_mut()?.as_mut_slice()),
             _ => Err(Error::new("TypeError", "cannot modify read-only memory")),
         }
     }
@@ -772,7 +767,7 @@ impl Context {
         match self.heap.get(self.scalar_value(id)) {
             Value::MemoryView { .. } => self.view_bytes(id),
             Value::BytesIoBuffer { storage, .. } => match self.heap.get(*storage) {
-                Value::BytesIoStorage(Some(file)) => Ok(file.bytes()),
+                Value::BytesIoStorage(state) => Ok(state.file()?.bytes()),
                 _ => Err(Error::new("ValueError", "I/O operation on closed file.")),
             },
             Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
@@ -795,11 +790,8 @@ impl Context {
     }
 
     fn invalidate_stream_snapshot(&self, owner: Id) {
-        if let Value::BytesIoBuffer { stream, .. } = self.heap.get(owner)
-            && let Value::Instance {
-                memory_stream: Some(stdlib::io::MemoryStream::Bytes(state)),
-                ..
-            } = self.heap.get(*stream)
+        if let Value::BytesIoBuffer { storage, .. } = *self.heap.get(owner)
+            && let Value::BytesIoStorage(state) = self.heap.get(storage)
         {
             state.snapshot.set(None);
         }
