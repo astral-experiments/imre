@@ -40,7 +40,8 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
     let key =
         super::super::namedtuple::factory(ctx, &[name, fields], &[("module".into(), module)])?;
     ctx.bind(scope, "SelectorKey", key);
-    let base = super::super::mapping_abc::class(ctx, "Mapping")?;
+    let abc = ctx.module("_collections_abc")?;
+    let base = ctx.lookup_attr(abc, "Mapping")?;
     let bases = ctx.alloc(Value::Tuple(vec![base]));
     let name = ctx.text("_SelectorMapping");
     let mut fields = vec![(ctx.text("__module__"), module)];

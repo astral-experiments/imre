@@ -44,8 +44,6 @@ fn class(ctx: &mut Context) -> Result<Id> {
     }
     let object = ctx.builtin("object");
     let class = ctx.allocate_class(CLASS.into(), scope, vec![object])?;
-    let mapping = super::mapping_abc::class(ctx, "Mapping")?;
-    ctx.heap.abc_registrations.push([mapping, class]);
     ctx.heap
         .set_registered_pattern_flags(class, super::collection_pattern::PatternFlags::MAPPING);
     if let Value::Scope(data) = ctx.heap.get_mut(scope) {

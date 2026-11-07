@@ -1,9 +1,9 @@
-# Set, mapping view, iterator, and sequence ABC implementations from CPython 3.14.5, Lib/_collections_abc.py.
+# Set, mapping, iterator, and sequence ABC implementations from CPython 3.14.5, Lib/_collections_abc.py.
 # abstractmethod is from Lib/abc.py at the same revision. See stdlib/docstrings/LICENSE.
 import sys
 from abc import ABCMeta as _ABCMeta
 from _collections_abc import (
-    Callable, Collection, Iterable, Mapping, MutableMapping, Sized,
+    Callable,
     _CallableGenericAlias, _check_methods,
 )
 from types import GenericAlias, MappingProxyType
@@ -64,6 +64,67 @@ def abstractmethod(funcobj):
     """
     funcobj.__isabstractmethod__ = True
     return funcobj
+
+
+class Iterable(metaclass=_ABCMeta):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __iter__(self):
+        while False:
+            yield None
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Iterable:
+            return _check_methods(C, "__iter__")
+        return NotImplemented
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+
+class Sized(metaclass=_ABCMeta):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __len__(self):
+        return 0
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Sized:
+            return _check_methods(C, "__len__")
+        return NotImplemented
+
+
+class Container(metaclass=_ABCMeta):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __contains__(self, x):
+        return False
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Container:
+            return _check_methods(C, "__contains__")
+        return NotImplemented
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+
+class Collection(Sized, Iterable, Container):
+
+    __slots__ = ()
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Collection:
+            return _check_methods(C,  "__len__", "__iter__", "__contains__")
+        return NotImplemented
 
 
 class Hashable(metaclass=_ABCMeta):
@@ -461,6 +522,57 @@ class MutableSet(Set):
 
 MutableSet.register(set)
 
+class Mapping(Collection):
+    """A Mapping is a generic container for associating key/value
+    pairs.
+
+    This class provides concrete generic implementations of all
+    methods except for __getitem__, __iter__, and __len__.
+    """
+
+    __slots__ = ()
+
+    # Tell ABCMeta.__new__ that this class should have TPFLAGS_MAPPING set.
+    __abc_tpflags__ = 1 << 6 # Py_TPFLAGS_MAPPING
+
+    @abstractmethod
+    def __getitem__(self, key):
+        raise KeyError
+
+    def get(self, key, default=None):
+        'D.get(k[,d]) -> D[k] if k in D, else d.  d defaults to None.'
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key):
+        try:
+            self[key]
+        except KeyError:
+            return False
+        else:
+            return True
+
+    def keys(self):
+        "D.keys() -> a set-like object providing a view on D's keys"
+        return KeysView(self)
+
+    def items(self):
+        "D.items() -> a set-like object providing a view on D's items"
+        return ItemsView(self)
+
+    def values(self):
+        "D.values() -> an object providing a view on D's values"
+        return ValuesView(self)
+
+    def __eq__(self, other):
+        if not isinstance(other, Mapping):
+            return NotImplemented
+        return dict(self.items()) == dict(other.items())
+
+    __reversed__ = None
+
 class MappingView(Sized):
 
     __slots__ = '_mapping',
@@ -539,7 +651,97 @@ class ValuesView(MappingView, Collection):
 ValuesView.register(type({}.values()))
 
 
+def _get_framelocalsproxy():
+    return type(sys._getframe().f_locals)
+
+
 Mapping.register(MappingProxyType)
+Mapping.register(_get_framelocalsproxy())
+del _get_framelocalsproxy
+
+
+class MutableMapping(Mapping):
+    """A MutableMapping is a generic container for associating
+    key/value pairs.
+
+    This class provides concrete generic implementations of all
+    methods except for __getitem__, __setitem__, __delitem__,
+    __iter__, and __len__.
+    """
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __setitem__(self, key, value):
+        raise KeyError
+
+    @abstractmethod
+    def __delitem__(self, key):
+        raise KeyError
+
+    __marker = object()
+
+    def pop(self, key, default=__marker):
+        '''D.pop(k[,d]) -> v, remove specified key and return the corresponding value.
+          If key is not found, d is returned if given, otherwise KeyError is raised.
+        '''
+        try:
+            value = self[key]
+        except KeyError:
+            if default is self.__marker:
+                raise
+            return default
+        else:
+            del self[key]
+            return value
+
+    def popitem(self):
+        '''D.popitem() -> (k, v), remove and return some (key, value) pair
+           as a 2-tuple; but raise KeyError if D is empty.
+        '''
+        try:
+            key = next(iter(self))
+        except StopIteration:
+            raise KeyError from None
+        value = self[key]
+        del self[key]
+        return key, value
+
+    def clear(self):
+        'D.clear() -> None.  Remove all items from D.'
+        try:
+            while True:
+                self.popitem()
+        except KeyError:
+            pass
+
+    def update(self, other=(), /, **kwds):
+        ''' D.update([E, ]**F) -> None.  Update D from mapping/iterable E and F.
+            If E present and has a .keys() method, does:     for k in E.keys(): D[k] = E[k]
+            If E present and lacks .keys() method, does:     for (k, v) in E: D[k] = v
+            In either case, this is followed by: for k, v in F.items(): D[k] = v
+        '''
+        if isinstance(other, Mapping):
+            for key in other:
+                self[key] = other[key]
+        elif hasattr(other, "keys"):
+            for key in other.keys():
+                self[key] = other[key]
+        else:
+            for key, value in other:
+                self[key] = value
+        for key, value in kwds.items():
+            self[key] = value
+
+    def setdefault(self, key, default=None):
+        'D.setdefault(k[,d]) -> D.get(k,d), also set D[k]=d if k not in D'
+        try:
+            return self[key]
+        except KeyError:
+            self[key] = default
+        return default
+
+
 MutableMapping.register(dict)
 
 
