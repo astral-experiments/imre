@@ -376,39 +376,45 @@ fn load_cert_chain(
     trust_result(ctx, result)
 }
 
-fn ca_data(ctx: &Context, input: Id) -> Result<provider::CaData<'_>> {
+fn load_ca_data(ctx: &mut Context, handle: Id, input: Id) -> Result<Id> {
     let invalid = || {
         Error::new(
             "TypeError",
             "cadata should be an ASCII string or a bytes-like object",
         )
     };
-    let (bytes, pem) = match ctx.heap.get(ctx.scalar_value(input)) {
-        Value::Str(text) if text.is_ascii() => (text.as_bytes(), true),
+    let load = |ctx: &Context, bytes: &[u8], pem| {
+        if bytes.is_empty() {
+            return Err(Error::new("ValueError", "Empty certificate data"));
+        }
+        if bytes.len() > i32::MAX as usize {
+            return Err(Error::new("OverflowError", "Certificate data is too long."));
+        }
+        let data = if pem {
+            provider::CaData::Pem(bytes)
+        } else {
+            provider::CaData::Der(bytes)
+        };
+        Ok(context(ctx, handle)?
+            .borrow_mut()
+            .load_verify_locations(None, None, Some(data)))
+    };
+    let result = match ctx.heap.get(ctx.scalar_value(input)) {
+        Value::Str(text) if text.is_ascii() => load(ctx, text.as_bytes(), true)?,
         Value::Str(_) | Value::SurrogateStr(_) => return Err(invalid()),
         _ => {
-            ctx.check_buffer_exporter(input)?;
-            let bytes = ctx.native_buffer_bytes(input).map_err(|error| {
-                if error.kind == "TypeError" {
-                    invalid()
-                } else {
-                    error
-                }
-            })?;
-            (bytes, false)
+            // Only non-exporters receive the cadata-specific TypeError.
+            if ctx.buffer_slot(input, "__buffer__").is_none()
+                && matches!(ctx.native_buffer_bytes(input), Err(e) if e.kind == "TypeError")
+            {
+                return Err(invalid());
+            }
+            ctx.with_read_buffer(input, |ctx, view| {
+                load(ctx, ctx.native_buffer_bytes(view)?, false)
+            })?
         }
     };
-    if bytes.is_empty() {
-        return Err(Error::new("ValueError", "Empty certificate data"));
-    }
-    if bytes.len() > i32::MAX as usize {
-        return Err(Error::new("OverflowError", "Certificate data is too long."));
-    }
-    Ok(if pem {
-        provider::CaData::Pem(bytes)
-    } else {
-        provider::CaData::Der(bytes)
-    })
+    trust_result(ctx, result)
 }
 
 fn trust_result(
@@ -711,11 +717,17 @@ pub(super) fn call(
             let capath = (capath != NONE)
                 .then(|| cert_path(ctx, capath, "capath"))
                 .transpose()?;
-            let cadata = (cadata != NONE).then(|| ca_data(ctx, cadata)).transpose()?;
+            if cadata != NONE {
+                // Release the DER export after installing its certificates and before opening paths.
+                let result = load_ca_data(ctx, handle, cadata)?;
+                if result != NONE || (cafile.is_none() && capath.is_none()) {
+                    return Ok(result);
+                }
+            }
             let result = context(ctx, handle)?.borrow_mut().load_verify_locations(
                 cafile.as_deref(),
                 capath.as_deref(),
-                cadata,
+                None,
             );
             trust_result(ctx, result)
         }
