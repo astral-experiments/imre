@@ -3444,6 +3444,7 @@ def report(text):
         if Path("/usr/share/zoneinfo/America/New_York").is_file():
             compare("-IB", fixtures / "boxed_zoneinfo.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pyexpat.py", native_timeout=300)
+        compare("-B", fixtures / "html_parser_feed.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pickle_writer.py")
         for first in ("_pickle", "pickle"):
             compare("-IB", fixtures / "pickle_accelerator_writer.py", first, native_timeout=600)
