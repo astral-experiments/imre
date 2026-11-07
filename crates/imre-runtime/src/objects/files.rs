@@ -149,6 +149,10 @@ impl FileState {
         }
     }
 
+    pub(super) fn take_pipe_buffer(&mut self) -> Result<Bytes> {
+        self.input()?.take_pipe_buffer()
+    }
+
     pub(super) fn take_pipe_read_ahead(&mut self) -> Result<Bytes> {
         self.input()?.take_read_ahead()
     }

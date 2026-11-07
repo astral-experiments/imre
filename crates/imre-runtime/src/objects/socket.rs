@@ -1834,20 +1834,7 @@ pub unsafe extern "C" fn imre_socket_recv(s: &Object, size: usize, flags: usize)
     finish(result, ptr::null())
 }
 
-/// Allocate initialized syscall output without touching every page of a large receive.
-pub(crate) fn zeroed_receive_buffer(size: usize) -> Result<Vec<u8>> {
-    if size == 0 {
-        return Ok(Vec::new());
-    }
-    let layout = std::alloc::Layout::array::<u8>(size).map_err(|_| Error::allocation())?;
-    // SAFETY: size is nonzero and layout describes exactly size bytes.
-    let data = unsafe { std::alloc::alloc_zeroed(layout) };
-    if data.is_null() {
-        return Err(Error::allocation());
-    }
-    // SAFETY: this initialized allocation has the layout Vec<u8> uses for size bytes.
-    Ok(unsafe { Vec::from_raw_parts(data, size, size) })
-}
+pub(crate) use crate::zeroed_io_buffer as zeroed_receive_buffer;
 
 pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
     recv_with_signals(s, size, flags, super::stdlib::check_interrupt)

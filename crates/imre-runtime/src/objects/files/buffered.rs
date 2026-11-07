@@ -368,11 +368,14 @@ impl Input {
         } else {
             TEXT_CHUNK_SIZE
         };
+        // Start at the end of the untouched zeroed window. The Python reader
+        // can take the allocation, and a native refill can reuse its capacity.
+        let bytes = crate::zeroed_io_buffer(capacity).map_err(|_| Error::memory_error())?;
         Ok(Self {
             raw: ReadBuffer::Pipe {
                 source: Source::Plain(file).take(u64::MAX),
-                bytes: reserve(capacity)?,
-                start: 0,
+                start: bytes.len(),
+                bytes,
                 window,
             },
             text: TextBuffer::default(),
@@ -423,6 +426,25 @@ impl Input {
         let pos = file.seek(at).map_err(super::errno_error)?;
         self.raw.consume(buffered);
         Ok(pos)
+    }
+
+    /// Hand the newly opened pipe's reserved read-ahead storage to its Python reader.
+    pub(super) fn take_pipe_buffer(&mut self) -> Result<Bytes> {
+        let ReadBuffer::Pipe {
+            source,
+            bytes,
+            start,
+            window,
+        } = &mut self.raw
+        else {
+            unreachable!("Popen input has pipe storage")
+        };
+        if source.limit() == u64::MAX && *start == *window && bytes.len() == *window {
+            *start = 0;
+            return Ok(std::mem::take(bytes));
+        }
+        // A second wrapper must not take unread bytes belonging to the first.
+        crate::zeroed_io_buffer(*window)
     }
 
     /// Detach bytes already prefetched by the public buffered pipe before reading its raw fd.

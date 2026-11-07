@@ -481,13 +481,7 @@ pub(in crate::dynamic) fn open(
         };
         let line_buffering =
             buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
-        let large_text_reader =
-            text_input && capacity > crate::text_output::MAX_DEFAULT_BUFFER_SIZE;
-        let buffer = if fresh.is_some()
-            || sized_reader
-            || large_text_reader
-            || (binary && warning_options)
-        {
+        let buffer = if fresh.is_some() || (reading && !update) || (binary && warning_options) {
             let class = if update {
                 types.random
             } else if reading {
@@ -724,6 +718,12 @@ pub(in crate::dynamic) fn popen_pipe(
     if pipe.is_raw() {
         return Ok(raw);
     }
+    if reading {
+        let receiver = ctx.instance(ctx.builtins["_io.BufferedReader"], None);
+        let bytes = pipe.take_input_buffer()?;
+        super::buffered_reader::install_buffer(ctx, receiver, raw, bytes, false)?;
+        return Ok(receiver);
+    }
     let handle = state(ctx, raw).expect("initialized FileIO");
     let buffer = super::BufferedFd::pipe(raw, handle, reading, pipe);
     ctx.heap
@@ -911,21 +911,6 @@ fn initialize_file(
     Ok(NONE)
 }
 
-fn transfer(mut syscall: impl FnMut() -> isize) -> Result<Option<usize>> {
-    loop {
-        let count = syscall();
-        if count >= 0 {
-            return Ok(Some(count as usize));
-        }
-        let err = std::io::Error::last_os_error();
-        match err.kind() {
-            ErrorKind::Interrupted => continue,
-            ErrorKind::WouldBlock => return Ok(None),
-            _ => return Err(os_error(err)),
-        }
-    }
-}
-
 /// A single FileIO write, including a successful short write to a pipe.
 pub(super) fn write_once(fd: RawFd, bytes: &[u8]) -> std::io::Result<usize> {
     // SAFETY: the kernel reads at most the supplied slice and retains no pointer.
@@ -937,27 +922,44 @@ pub(super) fn write_once(fd: RawFd, bytes: &[u8]) -> std::io::Result<usize> {
     }
 }
 
-fn read_into(fd: RawFd, buf: &mut [u8]) -> Result<Option<usize>> {
-    // SAFETY: read receives a writable slice and does not retain its pointer.
-    transfer(|| unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) })
-}
-
-/// Retry the same descriptor number even when a signal handler reinitializes this FileIO.
-fn read_interruptible(ctx: &mut Context, raw: &RawFile, buf: &mut [u8]) -> Result<Option<usize>> {
-    let fd = raw.live_fd().unwrap_or(-1);
+/// Dispatch before retrying the original syscall. The destination can be Python storage,
+/// so each attempt must release its borrow before a signal handler runs.
+fn retry_read(
+    ctx: &mut Context,
+    mut attempt: impl FnMut(&mut Context) -> Result<Option<usize>>,
+) -> Result<Option<usize>> {
     loop {
-        // SAFETY: the destination is an owned buffer, with no borrowed Python storage.
-        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
-        if n >= 0 {
-            return Ok(Some(n as usize));
-        }
-        let err = std::io::Error::last_os_error();
-        match err.kind() {
-            ErrorKind::Interrupted => ctx.dispatch_signals()?,
-            ErrorKind::WouldBlock => return Ok(None),
-            _ => return Err(os_error(err)),
+        match attempt(ctx) {
+            Ok(None) => ctx.dispatch_signals()?,
+            Err(error)
+                if ctx.has_errno(&error, libc::EAGAIN)
+                    || ctx.has_errno(&error, libc::EWOULDBLOCK) =>
+            {
+                return Ok(None);
+            }
+            result => return result,
         }
     }
+}
+
+/// Read into exported storage while a signal handler is free to inspect or rebind the raw.
+pub(super) fn read_span(
+    ctx: &mut Context,
+    raw: &RawFile,
+    storage: Id,
+    range: std::ops::Range<usize>,
+) -> Result<Option<usize>> {
+    let fd = raw.live_fd().ok_or_else(closed)?;
+    raw.check_direction(true)?;
+    retry_read(ctx, |ctx| {
+        let bytes = Context::mutable_storage_bytes(ctx.heap.get_mut(storage))?;
+        Ok(os::try_readinto(fd, &mut bytes[range.clone()])?)
+    })
+}
+
+fn read_interruptible(ctx: &mut Context, raw: &RawFile, buf: &mut [u8]) -> Result<Option<usize>> {
+    let fd = raw.live_fd().unwrap_or(-1);
+    retry_read(ctx, |_| Ok(os::try_readinto(fd, buf)?))
 }
 
 pub(super) fn read(
@@ -1173,14 +1175,16 @@ fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Resu
             }
         });
     }
-    if name == "readinto" && ctx.writable_byte_span(args[0])?.is_none() {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "readinto() argument 1 must be read-write bytes-like object, not {}",
-                ctx.type_name(args[0])
-            ),
-        ));
+    if name == "readinto" {
+        return ctx.with_writable_byte_span(
+            args[0],
+            "readinto() argument 1",
+            |ctx, storage, range| {
+                let raw = state(ctx, receiver).ok_or_else(closed)?;
+                let count = read_span(ctx, &raw, storage, range)?;
+                Ok(count.map_or(NONE, |n| ctx.int(n as i64)))
+            },
+        );
     }
     let whence = if name == "seek" && args.len() == 2 {
         ctx.index_integer(args[1])?
@@ -1245,11 +1249,6 @@ fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Resu
         "read" | "readall" | "readline" => {
             raw.check_direction(true)?;
             read(ctx, &raw, size, name == "readline", Vec::new())
-        }
-        "readinto" => {
-            raw.check_direction(true)?;
-            let buf = files::readinto_bytes(ctx, args[0])?;
-            Ok(read_into(fd, buf)?.map_or(NONE, |n| ctx.int(n as i64)))
         }
         _ => Err(Error::new(
             "AttributeError",

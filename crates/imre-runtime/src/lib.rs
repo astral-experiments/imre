@@ -536,6 +536,21 @@ pub type Bytes = Vec<u8>;
 /// CPython's variable-size bytes header, cached hash and trailing NUL also need to fit.
 pub(crate) const MAX_BYTES_LEN: usize = isize::MAX as usize - (4 * size_of::<usize>() + 1);
 
+/// Reserve initialized I/O storage without touching each page before a read.
+pub(crate) fn zeroed_io_buffer(size: usize) -> Result<Vec<u8>> {
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let layout = std::alloc::Layout::array::<u8>(size).map_err(|_| Error::allocation())?;
+    // SAFETY: size is nonzero and layout describes exactly size bytes.
+    let data = unsafe { std::alloc::alloc_zeroed(layout) };
+    if data.is_null() {
+        return Err(Error::allocation());
+    }
+    // SAFETY: this initialized allocation has the layout Vec<u8> uses for size bytes.
+    Ok(unsafe { Vec::from_raw_parts(data, size, size) })
+}
+
 /// Release unused byte capacity when possible, preserving data if allocation fails.
 ///
 /// Compaction follows a successful read, so its optional allocation must not abort
