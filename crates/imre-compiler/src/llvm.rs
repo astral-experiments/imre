@@ -5742,6 +5742,11 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_warning_reset", &[]);
                 none()
             }
+            Builtin::SignalPause => {
+                self.line("call void @imre_signal_pause()");
+                self.check_interrupt();
+                none()
+            }
             Builtin::TimeSleep => {
                 self.void_call("imre_time_sleep", &[&args[0].value]);
                 none()
@@ -10419,6 +10424,7 @@ declare void @imre_warning_scope_exit()
 declare ptr @imre_warning_format(ptr, ptr, ptr, ptr, i64, ptr, ptr, ptr, i32, ptr)
 declare void @imre_warning_write(ptr, ptr, i32)
 declare void @imre_time_sleep(double)
+declare void @imre_signal_pause()
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_pack(ptr,ptr)
 declare ptr @imre_str_percent_dict(ptr,ptr)

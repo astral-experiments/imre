@@ -135,6 +135,13 @@ fn current_action(number: i32) -> io::Result<libc::sigaction> {
     Ok(unsafe { previous.assume_init() })
 }
 
+/// Suspend this thread until the kernel delivers a caught signal.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_signal_pause() {
+    // SAFETY: pause has no arguments; interruption is its normal completion.
+    unsafe { libc::pause() };
+}
+
 pub(crate) fn disposition(number: i32) -> io::Result<Option<Disposition>> {
     current_action(number).map(Disposition::decode)
 }

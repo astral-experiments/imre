@@ -69,7 +69,7 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     ctx.bind(scope, "sigpending", pending);
     let valid = ctx.builtin("_signal.valid_signals");
     ctx.bind(scope, "valid_signals", valid);
-    for name in ["set_wakeup_fd", "siginterrupt"] {
+    for name in ["pause", "set_wakeup_fd", "siginterrupt"] {
         let function = ctx.builtin(&format!("_signal.{name}"));
         ctx.bind(scope, name, function);
     }
@@ -197,6 +197,11 @@ pub(super) fn call(
             "TypeError",
             format!("{name}() takes no arguments ({} given)", args.len()),
         ));
+    }
+    if name == "_signal.pause" {
+        crate::signals::imre_signal_pause();
+        ctx.dispatch_signals()?;
+        return Ok(super::NONE);
     }
     if name == "_imre_signal.make_signals" {
         return make_signals(ctx);
