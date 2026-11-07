@@ -1645,6 +1645,7 @@ pub(super) fn call(
     if matches!(
         name,
         "sys.get_int_max_str_digits"
+            | "_struct._clearcache"
             | "sys._get_cpu_count_config"
             | "sys.get_coroutine_origin_tracking_depth"
             | "sys.getdefaultencoding"
@@ -1690,6 +1691,8 @@ pub(super) fn call(
             ));
         }
         return Ok(match name {
+            // Module functions parse each format on demand. Struct instances own their layouts.
+            "_struct._clearcache" => NONE,
             #[cfg(target_os = "linux")]
             "sys._get_cpu_count_config" => {
                 ctx.int(i64::from(crate::sys::cpu_count::configured().unwrap_or(-1)))

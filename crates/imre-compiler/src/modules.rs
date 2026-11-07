@@ -1582,6 +1582,7 @@ impl IntrinsicModule {
             (Self::PickleNative, "UnpicklingError") => {
                 Intrinsic::ScopedObjectExport("_pickle.UnpicklingError")
             }
+            (Self::Struct, "_clearcache") => Intrinsic::ScopedObjectExport("struct._clearcache"),
             (Self::Tempfile, "gettempdir") => Intrinsic::ScopedObjectExport("tempfile.gettempdir"),
             (Self::Tempfile, "gettempdirb") => {
                 Intrinsic::ScopedObjectExport("tempfile.gettempdirb")
@@ -5073,9 +5074,11 @@ impl<'a> Loader<'a> {
                                 export @ (Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable)
                             ) if export != Intrinsic::TYPING_SEQUENCE
                         );
-                        if module == IntrinsicModule::Collections
-                            && binding == Binding::Intrinsic(Intrinsic::CountElements)
-                        {
+                        if matches!(
+                            (module, alias.name.as_str()),
+                            (IntrinsicModule::Collections, "_count_elements")
+                                | (IntrinsicModule::Struct, "_clearcache")
+                        ) {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
                         self.bind(id, local.as_str(), binding, alias)?;

@@ -10007,6 +10007,38 @@ impl<'a> Checker<'a> {
                     .integer_product(call)
                     .map_err(|_| self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport("struct._clearcache"))) => {
+                if let ast::Expr::Attribute(attr) = call.func.as_ref()
+                    && self
+                        .graph
+                        .session
+                        .is_stdlib_module(self.module, &attr.value, "struct")
+                {
+                    self.graph
+                        .checked_builtin_attribute(self.module, attr.range());
+                }
+                if call.arguments.is_empty() {
+                    // Checked struct operations have no shared format cache.
+                    return Ok(Expr::none());
+                }
+                calls::reject_unpacking(call, self.source)?;
+                let message = if call.arguments.keywords.is_empty() {
+                    format!(
+                        "_struct._clearcache() takes no arguments ({} given)",
+                        call.arguments.args.len()
+                    )
+                } else {
+                    "_struct._clearcache() takes no keyword arguments".to_owned()
+                };
+                let values = call
+                    .arguments
+                    .args
+                    .iter()
+                    .chain(call.arguments.keywords.iter().map(|keyword| &keyword.value))
+                    .map(|value| self.expr(value))
+                    .collect::<Result<_, _>>()?;
+                return Ok(calls::type_error(Type::None, values, message));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }

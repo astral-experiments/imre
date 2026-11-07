@@ -8,6 +8,18 @@ def current():
     assert error is struct.error and error.__bases__ == (Exception,)
     assert (error.__module__, error.__name__, error.__qualname__) == ("struct", "error", "error")
     saved = struct.Struct(">I")
+    from struct import _clearcache as clear
+    unpack = saved.unpack
+    iterator = saved.iter_unpack(b"\0\0\0\1\0\0\0\2")
+    assert next(iterator) == (1,)
+    assert clear is struct._clearcache and clear() is None
+    assert unpack(saved.pack(7)) == (7,) and list(iterator) == [(2,)]
+    try:
+        clear(1)
+    except TypeError as exc:
+        assert str(exc) == "_struct._clearcache() takes no arguments (1 given)"
+    else:
+        raise AssertionError("_clearcache accepted an argument")
     struct.error = ValueError
     try:
         try:
