@@ -38,6 +38,7 @@ pub(in crate::dynamic) struct RawFile {
     fd: Cell<Option<RawFd>>,
     pipe: RefCell<Option<BoxedPipe>>,
     closefd: Cell<bool>,
+    python_finalized: Cell<bool>,
     mode: Cell<RawMode>,
     blksize: Cell<i64>,
     repr_active: Cell<bool>,
@@ -45,7 +46,13 @@ pub(in crate::dynamic) struct RawFile {
 
 impl Drop for RawFile {
     fn drop(&mut self) {
-        let _ = self.close();
+        // A Python finalizer may have reused the number or left it to another
+        // owner. Disarm the pipe's Rust File as well as the raw wrapper.
+        if let Some(fd) = self.take_close_fd()
+            && !self.python_finalized.get()
+        {
+            let _ = os::close(fd);
+        }
     }
 }
 
@@ -83,16 +90,21 @@ impl RawFile {
         Ok(fd)
     }
 
+    fn take_close_fd(&self) -> Option<RawFd> {
+        let fd = self.fd.take()?;
+        if !self.closefd.get() {
+            return None;
+        }
+        self.blksize.set(super::DEFAULT_BUFFER_SIZE);
+        match self.pipe.borrow().as_ref() {
+            Some(pipe) => pipe.take_raw_fd(),
+            None => Some(fd),
+        }
+    }
+
     pub(super) fn close(&self) -> Result<()> {
-        if let Some(fd) = self.fd.take()
-            && self.closefd.get()
-        {
-            self.blksize.set(super::DEFAULT_BUFFER_SIZE);
-            if let Some(pipe) = self.pipe.borrow().as_ref() {
-                pipe.close_raw()?;
-            } else {
-                os::close(fd)?;
-            }
+        if let Some(fd) = self.take_close_fd() {
+            os::close(fd)?;
         }
         Ok(())
     }
@@ -123,6 +135,12 @@ impl RawFile {
                 },
             ))
         }
+    }
+}
+
+pub(in crate::dynamic) fn hand_file_finalization_to_python(ctx: &Context, receiver: Id) {
+    if let Some(raw) = state(ctx, receiver) {
+        raw.python_finalized.set(true);
     }
 }
 
@@ -837,6 +855,7 @@ fn initialize_file(
         let raw = Rc::new(RawFile {
             fd: Cell::new(None),
             closefd: Cell::new(true),
+            python_finalized: Cell::new(false),
             pipe: RefCell::new(pipe),
             mode: Cell::new(RawMode::default()),
             blksize: Cell::new(super::DEFAULT_BUFFER_SIZE),

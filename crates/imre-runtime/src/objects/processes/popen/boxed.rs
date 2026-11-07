@@ -376,8 +376,8 @@ impl BoxedPipe {
         self.with_file(|file| file.is_raw())
     }
 
-    pub(crate) fn close_raw(&self) -> Result<()> {
-        self.with_file(|file| file.close_raw_pipe().map_err(errno_error))
+    pub(crate) fn take_raw_fd(&self) -> Option<std::os::fd::RawFd> {
+        self.with_file(FileState::take_raw_pipe_fd)
     }
 
     pub(crate) fn read(&self, size: Option<usize>, line: bool) -> Result<Vec<u8>> {

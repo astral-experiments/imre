@@ -139,6 +139,7 @@ impl Context {
         if !found {
             return;
         }
+        super::stdlib::io::hand_file_finalization_to_python(self, owner);
         // The selected slot owns the implicit close. An override can resurrect the
         // socket or release its fd through os.close without calling the base slot.
         if let Some(socket) = self.heap.get(owner).socket_handle() {
