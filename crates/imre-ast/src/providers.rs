@@ -61,6 +61,12 @@ pub enum Provider {
     Hashlib,
 }
 
+/// These frozen registrations can yield to sys.path when frozen modules are disabled.
+pub fn is_optional_frozen(name: &str) -> bool {
+    matches!(name, "__hello__" | "runpy")
+        || (name == "stat" && cfg!(any(target_os = "linux", target_os = "macos")))
+}
+
 /// Optional native libraries are resolved by the runtime on the execution host.
 pub fn provider(name: &str) -> Option<Provider> {
     #[cfg(unix)]

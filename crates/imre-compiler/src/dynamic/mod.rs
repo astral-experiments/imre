@@ -589,6 +589,7 @@ pub(crate) fn compile(
 ) -> Result<Option<UnitCompilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
+    let frozen_modules = startup.is_none_or(|(flags, _)| flags.frozen_modules);
     let command = invocation.map(|i| &i.source);
     let module_entry = options.module_entry.as_deref();
     let in_memory = command.is_some() || module_entry.is_some();
@@ -1034,7 +1035,8 @@ pub(crate) fn compile(
             };
             // A frozen import never visits sys.path unless the program can disable
             // the frozen importer. Defer collecting its filesystem alternatives.
-            if !seen.contains("_imp")
+            if frozen_modules
+                && !seen.contains("_imp")
                 && let Some(top @ ("stat" | "__hello__")) = name.split('.').next()
                 && crate::modules::bundled_runtime_source(top).is_some()
             {
@@ -1103,8 +1105,8 @@ pub(crate) fn compile(
                     }
                     sources.push((prefix.clone(), path, source.into_owned()));
                 }
-                // The interpreter bootstraps runpy from its frozen copy before executing the target.
-                if prefix == "runpy" {
+                // When frozen imports are disabled, -m can load its runpy from sys.path.
+                if frozen_modules && prefix == "runpy" {
                     continue;
                 }
                 for root in roots.iter().filter(|_| !bundled_only) {
@@ -1309,6 +1311,7 @@ pub(crate) fn compile(
         "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
         "xoptions":startup.map(|(flags, _)| &flags.xoptions),
+        "frozen_modules":frozen_modules,
         "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
         "tracemalloc":startup.map_or(0, |(flags, _)| flags.tracemalloc),
         "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),

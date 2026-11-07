@@ -1313,6 +1313,54 @@ def check_tracemalloc_startup(imre, run):
     assert (traced.returncode, traced.stdout, traced.stderr) == (0, b"sample\n", b"")
 
 
+def check_frozen_modules_startup(imre, root, run):
+    provider = root / "frozen_provider"
+    provider.mkdir()
+    (provider / "__hello__.py").write_text("initialized = 73\ndef origin(): return __file__\n")
+    entry = provider / "entry.py"
+    entry.write_text(
+        "import _imp, importlib, sys\n"
+        "from importlib.machinery import FrozenImporter\n"
+        "name = '__hello__'\n"
+        "for override in (0, 1, -1, 0):\n"
+        "    _imp._override_frozen_modules_for_tests(override)\n"
+        "    sys.modules.pop(name, None)\n"
+        "    import __hello__\n"
+        "    assert importlib.import_module(name) is __hello__ is sys.modules[name]\n"
+        "    frozen = _imp.is_frozen(name)\n"
+        "    assert (__hello__.__loader__ is FrozenImporter) == frozen\n"
+        "    assert __hello__.__spec__.loader is __hello__.__loader__\n"
+        "    assert _imp.is_frozen('_frozen_importlib')\n"
+        "    if not frozen:\n"
+        "        assert __hello__.origin() == __hello__.origin.__code__.co_filename == __hello__.__file__\n"
+        "    print(frozen, sys._xoptions)\n"
+    )
+    for flags, setting in (
+        (("-X", "frozen_modules=off"), "on"),
+        (("-Xfrozen_modules=off", "-Xfrozen_modules=on"), "off"),
+        ((), "off"),
+        (("-E",), "invalid"),
+    ):
+        extra = {"PYTHON_FROZEN_MODULES": setting}
+        expected = run(sys.executable, "-B", *flags, entry, extra=extra)
+        actual = run(imre, "-B", *flags, entry, extra=extra, timeout=300)
+        assert expected.returncode == actual.returncode == 0, (expected, actual)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
+    # A scalar from-import also resolves the local file through the checked source graph.
+    direct = provider / "direct.py"
+    direct.write_text("from __hello__ import initialized\nprint(initialized)\n")
+    result = run(imre, "-BS", "-Xfrozen_modules=off", direct)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"73\n", b""), result
+
+    # The module-mode entry point imports runpy before invoking the target.
+    (provider / "runpy.py").write_text(
+        "def _run_module_as_main(name, alter_argv=True): print(name, alter_argv)\n"
+    )
+    result = run(imre, "-BS", "-Xfrozen_modules=off", "-m", "direct", extra={"PYTHONPATH": str(provider)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"direct True\n", b""), result
+
+
 def check_faulthandler(imre, root, env):
     import resource
     import select
@@ -1702,6 +1750,7 @@ def main():
             )
 
         check_tracemalloc_startup(imre, run)
+        check_frozen_modules_startup(imre, root, run)
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
