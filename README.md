@@ -109,8 +109,8 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 6, 2026, Imre has a paired pass for **12,652 of 16,202 tests (78.1%)** across the 44 standard library module families tracked below.
-The paired pass rate is 77.0% (10,267 of 13,327) for the original 25 families and 83.0% (2,385 of 2,875) for the 19 additional families.
+As of November 7, 2026, Imre has a paired pass for **12,687 of 16,202 tests (78.3%)** across the 44 standard library module families tracked below.
+The paired pass rate is 77.0% (10,267 of 13,327) for the original 25 families and 84.2% (2,420 of 2,875) for the 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -121,7 +121,7 @@ The [supplemental `test_urllib2` decision](docs/stdlib-omissions.md#test_urllib2
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
 It passed **15,161**, skipped 1,023, and reported 7 errors.
-Across the 44 families, **12,597 of the 15,161 stock Linux passes (83.1%)** have paired passes, leaving **1,048** more to reach 90%. This stock runner passed 184 of the 187 new `io` and `shutil` pairs and all 15 `unittest`, `functools` and `math` gains at the previous checkpoint. Separate stock runs account for 55 of the 12,652 cumulative pairs. Of the 52 already in that group at #5831, this runner skipped 45 and reported errors for seven. Of the two `math` pairs added on #5719, it passed `testSumProd` and skipped `test_sumprod_stress` because the CPU resource was disabled.
+Across the 44 families, **12,599 of the 15,161 stock Linux passes (83.1%)** have paired passes, leaving **1,046** more to reach 90%. This stock build lacked bzip2 and passed two of the 35 new `zipfile` pairs. It also passed 184 of the 187 `io` and `shutil` gains at #5836 and all 15 `unittest`, `functools` and `math` gains at #5831. Separate stock runs account for 88 of the 12,687 cumulative pairs. Of the 52 already in that group at #5831, this runner skipped 45 and reported errors for seven. Of the two `math` pairs added on #5719, it passed `testSumProd` and skipped `test_sumprod_stress` because the CPU resource was disabled.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
@@ -178,13 +178,13 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 | `uuid` | 48 | 120 | 1 | Both native builds passed 47 of 120 originals on the public squash, including 47 of 48 frozen CPython-positive cases. An earlier host also passed the IP-dependent lookup. The private enum layout check has a [documented omission decision](docs/stdlib-omissions.md#uuid). [Public change](https://github.com/astral-experiments/imre/pull/5313). |
 | `warnings` | 181 | 187 | 0 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | 7 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| `zipfile` | 300 | 383 | 0 | The whole-suite runs retained all 295 earlier paired passes and added three Deflate and two LZMA cases. Each native build passed 300, skipped 70 and errored on eight. Five originals did not register. Stock passed 376 and skipped two in the same configuration, and passed 381 with its optional dependencies installed. [Public revision](https://github.com/astral-experiments/imre/commit/c95eddb638efaec3872351016d2503007a82d920) |
+| `zipfile` | 335 | 383 | 0 | The replay at `c7634f71` retained all 300 earlier pairs. Of the 35 new pairs, 33 were bzip2-related. The other two, `test_execute_zip2` and `test_execute_zip64`, used a Bash fixture that launched a CPython child. At both O0 and O3, 335 originals passed, 37 skipped, six errored and five did not register. Stock with optional dependencies passed 381 of 383. A separate pip wheel check extracted all 465 files and verified all 464 `RECORD` hashes. [Earlier 300 pairs](https://github.com/astral-experiments/imre/commit/c95eddb638efaec3872351016d2503007a82d920) · [Public replay revision](https://github.com/astral-experiments/imre/commit/c7634f714e28e77d2c2217380b9def0bcfc71b4e). |
 | `zoneinfo` | 228 | 261 | 2 | All 261 original registrations completed on public Imre. Both native builds passed 228, including `test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime` (occurrence 1), which exercises the pure-Python datetime provider. Two private-cache tests have [documented omission decisions](docs/stdlib-omissions.md#zoneinfo). [Public change](https://github.com/astral-experiments/imre/pull/5295). |
-| **Measured total (19 of 19 families)** | **2,385** | **2,875** | **12** |  |
+| **Measured total (19 of 19 families)** | **2,420** | **2,875** | **12** |  |
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 28 suites, 1,913 of 2,990 originals have paired passes.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 29 suites, 1,983 of 3,100 originals have paired passes.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
@@ -205,6 +205,7 @@ We track these families separately to keep the original 16,202-test baseline com
 | `http.client` | 131 | 144 | 139 passed, 5 skipped | 131 passed, 9 errors, 4 skipped |
 | `ipaddress` | 211 | 211 | 211 passed | All 211 originals passed at both native optimization levels. [Public merge #5560](https://github.com/astral-experiments/imre/commit/56314e43d8fe671b05f2b0be1a22139fa45a3755). |
 | `lzma` | 118 | 121 | 120 passed, 1 skipped | 118 passed, 2 errors, 1 skipped. Both native runs retained all 117 prior passes and added `FileTestCase.test_issue44439`. [Public change](https://github.com/astral-experiments/imre/pull/5489). |
+| `operator` | 70 | 110 | 110 passed | The replay at `c7634f71` retained all 64 pairs from its first parent `a45016e6` and added two functional `methodcaller` tests and four pickle tests. Both native runs exited 1 with 40 originals in error, including both `methodcaller` signature tests. In a separate check, the unmodified Ansible Core 2.20.0 `six` module imported at O0 and O3 and matched all five stock output lines. [#5842](https://github.com/astral-experiments/imre/pull/5842). |
 | `optparse` | 151 | 154 | 154 passed | 151 passed, 2 skipped, 1 failure. The upstream `Tools/i18n/pygettext.py` found no messages at the module’s virtual source path. [Public revision](https://github.com/astral-experiments/imre/commit/276f0cbe28c37627fa4d0859dfe439303a208d74). |
 | `pyexpat` | 34 | 60 | 60 passed | 34 passed, 12 errors, 14 skipped (one during class setup) |
 | `queue` | 33 | 162 | 156 passed, 6 skipped | 33 passed, 85 skipped and 44 raised errors. Of the skips, 82 require the C implementation of _queue and three require a large-memory run. [Public revision](https://github.com/astral-experiments/imre/commit/cda138b4a157dd9d6fefaa21f3e5f6353d13db14). |
