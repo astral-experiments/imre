@@ -806,12 +806,9 @@ impl Function<'_, '_> {
         self.line(&format!(
             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
         ));
-        let more = self.op("more", &[&iter]);
-        let cond = self.value(&format!("icmp eq i64 {more}, 2"));
-        self.branch(&cond, &body, &done);
+        self.branch_iteration(&iter, &g.target, false, &body, &done);
         self.label(&body);
-        let item = self.op("next", &[&iter]);
-        self.assign(&g.target, &item);
+        self.bind_iteration(&iter, &g.target);
         for test in &g.ifs {
             let keep = self.name("b");
             self.branch_expr(test, &keep, &step);

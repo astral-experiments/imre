@@ -540,19 +540,9 @@ impl Function<'_, '_> {
                         &v.orelse,
                         Some(&iter),
                         |f, yes, no| {
-                            let op = if v.orelse.is_empty() {
-                                "more"
-                            } else {
-                                "more_else"
-                            };
-                            let more = f.op(op, &[&iter]);
-                            let ready = f.value(&format!("icmp eq i64 {more}, 2"));
-                            f.branch(&ready, yes, no);
+                            f.branch_iteration(&iter, &v.target, !v.orelse.is_empty(), yes, no)
                         },
-                        |f| {
-                            let item = f.op("next", &[&iter]);
-                            f.assign(&v.target, &item);
-                        },
+                        |f| f.bind_iteration(&iter, &v.target),
                     );
                 }
                 ast::Stmt::While(v) => {
@@ -1244,21 +1234,12 @@ impl Function<'_, '_> {
                 return;
             }
         };
-        if !owned
-            && let [left, right] = elements.as_slice()
-            && !left.is_starred_expr()
-            && !right.is_starred_expr()
-        {
+        if !owned && let Some([left, right]) = Self::pair_target(target) {
             self.max_live = self.max_live.max(2);
             self.checked(&format!(
                 "call i64 @imre_dyn_unpack_pair(ptr %ctx, i64 {value}, ptr %live)"
             ));
-            // Target expressions may make calls that reuse the scratch slots.
-            let first = self.value("load i64, ptr %live");
-            let second_slot = self.value("getelementptr i64, ptr %live, i64 1");
-            let second = self.value(&format!("load i64, ptr {second_slot}"));
-            self.assign(left, &first);
-            self.assign(right, &second);
+            self.assign_pair_slots(left, right);
             return;
         }
         let count = self.integer(elements.len());
@@ -1284,6 +1265,58 @@ impl Function<'_, '_> {
         if owned {
             self.live.pop();
         }
+    }
+
+    /// Branch after advancing the iterator and snapshotting a fixed pair into the scratch slots.
+    pub(super) fn branch_iteration(
+        &mut self,
+        iter: &str,
+        target: &ast::Expr,
+        has_else: bool,
+        yes: &str,
+        no: &str,
+    ) {
+        let more = if Self::pair_target(target).is_some() {
+            self.max_live = self.max_live.max(2);
+            self.checked(&format!(
+                "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {iter}, ptr %live, i1 {has_else})"
+            ))
+        } else {
+            self.op(if has_else { "more_else" } else { "more" }, &[iter])
+        };
+        let ready = self.value(&format!("icmp eq i64 {more}, 2"));
+        self.branch(&ready, yes, no);
+    }
+
+    /// Bind a loop target immediately after its successful advance.
+    pub(super) fn bind_iteration(&mut self, iter: &str, target: &ast::Expr) {
+        if let Some([left, right]) = Self::pair_target(target) {
+            self.assign_pair_slots(left, right);
+        } else {
+            let item = self.op("next", &[iter]);
+            self.assign(target, &item);
+        }
+    }
+
+    fn pair_target(target: &ast::Expr) -> Option<[&ast::Expr; 2]> {
+        let elements = match target {
+            ast::Expr::Tuple(t) => &t.elts,
+            ast::Expr::List(l) => &l.elts,
+            _ => return None,
+        };
+        let [left, right] = elements.as_slice() else {
+            return None;
+        };
+        (!left.is_starred_expr() && !right.is_starred_expr()).then_some([left, right])
+    }
+
+    fn assign_pair_slots(&mut self, left: &ast::Expr, right: &ast::Expr) {
+        // Target expressions may make calls that reuse the scratch slots.
+        let first = self.value("load i64, ptr %live");
+        let second_slot = self.value("getelementptr i64, ptr %live, i64 1");
+        let second = self.value(&format!("load i64, ptr {second_slot}"));
+        self.assign(left, &first);
+        self.assign(right, &second);
     }
 
     fn if_arm(&mut self, test: &ast::Expr, body: &[ast::Stmt], done: &str) {

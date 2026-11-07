@@ -2608,7 +2608,11 @@ impl DictIterator {
     }
 
     /// Advance the cursor before a value lookup can call back into the iterator.
-    pub(super) fn next(mut self, ctx: &mut Context, owner: Id) -> Result<Option<Id>> {
+    pub(super) fn next_entry_pair(
+        mut self,
+        ctx: &mut Context,
+        owner: Id,
+    ) -> Result<Option<[Id; 2]>> {
         let entry = self.next_entry(ctx, owner);
         *ctx.heap.get_mut(owner) = Value::DictIterator(self);
         let Some((storage, key, mut value)) = entry? else {
@@ -2625,6 +2629,18 @@ impl DictIterator {
             };
             value = ctx.stored_entries(storage)[index].1;
         }
+        Ok(Some([key, value]))
+    }
+
+    /// Plain item cursors read both handles without invoking a Python key lookup.
+    pub(super) fn is_plain_items(self) -> bool {
+        self.order_state.is_none() && matches!(self.kind, DictViewKind::Items)
+    }
+
+    pub(super) fn next(self, ctx: &mut Context, owner: Id) -> Result<Option<Id>> {
+        let Some([key, value]) = self.next_entry_pair(ctx, owner)? else {
+            return Ok(None);
+        };
         Ok(Some(match self.kind {
             DictViewKind::Keys => key,
             DictViewKind::Values => value,
