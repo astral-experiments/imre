@@ -2415,6 +2415,9 @@ impl Context {
         }
         let [modules, reference] = self.finalizer_path_roots();
         self.heap.learn_weak_roots(modules, reference);
+        let input = super::stdlib::io::rooted_input_chain(self);
+        self.heap
+            .learn_descriptor_paths([modules, reference], input.as_ref());
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.

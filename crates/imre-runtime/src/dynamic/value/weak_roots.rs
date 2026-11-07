@@ -477,6 +477,40 @@ impl Heap {
         false
     }
 
+    /// Learn a newly opened descriptor's path even when all ordinary finalizers are already rooted.
+    pub(in crate::dynamic) fn learn_descriptor_paths(
+        &mut self,
+        globals: [Id; 2],
+        stdin: Option<&[Id; 3]>,
+    ) {
+        if self.descriptor_owners.is_empty() {
+            return;
+        }
+        let paths_valid = self.finalizer_roots.valid(self, globals);
+        let retained = self.temporary_mark();
+        if self
+            .descriptor_owners
+            .iter()
+            .any(|&owner| !self.root_keeps_owner(owner, paths_valid, stdin, retained))
+        {
+            self.learn_finalizer_paths(globals, stdin);
+        }
+    }
+
+    /// Recheck the cached path or a surviving frame binding for a registered owner.
+    fn root_keeps_owner(
+        &self,
+        owner: Id,
+        paths_valid: bool,
+        stdin: Option<&[Id; 3]>,
+        retained_current: usize,
+    ) -> bool {
+        (paths_valid && self.finalizer_roots.contains(owner))
+            || stdin.is_some_and(|input| input.contains(&owner))
+            || self.operand_keeps_finalizer(owner, retained_current)
+            || self.bound_in_active_frame(owner)
+    }
+
     /// A pending discard preserves the active frame's operands below its mark. It must also
     /// preserve descriptor owners and weak references before a release can skip its sweep.
     pub(in crate::dynamic) fn cached_finalizers_kept(
@@ -499,10 +533,12 @@ impl Heap {
         let paths_valid = self.finalizer_roots.valid(self, globals);
         let kept = |owner: &Id| {
             except.contains(owner)
-                || (paths_valid && self.finalizer_roots.contains(*owner))
-                || stdin.is_some_and(|input| input.contains(owner))
-                || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
-                || self.bound_in_active_frame(*owner)
+                || self.root_keeps_owner(
+                    *owner,
+                    paths_valid,
+                    stdin,
+                    discard_from.unwrap_or(usize::MAX),
+                )
         };
         self.ordinary_finalizers.iter().all(&kept)
             && (discard_from.is_none()
