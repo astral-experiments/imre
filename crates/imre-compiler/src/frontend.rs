@@ -228,10 +228,11 @@ impl ClassInfo {
             .iter()
             .enumerate()
             .filter_map(|(id, class)| {
-                class
-                    .dataclass
-                    .is_some_and(|options| options.frozen && options.eq)
-                    .then_some(id)
+                (class.is_uuid(graph)
+                    || class
+                        .dataclass
+                        .is_some_and(|options| options.frozen && options.eq))
+                .then_some(id)
             })
             .collect::<HashSet<_>>();
         types.set_hashable_records(hashable.clone());
@@ -325,6 +326,12 @@ impl ClassInfo {
         loop {
             let before = hashable.len();
             hashable.retain(|&id| {
+                // A UUID-typed key may hold a subclass with different equality or hashing.
+                if declarations.definitions[id].is_uuid(graph)
+                    && !types.concrete_subclasses(id).is_empty()
+                {
+                    return false;
+                }
                 declarations.definitions[id].toml_hash
                     || declarations.definitions[id]
                         .dataclass
@@ -528,26 +535,46 @@ fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
 /// Resolves the project-wide call graph without changing source-level namespaces.
 #[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
-    lower_with_owners(graph).map(|(module, _)| module)
+    lower_current(graph, None, &mut HashSet::new()).map(|(module, _)| module)
 }
 
 pub(crate) fn lower_with_owners(
-    graph: &SourceGraph,
+    graph: &mut SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     lower_with_caller_cache(graph, None)
 }
 
 pub(crate) fn lower_with_caller_cache(
+    graph: &mut SourceGraph,
+    mut cache: Option<&mut CallerCache>,
+) -> Result<(ir::Module, Vec<ModuleId>), String> {
+    let mut key_reprs = HashSet::new();
+    loop {
+        let before = key_reprs.len();
+        graph.missing_repr.set(None);
+        let lowered = lower_current(graph, cache.take(), &mut key_reprs);
+        key_reprs.extend(graph.missing_repr.take());
+        if key_reprs.len() == before {
+            return lowered;
+        }
+        // Only the typed subscript knows the key's class. Include its missing
+        // formatter and its dependencies without admitting unrelated methods.
+        graph.include_key_reprs(&key_reprs);
+    }
+}
+
+fn lower_current(
     graph: &SourceGraph,
     cache: Option<&mut CallerCache>,
+    key_reprs: &mut HashSet<DefinitionId>,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     use crate::modules::FloatComponents;
     graph.float_components.set(FloatComponents::Native);
-    let result = lower_graph(graph, cache);
+    let result = lower_graph(graph, cache, key_reprs);
     if result.is_err() && graph.float_components.get() == FloatComponents::Used {
         // Recover the original descriptor diagnostic when a later use needs object semantics.
         graph.float_components.set(FloatComponents::Boxed);
-        return lower_graph(graph, None);
+        return lower_graph(graph, None, key_reprs);
     }
     result
 }
@@ -555,6 +582,7 @@ pub(crate) fn lower_with_caller_cache(
 fn lower_graph(
     graph: &SourceGraph,
     mut cache: Option<&mut CallerCache>,
+    key_reprs: &mut HashSet<DefinitionId>,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
     typing::collect_sites(graph, &types);
@@ -1170,6 +1198,9 @@ fn lower_graph(
                 }
             });
         }
+    }
+    if graph.reachable_only() {
+        classes.missing_key_reprs(&functions, &entry, graph, &types, key_reprs);
     }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
@@ -2675,6 +2706,13 @@ impl<'a> Checker<'a> {
                     attribute,
                     "argparse namespace fields are read-only",
                 ));
+            }
+            if declaration.fields.iter().any(|field| {
+                field.name == attribute.attr.as_str()
+                    && field.module != self.module
+                    && self.graph.modules[field.module].is_bundled("uuid")
+            }) {
+                return Err(error(self.source, attribute, "UUID fields are read-only"));
             }
             if declaration
                 .dataclass
@@ -7733,10 +7771,26 @@ impl<'a> Checker<'a> {
                 }) {
                     return json::compare(values, &compare.ops, self.source, expression);
                 }
+                let uuid_and_scalar = |uuid: Type, other: Type| {
+                    matches!(uuid, Type::Class(id) if self.classes.declarations.definitions[id].is_uuid(self.graph))
+                        && self.types.immutable_key_field(uuid)
+                        && matches!(
+                            other,
+                            Type::Int
+                                | Type::Bool
+                                | Type::Float
+                                | Type::Str
+                                | Type::StrLiteral(_)
+                                | Type::Bytes
+                                | Type::None
+                        )
+                };
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
                     && let [left, right] = values.as_slice()
                     && (matches!(left.ty, Type::Enum(_) | Type::BuiltinClass)
-                        || matches!(right.ty, Type::Enum(_) | Type::BuiltinClass))
+                        || matches!(right.ty, Type::Enum(_) | Type::BuiltinClass)
+                        || uuid_and_scalar(left.ty, right.ty)
+                        || uuid_and_scalar(right.ty, left.ty))
                     && left.ty != right.ty
                     && [left.ty, right.ty].into_iter().all(|ty| {
                         self.types.payload(ty).is_none() && self.types.members(ty).is_none()
@@ -11847,7 +11901,30 @@ impl<'a> Checker<'a> {
             if matches!(value.ty, Type::CmpKey(..)) {
                 return Ok(self.cmp_key_hash(value.clone()));
             }
-            let builtin = match value.ty {
+            // UUID hashes its integer value; the bool discriminator of UUID.int
+            // affects its Python type but never participates in equality or hashing.
+            let args = match value.ty {
+                Type::Class(id)
+                    if self.classes.declarations.definitions[id].is_uuid(self.graph)
+                        && self.types.immutable_key_field(value.ty) =>
+                {
+                    let fields = &self.classes.declarations.definitions[id].fields;
+                    let field = fields
+                        .iter()
+                        .position(|field| field.name == "_value")
+                        .unwrap();
+                    vec![Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Field(Box::new(value.clone()), field),
+                    }]
+                }
+                ty if ty == Type::Bool || self.types.is_bool_or_int(ty) => {
+                    vec![self.int_method_receiver(value.clone(), call)?]
+                }
+                _ => args,
+            };
+            let builtin = match args[0].ty {
+                Type::Int => Builtin::IntHash,
                 Type::Deque(_) => {
                     return Ok(calls::type_error(
                         Type::Int,

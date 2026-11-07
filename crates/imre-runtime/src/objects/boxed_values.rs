@@ -68,13 +68,18 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rendered {
         // SAFETY: the owning field roots the exact string.
         return Ok(unsafe { StrOwner::acquire_word(word) });
     }
-    if !repr {
-        let mut out = String::new();
-        if write_string_value(&mut values::ReprWriter(&mut out), kind, word)? {
-            return rendered(out.into());
+    let mut out = String::new();
+    let mut writer = values::ReprWriter(&mut out);
+    // SAFETY: the exception or its projected view roots this argument and
+    // releases all storage borrows before requesting its Python representation.
+    unsafe {
+        if repr {
+            values::try_write_argument_repr(&mut writer, word, kind)?;
+        } else if !write_string_value(&mut writer, kind, word)? {
+            values::try_write_repr(&mut writer, word, kind)?;
         }
     }
-    rendered(word_repr(kind, word)?.into())
+    rendered(out.into())
 }
 
 /// Write the string form of a rooted string, path or enum. Other values use their repr.

@@ -3069,6 +3069,7 @@ pub(crate) enum SetLayoutHint {
 pub(crate) struct SourceGraph {
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
+    pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
     pub(crate) handled_tracebacks: bool,
@@ -3333,6 +3334,24 @@ impl SourceGraph {
         self.command_startup
             .as_ref()
             .map_or(0, |(flags, _)| flags.optimize)
+    }
+
+    pub(crate) fn include_key_reprs(&mut self, owners: &HashSet<DefinitionId>) {
+        self.reachable = Some(reachability::Reachable::collect_with_reprs(
+            self, false, owners,
+        ));
+        self.refresh_reachable_state();
+    }
+
+    /// Both decisions depend on the methods included in this source graph.
+    fn refresh_reachable_state(&mut self) {
+        self.mutable_documents = self.uses_mutable_documents();
+        if self.handled_tracebacks {
+            self.traceback_objects = self.reachable.as_ref().map_or_else(
+                || reachability::Reachable::collect(self, false).traceback_objects,
+                |roots| roots.traceback_objects,
+            );
+        }
     }
 
     pub(crate) fn reachable_only(&self) -> bool {
@@ -4465,6 +4484,7 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             float_components: Default::default(),
+            missing_repr: Default::default(),
             // An import that cannot be initialized here must not turn an unused
             // object-capable namespace into a reason to box the caller.
             needs_object_runtime: std::cell::Cell::new(
@@ -4513,13 +4533,7 @@ impl<'a> Loader<'a> {
                 Some((library, reachability::Reachable::collect(&graph, true)));
         }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
-        graph.mutable_documents = graph.uses_mutable_documents();
-        if graph.handled_tracebacks {
-            graph.traceback_objects = graph.reachable.as_ref().map_or_else(
-                || reachability::Reachable::collect(&graph, false).traceback_objects,
-                |roots| roots.traceback_objects,
-            );
-        }
+        graph.refresh_reachable_state();
         graph.mutable_builtin_len = graph.writes_builtin_len();
         Ok(graph)
     }

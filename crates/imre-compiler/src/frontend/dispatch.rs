@@ -19,18 +19,76 @@ impl ClassInfo {
     /// A generated dataclass repr shadows an inherited override even though the
     /// generated method has no source signature in the method table.
     pub(super) fn has_repr_override(&self, id: usize) -> bool {
+        self.repr_override(id).is_some()
+    }
+
+    pub(super) fn repr_override(&self, id: usize) -> Option<(DefinitionId, &ast::StmtFunctionDef)> {
         for &owner in std::iter::once(&id).chain(&self.declarations.definitions[id].bases) {
             let class = &self.declarations.definitions[owner];
-            if class.node.body.iter().any(
-                |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__repr__"),
-            ) {
-                return true;
+            if let Some(method) = class.node.body.iter().find_map(|stmt| match stmt {
+                ast::Stmt::FunctionDef(f) if f.name.as_str() == "__repr__" => Some(f),
+                _ => None,
+            }) {
+                return Some((class.definition, method));
             }
             if class.dataclass.is_some_and(|options| options.repr) {
-                return false;
+                return None;
             }
         }
-        false
+        None
+    }
+
+    pub(super) fn missing_key_reprs(
+        &self,
+        functions: &[ir::Function],
+        entry: &ir::Function,
+        graph: &SourceGraph,
+        types: &Types,
+        owners: &mut HashSet<DefinitionId>,
+    ) {
+        let mut keys = HashSet::new();
+        for function in functions.iter().chain([entry]) {
+            ir::walk_expressions(&function.body, &mut |expr| {
+                if let ExprKind::Builtin(
+                    Builtin::DictGet
+                    | Builtin::DictDelete
+                    | Builtin::DictPop
+                    | Builtin::ChainMapGetItem,
+                    args,
+                ) = &expr.kind
+                    && let [_, key] = args.as_slice()
+                {
+                    keys.insert(key.ty);
+                }
+            });
+        }
+        let mut pending: Vec<_> = keys.into_iter().collect();
+        let mut seen = HashSet::new();
+        while let Some(ty) = pending.pop() {
+            if !seen.insert(ty) {
+                continue;
+            }
+            if let Type::Class(id) = ty {
+                for layout in self.concrete_layouts(id) {
+                    let class = &self.declarations.definitions[layout];
+                    if let Some((owner, method)) = self.repr_override(layout) {
+                        if !method.is_async && !graph.includes_method(owner.module, method) {
+                            owners.insert(owner);
+                        }
+                    } else if class.dataclass.is_some_and(|d| d.repr) {
+                        pending.extend(
+                            class
+                                .fields
+                                .iter()
+                                .zip(&self.fields[layout])
+                                .filter_map(|(field, &ty)| field.repr.then_some(ty)),
+                        );
+                    }
+                }
+            } else {
+                pending.extend(types.children(ty));
+            }
+        }
     }
 
     pub(super) fn has_concrete_subclasses(&self, class: usize) -> bool {
