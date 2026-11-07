@@ -1369,7 +1369,7 @@ pub(super) fn endpoint_method(
         } else {
             super::FALSE
         }),
-        "fileno" => Ok(ctx.int(i64::from(native::fd(socket)))),
+        "fileno" => Ok(ctx.int(i64::from(native::fileno(socket)?))),
         "listen" => {
             let backlog = match args {
                 [value] => ctx.index_c_int(*value)?,
@@ -1683,7 +1683,7 @@ pub(super) fn call(
             }
         }
         "close" => native::close(&s)?,
-        "detach" => return Ok(ctx.int(i64::from(native::detach(&s)))),
+        "detach" => return Ok(ctx.int(i64::from(native::detach(&s)?))),
         "fileno" | "listen" | "getsockname" | "getpeername" | "setblocking" | "getblocking"
         | "gettimeout" | "settimeout" => {
             return endpoint_method(ctx, method, &s, args);

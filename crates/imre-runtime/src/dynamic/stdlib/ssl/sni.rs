@@ -247,7 +247,7 @@ pub(super) fn drive<T>(
                 if e.kind() == std::io::ErrorKind::Interrupted =>
             {
                 // The provider and its destination have both been released before Python runs.
-                ctx.dispatch_signals()?;
+                super::callback_result(ctx, Context::dispatch_signals)?;
                 continue;
             }
             Err(BioFailure::ClientHello(name)) => name,
@@ -257,10 +257,7 @@ pub(super) fn drive<T>(
             Value::TlsSession(_, owner) | Value::TlsBioSession { owner, .. } => owner,
             _ => unreachable!(),
         };
-        let mark = ctx.heap.temporary_mark();
-        let alert = decision(ctx, owner, name);
-        // _ssl releases the callback result before returning the alert to OpenSSL.
-        ctx.discard_temporaries(mark, None);
+        let alert = super::callback_result(ctx, |ctx| Ok(decision(ctx, owner, name)))?;
         let resumed = match ctx.heap.get(id) {
             Value::TlsSession(state, _) => state
                 .borrow()

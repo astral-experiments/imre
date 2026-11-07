@@ -1,6 +1,7 @@
 //! Blocking TLS connections using the optional system OpenSSL 3 library.
 use std::ffi::{CStr, CString, c_char, c_int, c_long, c_uint, c_ulong, c_void};
 use std::io;
+use std::os::fd::AsRawFd;
 use std::ptr::{self, NonNull};
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -1337,13 +1338,15 @@ impl Session {
         server: bool,
     ) -> Result<Self, bio::BioFailure> {
         let api = ctx.api;
+        let endpoint = socket::TlsEndpoint::new(socket).map_err(Failure::Io)?;
+        let transport = endpoint.transport().expect("new TLS registration");
         let handle = ctx.new_connection(server)?;
         let mut session = Self {
             sni_deadline: None,
             sni: sni::Connection::new(ctx),
             api,
             handle,
-            endpoint: socket::TlsEndpoint::new(socket),
+            endpoint,
             hostname: None,
             server,
             handshake_complete: false,
@@ -1352,9 +1355,8 @@ impl Session {
             session.hostname =
                 Some(api.set_peer_name(handle.as_ptr(), host, ctx.check_hostname)?);
         }
-        // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
-        // is checked against the socket immediately before each I/O operation.
-        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
+        // SAFETY: the socket BIO borrows the registration's private descriptor.
+        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), transport.fd().as_raw_fd()) } != 1 {
             return Err(api.error("SSL_set_fd").into());
         }
         Ok(session)
@@ -1432,13 +1434,12 @@ impl Session {
         until: Option<socket::Deadline>,
         timeout_message: &'static str,
     ) -> Result<usize, bio::BioFailure> {
-        // The BIO retains the original fd number. A base close, detach or reinitializer
-        // must never let a later SSL operation use its replacement.
-        // A suspended callback must return to its original OpenSSL operation.
-        // Detach the old BIO first so even a reused fd cannot receive TLS records.
-        if !self.endpoint.matches() && !self.sni.detach_closing_socket(self.api, self.handle)? {
+        // Keep the registered descriptor alive through OpenSSL and any readiness wait.
+        let transport = self.endpoint.transport();
+        if transport.is_none() && !self.sni.detach_closing_socket(self.api, self.handle)? {
             return Err(Failure::Io(std::io::Error::from_raw_os_error(libc::EBADF)).into());
         }
+        let fd = transport.as_ref().map_or(-1, |r| r.fd().as_raw_fd());
         let api = self.api;
         let ssl = self.handle.as_ptr();
         let nonblocking = socket::get_timeout(self.socket()) == Some(std::time::Duration::ZERO);
@@ -1513,13 +1514,9 @@ impl Session {
                 _ if until.is_some_and(|end| end.remaining().is_zero()) => {
                     Err(io::ErrorKind::TimedOut.into())
                 }
-                Some(_) if socket::fd(self.socket()) < 0 => {
-                    Err(io::Error::from_raw_os_error(libc::EBADF))
-                }
-                Some(events) if reading => {
-                    socket::poll_interruptible(socket::fd(self.socket()), events, until)
-                }
-                Some(events) => socket::poll_socket(socket::fd(self.socket()), events, until),
+                Some(_) if fd < 0 => Err(io::Error::from_raw_os_error(libc::EBADF)),
+                Some(events) if reading => socket::poll_interruptible(fd, events, until),
+                Some(events) => socket::poll_socket(fd, events, until),
                 None => Ok(()),
             };
             if let Err(error) = wait {
@@ -1603,7 +1600,7 @@ impl Session {
     ) -> Result<usize, bio::BioFailure> {
         // SSL_read after a local read shutdown can treat the kernel EOF as a
         // fatal TLS truncation. Drain authenticated bytes without touching that EOF.
-        if out.is_empty() || (self.endpoint.read_shut && self.pending()? == 0) {
+        if out.is_empty() || (self.endpoint.read_shut() && self.pending()? == 0) {
             return Ok(0);
         }
         let result = self.transfer(Operation::Read(out), until, "The read operation timed out");
@@ -1622,6 +1619,7 @@ impl Session {
             socket::deadline(self.socket()),
             "The read operation timed out",
         )?;
+        self.endpoint.release_to_raw().map_err(Failure::Io)?;
         Ok(())
     }
 }
@@ -1630,7 +1628,7 @@ impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.sni.detach_closing_socket(self.api, self.handle);
         self.sni.cancel(self.api, self.handle);
-        // SAFETY: free the SSL and its non-closing BIO. The Python socket owns the fd.
+        // SAFETY: free the SSL and its non-closing BIO.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
     }
 }

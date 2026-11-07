@@ -7,13 +7,13 @@ use super::records::{RecordDescriptor, imre_record_new};
 pub(crate) use super::time::Deadline;
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, c_int, errno_error};
 use num_traits::ToPrimitive;
+use std::cell::Cell;
 use std::ffi::{CStr, CString};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-#[cfg(target_vendor = "apple")]
-use std::os::fd::AsRawFd;
-use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 pub(super) struct Socket {
@@ -21,7 +21,7 @@ pub(super) struct Socket {
     kind: i32,
     proto: i32,
     fd: RawFd,
-    generation: u64,
+    tls: Option<Rc<TlsRegistration>>,
     // Python socket timeouts use signed nanoseconds: -1 blocks indefinitely, 0 is nonblocking.
     timeout_ns: i64,
     // A Python subtype may take responsibility for the fd in its finalizer.
@@ -29,17 +29,61 @@ pub(super) struct Socket {
 }
 
 impl Socket {
+    fn transport_fd(&self) -> RawFd {
+        self.tls.as_ref().map_or(self.fd, |r| r.fd.as_raw_fd())
+    }
+
     fn into_owner(self) -> Result<crate::ObjectOwner> {
         crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Socket(self))))
             .map_err(|_| Error::memory_error())
     }
 
     fn close_fd(&mut self) -> io::Result<()> {
-        let fd = std::mem::replace(&mut self.fd, -1);
-        if fd == -1 {
-            return Ok(());
+        let owned = match self
+            .tls
+            .as_ref()
+            .map(|r| r.same_description(self.fd))
+            .transpose()
+        {
+            Ok(result) => result.flatten() != Some(false),
+            Err(error) => {
+                if error.raw_os_error() == Some(libc::EBADF) {
+                    self.fd = -1;
+                    self.tls = None;
+                }
+                return Err(error);
+            }
+        };
+        self.tls = None;
+        let raw = std::mem::replace(&mut self.fd, -1);
+        if owned && raw >= 0 {
+            close_fd(raw)
+        } else {
+            Ok(())
         }
-        close_fd(fd)
+    }
+
+    fn detach(&mut self) -> io::Result<RawFd> {
+        if let Some(registration) = &self.tls {
+            if registration.displaced(self.fd)? {
+                // Transfer the registered description, never a stranger's descriptor.
+                let registration = self.tls.take().unwrap();
+                let owned = match Rc::try_unwrap(registration) {
+                    Ok(registration) => registration.fd,
+                    Err(active) => match active.fd.try_clone() {
+                        Ok(copy) => copy,
+                        Err(error) => {
+                            self.tls = Some(active);
+                            return Err(error);
+                        }
+                    },
+                };
+                self.fd = -1;
+                return Ok(owned.into_raw_fd());
+            }
+        }
+        self.tls = None;
+        Ok(std::mem::replace(&mut self.fd, -1))
     }
 }
 
@@ -83,8 +127,22 @@ pub(crate) fn proto(s: &Object) -> i32 {
     state(s, |s| s.proto)
 }
 
+/// Descriptor used for socket operations, including changes to the open file status.
 pub(crate) fn fd(s: &Object) -> RawFd {
-    state(s, |s| s.fd)
+    state(s, |s| s.transport_fd())
+}
+
+/// Expose an owned alias for polling or transfer, even after an external dup2.
+pub(crate) fn fileno(s: &Object) -> Result<RawFd> {
+    state(s, |s| {
+        if let Some(registration) = &s.tls
+            && registration.displaced(s.fd)?
+        {
+            s.fd = registration.fd.try_clone()?.into_raw_fd();
+        }
+        Ok(s.fd)
+    })
+    .map_err(errno_error)
 }
 
 /// Check that OpenSSL can use this socket's current descriptor and timeout.
@@ -92,7 +150,8 @@ pub(crate) fn fd(s: &Object) -> RawFd {
 pub(crate) fn check_tls_mode(socket: &Object, connected: bool) -> Result<()> {
     state(socket, |s| {
         // SAFETY: this query only reads the flags of the socket-owned descriptor.
-        let flags = checked(unsafe { libc::fcntl(s.fd, libc::F_GETFL) }).map_err(errno_error)?;
+        let flags = checked(unsafe { libc::fcntl(s.transport_fd(), libc::F_GETFL) })
+            .map_err(errno_error)?;
         // A finite timeout uses a nonblocking fd so OpenSSL can yield to poll.
         let nonblocking = flags & libc::O_NONBLOCK != 0;
         let supported = match s.timeout_ns {
@@ -109,48 +168,118 @@ pub(crate) fn check_tls_mode(socket: &Object, connected: bool) -> Result<()> {
     })
 }
 
-/// The socket BIO borrows a number. Reinitializing the Python object may replace its endpoint.
+/// Own the socket description borrowed by OpenSSL independently of Python's fd number.
+pub(crate) struct TlsRegistration {
+    fd: OwnedFd,
+    read_shut: Cell<bool>,
+    write_shut: Cell<bool>,
+}
+
+impl TlsRegistration {
+    fn new(raw: RawFd) -> io::Result<Self> {
+        Ok(Self {
+            fd: duplicate_fd(raw)?,
+            read_shut: Cell::new(false),
+            write_shut: Cell::new(false),
+        })
+    }
+
+    /// Compare at public-fd ownership boundaries, outside ordinary TLS transfers.
+    fn same_description(&self, raw: RawFd) -> io::Result<Option<bool>> {
+        #[cfg(target_os = "linux")]
+        {
+            let query = linux_raw_sys::general::F_DUPFD_QUERY as libc::c_int;
+            // SAFETY: the query compares two numbers and neither consumes nor changes them.
+            match checked(unsafe { libc::fcntl(self.fd.as_raw_fd(), query, raw) }) {
+                Ok(same) => return Ok(Some(same != 0)),
+                Err(error) if matches!(error.raw_os_error(), Some(libc::EINVAL | libc::ENOSYS)) => {
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        // With the original socket pinned, a usable inode cannot be recycled.
+        // Some kernels do not identify sockets in stat. Keep the base socket's
+        // ordinary fd ownership there, without treating it as proof on reinitialization.
+        let original = socket_file(self.fd.as_raw_fd())?;
+        let exposed = socket_file(raw)?;
+        Ok((original.1 != 0 || exposed.1 != 0).then_some(original == exposed))
+    }
+
+    fn displaced(&self, raw: RawFd) -> io::Result<bool> {
+        match self.same_description(raw) {
+            Ok(result) => Ok(result == Some(false)),
+            Err(error) if error.raw_os_error() == Some(libc::EBADF) => Ok(true),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) fn fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct TlsEndpoint {
     socket: crate::ObjectOwner,
-    fd: RawFd,
-    generation: u64,
-    #[cfg(target_os = "linux")]
-    cookie: Option<u64>,
-    retired_file: Option<(libc::dev_t, libc::ino_t)>,
-    pub(crate) read_shut: bool,
-    write_shut: bool,
+    registration: Weak<TlsRegistration>,
 }
 
 impl TlsEndpoint {
-    pub(crate) fn new(socket: crate::ObjectOwner) -> Self {
-        let (fd, generation) = state(&socket, |s| (s.fd, s.generation));
-        Self {
+    pub(crate) fn new(socket: crate::ObjectOwner) -> io::Result<Self> {
+        let registration = state(&socket, |s| {
+            let reg = match &s.tls {
+                Some(reg) => reg,
+                None => s.tls.insert(Rc::new(TlsRegistration::new(s.fd)?)),
+            };
+            Ok::<_, io::Error>(Rc::downgrade(reg))
+        })?;
+        Ok(Self {
             socket,
-            fd,
-            generation,
-            #[cfg(target_os = "linux")]
-            cookie: socket_cookie(fd),
-            retired_file: None,
-            read_shut: false,
-            write_shut: false,
+            registration,
+        })
+    }
+
+    pub(crate) fn transport(&self) -> Option<Rc<TlsRegistration>> {
+        state(&self.socket, |s| {
+            s.tls
+                .as_ref()
+                .filter(|reg| Rc::as_ptr(reg) == self.registration.as_ptr())
+                .cloned()
+        })
+    }
+
+    fn public_transport(&self) -> io::Result<Rc<TlsRegistration>> {
+        let bad_fd = || io::Error::from_raw_os_error(libc::EBADF);
+        let transport = self.transport().ok_or_else(bad_fd)?;
+        if transport.same_description(state(&self.socket, |s| s.fd))? == Some(false) {
+            return Err(bad_fd());
         }
+        Ok(transport)
+    }
+
+    pub(crate) fn release_to_raw(&self) -> io::Result<()> {
+        self.public_transport()?;
+        state(&self.socket, |s| s.tls = None);
+        Ok(())
+    }
+
+    pub(crate) fn read_shut(&self) -> bool {
+        self.transport().is_some_and(|r| r.read_shut.get())
     }
 
     pub(crate) fn fully_shut(&self) -> bool {
-        self.read_shut && self.write_shut
+        self.transport()
+            .is_some_and(|r| r.read_shut.get() && r.write_shut.get())
     }
 
-    /// Record only directions that the kernel successfully shut down.
-    pub(crate) fn shutdown(&mut self, how: i32) -> Result<()> {
-        if !self.matches() {
-            return Err(errno_error(io::Error::from_raw_os_error(libc::EBADF)));
+    pub(crate) fn shutdown(&self, how: i32) -> Result<()> {
+        let transport = self.public_transport().map_err(errno_error)?;
+        shutdown_fd(transport.fd.as_raw_fd(), how)?;
+        if how == libc::SHUT_RD || how == libc::SHUT_RDWR {
+            transport.read_shut.set(true);
         }
-        shutdown(&self.socket, how)?;
-        self.read_shut |= how == libc::SHUT_RD || how == libc::SHUT_RDWR;
-        self.write_shut |= how == libc::SHUT_WR || how == libc::SHUT_RDWR;
-        if self.fully_shut() && self.retired_file.is_none() {
-            self.retired_file = socket_file(self.fd);
+        if how == libc::SHUT_WR || how == libc::SHUT_RDWR {
+            transport.write_shut.set(true);
         }
         Ok(())
     }
@@ -159,61 +288,36 @@ impl TlsEndpoint {
         &self.socket
     }
 
-    /// Ask the kernel for terminal errors and readiness without exposing queued wire bytes.
+    pub(crate) fn inactive_error(&self, pending_errno: i32) -> Result<i32> {
+        let transport = self.public_transport().map_err(errno_error)?;
+        if transport.read_shut.get() && transport.write_shut.get() {
+            int_option(transport.fd.as_raw_fd(), libc::SOL_SOCKET, libc::SO_ERROR)
+        } else {
+            Ok(pending_errno)
+        }
+    }
+
     pub(crate) fn read_eof<E: From<Error>>(
         &self,
         flags: i32,
         check_signals: impl FnMut() -> std::result::Result<(), E>,
     ) -> std::result::Result<(), E> {
         retry_read(self.socket(), check_signals, |until| {
-            if !self.matches() {
-                return Err(io::Error::from_raw_os_error(libc::EBADF));
-            }
+            let transport = self.public_transport()?;
             // SAFETY: a zero-length receive cannot write to the empty destination.
-            unsafe { receive_until(self.socket(), [].as_mut_ptr(), 0, flags, until) }.map(|_| ())
-        })
-    }
-
-    pub(crate) fn matches(&self) -> bool {
-        state(&self.socket, |s| {
-            if s.fd != self.fd {
-                return false;
-            }
-            // Keep the live TLS data path on the generation check. A retired
-            // transport must also verify the fd before consulting SO_ERROR or
-            // repeating shutdown, since dup2 can replace it at the same number.
-            let same_generation = s.generation == self.generation;
-            if same_generation && !self.fully_shut() {
-                return true;
-            }
-            #[cfg(target_os = "linux")]
-            if let (Some(expected), Some(actual)) = (self.cookie, socket_cookie(s.fd)) {
-                return expected == actual;
-            }
-            self.fully_shut()
-                && self.retired_file.is_some()
-                && self.retired_file == socket_file(s.fd)
+            unsafe { receive_until(transport.fd.as_raw_fd(), [].as_mut_ptr(), 0, flags, until) }
+                .map(|_| ())
         })
     }
 }
 
-/// Retain a fallback identity for the retired descriptor if SO_COOKIE becomes unavailable.
-fn socket_file(fd: RawFd) -> Option<(libc::dev_t, libc::ino_t)> {
+fn socket_file(fd: RawFd) -> io::Result<(libc::dev_t, libc::ino_t)> {
     let mut stat = std::mem::MaybeUninit::uninit();
     // SAFETY: fstat initializes the entire structure on success.
-    if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } < 0 {
-        return None;
-    }
+    checked(unsafe { libc::fstat(fd, stat.as_mut_ptr()) })?;
     // SAFETY: the preceding fstat succeeded.
     let stat = unsafe { stat.assume_init() };
-    (stat.st_ino != 0).then_some((stat.st_dev, stat.st_ino))
-}
-
-#[cfg(target_os = "linux")]
-fn socket_cookie(fd: RawFd) -> Option<u64> {
-    let mut bytes = [0; size_of::<u64>()];
-    let len = get_option_into(fd, libc::SOL_SOCKET, libc::SO_COOKIE, &mut bytes).ok()?;
-    (len == bytes.len()).then(|| u64::from_ne_bytes(bytes))
+    Ok((stat.st_dev, stat.st_ino))
 }
 
 fn checked(ret: i32) -> io::Result<i32> {
@@ -455,7 +559,12 @@ fn install_fd(s: &Object, raw: RawFd, blocking: bool, family: i32, kind: i32, pr
     state(s, |s| {
         // A repeated base initializer replaces the number in the same socket.
         // The caller retains any previous fd, including when raw equals that fd.
-        s.generation = s.generation.wrapping_add(1);
+        if s.tls
+            .as_ref()
+            .is_some_and(|tls| tls.same_description(raw).ok().flatten() != Some(true))
+        {
+            s.tls = None;
+        }
         s.fd = raw;
         s.family = family;
         s.kind = kind;
@@ -467,7 +576,7 @@ fn install_fd(s: &Object, raw: RawFd, blocking: bool, family: i32, kind: i32, pr
 pub(crate) fn uninitialized() -> Result<crate::ObjectOwner> {
     Socket {
         fd: -1,
-        generation: 0,
+        tls: None,
         family: 0,
         kind: 0,
         proto: 0,
@@ -534,8 +643,8 @@ pub(crate) fn discard_fd(socket: &Object) {
 }
 
 /// Return the underlying descriptor and disable subsequent closes by this socket.
-pub(crate) fn detach(socket: &Object) -> RawFd {
-    state(socket, |s| std::mem::replace(&mut s.fd, -1))
+pub(crate) fn detach(socket: &Object) -> Result<RawFd> {
+    state(socket, Socket::detach).map_err(errno_error)
 }
 
 /// Return the syscall type, stored socket kind, and initial blocking mode.
@@ -1518,8 +1627,12 @@ pub extern "C" fn imre_socket_listen(s: &Object, backlog: usize) {
 }
 
 pub(crate) fn shutdown(s: &Object, how: i32) -> Result<()> {
+    shutdown_fd(fd(s), how)
+}
+
+fn shutdown_fd(raw: RawFd, how: i32) -> Result<()> {
     // SAFETY: shutdown takes scalar values and never relinquishes the descriptor.
-    checked(unsafe { libc::shutdown(fd(s), how) })
+    checked(unsafe { libc::shutdown(raw, how) })
         .map(|_| ())
         .map_err(errno_error)
 }
@@ -1835,7 +1948,7 @@ pub(crate) fn recv_with_signals<E: From<Error>>(
         }
         let received = retry_read(s, check_signals, |until| {
             // SAFETY: this private allocation has at least size writable bytes.
-            unsafe { receive_until(s, bytes.as_mut_ptr(), size, flags, until) }
+            unsafe { receive_until(fd(s), bytes.as_mut_ptr(), size, flags, until) }
         })?;
         let n = received.min(size);
         // SAFETY: the kernel initialized the returned prefix or MSG_TRUNC
@@ -1924,20 +2037,19 @@ pub(crate) fn recv_into(
         return Ok(0);
     }
     // SAFETY: buffer exposes this many exclusively writable bytes.
-    unsafe { receive_until(s, buffer.as_mut_ptr(), buffer.len(), flags, until) }
+    unsafe { receive_until(fd(s), buffer.as_mut_ptr(), buffer.len(), flags, until) }
         .map_err(errno_error)
 }
 
 /// # Safety
 /// The caller provides len writable bytes for this attempt.
 unsafe fn receive_until(
-    socket: &Object,
+    fd: RawFd,
     buffer: *mut u8,
     len: usize,
     flags: i32,
     until: Option<Deadline>,
 ) -> io::Result<usize> {
-    let fd = fd(socket);
     socket_call_interruptible(fd, libc::POLLIN, until, || {
         // SAFETY: the caller supplies len writable bytes. Flags can make the
         // returned count differ from the number of bytes actually copied.
@@ -2055,7 +2167,7 @@ impl<'a> SendAll<'a> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_fileno(s: &Object) -> usize {
-    word(fd(s))
+    finish(fileno(s).map(word), 0)
 }
 
 #[unsafe(no_mangle)]
@@ -2119,13 +2231,18 @@ pub extern "C" fn imre_socket_getblocking(s: &Object) -> bool {
     get_timeout(s) != Some(Duration::ZERO)
 }
 
+fn duplicate_fd(raw: RawFd) -> io::Result<OwnedFd> {
+    // SAFETY: fcntl validates raw and creates a non-inheritable descriptor.
+    let copy = checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) })?;
+    // SAFETY: the successful duplication transferred ownership of copy.
+    Ok(unsafe { OwnedFd::from_raw_fd(copy) })
+}
+
 /// Duplicate the descriptor and copy the socket's timeout onto the new owner.
 pub(crate) fn dup(s: &Object) -> Result<crate::ObjectOwner> {
-    let (raw, family, kind, proto) = state(s, |s| (s.fd, s.family, s.kind, s.proto));
+    let (raw, family, kind, proto) = state(s, |s| (s.transport_fd(), s.family, s.kind, s.proto));
     let timeout = get_timeout(s);
-    // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
-    let copy =
-        checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
+    let copy = duplicate_fd(raw).map_err(errno_error)?.into_raw_fd();
     let child = handle(copy, timeout.is_none(), family, kind, proto)?;
     // socket.dup reapplies its source's blocking mode to the shared open file.
     set_timeout(&child, timeout)?;
@@ -2139,12 +2256,18 @@ pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_get_inheritable(s: &Object) -> bool {
-    super::os::imre_os_get_inheritable(word(fd(s))) != 0
+    finish(
+        fileno(s).map(|raw| super::os::imre_os_get_inheritable(word(raw)) != 0),
+        false,
+    )
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_set_inheritable(s: &Object, value: usize) {
-    super::os::imre_os_set_inheritable(word(fd(s)), value);
+    finish(
+        fileno(s).map(|raw| super::os::imre_os_set_inheritable(word(raw), value)),
+        (),
+    );
 }
 
 #[unsafe(no_mangle)]
