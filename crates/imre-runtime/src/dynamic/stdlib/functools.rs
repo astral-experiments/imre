@@ -372,8 +372,28 @@ pub(super) fn reduce(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
     };
     let [initial] =
         super::builtins::bind_builtin_arguments("reduce", rest, kwargs, ["initial"], 0)?;
+    fold(
+        ctx,
+        *function,
+        ReduceInput::NativeIterable(*iterable),
+        initial,
+    )
+}
+
+pub(super) enum ReduceInput {
+    NativeIterable(Id),
+    PythonIterator(Id),
+}
+
+/// Both providers share one fold, with the iterator and operand lifetimes of the selected provider.
+pub(super) fn fold(
+    ctx: &mut Context,
+    function: Id,
+    source: ReduceInput,
+    initial: Option<Id>,
+) -> Result<Id> {
     let roots = ctx.heap.temporary_mark();
-    let result = reduce_iterable(ctx, *function, *iterable, initial);
+    let result = reduce_iterable(ctx, function, source, initial);
     ctx.heap.release_temporaries_since(roots);
     match &result {
         Ok(value) => ctx.heap.keep(*value),
@@ -389,36 +409,65 @@ pub(super) fn reduce(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
 fn reduce_iterable(
     ctx: &mut Context,
     function: Id,
-    iterable: Id,
+    source: ReduceInput,
     initial: Option<Id>,
 ) -> Result<Id> {
-    let iterator = ctx.iterator(iterable).map_err(|error| {
-        let type_error = ctx.builtin("TypeError");
-        if ctx.raised_error_matches(&error, type_error) {
-            Error::new("TypeError", "reduce() arg 2 must support iteration")
-        } else {
-            error
-        }
-    })?;
+    let python = matches!(source, ReduceInput::PythonIterator(_));
+    let iterator = match source {
+        ReduceInput::NativeIterable(iterable) => ctx.iterator(iterable).map_err(|error| {
+            let type_error = ctx.builtin("TypeError");
+            if ctx.raised_error_matches(&error, type_error) {
+                Error::new("TypeError", "reduce() arg 2 must support iteration")
+            } else {
+                error
+            }
+        })?,
+        ReduceInput::PythonIterator(iterator) => iterator,
+    };
     ctx.heap.keep(iterator);
-    let mark = ctx.heap.temporary_mark();
+    let mut mark = ctx.heap.temporary_mark();
     let mut accumulator = match initial {
         Some(value) => value,
-        None => ctx.next_item(iterator)?.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                "reduce() of empty iterable with no initial value",
-            )
-        })?,
+        None => match super::builtins::call(ctx, "next", &[iterator], &[]) {
+            Ok(value) => value,
+            Err(mut exhausted) if ctx.is_stop_iteration(&exhausted) => {
+                let mut empty = Error::new(
+                    "TypeError",
+                    "reduce() of empty iterable with no initial value",
+                );
+                if python {
+                    // A builtin iterator reports exhaustion without raising in a Python frame.
+                    if exhausted.context == NONE && exhausted.trace.is_none() {
+                        exhausted.context = ctx.heap.active_exception();
+                    }
+                    empty.context = ctx.raised_instance(exhausted);
+                    empty.tracing().cause = Some(NONE);
+                }
+                return Err(empty);
+            }
+            Err(error) => return Err(error),
+        },
     };
     ctx.heap.keep(accumulator);
+    // Python enters a for loop over its first iterator after taking the optional seed.
+    let iterator = if python {
+        let second = ctx.iterator(iterator)?;
+        ctx.heap.keep_at(mark, second);
+        mark += 1;
+        second
+    } else {
+        iterator
+    };
     while let Some(item) = ctx.next_item(iterator)? {
-        // CPython keeps the last two callback operands alive until the next item arrives.
-        ctx.heap.release_temporaries_since(mark);
-        ctx.heap.keep(accumulator);
-        ctx.heap.keep(item);
+        ctx.discard_temporaries(mark, [accumulator, item]);
         accumulator = ctx.call(function, vec![accumulator, item], Vec::new())?;
-        ctx.heap.keep(accumulator);
+        if python {
+            // Storing the new value releases its predecessor; the loop still owns its element.
+            ctx.discard_temporaries(mark, [accumulator, item]);
+        } else {
+            // The C provider keeps its callback argument tuple until the next item arrives.
+            ctx.heap.keep(accumulator);
+        }
         ctx.heap.reserve_slot_or_request_collection();
         ctx.collect_garbage();
     }

@@ -1866,7 +1866,7 @@ impl IntrinsicModule {
             (Self::Functools | Self::FunctoolsNative, "_PlaceholderType") => {
                 Intrinsic::Placeholder(crate::ir::PlaceholderKind::Class)
             }
-            (Self::Functools, "reduce") => Intrinsic::Reduce,
+            (Self::Functools | Self::FunctoolsNative, "reduce") => Intrinsic::Reduce,
             (Self::Functools, "cmp_to_key") => Intrinsic::CmpToKey,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,

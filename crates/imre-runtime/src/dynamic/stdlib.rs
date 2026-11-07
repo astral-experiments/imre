@@ -836,6 +836,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             }
         }
         ("sys", "flags") => flags::current(ctx),
+        ("functools", "reduce") => {
+            let provider = ctx.module("_functools")?;
+            ctx.lookup_attr(provider, "reduce")?
+        }
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -953,7 +957,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("typing", "IO" | "Generator" | "Iterator")
         | ("enum", "_simple_enum")
-        | ("functools", "cmp_to_key" | "_cache_wrapper" | "reduce")
+        | ("functools", "cmp_to_key" | "_cache_wrapper" | "_reduce_iterator")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
@@ -3177,7 +3181,8 @@ pub(super) fn call(
                 object: None,
             }));
         }
-        "functools.reduce" => return functools::reduce(ctx, &args[1..], kwargs),
+        "_functools.reduce" => return functools::reduce(ctx, &args[1..], kwargs),
+        "functools._reduce_iterator" => (3, &[]),
         "functools._cache_wrapper" => (3, &[]),
         "_json.scanstring" => return json::scanstring(ctx, args, kwargs),
         "_json.encode_basestring" | "_json.encode_basestring_ascii" => {
@@ -3396,6 +3401,11 @@ pub(super) fn call(
             argument(args, 1)?,
             argument(args, 2)?,
         )?,
+        "functools._reduce_iterator" => {
+            let function = argument(args, 0)?;
+            let iterator = functools::ReduceInput::PythonIterator(argument(args, 1)?);
+            functools::fold(ctx, function, iterator, args.get(2).copied())?
+        }
         "functools._cache_wrapper" => functools::make_cache(
             ctx,
             argument(args, 0)?,
