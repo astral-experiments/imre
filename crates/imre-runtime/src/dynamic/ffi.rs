@@ -2453,6 +2453,9 @@ impl Context {
         }
         let [modules, reference] = self.finalizer_path_roots();
         self.heap.learn_weak_roots(modules, reference);
+        let streams = super::stdlib::io::rooted_standard_streams(self);
+        self.heap
+            .learn_descriptor_paths([modules, reference], streams.as_ref());
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.

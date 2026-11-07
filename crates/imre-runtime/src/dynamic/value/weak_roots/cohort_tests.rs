@@ -387,3 +387,42 @@ fn standard_output_roots_follow_rebinding_and_deletion() {
     assert_eq!(&roots[3..], &[stderr, NONE]);
     assert!(!roots.contains(&stdout));
 }
+
+#[test]
+fn learns_a_descriptor_added_after_the_ordinary_finalizer_paths() {
+    let mut heap = super::Heap::new();
+    let ordinary = heap.alloc(Value::List(Vec::new()));
+    heap.register_finalizer(ordinary);
+    let owners = heap.alloc(Value::List(vec![ordinary]));
+    let globals = [owners, NONE];
+    heap.release_temporaries_since(0);
+    assert!(heap.learn_finalizer_paths(globals, None));
+
+    let file = stdlib::BinaryFile::open(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
+        NONE,
+        "rb",
+        None,
+    )
+    .unwrap()
+    .into_value()
+    .unwrap();
+    let descriptor = heap.alloc_descriptor_owner(file).unwrap();
+    let Value::List(items) = heap.get_mut(owners) else {
+        unreachable!()
+    };
+    items.push(descriptor);
+    heap.release_temporaries_since(0);
+    assert!(heap.cached_finalizers_kept(globals, None, None));
+    assert!(!heap.cached_finalizers_kept(globals, None, Some(0)));
+
+    for _ in 0..=super::SEARCH_BACKOFF {
+        heap.learn_descriptor_paths(globals, None);
+    }
+    assert!(heap.cached_finalizers_kept(globals, None, Some(0)));
+    let Value::List(items) = heap.get_mut(owners) else {
+        unreachable!()
+    };
+    items.pop();
+    assert!(!heap.cached_finalizers_kept(globals, None, Some(0)));
+}

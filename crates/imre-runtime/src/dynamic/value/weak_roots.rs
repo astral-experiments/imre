@@ -477,6 +477,40 @@ impl Heap {
         false
     }
 
+    /// Learn a newly opened descriptor's path even when all ordinary finalizers are already rooted.
+    pub(in crate::dynamic) fn learn_descriptor_paths(
+        &mut self,
+        globals: [Id; 2],
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+    ) {
+        if self.descriptor_owners.is_empty() {
+            return;
+        }
+        let paths_valid = self.finalizer_roots.valid(self, globals);
+        let retained = self.temporary_mark();
+        if self
+            .descriptor_owners
+            .iter()
+            .any(|&owner| !self.root_keeps_owner(owner, paths_valid, streams, retained))
+        {
+            self.learn_finalizer_paths(globals, streams);
+        }
+    }
+
+    /// Recheck the cached path or a surviving frame binding for a registered owner.
+    fn root_keeps_owner(
+        &self,
+        owner: Id,
+        paths_valid: bool,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+        retained_current: usize,
+    ) -> bool {
+        (paths_valid && self.finalizer_roots.contains(owner))
+            || streams.is_some_and(|roots| roots.contains(&owner))
+            || self.operand_keeps_finalizer(owner, retained_current)
+            || self.bound_in_active_frame(owner)
+    }
+
     /// A pending discard preserves the active frame's operands below its mark. It must also
     /// preserve descriptor owners and weak references before a release can skip its sweep.
     pub(in crate::dynamic) fn cached_finalizers_kept(
@@ -499,10 +533,12 @@ impl Heap {
         let paths_valid = self.finalizer_roots.valid(self, globals);
         let kept = |owner: &Id| {
             except.contains(owner)
-                || (paths_valid && self.finalizer_roots.contains(*owner))
-                || streams.is_some_and(|roots| roots.contains(owner))
-                || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
-                || self.bound_in_active_frame(*owner)
+                || self.root_keeps_owner(
+                    *owner,
+                    paths_valid,
+                    streams,
+                    discard_from.unwrap_or(usize::MAX),
+                )
         };
         self.ordinary_finalizers.iter().all(&kept)
             && (discard_from.is_none()
