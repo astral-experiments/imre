@@ -1,3 +1,6 @@
+import sys
+
+
 def check():
     class Number(int):
         def bit_count(self):
@@ -6,6 +9,7 @@ def check():
         def __int__(self):
             raise AssertionError("unexpected conversion")
 
+    assert sys.maxsize.bit_count() == sys.maxsize.bit_length()
     assert [n.bit_count() for n in (0, True, False, 7, -7, 1 << 400)] == [0, 1, 0, 3, 3, 1]
     assert Number(-9).bit_count() == 42
     assert int.bit_count(Number(-9)) == 2
