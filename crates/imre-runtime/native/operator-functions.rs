@@ -43,6 +43,7 @@ operator_functions! {
     "length_hint" => Self::LengthHint,
     // Checked entries give their runtime operation and whether operator exports a dunder alias.
     checked {
+        "call" => (Self::Call, true),
         "not_" => (Self::Unary("not"), true),
         "is_" => (Self::Binary("is"), false),
         "is_not" => (Self::Binary("is not"), false),

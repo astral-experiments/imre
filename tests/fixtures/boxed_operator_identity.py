@@ -23,4 +23,16 @@ def current():
         assert str(inspect.signature(function)) == "(a, b, /)"
     assert not hasattr(operator, "__is__")
     assert not hasattr(operator, "__is_not__")
+    def capture(*args, **kwargs):
+        return args, kwargs
+
+    class Key(str):
+        pass
+
+    key = Key("obj")
+    assert operator.__call__ is _operator.call is operator.call
+    assert str(inspect.signature(operator.call)) == "(obj, /, *args, **kwargs)"
+    args, kwargs = operator.call(capture, 7, **{key: 3})
+    assert args == (7,) and next(iter(kwargs)) is key and kwargs[key] == 3
+    assert operator.call(locals)["key"] is key
     print("identity ok")

@@ -820,6 +820,7 @@ pub(crate) enum Intrinsic {
     BuiltinsPrint,
     BuiltinsHex,
     OperatorNot,
+    OperatorCall,
     BuiltinsOpen,
     SysDisplayHook,
     ArgumentParser,
@@ -2433,6 +2434,9 @@ impl IntrinsicModule {
                 Intrinsic::ScopedObjectExport("operator.methodcaller")
             }
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Operator | Self::OperatorNative, "call") | (Self::Operator, "__call__") => {
+                Intrinsic::OperatorCall
+            }
             (Self::Operator | Self::OperatorNative, "not_") | (Self::Operator, "__not__") => {
                 Intrinsic::OperatorNot
             }

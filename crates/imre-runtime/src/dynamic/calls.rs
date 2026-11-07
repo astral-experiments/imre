@@ -3055,6 +3055,12 @@ impl Context {
                     "__text_signature__" if symbol == "_typing._idfunc" => {
                         return Ok(self.text("($module, x, /)"));
                     }
+                    "__doc__" if symbol == "operator.call" => {
+                        return Ok(self.text("Same as obj(*args, **kwargs)."));
+                    }
+                    "__text_signature__" if symbol == "operator.call" => {
+                        return Ok(self.text("($module, obj, /, *args, **kwargs)"));
+                    }
                     "__doc__" if symbol == "operator.not_" => {
                         return Ok(self.text("Same as not a."));
                     }
@@ -7597,25 +7603,42 @@ impl Context {
         args: Vec<Id>,
         mapping: Id,
     ) -> Result<Id> {
+        let (callable, args) = if matches!(self.heap.get(callable), Value::Native(name) if name == "operator.call")
+        {
+            match self.operator_call_target(args) {
+                Ok(target) => target,
+                Err(error) => {
+                    self.validate_keyword_keys(mapping)?;
+                    return Err(error);
+                }
+            }
+        } else {
+            (callable, args)
+        };
         if let Value::Function { code, .. } = *self.heap.get(callable)
             && self.code_object(code).parameters != NONE
         {
             let sig = self.parsed_parameters(code)?;
             if sig.kwargs.is_some() && sig.positional.is_empty() && sig.keyword_only.is_empty() {
-                let Value::Dict(entries) = self.heap.get(mapping) else {
-                    return Err(Error::new("TypeError", "expected keyword dict"));
-                };
-                if entries
-                    .iter()
-                    .any(|&(key, _)| self.string_storage(key).is_none())
-                {
-                    return Err(Error::new("TypeError", "keywords must be strings"));
-                }
+                self.validate_keyword_keys(mapping)?;
                 return self.call_bound_keywords(callable, args, Vec::new(), Some(mapping));
             }
         }
         let kwargs = self.keyword_args(mapping)?;
         self.call_in_scope(scope, callable, args, kwargs)
+    }
+
+    fn validate_keyword_keys(&self, mapping: Id) -> Result<()> {
+        let Value::Dict(entries) = self.heap.get(mapping) else {
+            return Err(Error::new("TypeError", "expected keyword dict"));
+        };
+        if entries
+            .iter()
+            .any(|&(key, _)| self.string_storage(key).is_none())
+        {
+            return Err(Error::new("TypeError", "keywords must be strings"));
+        }
+        Ok(())
     }
 
     pub(super) fn call(
