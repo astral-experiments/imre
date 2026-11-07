@@ -2037,6 +2037,7 @@ impl Context {
             .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
+            varnames: NONE,
             body,
             name,
             qualname,
@@ -2283,6 +2284,22 @@ pub(super) unsafe extern "C" fn imre_dyn_set_statement_line(ctx: *mut Context, l
     ctx.heap.set_statement_line(line);
     ctx.heap
         .replace_expression(value::ExpressionPosition::Statement);
+}
+
+/// Native code entry for the namedtuple constructor, after ordinary Python argument binding.
+pub(super) unsafe extern "C" fn namedtuple_constructor(raw: *mut Context, scope: Id) -> Id {
+    // SAFETY: execute entered the function frame; all arguments are rooted by its scope and
+    // the static filename lives for the whole process. There are no operand temporaries yet.
+    unsafe {
+        imre_dyn_statement_with_exception(raw, std::ptr::null(), 0, c"<string>".as_ptr(), 1, NONE)
+    };
+    // SAFETY: the caller retains exclusive ownership until this code entry returns.
+    let ctx = unsafe { &mut *raw };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = super::namedtuple::construct(ctx, scope);
+    finish(ctx, result)
 }
 
 #[unsafe(no_mangle)]

@@ -3644,6 +3644,16 @@ impl Context {
                         + signature["positional"].as_array().map_or(0, Vec::len);
                     return Ok(self.int(count as i64));
                 }
+                "co_varnames" | "co_nlocals" if code.varnames != NONE => {
+                    let varnames = code.varnames;
+                    if name == "co_varnames" {
+                        return Ok(varnames);
+                    }
+                    let Value::Tuple(names) = self.heap.get(varnames) else {
+                        unreachable!("code varnames")
+                    };
+                    return Ok(self.int(names.len() as i64));
+                }
                 "co_flags" => {
                     if !code.flags_complete {
                         return Err(Error::new(
@@ -5886,7 +5896,13 @@ impl Context {
                 self.update_dictionary_field(obj, dictionary, name, None)
             }
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
-            Value::Code(_) if matches!(name, "co_qualname" | "co_argcount") => {
+            Value::Code(ref code) if code.varnames != NONE && name == "co_varnames" => {
+                Err(self.readonly_getset_error("code", name, obj))
+            }
+            Value::Code(ref code)
+                if matches!(name, "co_qualname" | "co_argcount")
+                    || name == "co_nlocals" && code.varnames != NONE =>
+            {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
             Value::Complex(_) if matches!(name, "real" | "imag") => {
@@ -7113,7 +7129,10 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
-            Value::Code(_)
+            Value::Code(code) if code.varnames != NONE && name == "co_varnames" => {
+                return Err(self.readonly_getset_error("code", name, obj));
+            }
+            Value::Code(code)
                 if matches!(
                     name,
                     "co_name"
@@ -7122,7 +7141,7 @@ impl Context {
                         | "co_firstlineno"
                         | "co_flags"
                         | "co_argcount"
-                ) =>
+                ) || name == "co_nlocals" && code.varnames != NONE =>
             {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }

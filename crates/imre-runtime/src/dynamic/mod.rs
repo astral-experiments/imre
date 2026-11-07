@@ -251,7 +251,7 @@ struct CallParameters {
 
 impl CallParameters {
     /// Decode both compiled and runtime-created function metadata once per definition.
-    fn from_metadata(mut metadata: serde_json::Value) -> Result<Self> {
+    fn from_metadata(mut metadata: serde_json::Value, varnames: Vec<String>) -> Result<Self> {
         let names = |key: &str| -> Result<Vec<String>> {
             let mut result = Vec::new();
             for name in metadata[key]
@@ -277,9 +277,10 @@ impl CallParameters {
         let local_names = names("scope_locals")?;
         let mut locals = std::collections::HashSet::new();
         locals
-            .try_reserve(local_names.len())
+            .try_reserve(local_names.len().saturating_add(varnames.len()))
             .map_err(|_| Error::new("MemoryError", ""))?;
         locals.extend(local_names);
+        locals.extend(varnames);
         Ok(Self {
             positional,
             positional_only,
@@ -325,7 +326,14 @@ impl Context {
         }
         let parameters = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|error| Error::new("SystemError", error.to_string()))?;
-        let parameters = CallParameters::from_metadata(parameters)?;
+        let varnames = match self.heap.get(code.varnames) {
+            Value::Tuple(names) => names
+                .iter()
+                .map(|&id| copy_label(self.str_value(id)?))
+                .collect::<Result<Vec<_>>>()?,
+            _ => Vec::new(),
+        };
+        let parameters = CallParameters::from_metadata(parameters, varnames)?;
         Ok(std::rc::Rc::clone(
             code.parsed_parameters
                 .get_or_init(|| std::rc::Rc::new(parameters)),

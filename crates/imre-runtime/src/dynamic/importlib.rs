@@ -484,6 +484,7 @@ impl Context {
         let name_id = self.text("<module>");
         Ok(self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
+            varnames: NONE,
             body: value::Body::Native(entry),
             parameters: NONE,
             nested: Vec::new(),
