@@ -89,6 +89,16 @@ def current():
         def __radd__(self, other):
             raise AssertionError("direct list descriptors do not use reflected addition")
 
+    class ContainsOverride(Source):
+        def __contains__(self, item):
+            return False
+
+    member = object()
+    values = ContainsOverride([member])
+    assert member not in values and list.__contains__(values, member)
+    contains = list.__contains__.__get__(values, ContainsOverride)
+    assert contains(member) and not contains(9)
+
     left = Source([1])
     right = Right([2])
     assert type(list.__add__).__name__ == "wrapper_descriptor"

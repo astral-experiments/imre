@@ -10143,7 +10143,7 @@ impl<'a> Checker<'a> {
                     )
                 {
                     let mut forwarded = call.clone();
-                    forwarded.func = Box::new(forwarded.arguments.args.remove(0));
+                    *forwarded.func = forwarded.arguments.args.remove(0);
                     // Preserve the ordinary checked binder for an exact named function.
                     if target
                         .as_name_expr()

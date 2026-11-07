@@ -1589,7 +1589,6 @@ pub(super) enum Value {
     RegexScanner {
         pattern: Id,
         subject: Id,
-        buffer_view: Option<Id>,
         initial_start: usize,
         start: Option<usize>,
         end: usize,
@@ -2460,14 +2459,8 @@ impl Value {
             } => visit.extend([*owner, *unsupported]),
             Self::HeapTypeMethod { owner, .. } => visit.push(*owner),
             Self::RegexScanner {
-                pattern,
-                subject,
-                buffer_view,
-                ..
-            } => {
-                visit.extend([*pattern, *subject]);
-                visit.extend(*buffer_view);
-            }
+                pattern, subject, ..
+            } => visit.extend([*pattern, *subject]),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
             Self::RegexMatch(m) => {
                 visit.extend([m.pattern, m.subject]);
@@ -4852,7 +4845,8 @@ impl Heap {
                 | Value::StructUnpackIterator {
                     buffer: Some(owner),
                     ..
-                },
+                }
+                | Value::RegexScanner { subject: owner, .. },
             ) => {
                 owner == storage
                     || matches!(self.get(owner),

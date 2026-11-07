@@ -777,6 +777,7 @@ pub(super) fn method(
     if matches!(
         name,
         "list.__add__"
+            | "list.__contains__"
             | "list.__setitem__"
             | "list.__iadd__"
             | "list.__init__"
@@ -1555,7 +1556,7 @@ pub(super) fn builtin_slot(
             )));
         };
         if method == "__contains__" {
-            return Ok(boolean(ctx.contains(*value, object)?));
+            return Ok(boolean(ctx.contains(*value, storage)?));
         }
         if let Some(op) = comparison {
             return Ok(ctx
