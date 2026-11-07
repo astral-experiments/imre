@@ -3668,7 +3668,7 @@ impl Context {
                             "__text_signature__" if method == "functools.cmp_to_key" => {
                                 Some("($module, /, mycmp)")
                             }
-                            "__doc__" if method == "functools.reduce" => Some(concat!(
+                            "__doc__" if method == "_functools.reduce" => Some(concat!(
                                 "Apply a function of two arguments cumulatively to the items of an iterable, from left to right.\n\n",
                                 "This effectively reduces the iterable to a single value.  If initial is present,\n",
                                 "it is placed before the items of the iterable in the calculation, and serves as\n",
@@ -3676,7 +3676,7 @@ impl Context {
                                 "For example, reduce(lambda x, y: x+y, [1, 2, 3, 4, 5])\n",
                                 "calculates ((((1 + 2) + 3) + 4) + 5)."
                             )),
-                            "__text_signature__" if method == "functools.reduce" => {
+                            "__text_signature__" if method == "_functools.reduce" => {
                                 Some("($module, function, iterable, /, initial=<unrepresentable>)")
                             }
                             "__doc__" if method == "_locale.localeconv" => {
@@ -4973,8 +4973,7 @@ impl Context {
                     if let Some(value) = self.scope_name(scope, name) {
                         return Ok(value);
                     }
-                    let bind_to_module =
-                        module == "functools" && matches!(name, "cmp_to_key" | "reduce");
+                    let bind_to_module = module == "functools" && name == "cmp_to_key";
                     match stdlib::attribute(self, &module.to_owned(), name) {
                         Ok(value) => {
                             let value = if bind_to_module {

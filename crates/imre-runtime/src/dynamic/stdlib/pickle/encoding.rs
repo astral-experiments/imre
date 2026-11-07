@@ -227,7 +227,7 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             _ => return Err(unsupported()),
         });
     }
-    if module == "functools" && name == "reduce" {
+    if matches!(module, "_functools" | "functools") && name == "reduce" {
         return Ok(("__builtin__", "reduce"));
     }
     if module == "itertools" {

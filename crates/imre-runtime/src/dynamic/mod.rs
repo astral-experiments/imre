@@ -4192,6 +4192,13 @@ impl Context {
                     let value = stdlib::attribute(self, "functools", name)?;
                     self.bind(scope, name, value);
                 }
+                let callable = self.builtin("_functools.reduce");
+                let reduce = self.alloc(Value::Method {
+                    callable,
+                    receiver: module,
+                    explicit: false,
+                });
+                self.bind(scope, "reduce", reduce);
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),
