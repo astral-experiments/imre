@@ -48,6 +48,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "randbytes",
         "sample",
         "expovariate",
+        "uniform",
     ] {
         let bound = ctx.lookup_attr(singleton, name)?;
         ctx.bind(scope, name, bound);
