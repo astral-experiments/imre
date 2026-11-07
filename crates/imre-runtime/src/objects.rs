@@ -140,7 +140,9 @@ pub(crate) use text::{
     python_istitle, python_isupper, split_parts,
 };
 mod typing;
-pub(crate) use text::{Form, chr_scalar, general_category, legacy, short_string, ucd_character};
+pub(crate) use text::{
+    Form, bidirectional, chr_scalar, general_category, legacy, short_string, ucd_character,
+};
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;

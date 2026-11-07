@@ -82,11 +82,13 @@ impl Checker<'_> {
         self.graph.checked_overload(self.module, call.range());
         if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
             // chr accepts lone surrogates, which cannot be materialized as native UTF-8.
-            // Its checked ordinal can go straight to the category database.
-            let kind = if property == ir::UnicodeProperty::Category
-                && let ExprKind::Builtin(Builtin::Chr, ordinal) = value.kind
+            // Query these properties directly from the checked ordinal.
+            let kind = if matches!(
+                property,
+                ir::UnicodeProperty::Category | ir::UnicodeProperty::Bidirectional
+            ) && let ExprKind::Builtin(Builtin::Chr, ordinal) = value.kind
             {
-                ExprKind::Builtin(Builtin::UnicodeCategoryOfOrdinal, ordinal)
+                ExprKind::Builtin(Builtin::UnicodePropertyOfOrdinal(property), ordinal)
             } else {
                 ExprKind::Builtin(
                     Builtin::Text(TextOperation::UnicodeProperty(property)),

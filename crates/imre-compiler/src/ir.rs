@@ -1223,7 +1223,7 @@ pub(crate) enum Builtin {
     InputSelectStdout,
     InputFinish,
     Chr,
-    UnicodeCategoryOfOrdinal,
+    UnicodePropertyOfOrdinal(UnicodeProperty),
     Ord,
     IntegerPower,
     ModularPower,
@@ -2013,6 +2013,7 @@ pub(crate) enum PatchOperation {
 /// Character properties shared by checked calls and the native Unicode database.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum UnicodeProperty {
+    Bidirectional,
     Category,
     EastAsianWidth,
 }
@@ -2020,6 +2021,7 @@ pub(crate) enum UnicodeProperty {
 impl UnicodeProperty {
     pub(crate) fn name(self) -> &'static str {
         match self {
+            Self::Bidirectional => "bidirectional",
             Self::Category => "category",
             Self::EastAsianWidth => "east_asian_width",
         }
