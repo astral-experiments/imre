@@ -22,13 +22,29 @@ pub fn is_zip_path(path: &Path) -> bool {
 
 /// Match parsed import names against the same member list used to package the stdlib.
 pub(crate) fn installed_member(name: &str) -> Option<&'static str> {
-    include_str!("../stdlib/installed-sources.txt")
+    module_member(
+        name,
+        include_str!("../stdlib/installed-sources.txt").lines(),
+    )
+}
+
+/// Archive members that also travel with a standalone executable when imported.
+pub(crate) fn standalone_member(name: &str) -> Option<&'static str> {
+    let members = include_str!("../stdlib/runtime-only-sources.txt")
         .lines()
-        .find(|file| {
-            file.strip_suffix("/__init__.py")
-                .or_else(|| file.strip_suffix(".py"))
-                .is_some_and(|module| module.split('/').eq(name.split('.')))
-        })
+        .filter_map(|entry| entry.strip_prefix("standalone "));
+    module_member(name, members)
+}
+
+fn module_member(
+    name: &str,
+    mut members: impl Iterator<Item = &'static str>,
+) -> Option<&'static str> {
+    members.find(|file| {
+        file.strip_suffix("/__init__.py")
+            .or_else(|| file.strip_suffix(".py"))
+            .is_some_and(|module| module.split('/').eq(name.split('.')))
+    })
 }
 
 fn read_source<R: Read + Seek>(archive: &mut ZipArchive<R>, member: &str) -> Option<String> {

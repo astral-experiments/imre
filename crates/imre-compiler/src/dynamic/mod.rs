@@ -1066,19 +1066,14 @@ pub(crate) fn compile(
                 if prefix == "_imp" && !frozen_imports.names.is_empty() {
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
-                // A standalone executable has no launcher ZIP. Carry the same sources
-                // when its import graph actually requests pydoc or its pager.
-                let member = match (startup.is_none(), prefix.as_str()) {
-                    (true, "pydoc") => Some("pydoc.py"),
-                    (true, "_pyrepl") => Some("_pyrepl/__init__.py"),
-                    (true, "_pyrepl.pager") => Some("_pyrepl/pager.py"),
-                    _ => None,
-                };
-                let bundled = if let Some(member) = member {
-                    Some((member, crate::zip_entry::installed_source(member)?.into()))
-                } else {
-                    bundled_module_source(&prefix, startup.is_none())
-                };
+                let mut bundled = bundled_module_source(&prefix, startup.is_none());
+                // Standalone programs can run without the launcher's stdlib ZIP.
+                if bundled.is_none()
+                    && startup.is_none()
+                    && let Some(member) = crate::zip_entry::standalone_member(&prefix)
+                {
+                    bundled = Some((member, crate::zip_entry::installed_source(member)?.into()));
+                }
                 let mut installed = if bundled.is_none() {
                     crate::zip_entry::installed_member(&prefix)
                 } else {
