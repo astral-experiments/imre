@@ -4997,6 +4997,26 @@ impl<'a> Loader<'a> {
         Ok(())
     }
 
+    /// A dotted alias follows visible package attributes after loading the physical leaf.
+    fn aliased_import(&self, name: &str) -> Result<Binding, String> {
+        let mut parts = name.split('.');
+        let root = parts.next().unwrap();
+        let mut binding = Binding::Module(self.by_name[root]);
+        for part in parts {
+            binding = match binding {
+                Binding::Module(parent) => self.modules[parent].export(part).or_else(|| {
+                    // A loaded child may not be published on its parent yet.
+                    let child = format!("{}.{part}", self.modules[parent].name);
+                    self.by_name.get(&child).copied().map(Binding::Module)
+                }),
+                Binding::IntrinsicModule(module) => stdlib_symbol(&self.modules, module, part),
+                _ => None,
+            }
+            .ok_or_else(|| format!("cannot resolve {part:?} in dotted import {name:?}"))?;
+        }
+        Ok(binding)
+    }
+
     fn import(&mut self, id: ModuleId, index: usize, statement: &ast::Stmt) -> Result<(), String> {
         match statement {
             ast::Stmt::Import(import) => {
@@ -5026,14 +5046,14 @@ impl<'a> Loader<'a> {
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
                         continue;
                     }
-                    let leaf = self.load_module(name)?;
-                    let (name, target) = if let Some(alias) = &alias.asname {
-                        (alias.as_str(), leaf)
+                    self.load_module(name)?;
+                    let (local, binding) = if let Some(local) = &alias.asname {
+                        (local.as_str(), self.aliased_import(name)?)
                     } else {
-                        let first = name.split('.').next().unwrap();
-                        (first, self.by_name[first])
+                        let root = name.split('.').next().unwrap();
+                        (root, Binding::Module(self.by_name[root]))
                     };
-                    self.bind(id, name, Binding::Module(target), alias)?;
+                    self.bind(id, local, binding, alias)?;
                 }
             }
             ast::Stmt::ImportFrom(import) => {
@@ -5242,6 +5262,12 @@ impl<'a> Loader<'a> {
                     }
                     return Ok(());
                 }
+                // Loading a new child briefly publishes the module on this package. A
+                // from-import in the package can immediately replace that very binding.
+                let fresh_child = name.rsplit_once('.').and_then(|(parent, child)| {
+                    (parent == self.modules[id].name && !self.by_name.contains_key(&name))
+                        .then_some(child)
+                });
                 // Only a from-import may read an explicitly ready binding from a loading module.
                 let target = match self.by_name.get(&name).copied() {
                     Some(target)
@@ -5329,7 +5355,14 @@ impl<'a> Loader<'a> {
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
                     self.imports_runtime_class |= binding == Binding::RuntimeClass;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
-                    self.bind(id, local.as_str(), binding, alias)?;
+                    if fresh_child == Some(local.as_str())
+                        && let Some(current) = self.modules[id].bindings.get_mut(local.as_str())
+                        && *current == Binding::Module(target)
+                    {
+                        *current = binding;
+                    } else {
+                        self.bind(id, local.as_str(), binding, alias)?;
+                    }
                 }
             }
             _ => unreachable!(),

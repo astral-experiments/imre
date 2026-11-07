@@ -481,18 +481,7 @@ pub(super) fn shutdown(ctx: &mut Context) {
     let mark = ctx.heap.temporary_mark();
     let result = (|| -> Result<()> {
         let key = ctx.text("threading");
-        if let Some(module) = ctx.registered_module(key)? {
-            ctx.heap.keep(module);
-            if module != NONE {
-                if ctx.module_initializing(module)? {
-                    let wait = ctx.lookup_attr(ctx.bootstrap_module, "_lock_unlock_module")?;
-                    ctx.call(wait, vec![key], Vec::new())?;
-                }
-                // Fetching the spec or waiting for the import can replace the original entry.
-                if ctx.registered_module(key)? != Some(module) {
-                    return Ok(());
-                }
-            }
+        if let Some(module) = ctx.initialized_registry_entry(key)? {
             let shutdown = ctx.lookup_attr(module, "_shutdown")?;
             ctx.call(shutdown, Vec::new(), Vec::new())?;
         }

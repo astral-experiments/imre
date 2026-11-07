@@ -679,6 +679,16 @@ unsafe fn cstr<'a>(ptr: *const c_char) -> &'a str {
         .expect("compiler UTF-8 constant")
 }
 
+/// Recover the native filename constant emitted from OsStr::as_encoded_bytes.
+unsafe fn native_path<'a>(ptr: *const c_char) -> &'a Path {
+    // SAFETY: the compiler emits a nul-terminated native path in the executable's target encoding.
+    unsafe {
+        Path::new(std::ffi::OsStr::from_encoded_bytes_unchecked(
+            CStr::from_ptr(ptr).to_bytes(),
+        ))
+    }
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_new(
     argc: i32,
@@ -786,6 +796,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         helper_executable,
         argv: NONE,
         sys_path: NONE,
+        startup_path0: None,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
         fork_hooks: Default::default(),
@@ -803,6 +814,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         suspended_typing_frames: 0,
         token_missing: NONE,
         native_code_objects: HashMap::new(),
+        native_filename_labels: HashMap::new(),
         original_builtins: None,
         source_builtins: None,
         zip_directories: HashMap::new(),
@@ -839,10 +851,10 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     let paths: Vec<String> =
         serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
     // The CLI adds its script directory only after site has finished.
-    let defer_path0 = ctx.config["sitecustomize"] == true && ctx.config["path0"] == true;
+    let has_path0 = ctx.config["path0"] == true;
     let paths = paths
         .into_iter()
-        .skip(usize::from(defer_path0))
+        .skip(usize::from(has_path0))
         .map(|p| ctx.text(p))
         .collect();
     ctx.sys_path = ctx.alloc(Value::List(paths));
@@ -877,7 +889,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     code: Code,
 ) {
     // SAFETY: module names and filenames are static compiler-emitted strings.
-    let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), cstr(file)) };
+    let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), native_path(file)) };
     // SAFETY: non-null text points to a static source constant with exactly len bytes.
     let bundled_text =
         (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
@@ -904,7 +916,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register_bundled_source(
         (
             &mut *ctx,
             cstr(name),
-            cstr(file),
+            native_path(file),
             std::slice::from_raw_parts(text, len as usize),
         )
     };
@@ -921,7 +933,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register_bundled_source(
 fn register_source(
     ctx: &mut Context,
     name: &str,
-    file: &str,
+    file: &Path,
     code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
 ) {
@@ -942,6 +954,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let mark = ctx.heap.temporary_mark();
     let mut failed_site = false;
     let result = ctx.startup_sys().and_then(|_| {
+        if ctx.config["path0"] == true && ctx.config["sitecustomize"] != true {
+            ctx.insert_startup_path0()?;
+        }
         if ctx.config["faulthandler"].as_bool() == Some(true) {
             let handler = ctx.module("faulthandler")?;
             let enable = ctx.lookup_attr(handler, "enable")?;
@@ -1697,7 +1712,11 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         code
     } else {
         // SAFETY: the filename is a nul-terminated constant in the native executable.
-        let file = unsafe { cstr(definition.filename) };
+        let file = unsafe { native_path(definition.filename) };
+        let filename = match ctx.import_path_text(file) {
+            Ok(filename) => filename,
+            Err(error) => return finish(ctx, Err(error)),
+        };
         // SAFETY: the compiler tags native functions with line zero and suspended suites
         // with their one-based source line and a static, nul-terminated UTF-8 string.
         let body = unsafe {
@@ -1716,11 +1735,7 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             name,
             parameters,
             (qualname, doc),
-            value::Location {
-                file: file.into(),
-                line: definition.first_line,
-                span: None,
-            },
+            (filename, definition.first_line),
         );
         ctx.native_code_objects.insert(key, code);
         code
@@ -1826,9 +1841,8 @@ impl Context {
         name: Id,
         parameters: Id,
         metadata_pair: (Id, Id),
-        location: value::Location,
+        (filename, first_line): (Id, u32),
     ) -> Id {
-        let filename = self.text(location.file);
         let (qualname, doc) = metadata_pair;
         let module_definition = self.scope_data(scope).parent.is_none();
         let metadata: serde_json::Value = self
@@ -1888,7 +1902,7 @@ impl Context {
             doc,
             parameters,
             filename,
-            first_line: location.line,
+            first_line,
             module_definition,
             flags: flags.unwrap_or_default(),
             flags_complete: flags.is_some(),
@@ -2112,12 +2126,18 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 ) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    // SAFETY: file names are static constants in the generated native program.
-    let file = unsafe { cstr(file) };
+    // SAFETY: the emitter passes the same static filename constant at each statement in a source.
+    let file = match unsafe { ctx.native_filename_label(file) } {
+        Ok(label) => label,
+        Err(error) => {
+            finish(ctx, Err(error));
+            return;
+        }
+    };
     ctx.checkpoint(
         live,
         value::Location {
-            file: file.into(),
+            file,
             line,
             span: None,
         },
@@ -2131,6 +2151,25 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 }
 
 impl Context {
+    /// Decode a static, NUL-terminated native filename once for statement diagnostics.
+    unsafe fn native_filename_label(&mut self, file: *const c_char) -> Result<std::rc::Rc<str>> {
+        if let Some(label) = self.native_filename_labels.get(&file.addr()) {
+            return Ok(label.clone());
+        }
+        // SAFETY: the emitted filename is a native path constant for the lifetime of the program.
+        let path = unsafe { native_path(file) };
+        let label: std::rc::Rc<str> = match path.to_str() {
+            Some(text) if text.is_ascii() => text.into(),
+            _ => {
+                let filename = self.import_path_text(path)?;
+                self.filename_display(filename)?.as_ref().into()
+            }
+        };
+        self.native_filename_labels
+            .insert(file.addr(), label.clone());
+        Ok(label)
+    }
+
     /// Check the old binding without calling a Python mapping's lookup hook.
     pub(super) fn replacing_finalizer(&self, scope: Id, name: &str, value: Id) -> bool {
         if !self.heap.tracks_finalizers() {
@@ -2480,6 +2519,35 @@ mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
 
+    #[cfg(unix)]
+    #[test]
+    fn native_filename_labels_belong_to_the_interpreter() {
+        let new_context = || {
+            let argv = [c"imre".as_ptr()];
+            // SAFETY: the constructor consumes the argument pointers before returning.
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) }
+        };
+        let label = |ctx: &mut Context, filename: &'static CStr| {
+            // SAFETY: the string literal has the same lifetime as an emitted filename.
+            unsafe { ctx.native_filename_label(filename.as_ptr()) }.unwrap()
+        };
+        let mut first = new_context();
+        let mut second = new_context();
+        let raw = c"ledger-\xff.py";
+        let first_label = Rc::downgrade(&label(&mut first, raw));
+        let second_label = label(&mut second, raw);
+        assert_eq!(&*label(&mut first, c"other.py"), "other.py");
+
+        first.collect_generation(2).unwrap();
+        let retained = first_label.upgrade().unwrap();
+        assert!(Rc::ptr_eq(&retained, &label(&mut first, raw)));
+        assert!(!Rc::ptr_eq(&retained, &second_label));
+        drop(retained);
+        drop(first);
+        assert!(first_label.upgrade().is_none());
+        assert!(Rc::ptr_eq(&second_label, &label(&mut second, raw)));
+    }
+
     #[test]
     fn linked_small_integer_literals_use_permanent_slots() {
         let argv = [c"imre".as_ptr()];
@@ -2619,13 +2687,14 @@ mod tests {
             line: 1,
             span: None,
         };
+        let filename = ctx.text(location.file.as_ref());
         let code = ctx.prelinked_code(
             value::Body::Native(read),
             outer,
             name,
             signature,
             (name, NONE),
-            location.clone(),
+            (filename, location.line),
         );
         let defaults = ctx.dict(Vec::new());
         let function = ctx.define_function(code, outer, name, defaults, name, NONE, NONE, false);

@@ -3053,10 +3053,38 @@ assert namespace["found"] is import_members.found is sys.modules["import_members
             byte_dir.mkdir()
             (byte_dir / "main.py").write_text("import sys\nprint(sys.path[0])\n")
             (root / "ascii-alias").symlink_to(byte_dir.name, target_is_directory=True)
-            result = run(imre, "-B", "ascii-alias/main.py")
-            assert (result.returncode, result.stdout, result.stderr) == (
-                0, os.fsencode(root.resolve() / "ascii-alias") + b"\n", b"",
-            ), result
+            compare("-B", "ascii-alias/main.py")
+
+            # The loader and the import error must agree on the physical directory.
+            (byte_dir / "local_owner.py").write_text("value = 41\n")
+            probe = (
+                "import importlib, os, sys\n"
+                "owner = importlib.import_module('local_owner')\n"
+                "origin = owner.__spec__.origin\n"
+                "print(os.fsencode(sys.path[0]), os.fsencode(origin), origin == owner.__file__)\n"
+                "class Spec:\n    has_location = True\n    origin = origin\n"
+                "    @property\n    def _initializing(self): raise RuntimeError('unexpected flag lookup')\n"
+                "def missing(name):\n"
+                "    if name == 'leaf': owner.__name__, owner.__spec__ = 'json', Spec()\n"
+                "    raise AttributeError(name)\n"
+                "owner.__getattr__ = missing\n"
+                "try:\n    exec('from local_owner import leaf')\n"
+                "except ImportError as exc:\n    print(owner.value, exc.path is origin, exc.name_from)\n"
+            )
+            (byte_dir / "main.py").write_text(probe)
+            compare("-B", "ascii-alias/main.py")
+            compare("-B", "-c", "import os\nos.chdir('ascii-alias')\n" + probe)
+
+            (byte_dir / "trace_owner.py").write_text("def fail(): raise ValueError('traceback sentinel')\n")
+            (byte_dir / "main.py").write_text(
+                "import importlib, os, traceback\n"
+                "owner = importlib.import_module('trace_owner')\n"
+                "try:\n    owner.fail()\n"
+                "except ValueError as exc: print(owner.__file__ in ''.join(traceback.format_exception(exc)))\n"
+                "filename = os.fsdecode(b'bad-\\xfe.py')\n"
+                "print(filename in str(SyntaxError('bad', (filename, 2, 1, ''))))\n"
+            )
+            compare("-B", "ascii-alias/main.py", native_timeout=180)
         assert (
             run(imre, "-B", "pkg/app.py", extra={"PYTHONSAFEPATH": "1"}).returncode
             != 0

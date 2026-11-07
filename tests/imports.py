@@ -737,6 +737,12 @@ REJECTED = {
     "local_module_shadow": ({"main.py": "import helper\ndef g() -> None:\n    helper = 1\n", "helper.py": HELPER}, "rebinding"),
     "local_function_shadow": ({"main.py": "from helper import f\ndef g() -> None:\n    f = 1\n", "helper.py": HELPER}, "rebinding"),
     "module_rebinding": ({"main.py": "from helper import f\ndef f(value: int) -> int:\n    return value\n", "helper.py": HELPER}, "cannot be rebound"),
+    "child_reexport_keeps_call_diagnostic": ({
+        "pkg/__init__.py": "from .label import label\n",
+        "pkg/label.py": "label = 'version'\n",
+        "scores.py": "def take(x: int) -> int: return x\ndef unused() -> int: return take('x')\n",
+        "main.py": "from pkg import label\nimport scores\nfrom importlib import import_module\nprint(import_module(label))\n",
+    }, "expected int, got str"),
     "cached_target_early_alias": ({
         "main.py": "import pkg.parent\n", "pkg/__init__.py": "", "pkg/child.py": HELPER,
         "pkg/parent.py": "from . import child\nvalue = late(1)\nfrom .child import f as late\n",
@@ -1018,6 +1024,60 @@ ACCEPTED = {
             "def value() -> int:\n    print('initializer')\n    return 17\n"
             "after = value()\ndef read() -> int:\n    return after\nprint(read())\n"
         ),
+    },
+    "rebound_import_surrogate_file_origin": {
+        "pkg/__init__.py": "",
+        "pkg/middle/__init__.py": "",
+        "pkg/middle/leaf.py": "answer = 41\n",
+        "main.py": (
+            "import pyexpat\nimport pkg.middle.leaf as physical\nimport pkg\n"
+            "class Spec:\n    has_location = True\n"
+            "    @property\n    def _initializing(self): raise RuntimeError('unexpected read')\n"
+            "class Receiver: pass\n"
+            "spec = Spec()\nspec.origin = __file__.rsplit('/', 1)[0] + '/local-' + chr(0xdcff) + '.py'\n"
+            "view = Receiver()\nview.__name__ = 'json'\nview.__spec__ = spec\npkg.middle = view\n"
+            "try:\n    import pkg.middle.leaf as selected\n"
+            "except ImportError as error:\n    print(error.path is spec.origin, physical.answer)\n"
+        ),
+    },
+    "nonmodule_import_error_recovery": {
+        "pkg/__init__.py": "",
+        "pkg/middle/__init__.py": "",
+        "pkg/middle/last.py": "answer = 41\n",
+        "main.py": (
+            "from importlib import import_module\n"
+            "pkg = import_module('pkg')\n"
+            "physical = import_module('pkg.middle.last')\n"
+            "class NamespaceView: pass\n"
+            "pkg.middle = NamespaceView()\n"
+            "try:\n"
+            "    import pkg.middle.last as selected\n"
+            "except ImportError as exc:\n"
+            "    print(str(exc), exc.name, exc.path, exc.name_from)\n"
+            "    selected = import_module('pkg.middle.last')\n"
+            "print(selected is physical, selected.answer)\n"
+        ),
+    },
+    "boxed_reexported_child": {
+        "pkg/__init__.py": "from .label import label\n",
+        "pkg/label.py": "label = 73\nphysical = 41\n",
+        "main.py": "from importlib import import_module\nimport pkg.label as alias\nprint(alias)\nprint(import_module('pkg.label').physical)\n",
+    },
+    "initializing_child_after_reexport": {
+        "banner/__init__.py": "from .version import version\n",
+        "banner/version.py": "version = 1\n",
+        "pkg/__init__.py": "",
+        "pkg/middle/__init__.py": "import pkg.middle.leaf as first\nanswer = first.value\n",
+        "pkg/middle/leaf.py": "value = 37\n",
+        "main.py": "import banner\nimport pkg.middle\nprint(pkg.middle.answer)\n",
+    },
+    "reexported_child_module": {
+        "pkg/__init__.py": "from .middle import middle\n",
+        "pkg/middle/__init__.py": "from .. import alternate as middle\n",
+        "pkg/middle/last.py": "answer = 41\n",
+        "pkg/alternate/__init__.py": "from . import last\n",
+        "pkg/alternate/last.py": "answer = 73\n",
+        "main.py": "import pkg.middle.last as alias\nfrom pkg.middle.last import answer\nprint(alias.answer)\nprint(answer)\n",
     },
     "optional_stdlib_entry_import": {
         "main.py": (

@@ -74,7 +74,7 @@ mod zip;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::objects::exceptions::string_repr;
 use value::{
@@ -146,6 +146,8 @@ pub(crate) struct Context {
     helper_executable: String,
     argv: Id,
     sys_path: Id,
+    /// Filesystem bytes of the installed startup entry. An empty entry follows the current cwd.
+    startup_path0: Option<Vec<u32>>,
     default_encoding: Id,
     audit_hooks: Vec<Id>,
     fork_hooks: [Vec<Id>; 3],
@@ -168,6 +170,8 @@ pub(crate) struct Context {
     suspended_typing_frames: usize,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
+    // Emitted filename constants live for the program. Their display spelling belongs to this interpreter.
+    native_filename_labels: HashMap<usize, std::rc::Rc<str>>,
     // Builtin functions stay bound to the first builtins module across reimports.
     original_builtins: Option<Id>,
     source_builtins: Option<Id>,
@@ -3066,102 +3070,132 @@ impl Context {
     /// Resolve a named import from a loaded module, including package children.
     fn import_from(&mut self, object: Id, member: Id) -> Result<Id> {
         let name = self.str_value(member)?.to_owned();
-        let attribute_error = match self.lookup_named_attr(object, &name, Some(member)) {
-            Err(error) if self.is_attribute_error(&error) => error,
+        match self.lookup_named_attr(object, &name, Some(member)) {
+            Err(error) if self.is_attribute_error(&error) => {}
             value => return value,
-        };
-        // The importer has already attempted package children. A circular import
-        // can publish a child in sys.modules before binding it on the parent.
-        let module_name = match self.lookup_attr(object, "__name__") {
-            Ok(value) => Some(value),
-            Err(err) if self.is_attribute_error(&err) => None,
-            Err(err) => return Err(err),
-        };
-        if let Some(module) = module_name.and_then(|id| self.str_value(id).ok()) {
-            let child = self.text(format!("{module}.{name}"));
-            if let Some(value) = self.registered_module(child)? {
+        }
+        // A circular import can register a child before publishing it on its parent.
+        let module = self
+            .optional_attr(object, "__name__")?
+            .filter(|&id| self.string_storage(id).is_some());
+        if let Some(module) = module {
+            self.heap.keep(module);
+            let suffix = self.text(format!(".{name}"));
+            let child = self.concat_strings(module, suffix)?;
+            if let Some(value) = self.initialized_registry_entry(child)? {
                 return Ok(value);
             }
         }
-        let Value::Module {
-            scope,
-            origin,
-            initializing,
-            ..
-        } = self.heap.get(object)
-        else {
-            return Err(attribute_error);
+
+        let spec = self.optional_attr(object, "__spec__")?;
+        let origin = if let Some(spec) = spec {
+            self.heap.keep(spec);
+            let has_location = self.optional_attr(spec, "has_location")?;
+            if self.optional_truth(has_location, false)? {
+                self.optional_attr(spec, "origin")?
+                    .filter(|&id| self.string_storage(id).is_some())
+            } else {
+                None
+            }
+        } else {
+            None
         };
-        let module = module_name.and_then(|id| self.str_value(id).ok());
-        let quoted_module = string_repr(module.unwrap_or("<unknown module name>"));
-        let origin = origin.or_else(|| self.scope_name(*scope, "__file__"));
-        let path = origin.and_then(|id| self.str_value(id).ok());
-        let prefix = format!(
-            "cannot import name {} from {quoted_module}",
-            self.repr(member)
-        );
-        let shadow = path.filter(|path| self.possibly_shadowing(path));
-        let message = match shadow {
-            Some(path)
-                if module.is_some_and(|module| {
-                    crate::sys::STDLIB_MODULE_NAMES
-                        .lines()
-                        .any(|name| name == module)
-                }) =>
-            {
-                format!(
-                    "{prefix} (consider renaming {} since it has the same name as the standard library module named {quoted_module} and prevents importing that standard library module)",
-                    string_repr(path)
-                )
-            }
-            Some(path) if *initializing => {
-                format!(
-                    "{prefix} (consider renaming {} if it has the same name as a library you intended to import)",
-                    string_repr(path)
-                )
-            }
-            _ if *initializing => {
-                let message = format!(
-                    "cannot import name {} from partially initialized module {quoted_module} (most likely due to a circular import)",
-                    self.repr(member)
-                );
-                match path {
-                    Some(path) => format!("{message} ({path})"),
-                    None => message,
-                }
-            }
-            _ => format!("{prefix} ({})", path.unwrap_or("unknown location")),
+        // Only the spec's file origin participates in the shadowing check.
+        let shadow = origin
+            .map(|id| self.possibly_shadowing(id))
+            .transpose()?
+            .unwrap_or(false);
+        let path = origin.or_else(|| match *self.heap.get(object) {
+            Value::Module { scope, .. } if spec.is_some() => self
+                .scope_name(scope, "__file__")
+                .filter(|&id| self.string_storage(id).is_some()),
+            _ => None,
+        });
+        if let Some(path) = path {
+            self.heap.keep(path);
+        }
+        let label = module.unwrap_or_else(|| self.text("<unknown module name>"));
+        let shadowed_stdlib = if shadow
+            && let Some(names) = self.sys_binding("stdlib_module_names")?
+            && let storage = self.scalar_value(names)
+            && matches!(self.heap.get(storage), Value::Set { .. })
+        {
+            builtins::set_member(self, storage, label, false)?
+        } else {
+            false
         };
-        Err(Error::new("ImportError", message).with_import(
-            module,
-            path.map(str::to_owned),
-            Some(&name),
-        ))
+        let mut fields = vec![member, label];
+        let format = if shadowed_stdlib {
+            fields.extend([origin.unwrap(), label]);
+            "cannot import name %r from %r (consider renaming %r since it has the same name as the standard library module named %r and prevents importing that standard library module)"
+        } else if let Some(spec) = spec
+            && self.spec_initializing(spec)?
+        {
+            if shadow {
+                fields.push(origin.unwrap());
+                "cannot import name %r from %r (consider renaming %r if it has the same name as a library you intended to import)"
+            } else if let Some(path) = path {
+                fields.push(path);
+                "cannot import name %r from partially initialized module %r (most likely due to a circular import) (%s)"
+            } else {
+                "cannot import name %r from partially initialized module %r (most likely due to a circular import)"
+            }
+        } else if let Some(path) = path {
+            fields.push(path);
+            "cannot import name %r from %r (%s)"
+        } else {
+            "cannot import name %r from %r (unknown location)"
+        };
+        let fields = self.alloc(Value::Tuple(fields));
+        let message = builtins::percent(self, format, fields)?;
+        let mut error = Error::new("ImportError", self.display(message));
+        error.args = Some(self.alloc(Value::Tuple(vec![message])));
+        let trace = error.tracing();
+        trace.import_message = Some(message);
+        trace.import_names = Some([module.unwrap_or(NONE), path.unwrap_or(NONE), member]);
+        Err(error)
     }
 
     /// Check whether the script's startup search path could shadow an installed module.
-    fn possibly_shadowing(&self, path: &str) -> bool {
+    fn possibly_shadowing(&self, origin: Id) -> Result<bool> {
         if self.config["safe_path"].as_bool() == Some(true) {
-            return false;
+            return Ok(false);
         }
-        let path = std::path::Path::new(path);
-        let root = if path.ends_with("__init__.py") {
-            path.parent().and_then(std::path::Path::parent)
+        // CPython compares the directory spelling in a bounded, NUL-terminated
+        // wide-character buffer. A POSIX filename can contain surrogate escapes.
+        let limit = (libc::PATH_MAX as usize).max(1024);
+        let path: Cow<'_, [u32]> = match self.heap.get(self.scalar_value(origin)) {
+            Value::Str(text) => Cow::Owned(text.chars().take(limit).map(u32::from).collect()),
+            Value::SurrogateStr(points) => Cow::Borrowed(&points[..points.len().min(limit)]),
+            _ => unreachable!("a file origin is a Python string"),
+        };
+        let path = path.split(|&point| point == 0).next().unwrap_or_default();
+        let sep = u32::from(std::path::MAIN_SEPARATOR);
+        let Some(end) = path.iter().rposition(|&point| point == sep) else {
+            return Ok(false);
+        };
+        let dir = &path[..end];
+        let root = if path[end + 1..]
+            .iter()
+            .copied()
+            .eq("__init__.py".bytes().map(u32::from))
+        {
+            dir.iter()
+                .rposition(|&point| point == sep)
+                .map(|end| &dir[..end])
         } else {
-            path.parent()
+            Some(dir)
         };
-        let first = self.config["paths"]
-            .get(0)
-            .and_then(serde_json::Value::as_str);
-        let Some((root, first)) = root.zip(first) else {
-            return false;
+        let Some((root, first)) = root.zip(self.startup_path0.as_deref()) else {
+            return Ok(false);
         };
-        let first = if first.is_empty() {
-            std::env::current_dir()
-        } else {
-            std::path::absolute(first)
-        };
-        first.is_ok_and(|first| first == root)
+        if first.is_empty() {
+            let Some(cwd) = Self::startup_cwd() else {
+                return Ok(false);
+            };
+            return Ok(Self::import_path_points(cwd.as_os_str().as_encoded_bytes())? == root);
+        }
+        Ok(first == root)
     }
 
     fn missing_module(name: &str) -> Error {
@@ -3217,15 +3251,32 @@ impl Context {
         Ok((value != self.import_missing).then_some(value))
     }
 
+    fn spec_initializing(&mut self, spec: Id) -> Result<bool> {
+        let flag = self.optional_attr(spec, "_initializing")?;
+        self.optional_truth(flag, false)
+    }
+
     fn module_initializing(&mut self, module: Id) -> Result<bool> {
-        match self
-            .lookup_attr(module, "__spec__")
-            .and_then(|spec| self.lookup_attr(spec, "_initializing"))
-        {
-            Ok(flag) => self.truth(flag),
-            Err(error) if self.is_attribute_error(&error) => Ok(false),
-            Err(error) => Err(error),
+        self.optional_attr(module, "__spec__")?
+            .map_or(Ok(false), |spec| self.spec_initializing(spec))
+    }
+
+    /// PyImport_GetModule waits for initialization and verifies the same cache entry survived.
+    fn initialized_registry_entry(&mut self, key: Id) -> Result<Option<Id>> {
+        let Some(module) = self.registered_module(key)? else {
+            return Ok(None);
+        };
+        self.heap.keep(module);
+        if module != NONE {
+            if self.module_initializing(module)? {
+                let wait = self.lookup_attr(self.bootstrap_module, "_lock_unlock_module")?;
+                self.call(wait, vec![key], Vec::new())?;
+            }
+            if self.registered_module(key)? != Some(module) {
+                return Ok(None);
+            }
         }
+        Ok(Some(module))
     }
 
     fn cached_import(&mut self, name: &str) -> Result<Option<Id>> {
@@ -3369,28 +3420,74 @@ impl Context {
         Ok(())
     }
 
-    /// Prepend the CLI entry to the list currently installed as sys.path.
+    // CPython's _Py_wgetcwd uses a MAXPATHLEN buffer and treats an unavailable cwd as absent.
+    fn startup_cwd() -> Option<PathBuf> {
+        std::env::current_dir().ok().filter(|path| {
+            path.as_os_str().as_encoded_bytes().len() < (libc::PATH_MAX as usize).max(1024)
+        })
+    }
+
+    /// Convert Python filesystem text without invoking path-like hooks.
+    fn import_path(&mut self, id: Id) -> Result<PathBuf> {
+        if let Ok(text) = self.str_value(id)
+            && text.is_ascii()
+        {
+            return Ok(PathBuf::from(text));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            Ok(std::ffi::OsString::from_vec(self.encode_os_path(id)?).into())
+        }
+        #[cfg(not(unix))]
+        Ok(self.str_value(id)?.into())
+    }
+
+    fn import_path_points(bytes: &[u8]) -> Result<Vec<u32>> {
+        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        Ok(codec.decode_filesystem(bytes)?)
+    }
+
+    fn import_path_text(&mut self, path: &Path) -> Result<Id> {
+        if let Some(text) = path.to_str()
+            && text.is_ascii()
+        {
+            return Ok(self.text(text));
+        }
+        Ok(self.text_codepoints(Self::import_path_points(
+            path.as_os_str().as_encoded_bytes(),
+        )?))
+    }
+
+    /// Install the search entry after site, keeping its configured value independent of sys.path.
     fn insert_startup_path0(&mut self) -> Result<()> {
-        let entry = if self.config["command_source"].is_string() {
-            String::new()
-        } else if self.config["module_entry"].is_string() && self.config["path_entry"] != true {
-            let Ok(cwd) = std::env::current_dir() else {
+        let entry = if self.config["path_entry"] != true
+            && self.config["command_source"].is_string()
+        {
+            self.text("")
+        } else if self.config["path_entry"] != true && self.config["module_entry"].is_string() {
+            let Some(cwd) = Self::startup_cwd() else {
                 return Ok(());
             };
-            cwd.to_string_lossy().into_owned()
+            self.import_path_text(&cwd)?
+        } else if self.config["path0_bytes"].is_array() {
+            let bytes: Vec<u8> = serde_json::from_value(self.config["path0_bytes"].clone())
+                .expect("compiler path0 bytes");
+            self.text_codepoints(Self::import_path_points(&bytes)?)
         } else {
-            self.config["paths"][0]
-                .as_str()
-                .expect("compiler path0")
-                .to_owned()
+            let first = PathBuf::from(self.config["paths"][0].as_str().expect("compiler path0"));
+            self.import_path_text(&first)?
         };
-        let path = self
-            .sys_binding("path")?
-            .ok_or_else(|| Error::new("RuntimeError", "unable to get sys.path"))?;
+        self.startup_path0 = Some(self.string_codepoints(entry)?.into_owned());
+        let path = if self.config["sitecustomize"] == true {
+            self.sys_binding("path")?
+                .ok_or_else(|| Error::new("RuntimeError", "unable to get sys.path"))?
+        } else {
+            self.sys_path
+        };
         let storage = self
             .list_storage(path)
             .ok_or_else(|| Error::new("SystemError", "bad argument to internal function"))?;
-        let entry = self.text(entry);
         let Value::List(items) = self.heap.get_mut(storage) else {
             unreachable!()
         };
@@ -3529,13 +3626,15 @@ impl Context {
             if let Some(module) = self.public_registered_module(key)?
                 && let Value::Module { scope, .. } = *self.heap.get(module)
             {
-                let origin = (self.config["command"] != true).then(|| {
-                    let file = self.text(path.to_string_lossy());
+                let origin = if self.config["command"] != true {
+                    let file = self.import_path_text(path)?;
                     if self.scope_name(scope, "__file__").is_none() {
                         self.bind(scope, "__file__", file);
                     }
-                    file
-                });
+                    Some(file)
+                } else {
+                    None
+                };
                 return Ok((module, scope, key, origin));
             }
         }
@@ -3557,11 +3656,7 @@ impl Context {
             self.bind(scope, "__doc__", doc);
         }
         if !locations.is_empty() {
-            let dirs = locations
-                .iter()
-                .map(|p| self.text(p.to_string_lossy()))
-                .collect();
-            let dirs = self.alloc(Value::List(dirs));
+            let dirs = self.location_list(locations)?;
             self.bind(scope, "__path__", dirs);
         }
         let package = if name == "__main__" {
@@ -3604,16 +3699,18 @@ impl Context {
                 self.bind(scope, name, function);
             }
         }
-        let origin = source.and_then(|(path, _)| {
-            if locations.contains(path) {
+        let origin = match source {
+            Some((path, _)) if locations.contains(path) => {
                 self.bind(scope, "__file__", NONE);
-            } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {
-                let file = self.text(path.to_string_lossy());
-                self.bind(scope, "__file__", file);
-                return Some(file);
+                None
             }
-            None
-        });
+            Some((path, _)) if name != "__main__" || self.config["command"] != true => {
+                let file = self.import_path_text(path)?;
+                self.bind(scope, "__file__", file);
+                Some(file)
+            }
+            _ => None,
+        };
         let module = self.alloc(Value::Module {
             name: name.to_owned(),
             scope,

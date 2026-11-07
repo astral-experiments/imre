@@ -1,15 +1,63 @@
 //! Format native exception objects and write their tracebacks to Python streams.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
 use icu_properties::{CodePointMapData, props::EastAsianWidth};
 
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 
+/// Traceback text is converted to a Python object only at the public return or write boundary.
+#[derive(PartialEq, Eq, Hash)]
+pub(in crate::dynamic) enum TraceText<'a> {
+    Scalar(Cow<'a, str>),
+    Points(Cow<'a, [u32]>),
+}
+
+impl<'a> TraceText<'a> {
+    fn read(ctx: &'a Context, value: Id) -> Result<Self> {
+        match ctx.heap.get(ctx.scalar_value(value)) {
+            Value::SurrogateStr(points) => Ok(Self::Points(Cow::Borrowed(points))),
+            _ => Ok(Self::Scalar(Cow::Borrowed(ctx.str_value(value)?))),
+        }
+    }
+
+    fn owned(self) -> TraceText<'static> {
+        match self {
+            Self::Scalar(text) => TraceText::Scalar(Cow::Owned(text.into_owned())),
+            Self::Points(points) => TraceText::Points(Cow::Owned(points.into_owned())),
+        }
+    }
+
+    fn surrounded(&self, prefix: &str, suffix: &str) -> TraceText<'static> {
+        match self {
+            Self::Scalar(text) => TraceText::Scalar(format!("{prefix}{text}{suffix}").into()),
+            Self::Points(points) => {
+                let line = prefix
+                    .chars()
+                    .map(u32::from)
+                    .chain(points.iter().copied())
+                    .chain(suffix.chars().map(u32::from))
+                    .collect::<Vec<_>>();
+                TraceText::Points(line.into())
+            }
+        }
+    }
+
+    pub(in crate::dynamic) fn into_python(self, ctx: &mut Context) -> Id {
+        match self {
+            Self::Scalar(text) => ctx.text(text.into_owned()),
+            Self::Points(points) => ctx.text_codepoints(points.into_owned()),
+        }
+    }
+}
+
 struct FrameLine<'a> {
     locals: &'a str,
-    file: &'a str,
+    file: TraceText<'a>,
+    path: Option<&'a Path>,
     embedded_source: Option<&'a str>,
     name: &'a str,
     line: i64,
@@ -36,22 +84,23 @@ impl<'a> FrameLine<'a> {
         line: i64,
         span: Option<[u32; 3]>,
         locals: &'a str,
+        path: Option<&'a Path>,
     ) -> Result<Self> {
         let code = ctx.code_object(code);
-        let file = ctx.str_value(code.filename)?;
+        let file = TraceText::read(ctx, code.filename)?;
         // Only native code has the original embedded source at this position.
         let embedded_source = if !matches!(code.body, crate::dynamic::value::Body::Native(_)) {
             None
-        } else if file == "<string>" {
+        } else if matches!(&file, TraceText::Scalar(text) if text == "<string>") {
             ctx.config["command_source"].as_str()
         } else if ctx.config["bundled_root"]
             .as_str()
-            .is_some_and(|root| std::path::Path::new(file).starts_with(root))
+            .is_some_and(|root| path.is_some_and(|p| p.starts_with(root)))
         {
             ctx.sources
                 .values()
                 .flatten()
-                .find(|module| module.path == std::path::Path::new(file))
+                .find(|module| Some(module.path.as_path()) == path)
                 .and_then(|module| module.bundled_text)
                 .map(|text| std::str::from_utf8(text).expect("compiler-emitted Python is UTF-8"))
         } else {
@@ -60,6 +109,7 @@ impl<'a> FrameLine<'a> {
         Ok(Self {
             locals,
             file,
+            path,
             embedded_source,
             name: ctx.str_value(code.name)?,
             line,
@@ -67,11 +117,8 @@ impl<'a> FrameLine<'a> {
         })
     }
 
-    fn format(&self, source: Option<&str>) -> String {
-        let mut out = format!(
-            "  File \"{}\", line {}, in {}\n",
-            self.file, self.line, self.name
-        );
+    fn formatted_suffix(&self, source: Option<&str>) -> String {
+        let mut out = format!("\", line {}, in {}\n", self.line, self.name);
         let Some(raw) = usize::try_from(self.line)
             .ok()
             .and_then(|line| line.checked_sub(1))
@@ -309,7 +356,7 @@ fn render(
     args: &[Id],
     kwargs: &[(String, Id)],
     chain_index: usize,
-) -> Result<Vec<String>> {
+) -> Result<Vec<TraceText<'static>>> {
     if let Some(colorize) = kwargs
         .iter()
         .find(|(key, _)| key == "colorize")
@@ -376,7 +423,10 @@ pub(super) fn format_result(
 ) -> Result<Id> {
     let limit = traceback_limit(ctx, None)?;
     let lines = render_chain(ctx, value, tb, limit, true, Some((kind, locals)))?;
-    let values = lines.into_iter().map(|line| ctx.text(line)).collect();
+    let values = lines
+        .into_iter()
+        .map(|line| line.into_python(ctx))
+        .collect();
     Ok(ctx.alloc(Value::List(values)))
 }
 
@@ -387,7 +437,7 @@ fn render_chain(
     limit: Option<i64>,
     chain: bool,
     report: Option<(Id, Id)>,
-) -> Result<Vec<String>> {
+) -> Result<Vec<TraceText<'static>>> {
     let mut kind = report.map(|(kind, _)| kind);
     let mut sections = Vec::new();
     let mut seen = std::collections::HashSet::from([value]);
@@ -407,7 +457,7 @@ fn render_chain(
         }
         format_exception_line(ctx, current, kind.take(), &mut lines)?;
         if let Some(separator) = separator {
-            lines.push(separator.to_owned());
+            lines.push(TraceText::Scalar(separator.to_owned().into()));
         }
         sections.push(lines);
         let Value::Raised(error) = ctx.heap.get(current) else {
@@ -458,7 +508,10 @@ pub(super) fn format(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
         ));
     }
     let lines = render(ctx, args, kwargs, 4)?;
-    let values = lines.into_iter().map(|line| ctx.text(line)).collect();
+    let values = lines
+        .into_iter()
+        .map(|line| line.into_python(ctx))
+        .collect();
     Ok(ctx.alloc(Value::List(values)))
 }
 
@@ -475,7 +528,7 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     ctx.heap.keep(file);
     for line in lines {
         let write = ctx.lookup_attr(file, "write")?;
-        let line = ctx.text(line);
+        let line = line.into_python(ctx);
         ctx.call(write, vec![line], Vec::new())?;
         let write = ctx.lookup_attr(file, "write")?;
         let end = ctx.text("");
@@ -486,10 +539,10 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
 
 /// Append Python traceback frames without rendering the exception or its chain.
 pub(in crate::dynamic) fn format_frames(
-    ctx: &Context,
+    ctx: &mut Context,
     mut tb: Id,
     limit: Option<i64>,
-    lines: &mut Vec<String>,
+    lines: &mut Vec<TraceText<'static>>,
 ) -> Result<()> {
     let mut stack = Vec::new();
     while tb != NONE {
@@ -505,7 +558,7 @@ pub(in crate::dynamic) fn format_frames(
         let Value::PythonFrame { code, .. } = *ctx.heap.get(frame) else {
             unreachable!()
         };
-        stack.push(FrameLine::new(ctx, code, lineno, span, "")?);
+        stack.push((code, lineno, span, String::new()));
         tb = next;
     }
     if let Some(n) = limit {
@@ -518,8 +571,7 @@ pub(in crate::dynamic) fn format_frames(
             stack.drain(..skip);
         }
     }
-    render_frame_lines(&stack, lines);
-    Ok(())
+    captured_frames(ctx, &stack, lines)
 }
 
 /// Capture each selected frame's locals before advancing its mutable traceback link.
@@ -528,7 +580,7 @@ fn format_result_frames(
     mut tb: Id,
     limit: Option<i64>,
     locals: Id,
-    lines: &mut Vec<String>,
+    lines: &mut Vec<TraceText<'static>>,
 ) -> Result<()> {
     // TestResult uses sys.tracebacklimit, which traceback_limit clamps to zero or above.
     debug_assert!(limit.is_none_or(|n| n >= 0));
@@ -562,17 +614,40 @@ fn format_result_frames(
         ctx.heap.keep_call_result(mark, code);
         captured.push((code, lineno, span, text));
     }
+    captured_frames(ctx, &captured, lines)
+}
+
+type CapturedFrame = (Id, i64, Option<[u32; 3]>, String);
+
+fn captured_frames(
+    ctx: &mut Context,
+    captured: &[CapturedFrame],
+    lines: &mut Vec<TraceText<'static>>,
+) -> Result<()> {
+    // Arbitrary compile() filenames can be printed even when they cannot name a file.
+    let mut paths = HashMap::<Id, Option<PathBuf>>::new();
+    for (code, ..) in captured {
+        let filename = ctx.code_object(*code).filename;
+        paths
+            .entry(filename)
+            .or_insert_with(|| ctx.import_path(filename).ok());
+    }
     let stack = captured
         .iter()
-        .map(|(code, line, span, text)| FrameLine::new(ctx, *code, *line, *span, text))
+        .map(|(code, line, span, locals)| {
+            let path = paths[&ctx.code_object(*code).filename].as_deref();
+            FrameLine::new(ctx, *code, *line, *span, locals, path)
+        })
         .collect::<Result<Vec<_>>>()?;
     render_frame_lines(&stack, lines);
     Ok(())
 }
 
-fn render_frame_lines(stack: &[FrameLine<'_>], lines: &mut Vec<String>) {
+fn render_frame_lines(stack: &[FrameLine<'_>], lines: &mut Vec<TraceText<'static>>) {
     if !stack.is_empty() {
-        lines.push("Traceback (most recent call last):\n".to_owned());
+        lines.push(TraceText::Scalar(
+            "Traceback (most recent call last):\n".into(),
+        ));
         let mut sources = HashMap::new();
         let mut i = 0;
         while i < stack.len() {
@@ -585,19 +660,22 @@ fn render_frame_lines(stack: &[FrameLine<'_>], lines: &mut Vec<String>) {
             for frame in &stack[i..i + same.min(3)] {
                 let source = frame.embedded_source.or_else(|| {
                     sources
-                        .entry(frame.file)
-                        .or_insert_with(|| std::fs::read_to_string(frame.file).ok())
+                        .entry(&frame.file)
+                        .or_insert_with(|| std::fs::read_to_string(frame.path?).ok())
                         .as_deref()
                 });
-                let mut line = frame.format(source);
-                line.push_str(frame.locals);
-                lines.push(line);
+                let mut suffix = frame.formatted_suffix(source);
+                suffix.push_str(frame.locals);
+                lines.push(frame.file.surrounded("  File \"", &suffix));
             }
             if same > 3 {
                 let count = same - 3;
-                lines.push(format!(
-                    "  [Previous line repeated {count} more time{}]\n",
-                    if count == 1 { "" } else { "s" }
+                lines.push(TraceText::Scalar(
+                    format!(
+                        "  [Previous line repeated {count} more time{}]\n",
+                        if count == 1 { "" } else { "s" }
+                    )
+                    .into(),
                 ));
             }
             i += same;
@@ -609,12 +687,12 @@ fn format_exception_line(
     ctx: &mut Context,
     value: Id,
     kind: Option<Id>,
-    lines: &mut Vec<String>,
+    lines: &mut Vec<TraceText<'static>>,
 ) -> Result<()> {
     let convert = ctx.builtin("str");
     let text = match ctx.call(convert, vec![value], Vec::new()) {
-        Ok(result) => ctx.str_value(result)?.to_owned(),
-        Err(_) => "<exception str() failed>".to_owned(),
+        Ok(result) => TraceText::read(ctx, result)?.owned(),
+        Err(_) => TraceText::Scalar("<exception str() failed>".into()),
     };
     let (module, dot, name) = match kind {
         Some(NONE) => ("", "", "None"),
@@ -626,8 +704,12 @@ fn format_exception_line(
         }
         None => exception_label(ctx, value)?,
     };
-    let separator = if text.is_empty() { "" } else { ": " };
-    lines.push(format!("{module}{dot}{name}{separator}{text}\n"));
+    let separator = if matches!(&text, TraceText::Scalar(s) if s.is_empty()) {
+        ""
+    } else {
+        ": "
+    };
+    lines.push(text.surrounded(&format!("{module}{dot}{name}{separator}"), "\n"));
     Ok(())
 }
 

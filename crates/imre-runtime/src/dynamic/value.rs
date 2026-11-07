@@ -99,7 +99,7 @@ pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
-    pub file: std::borrow::Cow<'static, str>,
+    pub file: std::rc::Rc<str>,
     pub line: u32,
     pub span: Option<[u32; 3]>,
 }
@@ -372,6 +372,11 @@ impl Context {
     }
 
     /// Snapshot active Python code without materializing Python frame objects.
+    /// Return the UTF-8 spelling used in native diagnostics for a Python filename.
+    pub(super) fn filename_display(&self, id: Id) -> Result<std::borrow::Cow<'_, str>> {
+        self.heap.filename_display(id)
+    }
+
     pub(super) fn publish_fault_frames(&self) {
         self.heap
             .publish_fault_frames(crate::fault_handler::generation());
@@ -896,9 +901,9 @@ impl Error {
                     let Value::Code(code) = heap.get(*code) else {
                         unreachable!()
                     };
-                    let Value::Str(file) = heap.get(code.filename) else {
-                        unreachable!()
-                    };
+                    let file = heap
+                        .filename_display(code.filename)
+                        .map_err(|_| fmt::Error)?;
                     writeln!(f, "  File {file:?}, line {lineno}")?;
                     current = *next;
                 }
@@ -4258,21 +4263,48 @@ impl Heap {
         self.publish_fault_frames(crate::fault_handler::generation());
     }
 
+    fn filename_display(&self, id: Id) -> Result<std::borrow::Cow<'_, str>> {
+        use std::fmt::Write;
+
+        let value = match self.get(id) {
+            Value::Instance {
+                scalar: Some(text), ..
+            } => self.get(*text),
+            value => value,
+        };
+        match value {
+            Value::Str(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
+            Value::SurrogateStr(points) => {
+                let mut label = String::new();
+                for &point in points {
+                    if let Some(ch) = char::from_u32(point) {
+                        label.push(ch);
+                    } else {
+                        write!(label, "\\u{point:04x}").expect("writing to a string");
+                    }
+                }
+                Ok(std::borrow::Cow::Owned(label))
+            }
+            _ => Err(Error::new("TypeError", "expected str")),
+        }
+    }
+
     fn publish_fault_frame(&self, index: usize) {
         let frame = &self.frames[index + 1];
         let Value::Code(code) = self.get(frame.code) else {
             unreachable!("Python frame owns its code");
         };
-        let (Value::Str(filename), Value::Str(name)) =
-            (self.get(code.filename), self.get(code.name))
-        else {
+        let filename = self
+            .filename_display(code.filename)
+            .expect("code filename is text");
+        let Value::Str(name) = self.get(code.name) else {
             unreachable!("code locations and names come from source text");
         };
         let line = frame
             .location
             .as_ref()
             .map_or(code.first_line, |loc| loc.line);
-        crate::fault_handler::frame(index, filename, name, line);
+        crate::fault_handler::frame(index, &filename, name, line);
     }
 
     fn publish_fault_frames(&self, generation: u32) {

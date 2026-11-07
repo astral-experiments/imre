@@ -121,7 +121,7 @@ pub(crate) fn emit(
     for (unit, (name, path, source)) in modules.iter().enumerate() {
         let bundled = path.starts_with(bundled_root);
         let module_name = output.data(name.as_bytes());
-        let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
+        let file = output.data(path.as_os_str().as_encoded_bytes());
         if bundled && source_only_provider == Some(name.as_str()) {
             let text = output.data(source.as_bytes());
             writeln!(
@@ -192,8 +192,8 @@ pub(super) fn initializer(
         keep_docstrings,
         ..Output::default()
     };
-    let filename = path.to_str().ok_or("module path must be UTF-8")?;
-    let file = output.data(filename.as_bytes());
+    let filename = path.as_os_str().as_encoded_bytes();
+    let file = output.data(filename);
     let entry = output.module(0, name, path, source, &file, bundled)?;
     // These slots are numbered across the whole program and must stay in its codegen unit.
     if !output.string_constant_slots.is_empty() {
@@ -201,9 +201,15 @@ pub(super) fn initializer(
     }
     let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
     let mut hash = blake3::Hasher::new();
-    for field in [std::env::consts::ARCH, name, filename, source, &ir] {
+    for field in [
+        std::env::consts::ARCH.as_bytes(),
+        name.as_bytes(),
+        filename,
+        source.as_bytes(),
+        ir.as_bytes(),
+    ] {
         hash.update(&(field.len() as u64).to_le_bytes());
-        hash.update(field.as_bytes());
+        hash.update(field);
     }
     hash.update(&[u8::from(keep_docstrings)]);
     let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
