@@ -69,6 +69,9 @@ impl<'a> Links<'a> {
                 ([None; 2], Members::Sequence(inputs))
             }
             Value::Generator { iterators, .. } => ([None; 2], Members::Sequence(iterators)),
+            Value::Method {
+                receiver, callable, ..
+            } => ([Some(*receiver), Some(*callable)], Members::None),
             Value::LoopIterator { source, peeked } => ([Some(*source), *peeked], Members::None),
             Value::Instance {
                 fields,
