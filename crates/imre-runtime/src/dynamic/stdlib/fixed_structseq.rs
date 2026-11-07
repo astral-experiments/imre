@@ -9,6 +9,7 @@ pub(in crate::dynamic) const FLOAT_INFO: &str = "sys.float_info";
 pub(in crate::dynamic) const HASH_INFO: &str = "sys.hash_info";
 pub(in crate::dynamic) const THREAD_INFO: &str = "sys.thread_info";
 pub(in crate::dynamic) const SCHED_PARAM: &str = "posix.sched_param";
+pub(in crate::dynamic) const WAITID_RESULT: &str = "posix.waitid_result";
 pub(in crate::dynamic) const TIMES_RESULT: &str = "posix.times_result";
 pub(in crate::dynamic) const TERMINAL_SIZE: &str = "os.terminal_size";
 pub(in crate::dynamic) const ASYNCGEN_HOOKS: &str = "asyncgen_hooks";
@@ -34,6 +35,7 @@ pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
         THREAD_INFO => Some(THREAD_INFO),
         ASYNCGEN_HOOKS => Some(ASYNCGEN_HOOKS),
         UNRAISABLE_ARGS => Some(UNRAISABLE_ARGS),
+        WAITID_RESULT if cfg!(target_os = "linux") => Some(WAITID_RESULT),
         TIMES_RESULT if cfg!(unix) => Some(TIMES_RESULT),
         TERMINAL_SIZE => Some(TERMINAL_SIZE),
         SCHED_PARAM if cfg!(target_os = "linux") => Some(SCHED_PARAM),
@@ -76,6 +78,7 @@ pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
             "err_msg",
             "object",
         ],
+        WAITID_RESULT => &["si_pid", "si_uid", "si_signo", "si_status", "si_code"],
         TIMES_RESULT => &[
             "user",
             "system",
@@ -348,6 +351,13 @@ pub(in crate::dynamic) fn type_attribute(
         "__doc__" if class == THREAD_INFO => ctx.text(
             "sys.thread_info\n\nA named tuple holding information about the thread implementation.",
         ),
+        "__doc__" if class == WAITID_RESULT => ctx.text(concat!(
+            "waitid_result: Result from waitid.\n\n",
+            "This object may be accessed either as a tuple of\n",
+            "  (si_pid, si_uid, si_signo, si_status, si_code),\n",
+            "or via the attributes si_pid, si_uid, and so on.\n\n",
+            "See os.waitid for more information."
+        )),
         "__doc__" if class == TIMES_RESULT => ctx.text(concat!(
             "times_result: Result from os.times().\n\n",
             "This object may be accessed either as a tuple of\n",

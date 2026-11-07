@@ -3866,6 +3866,8 @@ impl Context {
             };
             #[cfg(target_os = "linux")]
             stdlib::posix_spawn::initialize(self, scope, posix)?;
+            #[cfg(target_os = "linux")]
+            stdlib::os::waitid::initialize(self, scope, posix)?;
             for attr in [
                 "fchdir",
                 "chown",

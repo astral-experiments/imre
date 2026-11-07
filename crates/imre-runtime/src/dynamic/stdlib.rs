@@ -854,6 +854,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", "waitid_result") => ctx.builtin(fixed_structseq::WAITID_RESULT),
         #[cfg(unix)]
         ("os" | "posix", "times_result") => ctx.builtin(fixed_structseq::TIMES_RESULT),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
