@@ -492,6 +492,31 @@ fn vector_norm(coordinates: &[f64]) -> f64 {
     ldexp(h + residual / (2.0 * h), exponent)
 }
 
+/// Multiply exact numeric factors without boxing each floating-point intermediate.
+fn float_product(ctx: &Context, items: &[Id], start: Id) -> Option<(usize, f64)> {
+    let mut total = match ctx.heap.get(start) {
+        Value::Float(value) => *value,
+        Value::Int(value) if matches!(ctx.heap.get(*items.first()?), Value::Float(_)) => {
+            value.as_small()? as f64
+        }
+        _ => return None,
+    };
+    let mut consumed = 0;
+    for &item in items {
+        let factor = match ctx.heap.get(item) {
+            Value::Float(value) => *value,
+            Value::Int(value) => match value.as_small() {
+                Some(n) => n as f64,
+                None => break,
+            },
+            _ => break,
+        };
+        total *= factor;
+        consumed += 1;
+    }
+    Some((consumed, total))
+}
+
 fn prod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let count = args.len() + kwargs.len();
     if count > 2 {
@@ -524,13 +549,27 @@ fn prod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
 
     let iterator = ctx.iterator(values)?;
     ctx.heap.keep(iterator);
+    // CPython unboxes these exact starts even for empty and user-defined iterators.
+    if !kwargs.is_empty() {
+        match ctx.heap.get(product) {
+            Value::Float(f) => product = ctx.alloc(Value::Float(*f)),
+            Value::Int(n) => {
+                if let Some(n) = n.to_i64()
+                    && std::ffi::c_long::try_from(i128::from(n)).is_ok()
+                {
+                    product = ctx.int(n);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut consumed = 0;
     // Exact factors cannot run Python code. Consume them from the backing slice and
     // hand the live cursor to generic multiplication at the first unsupported factor.
     if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(values)
         && let Value::Int(initial) = ctx.heap.get(product)
         && let Some(mut total) = initial.as_small()
     {
-        let mut consumed = 0;
         for &item in items {
             let Value::Int(factor) = ctx.heap.get(item) else {
                 break;
@@ -547,6 +586,19 @@ fn prod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         }
         if complete {
             return Ok(product);
+        }
+    }
+    if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(values) {
+        let remaining = &items[consumed..];
+        if let Some((count, total)) = float_product(ctx, remaining, product) {
+            let complete = count == remaining.len();
+            if count != 0 {
+                product = ctx.alloc(Value::Float(total));
+            }
+            if complete {
+                return Ok(product);
+            }
+            consumed += count;
         }
         let Value::Iterator { offset, .. } = ctx.heap.get_mut(iterator) else {
             unreachable!("exact list or tuple iterator")
