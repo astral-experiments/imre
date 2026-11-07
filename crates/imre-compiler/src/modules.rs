@@ -5670,8 +5670,18 @@ impl<'a> Loader<'a> {
             {
                 None
             }
-            "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
+            _ if self.allow_imports
+                && (matches!(name, "_pyio" | "quopri")
+                    || imre_ast::providers::is_native_fallback(name))
+                && self.has_project_source(name) =>
+            {
+                None
+            }
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
+            // Keep the bundled implementation behind inspect's complete stdlib type stub.
+            "inspect" => {
+                bundled_runtime_source(name).map(|(_, source)| ("<imre stdlib>/inspect.py", source))
+            }
             // Keep the public typeshed decorator signatures available alongside this singleton.
             "dataclasses" => Some((
                 "<imre stdlib>/dataclasses.py",

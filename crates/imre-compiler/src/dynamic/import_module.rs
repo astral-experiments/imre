@@ -174,6 +174,22 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     )
                         .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
                         .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
+                    // Imre's built-in finder already classifies native modules without Python source.
+                    let main = UPSTREAM[UPSTREAM.find("def _main():").unwrap()..].replace(
+                        "module.__name__ in sys.builtin_module_names",
+                        "importlib.machinery.BuiltinImporter.find_spec(module.__name__) is not None",
+                    )
+                    // A source module can have a spec but no legacy cached attribute.
+                    .replace(
+                        "        print('Cached: {}'.format(module.__cached__))",
+                        concat!(
+                            "        try:\n",
+                            "            cached = module.__cached__\n",
+                            "        except AttributeError:\n",
+                            "            cached = module.__spec__.cached\n",
+                            "        print('Cached: {}'.format(cached))",
+                        ),
+                    );
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
@@ -203,6 +219,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def _signature_get_partial(", "def _signature_strip_non_python_syntax("),
                         &text_signatures,
                         section("class _void:", "class BufferFlags("),
+                        &main,
                     ]
                     .join("\n")
                 }),
