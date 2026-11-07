@@ -60,22 +60,36 @@ impl InterpreterLayout {
         if let Some(cfg) = Self::venv_config(executable) {
             prefix = cfg.parent().expect("configuration directory").to_owned();
             let contents = std::fs::read_to_string(&cfg);
-            let home = contents
-                .as_deref()
-                .unwrap_or("")
-                .lines()
-                .find_map(|line| config_value(line, "home"))
-                .map(Path::new)
-                .filter(|home| home.is_absolute());
+            let config_path = |key: &str| {
+                contents
+                    .as_deref()
+                    .unwrap_or("")
+                    .lines()
+                    .find_map(|line| config_value(line, key))
+                    .map(Path::new)
+            };
+            let home = config_path("home").filter(|path| path.is_absolute());
             let physical = executable
                 .canonicalize()
                 .unwrap_or_else(|_| executable.to_owned());
             base_prefix =
                 installation_prefix(home.or_else(|| physical.parent()).unwrap_or(directory));
             let base_binary = if let Some(home) = home
-                && physical == executable
+                && (physical == executable
+                    || directory.canonicalize().ok().as_deref() == physical.parent())
             {
-                home.join(executable.file_name().expect("launcher name"))
+                // Copies can be renamed "python". A nested venv's "executable"
+                // identifies its creator, while "base-executable" survives its removal.
+                ["base-executable", "executable"]
+                    .into_iter()
+                    .filter_map(config_path)
+                    .find(|path| path.parent() == Some(home) && path.is_file())
+                    .map(Path::to_owned)
+                    .or_else(|| {
+                        let installed = home.join("imre");
+                        installed.is_file().then_some(installed)
+                    })
+                    .unwrap_or_else(|| home.join(physical.file_name().expect("launcher name")))
             } else {
                 physical
             };

@@ -754,6 +754,19 @@ fn program_exit_code(status: ExitStatus) -> ExitCode {
     ExitCode::from(code.unwrap_or(1) as u8)
 }
 
+/// A copied venv launcher can use the native tools and archives in its base installation.
+fn installation_file(name: &str) -> std::io::Result<PathBuf> {
+    let executable = std::env::current_exe()?;
+    let local = executable.with_file_name(name);
+    if local.exists() {
+        return Ok(local);
+    }
+    let version = imre_compiler::PYTHON_VERSION;
+    let layout =
+        imre_ast::layout::InterpreterLayout::new(&executable, (version.major, version.minor))?;
+    Ok(layout.base_executable.with_file_name(name))
+}
+
 fn runtime_archive(
     runtime: Option<PathBuf>,
     allocator: Option<Allocator>,
@@ -783,9 +796,7 @@ fn runtime_archive(
         Allocator::System => "libimre_runtime.a",
         Allocator::Jemalloc => JEMALLOC_RUNTIME,
     };
-    Ok(std::env::current_exe()
-        .map_err(|error| error.to_string())?
-        .with_file_name(filename))
+    installation_file(filename).map_err(|error| error.to_string())
 }
 
 /// The release's startup objects and libraries match only its native GNU/Linux ABI.
