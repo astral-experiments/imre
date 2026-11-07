@@ -1646,6 +1646,14 @@ impl Context {
             } if cursor.is_exact_accumulate(*class) => {
                 return stdlib::itertools::next_accumulated(self, id);
             }
+            Value::Instance {
+                class,
+                itertools: Some(cursor),
+                ..
+            } if cursor.is_exact_pairwise(*class) => {
+                let base = *class;
+                return stdlib::itertools::next_paired(self, base, id).map(Some);
+            }
             _ => {
                 if let Some(method) = self.bound_slot(id, "__next__")? {
                     return self.call(method, Vec::new(), Vec::new()).map(Some);
