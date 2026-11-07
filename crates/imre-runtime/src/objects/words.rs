@@ -298,7 +298,18 @@ impl Words {
         }
     }
 
+    /// Ordinary sequence storage already contains its element words.
+    #[inline]
     pub(super) fn resolved(&self) -> Result<&Self, super::exceptions::Error> {
+        if self.kind.0 < WordKind::STRUCT_ROWS.0 {
+            return Ok(self);
+        }
+        self.resolve_view()
+    }
+
+    /// Keep materialization off the common path for reads of an existing buffer.
+    #[inline(never)]
+    fn resolve_view(&self) -> Result<&Self, super::exceptions::Error> {
         if let Some(rows) = self.rows() {
             return Ok(rows.boxed());
         }
@@ -316,12 +327,28 @@ impl Words {
         Ok(())
     }
 
+    /// Acquire all owners together when each output word can then be copied directly.
+    fn retain_repeated_words(&self, copies: usize) -> bool {
+        // SAFETY: all non-null words are rooted by this buffer and have its declared type.
+        unsafe {
+            match self.kind.base() {
+                3 | 11 => StrOwner::retain_repeated_words(&self.values, copies),
+                4 => crate::ListOwner::retain_repeated_words(&self.values, copies),
+                5 => crate::ObjectOwner::retain_repeated_words(&self.values, copies),
+                _ => return self.kind.is_bitwise_copy(),
+            }
+        }
+        true
+    }
+
     /// Repeat the resolved sequence, acquiring shared owners only for reference-bearing kinds.
-    pub(super) fn repeated(
-        &self,
-        count: usize,
-        length: usize,
-    ) -> Result<Self, super::exceptions::Error> {
+    pub(super) fn repeated(&self, count: usize) -> Result<Self, super::exceptions::Error> {
+        let length = self
+            .values
+            .len()
+            .checked_mul(count)
+            .filter(|&length| length <= super::MAX_LIST_LEN)
+            .ok_or_else(|| super::Error::new(super::Kind::MemoryError, "list is too large"))?;
         let mut result = Self::new(self.kind.raw());
         result
             .values
@@ -330,7 +357,8 @@ impl Words {
         if length == 0 {
             return Ok(result);
         }
-        if self.kind.is_bitwise_copy() {
+        // The full result has capacity before any additional strong owners are acquired.
+        if self.retain_repeated_words(count) {
             if let [word] = self.values.as_slice() {
                 result.values.resize(length, *word);
             } else {
@@ -581,6 +609,25 @@ impl Drop for Words {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_nullable_words_keep_each_alias_alive() {
+        let owner = StrOwner::new(Str::const_new("alias"));
+        let mut source = Words::new(NULLABLE | 3);
+        let first = StrOwner::into_raw(owner.clone()) as usize;
+        let second = StrOwner::into_raw(owner.clone()) as usize;
+        source.values.extend_from_slice(&[first, 0, second]);
+
+        let Ok(result) = source.repeated(3) else {
+            panic!("small repetition must fit")
+        };
+        assert_eq!(StrOwner::strong_count(&owner), 9);
+        assert_eq!(result.values.as_slice(), &[first, 0, second].repeat(3));
+        drop(source);
+        assert_eq!(StrOwner::strong_count(&owner), 7);
+        drop(result);
+        assert_eq!(StrOwner::strong_count(&owner), 1);
+    }
 
     #[test]
     #[cfg(target_pointer_width = "64")]

@@ -789,14 +789,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
             if let Some(rows) = storage.sequence_storage().rows() {
                 return rows.repeat(count);
             }
-            let values = storage.sequence()?;
-            let length = values
-                .values
-                .len()
-                .checked_mul(count)
-                .filter(|&length| length <= MAX_LIST_LEN)
-                .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
-            values.repeated(count, length)
+            storage.sequence()?.repeated(count)
         })
     };
     finish(
