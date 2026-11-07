@@ -672,7 +672,10 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 names.extend(["__dict__".to_owned(), "__weakref__".to_owned()]);
             }
         }
-        Value::Native(owner) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
+        Value::Native(owner)
+            if ctx.native_type_dicts.contains_key(&class)
+                || super::exception_kind(owner).is_some() =>
+        {
             let base = if crate::dynamic::stdlib::datetime::members(owner).is_some() {
                 Context::native_base(owner).unwrap_or("object")
             } else {
@@ -683,7 +686,13 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 .into_iter()
                 .flat_map(super::exception_ancestors)
                 .filter_map(|base| ctx.native_type_dicts.get(&ctx.builtins[base]).copied());
-            for namespace in std::iter::once(dictionary).chain(ancestors) {
+            for namespace in ctx
+                .native_type_dicts
+                .get(&class)
+                .copied()
+                .into_iter()
+                .chain(ancestors)
+            {
                 for &(key, _) in ctx
                     .dict_entries(namespace)
                     .expect("native class dictionary")
