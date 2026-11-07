@@ -4829,10 +4829,14 @@ impl Heap {
     }
 
     /// Check each registration against the surviving frame bindings and native stream edges.
-    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, owners: &[Id]) -> bool {
+    fn frame_keeps_stream_finalizers(
+        &self,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+        owners: &[Id],
+    ) -> bool {
         let chains = self.bound_finalizer_chains();
         self.ordinary_finalizers.iter().chain(owners).all(|owner| {
-            stdin.is_some_and(|input| input.contains(owner))
+            streams.is_some_and(|roots| roots.contains(owner))
                 || chains.iter().flatten().any(|chain| chain.contains(owner))
                 || self.find_finalizer_binding(*owner)
                 || self.ordinary_finalizers.iter().any(|&stream| {
@@ -4851,11 +4855,11 @@ impl Heap {
         &mut self,
         globals: [Id; 2],
         roots: impl Iterator<Item = Id>,
-        stdin: Option<&[Id; 3]>,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
     ) -> Result<Option<Id>> {
-        // These owners are reachable through the current sys.__stdin__ even in a mixed set.
+        // These owners are reachable through the current standard stream bindings even in a mixed set.
         let mut remaining = self.ordinary_finalizers.len();
-        if let Some(chain) = stdin {
+        if let Some(chain) = streams {
             for (index, &id) in chain.iter().enumerate() {
                 if self.slots[id as usize].finalization == Finalization::Pending
                     && !chain[..index].contains(&id)
@@ -4867,7 +4871,7 @@ impl Heap {
         if remaining == 0 {
             return Ok(None);
         }
-        if remaining <= MAX_FRAME_FINALIZERS && self.frame_keeps_stream_finalizers(stdin, &[]) {
+        if remaining <= MAX_FRAME_FINALIZERS && self.frame_keeps_stream_finalizers(streams, &[]) {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
@@ -4886,7 +4890,7 @@ impl Heap {
             .ordinary_finalizers
             .iter()
             .copied()
-            .filter(|id| !stdin.is_some_and(|chain| chain.contains(id)));
+            .filter(|id| !streams.is_some_and(|chain| chain.contains(id)));
         if (remaining == 1
             || remaining <= MAX_FRAME_FINALIZERS
                 && owners
@@ -4897,9 +4901,9 @@ impl Heap {
             return Ok(None);
         }
         if remaining > 1
-            && (self.cached_finalizers_kept(globals, stdin, None)
-                || (self.learn_finalizer_paths(globals, stdin)
-                    && self.cached_finalizers_kept(globals, stdin, None)))
+            && (self.cached_finalizers_kept(globals, streams, None)
+                || (self.learn_finalizer_paths(globals, streams)
+                    && self.cached_finalizers_kept(globals, streams, None)))
         {
             return Ok(None);
         }
@@ -4923,7 +4927,7 @@ impl Heap {
             self.traces[id as usize].set(visited);
             visited = id as usize;
             if slot.finalization == Finalization::Pending
-                && !stdin.is_some_and(|chain| chain.contains(&id))
+                && !streams.is_some_and(|chain| chain.contains(&id))
             {
                 remaining -= 1;
             }
@@ -5019,13 +5023,16 @@ impl Heap {
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
     }
 
-    /// A global input stream and a frame-owned stream can keep all registered owners alive.
-    pub(super) fn finalizers_kept_by(&self, input: &[Id; 3]) -> bool {
+    /// Standard streams and frame-owned streams can keep all registered owners alive.
+    pub(super) fn finalizers_kept_by(
+        &self,
+        streams: &crate::dynamic::stdlib::io::StandardStreamRoots,
+    ) -> bool {
         self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
-            .all(|owner| input.contains(owner) || self.caller_keeps_generator(*owner))
-            || self.frame_keeps_stream_finalizers(Some(input), &self.descriptor_owners)
+            .all(|owner| streams.contains(owner) || self.caller_keeps_generator(*owner))
+            || self.frame_keeps_stream_finalizers(Some(streams), &self.descriptor_owners)
     }
 
     /// Both the weak reference and its target must keep a strong path from a surviving root.
@@ -6227,7 +6234,7 @@ mod tests {
         };
         fields.insert("resource".into(), owner);
 
-        let input = stdlib::io::rooted_input_chain(&ctx);
+        let input = stdlib::io::rooted_standard_streams(&ctx);
         assert!(ctx.heap.frame_keeps_stream_finalizers(input.as_ref(), &[]));
         assert!(
             ctx.heap
@@ -6254,7 +6261,7 @@ mod tests {
         let owner = ctx.alloc(Value::List(Vec::new()));
         let writer = ctx.alloc(Value::List(Vec::new()));
         ctx.heap.register_finalizer(owner);
-        let input = stdlib::io::rooted_input_chain(&ctx);
+        let input = stdlib::io::rooted_standard_streams(&ctx);
 
         let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
             unreachable!()
@@ -6368,7 +6375,7 @@ mod tests {
         heap.release_temporaries_since(mark);
 
         // Only one distinct pending owner is proven by this chain.
-        let chain = [input, buffer, input];
+        let chain = [input, buffer, input, NONE, input];
         let mut check = |roots| {
             heap.acyclic_finalizer([NONE; 2], roots, Some(&chain))
                 .unwrap()

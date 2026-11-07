@@ -58,7 +58,7 @@ fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
     let held = ctx.alloc(Value::List(owners));
     let refs = ctx.alloc(Value::List(references));
     let globals = ctx.finalizer_path_roots();
-    let stdin = stdlib::io::rooted_input_chain(&ctx);
+    let streams = stdlib::io::rooted_standard_streams(&ctx);
     let heap = &mut ctx.heap;
     let Value::Scope(bindings) = heap.get_mut(scope) else {
         unreachable!()
@@ -67,38 +67,38 @@ fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
     bindings.names.insert("refs".into(), refs);
     heap.release_temporaries_since(0);
 
-    heap.learn_finalizer_paths(globals, stdin.as_ref());
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    heap.learn_finalizer_paths(globals, streams.as_ref());
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), None));
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
 
     for (list, before_discard) in [(refs, Some(0)), (held, None)] {
         let Value::List(items) = heap.get_mut(list) else {
             unreachable!()
         };
         let old = std::mem::replace(&mut items[0], NONE);
-        assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), before_discard));
+        assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), before_discard));
         let Value::List(items) = heap.get_mut(list) else {
             unreachable!()
         };
         items[0] = old;
     }
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
 
     let extra = ctx.instance(class, None);
     let heap = &mut ctx.heap;
     heap.register_finalizer(extra);
     heap.release_temporaries_since(0);
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), None));
     heap.keep(extra);
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
     heap.release_temporaries_since(0);
     heap.take_finalizer(extra, false);
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
 
     heap.leave(NONE, false);
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
 }
 
 #[test]
@@ -114,25 +114,25 @@ fn published_loop_sources_and_peeked_items_keep_finalizers_alive() {
         peeked: Some(item),
     });
     let globals = ctx.finalizer_path_roots();
-    let stdin = stdlib::io::rooted_input_chain(&ctx);
+    let streams = stdlib::io::rooted_standard_streams(&ctx);
     let heap = &mut ctx.heap;
     heap.register_finalizer(source);
     heap.register_finalizer(item);
     heap.release_temporaries_since(0);
     heap.keep(cursor);
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(1)));
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), None));
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), Some(1)));
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), None));
+    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
 
     for _ in 0..32 {
         heap.enter(scope, NONE, FrameOwner::Module(NONE));
     }
-    assert!(heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    assert!(heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
     let Value::LoopIterator { peeked, .. } = heap.get_mut(cursor) else {
         unreachable!();
     };
     *peeked = None;
-    assert!(!heap.cached_finalizers_kept(globals, stdin.as_ref(), Some(0)));
+    assert!(!heap.cached_finalizers_kept(globals, streams.as_ref(), Some(0)));
 }
 
 #[test]
@@ -368,4 +368,22 @@ fn iterator_paths_recheck_the_suspended_operands() {
     };
     iterators.clear();
     assert!(!paths.valid(&heap, globals));
+}
+
+#[test]
+fn standard_output_roots_follow_rebinding_and_deletion() {
+    let mut ctx = ffi::new_context(
+        serde_json::json!({"paths": [], "python_version": "3.14"}),
+        ["imre"],
+    );
+    let sys = ctx.module("sys").unwrap();
+    let roots = stdlib::io::rooted_standard_streams(&ctx).unwrap();
+    let [stdout, stderr] = ctx.heap.standard_outputs.map(Option::unwrap);
+    assert_eq!(&roots[3..], &[stdout, stderr]);
+
+    ctx.set_attr(sys, "__stdout__", stderr).unwrap();
+    ctx.delete_attr(sys, "__stderr__").unwrap();
+    let roots = stdlib::io::rooted_standard_streams(&ctx).unwrap();
+    assert_eq!(&roots[3..], &[stderr, NONE]);
+    assert!(!roots.contains(&stdout));
 }

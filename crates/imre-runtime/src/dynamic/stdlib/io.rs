@@ -202,12 +202,25 @@ fn wrap_standard(
     Ok(stream)
 }
 
-/// Follow strong edges from the original sys module without retaining any of the streams.
-pub(in crate::dynamic) fn rooted_input_chain(ctx: &Context) -> Option<[Id; 3]> {
+/// The input descriptor chain and the two output bindings currently held by sys.
+pub(in crate::dynamic) type StandardStreamRoots = [Id; 5];
+
+/// Read the current bindings so rebinding or deletion takes effect at the next check.
+pub(in crate::dynamic) fn rooted_standard_streams(ctx: &Context) -> Option<StandardStreamRoots> {
     let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
         return None;
     };
-    text_descriptor_chain(&ctx.heap, ctx.scope_name(scope, "__stdin__")?)
+    let [input, buffer, raw] = ctx
+        .scope_name(scope, "__stdin__")
+        .and_then(|stream| text_descriptor_chain(&ctx.heap, stream))
+        .unwrap_or([NONE; 3]);
+    Some([
+        input,
+        buffer,
+        raw,
+        ctx.scope_name(scope, "__stdout__").unwrap_or(NONE),
+        ctx.scope_name(scope, "__stderr__").unwrap_or(NONE),
+    ])
 }
 
 /// A text wrapper and its buffered descriptor retain the next layer through these native edges.
