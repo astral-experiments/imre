@@ -397,7 +397,7 @@ impl Checker<'_> {
             )
         };
         if matches!(expression, ast::Expr::Name(_) | ast::Expr::Attribute(_)) {
-            if !self.static_schema_name(expression) {
+            if !self.has_static_namespace_root(expression) {
                 return Err(invalid());
             }
             if let Some(class) = self.class_reference(expression) {
@@ -414,7 +414,7 @@ impl Checker<'_> {
             },
             ast::Expr::NoneLiteral(_) => Ok(Type::None),
             ast::Expr::Subscript(value)
-                if self.static_schema_name(&value.value)
+                if self.has_static_namespace_root(&value.value)
                     && self.class_reference(&value.value).is_none() =>
             {
                 match &*value.value {
@@ -465,17 +465,6 @@ impl Checker<'_> {
             }
             _ => Err(invalid()),
         }
-    }
-
-    /// Checks the lexical root before resolving a static namespace path.
-    fn static_schema_name(&self, expression: &ast::Expr) -> bool {
-        let mut root = expression;
-        while let ast::Expr::Attribute(attribute) = root {
-            root = &attribute.value;
-        }
-        matches!(root, ast::Expr::Name(name)
-            if !self.names.contains_key(name.id.as_str())
-                && !self.comprehension_targets.contains(name.id.as_str()))
     }
 
     /// Check an encoding operand using the same schema and display rules for

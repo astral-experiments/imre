@@ -286,6 +286,17 @@ pub unsafe extern "C" fn imre_record_has_type(
     unsafe { u32::from(descriptor(payload).same_class(&*expected)) }
 }
 
+/// Test the original record type even when a tuple annotation has erased its shape.
+///
+/// # Safety
+/// The caller keeps the initialized record and its descriptor alive for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_is_exact_tuple(tuple: *const usize) -> bool {
+    // SAFETY: the live record owns its descriptor and the immutable semantics table.
+    unsafe { descriptor(tuple).semantics.as_ref() }
+        .is_some_and(|semantics| semantics.kind == 1 && semantics.flags & EXACT_TUPLE != 0)
+}
+
 /// Initializes caller-owned scratch for a tuple used only by a read-only lookup.
 ///
 /// # Safety

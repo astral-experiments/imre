@@ -739,7 +739,7 @@ pub unsafe extern "C" fn imre_hash_type(hash: *const Object) -> *const Str {
 /// The address is stable while an alias retains the rooted native hash.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_hash_identity(hash: *const Object) -> usize {
-    Int::from_usize(hash as usize).into_raw()
+    super::imre_pointer_identity(hash.cast())
 }
 
 /// # Safety

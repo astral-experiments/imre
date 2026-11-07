@@ -287,6 +287,7 @@ mod tests {
         let module = Module {
             list_builds: Default::default(),
             command_flags: None,
+            builtin_module_sources: None,
             types,
             functions,
             class_fields: Vec::new(),
@@ -340,6 +341,7 @@ mod tests {
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
@@ -401,6 +403,7 @@ mod tests {
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
@@ -463,6 +466,7 @@ def integers(values: list[int]) -> int:
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
@@ -580,6 +584,31 @@ def integers(values: list[int]) -> int:
     }
 
     #[test]
+    fn builtin_module_names_preserves_checked_calls() {
+        let source = r#"
+import sys
+from sys import builtin_module_names as names
+
+def get_names() -> tuple[str, ...]:
+    return sys.builtin_module_names
+
+def take(value: int) -> int:
+    return value
+
+print(take(2), 'errno' in sys.builtin_module_names)
+print(type(names) is tuple, type(sys.builtin_module_names) is tuple, type(get_names()) is tuple)
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_sys_builtin_module_names("));
+        assert!(llvm.contains("call i1 @imre_str_tuple_contains("));
+        assert!(!llvm.contains("call ptr @imre_dyn_new("));
+
+        let source = "import sys\ndef take(value: int) -> int:\n    return value\nif False:\n    print(sys.builtin_module_names)\nprint(take('x'))\n";
+        let error = crate::compile(source, &crate::CompileOptions::default()).unwrap_err();
+        assert!(error.contains("expected int, got str"), "{error}");
+    }
+
+    #[test]
     fn codegen_checks_fallible_calls_but_not_fixed_field_call_chains() {
         let source = r#"
 class Record:
@@ -612,6 +641,10 @@ def indirect(value: str) -> int:
             (
                 "def lines(text: str) -> list[str]:\n    return text.splitlines()\ndef count(text: str) -> int:\n    return len(lines(text))\n",
                 "call ptr @imre_str_splitlines(",
+            ),
+            (
+                "import sys\ndef names() -> tuple[str, ...]:\n    return sys.builtin_module_names\ndef count() -> int:\n    return len(names())\n",
+                "call ptr @imre_sys_builtin_module_names(",
             ),
             (
                 "import sys\ndef names() -> frozenset[str]:\n    return sys.stdlib_module_names\ndef count() -> int:\n    return len(names())\n",

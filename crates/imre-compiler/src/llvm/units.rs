@@ -155,6 +155,20 @@ impl Output {
         self.used(self.function_owner(id), self.adapter_name(id, bound))
     }
 
+    pub fn byte_constant(&mut self, owner: usize, name: &str, bytes: &[u8]) {
+        let output = self.global(
+            owner,
+            name,
+            "unnamed_addr constant",
+            format_args!("[{} x i8]", bytes.len()),
+        );
+        output.push_str("c\"");
+        for byte in bytes {
+            write!(output, "\\{byte:02X}").unwrap();
+        }
+        output.push_str("\"\n");
+    }
+
     pub fn global(
         &mut self,
         owner: usize,

@@ -756,6 +756,17 @@ impl Session {
         .map(|(_, ty)| ty)
     }
 
+    /// Recognize the canonical tuple[str, ...] type across calls, attributes and names.
+    pub(crate) fn is_string_tuple(&self, module: usize, value: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let file = self.db.program_file(self.files[module]);
+        let env = ProgramEnvironment::from_file(file);
+        let model = SemanticModel::new(&self.db, file);
+        let text = KnownClass::Str.to_instance(&self.db, &env);
+        value.inferred_type(&model) == Some(Ty::homogeneous_tuple(&self.db, &env, text))
+    }
+
     /// Compare an argv expression to the canonical built-in list[str] instance,
     /// as declared for sys.argv in ty's vendored standard library. Equality
     /// (not assignability) rules out Any and lists with a different field ABI.
