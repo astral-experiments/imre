@@ -25,7 +25,7 @@ __all__ = [
     "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "FTPHandler", "UnknownHandler",
     "HTTPPasswordMgr", "HTTPPasswordMgrWithDefaultRealm", "HTTPPasswordMgrWithPriorAuth",
     "AbstractBasicAuthHandler", "HTTPBasicAuthHandler", "ProxyBasicAuthHandler",
-    "AbstractDigestAuthHandler", "HTTPDigestAuthHandler",
+    "AbstractDigestAuthHandler", "HTTPDigestAuthHandler", "ProxyDigestAuthHandler",
     "ProxyHandler", "HTTPCookieProcessor", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
     "pathname2url", "url2pathname", "getproxies",
@@ -1087,6 +1087,19 @@ class HTTPDigestAuthHandler(BaseHandler, AbstractDigestAuthHandler):
     def http_error_401(self, req, fp, code, msg, headers):
         host = urlparse(req.full_url)[1]
         retry = self.http_error_auth_reqed('www-authenticate',
+                                           host, req, headers)
+        self.reset_retry_count()
+        return retry
+
+
+class ProxyDigestAuthHandler(BaseHandler, AbstractDigestAuthHandler):
+
+    auth_header = 'Proxy-Authorization'
+    handler_order = 490  # before Basic auth
+
+    def http_error_407(self, req, fp, code, msg, headers):
+        host = req.host
+        retry = self.http_error_auth_reqed('proxy-authenticate',
                                            host, req, headers)
         self.reset_retry_count()
         return retry
