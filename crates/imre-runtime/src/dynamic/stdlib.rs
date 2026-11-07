@@ -245,6 +245,10 @@ pub(in crate::dynamic) fn diagnostic_type_name(
         {
             return format!("itertools.{}", ctx.class_name(class)).into();
         }
+        // Ordinary instances use the runtime's registered type name, without exposing private heap tags.
+        if ty.heap_type().is_none() && matches!(ctx.heap.get(value), Value::Instance { .. }) {
+            return ctx.type_name(value).into();
+        }
         return ctx.class_name(class).into();
     }
     ctx.builtin_type_name(value)
