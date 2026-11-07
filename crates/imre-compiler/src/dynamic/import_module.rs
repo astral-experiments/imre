@@ -47,6 +47,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 )
             })))
         }
+        "encodings.iso8859_2" => Some((
+            "encodings/iso8859_2.py",
+            include_str!("../../stdlib/encodings/writer_charmap.py"),
+        )),
         "reprlib" => bundled_source!("reprlib.py"),
         // The scalar Decimal stays available for checked serializers.
         "decimal" => Some(("decimal.py", include_str!("../../stdlib/decimal_boxed.py"))),

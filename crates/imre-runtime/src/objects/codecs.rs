@@ -42,8 +42,9 @@ static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
 static KOI8_U: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(8, "koi8_u"));
 static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"));
 static ISO8859_15: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(10, "iso8859_15"));
+static ISO8859_2: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(12, "iso8859_2"));
 
-const CODEC_NAMES: [&str; 12] = [
+const CODEC_NAMES: [&str; 13] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -56,6 +57,7 @@ const CODEC_NAMES: [&str; 12] = [
     "cp1252",
     "iso8859-15",
     "idna",
+    "iso8859-2",
 ];
 
 thread_local! {
@@ -89,6 +91,12 @@ pub(crate) fn normalize(name: &str) -> Result<String> {
         }
     }
     Ok(normalized)
+}
+
+/// The encodings provider also tries dots as underscores in aliases, but not in module names.
+fn matches_alias(key: &str, aliases: &[&str]) -> bool {
+    aliases.contains(&key)
+        || (key.contains('.') && aliases.contains(&key.replace('.', "_").as_str()))
 }
 
 /// An owned entry in the native registry, shared by typed and boxed callers.
@@ -561,6 +569,21 @@ impl Codec {
             "ascii" | "us" | "us_ascii" | "646" | "ansi_x3.4_1968" | "ansi_x3_4_1968"
             | "ansi_x3.4_1986" | "cp367" | "csascii" | "ibm367" | "iso646_us"
             | "iso_646.irv_1991" | "iso_ir_6" => Ok(Self::Ascii),
+            key if key == "iso8859_2"
+                || matches_alias(
+                    key,
+                    &[
+                        "csisolatin2",
+                        "iso_8859_2",
+                        "iso_8859_2_1987",
+                        "iso_ir_101",
+                        "l2",
+                        "latin2",
+                    ],
+                ) =>
+            {
+                Ok(Self::CodePage(&ISO8859_2))
+            }
             _ => Err(option_error(
                 Kind::LookupError,
                 "unknown encoding: ",
