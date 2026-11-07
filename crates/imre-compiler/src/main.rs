@@ -351,7 +351,7 @@ fn run() -> Result<ExitCode, String> {
                 &link,
             )
         });
-    // Wheel archives and their optional library manifests must be reread at link time.
+    // Keep explicit extension paths on their ordinary linker path.
     // Generated module objects are still keyed by their complete LLVM IR.
     let executable_cache = cache
         .as_ref()
@@ -399,7 +399,7 @@ fn run() -> Result<ExitCode, String> {
         Units(Vec<CodegenUnit>),
     }
     let mut boxed_ir_dump = None;
-    let (code, input_paths, sources, extension_archives) = if split {
+    let (code, input_paths, mut sources, extension_archives) = if split {
         let c = imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)?;
         (
             Code::Units(c.units),
@@ -429,7 +429,11 @@ fn run() -> Result<ExitCode, String> {
         };
         (code, c.input_paths, c.source_inputs, c.extension_archives)
     };
-    let (library_manifests, native_libraries) = extension_libraries(&extension_archives)?;
+    let (library_manifests, native_libraries) =
+        extension_libraries(&extension_archives, &mut sources)?;
+    // A wheel's -l flags may use implicit linker search directories beyond the
+    // driver's recorded roots. Relink until those choices can be validated.
+    sources.relink_site_wheel |= !native_libraries.is_empty();
     validate_paths(
         input_paths
             .iter()
@@ -626,6 +630,7 @@ fn run() -> Result<ExitCode, String> {
                 stage.path(),
                 file,
                 &output,
+                &extension_archives,
                 options.bundled_provider_archive.as_deref(),
             )
             .is_some()
@@ -646,14 +651,20 @@ fn run() -> Result<ExitCode, String> {
 
 /// Read only library names, never arbitrary driver or linker options, from a wheel.
 /// Keep input manifests protected by the same output alias check as the archives.
-fn extension_libraries(archives: &[PathBuf]) -> Result<(Vec<PathBuf>, Vec<String>), String> {
+fn extension_libraries(
+    archives: &[PathBuf],
+    sources: &mut imre_compiler::SourceInputs,
+) -> Result<(Vec<PathBuf>, Vec<String>), String> {
     let mut manifests = Vec::new();
     let mut libraries = Vec::new();
     for archive in archives {
         let path = archive.with_extension("libs");
         let canonical = match path.canonicalize() {
             Ok(canonical) => canonical,
-            Err(e) if e.kind() == ErrorKind::NotFound => continue,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                sources.missing.push(path);
+                continue;
+            }
             Err(e) => return Err(format!("{}: {e}", path.display())),
         };
         if canonical.parent() != archive.parent() {
@@ -680,6 +691,11 @@ fn extension_libraries(archives: &[PathBuf]) -> Result<(Vec<PathBuf>, Vec<String
                 libraries.push(arg);
             }
         }
+        sources.files.push((
+            path.clone(),
+            canonical,
+            blake3::hash(contents.as_bytes()).to_hex().to_string(),
+        ));
         manifests.push(path);
     }
     Ok((manifests, libraries))

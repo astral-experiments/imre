@@ -643,8 +643,16 @@ impl Cache {
         stage: &Path,
         file: &Path,
         materialized_output: &Path,
+        extension_archives: &[PathBuf],
         bundled_provider_archive: Option<&Path>,
     ) -> Option<()> {
+        // A wheel symlink's physical target need not have an archive suffix.
+        if extension_archives
+            .iter()
+            .any(|path| !ordinary_archive(path))
+        {
+            return None;
+        }
         // LLD's Make depfile normalizes POSIX backslashes into separators.
         // Its object trace preserves those names, including archive members.
         let lld = self.toolchain.lld.is_some();
@@ -690,9 +698,10 @@ impl Cache {
                             .is_some_and(|dir| path.starts_with(dir))
                 };
                 let cwd_symlink = p.parent() == Some(cwd.as_path()) && p.is_symlink();
-                // The packaged provider archive is an explicit compiler input, like the runtime.
-                let is_provider =
-                    bundled_provider_archive == Some(p.as_path()) && ordinary_archive(&resolved);
+                // Ordinary archives explicitly selected by the compiler have known identities.
+                let is_provider = (bundled_provider_archive == Some(p.as_path())
+                    || extension_archives.contains(&p))
+                    && ordinary_archive(&resolved);
                 if resolved != self.runtime
                     && !is_provider
                     && !(supported(&resolved) && (supported(&p) || cwd_symlink))
