@@ -6918,6 +6918,13 @@ impl<'a> Checker<'a> {
                 Intrinsic::Base64Decode => {
                     return Err(self.scoped_builtin_error("base64.b64decode", expression));
                 }
+                Intrinsic::MathPerm => {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "checked math.perm requires a direct call",
+                    ));
+                }
                 Intrinsic::ScopedObjectExport("math.sumprod") => {
                     return Err(error(
                         self.source,
@@ -10007,6 +10014,7 @@ impl<'a> Checker<'a> {
                 return stdlib::unary_float_builtin(builtin, value)
                     .ok_or_else(|| self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::MathPerm)) => return self.math_perm(call),
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("math.comb" | "math.factorial"),
             ))) if call.arguments.keywords.is_empty() => {

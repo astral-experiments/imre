@@ -84,6 +84,93 @@ fn positional_template(mut rest: &str, arguments: usize) -> Option<String> {
 }
 
 impl Checker<'_> {
+    /// Keep argument evaluation ahead of index conversion, including when k evaluates to None.
+    pub(super) fn math_perm(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let args = &call.arguments;
+        if !self
+            .graph
+            .session
+            .is_stdlib_function(self.module, &call.func, "math", "perm")
+        {
+            return Err(error(
+                self.source,
+                call,
+                "checked permutation requires a resolved math.perm call",
+            ));
+        }
+        let message = if !args.keywords.is_empty() {
+            Some("math.perm() takes no keyword arguments".into())
+        } else {
+            match args.args.len() {
+                0 => Some("perm expected at least 1 argument, got 0".into()),
+                1 | 2 => None,
+                count => Some(format!("perm expected at most 2 arguments, got {count}")),
+            }
+        };
+        self.graph.checked_overload(self.module, call.range());
+        if let Some(message) = message {
+            return self.positional_argument_error(
+                call,
+                &["n", "k"],
+                Type::Int,
+                unpacking::string(message),
+            );
+        }
+
+        let mut scope = calls::ArgumentScope::default();
+        let n_node = &args.args[0];
+        let n = self.expr(n_node)?;
+        let n = scope.hold(self, n);
+        let k = if let Some(node) = args.args.get(1) {
+            let value = self.expr(node)?;
+            Some((node, scope.hold(self, value)))
+        } else {
+            None
+        };
+        let n = self.index_word(n, n_node, false)?;
+        self.graph
+            .checked_argument_type(self.module, n_node.range());
+        let factorial = |n| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::MathFactorial, vec![n]),
+        };
+        let perm = |n, k| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::MathPerm, vec![n, k]),
+        };
+        let value = match k {
+            None => factorial(n),
+            Some((_, k)) if k.ty == Type::None => factorial(n),
+            Some((node, k)) => {
+                self.graph.checked_argument_type(self.module, node.range());
+                if let Some(ty) = self.types.payload(k.ty) {
+                    let n = scope.hold(self, n);
+                    let absent = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::IsNone, vec![k.clone()]),
+                    };
+                    let value = Expr {
+                        ty,
+                        kind: ExprKind::Unwrap(Box::new(k)),
+                    };
+                    let k = self.index_word(value, node, false)?;
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Conditional(
+                            Box::new(absent),
+                            Box::new(factorial(n.clone())),
+                            Box::new(perm(n, k)),
+                        ),
+                    }
+                } else {
+                    let k = self.index_word(k, node, false)?;
+                    perm(n, k)
+                }
+            }
+        };
+        Ok(scope.finish(value))
+    }
+
     /// Captures arguments before acquisition, materializes the source before key
     /// calls, and keeps the source argument rooted until the sorted result escapes.
     pub(super) fn sorted_call(

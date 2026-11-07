@@ -1122,9 +1122,8 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     Ok(Int::new(result))
 }
 
-/// Compute math.comb for either entry point after both arguments have been indexed.
-fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
-    let (n, k) = (n.big(), k.big());
+/// Validate indexed selection arguments before narrowing the requested count.
+fn selection_fits(n: &BigInt, k: &BigInt) -> Result<bool> {
     if n.is_negative() {
         return Err(Error::new(
             Kind::ValueError,
@@ -1137,7 +1136,13 @@ fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
             "k must be a non-negative integer",
         ));
     }
-    if k > n {
+    Ok(k <= n)
+}
+
+/// Compute math.comb for either entry point after both arguments have been indexed.
+fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
+    let (n, k) = (n.big(), k.big());
+    if !selection_fits(&n, &k)? {
         return Ok(Int::from(0));
     }
     let complement = n.as_ref() - k.as_ref();
@@ -1178,6 +1183,41 @@ fn factorial_product(lo: u64, hi: u64) -> BigInt {
     }
     let mid = lo + (hi - lo) / 2;
     factorial_product(lo, mid) * factorial_product(mid + 1, hi)
+}
+
+/// Multiply k descending factors, reusing the factorial product for word-sized endpoints.
+fn falling_product(n: &BigInt, k: u64) -> BigInt {
+    if k == 0 {
+        return BigInt::from(1);
+    }
+    if k == 1 {
+        return n.clone();
+    }
+    if let Some(hi) = n.to_u64() {
+        return factorial_product(hi - (k - 1), hi);
+    }
+    let half = k / 2;
+    falling_product(n, half) * falling_product(&(n - half), k - half)
+}
+
+fn integer_perm(n: &Int, k: &Int) -> Result<Int> {
+    let (n, k) = (n.big(), k.big());
+    if !selection_fits(&n, &k)? {
+        return Ok(Int::from(0));
+    }
+    let k = k
+        .to_i64()
+        .ok_or_else(|| Error::new(Kind::OverflowError, "k must not exceed 9223372036854775807"))?;
+    Ok(Int::new(falling_product(&n, k as u64)))
+}
+
+/// # Safety
+/// Both operands borrow live integer handles. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_perm(n: usize, k: usize) -> usize {
+    // SAFETY: the generated caller roots both operands across this call.
+    let (n, k) = unsafe { (Int::borrow(n), Int::borrow(k)) };
+    finish(integer_perm(&n, &k).map(Int::into_raw), 1)
 }
 
 fn integer_factorial(n: &Int) -> Result<Int> {
