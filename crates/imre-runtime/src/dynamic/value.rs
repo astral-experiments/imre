@@ -1930,7 +1930,7 @@ impl Value {
         )
     }
 
-    fn children(&self, visit: &mut MarkQueue<'_>) {
+    fn children(&self, visit: &mut impl VisitReferences) {
         self.try_children(visit)
             .expect("borrowed native state during collection");
     }
@@ -2864,6 +2864,17 @@ struct FindReferences {
 impl VisitReferences for FindReferences {
     fn push(&mut self, id: Id) {
         self.found |= self.targets.contains(&id);
+    }
+}
+
+/// Mark direct children of surviving cycles without scheduling another trace.
+struct MarkCycleChildren<'a> {
+    traces: &'a [Cell<usize>],
+}
+
+impl VisitReferences for MarkCycleChildren<'_> {
+    fn push(&mut self, id: Id) {
+        self.traces[id as usize].set(END);
     }
 }
 
@@ -5353,14 +5364,15 @@ impl Heap {
     ) -> bool {
         let (_, cyclic) = self.identify_indexed_cycles(cycles, &slot_at, index_of);
         if cyclic {
+            let mut children = MarkCycleChildren {
+                traces: &self.traces,
+            };
             for index in cycles.members() {
                 let id = slot_at(index as usize);
                 self.traces[id].set(END);
                 // Every nonleaf descendant is already a member. Scalar children
                 // have no incoming-count slot in the compact candidate graph.
-                self.unreachable_children(self.get(id as Id), MarkMode::All, |child| {
-                    self.traces[child].set(END);
-                });
+                self.get(id as Id).children(&mut children);
             }
         }
         cyclic
