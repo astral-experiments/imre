@@ -4158,8 +4158,13 @@ impl Emitter<'_, '_> {
         })
     }
 
-    /// Lower a fixed-order binomial when range analysis proves its numerator fits one word.
-    fn bounded_comb(&mut self, expressions: &[Expr], args: &[Operand]) -> Option<Value> {
+    /// Lower a fixed-order selection when its product fits a word and its result fits a tagged integer.
+    fn bounded_selection(
+        &mut self,
+        builtin: &Builtin,
+        expressions: &[Expr],
+        args: &[Operand],
+    ) -> Option<Value> {
         let n = self.ranges.integer(&expressions[0])?;
         let order = self.ranges.integer(&expressions[1])?;
         // Bound the unrolled product. Unknown signs or orders use the checked runtime.
@@ -4175,12 +4180,19 @@ impl Emitter<'_, '_> {
             1 => return Some(args[0].value.clone()),
             _ => {}
         }
-        let denominator = (2..=k).product::<i64>();
+        let denominator = if matches!(builtin, Builtin::MathComb) {
+            (2..=k).product::<i64>()
+        } else {
+            1
+        };
         let upper = (0..k).try_fold(1_i64, |product, i| product.checked_mul(n.max - i))?;
-        // Dividing a signed word by at least two fits a tagged result. For n < k
-        // one factor is zero before any later negative factors are multiplied.
+        let largest_result = upper / denominator;
+        if largest_result >= 1_i64 << 62 {
+            return None;
+        }
+        // For n < k one factor is zero before any later negative factors are multiplied.
         if n.min == n.max {
-            return Some(small(upper / denominator));
+            return Some(small(largest_result));
         }
         let raw = self.instruction(format!("ashr i64 {}, 1", args[0].value.operand));
         let mut product = raw.clone();
@@ -4188,7 +4200,11 @@ impl Emitter<'_, '_> {
             let factor = self.instruction(format!("sub nsw i64 {raw}, {offset}"));
             product = self.instruction(format!("mul nsw i64 {product}, {factor}"));
         }
-        let result = self.instruction(format!("udiv exact i64 {product}, {denominator}"));
+        let result = if denominator == 1 {
+            product
+        } else {
+            self.instruction(format!("udiv exact i64 {product}, {denominator}"))
+        };
         Some(self.tag_small(&result))
     }
 
@@ -7786,18 +7802,16 @@ impl Emitter<'_, '_> {
             Builtin::MathFactorial => self
                 .bounded_factorial(&expressions[0], &args[0].value)
                 .unwrap_or_else(|| self.call("imre_math_factorial", Type::Int, &[&args[0].value])),
-            Builtin::MathPerm => self.call(
-                "imre_math_perm",
-                Type::Int,
-                &[&args[0].value, &args[1].value],
-            ),
-            Builtin::MathComb => self.bounded_comb(expressions, &args).unwrap_or_else(|| {
-                self.call(
-                    "imre_math_comb",
-                    Type::Int,
-                    &[&args[0].value, &args[1].value],
-                )
-            }),
+            Builtin::MathPerm | Builtin::MathComb => self
+                .bounded_selection(builtin, expressions, &args)
+                .unwrap_or_else(|| {
+                    let symbol = if matches!(builtin, Builtin::MathPerm) {
+                        "imre_math_perm"
+                    } else {
+                        "imre_math_comb"
+                    };
+                    self.call(symbol, Type::Int, &[&args[0].value, &args[1].value])
+                }),
             Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
             Builtin::Sumprod if returns == Type::Int => {
                 self.output.local_helper(
@@ -12217,6 +12231,22 @@ print(show("x"))
         for arg in ["n", "n & 31", "-1"] {
             let wide = body(arg);
             assert!(wide.contains("@imre_math_factorial("), "{wide}");
+        }
+    }
+
+    #[test]
+    fn bounded_permutations_require_a_taggable_product() {
+        let body = |args| {
+            function_body(&format!(
+                "from math import perm\ndef count(n: int) -> int:\n    return perm({args})\n"
+            ))
+        };
+        let fixed = body("n & 63, 5");
+        assert!(fixed.contains("mul nsw i64"), "{fixed}");
+        assert!(!fixed.contains("@imre_math_perm("), "{fixed}");
+        for args in ["(n & 3) + 2147483647, 2", "n & 63, n", "-1, 2"] {
+            let fallback = body(args);
+            assert!(fallback.contains("@imre_math_perm("), "{fallback}");
         }
     }
 
