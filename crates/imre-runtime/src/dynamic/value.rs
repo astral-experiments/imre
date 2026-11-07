@@ -1672,8 +1672,8 @@ pub(super) enum Value {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
-    ZstdCompressor(crate::Shared<std::cell::RefCell<crate::zstd_streams::Compressor>>),
-    ZstdDecompressor(crate::Shared<std::cell::RefCell<super::stdlib::zstd::Decompressor>>),
+    ZstdCompressor(triomphe::Arc<std::sync::Mutex<crate::zstd_streams::Compressor>>),
+    ZstdDecompressor(super::stdlib::zstd::Decompressor),
     Bz2Compressor(crate::Shared<std::cell::RefCell<super::stdlib::bz2::codec::Compressor>>),
     Bz2Decompressor(crate::Shared<std::cell::RefCell<super::stdlib::bz2::Decompressor>>),
     LzmaCompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Compressor>>),
@@ -2652,7 +2652,7 @@ impl Value {
                 visit.push(*server_hostname);
                 visit.extend(owner.references());
             }
-            Self::ZstdDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
+            Self::ZstdDecompressor(state) => visit.push(state.unused_data),
             Self::Bz2Decompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::LzmaDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::ZlibDecompressor { state, dictionary } => {
