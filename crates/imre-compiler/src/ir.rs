@@ -1219,6 +1219,7 @@ pub(crate) enum Builtin {
     InputSelectStdout,
     InputFinish,
     Chr,
+    UnicodeCategoryOfOrdinal,
     Ord,
     IntegerPower,
     ModularPower,
@@ -2003,6 +2004,22 @@ pub(crate) enum PatchOperation {
     HunkText,
 }
 
+/// Character properties shared by checked calls and the native Unicode database.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum UnicodeProperty {
+    Category,
+    EastAsianWidth,
+}
+
+impl UnicodeProperty {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Category => "category",
+            Self::EastAsianWidth => "east_asian_width",
+        }
+    }
+}
+
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
@@ -2012,7 +2029,7 @@ pub(crate) enum TextOperation {
     ZFill {
         copy: bool,
     },
-    EastAsianWidth,
+    UnicodeProperty(UnicodeProperty),
     Normalize,
     Lower,
     Upper,

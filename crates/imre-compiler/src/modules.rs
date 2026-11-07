@@ -11,7 +11,8 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, FallbackCalls, Session};
 use crate::ir::{
-    Builtin, CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, WrapperAttributes,
+    Builtin, CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, UnicodeProperty,
+    WrapperAttributes,
 };
 use crate::watch::FileSystem;
 
@@ -1025,7 +1026,7 @@ pub(crate) enum Intrinsic {
     Sha1,
     Sha256,
     NamedHash(&'static str),
-    UnicodeEastAsianWidth,
+    UnicodeProperty(UnicodeProperty),
     UnicodeNormalize {
         check: bool,
     },
@@ -2132,7 +2133,12 @@ impl IntrinsicModule {
             (Self::UnicodeData, "unidata_version") => {
                 Intrinsic::StringConstant(imre_ast::UNICODE_DATA_VERSION)
             }
-            (Self::UnicodeData, "east_asian_width") => Intrinsic::UnicodeEastAsianWidth,
+            (Self::UnicodeData, "category") => {
+                Intrinsic::UnicodeProperty(UnicodeProperty::Category)
+            }
+            (Self::UnicodeData, "east_asian_width") => {
+                Intrinsic::UnicodeProperty(UnicodeProperty::EastAsianWidth)
+            }
             (Self::UnicodeData, "decomposition") => {
                 Intrinsic::ObjectRuntimeExport("unicodedata.decomposition")
             }

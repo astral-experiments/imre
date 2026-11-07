@@ -119,12 +119,17 @@ pub(super) fn ascii_escape(text: &str) -> Result<String> {
 
 /// Converts a Python character ordinal within the native string domain.
 pub(crate) fn chr_scalar(value: &Int) -> Result<char> {
-    match value.as_small() {
-        Some(0xd800..=0xdfff) => Err(Error::new(
+    char::from_u32(chr_codepoint(value)?).ok_or_else(|| {
+        Error::new(
             Kind::ValueError,
             "surrogates are outside the native string domain",
-        )),
-        Some(code @ 0..=0x10ffff) => Ok(char::from_u32(code as u32).expect("Unicode scalar")),
+        )
+    })
+}
+
+fn chr_codepoint(value: &Int) -> Result<u32> {
+    match value.as_small() {
+        Some(code @ 0..=0x10ffff) => Ok(code as u32),
         _ => Err(Error::new(
             Kind::ValueError,
             "chr() arg not in range(0x110000)",
@@ -168,6 +173,15 @@ pub(crate) fn east_asian_width(point: u32) -> &'static str {
     width.short_name()
 }
 
+/// Unicode 16.0 General_Category for a Python code point, including surrogates.
+pub(crate) fn general_category(point: u32) -> &'static str {
+    const TABLE: (&[&str], &[(u32, u8)]) =
+        include!(concat!(env!("OUT_DIR"), "/unicode_general_categories.rs"));
+    let (names, runs) = TABLE;
+    let end = runs.partition_point(|&(start, _)| start <= point);
+    names[usize::from(runs[end - 1].1)]
+}
+
 /// Argument Clinic's character converter counts Python code points, including surrogates.
 pub(crate) fn ucd_character(name: &str, mut points: impl Iterator<Item = u32>) -> Result<u32> {
     let first = points.next();
@@ -187,9 +201,32 @@ pub(crate) fn ucd_character(name: &str, mut points: impl Iterator<Item = u32>) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_unicode_east_asian_width(text: *const Str) -> *const Str {
     // SAFETY: the checked caller provides a rooted UTF-8 string.
-    let text = unsafe { &*text };
-    let result = ucd_character("east_asian_width", text.chars().map(u32::from))
-        .and_then(|point| try_owned_string(east_asian_width(point)))
+    unicode_property(unsafe { &*text }, "east_asian_width", east_asian_width)
+}
+
+/// # Safety
+/// The caller retains the input string until the result is returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_category(text: *const Str) -> *const Str {
+    // SAFETY: the checked caller provides a rooted UTF-8 string.
+    unicode_property(unsafe { &*text }, "category", general_category)
+}
+
+/// # Safety
+/// The integer operand of the checked chr call is rooted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_category_of_ordinal(value: usize) -> *const Str {
+    // SAFETY: the generated caller retains the integer.
+    let value = unsafe { Int::borrow(value) };
+    let result = chr_codepoint(&value)
+        .and_then(|point| try_owned_string(general_category(point)))
+        .map(StrOwner::into_raw);
+    finish(result, std::ptr::null())
+}
+
+fn unicode_property(text: &Str, name: &str, property: fn(u32) -> &'static str) -> *const Str {
+    let result = ucd_character(name, text.chars().map(u32::from))
+        .and_then(|point| try_owned_string(property(point)))
         .map(StrOwner::into_raw);
     finish(result, std::ptr::null())
 }

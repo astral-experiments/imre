@@ -6238,6 +6238,11 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::UnicodeCategoryOfOrdinal => self.call(
+                "imre_unicode_category_of_ordinal",
+                Type::Str,
+                &[&args[0].value],
+            ),
             Builtin::Random(op) => {
                 use crate::ir::RandomOperation::*;
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
@@ -11268,6 +11273,8 @@ declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
 declare ptr @imre_str_zfill(ptr, i64, i32)
 declare ptr @imre_unicode_east_asian_width(ptr)
+declare ptr @imre_unicode_category(ptr)
+declare ptr @imre_unicode_category_of_ordinal(i64)
 declare ptr @imre_unicode_normalize(ptr, ptr)
 declare ptr @imre_str_case_map(ptr, i32)
 declare ptr @imre_str_lower(ptr)
