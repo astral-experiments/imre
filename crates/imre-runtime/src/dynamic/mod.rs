@@ -174,7 +174,7 @@ pub(crate) struct Context {
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     // Emitted filename constants live for the program. Their display spelling belongs to this interpreter.
-    native_filename_labels: HashMap<usize, std::rc::Rc<str>>,
+    native_filename_labels: HashMap<usize, std::sync::Arc<str>>,
     // Builtin functions stay bound to the first builtins module across reimports.
     original_builtins: Option<Id>,
     source_builtins: Option<Id>,

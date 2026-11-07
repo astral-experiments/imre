@@ -103,7 +103,7 @@ pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
-    pub file: std::rc::Rc<str>,
+    pub file: std::sync::Arc<str>,
     pub line: u32,
     pub span: Option<[u32; 3]>,
 }
