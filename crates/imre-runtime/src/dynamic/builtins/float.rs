@@ -1,5 +1,5 @@
 use super::*;
-use crate::dynamic::complex::Complex;
+use crate::dynamic::{IteratorSlice, complex::Complex};
 
 /// Apply a native integral method to the stored float without calling subtype hooks.
 pub(in crate::dynamic) fn round_float_to_integer(
@@ -343,13 +343,30 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
     if let Value::Int(initial) = ctx.heap.get(total)
         && let Some(mut integer) = initial.to_i64()
     {
+        let small_integer = |value: &Value| match value {
+            Value::Int(value) => value.to_i64(),
+            Value::Bool(value) => Some(i64::from(*value)),
+            _ => None,
+        };
+        if matches!(ctx.heap.get(iterator), Value::Iterator { .. })
+            && let IteratorSlice::Values(items) = ctx.iterator_remaining(iterator)?
+            && let Some(sum) = std::iter::once(&item)
+                .chain(items)
+                .try_fold(integer, |sum, &id| {
+                    sum.checked_add(small_integer(ctx.heap.get(id))?)
+                })
+        {
+            // These exact integer additions cannot call Python or allocate intermediate values.
+            if let Value::Iterator { sequence, .. } = ctx.heap.get_mut(iterator) {
+                *sequence = None;
+            }
+            ctx.heap.release_temporaries_since(mark);
+            return Ok(ctx.int(sum));
+        }
         loop {
-            let value = match ctx.heap.get(item) {
-                Value::Int(value) => value.to_i64(),
-                Value::Bool(value) => Some(i64::from(*value)),
-                _ => None,
-            };
-            let Some(next) = value.and_then(|value| integer.checked_add(value)) else {
+            let Some(next) =
+                small_integer(ctx.heap.get(item)).and_then(|value| integer.checked_add(value))
+            else {
                 let accumulated = ctx.int(integer);
                 total = ctx.binary("+", accumulated, item)?;
                 break;
