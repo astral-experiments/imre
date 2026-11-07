@@ -2227,16 +2227,21 @@ impl Program {
                     None
                 }
                 ast::Expr::If(b) => {
-                    self.lower_choice(b, plan, Instruction::Jump(0), |program, arm, fallthrough| {
-                        if usage == BranchUse::Operand && !fallthrough {
-                            // The body jumps over the else arm with a materialized value.
-                            program.lower_result(arm, plan)?;
-                            program.emit_truth_branch(None, when, usage, line, exits);
-                            Ok(())
-                        } else {
-                            program.branch_on(arm, when, usage, plan, exits)
-                        }
-                    })?;
+                    self.lower_choice(
+                        b,
+                        plan,
+                        Instruction::Jump(0),
+                        |program, arm, fallthrough| {
+                            if usage == BranchUse::Operand && !fallthrough {
+                                // The body jumps over the else arm with a materialized value.
+                                program.lower_result(arm, plan)?;
+                                program.emit_truth_branch(None, when, usage, line, exits);
+                                Ok(())
+                            } else {
+                                program.branch_on(arm, when, usage, plan, exits)
+                            }
+                        },
+                    )?;
                     return Ok(());
                 }
                 value => self.lower_operand(value, plan)?,

@@ -2234,7 +2234,10 @@ pub(super) fn call(
                     || Some(&init) == ctx.builtins.get("object.__init__")
             })
         {
-            return Err(Error::new("TypeError", "chain() takes no keyword arguments"));
+            return Err(Error::new(
+                "TypeError",
+                "chain() takes no keyword arguments",
+            ));
         }
         let result = ctx.instance(*class, None);
         if let Value::Instance { fields, .. } = ctx.heap.get_mut(result) {
