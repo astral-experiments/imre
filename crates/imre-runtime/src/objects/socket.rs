@@ -223,7 +223,11 @@ pub(crate) fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io
     retry(until, || poll_interruptible(fd, events, until))
 }
 
-fn poll_interruptible(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()> {
+pub(crate) fn poll_interruptible(
+    fd: RawFd,
+    events: i16,
+    until: Option<Deadline>,
+) -> io::Result<()> {
     let mut pollfd = libc::pollfd {
         fd,
         events,

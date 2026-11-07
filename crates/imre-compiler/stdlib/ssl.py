@@ -901,9 +901,9 @@ class SSLSocket(_socket.socket):
 
     def shutdown(self, how):
         session = SSLSocket._session.__get__(self)
-        super().shutdown(how)
-        if SSLSocket._session.__get__(self) is session:
-            SSLSocket._session.__set__(self, _imre_ssl.release_session(session))
+        if session is None:
+            return super().shutdown(how)
+        _imre_ssl.transport_shutdown(session, how)
 
     def _real_close(self):
         _imre_ssl.release_session(getattr(self, "_session", None))

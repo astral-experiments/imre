@@ -65,6 +65,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "is_session",
         "do_handshake",
         "release_session",
+        "transport_shutdown",
         "read",
         "pending",
         "tls_shutdown",
@@ -279,6 +280,7 @@ fn socket_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id
         return Err(closed());
     };
     let socket = Rc::clone(socket);
+    let mut deadline = None;
     read_plaintext(ctx, handle, size, buffer, |data| {
         // The length's __index__ may have closed or unwrapped this socket.
         let mut socket = socket.borrow_mut();
@@ -287,7 +289,8 @@ fn socket_read(ctx: &mut Context, handle: Id, size: Id, buffer: Id) -> Result<Id
                 libc::EBADF,
             )))
         })?;
-        session.read(data)
+        let until = *deadline.get_or_insert_with(|| socket::deadline(session.socket()));
+        session.read(data, until)
     })
 }
 
@@ -1030,6 +1033,18 @@ pub(super) fn call(
             ctx.heap.get(handle),
             Value::TlsSession(s, _) if s.borrow().is_some()
         ))),
+        ("transport_shutdown", &[handle, how]) => {
+            let how = super::socket::integer(ctx, how)?;
+            match ctx.heap.get(handle) {
+                Value::TlsListener(socket) => socket::shutdown(socket, how)?,
+                _ => session(ctx, handle)?
+                    .borrow_mut()
+                    .as_mut()
+                    .ok_or_else(closed)?
+                    .transport_shutdown(how)?,
+            }
+            Ok(NONE)
+        }
         ("release_session", &[handle]) => match ctx.heap.get(handle) {
             Value::TlsSession(state, _) => {
                 // An in-flight OpenSSL operation still needs its callback result. The

@@ -1301,6 +1301,7 @@ pub(crate) struct Session {
     hostname: Option<CString>,
     server: bool,
     handshake_complete: bool,
+    read_shutdown: bool,
 }
 
 enum Operation<'a> {
@@ -1349,6 +1350,7 @@ impl Session {
             hostname: None,
             server,
             handshake_complete: false,
+            read_shutdown: false,
         };
         if let Some(host) = host {
             session.hostname =
@@ -1405,11 +1407,10 @@ impl Session {
     fn transfer(
         &mut self,
         operation: Operation<'_>,
+        until: Option<socket::Deadline>,
         timeout_message: &'static str,
     ) -> Result<usize, bio::BioFailure> {
-        let until = self
-            .sni_deadline
-            .unwrap_or_else(|| socket::deadline(self.socket()));
+        let until = self.sni_deadline.unwrap_or(until);
         self.sni.check_reentry()?;
         if !self.handshake_complete
             || (matches!(operation, Operation::Write(_))
@@ -1488,6 +1489,16 @@ impl Session {
             let os_error = std::io::Error::last_os_error();
             // SAFETY: classify this exact return value immediately on the same thread.
             let kind = unsafe { (api.SSL_get_error)(ssl, rc) };
+            let reading = matches!(operation, Operation::Read(_));
+            if reading
+                && matches!(
+                    kind,
+                    SSL_ERROR_WANT_READ | SSL_ERROR_WANT_WRITE | SSL_ERROR_SYSCALL
+                )
+                && os_error.kind() == io::ErrorKind::Interrupted
+            {
+                return Err(Failure::Io(os_error).into());
+            }
             let events = match (kind, api.syscall_error(kind, os_error)) {
                 (SSL_ERROR_WANT_READ, _) if nonblocking => return Err(bio::BioFailure::WantRead),
                 (SSL_ERROR_WANT_WRITE, _) if nonblocking => return Err(bio::BioFailure::WantWrite),
@@ -1510,6 +1521,9 @@ impl Session {
                 }
                 Some(_) if socket::fd(self.socket()) < 0 => {
                     Err(io::Error::from_raw_os_error(libc::EBADF))
+                }
+                Some(events) if reading => {
+                    socket::poll_interruptible(socket::fd(self.socket()), events, until)
                 }
                 Some(events) => socket::poll_socket(socket::fd(self.socket()), events, until),
                 None => Ok(()),
@@ -1569,7 +1583,11 @@ impl Session {
     }
 
     pub(crate) fn send(&mut self, bytes: &[u8]) -> Result<usize, bio::BioFailure> {
-        let n = self.transfer(Operation::Write(bytes), "The write operation timed out")?;
+        let n = self.transfer(
+            Operation::Write(bytes),
+            socket::deadline(self.socket()),
+            "The write operation timed out",
+        )?;
         if (n == 0 && !bytes.is_empty()) || n > bytes.len() {
             return Err(Failure::Other("invalid SSL_write byte count".into()).into());
         }
@@ -1584,16 +1602,31 @@ impl Session {
         Ok(())
     }
 
-    pub(in crate::dynamic) fn read(&mut self, out: &mut [u8]) -> Result<usize, bio::BioFailure> {
-        if out.is_empty() {
+    pub(in crate::dynamic) fn read(
+        &mut self,
+        out: &mut [u8],
+        until: Option<socket::Deadline>,
+    ) -> Result<usize, bio::BioFailure> {
+        // SSL_read after a local read shutdown can treat the kernel EOF as a
+        // fatal TLS truncation. Drain authenticated bytes without touching that EOF.
+        if out.is_empty() || (self.read_shutdown && self.pending()? == 0) {
             return Ok(0);
         }
-        let result = self.transfer(Operation::Read(out), "The read operation timed out");
+        let result = self.transfer(Operation::Read(out), until, "The read operation timed out");
         self.api.finish_read(self.handle, result)
     }
 
     pub(in crate::dynamic) fn pending(&self) -> Result<usize, bio::BioFailure> {
         self.api.ssl_pending(self.handle, self.hostname.as_deref())
+    }
+
+    pub(super) fn transport_shutdown(&mut self, how: i32) -> super::Result<()> {
+        if !self.endpoint.matches(self.socket()) {
+            return Err(super::closed());
+        }
+        socket::shutdown(self.socket(), how)?;
+        self.read_shutdown |= matches!(how, libc::SHUT_RD | libc::SHUT_RDWR);
+        Ok(())
     }
 
     /// Exchange close notifications while the session still owns the socket.

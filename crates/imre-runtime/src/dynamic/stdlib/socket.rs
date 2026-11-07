@@ -327,7 +327,7 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
     }
 }
 
-fn integer(ctx: &Context, id: Id) -> Result<i32> {
+pub(super) fn integer(ctx: &Context, id: Id) -> Result<i32> {
     i32::try_from(ctx.as_integer(id)?)
         .map_err(|_| Error::new("OverflowError", "Python int too large to convert to C int"))
 }
