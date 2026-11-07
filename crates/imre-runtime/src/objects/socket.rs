@@ -4,6 +4,7 @@ pub(crate) mod message;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, imre_record_new};
+pub(crate) use super::time::Deadline;
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, c_int, errno_error};
 use num_traits::ToPrimitive;
 use std::ffi::{CStr, CString};
@@ -13,7 +14,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsRawFd;
 use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub(super) struct Socket {
     family: i32,
@@ -256,26 +257,10 @@ fn retry_read<T, E: From<Error>>(
     }
 }
 
-/// Return a single deadline for an entire socket operation, including retries and sendall.
-#[derive(Clone, Copy)]
-pub(crate) struct Deadline {
-    start: Instant,
-    duration: Duration,
-}
-
-impl Deadline {
-    pub(crate) fn remaining(self) -> Duration {
-        self.duration.saturating_sub(self.start.elapsed())
-    }
-}
-
 pub(crate) fn deadline(socket: &Object) -> Option<Deadline> {
     get_timeout(socket)
         .filter(|d| !d.is_zero())
-        .map(|duration| Deadline {
-            start: Instant::now(),
-            duration,
-        })
+        .map(Deadline::after)
 }
 
 fn timed_out() -> io::Error {

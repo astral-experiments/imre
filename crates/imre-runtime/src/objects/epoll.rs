@@ -2,10 +2,11 @@
 
 use super::errno_error;
 use super::exceptions::{Error, Kind};
+use super::time::Deadline;
 use std::cell::Cell;
 use std::io;
 use std::os::fd::RawFd;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub(crate) struct Epoll {
     fd: Cell<RawFd>,
@@ -70,7 +71,7 @@ impl Epoll {
                 .map_err(|_| Error::new(Kind::OverflowError, "timeout is too large"))?
                 .max(-1);
             if ns >= 0 {
-                deadline = Some(Instant::now() + Duration::from_nanos(ns as u64));
+                deadline = Some(Deadline::after(Duration::from_nanos(ns as u64)));
             }
         }
         let maxevents = match maxevents {
@@ -104,7 +105,7 @@ impl Epoll {
             }
             check_signals()?;
             if let Some(end) = deadline {
-                let Some(left) = end.checked_duration_since(Instant::now()) else {
+                let Some(left) = end.checked_remaining() else {
                     break;
                 };
                 millis = left.as_nanos().div_ceil(1_000_000) as i32;
