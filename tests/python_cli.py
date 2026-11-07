@@ -4405,6 +4405,7 @@ for name in ("md4", "ripemd160"):
             "boxed_structural_hooks.py",
             "boxed_list_pop.py",
             "boxed_list_iter_descriptor.py",
+            "boxed_list_setitem.py",
             "boxed_sequence_repeat.py",
             "boxed_primitive_sequence_literals.py",
             "boxed_sequence_order.py",

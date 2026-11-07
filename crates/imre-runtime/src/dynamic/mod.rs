@@ -1947,6 +1947,25 @@ impl Context {
         ) || self.slot(id, "__getitem__").is_some()
     }
 
+    /// Materialize a PySequence_Fast operand. Exact lists and tuples already have
+    /// sequence storage. Other inputs use list construction on their iterator.
+    fn fast_sequence_values(&mut self, sequence: Id, not_iterable: &str) -> Result<Vec<Id>> {
+        if matches!(self.heap.get(sequence), Value::List(_) | Value::Tuple(_)) {
+            return self.items(sequence);
+        }
+        let iter = self.iterator(sequence).map_err(|err| {
+            let type_error = self.builtin("TypeError");
+            if self.raised_error_matches(&err, type_error) {
+                Error::new("TypeError", not_iterable)
+            } else {
+                err
+            }
+        })?;
+        let list = self.alloc(Value::List(Vec::new()));
+        builtins::list_extend(self, list, iter)?;
+        self.items(list)
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(self.heap.get(id), Value::TypeVarTuple { .. }) {
             return Ok(vec![typing::unpack_parameter(self, id)?]);

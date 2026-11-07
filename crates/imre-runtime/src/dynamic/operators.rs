@@ -3701,7 +3701,11 @@ impl Context {
     /// Materialize the iterable before normalizing against the possibly resized destination.
     fn set_list_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
         let bounds = super::slice::sequence_components(self, parts)?;
-        let replacement = source.map(|source| self.items(source)).transpose()?;
+        let replacement = source
+            .map(|source| {
+                self.fast_sequence_values(source, "must assign iterable to extended slice")
+            })
+            .transpose()?;
         let Value::List(target) = self.heap.get_mut(obj) else {
             unreachable!("list slice receiver")
         };

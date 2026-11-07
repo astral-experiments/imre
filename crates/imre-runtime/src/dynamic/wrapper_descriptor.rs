@@ -840,6 +840,8 @@ impl BuiltinDescriptor {
             "__doc__" if matches!(self.owner, "dict" | "mappingproxy") && self.name == "__or__" => ctx.text("Return self|value."),
             "__doc__" if matches!(self.owner, "dict" | "mappingproxy") && self.name == "__ror__" => ctx.text("Return value|self."),
             "__text_signature__" if self.name == "__ior__" || (matches!(self.owner, "dict" | "mappingproxy") && matches!(self.name, "__or__" | "__ror__")) => ctx.text("($self, value, /)"),
+            "__doc__" if self.owner == "list" && self.name == "__setitem__" => ctx.text("Set self[key] to value."),
+            "__text_signature__" if self.owner == "list" && self.name == "__setitem__" => ctx.text("($self, key, value, /)"),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
             "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__mod__" | "__rmod__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")
