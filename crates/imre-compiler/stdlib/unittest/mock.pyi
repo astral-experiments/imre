@@ -1,6 +1,8 @@
 from builtins import dict as _Dict
 from typing import Any, Callable, Iterable
 
+FILTER_DIR: bool
+
 class _ANY(Any): ...
 
 ANY: _ANY

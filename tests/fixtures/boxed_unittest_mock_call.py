@@ -164,3 +164,15 @@ for options, message in [
     with TestCase().assertRaises(AttributeError) as caught:
         del delivery.assert_delivery
     assert str(caught.exception) == "assert_delivery"
+
+directory = Mock()
+directory.fetch
+directory.finished
+del directory.finished
+directory._private = "hidden"
+names = dir(directory)
+assert "fetch" in names and "finished" not in names and "_private" not in names
+assert all(name in names for name in ("called", "call_count", "call_args", "call_args_list"))
+with mock.patch.object(mock, "FILTER_DIR", False):
+    assert dir(directory) == sorted(object.__dir__(directory))
+assert "fetch" in dir(directory)

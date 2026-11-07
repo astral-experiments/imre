@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+FILTER_DIR: bool = True
+
 
 def _format_list(parts: list[str], pretty: bool) -> str:
     entries = ", ".join(parts)
