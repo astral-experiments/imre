@@ -722,6 +722,7 @@ pub(super) fn generic_alias_method_owner(symbol: &str) -> Option<&'static str> {
     let owner = symbol.strip_suffix(".__class_getitem__")?;
     [
         "BaseExceptionGroup",
+        super::defaultdict::CLASS,
         super::stdlib::functools::PARTIAL_CLASS,
         "_contextvars.ContextVar",
         "_contextvars.Token",

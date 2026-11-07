@@ -16,6 +16,7 @@ pub(super) const METHODS: &[&str] = &[
     "copy",
     "__copy__",
     "__reduce__",
+    "__class_getitem__",
 ];
 
 /// Return the CPython 3.14.5 documentation and text signature of an implemented descriptor.
