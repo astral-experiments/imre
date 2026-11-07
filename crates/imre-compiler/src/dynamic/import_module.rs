@@ -87,19 +87,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "subprocess" if cfg!(unix) => {
             bundled_source!("subprocess.py")
         }
-        "linecache" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            const UPSTREAM: &str = include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/linecache.py"
-            );
-            // Keep CPython's cache, loader fallback and invalidation. The native source
-            // decoder implements the disk path ordinarily provided by tokenize.open.
-            Some(("linecache.py", SOURCE.get_or_init(|| {
-                UPSTREAM.replace("import tokenize\n", "from _imre_linecache import source_lines\n")
-                    .replace("with tokenize.open(fullname) as fp:\n            lines = fp.readlines()",
-                             "with open(fullname, 'rb') as fp:\n            lines = source_lines(fp.read())")
-            })))
-        }
+        "linecache" => bundled_source!("linecache.py"),
         "bisect" => bundled_source!("bisect.py"),
         "email.errors" => Some((
             "email/errors.py",
