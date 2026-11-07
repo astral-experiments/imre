@@ -11,6 +11,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
 REQUIRE_INT = "def require_int(value: int) -> int:\n    return value\n"
 
 REJECTED = {
+    "invalid_call_inside_invalid_range": REQUIRE_INT + "range(1, 2, 3, require_int('x'))\n",
     "producer_escape": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        yield i\nsaved = values()\n",
     "producer_handler": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        try:\n            yield i\n        finally:\n            print(i)\nfor x in values():\n    print(x)\n",
     "sentinel_escaped": "saved = iter(lambda: 'x', 'x')\n",

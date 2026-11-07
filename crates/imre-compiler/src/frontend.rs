@@ -3976,6 +3976,31 @@ impl<'a> Checker<'a> {
         self.iteration_value(self.json_iteration(value), false, expression)
     }
 
+    /// Raise a statically known range binding error after evaluating its operands.
+    fn range_argument_error(
+        &mut self,
+        call: &ast::ExprCall,
+        returns: Type,
+    ) -> Result<Option<Expr>, String> {
+        if calls::has_unpacking(call) {
+            return Ok(None);
+        }
+        let Some(message) = imre_ast::range_constructor_error(
+            call.arguments.args.len(),
+            !call.arguments.keywords.is_empty(),
+        ) else {
+            return Ok(None);
+        };
+        self.graph.checked_overload(self.module, call.range());
+        self.positional_argument_error(
+            call,
+            &["start", "stop", "step"],
+            returns,
+            unpacking::string(message),
+        )
+        .map(Some)
+    }
+
     /// Checks an iterable in its current lexical scope, before target binding.
     fn iteration_input(
         &mut self,
@@ -3986,8 +4011,11 @@ impl<'a> Checker<'a> {
             return Ok(input);
         }
         if let ast::Expr::Call(call) = expression
-            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
+            && self.unshadowed_builtin(&call.func, "range")
         {
+            if let Some(failure) = self.range_argument_error(call, Type::Int)? {
+                return Ok(Iteration::Range(vec![failure]));
+            }
             if !call.arguments.keywords.is_empty() || !(1..=3).contains(&call.arguments.args.len())
             {
                 return Err(error(
@@ -9002,6 +9030,11 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if self.unshadowed_builtin(&call.func, "range")
+            && let Some(failure) = self.range_argument_error(call, self.types.cursor(Type::Int))?
+        {
+            return Ok(failure);
+        }
         if self.unshadowed_builtin(&call.func, "__import__")
             && call
                 .arguments

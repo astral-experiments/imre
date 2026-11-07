@@ -28,6 +28,19 @@ use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use ruff_text_size::{Ranged, TextSize};
 
+/// Diagnose the positional-only range constructor before converting any bounds.
+pub fn range_constructor_error(positional: usize, keywords: bool) -> Option<String> {
+    if keywords {
+        Some("range() takes no keyword arguments".into())
+    } else {
+        match positional {
+            0 => Some("range expected at least 1 argument, got 0".into()),
+            1..=3 => None,
+            n => Some(format!("range expected at most 3 arguments, got {n}")),
+        }
+    }
+}
+
 /// A pattern that neither inspects nor captures its operand.
 pub fn wildcard_pattern(pattern: &ast::Pattern) -> bool {
     matches!(pattern, ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none())

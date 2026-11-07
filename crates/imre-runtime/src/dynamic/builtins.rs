@@ -2857,8 +2857,10 @@ pub(super) fn call(
         }
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 3)?;
+            if let Some(message) = imre_ast::range_constructor_error(args.len(), !kwargs.is_empty())
+            {
+                return Err(type_error(message));
+            }
             let first = ctx.index_integer(args[0])?;
             let (start, stop) = if let Some(&stop) = args.get(1) {
                 (first, ctx.index_integer(stop)?)
