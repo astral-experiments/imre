@@ -6,6 +6,35 @@ pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' 
 /// Native archives in import order. The first filename carries the wheel ABI tag.
 pub const NATIVE_ARCHIVE_EXTENSIONS: [&str; 2] = ["imre1.a", "imre.a"];
 
+/// Python language version used by the compiler and the runtime import machinery.
+pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = ruff_python_ast::PythonVersion::PY314;
+
+/// Filesystem module suffixes in discovery order; match compound suffixes before ".so".
+pub fn module_suffixes() -> [String; 7] {
+    let version = PYTHON_VERSION;
+    let abi = if cfg!(target_os = "macos") {
+        "darwin".to_owned()
+    } else {
+        let libc = if cfg!(target_env = "musl") {
+            "musl"
+        } else {
+            "gnu"
+        };
+        format!("{}-linux-{libc}", std::env::consts::ARCH)
+    };
+    let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
+    let [versioned, legacy] = NATIVE_ARCHIVE_EXTENSIONS.map(|ext| format!(".{ext}"));
+    [
+        tagged,
+        ".abi3.so".into(),
+        versioned,
+        legacy,
+        ".so".into(),
+        ".py".into(),
+        ".pyc".into(),
+    ]
+}
+
 /// Unicode Character Database version shipped with the target CPython 3.14 release.
 pub const UNICODE_DATA_VERSION: &str = "16.0.0";
 

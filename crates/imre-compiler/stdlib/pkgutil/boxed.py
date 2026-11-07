@@ -7,12 +7,16 @@ from importlib.util import resolve_name as _spec_name
 from os import fsdecode
 from os.path import abspath as _absolute, dirname, join as _join
 from typing import NamedTuple
+from _imre_importlib import module_suffixes as _target_suffixes
 from _imre_pkgutil import (
     filenames as _filenames,
     find_module as _find_module,
     find_spec as _find_spec,
     isdir as _isdir,
 )
+
+
+_module_suffixes = list(_target_suffixes)
 
 
 class ModuleInfo(NamedTuple):
