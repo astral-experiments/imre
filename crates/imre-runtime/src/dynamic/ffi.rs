@@ -299,7 +299,19 @@ impl Context {
                 let name = self.copy_name(b)?;
                 let released = self.replacing_finalizer(a, &name, NONE);
                 let scope = self.binding_scope(a, &name);
-                if self.remove_binding(scope, &name, b)? {
+                let removed = match self.remove_binding(scope, &name, b) {
+                    Err(error)
+                        if op == "delname"
+                            && self.scope_data(a).parent.is_none()
+                            && !self.scope_data(a).globals.contains(name.as_str()) =>
+                    {
+                        // DELETE_NAME replaces the mapping error after its callback has unwound.
+                        self.raised_instance(error);
+                        false
+                    }
+                    result => result?,
+                };
+                if removed {
                     if released {
                         self.heap.release_unbound_finalizers();
                     }
