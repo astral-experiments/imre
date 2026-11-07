@@ -3523,6 +3523,7 @@ impl Context {
                 "asinh",
                 "atan",
                 "atanh",
+                "comb",
                 "cosh",
                 "erfc",
                 "fabs",

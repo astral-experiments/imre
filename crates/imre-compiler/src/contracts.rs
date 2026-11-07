@@ -545,6 +545,7 @@ impl Builtin {
             | Self::StringIntList
             | Self::ListAccumulate
             | Self::Sumprod
+            | Self::MathComb
             | Self::EnumLookup(_)
             | Self::TomlDecode(_)
             | Self::FloatAcos
@@ -968,6 +969,7 @@ impl Builtin {
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
+            Self::MathComb => signature(&[Type::Int, Type::Int], Type::Int),
             Self::IntBitLength | Self::IntHash => signature(&[Type::Int], Type::Int),
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
             Self::FloatAcos
@@ -1275,6 +1277,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_secrets_choice_index"
                 | "imre_random_progression"
                 | "imre_function_get_wrapped"
+                | "imre_math_comb"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"

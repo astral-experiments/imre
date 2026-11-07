@@ -107,6 +107,17 @@ pub(super) fn call(
             format!("math.{operation}() takes no keyword arguments"),
         ));
     }
+    if operation == "comb" {
+        let &[n, k] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("comb expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let n = ctx.index_integer(n)?;
+        let k = ctx.index_integer(k)?;
+        return Ok(ctx.alloc(Value::Int(crate::integer_comb(&n, &k)?)));
+    }
     if matches!(operation, "gcd" | "lcm") {
         let mut result = if operation == "gcd" {
             BigInt::ZERO

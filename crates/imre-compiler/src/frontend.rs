@@ -9937,6 +9937,30 @@ impl<'a> Checker<'a> {
                 return stdlib::unary_float_builtin(Builtin::Abs, value)
                     .ok_or_else(|| self.scoped_builtin_error("math.fabs", call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.comb")))
+                if call.arguments.keywords.is_empty()
+                    && let [n, k] = call.arguments.args.as_ref()
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "math",
+                        "comb",
+                    ) =>
+            {
+                let n = self.expr(n)?;
+                let k = self.expr(k)?;
+                if matches!(n.ty, Type::Int | Type::Bool) && matches!(k.ty, Type::Int | Type::Bool)
+                {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(
+                            Builtin::MathComb,
+                            vec![powers::integer(n), powers::integer(k)],
+                        ),
+                    });
+                }
+                return Err(self.scoped_builtin_error(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "math.log2")))
                 if call.arguments.keywords.is_empty()
                     && let [arg] = call.arguments.args.as_ref()

@@ -2340,6 +2340,7 @@ impl IntrinsicModule {
             (Self::Math, "atan") => Intrinsic::MathAtan,
             (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "atanh") => Intrinsic::ScopedObjectExport("math.atanh"),
+            (Self::Math, "comb") => Intrinsic::ScopedObjectExport("math.comb"),
             (Self::Math, "cosh") => Intrinsic::ScopedObjectExport("math.cosh"),
             (Self::Math, "erfc") => Intrinsic::MathErfc,
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
