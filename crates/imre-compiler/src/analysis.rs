@@ -164,29 +164,14 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
-        // CPython truth-tests any non-None debug_override and raises for conflicting
-        // optimization arguments. Preserve these catchable routes and the original
-        // unrelated frozen-importlib declarations, including their version guards.
-        let bootstrap = vendored
-            .read_to_string("stdlib/_frozen_importlib_external.pyi")
-            .map_err(|e| e.to_string())?
-            .replace(
-                "def cache_from_source(path: StrPath,",
-                "def cache_from_source(path: object,",
-            )
-            .replace(
-                "debug_override: bool, *, optimization: None = None",
-                "debug_override: object, *, optimization: object = None",
-            )
-            .replace(
-                "def source_from_cache(path: StrPath)",
-                "def source_from_cache(path: object)",
-            );
+        let stdlib_stubs = intrinsic.join(".stdlib-stubs");
+        // Based on ty_vendored 0.0.15 (licenses/typeshed.txt). Retain the cache
+        // helpers' object parameters when importing updated typeshed declarations.
         system
             .fs()
             .write_file_all(
-                SystemPathBuf::from(root).join("_frozen_importlib_external.pyi"),
-                bootstrap,
+                stdlib_stubs.join("_frozen_importlib_external.pyi"),
+                include_str!("stubs/_frozen_importlib_external.pyi"),
             )
             .map_err(|e| e.to_string())?;
         // CPython's _simple_enum builds the public enum classes from private member
@@ -199,7 +184,6 @@ impl Session {
             .write_file_all(SystemPathBuf::from(root).join("http/__init__.pyi"), http)
             .map_err(|e| e.to_string())?;
         // Only use the augmented stdlib stub when the project did not supply inspect.
-        let stdlib_stubs = intrinsic.join(".stdlib-stubs");
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
             .map_err(|e| e.to_string())?;
