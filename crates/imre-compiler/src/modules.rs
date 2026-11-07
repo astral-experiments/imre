@@ -3121,8 +3121,8 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
-    /// A reachable bytearray constructor keeps its object implementation available on typed failure.
-    pub(crate) has_native_bytearray: std::cell::Cell<bool>,
+    /// A reachable native constructor can use its object implementation if typed lowering fails.
+    pub(crate) has_object_constructor_fallback: std::cell::Cell<bool>,
     pub(crate) check_fallback_calls: std::cell::Cell<FallbackCalls>,
     pub(crate) imports_runtime_class: bool,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
@@ -4569,7 +4569,7 @@ impl<'a> Loader<'a> {
             needs_object_runtime: std::cell::Cell::new(
                 self.needs_object_imports && self.runtime_initializer.is_none(),
             ),
-            has_native_bytearray: Default::default(),
+            has_object_constructor_fallback: Default::default(),
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
             imports_runtime_class: self.imports_runtime_class,

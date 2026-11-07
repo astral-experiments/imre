@@ -446,7 +446,8 @@ fn object_fallback<T>(
             Some(dynamic::ObjectOperation::ClassLayout)
         } else {
             (g.object_builtin_errors.borrow().contains(&error)
-                || g.has_native_bytearray.get() && !g.return_errors.borrow().contains(&error))
+                || g.has_object_constructor_fallback.get()
+                    && !g.return_errors.borrow().contains(&error))
             .then_some(dynamic::ObjectOperation::Builtin)
         }
     });
@@ -484,7 +485,7 @@ fn object_fallback<T>(
                     .any(|names| names.len() > 1)
             });
             let all_calls = !matches!(requested, analysis::FallbackCalls::None)
-                || checked_file && graph.has_native_bytearray.get()
+                || checked_file && graph.has_object_constructor_fallback.get()
                 || !entry.optional_imports.is_empty()
                 || compound_probe
                 || !graph.needs_object_runtime.get()
@@ -974,6 +975,19 @@ fn check_encoding(source: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn dictionary_set_construction_preserves_object_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(
+            &path,
+            "keys = set({'first': 1, 'second': 2})\nprint([3, 7], len(keys), 'second' in keys)\n",
+        )
+        .unwrap();
+        let program = super::compile_file(&path, None, &CompileOptions::default()).unwrap();
+        assert!(program.llvm_ir.contains("call ptr @imre_dyn_new("));
+    }
 
     #[test]
     fn native_bytearray_construction_preserves_object_fallback() {
