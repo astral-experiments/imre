@@ -4622,6 +4622,16 @@ impl Context {
                     return self.bind_attribute(member, NONE, obj);
                 }
             }
+            #[cfg(unix)]
+            Value::TlsBioSession { .. } if name == "do_handshake" => {
+                let module = self.module("ssl")?;
+                let callable = self.lookup_attr(module, "_bio_handshake")?;
+                return Ok(self.alloc(Value::Method {
+                    callable,
+                    receiver: obj,
+                    explicit: false,
+                }));
+            }
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }
@@ -6306,7 +6316,7 @@ impl Context {
                 self.layout_receiver_class(owner, name, receiver)?;
                 Ok(self
                     .heap
-                    .weak_references(receiver)
+                    .python_weak_references(receiver)
                     .first()
                     .copied()
                     .unwrap_or(NONE))

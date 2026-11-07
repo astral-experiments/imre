@@ -798,6 +798,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         sys_path: NONE,
         startup_path0: None,
         default_encoding: NONE,
+        displaced_sni_callbacks: Default::default(),
         audit_hooks: Vec::new(),
         fork_hooks: Default::default(),
         fault_file: None,
@@ -2245,6 +2246,7 @@ impl Context {
                 .values()
                 .chain(self.enum_scopes.values())
                 .chain(self.signal_handlers.iter())
+                .chain(self.displaced_sni_callbacks.iter())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
                 .chain(self.native_type_dicts.values())

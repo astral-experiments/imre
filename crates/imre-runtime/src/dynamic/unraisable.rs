@@ -52,16 +52,23 @@ pub(super) fn report(
     callable: Option<Id>,
     prefix: &str,
 ) {
+    report_with_message(ctx, error, supply_frame, |ctx| match callable {
+        Some(callable) => Ok(format!("{prefix} {}", ctx.checked_format(callable, true)?)),
+        None => Ok(prefix.to_owned()),
+    });
+}
+
+/// Keep the exception and traceback alive across arbitrary Python code in the message's reprs.
+pub(super) fn report_with_message(
+    ctx: &mut Context,
+    error: Error,
+    supply_frame: bool,
+    message: impl FnOnce(&mut Context) -> Result<String>,
+) {
     let Ok(fields) = exception_fields(ctx, error, supply_frame) else {
         return;
     };
-    let message = match callable {
-        Some(callable) => match ctx.checked_format(callable, true) {
-            Ok(name) => ctx.text(format!("{prefix} {name}")),
-            Err(_) => NONE,
-        },
-        None => ctx.text(prefix),
-    };
+    let message = message(ctx).map_or(NONE, |s| ctx.text(s));
     let args = record(ctx, fields, message, NONE);
     ctx.heap.keep(args);
     let Ok(hook) = ctx.sys_binding("unraisablehook") else {
