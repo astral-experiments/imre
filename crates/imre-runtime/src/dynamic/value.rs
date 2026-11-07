@@ -2816,6 +2816,11 @@ enum MarkMode<'a> {
 pub(super) trait VisitReferences {
     fn push(&mut self, id: Id);
 
+    /// Keep the callback type independent of the iterator supplying the roots.
+    fn visitor(&mut self) -> impl FnMut(Id) {
+        |id| self.push(id)
+    }
+
     fn extend<T: std::borrow::Borrow<Id>>(&mut self, ids: impl IntoIterator<Item = T>) {
         for id in ids {
             self.push(*id.borrow());
@@ -4448,7 +4453,7 @@ impl Heap {
     }
 
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut impl VisitReferences) {
-        pending.extend(globals);
+        globals.for_each(pending.visitor());
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_string_constants.values().copied());
         pending.extend(self.short_bytes.values().copied());
