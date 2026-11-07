@@ -540,12 +540,9 @@ pub(super) fn bind_new(
         "))",
     ])?);
     ctx.exec_source(source, globals, None, None)?;
-    let new = ctx
-        .dict_named_item(globals, "__new__")
-        .expect("generated function");
-    ctx.heap.keep(new);
     let key = ctx.text("__new__");
-    ctx.delete_item(globals, key)?;
+    let new = builtins::remove_dict_item(ctx, globals, key)?.expect("generated function");
+    ctx.heap.keep(new);
     let Value::Function { code, .. } = *ctx.heap.get(new) else {
         unreachable!()
     };
