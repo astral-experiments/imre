@@ -99,6 +99,19 @@ pub(super) fn semantics(
             Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes
         )
     });
+    // The high half of the flags word describes the text slots in short
+    // records whose other fields contain full-width tagged integers.
+    let mut scalar_release = 0_u32;
+    if fields.len() <= u16::BITS as usize
+        && fields.iter().all(|ty| matches!(ty, Type::Int | Type::Str))
+    {
+        scalar_release |= 1 << 15;
+        for (slot, ty) in fields.iter().enumerate() {
+            if *ty == Type::Str {
+                scalar_release |= 1 << (16 + slot);
+            }
+        }
+    }
     let (kind, flags, class_name, qualified_name, fields) = match ty {
         Type::Class(class) => {
             let Some(metadata) = module.class_metadata.get(class) else {
@@ -214,6 +227,7 @@ pub(super) fn semantics(
         }
         _ => unreachable!("only public record layouts have value behavior"),
     };
+    let flags = flags | scalar_release;
     let names = |output: &mut String, prefix: &str, value: &str| {
         if value.is_empty() {
             return "ptr null, i64 0".to_owned();

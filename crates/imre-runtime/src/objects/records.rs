@@ -45,6 +45,7 @@ pub struct RecordDescriptor {
 #[repr(C)]
 pub struct RecordSemantics {
     pub kind: u32,
+    /// Bit 15 enables compact integer/text teardown. Bits 16–31 select the text slots.
     pub flags: u32,
     pub name: *const u8,
     pub name_len: usize,
@@ -908,7 +909,35 @@ unsafe fn release_fields<const PACKED: bool>(
     // Dataclass fields release in definition order. Tuples release their last
     // element first. Both kinds use the same native record layout.
     // SAFETY: semantic metadata, when present, lives as long as the descriptor.
-    let is_tuple = unsafe { descriptor.semantics.as_ref() }.is_some_and(|value| value.kind == 1);
+    let semantics = unsafe { descriptor.semantics.as_ref() };
+    let is_tuple = semantics.is_some_and(|value| value.kind == 1);
+    if let Some(layout) = semantics.filter(|value| value.flags & (1 << 15) != 0) {
+        let text_slots = layout.flags >> 16;
+        for field in fields {
+            let index = if is_tuple {
+                descriptor.length - 1 - field
+            } else {
+                field
+            };
+            let text_slot = text_slots & (1 << index) != 0;
+            let kind = WordKind::new(if text_slot { 3 } else { 2 });
+            // SAFETY: the compiler mask selects the exact field representation.
+            let word = unsafe { kind.read_record_field(payload.add(index)) };
+            if word == 0 || word & 1 != 0 {
+                continue;
+            }
+            if !text_slot {
+                drop(crate::Int(word));
+            } else if PACKED {
+                // SAFETY: the indexed text slot transfers one live string owner.
+                strings::release(unsafe { StrOwner::from_raw(word as *const crate::Str) });
+            } else {
+                // SAFETY: the indexed text slot transfers one live string owner.
+                unsafe { StrOwner::decrement_strong_count(word as *const crate::Str) };
+            }
+        }
+        return;
+    }
     for field in fields {
         let index = if is_tuple {
             descriptor.length - 1 - field
@@ -1185,6 +1214,40 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+    #[test]
+    fn compact_field_mask_releases_pointer_and_integer_owners() {
+        let mut kinds = [2; 16];
+        kinds[15] = 3;
+        let semantics = RecordSemantics {
+            kind: 0,
+            flags: (1 << 6) | (1 << 15) | (1 << 31),
+            name: std::ptr::null(),
+            name_len: 0,
+            qualified_name: std::ptr::null(),
+            qualified_name_len: 0,
+            fields: std::ptr::null(),
+        };
+        let layout = RecordDescriptor {
+            length: kinds.len(),
+            kinds: kinds.as_ptr(),
+            semantics: &semantics,
+        };
+        let text = StrOwner::new(Str::from("last field"));
+        let integer = crate::wide_owner(BigInt::from(1_u128 << 120));
+        // SAFETY: the layout outlives the record and each store uses its declared kind.
+        unsafe {
+            let record = imre_record_new(&layout);
+            replace(record, 0, Shared::as_ptr(&integer) as usize, 2);
+            replace(record, 1, Int::small(-17).unwrap().0, 2);
+            replace(record, 15, StrOwner::as_ptr(&text) as usize, 3);
+            assert_eq!(Shared::strong_count(&integer), 2);
+            assert_eq!(StrOwner::strong_count(&text), 2);
+            imre_record_release(record);
+        }
+        assert_eq!(Shared::strong_count(&integer), 1);
+        assert_eq!(StrOwner::strong_count(&text), 1);
     }
 
     #[test]
