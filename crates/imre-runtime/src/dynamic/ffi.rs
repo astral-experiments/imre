@@ -1923,10 +1923,13 @@ impl Context {
         let fields =
             super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
         let names = self.code_object(code).freevars.clone();
-        let entries = self
-            .dict_entries(defaults)
-            .expect("function defaults are a dict")
-            .to_vec();
+        let entries = if defaults == NONE {
+            Vec::new()
+        } else {
+            self.dict_entries(defaults)
+                .expect("function defaults are a dict")
+                .to_vec()
+        };
         // Only default values and implicit class cells need the parameter metadata here.
         let signature = self.code_object(code).parameters;
         let signature: serde_json::Value = if signature == NONE

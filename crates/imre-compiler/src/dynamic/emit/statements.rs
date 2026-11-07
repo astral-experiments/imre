@@ -765,8 +765,7 @@ impl Function<'_, '_> {
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
-            let defaults = self.op("dict", &[]);
-            self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
+            self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 0, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
         };
         let qualname = self.text(&qualname);
         let mut signature =
@@ -895,7 +894,16 @@ impl Function<'_, '_> {
                 signature["thread_bound_lock_field"] = json!(field);
             }
         }
-        let defaults = self.op("dict", &[]);
+        // A type alias thunk has an implicit default for its format parameter.
+        let defaults = if matches!(body, Body::TypeAlias(_))
+            || params.is_some_and(|p| {
+                p.iter_non_variadic_params()
+                    .any(|arg| arg.default.is_some())
+            }) {
+            self.op("dict", &[])
+        } else {
+            "0".into()
+        };
         if matches!(body, Body::TypeAlias(_)) {
             signature["posonly"] = json!([".format"]);
             let format = self.text(".format");
@@ -1030,8 +1038,7 @@ impl Function<'_, '_> {
                 None,
             );
             let name = self.text("__annotate__");
-            let defaults = self.op("dict", &[]);
-            let provider = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+            let provider = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
             self.bind("__annotate__", &provider);
         }
         self.op("setup_module_annotations", &[&self.scope.clone()]);
