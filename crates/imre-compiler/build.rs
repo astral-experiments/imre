@@ -16,9 +16,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=stdlib/installed-sources.txt");
     println!("cargo:rerun-if-changed=stdlib/runtime-only-sources.txt");
     // Only installed-sources.txt participates in checked file-entry admission.
+    // The standalone marker affects source registration, not the path in the ZIP.
+    let runtime_only = include_str!("stdlib/runtime-only-sources.txt")
+        .lines()
+        .map(|entry| entry.strip_prefix("standalone ").unwrap_or(entry));
     let members: Vec<_> = include_str!("stdlib/installed-sources.txt")
         .lines()
-        .chain(include_str!("stdlib/runtime-only-sources.txt").lines())
+        .chain(runtime_only)
         .collect();
     std::fs::write(out.join("imre-stdlib-members.txt"), members.join("\n"))?;
     for name in members {
