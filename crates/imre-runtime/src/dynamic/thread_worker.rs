@@ -433,14 +433,20 @@ impl Registry {
 }
 
 impl Registry {
+    fn shutdown_handles(&self) -> impl Iterator<Item = &Arc<Handle>> {
+        let caller = thread_ident();
+        self.entries
+            .iter()
+            .filter(move |worker| !worker.daemon && worker.ident != caller)
+            .map(|worker| &worker.handle)
+    }
+
     fn join_non_daemon(&self) {
-        for worker in &self.entries {
-            if !worker.daemon {
-                // Explicit detach completes Python joins before the real worker exits.
-                // Non-daemon shutdown still waits for its final bootstrap references.
-                worker.handle.wait(None, State::worker_pending);
-                drop(worker.handle.joined());
-            }
+        for handle in self.shutdown_handles() {
+            // Explicit detach completes Python joins before the real worker exits.
+            // Non-daemon shutdown still waits for its final bootstrap references.
+            handle.wait(None, State::worker_pending);
+            drop(handle.joined());
         }
     }
 }
@@ -793,10 +799,15 @@ pub(super) fn call(
         ("shutdown", &[]) => {
             // A signal handler may start a worker or reap entries. Keep only the
             // native handle across dispatch, then look up the next live worker.
-            while let Some(handle) = ctx.workers.entries.iter().find_map(|worker| {
-                (!worker.daemon && worker.handle.awaiting_exit())
-                    .then(|| Arc::clone(&worker.handle))
-            }) {
+            loop {
+                let Some(handle) = ctx
+                    .workers
+                    .shutdown_handles()
+                    .find(|h| h.awaiting_exit())
+                    .cloned()
+                else {
+                    break;
+                };
                 if let Err(error) = handle.wait_interruptible(ctx, None) {
                     super::unraisable::report(
                         ctx,

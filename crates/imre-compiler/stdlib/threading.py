@@ -1,7 +1,7 @@
 """Thread objects for the native object runtime."""
 
 from _thread import TIMEOUT_MAX, LockType as Lock, _local as local, get_ident
-from _thread import _ThreadHandle, allocate_lock as _allocate_lock
+from _thread import _ThreadHandle, _shutdown as _thread_shutdown, allocate_lock as _allocate_lock
 import _thread
 import sys as _sys
 from time import monotonic as _time
@@ -1060,7 +1060,7 @@ def _shutdown():
         callback()
     _main_thread._os_thread_handle._set_done()
     _main_thread._stopped = True
-    _imre_thread.shutdown()
+    _thread_shutdown()
 
 
 def main_thread():
