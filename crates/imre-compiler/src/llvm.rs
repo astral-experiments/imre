@@ -7065,6 +7065,9 @@ impl Emitter<'_, '_> {
             Builtin::DecodeAscii => {
                 self.call("imre_bytes_decode_ascii", Type::Str, &[&args[0].value])
             }
+            Builtin::DecodeLatin1 => {
+                self.call("imre_bytes_decode_latin1", Type::Str, &[&args[0].value])
+            }
             Builtin::Base64Translate => self.call(
                 "imre_base64_translate",
                 Type::Bytes,
@@ -11126,6 +11129,7 @@ declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_hex(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
+declare ptr @imre_bytes_decode_latin1(ptr)
 declare ptr @imre_urlsafe_b64encode(ptr)
 declare ptr @imre_base64_translate(ptr, ptr, i1)
 declare ptr @imre_binascii_ascii_input(ptr)
@@ -12352,6 +12356,15 @@ mod tests {
                 .0
                 .contains("call void @imre_object_release(")
         );
+    }
+
+    #[test]
+    fn constant_latin1_encoding_decodes_the_buffer_directly() {
+        let body = function_body(
+            "def convert(data: bytes) -> str:\n    return str(data, 'IsO-8859-1')\nprint(convert(b'x'))",
+        );
+        assert!(body.contains("call ptr @imre_bytes_decode_latin1("));
+        assert!(!body.contains("call ptr @imre_codec_lookup("));
     }
 
     #[test]
