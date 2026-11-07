@@ -453,7 +453,8 @@ fn object_fallback<T>(
                 || !entry.optional_imports.is_empty()
                 || compound_probe
                 || !graph.needs_object_runtime.get()
-                    && graph.object_builtin_errors.borrow().contains(&error);
+                    && graph.object_builtin_errors.borrow().contains(&error)
+                || checked_file && graph.uses_source_loader();
             let checked_calls = if !checked_file {
                 requested
             } else if graph.check_method_factories.get() {

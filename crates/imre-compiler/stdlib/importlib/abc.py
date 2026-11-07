@@ -18,7 +18,7 @@ except ImportError:
 
 __all__ = [
     "Loader", "MetaPathFinder", "PathEntryFinder", "ResourceLoader",
-    "InspectLoader", "ExecutionLoader", "FileLoader",
+    "InspectLoader", "ExecutionLoader", "FileLoader", "SourceLoader",
 ]
 
 
@@ -100,3 +100,54 @@ class FileLoader(_bootstrap_external.FileLoader, ResourceLoader, ExecutionLoader
 
 
 _register(FileLoader, machinery.SourceFileLoader, machinery.SourcelessFileLoader)
+
+
+class SourceLoader(_bootstrap_external.SourceLoader, ResourceLoader, ExecutionLoader):
+
+    """Abstract base class for loading source code (and optionally any
+    corresponding bytecode).
+
+    To support loading from source code, the abstractmethods inherited from
+    ResourceLoader and ExecutionLoader need to be implemented. To also support
+    loading from bytecode, the optional methods specified directly by this ABC
+    is required.
+
+    Inherited abstractmethods not implemented in this ABC:
+
+        * ResourceLoader.get_data
+        * ExecutionLoader.get_filename
+
+    """
+
+    def path_mtime(self, path):
+        """Return the (int) modification time for the path (str)."""
+        import warnings
+        warnings.warn('SourceLoader.path_mtime is deprecated in favour of '
+                      'SourceLoader.path_stats().',
+                      DeprecationWarning, stacklevel=2)
+        if self.path_stats.__func__ is SourceLoader.path_stats:
+            raise OSError
+        return int(self.path_stats(path)['mtime'])
+
+    def path_stats(self, path):
+        """Return a metadata dict for the source pointed to by the path (str).
+        Possible keys:
+        - 'mtime' (mandatory) is the numeric timestamp of last source
+          code modification;
+        - 'size' (optional) is the size in bytes of the source code.
+        """
+        if self.path_mtime.__func__ is SourceLoader.path_mtime:
+            raise OSError
+        return {'mtime': self.path_mtime(path)}
+
+    def set_data(self, path, data):
+        """Write the bytes to the path (if possible).
+
+        Accepts a str path and data as bytes.
+
+        Any needed intermediary directories are to be created. If for some
+        reason the file cannot be written because of permissions, fail
+        silently.
+        """
+
+_register(SourceLoader, machinery.SourceFileLoader)

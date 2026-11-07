@@ -1202,9 +1202,11 @@ impl Intrinsic {
     pub(crate) fn scoped_class_base(self) -> Option<&'static str> {
         match self {
             Self::SOCKETSERVER_CLASS => Some("socketserver base class"),
-            Self::ScopedObjectExport(name @ ("enum.Flag" | "unittest.IsolatedAsyncioTestCase")) => {
-                Some(name)
-            }
+            Self::ScopedObjectExport(
+                name @ ("enum.Flag"
+                | "unittest.IsolatedAsyncioTestCase"
+                | "importlib.abc.SourceLoader"),
+            ) => Some(name),
             _ => None,
         }
     }
@@ -1632,6 +1634,9 @@ impl IntrinsicModule {
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "NamespaceLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.NamespaceLoader")
+            }
+            (Self::ImportlibAbc, "SourceLoader") => {
+                Intrinsic::ScopedObjectExport("importlib.abc.SourceLoader")
             }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
@@ -3104,6 +3109,26 @@ impl SourceGraph {
                 && ast::helpers::any_over_body(&module.parsed.syntax().body, |expr| {
                     self.boxed_pattern_method(id, expr).is_some()
                 })
+        })
+    }
+
+    /// A first-party loader can select object execution before a typed call in another module.
+    pub(crate) fn uses_source_loader(&self) -> bool {
+        self.modules.iter().enumerate().any(|(id, module)| {
+            !module.bundled
+                && (module.bindings.values().any(|binding| {
+                    *binding
+                        == Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                            "importlib.abc.SourceLoader",
+                        ))
+                }) || ast::helpers::any_over_body(&module.parsed.syntax().body, |expr| {
+                    expr.as_attribute_expr().is_some_and(|attr| {
+                        attr.attr.as_str() == "SourceLoader"
+                            && self
+                                .session
+                                .is_stdlib_module(id, &attr.value, "importlib.abc")
+                    })
+                }))
         })
     }
 
@@ -5186,23 +5211,24 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::Md5
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::Imp
-                    | IntrinsicModule::ImportlibAbc
                     | IntrinsicModule::ImportlibLoaderAbc
                     | IntrinsicModule::ImportlibBootstrapExternal
                     | IntrinsicModule::ImportlibResourcesAbc
-            ) || module == IntrinsicModule::SocketNative
-                && imports.is_none_or(|names| {
-                    names.iter().any(|alias| {
-                        !matches!(
-                            module.symbol(alias.name.as_str()),
-                            Some(Binding::Intrinsic(
-                                Intrinsic::IntConstant(_)
-                                    | Intrinsic::SocketControlSize { .. }
-                                    | Intrinsic::ScopedObjectExport(_)
-                            ))
-                        )
-                    })
-                });
+            ) || matches!(
+                module,
+                IntrinsicModule::SocketNative | IntrinsicModule::ImportlibAbc
+            ) && imports.is_none_or(|names| {
+                names.iter().any(|alias| {
+                    !matches!(
+                        module.symbol(alias.name.as_str()),
+                        Some(Binding::Intrinsic(
+                            Intrinsic::IntConstant(_)
+                                | Intrinsic::SocketControlSize { .. }
+                                | Intrinsic::ScopedObjectExport(_)
+                        ))
+                    )
+                })
+            });
         }
         if module == Some(IntrinsicModule::Dataclasses)
             && imports.is_none_or(|names| {

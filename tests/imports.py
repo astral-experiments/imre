@@ -25,6 +25,40 @@ LOCALE_FORMAT = (
 )
 
 REJECTED = {
+    "local_source_loader_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from scores import take\n"
+            "def loader_type():\n"
+            "    from importlib.abc import SourceLoader\n"
+            "    return SourceLoader\n"
+            "print(take('x'))\n"
+        ),
+    }, "invalid-argument-type"),
+    "unused_source_loader_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from importlib.abc import SourceLoader as Loader\n"
+            "from scores import take\n"
+            "def unused() -> int: return take('x')\n"
+            "print(take(7))\n"
+        ),
+    }, "invalid-argument-type"),
+    "source_loader_subclass_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "rules.py": (
+            "from importlib.abc import SourceLoader\n"
+            "class MemoryLoader(SourceLoader):\n"
+            "    def get_filename(self, fullname): return 'rules.py'\n"
+            "    def get_data(self, path): return b'value = 42'\n"
+        ),
+        "main.py": (
+            "from rules import MemoryLoader\n"
+            "from scores import take\n"
+            "def unused() -> int: return take('x')\n"
+            "print(MemoryLoader().get_filename('rules'))\n"
+        ),
+    }, "invalid-argument-type"),
     "unused_reload_preserves_typed_call": ({
         "scores.py": "def take(value: int) -> int: return value\n",
         "main.py": (
@@ -742,6 +776,16 @@ ACCEPTED = {
     "methodcaller_from_alias": {
         "main.py": "from operator import methodcaller as call\nprint(call('replace', 'a', 'b')('abc'))\n",
     },
+    "unreached_local_source_loader": {
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from scores import take\n"
+            "def loader_type():\n"
+            "    from importlib.abc import SourceLoader\n"
+            "    return SourceLoader\n"
+            "print(take(3))\n"
+        ),
+    },
     "doctest_qualified_exception": {
         "events_module.py": (
             '"""\n>>> raise Problem("sample event")\nTraceback (most recent call last):\n'
@@ -1391,11 +1435,12 @@ ACCEPTED = {
         "helper.py": (
             "from importlib import abc\n"
             "import importlib.abc as protocols\n"
-            "from importlib.abc import FileLoader\n"
+            "from importlib.abc import FileLoader, SourceLoader\n"
             "from importlib._abc import Loader\n"
             "from importlib.util import Loader as UtilLoader\n"
             "def check():\n"
             "    assert abc is protocols and FileLoader is abc.FileLoader\n"
+            "    assert SourceLoader is protocols.SourceLoader\n"
             "    assert Loader is UtilLoader is abc.Loader\n"
             "    assert abc.MetaPathFinder().invalidate_caches() is None\n"
         ),
