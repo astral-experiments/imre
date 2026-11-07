@@ -1,6 +1,13 @@
 use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a string; the optional doc argument can have any type.";
+pub(super) const METHODS: &[&str] = &[
+    "__new__",
+    "__init__",
+    "__repr__",
+    "__dir__",
+    "__getattribute__",
+];
 
 impl Context {
     /// Copy live exports from a module in their original order. A failing lookup
@@ -129,10 +136,6 @@ impl Context {
             return self.instance_attribute(module, class, field, name);
         }
         match name {
-            "__init__" | "__getattribute__" | "__dir__" | "__repr__" => {
-                let method = self.builtin(&format!("module.{name}"));
-                return self.bind_attribute(method, module, class);
-            }
             "__setattr__" | "__str__" => {
                 let method = self.builtin(&format!("object.{name}"));
                 return self.bind_attribute(method, module, class);
@@ -196,11 +199,7 @@ impl Context {
         if let Some(hook) = self.scope_name(scope, "__dir__") {
             return self.call(hook, vec![], vec![]);
         }
-        if let Value::Module {
-            name,
-            constructor: None,
-            ..
-        } = self.heap.get(module)
+        if let Value::Module { name, .. } = self.heap.get(module)
             && super::stdlib::has_lazy_attributes(name)
         {
             return Err(Error::new(
@@ -251,11 +250,37 @@ impl Context {
         Ok(())
     }
 
+    /// Walk the effective storage bases past subclasses that add no fields.
+    /// ModuleType already provides both the dictionary and weak-reference storage.
+    pub(super) fn module_slot_layout(&mut self, mut class: Id) -> Result<(Id, Vec<String>)> {
+        let unknown = || Error::new("TypeError", "cannot determine module subclass layout");
+        while let Value::Class { name, scope, .. } = self.heap.get(class) {
+            let namespace = self
+                .scope_data(*scope)
+                .class_namespace
+                .as_ref()
+                .ok_or_else(unknown)?;
+            let mut slots: Vec<_> = namespace
+                .slot_names
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|slot| !matches!(slot.as_str(), "__dict__" | "__weakref__"))
+                .map(|slot| super::slot_member::slot_name(name, slot))
+                .collect();
+            let bases = self.class_bases_tuple(class).ok_or_else(unknown)?;
+            class = self.member_layout_base(&bases)?;
+            if !slots.is_empty() {
+                slots.sort_unstable();
+                return Ok((class, slots));
+            }
+        }
+        Ok((class, Vec::new()))
+    }
+
     /// Allocate an empty module namespace without publishing the module in sys.modules.
     pub(super) fn allocate_module(&mut self, class: Id) -> Id {
         let scope = self.scope("", None);
-        self.builtin("module.__init__");
-        self.builtin("module.__repr__");
         self.alloc(Value::Module {
             name: String::new(),
             scope,

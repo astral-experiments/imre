@@ -3019,6 +3019,7 @@ impl Context {
                 "__reduce_ex__",
             ],
             "dict" => builtins::DICT_METHODS,
+            "module" => module_type::METHODS,
             "function" => &["__call__"],
             "builtin_function_or_method" | "method" => &["__reduce__"],
             defaultdict::CLASS => {

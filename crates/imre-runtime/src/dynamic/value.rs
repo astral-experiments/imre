@@ -1305,7 +1305,8 @@ pub(super) enum Value {
         initializing: bool,
         // Private state retained by this generation of a native module.
         module_state: Option<NativeModuleState>,
-        // Imported modules are resolved separately from independently constructed ones.
+        // Concrete Python type. Imported base modules use None; a directly constructed
+        // module has an empty internal import name and always carries its constructor.
         constructor: Option<Id>,
     },
     Function {
@@ -1826,6 +1827,7 @@ impl Value {
     pub(super) fn finalizer_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
         }

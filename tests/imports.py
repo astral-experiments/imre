@@ -1644,6 +1644,14 @@ ACCEPTED = {
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
     },
+    "lazy_loader": {
+        "main.py": (FIXTURES.parent / "importlib_lazy_loader.py").read_text(),
+        "price_events.py": "calls = []\n",
+        "price_plugin.py": (
+            "import price_events\nprice_events.calls.append(__name__)\ncurrency = 'USD'\n"
+            "def quote(value): return value + 2\n"
+        ),
+    },
     "frozen_importer": {
         "main.py": (FIXTURES.parent / "frozen_importer.py").read_text(),
         "frozen_price_plugin.py": "def quote(n): return n * 7\n",

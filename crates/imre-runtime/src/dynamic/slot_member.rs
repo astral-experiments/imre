@@ -3,6 +3,16 @@
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use ruff_python_stdlib::identifiers::is_identifier;
 
+/// Python mangles private member names with the name of the declaring class.
+pub(super) fn slot_name(class_name: &str, original: &str) -> String {
+    let owner = class_name.trim_start_matches('_');
+    if original.starts_with("__") && !original.ends_with("__") && !owner.is_empty() {
+        format!("_{owner}{original}")
+    } else {
+        original.to_owned()
+    }
+}
+
 impl Context {
     /// Inspect inherited slot layouts in method resolution order, without invoking Python.
     fn dataclass_slot_ancestors(&mut self, class: Id) -> Result<Vec<Id>> {
@@ -734,13 +744,7 @@ impl Context {
             if matches!(original.as_str(), "__dict__" | "__weakref__") {
                 continue;
             }
-            let owner = class_name.trim_start_matches('_');
-            let name =
-                if original.starts_with("__") && !original.ends_with("__") && !owner.is_empty() {
-                    format!("_{owner}{original}")
-                } else {
-                    original.clone()
-                };
+            let name = slot_name(class_name, original);
             if self
                 .namespace_binding(self.scope_data(scope), &name)
                 .is_some()

@@ -98,3 +98,37 @@ def current():
     del child
     assert reference() is None
     print("module identity, live namespace, subclass, weak reference")
+
+    class Empty(ModuleType):
+        __slots__ = ()
+
+    class Fee(ModuleType):
+        __slots__ = ("fee",)
+
+    class Standard(Empty):
+        __slots__ = ("price",)
+
+    class Premium(Empty, Fee):
+        __slots__ = ("price",)
+
+    class Reordered(Fee, Empty):
+        __slots__ = ("price",)
+
+    quote = Standard("quote")
+    quote.price = 42
+    try:
+        quote.__class__ = Premium
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted an additional inherited fee slot")
+    assert type(quote) is Standard and quote.price == 42
+
+    wide = Premium("wide")
+    wide.price, wide.fee = 42, 13
+    namespace = wide.__dict__
+    ref = _weakref.ref(wide)
+    for target in (Reordered, Premium):
+        wide.__class__ = target
+        assert type(wide) is target and wide.__dict__ is namespace and ref() is wide
+        assert (wide.price, wide.fee) == (42, 13)
