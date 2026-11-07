@@ -324,7 +324,7 @@ impl Context {
             definition,
         )?;
         self.heap.keep(function);
-        let first = &genexpr.generators[0];
+        let first = outer_clause(&genexpr.generators);
         let iterable = match outer {
             Some(value) => value,
             None => self.source_expr(code, scope, &first.iter)?,

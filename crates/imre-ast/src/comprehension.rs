@@ -101,6 +101,13 @@ pub struct Plan<'a> {
     pub clauses: &'a [ast::Comprehension],
 }
 
+/// The only clause whose iterable expression is evaluated by the caller.
+pub fn outer_clause(clauses: &[ast::Comprehension]) -> &ast::Comprehension {
+    clauses
+        .first()
+        .expect("comprehension has an outer iterable")
+}
+
 impl<'a> Plan<'a> {
     pub fn from_expr(expr: &'a ast::Expr) -> Option<Self> {
         let (output, clauses) = Output::from_expr(expr)?;
@@ -112,9 +119,7 @@ impl<'a> Plan<'a> {
     }
 
     pub fn new(clauses: &'a [ast::Comprehension], output: Output<'a>) -> Self {
-        let outer = clauses
-            .first()
-            .expect("comprehension has an outer iterable");
+        let outer = outer_clause(clauses);
         let mut heads = Vec::with_capacity(clauses.len());
         let mut steps = Vec::new();
         for (depth, clause) in clauses.iter().enumerate() {
@@ -224,8 +229,10 @@ impl<'a> Plan<'a> {
         names
     }
 
-    /// Visit the expressions in one successful pass through the body. The
-    /// acquisition expression belongs to the enclosing lexical scope.
+    /// Visit the operands of a successful body pass in execution order, including
+    /// binding targets. The caller evaluates `outer` separately. A name used
+    /// there may also occur in a body operand. Capture analysis resolves these
+    /// occurrences against their lexical bindings.
     pub fn visit_body(&self, mut visit: impl FnMut(&'a ast::Expr)) {
         for step in &self.steps {
             match *step {
@@ -260,10 +267,13 @@ impl<'a> Plan<'a> {
     }
 }
 
-/// Recognize explicit awaits and implicit asynchronous pulls in this scope.
+/// Recognize yield, await and implicit asynchronous pulls in this scope.
 /// Nested lazy bodies begin executing only when their generator is advanced.
 pub fn expression_suspends(expression: &ast::Expr) -> bool {
-    let mut scan = Suspension::default();
+    let mut scan = Suspension {
+        include_yield: true,
+        ..Suspension::default()
+    };
     scan.visit_expr(expression);
     scan.any()
 }
@@ -287,6 +297,7 @@ pub fn collect_target_names(target: &ast::Expr, names: &mut HashSet<String>) {
 
 #[derive(Default)]
 struct Suspension<'a> {
+    include_yield: bool,
     pending: Vec<&'a ast::Expr>,
 }
 
@@ -301,12 +312,15 @@ impl Suspension<'_> {
         while let Some(expr) = self.pending.pop() {
             match expr {
                 ast::Expr::Await(_) => return true,
+                ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) if self.include_yield => return true,
                 ast::Expr::Lambda(lambda) => {
                     if let Some(params) = &lambda.parameters {
                         self.visit_parameters(params);
                     }
                 }
-                ast::Expr::Generator(generator) => self.visit_expr(&generator.generators[0].iter),
+                ast::Expr::Generator(generator) => {
+                    self.visit_expr(&outer_clause(&generator.generators).iter)
+                }
                 expr => {
                     if Output::from_expr(expr)
                         .is_some_and(|(_, clauses)| clauses.iter().any(|c| c.is_async))
@@ -339,6 +353,46 @@ mod tests {
         };
         *reject = 0;
         assert_eq!(plan.loop_filters(4, Some(0)), None);
+    }
+
+    #[test]
+    fn body_operands_exclude_outer_acquisition_but_preserve_later_reads() {
+        use ast::ExprContext::{Load, Store};
+
+        for (source, predicate, output) in [
+            (
+                "(child for item in source if ready for child in children)",
+                "ready",
+                "child",
+            ),
+            (
+                "(source for item in source if source for child in children)",
+                "source",
+                "source",
+            ),
+        ] {
+            let parsed = ruff_python_parser::parse_expression(source).unwrap();
+            let plan = Plan::from_expr(parsed.expr()).unwrap();
+            let outer = plan.outer.as_name_expr().unwrap();
+            assert_eq!((outer.id.as_str(), outer.ctx), ("source", Load));
+
+            let mut body = Vec::new();
+            plan.visit_body(|operand| {
+                assert!(!std::ptr::eq(operand, plan.outer));
+                let name = operand.as_name_expr().unwrap();
+                body.push((name.id.as_str(), name.ctx));
+            });
+            assert_eq!(
+                body,
+                [
+                    ("item", Store),
+                    (predicate, Load),
+                    ("children", Load),
+                    ("child", Store),
+                    (output, Load),
+                ]
+            );
+        }
     }
 
     #[test]
