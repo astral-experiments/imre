@@ -60,3 +60,7 @@ def _registered_path_hook(path):
     if registry_path is None:
         raise ImportError('not a registered module path', path=path)
     return _RegisteredFileFinder(path, registry_path)
+
+def _set_bootstrap_module(_bootstrap_module):
+    global _bootstrap
+    _bootstrap = _bootstrap_module
