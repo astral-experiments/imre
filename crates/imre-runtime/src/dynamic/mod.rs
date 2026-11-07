@@ -3550,6 +3550,7 @@ impl Context {
                 "fabs",
                 "factorial",
                 "log10",
+                "log1p",
                 "nextafter",
                 "remainder",
                 "sinh",

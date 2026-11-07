@@ -290,12 +290,13 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
     }
-    if matches!(operation, "acos" | "asin") {
-        let function = if operation == "asin" {
-            crate::floats::asin
-        } else {
-            crate::floats::acos
-        };
+    let checked_unary: Option<fn(f64) -> crate::Result<f64>> = match operation {
+        "acos" => Some(crate::floats::acos),
+        "asin" => Some(crate::floats::asin),
+        "log1p" => Some(crate::floats::log1p),
+        _ => None,
+    };
+    if let Some(function) = checked_unary {
         let result = function(as_double(ctx, value)?)?;
         return Ok(ctx.alloc(Value::Float(result)));
     }

@@ -9926,19 +9926,26 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("base64.a85encode" | "base64.b85encode" | "base64.z85encode"),
             ))) => return self.base85_encode(call, name),
-            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport("math.fabs")))
-                if call.arguments.keywords.is_empty()
-                    && let [arg] = call.arguments.args.as_ref()
-                    && self.graph.session.is_stdlib_function(
-                        self.module,
-                        &call.func,
-                        "math",
-                        "fabs",
-                    ) =>
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("math.fabs" | "math.log1p"),
+            ))) if call.arguments.keywords.is_empty()
+                && let [arg] = call.arguments.args.as_ref() =>
             {
+                let (member, builtin) = if name == "math.fabs" {
+                    ("fabs", Builtin::Abs)
+                } else {
+                    ("log1p", Builtin::FloatLog1p)
+                };
+                if !self
+                    .graph
+                    .session
+                    .is_stdlib_function(self.module, &call.func, "math", member)
+                {
+                    return Err(self.scoped_builtin_error(name, call));
+                }
                 let value = self.expr(arg)?;
-                return stdlib::unary_float_builtin(Builtin::Abs, value)
-                    .ok_or_else(|| self.scoped_builtin_error("math.fabs", call));
+                return stdlib::unary_float_builtin(builtin, value)
+                    .ok_or_else(|| self.scoped_builtin_error(name, call));
             }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("math.comb" | "math.factorial"),
