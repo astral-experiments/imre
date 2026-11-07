@@ -2480,7 +2480,12 @@ impl Emitter<'_, '_> {
         };
         for slot in cleanup_slots {
             let value = self.borrow_slot(slot);
-            self.reference(&value, "release");
+            if matches!(value.ty.word_kind(), WordKind::IntList) {
+                // A conditional initializer can leave the slot empty on this exit.
+                self.void_call("list_release_if_present", &[&value]);
+            } else {
+                self.reference(&value, "release");
+            }
         }
         if let Some(leave) = leave_frame {
             self.line(leave);
@@ -11954,8 +11959,13 @@ declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 /// After mem2reg, a cleared or never-filled slot needs no runtime call at all.
 fn nullable_pointer_helpers() -> String {
     let mut output = String::new();
-    for family in ["str", "object", "record"] {
-        for operation in ["release", "retain"] {
+    for family in ["str", "object", "record", "list"] {
+        let operations: &[&str] = if family == "list" {
+            &["release"]
+        } else {
+            &["release", "retain"]
+        };
+        for operation in operations {
             writeln!(
                 output,
                 r#"
@@ -12544,6 +12554,14 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn conditional_integer_list_is_released_only_when_present_at_exit() {
+        let body = function_body(
+            "def choose(value: int, enabled: bool) -> int:\n    if enabled:\n        items = [value]\n        items.append(value + 1)\n        return items.pop()\n    return value\nprint(choose(4, True))",
+        );
+        assert!(body.contains("call void @list_release_if_present("));
     }
 
     #[test]
