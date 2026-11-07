@@ -9,6 +9,7 @@ pub const NATIVE_ARCHIVE_EXTENSIONS: [&str; 2] = ["imre1.a", "imre.a"];
 /// Unicode Character Database version shipped with the target CPython 3.14 release.
 pub const UNICODE_DATA_VERSION: &str = "16.0.0";
 
+pub mod comprehension;
 #[cfg(target_os = "linux")]
 pub mod epoll;
 pub mod exceptions;
@@ -539,6 +540,12 @@ impl Transformer for Mangler<'_> {
                     .borrow_mut()
                     .owners
                     .insert(lambda.body.start(), Name::new(self.owner));
+            }
+            ast::Expr::Generator(generator) if !self.owner.is_empty() => {
+                self.names
+                    .borrow_mut()
+                    .owners
+                    .insert(generator.start(), Name::new(self.owner));
             }
             ast::Expr::Name(name) => self.remember(name.start(), &mut name.id),
             ast::Expr::Attribute(attr) => self.definition(&mut attr.attr),

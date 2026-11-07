@@ -4485,6 +4485,8 @@ for name in ("md4", "ripemd160"):
             "boxed_coroutine_origin.py",
             "boxed_anext.py",
             "boxed_async_generator.py",
+            "boxed_comprehension_plan.py",
+            "boxed_comprehension_operands.py",
             "boxed_source_async_generator.py",
             "boxed_source_async_with.py",
             "boxed_with_control.py",

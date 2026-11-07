@@ -1,6 +1,7 @@
 //! In-process execution of source received by the boxed Python runtime.
 
 mod annotations;
+mod comprehensions;
 
 use annotations::CONDITIONAL;
 
@@ -9,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
 use imre_ast::code_flags;
+use imre_ast::comprehension::{Output, Plan};
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
@@ -150,6 +152,18 @@ enum EnclosingBinding {
 // A plain if or while needs a single forward destination without a heap allocation.
 type BranchTargets = smallvec::SmallVec<[usize; 1]>;
 
+// CPython's BUILD_SET batches leading operands only within its stack-use guideline.
+fn set_display_prefix(elements: &[ast::Expr]) -> usize {
+    if elements.len() <= 30 {
+        elements
+            .iter()
+            .take_while(|item| !item.is_starred_expr())
+            .count()
+    } else {
+        0
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum BranchUse {
     Condition,
@@ -176,11 +190,44 @@ impl OperandPlan {
                         sites.push(a.start());
                         work.push(&a.value);
                     }
+                    ast::Expr::Generator(g) => work.push(&g.generators[0].iter),
+                    expr if let Some(comp) = Plan::from_expr(expr) => {
+                        if comp.suspends() {
+                            sites.push(expr.start());
+                        }
+                    }
+                    ast::Expr::Tuple(ast::ExprTuple { elts, .. })
+                    | ast::Expr::List(ast::ExprList { elts, .. })
+                        if !elts.iter().any(ast::Expr::is_starred_expr) =>
+                    {
+                        work.extend(elts.iter());
+                    }
                     ast::Expr::BinOp(b) => work.extend([&*b.left, &*b.right]),
                     ast::Expr::Compare(c) => work.extend(c.operands.iter()),
                     ast::Expr::BoolOp(b) => work.extend(b.values.iter()),
                     ast::Expr::UnaryOp(u) => work.push(&u.operand),
                     ast::Expr::Attribute(a) => work.push(&a.value),
+                    ast::Expr::Subscript(s) => work.extend([&*s.value, &*s.slice]),
+                    ast::Expr::Slice(s) => {
+                        work.extend(
+                            [s.lower.as_deref(), s.upper.as_deref(), s.step.as_deref()]
+                                .into_iter()
+                                .flatten(),
+                        );
+                    }
+                    ast::Expr::Named(n) => work.push(&n.value),
+                    ast::Expr::Dict(d) => {
+                        for item in &d.items {
+                            work.extend(item.key.as_ref());
+                            work.push(&item.value);
+                        }
+                    }
+                    ast::Expr::Set(s) => {
+                        work.extend(s.elts.iter().map(|item| match item {
+                            ast::Expr::Starred(star) => star.value.as_ref(),
+                            item => item,
+                        }));
+                    }
                     ast::Expr::If(b) => work.extend([&*b.body, &*b.test, &*b.orelse]),
                     ast::Expr::Call(c)
                         if !c.arguments.args.iter().any(ast::Expr::is_starred_expr)
@@ -236,6 +283,8 @@ enum Instruction {
     ClassStart,
     ClassEnd,
     Yield(Option<ast::Expr>),
+    YieldResult,
+    MakeGenerator(ast::Expr),
     Return(Option<ast::Expr>),
     ReturnSent,
     Raise(ast::StmtRaise),
@@ -246,13 +295,44 @@ enum Instruction {
         cases: Vec<SourceCase>,
         end: usize,
     },
-    Iter(ast::Expr),
-    AsyncIter(Option<ast::Expr>),
+    Iter(Option<ast::Expr>, bool),
+    EnterComprehension {
+        kind: &'static str,
+        targets: HashSet<String>,
+        end: usize,
+    },
+    CollectItem {
+        value: Option<ast::Expr>,
+        keyed: bool,
+    },
+    LeaveComprehension,
     AsyncNext,
-    BindAsyncItem(ast::Expr),
+    BindAsyncItem(Option<ast::Expr>),
+    UnpackTarget {
+        count: usize,
+        star: Option<usize>,
+    },
+    BindOperand(ast::Expr),
+    StoreAttribute(ast::Identifier),
+    StoreSubscript,
     EndAsyncFor,
     Await(Option<ast::Expr>),
     SaveOperand(Option<ast::Expr>),
+    BuildSequence {
+        tuple: bool,
+        count: usize,
+    },
+    BuildSlice([bool; 3]),
+    StoreNamed(ast::Identifier),
+    StartDict,
+    StartSet(usize),
+    InsertDict {
+        unpack: bool,
+    },
+    InsertSet {
+        unpack: bool,
+    },
+    FinishDisplay,
     Binary(&'static str, ruff_text_size::TextRange, bool),
     NextComparison {
         end: usize,
@@ -357,82 +437,6 @@ impl DefinitionKind {
     }
 }
 
-struct EagerComprehension<'a> {
-    kind: &'static str,
-    clauses: &'a [ast::Comprehension],
-    key: Option<&'a ast::Expr>,
-    value: &'a ast::Expr,
-}
-
-impl<'a> EagerComprehension<'a> {
-    fn from_expr(expr: &'a ast::Expr) -> Option<Self> {
-        let (kind, clauses, key, value) = match expr {
-            ast::Expr::ListComp(c) => ("list", &c.generators[..], None, &c.elt),
-            ast::Expr::SetComp(c) => ("set", &c.generators[..], None, &c.elt),
-            ast::Expr::DictComp(c) => {
-                ("dict", &c.generators[..], Some(c.key.as_deref()?), &c.value)
-            }
-            _ => return None,
-        };
-        Some(Self {
-            kind,
-            clauses,
-            key,
-            value,
-        })
-    }
-
-    fn elements(&self) -> impl Iterator<Item = &'a ast::Expr> {
-        self.key.into_iter().chain(std::iter::once(self.value))
-    }
-}
-
-/// Check the expressions executed inline or in a synchronous generator's deferred frame.
-fn synchronous_comprehension<'a>(
-    elements: impl Iterator<Item = &'a ast::Expr>,
-    clauses: &'a [ast::Comprehension],
-    deferred: bool,
-) -> bool {
-    use ast::visitor::{self, Visitor};
-    struct Body<'a>(Vec<&'a ast::Expr>);
-    impl<'a> Visitor<'a> for Body<'a> {
-        fn visit_expr(&mut self, expr: &'a ast::Expr) {
-            self.0.push(expr);
-        }
-    }
-    let mut body = Body(elements.collect());
-    for (index, clause) in clauses.iter().enumerate() {
-        if clause.is_async {
-            return false;
-        }
-        body.visit_expr(&clause.target);
-        if !deferred || index != 0 {
-            body.visit_expr(&clause.iter);
-        }
-        for condition in &clause.ifs {
-            body.visit_expr(condition);
-        }
-    }
-    while let Some(expr) = body.0.pop() {
-        match expr {
-            ast::Expr::Await(_) => return false,
-            // A deferred assignment would need to update a binding outside its frame.
-            ast::Expr::Named(_) if deferred => return false,
-            ast::Expr::Lambda(lambda) => {
-                if let Some(params) = &lambda.parameters {
-                    body.visit_parameters(params);
-                }
-            }
-            ast::Expr::Generator(nested) => body.visit_expr(&nested.generators[0].iter),
-            ast::Expr::ListComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
-            ast::Expr::SetComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
-            ast::Expr::DictComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
-            _ => visitor::walk_expr(&mut body, expr),
-        }
-    }
-    true
-}
-
 #[derive(Default)]
 struct ComprehensionBindings {
     iteration_variables: HashSet<String>,
@@ -495,10 +499,10 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
             }
             return;
         }
-        if let Some(comp) = EagerComprehension::from_expr(expr) {
+        if let Some((output, clauses)) = Output::from_expr(expr) {
             self.comprehensions.push(ComprehensionBindings::default());
             stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                for clause in comp.clauses {
+                for clause in clauses {
                     let frame = self
                         .comprehensions
                         .last_mut()
@@ -526,7 +530,7 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
                     self.visit_expr(&clause.target);
                     self.visit_comprehension(clause);
                 }
-                for element in comp.elements() {
+                for element in output.elements() {
                     self.visit_expr(element);
                 }
             });
@@ -606,11 +610,19 @@ struct SourceCursor<'a> {
     protected: &'a mut Vec<FinallyBlock>,
     advanced: Option<Result<DelegateOutcome>>,
     nested_resume: bool,
+    comprehension: Option<(Id, usize)>,
     sent: Id,
     thrown: Option<(Error, Vec<Id>)>,
 }
 
 impl<'a> SourceCursor<'a> {
+    fn active_comprehension(blocks: &[FinallyBlock]) -> Option<(Id, usize)> {
+        blocks.iter().rev().find_map(|b| match b.kind {
+            HandlerKind::Comprehension(scope) => Some((scope, b.depth)),
+            _ => None,
+        })
+    }
+
     /// Resume the source frame with its live iterators, protected blocks and pending input.
     fn new(
         ip: usize,
@@ -623,8 +635,10 @@ impl<'a> SourceCursor<'a> {
             GeneratorInput::Send(sent) => (sent, None),
             GeneratorInput::Throw { error, args } => (NONE, Some((error, args))),
         };
+        let comprehension = Self::active_comprehension(protected);
         Self {
             ip,
+            comprehension,
             iterators,
             protected,
             advanced,
@@ -658,6 +672,7 @@ enum HandlerKind {
     Finally(usize),
     Except,
     With(Id),
+    Comprehension(Id),
 }
 
 /// A protected source region survives yields, including yields in its cleanup.
@@ -674,7 +689,7 @@ pub(super) struct FinallyBlock {
 impl FinallyBlock {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
         let exit = match self.kind {
-            HandlerKind::With(exit) => Some(exit),
+            HandlerKind::With(root) | HandlerKind::Comprehension(root) => Some(root),
             _ => None,
         };
         exit.into_iter().chain(match self.pending {
@@ -987,10 +1002,9 @@ impl<'a> CompiledStrings<'a, '_> {
                         self.visit_parameters(parameters);
                     }
                 }
-                ast::Expr::ListComp(comp) => self.visit_expr(&comp.generators[0].iter),
-                ast::Expr::SetComp(comp) => self.visit_expr(&comp.generators[0].iter),
-                ast::Expr::DictComp(comp) => self.visit_expr(&comp.generators[0].iter),
-                ast::Expr::Generator(comp) => self.visit_expr(&comp.generators[0].iter),
+                expr if let Some((_, clauses)) = Output::from_expr(expr) => {
+                    self.visit_expr(&clauses[0].iter);
+                }
                 _ => ast::visitor::walk_expr(self, expr),
             }
         }
@@ -1041,13 +1055,7 @@ impl<'a> CompiledStrings<'a, '_> {
                     }
                     continue;
                 }
-                ast::Expr::Generator(genexpr)
-                    if synchronous_comprehension(
-                        std::iter::once(genexpr.elt.as_ref()),
-                        &genexpr.generators,
-                        true,
-                    ) =>
-                {
+                ast::Expr::Generator(genexpr) => {
                     functions
                         .try_reserve(1)
                         .map_err(|_| Error::new("MemoryError", ""))?;
@@ -1055,14 +1063,14 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.visit_expr(&genexpr.generators[0].iter);
                     continue;
                 }
-                expr if let Some(comp) = EagerComprehension::from_expr(expr) => {
-                    let generators = comp.clauses;
+                expr if let Some(plan) = Plan::from_expr(expr) => {
+                    let generators = plan.clauses;
                     self.visit_expr(&generators[0].iter);
                     let mut names = HashSet::new();
                     for clause in generators {
                         Program::collect_target_names(&clause.target, &mut names)?;
                     }
-                    if synchronous_comprehension(comp.elements(), generators, false) {
+                    if !plan.suspends() {
                         self.eager_comprehension_targets
                             .insert(expr.range(), names.clone());
                     }
@@ -1070,18 +1078,7 @@ impl<'a> CompiledStrings<'a, '_> {
                         names.extend(enclosing.iter().cloned());
                     }
                     self.bound = Some(Rc::new(names));
-                    for (index, clause) in generators.iter().enumerate() {
-                        self.visit_expr(&clause.target);
-                        if index != 0 {
-                            self.visit_expr(&clause.iter);
-                        }
-                        for predicate in &clause.ifs {
-                            self.visit_expr(predicate);
-                        }
-                    }
-                    for element in comp.elements() {
-                        self.visit_expr(element);
-                    }
+                    plan.visit_body(|operand| self.visit_expr(operand));
                     continue;
                 }
                 ast::Expr::FString(formatted) => {
@@ -1401,8 +1398,19 @@ impl Program {
             eager_comprehension_targets: &mut self.eager_comprehension_targets,
             exhausted: false,
         };
+        let mut enclosing_bindings = Vec::new();
         for (_, op) in &mut self.instructions {
             match op {
+                Instruction::EnterComprehension { targets, .. } => {
+                    let mut bound = targets.clone();
+                    if let Some(parent) = &strings.bound {
+                        bound.extend(parent.iter().cloned());
+                    }
+                    enclosing_bindings.push(strings.bound.replace(Rc::new(bound)));
+                }
+                Instruction::LeaveComprehension => {
+                    strings.bound = enclosing_bindings.pop().expect("comprehension bindings");
+                }
                 Instruction::Eval(ast::Expr::StringLiteral(doc))
                     if self.scope_flags & code_flags::HAS_DOCSTRING != 0
                         && self.doc == Some(doc.range()) =>
@@ -1415,12 +1423,14 @@ impl Program {
                 | Instruction::Discard(e)
                 | Instruction::Unless(e, _)
                 | Instruction::Branch { value: Some(e), .. }
+                | Instruction::MakeGenerator(e)
                 | Instruction::LoadResult(e)
-                | Instruction::Iter(e)
+                | Instruction::Iter(Some(e), _)
+                | Instruction::CollectItem { value: Some(e), .. }
                 | Instruction::ExceptMatch(e, _)
                 | Instruction::Await(Some(e))
                 | Instruction::SaveOperand(Some(e)) => strings.visit_expr(e),
-                Instruction::Attribute { name, .. } => {
+                Instruction::Attribute { name, .. } | Instruction::StoreNamed(name) => {
                     strings.heap.code_name(name.as_str());
                 }
                 Instruction::SaveCallMethod(field) => {
@@ -1444,9 +1454,13 @@ impl Program {
                         }
                     }
                 }
-                Instruction::BindAsyncItem(target) => strings.visit_expr(target),
-                Instruction::AsyncWithMethods(Some(context))
-                | Instruction::AsyncIter(Some(context)) => strings.visit_expr(context),
+                Instruction::BindAsyncItem(Some(target)) | Instruction::BindOperand(target) => {
+                    strings.visit_expr(target);
+                }
+                Instruction::StoreAttribute(attr) => {
+                    strings.heap.code_name(attr.as_str());
+                }
+                Instruction::AsyncWithMethods(Some(context)) => strings.visit_expr(context),
                 Instruction::EnterAsyncWith {
                     target: Some(target),
                     ..
@@ -1591,8 +1605,16 @@ impl Program {
                     }
                 }
                 Instruction::ReturnSent
+                | Instruction::YieldResult
                 | Instruction::Await(None)
                 | Instruction::SaveOperand(None)
+                | Instruction::BuildSequence { .. }
+                | Instruction::BuildSlice(_)
+                | Instruction::StartDict
+                | Instruction::StartSet(_)
+                | Instruction::InsertDict { .. }
+                | Instruction::InsertSet { .. }
+                | Instruction::FinishDisplay
                 | Instruction::Binary(_, _, _)
                 | Instruction::NextComparison { .. }
                 | Instruction::Branch { value: None, .. }
@@ -1602,9 +1624,13 @@ impl Program {
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
                 | Instruction::AsyncWithMethods(None)
-                | Instruction::AsyncIter(None)
+                | Instruction::Iter(None, _)
+                | Instruction::CollectItem { value: None, .. }
                 | Instruction::AsyncNext
                 | Instruction::EndAsyncFor
+                | Instruction::BindAsyncItem(None)
+                | Instruction::UnpackTarget { .. }
+                | Instruction::StoreSubscript
                 | Instruction::EnterAsyncWith { target: None, .. }
                 | Instruction::ExitWith
                 | Instruction::CallAsyncExit
@@ -1671,7 +1697,27 @@ impl Program {
                     child.instructions.push((line, end));
                     params
                 }
-                ast::Expr::Generator(genexpr) => child.lower_genexpr(genexpr, line_at)?,
+                ast::Expr::Generator(genexpr) => {
+                    // Assignment expressions in the deferred frame still bind in the
+                    // containing code unit. Nested lambdas have their own bindings.
+                    if self.has_named_bindings {
+                        let mut bindings = NamedBindings::default();
+                        bindings.visit_expr(expr);
+                        for (name, offset, _) in bindings.targets {
+                            let kind = if self.name == "<module>"
+                                || matches!(
+                                    self.directives.get(&name),
+                                    Some((ScopeDirective::Global, _))
+                                ) {
+                                ScopeDirective::Global
+                            } else {
+                                ScopeDirective::Nonlocal
+                            };
+                            child.directives.insert(name, (kind, offset));
+                        }
+                    }
+                    child.lower_genexpr(genexpr, line_at)?
+                }
                 _ => unreachable!("anonymous function expression"),
             };
             child.scope_flags |= code_flags::function_flags(
@@ -1766,62 +1812,6 @@ impl Program {
             self.reads.insert(CONDITIONAL.into());
         }
         Ok((self.string_roots, &self.reads))
-    }
-
-    /// Lower a generator expression to resumable for loops. Its frame already
-    /// owns the outer iterator; only inner clauses evaluate Iter instructions.
-    fn lower_genexpr(
-        &mut self,
-        genexpr: &ast::ExprGenerator,
-        line_at: &impl Fn(usize) -> u32,
-    ) -> Result<Box<ast::Parameters>> {
-        self.kind = FunctionKind::Generator;
-        let mut heads = Vec::new();
-        for (index, clause) in genexpr.generators.iter().enumerate() {
-            self.declare_target(&clause.target)?;
-            let line = line_at(clause.target.start().to_usize());
-            if index != 0 {
-                self.instructions
-                    .push((line, Instruction::Iter(clause.iter.clone())));
-            }
-            let head = self.instructions.len();
-            heads.push(head);
-            self.instructions
-                .push((line, Instruction::Next(Some(clause.target.clone()), 0)));
-            for predicate in &clause.ifs {
-                self.instructions.push((
-                    line_at(predicate.start().to_usize()),
-                    Instruction::Unless(predicate.clone(), head),
-                ));
-            }
-        }
-        self.instructions.push((
-            line_at(genexpr.elt.start().to_usize()),
-            Instruction::Yield(Some(*genexpr.elt.clone())),
-        ));
-        for head in heads.into_iter().rev() {
-            self.instructions
-                .push((self.instructions[head].0, Instruction::Jump(head)));
-            let end = self.instructions.len();
-            let Instruction::Next(_, target) = &mut self.instructions[head].1 else {
-                unreachable!("loop head")
-            };
-            *target = end;
-        }
-        let range = genexpr.range();
-        let mut params = ast::Parameters::default();
-        params.args.push(ast::ParameterWithDefault {
-            range,
-            node_index: ast::AtomicNodeIndex::NONE,
-            default: None,
-            parameter: ast::Parameter {
-                range,
-                node_index: ast::AtomicNodeIndex::NONE,
-                name: ast::Identifier::new(".0", range),
-                annotation: None,
-            },
-        });
-        Ok(Box::new(params))
     }
 
     fn declare(&mut self, kind: ScopeDirective, names: &[ast::Identifier]) -> Result<()> {
@@ -2115,7 +2105,8 @@ impl Program {
                 }
                 ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
                 ast::Expr::YieldFrom(y) => {
-                    self.instructions.push((line, Instruction::Iter(*y.value)));
+                    self.instructions
+                        .push((line, Instruction::Iter(Some(*y.value), false)));
                     Instruction::Delegate
                 }
                 value => return Ok(Some(value)),
@@ -2126,6 +2117,16 @@ impl Program {
             self.instructions.push((line, op));
             return Ok(None);
         }
+        if let ast::Expr::Generator(genexpr) = &expr {
+            self.lower_result(genexpr.generators[0].iter.clone(), plan)?;
+            self.instructions
+                .push((line, Instruction::MakeGenerator(expr)));
+            return Ok(None);
+        }
+        if let Some(comp) = Plan::from_expr(&expr) {
+            self.lower_eager_comprehension(&comp, plan)?;
+            return Ok(None);
+        }
         match expr {
             ast::Expr::Await(a) => {
                 let value = self.lower_operand(*a.value, plan)?;
@@ -2133,6 +2134,66 @@ impl Program {
                 self.instructions.push((line, Instruction::Delegate));
             }
             ast::Expr::Call(call) => self.lower_awaited_call(call, plan)?,
+            ast::Expr::Tuple(tuple) => self.lower_sequence(tuple.elts, true, plan)?,
+            ast::Expr::List(list) => self.lower_sequence(list.elts, false, plan)?,
+            ast::Expr::Subscript(item) => {
+                self.save_operand(*item.value, plan)?;
+                self.save_operand(*item.slice, plan)?;
+                self.instructions
+                    .push((line, Instruction::Binary("get", item.range, false)));
+            }
+            ast::Expr::Slice(slice) => {
+                let parts = [slice.lower, slice.upper, slice.step];
+                let present = parts.each_ref().map(Option::is_some);
+                for part in parts.into_iter().flatten() {
+                    self.save_operand(*part, plan)?;
+                }
+                self.instructions
+                    .push((line, Instruction::BuildSlice(present)));
+            }
+            ast::Expr::Named(named) => {
+                let ast::Expr::Name(name) = *named.target else {
+                    return Err(unsupported("assignment expression target"));
+                };
+                self.lower_result(*named.value, plan)?;
+                self.instructions.push((
+                    line,
+                    Instruction::StoreNamed(ast::Identifier::new(name.id, name.range)),
+                ));
+            }
+            ast::Expr::Dict(dict) => {
+                self.instructions.push((line, Instruction::StartDict));
+                for item in dict.items {
+                    let unpack = item.key.is_none();
+                    if let Some(key) = item.key {
+                        self.save_operand(key, plan)?;
+                    }
+                    self.lower_result(item.value, plan)?;
+                    self.instructions
+                        .push((line, Instruction::InsertDict { unpack }));
+                }
+                self.instructions.push((line, Instruction::FinishDisplay));
+            }
+            ast::Expr::Set(set) => {
+                let prefix = set_display_prefix(&set.elts);
+                let mut items = set.elts.into_iter();
+                for item in items.by_ref().take(prefix) {
+                    self.save_operand(item, plan)?;
+                }
+                self.instructions
+                    .push((line, Instruction::StartSet(prefix)));
+                for item in items {
+                    let unpack = item.is_starred_expr();
+                    let value = match item {
+                        ast::Expr::Starred(star) => *star.value,
+                        value => value,
+                    };
+                    self.lower_result(value, plan)?;
+                    self.instructions
+                        .push((line, Instruction::InsertSet { unpack }));
+                }
+                self.instructions.push((line, Instruction::FinishDisplay));
+            }
             ast::Expr::BinOp(binary) => {
                 for operand in [*binary.left, *binary.right] {
                     self.save_operand(operand, plan)?;
@@ -2181,6 +2242,42 @@ impl Program {
             _ => unreachable!("operand with a supported await"),
         }
         Ok(None)
+    }
+
+    /// Only the async pull and its await are protected by END_ASYNC_FOR.
+    fn lower_async_next(&mut self, line: u32, target: Option<ast::Expr>) {
+        self.instructions.push((line, Instruction::AsyncNext));
+        self.instructions.push((line, Instruction::Delegate));
+        self.instructions
+            .push((line, Instruction::BindAsyncItem(target)));
+    }
+
+    fn finish_iterator_loop(&mut self, head: usize, line: u32) {
+        let after = self.instructions.len();
+        match &mut self.instructions[head].1 {
+            Instruction::Next(_, end) => *end = after,
+            Instruction::EnterExcept { handler, end } => {
+                *handler = after;
+                *end = after + 1;
+                self.instructions.push((line, Instruction::EndAsyncFor));
+            }
+            _ => unreachable!("iterator loop guard"),
+        }
+    }
+
+    fn lower_sequence(
+        &mut self,
+        items: Vec<ast::Expr>,
+        tuple: bool,
+        plan: &OperandPlan,
+    ) -> Result<()> {
+        let count = items.len();
+        for item in items {
+            self.save_operand(item, plan)?;
+        }
+        self.instructions
+            .push((plan.line, Instruction::BuildSequence { tuple, count }));
+        Ok(())
     }
 
     fn save_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<()> {
@@ -2364,7 +2461,10 @@ impl Program {
     }
 
     fn finish_branches(&mut self, exits: impl IntoIterator<Item = usize>) {
-        let end = self.instructions.len();
+        self.resolve_branches(exits, self.instructions.len());
+    }
+
+    fn resolve_branches(&mut self, exits: impl IntoIterator<Item = usize>, end: usize) {
         for index in exits {
             match &mut self.instructions[index].1 {
                 Instruction::Branch { end: target, .. }
@@ -2937,11 +3037,12 @@ impl Program {
                                 }
                                 let iterable = self.lower_suspension(*s.iter, line, function)?;
                                 self.instructions
-                                    .push((line, Instruction::AsyncIter(iterable)));
+                                    .push((line, Instruction::Iter(iterable, true)));
                                 async_target = Some(*s.target);
                                 Instruction::EnterExcept { handler: 0, end: 0 }
                             } else {
-                                self.instructions.push((line, Instruction::Iter(*s.iter)));
+                                self.instructions
+                                    .push((line, Instruction::Iter(Some(*s.iter), false)));
                                 Instruction::Next(Some(*s.target), 0)
                             };
                             (s.body, s.orelse, guard)
@@ -2963,27 +3064,14 @@ impl Program {
                         BranchTargets::new()
                     };
                     if let Some(target) = async_target {
-                        // Only GET_ANEXT and its await are protected by END_ASYNC_FOR.
-                        self.instructions.push((line, Instruction::AsyncNext));
-                        self.instructions.push((line, Instruction::Delegate));
-                        self.instructions
-                            .push((line, Instruction::BindAsyncItem(target)));
+                        self.lower_async_next(line, Some(target));
                     }
                     self.lower(body, lines, function, Some(&mut current))?;
                     self.instructions.push((line, Instruction::Jump(head)));
-                    let other = self.instructions.len();
                     if !skip.is_empty() {
                         self.finish_branches(skip);
                     } else {
-                        match &mut self.instructions[head].1 {
-                            Instruction::Next(_, end) => *end = other,
-                            Instruction::EnterExcept { handler, end } => {
-                                *handler = other;
-                                *end = other + 1;
-                                self.instructions.push((line, Instruction::EndAsyncFor));
-                            }
-                            _ => unreachable!("loop guard"),
-                        }
+                        self.finish_iterator_loop(head, line);
                     }
                     self.lower(orelse, lines, function, active.as_deref_mut())?;
                     let end = self.instructions.len();
@@ -3838,36 +3926,35 @@ impl Context {
             _ => None,
         };
         let spellings = string_replacements(source, parsed.tokens());
-        let async_error = match parsed.syntax() {
-            ast::Mod::Module(module) => {
-                let error = imre_ast::async_generators::syntax_error(module);
-                if error.is_some() && imre_ast::misplaced_star_import(&module.body).is_some() {
-                    return Err(Error::new(
-                        "SyntaxError",
-                        "import * only allowed at module level",
-                    ));
-                }
-                error
-            }
-            _ => None,
-        };
-        let invalid = async_error
-            .map(|(range, msg)| (range, msg.to_owned()))
+        let scope_error = imre_ast::async_generators::check(parsed.syntax().into());
+        if scope_error.is_some()
+            && let ast::Mod::Module(module) = parsed.syntax()
+            && imre_ast::misplaced_star_import(&module.body).is_some()
+        {
+            return Err(Error::new(
+                "SyntaxError",
+                "import * only allowed at module level",
+            ));
+        }
+        let invalid = scope_error
+            .map(|error| {
+                let span = if error.location_in_args {
+                    SyntaxSpan::InArgs(error.range)
+                } else {
+                    SyntaxSpan::InFields(error.range)
+                };
+                (span, error.message.to_owned())
+            })
             .or_else(|| {
                 let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
                 let name = keyword.arg.as_ref().unwrap();
                 Some((
-                    keyword.range(),
+                    SyntaxSpan::InArgs(keyword.range()),
                     format!("keyword argument repeated: {name}"),
                 ))
             });
-        if let Some((range, message)) = invalid {
-            return Err(self.located_syntax_error(
-                &message,
-                SyntaxSpan::InArgs(range),
-                filename_id,
-                &lines,
-            )?);
+        if let Some((span, message)) = invalid {
+            return Err(self.located_syntax_error(&message, span, filename_id, &lines)?);
         }
         if let ast::Mod::Module(module) = parsed.syntax()
             && let Some((range, message)) = imre_ast::type_alias_error(&module.body)
@@ -4731,6 +4818,8 @@ impl Context {
             #[serde(default)]
             generator_lambda: bool,
             #[serde(default)]
+            generator_expression: bool,
+            #[serde(default)]
             method_imports: std::collections::BTreeSet<String>,
         }
         let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
@@ -4757,7 +4846,22 @@ impl Context {
         program.first_line = code.first_line;
         program.scope_flags = code.flags;
         program.kind = FunctionKind::prelinked(code);
-        program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
+        if signature.generator_expression {
+            let [ast::Stmt::Return(ret)] = def.body.as_slice() else {
+                return Err(Error::new(
+                    "SystemError",
+                    "invalid generator expression body",
+                ));
+            };
+            let Some(ast::Expr::Generator(expr)) = ret.value.as_deref() else {
+                return Err(Error::new("SystemError", "invalid generator expression"));
+            };
+            program.lower_genexpr(expr, &|offset| {
+                lines.partition_point(|n| *n <= offset) as u32
+            })?;
+        } else {
+            program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
+        }
         if signature.generator_lambda {
             program.kind = FunctionKind::GeneratorLambda;
         }
@@ -5072,6 +5176,11 @@ impl Context {
                 let iter = cursor.iterators.pop().expect("inner iterator");
                 self.release_loop_iterator(iter);
             }
+            if matches!(block.kind, HandlerKind::Comprehension(_)) {
+                cursor.protected.pop();
+                cursor.comprehension = SourceCursor::active_comprehension(cursor.protected);
+                continue;
+            }
             if block.pending.is_none()
                 && (!matches!(block.kind, HandlerKind::Except)
                     || matches!(transfer, Transfer::Raise(_)))
@@ -5159,6 +5268,11 @@ impl Context {
                         _,
                         Instruction::BindSent(_)
                             | Instruction::ReturnSent
+                            | Instruction::YieldResult
+                            | Instruction::MakeGenerator(_)
+                            | Instruction::StoreNamed(_)
+                            | Instruction::InsertDict { .. }
+                            | Instruction::InsertSet { .. }
                             | Instruction::Delegate
                             | Instruction::Await(None)
                             | Instruction::SaveOperand(None)
@@ -5168,7 +5282,8 @@ impl Context {
                             | Instruction::Unary(_)
                             | Instruction::Attribute { .. }
                             | Instruction::AsyncWithMethods(None)
-                            | Instruction::AsyncIter(None)
+                            | Instruction::Iter(None, _)
+                            | Instruction::CollectItem { value: None, .. }
                             | Instruction::BindAsyncItem(_)
                             | Instruction::CallAsyncEnter
                             | Instruction::AwaitWithResult(_)
@@ -5308,7 +5423,13 @@ impl Context {
                                 pop_iter: matches!(op, Instruction::Break(_)),
                             }
                         }
-                        _ => match self.source_step(&code, owner, scope, op, &mut cursor) {
+                        _ => match self.source_step(
+                            &code,
+                            owner,
+                            cursor.comprehension.map_or(scope, |(scope, _)| scope),
+                            op,
+                            &mut cursor,
+                        ) {
                             Ok(Some(Step::Return(value))) => Transfer::Return(value),
                             Ok(Some(step)) => return Ok(step),
                             Ok(None) => continue,
@@ -5818,12 +5939,51 @@ impl Context {
             | Instruction::EndAsyncFor
             | Instruction::Jump(_)
             | Instruction::Break(_) => unreachable!("source control instruction"),
-            Instruction::AsyncIter(expr) => {
+            Instruction::Iter(expr, is_async) => {
                 let iterable = match expr {
                     Some(expr) => eval(self, expr)?,
                     None => std::mem::replace(sent, NONE),
                 };
-                iterators.push(self.async_for_iter(iterable)?);
+                iterators.push(if *is_async {
+                    self.async_for_iter(iterable)?
+                } else {
+                    self.iterator(iterable)?
+                });
+            }
+            Instruction::EnterComprehension { kind, targets, end } => {
+                let first = iterators.pop().expect("outer iterator");
+                let collection = self.op(kind, NONE, NONE, NONE)?;
+                let child = self.comprehension_scope_with_targets(scope, targets.clone());
+                let depth = iterators.len();
+                iterators.extend([collection, first]);
+                cursor.protected.push(FinallyBlock {
+                    start: *ip,
+                    handler: *end,
+                    end: *end,
+                    depth,
+                    pending: None,
+                    kind: HandlerKind::Comprehension(child),
+                });
+                cursor.comprehension = Some((child, depth));
+            }
+            Instruction::CollectItem { value, keyed } => {
+                let (_, depth) = cursor.comprehension.expect("active comprehension");
+                let collection = iterators[depth];
+                let item = match value {
+                    Some(expr) => eval(self, expr)?,
+                    None => *sent,
+                };
+                if *keyed {
+                    let key = iterators.pop().expect("dictionary key");
+                    self.put_item(collection, key, item)?;
+                } else {
+                    self.op("append", collection, item, NONE)?;
+                }
+            }
+            Instruction::LeaveComprehension => {
+                *sent = iterators.pop().expect("comprehension result");
+                cursor.protected.pop().expect("comprehension scope");
+                cursor.comprehension = SourceCursor::active_comprehension(cursor.protected);
             }
             Instruction::AsyncNext => {
                 let iter = *iterators.last().expect("async iterator");
@@ -5831,11 +5991,29 @@ impl Context {
             }
             Instruction::BindAsyncItem(target) => {
                 cursor.protected.pop().expect("completed async for pull");
-                self.bind_target(code, scope, target, *sent)?;
+                if let Some(target) = target {
+                    self.bind_target(code, scope, target, *sent)?;
+                }
             }
-            Instruction::Iter(e) => {
-                let value = eval(self, e)?;
-                iterators.push(self.iterator(value)?);
+            Instruction::BindOperand(target) => {
+                let value = iterators.pop().expect("target value");
+                self.bind_target(code, scope, target, value)?;
+            }
+            Instruction::UnpackTarget { count, star } => {
+                let value = iterators.pop().expect("target value");
+                let items = self.unpack_items(value, *count, *star)?;
+                iterators.extend(items.into_iter().rev());
+            }
+            Instruction::StoreAttribute(attr) => {
+                let object = iterators.pop().expect("attribute receiver");
+                let value = iterators.pop().expect("target value");
+                self.set_attr(object, attr.as_str(), value)?;
+            }
+            Instruction::StoreSubscript => {
+                let key = iterators.pop().expect("subscript key");
+                let object = iterators.pop().expect("subscript receiver");
+                let value = iterators.pop().expect("target value");
+                self.put_item(object, key, value)?;
             }
             Instruction::Await(expr) => {
                 let value = match expr {
@@ -5851,7 +6029,54 @@ impl Context {
                 };
                 iterators.push(value);
             }
+            Instruction::BuildSequence { tuple, count } => {
+                let items = iterators.split_off(iterators.len() - count);
+                *sent = self.alloc(if *tuple {
+                    Value::Tuple(items)
+                } else {
+                    Value::List(items)
+                });
+            }
             Instruction::LoadResult(expr) => *sent = eval(self, expr)?,
+            Instruction::StoreNamed(name) => {
+                let mark = self.heap.temporary_mark();
+                self.store_named_result(scope, name.as_str(), *sent, mark)?;
+            }
+            Instruction::BuildSlice(present) => {
+                let mut parts = [NONE; 3];
+                for (part, exists) in parts.iter_mut().zip(present).rev() {
+                    if *exists {
+                        *part = iterators.pop().expect("saved slice bound");
+                    }
+                }
+                *sent = self.alloc(Value::Slice(parts));
+            }
+            Instruction::StartDict => iterators.push(self.dict(Vec::new())),
+            Instruction::StartSet(count) => {
+                let keys = iterators.split_off(iterators.len() - count);
+                let mark = self.heap.temporary_mark();
+                let set = self.build_source_set(mark, keys)?;
+                iterators.push(set);
+            }
+            Instruction::InsertDict { unpack } => {
+                if *unpack {
+                    let dict = *iterators.last().expect("active dict display");
+                    self.merge_mapping(dict, *sent, calls::MappingOperation::Unpack)?;
+                } else {
+                    let key = iterators.pop().expect("saved dictionary key");
+                    let dict = *iterators.last().expect("active dict display");
+                    self.put_item(dict, key, *sent)?;
+                }
+            }
+            Instruction::InsertSet { unpack } => {
+                let set = *iterators.last().expect("active set display");
+                if *unpack {
+                    builtins::update_set(self, set, *sent)?;
+                } else {
+                    builtins::set_add(self, set, *sent)?;
+                }
+            }
+            Instruction::FinishDisplay => *sent = iterators.pop().expect("active display"),
             Instruction::Unary(op) => *sent = self.source_unary(*op, *sent)?,
             Instruction::Attribute { name, method } => {
                 *sent = if *method {
@@ -5965,13 +6190,13 @@ impl Context {
                     }
                 };
                 match item {
-                    DelegateOutcome::Yield(value) => {
-                        if let Instruction::Next(Some(target), _) = op {
-                            self.bind_target(code, scope, target, value)?;
-                        } else {
-                            return Ok(Some(Step::Yield(value, *ip - 1)));
+                    DelegateOutcome::Yield(value) => match op {
+                        Instruction::Next(Some(target), _) => {
+                            self.bind_target(code, scope, target, value)?
                         }
-                    }
+                        Instruction::Next(None, _) => *sent = value,
+                        _ => return Ok(Some(Step::Yield(value, *ip - 1))),
+                    },
                     DelegateOutcome::Done(value) => {
                         iterators.pop();
                         self.release_source_loop_owner(owner);
@@ -5985,6 +6210,17 @@ impl Context {
                         return Ok(Some(Step::Rejected(error, *ip - 1)));
                     }
                 }
+            }
+            Instruction::MakeGenerator(expr) => {
+                *sent = self.source_genexpr(code, scope, expr, Some(*sent))?;
+            }
+            Instruction::YieldResult => {
+                let value = if code.kind == FunctionKind::AsyncGenerator {
+                    self.wrap_async_generator_yield(*sent)
+                } else {
+                    *sent
+                };
+                return Ok(Some(Step::Yield(value, *ip)));
             }
             Instruction::Yield(e) | Instruction::Return(e) => {
                 let v = e
@@ -6910,15 +7146,7 @@ impl Context {
         scope: Id,
         elements: &[ast::Expr],
     ) -> Result<Id> {
-        // CPython's BUILD_SET batches leading operands only within its stack-use guideline.
-        let prefix_len = if elements.len() <= 30 {
-            elements
-                .iter()
-                .take_while(|item| !matches!(item, ast::Expr::Starred(_)))
-                .count()
-        } else {
-            0
-        };
+        let prefix_len = set_display_prefix(elements);
         let (prefix, rest) = elements.split_at(prefix_len);
         let mark = self.heap.temporary_mark();
         let mut keys = Vec::with_capacity(prefix_len);
@@ -6927,20 +7155,7 @@ impl Context {
             let key = self.source_expr(code, scope, expr)?;
             keys.push(self.keep_source_result(operand, key)?);
         }
-        let result = self.alloc(Value::Set {
-            entries: Default::default(),
-            frozen: false,
-        });
-        // Pop keys in insertion order. A rejected duplicate may finalize before the next hash.
-        self.heap.release_temporaries_since(mark);
-        self.heap.keep(result);
-        for &key in keys.iter().rev() {
-            self.heap.keep(key);
-        }
-        for (index, key) in keys.into_iter().enumerate() {
-            builtins::set_add(self, result, key)?;
-            self.discard_truth(mark + prefix_len - index);
-        }
+        let result = self.build_source_set(mark, keys)?;
         for expr in rest {
             let operand = self.heap.temporary_mark();
             if let ast::Expr::Starred(star) = expr {
@@ -6951,6 +7166,25 @@ impl Context {
                 builtins::set_add(self, result, key)?;
             }
             self.discard_truth(operand);
+        }
+        Ok(result)
+    }
+
+    fn build_source_set(&mut self, mark: usize, keys: Vec<Id>) -> Result<Id> {
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        // Pop keys in insertion order. A rejected duplicate may finalize before the next hash.
+        self.heap.release_temporaries_since(mark);
+        self.heap.keep(result);
+        for &key in keys.iter().rev() {
+            self.heap.keep(key);
+        }
+        let count = keys.len();
+        for (index, key) in keys.into_iter().enumerate() {
+            builtins::set_add(self, result, key)?;
+            self.discard_truth(mark + count - index);
         }
         Ok(result)
     }
@@ -7006,110 +7240,31 @@ impl Context {
         Ok(())
     }
 
-    /// Obtain an iterator in the selected scope and drop its consumed expression operands.
-    fn source_comprehension_iterator(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        expression: &ast::Expr,
-    ) -> Result<Id> {
-        let mark = self.heap.temporary_mark();
-        let source = self.source_expr(code, scope, expression)?;
-        let iterator = self.iterator(source)?;
-        self.keep_source_result(mark, iterator)
-    }
-
-    /// Append each element to the result before advancing its innermost iterator.
-    fn source_eager_comprehension(
-        &mut self,
-        code: &Program,
-        parent: Id,
-        comp: EagerComprehension<'_>,
-        targets: &HashSet<String>,
-    ) -> Result<Id> {
-        let mark = self.heap.temporary_mark();
-        let result = (|| -> Result<Id> {
-            let clauses = comp.clauses;
-            let first = self.source_comprehension_iterator(code, parent, &clauses[0].iter)?;
-            let scope = self.comprehension_scope_with_targets(parent, targets.clone());
-            let collection = self.op(comp.kind, NONE, NONE, NONE)?;
-            // Each mark preserves the iterator and persistent roots of all outer clauses.
-            let mut levels = Vec::new();
-            levels
-                .try_reserve_exact(clauses.len())
-                .map_err(|_| crate::Error::memory_error())?;
-            levels.push((first, self.heap.temporary_mark()));
-            'advance: while let Some(&(iterator, step)) = levels.last() {
-                self.comprehension_step(step);
-                let Some(item) = self.next_item(iterator)? else {
-                    levels.pop();
-                    continue;
-                };
-                self.heap.keep(item);
-                let clause = &clauses[levels.len() - 1];
-                self.bind_target(code, scope, &clause.target, item)?;
-                for test in &clause.ifs {
-                    if !self.source_condition(code, scope, test)? {
-                        continue 'advance;
-                    }
-                }
-                if let Some(next) = clauses.get(levels.len()) {
-                    let inner = self.source_comprehension_iterator(code, scope, &next.iter)?;
-                    levels.push((inner, self.heap.temporary_mark()));
-                } else if let Some(key) = comp.key {
-                    let key = self.source_expr(code, scope, key)?;
-                    let value = self.source_expr(code, scope, comp.value)?;
-                    self.put_item(collection, key, value)?;
-                } else {
-                    let value = self.source_expr(code, scope, comp.value)?;
-                    self.op("append", collection, value, NONE)?;
-                }
-            }
-            Ok(collection)
-        })();
-        match result {
-            Ok(collection) => self.keep_source_result(mark, collection),
-            Err(error) => {
-                let collect = self.heap.discard_truth_operands(mark, self.modules);
-                for root in error.roots() {
-                    self.heap.keep(root);
-                }
-                if collect {
-                    self.collect_unreachable();
-                }
-                Err(error)
-            }
+    fn store_named_result(&mut self, scope: Id, name: &str, value: Id, mark: usize) -> Result<()> {
+        if self.store_source_name(self.named_expression_scope(scope), name, value)?
+            && self.heap.named_assignment(mark, value)
+        {
+            self.finish_binding_release();
         }
+        Ok(())
     }
 
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
         match expr {
-            Expr::Lambda(_) | Expr::Generator(_)
-                if code.expression_functions.contains_key(&expr.range()) =>
-            {
+            Expr::Lambda(_) if code.expression_functions.contains_key(&expr.range()) => {
                 let (site, definition) = &code.expression_functions[&expr.range()];
-                let function = self.source_definition(
+                self.source_definition(
                     code,
                     self.heap.current_code(),
                     scope,
                     code.instructions.len() + site,
                     definition,
-                )?;
-                if let Expr::Generator(genexpr) = expr {
-                    self.heap.keep(function);
-                    let outer = eval(self, &genexpr.generators[0].iter)?;
-                    let iter = self.iterator(outer)?;
-                    let generator = self.call(function, vec![iter], Vec::new())?;
-                    let Value::Generator { iterators, .. } = self.heap.get_mut(generator) else {
-                        unreachable!("source generator expression")
-                    };
-                    iterators.push(iter);
-                    Ok(generator)
-                } else {
-                    Ok(function)
-                }
+                )
+            }
+            Expr::Generator(_) if code.expression_functions.contains_key(&expr.range()) => {
+                self.source_genexpr(code, scope, expr, None)
             }
             Expr::Name(n) => {
                 let name = n.id.as_str();
@@ -7154,14 +7309,7 @@ impl Context {
                 };
                 let mark = self.heap.temporary_mark();
                 let value = eval(self, &named.value)?;
-                if self.store_source_name(
-                    self.named_expression_scope(scope),
-                    name.id.as_str(),
-                    value,
-                )? && self.heap.named_assignment(mark, value)
-                {
-                    self.finish_binding_release();
-                }
+                self.store_named_result(scope, name.id.as_str(), value, mark)?;
                 Ok(value)
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) | Expr::NumberLiteral(_) => {
@@ -7230,9 +7378,9 @@ impl Context {
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
             }
             expr if let Some(targets) = code.eager_comprehension_targets.get(&expr.range())
-                && let Some(comp) = EagerComprehension::from_expr(expr) =>
+                && let Some(comp) = Plan::from_expr(expr) =>
             {
-                self.source_eager_comprehension(code, scope, comp, targets)
+                self.source_eager_comprehension(code, scope, &comp, targets)
             }
             Expr::Set(display) => self.source_set_display(code, scope, &display.elts),
             Expr::Dict(v) => {

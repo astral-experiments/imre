@@ -69,8 +69,10 @@ impl Checker<'_> {
             return Ok(diff);
         }
         if let ast::Expr::Generator(generator) = source
-            && let Some(filtered) =
-                self.string_list_filter(&generator.generators, &generator.elt, element, true)?
+            && let Some(filtered) = self.string_list_filter(
+                &imre_ast::comprehension::Plan::generator(generator),
+                element,
+            )?
         {
             return Ok(filtered);
         }
