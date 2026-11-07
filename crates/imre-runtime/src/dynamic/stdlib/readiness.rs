@@ -40,14 +40,16 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
     let key =
         super::super::namedtuple::factory(ctx, &[name, fields], &[("module".into(), module)])?;
     ctx.bind(scope, "SelectorKey", key);
-    let fields = ctx.scope("selectors", Some(scope));
-    ctx.bind(fields, "__module__", module);
+    let base = super::super::mapping_abc::class(ctx, "Mapping")?;
+    let bases = ctx.alloc(Value::Tuple(vec![base]));
+    let name = ctx.text("_SelectorMapping");
+    let mut fields = vec![(ctx.text("__module__"), module)];
     for method in ["__init__", "__getitem__", "get", "__iter__", "__len__"] {
         let function = ctx.builtin(&format!("selectors._SelectorMapping.{method}"));
-        ctx.bind(fields, method, function);
+        fields.push((ctx.text(method), function));
     }
-    let base = super::super::mapping_abc::class(ctx, "Mapping")?;
-    let class = ctx.allocate_class("_SelectorMapping".into(), fields, vec![base])?;
+    let namespace = ctx.dict(fields);
+    let class = builtins::call(ctx, "type", &[name, bases, namespace], &[])?;
     ctx.bind(scope, "_SelectorMapping", class);
     #[cfg(target_os = "linux")]
     let source = concat!(
