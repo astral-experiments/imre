@@ -38,7 +38,9 @@ def want_read(operation):
         raise AssertionError("expected SSLWantReadError")
 
 
-client, server, cin, cout, sin, sout = connect("localhost")
+# IDNA removes the soft hyphen before OpenSSL checks the localhost certificate.
+client, server, cin, cout, sin, sout = connect("local\u00adhost")
+assert client.server_hostname == "localhost"
 with open(certdata + "/ssl_cert.pem") as cert:
     assert client.getpeercert(binary_form=True) == ssl.PEM_cert_to_DER_cert(cert.read())
 identity = client.getpeercert()["subjectAltName"]
