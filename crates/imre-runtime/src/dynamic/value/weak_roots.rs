@@ -367,10 +367,12 @@ impl Heap {
         {
             return;
         }
-        if !self.weak_roots.search_due() {
+        // A complete proof went stale. Look for the new path before backing off again.
+        let refresh = std::mem::take(&mut self.weak_roots.covers_endpoints);
+        if !refresh && !self.weak_roots.search_due() {
             return;
         }
-        let dict_keys = self.weak_roots.retry_with_keys;
+        let dict_keys = self.weak_roots.retry_with_keys || (refresh && self.weak_roots.dict_keys);
         if let Some(paths) = RootPaths::discover(
             self,
             globals,
