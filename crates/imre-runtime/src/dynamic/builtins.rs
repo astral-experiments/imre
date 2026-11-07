@@ -926,7 +926,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Int(_) if attr == "__repr__" => "int",
         Value::Int(_) | Value::Bool(_)
             if real_methods("int").contains(&attr)
-                || matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+                || matches!(
+                    attr,
+                    "__add__" | "__index__" | "bit_count" | "bit_length" | "to_bytes"
+                ) =>
         {
             "int"
         }
@@ -2346,7 +2349,9 @@ pub(super) fn call(
                 let value = ctx.alloc(Value::Int(value));
                 Ok(ctx.alloc(Value::Tuple(vec![value])))
             }
-            "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
+            "int" if matches!(method, "bit_count" | "bit_length") => {
+                integer::bit_count_or_length(ctx, method, args, kwargs)
+            }
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             _ if matches!(

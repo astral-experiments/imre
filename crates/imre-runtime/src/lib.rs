@@ -164,6 +164,16 @@ impl Int {
         }
     }
 
+    /// Count the set bits in the absolute value, including for negative integers.
+    fn bit_count(&self) -> Self {
+        let count = if let Some(value) = self.as_small() {
+            u64::from(value.unsigned_abs().count_ones())
+        } else {
+            self.big().magnitude().count_ones()
+        };
+        Self::from_usize(count as usize)
+    }
+
     /// Counts magnitude bits, excluding the sign and leading zeroes.
     fn bit_length(&self) -> Self {
         Self::from_usize(self.bits() as usize)
@@ -1316,6 +1326,16 @@ fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
         ));
     }
     Ok(Int::new(value.as_ref() << shift as usize))
+}
+
+/// Return the population count of the magnitude of a canonical integer.
+///
+/// # Safety
+/// The argument must be a rooted, canonical integer handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_bit_count(value: usize) -> usize {
+    // SAFETY: the caller roots the handle through this nonreentrant read.
+    unsafe { Int::borrow(value) }.bit_count().into_raw()
 }
 
 /// Returns the number of bits in the magnitude of a canonical integer.

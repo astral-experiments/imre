@@ -1237,6 +1237,7 @@ pub(crate) enum Builtin {
     MathComb,
     MathPerm,
     MathFactorial,
+    IntBitCount,
     IntBitLength,
     IntHash,
     FloatIsInteger,

@@ -595,6 +595,7 @@ impl Builtin {
             | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
             | Self::IntExtremum { .. }
+            | Self::IntBitCount
             | Self::IntBitLength
             | Self::IntHash
             | Self::FloatIsInteger
@@ -979,7 +980,7 @@ impl Builtin {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
             Self::MathComb | Self::MathPerm => signature(&[Type::Int, Type::Int], Type::Int),
-            Self::MathFactorial | Self::IntBitLength | Self::IntHash => {
+            Self::MathFactorial | Self::IntBitCount | Self::IntBitLength | Self::IntHash => {
                 signature(&[Type::Int], Type::Int)
             }
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),

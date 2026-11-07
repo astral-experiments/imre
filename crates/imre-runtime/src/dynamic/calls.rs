@@ -1120,6 +1120,7 @@ impl Context {
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"
+                            | "int.bit_count"
                             | "int.bit_length"
                             | "int.to_bytes"
                             | "list.index"
@@ -5053,7 +5054,10 @@ impl Context {
             Value::Native(ref class)
                 if class == "bool"
                     && (builtins::real_methods("int").contains(&name)
-                        || matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes")) =>
+                        || matches!(
+                            name,
+                            "__add__" | "__index__" | "bit_count" | "bit_length" | "to_bytes"
+                        )) =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -5127,7 +5131,7 @@ impl Context {
                         && (builtins::real_methods("int").contains(&name)
                             || matches!(
                                 name,
-                                "__add__" | "__index__" | "bit_length" | "to_bytes"
+                                "__add__" | "__index__" | "bit_count" | "bit_length" | "to_bytes"
                             )))
                     || (class == "float"
                         && (builtins::real_methods(class).contains(&name)
