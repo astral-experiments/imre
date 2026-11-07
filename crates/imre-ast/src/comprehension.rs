@@ -245,6 +245,11 @@ impl<'a> Plan<'a> {
     }
 
     pub fn target_names(&self) -> HashSet<String> {
+        self.collect_target_names()
+    }
+
+    /// Collect binding names in clause and unpacking order using the caller's collection.
+    pub fn collect_target_names<T: Default + Extend<String>>(&self) -> T {
         self.target_names_with(|_| Ok(()))
             .expect("collecting names without validation")
     }
@@ -255,11 +260,11 @@ impl<'a> Plan<'a> {
 
     /// Declare the targets of all pulls, including an inner clause that may
     /// never run. Each consumer chooses when to report assignment syntax errors.
-    fn target_names_with(
+    fn target_names_with<T: Default + Extend<String>>(
         &self,
         invalid: impl Fn(InvalidTarget) -> Result<(), InvalidTarget>,
-    ) -> Result<HashSet<String>, InvalidTarget> {
-        let mut names = HashSet::new();
+    ) -> Result<T, InvalidTarget> {
+        let mut names = T::default();
         for step in &self.steps {
             if let Step::Next { target, .. } = step {
                 visit_target_names(target, &mut names, &invalid)?;
@@ -481,13 +486,17 @@ mod tests {
     #[test]
     fn target_scopes_declare_unpack_names_in_clause_order() {
         let parsed = ruff_python_parser::parse_expression(
-            "[item async for (first, *rest), [items[index], box.value] in rows for item in rest]",
+            "[item async for (first, *rest), [items[index], box.value] in rows for item, first in rest]",
         )
         .unwrap();
         let plan = Plan::from_expr(parsed.expr()).unwrap();
         let expected = HashSet::from(["first".to_owned(), "rest".to_owned(), "item".to_owned()]);
         assert_eq!(plan.target_names(), expected);
         assert_eq!(plan.try_target_names(), Ok(expected));
+        assert_eq!(
+            plan.collect_target_names::<Vec<_>>(),
+            ["first", "rest", "item", "first"]
+        );
 
         let pattern = ruff_python_parser::parse_expression("(a, [b, *c], d)").unwrap();
         let mut declared = Vec::new();
