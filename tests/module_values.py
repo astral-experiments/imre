@@ -22,6 +22,9 @@ REJECTED = {
     "early_namedtuple_imported": {
         "library.py": 'from collections import namedtuple\ndef early() -> str:\n    return Late("before").value\nVALUE = early()\nLate = namedtuple("Late", "value")\n',
     },
+    "early_builtin_shadow_in_callback": {
+        "main.py": "def relay(label: str) -> None:\n    print(label)\nrelay('before')\ndef print(label: str) -> None:\n    pass\nrelay('after')\n",
+    },
     "entry_call_before_definition": {"main.py": "VALUE = make()\ndef make() -> int:\n    return 1\n"},
     "entry_early_read": {"main.py": "def read() -> int:\n    return SECOND\nFIRST = read()\nSECOND = 2\ndef last() -> None:\n    pass\n"},
     "early_class_entry_enum": {
@@ -195,6 +198,8 @@ def main() -> None:
             assert "panicked" not in actual.stderr, (name, actual.stderr)
             if name.startswith("early_class_"):
                 assert "references a class before it is available" in actual.stderr, actual.stderr
+            if name == "early_builtin_shadow_in_callback":
+                assert "calls a definition before it is available" in actual.stderr, actual.stderr
             if name == "uninitialized_rebinding":
                 assert "module value is not initialized on this path" in actual.stderr, actual.stderr
             checks += 1

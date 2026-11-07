@@ -1409,6 +1409,27 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn module_functions_take_precedence_over_builtin_calls() {
+        let source = r#"
+import builtins
+
+def print(value: int) -> int:
+    return value + 1
+
+def sorted(value: int) -> list[int]:
+    return [value]
+
+def result() -> list[int]:
+    increment = print
+    return sorted(increment(print(40)))
+
+builtins.print(result()[0])
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(!llvm.contains("call ptr @imre_dyn_new("));
+    }
+
+    #[test]
     fn generic_io_annotations_use_typed_stream_reads() {
         let source = r#"
 import typing

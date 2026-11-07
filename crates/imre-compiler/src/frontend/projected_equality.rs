@@ -18,17 +18,20 @@ fn arguments<'a>(value: &'a ast::Expr, builtin: &str) -> Option<&'a [ast::Expr]>
         .then_some(call.arguments.args.as_ref())
 }
 
-fn mapped(statement: &ast::Stmt) -> Option<Mapped<'_>> {
+fn mapped<'a>(checker: &Checker<'_>, statement: &'a ast::Stmt) -> Option<Mapped<'a>> {
     let assign = statement.as_assign_stmt()?;
     let [target] = assign.targets.as_slice() else {
         return None;
     };
-    let mut projection = mapped_value(&assign.value)?;
+    let mut projection = mapped_value(checker, &assign.value)?;
     projection.target = Some(name(target)?);
     Some(projection)
 }
 
-fn mapped_value(value: &ast::Expr) -> Option<Mapped<'_>> {
+fn mapped_value<'a>(checker: &Checker<'_>, value: &'a ast::Expr) -> Option<Mapped<'a>> {
+    if !checker.unshadowed_builtin(&value.as_call_expr()?.func, "sorted") {
+        return None;
+    }
     let [inner] = arguments(value, "sorted")? else {
         return None;
     };
@@ -86,12 +89,15 @@ fn zipped_comparison(
 
 /// The result is terminal, so neither sorted list nor either zip target escapes.
 /// Other lengths retain the complete reduction, including zip truncation.
-fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)> {
+fn tail<'a>(
+    checker: &Checker<'_>,
+    stmts: &'a [ast::Stmt],
+) -> Option<(usize, Mapped<'a>, Mapped<'a>, Answers)> {
     if let [.., ast::Stmt::Return(ret)] = stmts
         && let Some(compare) = ret.value.as_deref()?.as_compare_expr()
         && let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
         && let [left, right] = compare.operands.as_ref()
-        && let (Some(a), Some(b)) = (mapped_value(left), mapped_value(right))
+        && let (Some(a), Some(b)) = (mapped_value(checker, left), mapped_value(checker, right))
     {
         let equal = *op == ast::CmpOp::Eq;
         return Some((
@@ -106,9 +112,11 @@ fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)>
         ));
     }
     if let [.., a, b, ast::Stmt::Return(ret)] = stmts
-        && let (Some(a), Some(b), Some(value)) = (mapped(a), mapped(b), ret.value.as_deref())
+        && let (Some(a), Some(b), Some(value)) =
+            (mapped(checker, a), mapped(checker, b), ret.value.as_deref())
         && let Some(call) = value.as_call_expr()
         && let Some(reducer @ ("any" | "all")) = name(&call.func)
+        && checker.unshadowed_builtin(&call.func, reducer)
         && call.arguments.keywords.is_empty()
         && let [ast::Expr::Generator(generator)] = call.arguments.args.as_ref()
         && let [clause] = generator.generators.as_slice()
@@ -136,7 +144,7 @@ fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)>
     let [.., a, b, ast::Stmt::For(loop_), result] = stmts else {
         return None;
     };
-    let (a, b) = (mapped(a)?, mapped(b)?);
+    let (a, b) = (mapped(checker, a)?, mapped(checker, b)?);
     let [ast::Stmt::If(test)] = loop_.body.as_slice() else {
         return None;
     };
@@ -179,7 +187,7 @@ impl Checker<'_> {
         if self.returns != Type::Bool {
             return self.block(stmts);
         }
-        let Some((at, a, b, answers)) = tail(stmts) else {
+        let Some((at, a, b, answers)) = tail(self, stmts) else {
             return self.block(stmts);
         };
         let (mut body, prefix_falls) = self.block(&stmts[..at])?;
