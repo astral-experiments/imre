@@ -1,8 +1,9 @@
-"""Discover filesystem modules and read package resources in runtime imports."""
+"""Discover modules on the import path and read package resources."""
 
 import importlib
 import os as _os
 import sys
+from importlib.machinery import FileFinder as _PathFileFinder
 from importlib.util import resolve_name as _spec_name
 from os import fsdecode
 from os.path import abspath as _absolute, dirname, join as _join
@@ -14,6 +15,13 @@ from _imre_pkgutil import (
     find_spec as _find_spec,
     isdir as _isdir,
 )
+
+
+try:
+    from zipimport import zipimporter as _ZipImporter
+    from _imre_zipimport import names as _zip_names
+except ImportError:
+    _ZipImporter = ()
 
 
 _module_suffixes = list(_target_suffixes)
@@ -170,17 +178,43 @@ def get_data(package, resource):
     return spec.loader.get_data(_join(dirname(filename), *resource.split('/')))
 
 
+def _iter_zip_modules(finder, prefix):
+    # CPython 3.14.5 Lib/pkgutil.py considers sorted entries immediately under the prefix.
+    for member in sorted(_zip_names(finder.archive)):
+        if not member.startswith(finder.prefix):
+            continue
+        parts = member[len(finder.prefix):].split('/')
+        if len(parts) == 2 and parts[1].startswith('__init__.py'):
+            yield prefix + parts[0], True
+        elif len(parts) == 1:
+            name = _module_name(parts[0])
+            if name and name != '__init__' and '.' not in name:
+                yield prefix + name, False
+
+
 def iter_modules(path=None, prefix=''):
-    """Yield unique modules and regular packages in filesystem import order."""
+    """Yield unique modules and regular packages in import path order."""
     if isinstance(path, str):
         raise ValueError('path must be None or list of paths to look for modules in')
     seen = set()
     for directory in sys.path if path is None else path:
-        finder = FileFinder(fsdecode(directory))
-        for filename in _filenames(finder.path):
-            info = _module_info(finder, filename, prefix, seen)
-            if info is not None:
-                yield info
+        finder = get_importer(directory)
+        if isinstance(finder, _PathFileFinder):
+            for filename in _filenames(finder.path):
+                info = _module_info(finder, filename, prefix, seen)
+                if info is not None:
+                    yield info
+            continue
+        if isinstance(finder, _ZipImporter):
+            entries = _iter_zip_modules(finder, prefix)
+        elif hasattr(finder, 'iter_modules'):
+            entries = finder.iter_modules(prefix)
+        else:
+            continue
+        for name, ispkg in entries:
+            if name not in seen:
+                seen.add(name)
+                yield ModuleInfo(finder, name, ispkg)
 
 
 # From CPython 3.14.5 Lib/pkgutil.py. See licenses/CPython.txt.

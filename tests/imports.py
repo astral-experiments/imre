@@ -1518,6 +1518,7 @@ ACCEPTED = {
         "main.py": (
             "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
             "from importlib.util import find_spec\nfrom importlib.resources import files\nfrom witness import seen\n"
+            "from pkgutil import get_importer, iter_modules\n"
             "sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/zip-provider')\n"
             "def refresh():\n    assert sys.exception() is None\n    refresh_finder()\n"
             "for name in ('stored', 'deflated'):\n"
@@ -1527,6 +1528,10 @@ ACCEPTED = {
             "    assert package is import_module(name) and package.__spec__ is spec\n"
             "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
             "    assert spec.submodule_search_locations is package.__path__\n"
+            "    roots = [sys.path[0], sys.path[0]]\n"
+            "    assert list(iter_modules(roots)) == [(get_importer(roots[0]), name, True)]\n"
+            "    assert list(iter_modules(package.__path__, name + '.')) == [\n"
+            "        (get_importer(package.__path__[0]), name + '.leaf', False)]\n"
             "    from importlib.readers import ZipReader\n"
             "    reader = spec.loader.get_resource_reader(name)\n"
             "    assert isinstance(reader, ZipReader) and reader.prefix == name + '/'\n"
