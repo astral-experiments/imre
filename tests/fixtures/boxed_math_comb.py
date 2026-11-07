@@ -4,6 +4,8 @@ from math import comb
 
 def current():
     assert import_module("math").comb is comb
+    assert comb(67, 33) == 14226520737620288370
+    assert comb(68, 34) == 28453041475240576740
     n = 2**1000
     assert comb(n, n - 2) == n * (n - 1) // 2
     assert comb(0, n) == 0
