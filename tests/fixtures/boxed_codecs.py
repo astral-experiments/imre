@@ -214,6 +214,22 @@ def check_utf8_incremental_encoder():
     assert factory("ignore").encode("\ud800Z") == b"Z"
 
 
+def check_charmap_factories():
+    from encodings import cp1252
+    from io import BytesIO
+
+    entry = codecs.lookup("windows-1252")
+    assert entry.incrementalencoder is codecs.getincrementalencoder("cp1252") is cp1252.IncrementalEncoder
+    assert entry.streamreader is codecs.getreader("cp1252") is cp1252.StreamReader
+    encoder = entry.incrementalencoder("replace")
+    assert encoder.encode("€") + encoder.encode("☃", final=True) == b"\x80?"
+    reader = entry.streamreader(BytesIO(b"\x80\x81"), "replace")
+    assert reader.read(1) == "€"
+    assert reader.read() == "\ufffd"
+    reader.seek(0)
+    assert reader.read() == "€\ufffd"
+
+
 def check_incremental_decoder_factory():
     from encodings.utf_8 import IncrementalDecoder
 
@@ -311,6 +327,7 @@ def current():
     check_utf8_error_handler()
     check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
+    check_charmap_factories()
     check_incremental_decoder_factory()
     check_text_encoding_flag()
     check_escape_decode()
@@ -425,6 +442,13 @@ def current():
     assert latin2.decode.__func__ is Latin2.decode
     assert Latin2.__bases__ == (codecs.Codec,)
     assert latin2.decode(b"\xa1") == ("Ą", 1)
+    from encodings.iso8859_2 import IncrementalEncoder, StreamReader
+    from io import BytesIO
+
+    assert codecs.getincrementalencoder("l2") is latin2.incrementalencoder is IncrementalEncoder
+    assert codecs.getreader("latin2") is latin2.streamreader is StreamReader
+    text = StreamReader(BytesIO(wire)).read()
+    assert text[0xA1] == "Ą" and IncrementalEncoder().encode(text, final=True) == wire
 
     entry_koi8 = codecs.lookup("KOI8_U")
     assert entry_koi8.name == "koi8-u"
