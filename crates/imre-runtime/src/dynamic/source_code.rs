@@ -15,8 +15,15 @@ use ruff_text_size::Ranged;
 use super::value::{Body, ExecGlobals, Location};
 use super::*;
 
+#[derive(Clone)]
+struct SourceFilename {
+    // Code objects own the Python spelling. Rust diagnostic locations require scalar text.
+    object: Id,
+    display: Rc<str>,
+}
+
 pub(super) struct Program {
-    pub filename: Rc<str>,
+    filename: SourceFilename,
     // All nested code shares a source map. Prelinked suspended suites start in a synthetic header.
     source_lines: Rc<[usize]>,
     linked_body_line: Option<u32>,
@@ -70,15 +77,11 @@ impl CapturedAcquire {
         name: Id,
         parameters: Id,
         qualname: Id,
-        location: Location,
+        (filename, first_line): (Id, u32),
     ) -> Result<Id> {
-        let mut program = Program::new(
-            Rc::from(location.file.as_ref()),
-            ctx.str_value(name)?,
-            false,
-        );
+        let mut program = Program::new(ctx.source_filename(filename)?, ctx.str_value(name)?, false);
         program.qualname = ctx.str_value(qualname)?.to_owned();
-        program.first_line = location.line;
+        program.first_line = first_line;
         program
             .instructions
             .push((self.line, Instruction::Eval(self.expression)));
@@ -1984,7 +1987,7 @@ impl Program {
         flags
     }
 
-    fn new(filename: Rc<str>, name: &str, has_named_bindings: bool) -> Self {
+    fn new(filename: SourceFilename, name: &str, has_named_bindings: bool) -> Self {
         Self {
             filename,
             source_lines: Rc::default(),
@@ -3543,14 +3546,8 @@ impl Context {
         true
     }
 
-    pub(super) fn syntax_suffix(&self, filename: Id, line: Id) -> Result<String> {
-        use std::fmt::Write;
-        let filename = self
-            .string_storage(filename)
-            .map(|id| self.str_value(id))
-            .transpose()?
-            .and_then(|path| path.rsplit(std::path::MAIN_SEPARATOR).next());
-        let line = if let Value::Int(number) = self.heap.get(line) {
+    fn syntax_lineno(&self, line: Id) -> Option<i64> {
+        if let Value::Int(number) = self.heap.get(line) {
             Some(if std::mem::size_of::<libc::c_long>() == 4 {
                 number
                     .to_i64()
@@ -3562,7 +3559,41 @@ impl Context {
             })
         } else {
             None
+        }
+    }
+
+    /// Construct a Python suffix from the filename's storage before rendering the message.
+    pub(super) fn surrogate_syntax_suffix(&mut self, filename: Id, line: Id) -> Result<Option<Id>> {
+        let Value::SurrogateStr(points) = self.heap.get(self.scalar_value(filename)) else {
+            return Ok(None);
         };
+        let name = points
+            .rsplit(|&p| p == std::path::MAIN_SEPARATOR as u32)
+            .next()
+            .unwrap();
+        let mut suffix = Vec::new();
+        suffix
+            .try_reserve_exact(name.len().saturating_add(40))
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        suffix.extend([u32::from(' '), u32::from('(')]);
+        suffix.extend_from_slice(name);
+        if let Some(n) = self.syntax_lineno(line) {
+            suffix.extend(format!(", line {n}").bytes().map(u32::from));
+        }
+        suffix.push(u32::from(')'));
+        Ok(Some(self.text_codepoints(suffix)))
+    }
+
+    pub(super) fn syntax_suffix(&self, filename: Id, line: Id) -> Result<String> {
+        use std::fmt::Write;
+        let display = self
+            .string_storage(filename)
+            .map(|id| self.filename_display(id))
+            .transpose()?;
+        let filename = display
+            .as_deref()
+            .and_then(|path| path.rsplit(std::path::MAIN_SEPARATOR).next());
+        let line = self.syntax_lineno(line);
         let mut suffix = String::new();
         if filename.is_some() || line.is_some() {
             suffix
@@ -3629,6 +3660,13 @@ impl Context {
         self.compile_source_with_flags(source, filename, mode, strip_indent, inherited)
     }
 
+    fn source_filename(&self, object: Id) -> Result<SourceFilename> {
+        Ok(SourceFilename {
+            object,
+            display: Rc::from(self.filename_display(object)?.as_ref()),
+        })
+    }
+
     pub(super) fn compile_source_with_flags(
         &mut self,
         source: Id,
@@ -3650,21 +3688,22 @@ impl Context {
                 ));
             }
         };
-        let filename_text = self.str_value(filename)?;
+        let filename_id = filename;
+        let filename = self.source_filename(filename_id)?;
         let source = match self.heap.get(self.scalar_value(source)) {
             Value::Bytes(data) | Value::ByteArray(data) => {
                 match crate::objects::decode_compile_source(data) {
                     Ok(text) => Cow::Owned(text),
-                    Err(error) => return Err(self.source_decode_error(error, filename)),
+                    Err(error) => return Err(self.source_decode_error(error, filename_id)),
                 }
             }
             _ => Cow::Borrowed(self.str_value(source)?),
         };
         if source.contains('\0') {
-            return Err(self.source_decode_error(crate::objects::SourceDecodeError::Null, filename));
+            return Err(
+                self.source_decode_error(crate::objects::SourceDecodeError::Null, filename_id)
+            );
         }
-        let filename_id = filename;
-        let filename = filename_text;
         let source = if strip_indent {
             source.trim_start_matches([' ', '\t'])
         } else {
@@ -3720,8 +3759,10 @@ impl Context {
             if mode == "exec" && !text.ends_with('\n') {
                 text.push('\n');
             }
-            let message = format!("{filename}: {error}");
-            let msg = self.text(&message);
+            let detail = format!(": {error}");
+            let message = format!("{}{detail}", filename.display);
+            let detail = self.text(detail);
+            let msg = self.concat_strings(filename_id, detail)?;
             let details = vec![
                 filename_id,
                 self.int(row as i64),
@@ -3792,7 +3833,7 @@ impl Context {
                 &lines,
             )?);
         }
-        let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
+        let mut code = Program::new(filename, "<module>", source.contains(":="));
         code.scope_flags = inherited;
         code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
@@ -3888,12 +3929,12 @@ impl Context {
         if !null {
             let lineno = range.as_ref().map_or(0, |r| r.line);
             let name = self
-                .str_value(filename)
+                .filename_display(filename)
                 .expect("source filename was validated");
             let basename = name
                 .rsplit(std::path::MAIN_SEPARATOR)
                 .next()
-                .unwrap_or(name);
+                .unwrap_or(&name);
             rendered = format!("{rendered} ({basename}, line {lineno})");
             let line = self.int(lineno as i64);
             let details = if let Some(r) = range {
@@ -3933,7 +3974,7 @@ impl Context {
     ) -> Id {
         let name = self.heap.code_name(&program.name);
         let qualname = self.heap.code_name(&program.qualname);
-        let filename = self.text(program.filename.as_ref());
+        let filename = program.filename.object;
         let doc = program
             .doc
             .and_then(|range| program.literals.get(&range).copied())
@@ -4622,7 +4663,7 @@ impl Context {
         let lines: Rc<[usize]> =
             line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
         let mut program = Program::new(
-            self.str_value(code.filename)?.into(),
+            self.source_filename(code.filename)?,
             self.str_value(code.name)?,
             source.contains(":="),
         );
@@ -5093,7 +5134,7 @@ impl Context {
                         &cursor.iterators[..]
                     };
                     let location = Location {
-                        file: code.filename.to_string().into(),
+                        file: code.filename.display.clone(),
                         line,
                         span: None,
                     };

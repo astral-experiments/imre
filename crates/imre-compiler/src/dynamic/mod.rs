@@ -750,16 +750,16 @@ pub(crate) fn compile(
     } else {
         cwd.clone()
     };
-    // POSIX starts a script's search path at its physical directory. Keep a
-    // usable UTF-8 alias when the physical name is outside our string domain.
-    let physical_root = match (cfg!(unix), &entry_identity, module_root) {
-        (true, Some(_), Some(_)) => root.canonicalize().ok(),
-        (true, Some(identity), None) => identity.parent().map(Path::to_owned),
-        _ => None,
+    // Script entries follow the physical directory. A directory operand retains its spelling.
+    let root = match (
+        cfg!(unix) && !options.path_entry,
+        &entry_identity,
+        module_root,
+    ) {
+        (true, Some(_), Some(_)) => root.canonicalize().unwrap_or(root),
+        (true, Some(identity), None) => identity.parent().unwrap_or(&root).to_owned(),
+        _ => root,
     };
-    let root = physical_root
-        .filter(|path| path.to_str().is_some())
-        .unwrap_or(root);
     let mut initial = Vec::new();
     let safe_path = startup.is_some_and(|(flags, _)| flags.safe_path);
     if options.path_entry {
@@ -1295,6 +1295,17 @@ pub(crate) fn compile(
     } else {
         initial.extend(installed_dirs);
     }
+    // Command and module entries compute path[0] at startup, after site has run.
+    // Preserve the native bytes when a script directory cannot be serialized as JSON text.
+    let mut path0_bytes = None;
+    if path0_len != 0 {
+        let first = &mut initial[0];
+        if in_memory && !options.path_entry {
+            first.clear();
+        } else if first.to_str().is_none() {
+            path0_bytes = Some(std::mem::take(first).into_os_string().into_encoded_bytes());
+        }
+    }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
@@ -1322,7 +1333,7 @@ pub(crate) fn compile(
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command_source":command,
+        "command_source":command,"path0_bytes":path0_bytes,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     check_returns()?;

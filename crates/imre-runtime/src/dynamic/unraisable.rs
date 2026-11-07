@@ -178,7 +178,8 @@ fn display(ctx: &mut Context, args: Id) -> Result<()> {
             let _ = traceback::format_frames(ctx, tb, Some(-limit), &mut lines);
         }
         for line in lines {
-            if write_text(ctx, file, line).is_err() {
+            let text = line.into_python(ctx);
+            if write(ctx, file, text).is_err() {
                 break;
             }
         }

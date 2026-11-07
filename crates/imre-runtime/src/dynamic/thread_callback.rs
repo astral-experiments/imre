@@ -3,7 +3,7 @@
 
 use super::source_code::CapturedAcquire;
 use super::thread_worker::Operation;
-use super::value::{Body, Code, CodeObject, Location};
+use super::value::{Body, Code, CodeObject};
 use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
 use crate::objects::logging::HandlerLock;
@@ -26,7 +26,7 @@ pub(super) struct Callback {
     module: String,
     name: String,
     qualname: String,
-    filename: String,
+    filename: Vec<u32>,
     first_line: u32,
     signature: String,
     values: Vec<Argument>,
@@ -353,7 +353,7 @@ impl Callback {
             module: copy_label(&ctx.scope_data(scope).module)?,
             name: copy_label(ctx.str_value(code.name)?)?,
             qualname: copy_label(ctx.str_value(code.qualname)?)?,
-            filename: copy_label(ctx.str_value(code.filename)?)?,
+            filename: ctx.string_codepoints(code.filename)?.into_owned(),
             first_line: code.first_line,
             signature: copy_label(ctx.str_value(code.parameters)?)?,
             values,
@@ -392,11 +392,8 @@ impl Callback {
         let name = ctx.text(self.name);
         let qualname = ctx.text(self.qualname);
         let signature = ctx.text(self.signature);
-        let location = Location {
-            file: self.filename.into(),
-            line: self.first_line,
-            span: None,
-        };
+        let filename = ctx.text_codepoints(self.filename);
+        let location = (filename, self.first_line);
         let code = match self.entry {
             Entry::Native(entry) => ctx.prelinked_code(
                 Body::Native(entry),

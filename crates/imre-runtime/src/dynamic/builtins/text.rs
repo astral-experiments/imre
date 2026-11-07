@@ -171,24 +171,35 @@ pub(super) fn construct(
                     .trace
                     .as_ref()
                     .and_then(|trace| trace.source_syntax.as_ref())
-                && ctx.string_storage(fields[1].get()).is_none()
-                && !matches!(ctx.heap.get(fields[2].get()), Value::Int(_))
             {
-                // Without a location, SyntaxError delegates directly to str(msg), including its identity.
-                let message = fields[0].get();
-                if matches!(ctx.heap.get(message), Value::Str(_)) {
-                    return Ok(message);
+                let (message, filename, line) = (fields[0].get(), fields[1].get(), fields[2].get());
+                if let Some(suffix) = ctx.surrogate_syntax_suffix(filename, line)? {
+                    return ctx.with_slot_depth(
+                        "maximum recursion depth exceeded while getting the str of an object",
+                        |ctx| {
+                            let text = super::call(ctx, "str", &[message], &[])?;
+                            ctx.concat_strings(text, suffix)
+                        },
+                    );
                 }
-                let class = match ctx.heap.get(message) {
-                    Value::Instance { class, .. } => Some(*class),
-                    Value::Raised(error) => Some(error.class),
-                    _ => None,
-                };
-                if class.is_some_and(|class| {
-                    ctx.class_attr(class, "__str__").is_some()
-                        || ctx.class_attr(class, "__repr__").is_some()
-                }) {
-                    return super::call(ctx, "str", &[message], &[]);
+                if ctx.string_storage(filename).is_none()
+                    && !matches!(ctx.heap.get(line), Value::Int(_))
+                {
+                    // Without a location, SyntaxError delegates directly to str(msg), including its identity.
+                    if matches!(ctx.heap.get(message), Value::Str(_)) {
+                        return Ok(message);
+                    }
+                    let class = match ctx.heap.get(message) {
+                        Value::Instance { class, .. } => Some(*class),
+                        Value::Raised(error) => Some(error.class),
+                        _ => None,
+                    };
+                    if class.is_some_and(|class| {
+                        ctx.class_attr(class, "__str__").is_some()
+                            || ctx.class_attr(class, "__repr__").is_some()
+                    }) {
+                        return super::call(ctx, "str", &[message], &[]);
+                    }
                 }
             }
             if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(value)) {

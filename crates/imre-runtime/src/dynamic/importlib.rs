@@ -386,10 +386,12 @@ impl Context {
         // regular package can never acquire one of its children implicitly.
         let search = self.items(search)?;
         let bundle = self.config["bundled_root"].as_str().map(PathBuf::from);
-        let roots = search
-            .into_iter()
-            .filter_map(|id| self.str_value(id).ok().map(PathBuf::from))
-            .collect::<Vec<_>>();
+        let mut roots = Vec::new();
+        for entry in search {
+            if self.string_storage(entry).is_some() {
+                roots.push(self.import_path(entry)?);
+            }
+        }
         for spelling in roots
             .into_iter()
             .chain(bundle.iter().filter(|_| top_level).cloned())
@@ -461,7 +463,7 @@ impl Context {
     fn zip_source(&mut self, root: &Path, name: &str) -> Result<Option<(PathBuf, Id)>> {
         let module = self.module("zipimport")?;
         let find = self.lookup_attr(module, "_find_at")?;
-        let path = self.text(root.to_string_lossy());
+        let path = self.import_path_text(root)?;
         let name = self.text(name);
         let result = self.call(find, vec![path, name], vec![])?;
         if result == NONE {
@@ -471,11 +473,11 @@ impl Context {
         let [origin, loader] = parts.as_slice() else {
             return Err(Error::new("TypeError", "expected a ZIP origin and loader"));
         };
-        Ok(Some((PathBuf::from(self.str_value(*origin)?), *loader)))
+        Ok(Some((self.import_path(*origin)?, *loader)))
     }
 
     pub(super) fn module_code(&mut self, entry: ModuleInitializer, path: &Path) -> Result<Id> {
-        let filename = self.text(path.to_string_lossy());
+        let filename = self.import_path_text(path)?;
         let entry = match entry {
             ModuleInitializer::Native(entry) => entry,
             ModuleInitializer::Source(text) => {
@@ -504,19 +506,19 @@ impl Context {
         })))
     }
 
-    fn registered_file(&self, name: &str, filename: &str) -> Option<&super::SourceModule> {
+    fn registered_file(&self, name: &str, filename: &Path) -> Option<&super::SourceModule> {
         self.sources
             .get(name)?
             .iter()
-            .find(|source| source.path == Path::new(filename))
+            .find(|source| source.path == filename)
     }
 
     /// Bind the issued loader to its initializer, including modules compiled without source text.
     pub(super) fn bind_loader_source(&mut self, loader: Id, name: Id, origin: Id) -> Result<()> {
-        let filename = self.str_value(origin)?;
-        if let Some(source) = self.registered_file(self.str_value(name)?, filename) {
+        let filename = self.import_path(origin)?;
+        if let Some(source) = self.registered_file(self.str_value(name)?, &filename) {
             let source = super::SourceModule {
-                path: filename.into(),
+                path: filename,
                 ..*source
             };
             self.heap.loader_sources.insert(loader, source);
@@ -524,12 +526,17 @@ impl Context {
         Ok(())
     }
 
-    fn loader_source(&self, loader: Id, filename: Id) -> Option<&super::SourceModule> {
+    fn loader_source(&mut self, loader: Id, filename: Id) -> Option<&super::SourceModule> {
+        let path = self.import_path(filename).ok()?;
         let source = self.heap.loader_sources.get(&loader)?;
-        (source.path.to_str()? == self.str_value(filename).ok()?).then_some(source)
+        (source.path.as_os_str() == path.as_os_str()).then_some(source)
     }
 
-    pub(super) fn registered_source_data(&self, loader: Id, filename: Id) -> Option<&'static [u8]> {
+    pub(super) fn registered_source_data(
+        &mut self,
+        loader: Id,
+        filename: Id,
+    ) -> Option<&'static [u8]> {
         self.loader_source(loader, filename)?.bundled_text
     }
 
@@ -562,12 +569,12 @@ impl Context {
         Ok(spec)
     }
 
-    fn location_list(&mut self, locations: &[PathBuf]) -> Id {
+    pub(super) fn location_list(&mut self, locations: &[PathBuf]) -> Result<Id> {
         let values = locations
             .iter()
-            .map(|p| self.text(p.to_string_lossy()))
-            .collect();
-        self.alloc(Value::List(values))
+            .map(|p| self.import_path_text(p))
+            .collect::<Result<_>>()?;
+        Ok(self.alloc(Value::List(values)))
     }
 
     /// Recheck the search roots supplied by _NamespacePath, ignoring already loaded modules.
@@ -576,7 +583,7 @@ impl Context {
         let mut locations = Vec::new();
         let source = self.source_on_path(name, child, search, child == name, &mut locations)?;
         if matches!(source, Some((_, SourceBody::Namespace))) {
-            Ok(self.location_list(&locations))
+            self.location_list(&locations)
         } else {
             Ok(NONE)
         }
@@ -712,14 +719,14 @@ impl Context {
         };
         let name = self.text(fullname);
         if matches!(body, SourceBody::Namespace) {
-            let paths = self.location_list(&locations);
+            let paths = self.location_list(&locations)?;
             return self.namespace_spec(name, paths, NONE, NONE);
         }
-        let origin = self.text(path.to_string_lossy());
+        let origin = self.import_path_text(&path)?;
         let locations = if locations.is_empty() {
             NONE
         } else {
-            self.location_list(&locations)
+            self.location_list(&locations)?
         };
         self.file_spec(name, origin, locations, body)
     }

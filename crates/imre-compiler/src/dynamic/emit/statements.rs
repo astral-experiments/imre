@@ -520,19 +520,22 @@ impl Function<'_, '_> {
                 ast::Stmt::Import(v) => {
                     for alias in &v.names {
                         let full = alias.name.as_str();
-                        let module = self.import(full);
-                        if let Some(name) = &alias.asname
-                            && !self.source.private_names.imports_root(&alias.name)
-                        {
-                            self.bind(name.as_str(), &module);
-                        } else if let Some((root, _)) = full.split_once('.') {
-                            let outer = self.import(root);
-                            let binding =
-                                alias.asname.as_ref().map_or(root, ast::Identifier::as_str);
-                            self.bind(binding, &outer);
-                        } else {
-                            self.bind(full, &module);
+                        let mut module = self.import(full);
+                        let mut parts = full.split('.');
+                        let root = parts.next().unwrap();
+                        if root != full {
+                            module = self.import(root);
+                            if alias.asname.is_some()
+                                && !self.source.private_names.imports_root(&alias.name)
+                            {
+                                for part in parts {
+                                    let member = self.code_name(part);
+                                    module = self.op("from", &[&module, &member]);
+                                }
+                            }
                         }
+                        let local = alias.asname.as_ref().map_or(root, ast::Identifier::as_str);
+                        self.bind(local, &module);
                     }
                 }
                 ast::Stmt::ImportFrom(v) => {
