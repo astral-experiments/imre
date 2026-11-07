@@ -233,25 +233,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "importlib.resources.abc" => bundled_source!("importlib/resources/abc.py"),
         "importlib.resources._as_file" => bundled_source!("importlib/resources/_as_file.py"),
         "importlib.resources._filesystem" => bundled_source!("importlib/resources/_filesystem.py"),
-        "importlib.util" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            const UPSTREAM: &str = include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/util.py"
-            );
-            Some((
-                "importlib/util.py",
-                SOURCE.get_or_init(|| {
-                    // Keep the native registry's find_spec and use CPython's lazy module protocol.
-                    let start = UPSTREAM.find("class _LazyModule(").unwrap();
-                    let end = UPSTREAM.find("\n__all__ =").unwrap();
-                    format!(
-                        "{}\nimport sys\nimport types\n\n{}",
-                        include_str!("../../stdlib/importlib/util.py"),
-                        &UPSTREAM[start..end]
-                    )
-                }),
-            ))
-        }
+        "importlib.util" => bundled_source!("importlib/util.py"),
         "importlib._abc" => bundled_source!("importlib/_abc.py"),
         "importlib.abc" => bundled_source!("importlib/abc.py"),
         "importlib.machinery" => bundled_source!("importlib/machinery.py"),
