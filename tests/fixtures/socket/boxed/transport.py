@@ -58,9 +58,12 @@ def run():
                 assert exc.args == ("getsockopt buflen out of range",)
             else:
                 raise AssertionError("getsockopt accepted an invalid buffer size")
-        listener.bind(addr)
+        bind = socket.socket.bind
+        assert bind is _socket.socket.bind
+        bind(listener, addr)
         listener.listen(128)
         server = listener.getsockname()
+        assert _socket.socket.getsockname.__get__(listener)() == server
         assert server[0] == "127.0.0.1" and server[1] > 0
         check_bind_error(server)
         client.connect(server)

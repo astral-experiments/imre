@@ -5,10 +5,30 @@ use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 use crate::objects::socket as native;
 use std::time::Duration;
 
-/// Methods available through both the native socket class and its instances.
+/// Native method descriptors inherited unchanged by the public socket class.
 pub(in super::super) const CLASS_METHODS: &[&str] = &[
     "_accept",
+    "bind",
+    "connect",
     "connect_ex",
+    "fileno",
+    "getblocking",
+    "getpeername",
+    "getsockname",
+    "getsockopt",
+    "gettimeout",
+    "listen",
+    "recv",
+    "recv_into",
+    "recvfrom",
+    "recvfrom_into",
+    "send",
+    "sendall",
+    "sendto",
+    "setblocking",
+    "setsockopt",
+    "settimeout",
+    "shutdown",
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     "sendmsg",
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1404,7 +1424,7 @@ pub(super) fn call(
         ));
     };
     let is_message = matches!(method, "sendmsg" | "recvmsg" | "recvmsg_into");
-    let descriptor = is_message || method == "_accept";
+    let descriptor = CLASS_METHODS.contains(&method);
     let (receiver, args) = args.split_first().ok_or_else(|| {
         if descriptor {
             Error::new(

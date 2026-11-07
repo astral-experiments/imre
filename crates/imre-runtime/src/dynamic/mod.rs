@@ -434,6 +434,7 @@ impl Context {
             | ("float", Value::Float(_))
             | ("filter", Value::Filter { .. })
             | ("mappingproxy", Value::MappingProxy(_))
+            | ("socket.socket", Value::Socket(_))
             | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
