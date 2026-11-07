@@ -1310,6 +1310,23 @@ def check_faulthandler(imre, root, env):
             assert any(f'File "{source}", line {n} in wait_for_signal\n'.encode() in err for n in (7, 8)), err
 
 
+def check_forked_fault_frames(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "fork_fault_frames.c"
+    probe = root / "fork_fault_frames"
+    subprocess.run(
+        ["cc", fixture, imre.with_name("libimre_runtime.a"), "-pthread", "-Wl,--wrap=realloc", "-o", probe],
+        check=True,
+    )
+    result = run(probe)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        b'Stack (most recent call first):\n  File "child.py", line 30 in child\n'
+        b'Stack (most recent call first):\n  File "parent.py", line 20 in inner\n'
+        b'  File "parent.py", line 10 in outer\n',
+        b"",
+    ), result
+
+
 def check_pending_signals(imre, root, env):
     import signal
 
@@ -1609,6 +1626,7 @@ def main():
             check_script_sitecustomize(imre, root, run)
             check_explicit_site_directory(imre, root, run)
         if sys.platform.startswith("linux"):
+            check_forked_fault_frames(imre, root, run)
             check_os_abort(imre, run)
             check_os_execvpe(imre, root, run)
             check_pending_signals(imre, root, env)
