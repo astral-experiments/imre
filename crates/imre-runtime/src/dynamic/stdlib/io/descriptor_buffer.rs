@@ -1268,7 +1268,7 @@ impl BufferedFd {
             };
             if let Some(bytes) = prefix {
                 self.callback_active.set(true);
-                let result = file_io::read(ctx, &self.handle, -1, false, bytes);
+                let result = file_io::read_all(ctx, &self.handle, bytes);
                 self.callback_active.set(false);
                 return result;
             }

@@ -763,9 +763,11 @@ fn readline(ctx: &mut Context, receiver: Id, size: Option<Id>) -> Result<Id> {
         ctx.heap.keep(method);
     }
     let step = ctx.heap.temporary_mark();
+    let mut gc_limit = ctx.heap.streaming_collection_limit();
     let mut line = Vec::new();
     while line.len() < limit {
         ctx.heap.release_temporaries_since(step);
+        ctx.collect_streaming_garbage(&mut gc_limit);
         let mut size = 1;
         if let Some(peek) = peek {
             let one = ctx.int(1);
@@ -782,15 +784,27 @@ fn readline(ctx: &mut Context, receiver: Id, size: Option<Id>) -> Result<Id> {
                     .map_or(ahead.len(), |i| i + 1);
             }
         }
-        let count = ctx.int(size as i64);
-        let result = match ctx
-            .lookup_attr(receiver, "read")
-            .and_then(|read| ctx.call(read, vec![count], Vec::new()))
+        let mut byte = [0];
+        let result = if size == 1
+            && let Some(raw) = file_io::native_reader(ctx, receiver)
         {
+            // Resolve read again on the next iteration: a signal handler can rebind it.
+            raw.readable_fd()
+                .and_then(|fd| file_io::read_once(ctx, fd, &mut byte))
+                .and_then(|count| match count {
+                    Some(n) => Ok(&byte[..n]),
+                    None => bytes(ctx, NONE, "read"),
+                })
+        } else {
+            let count = ctx.int(size as i64);
+            ctx.lookup_attr(receiver, "read")
+                .and_then(|read| ctx.call(read, vec![count], Vec::new()))
+                .and_then(|value| bytes(ctx, value, "read"))
+        };
+        let data = match result {
             Err(error) if ctx.has_errno(&error, libc::EINTR) => continue,
             result => result?,
         };
-        let data = bytes(ctx, result, "read")?;
         line.try_reserve(data.len())
             .map_err(|_| crate::Error::allocation())?;
         line.extend_from_slice(data);

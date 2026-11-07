@@ -22,7 +22,6 @@ pub(super) const METHODS: &[&str] = &[
     "fileno",
     "read",
     "readall",
-    "readline",
     "readinto",
     "write",
     "seek",
@@ -78,6 +77,12 @@ impl RawFile {
         operation(self.live_fd().ok_or_else(closed)?)
     }
 
+    pub(super) fn readable_fd(&self) -> Result<RawFd> {
+        let fd = self.live_fd().ok_or_else(closed)?;
+        self.check_direction(true)?;
+        Ok(fd)
+    }
+
     pub(super) fn close(&self) -> Result<()> {
         if let Some(fd) = self.fd.take()
             && self.closefd.get()
@@ -129,6 +134,32 @@ pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
         } => Some(raw.clone()),
         _ => None,
     }
+}
+
+/// Resolve the native FileIO.read without binding a fresh method for every byte.
+pub(super) fn native_reader(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
+    let raw = state(ctx, receiver)?;
+    let class = ctx.heap.get(receiver).instance_class()?;
+    if ctx.raw_instance_field(receiver, "read").is_some() {
+        return None;
+    }
+    let method = ctx.class_attr(class, "read")?;
+    let Value::IoMethod {
+        owner,
+        name: "read",
+        ..
+    } = ctx.heap.get(method)
+    else {
+        return None;
+    };
+    if ctx.heap.get(*owner).io_kind() != Some("FileIO")
+        || (class != *owner
+            && ctx.class_attr(class, "__getattribute__")
+                != ctx.class_attr(*owner, "__getattribute__"))
+    {
+        return None;
+    }
+    Some(raw)
 }
 
 /// FileIO retains its access bits across explicit reinitialization.
@@ -949,44 +980,22 @@ pub(super) fn read_span(
     storage: Id,
     range: std::ops::Range<usize>,
 ) -> Result<Option<usize>> {
-    let fd = raw.live_fd().ok_or_else(closed)?;
-    raw.check_direction(true)?;
+    let fd = raw.readable_fd()?;
     retry_read(ctx, |ctx| {
         let bytes = Context::mutable_storage_bytes(ctx.heap.get_mut(storage))?;
         Ok(os::try_readinto(fd, &mut bytes[range.clone()])?)
     })
 }
 
-fn read_interruptible(ctx: &mut Context, raw: &RawFile, buf: &mut [u8]) -> Result<Option<usize>> {
-    let fd = raw.live_fd().unwrap_or(-1);
+/// Perform one unbuffered read into the caller's storage, retrying the same descriptor on EINTR.
+pub(super) fn read_once(ctx: &mut Context, fd: RawFd, buf: &mut [u8]) -> Result<Option<usize>> {
     retry_read(ctx, |_| Ok(os::try_readinto(fd, buf)?))
 }
 
-pub(super) fn read(
-    ctx: &mut Context,
-    raw: &RawFile,
-    size: i64,
-    line: bool,
-    mut bytes: Vec<u8>,
-) -> Result<Id> {
-    if size >= 0 && !line {
-        let mut bytes = builtins::zeroed_bytes(size)?;
-        let Some(n) = read_interruptible(ctx, raw, &mut bytes)? else {
-            return Ok(NONE);
-        };
-        bytes.truncate(n);
-        return Ok(ctx.alloc(Value::Bytes(bytes)));
-    }
+pub(super) fn read_all(ctx: &mut Context, raw: &RawFile, mut bytes: Vec<u8>) -> Result<Id> {
     let mut chunk = [0; 8192];
-    while size < 0 || bytes.len() < size as usize {
-        let cap = if line { 1 } else { chunk.len() };
-        match read_interruptible(ctx, raw, &mut chunk[..cap])? {
-            None if line => {
-                return Err(Error::new(
-                    "OSError",
-                    "read() should have returned a bytes object, not 'NoneType'",
-                ));
-            }
+    loop {
+        match read_once(ctx, raw.live_fd().unwrap_or(-1), &mut chunk)? {
             None if bytes.is_empty() => return Ok(NONE),
             None | Some(0) => break,
             Some(n) => {
@@ -994,9 +1003,6 @@ pub(super) fn read(
                     .try_reserve(n)
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 bytes.extend_from_slice(&chunk[..n]);
-                if line && chunk[0] == b'\n' {
-                    break;
-                }
             }
         }
     }
@@ -1015,7 +1021,7 @@ pub(super) fn call(
     }
     let arity = match name {
         "write" | "readinto" | "_dealloc_warn" => 1..=1,
-        "read" | "readline" | "truncate" => 0..=1,
+        "read" | "truncate" => 0..=1,
         "seek" => 1..=2,
         "__exit__" => 3..=3,
         _ => 0..=0,
@@ -1147,14 +1153,11 @@ fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Resu
         _ => {}
     }
     // Argument conversions may call back into this file and close or reinitialize it.
-    let size = if matches!(name, "read" | "readline") {
+    let size = if name == "read" {
         files::read_length(ctx, args.first().copied())?
     } else {
         -1
     };
-    if name == "readline" && size == 0 {
-        return Ok(ctx.alloc(Value::Bytes(Vec::new())));
-    }
     if name == "write" {
         let input = args[0];
         ctx.check_buffer_exporter(input)?;
@@ -1239,6 +1242,18 @@ fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Resu
                 .unwrap_or_else(|| ctx.int(size)))
         });
     }
+    if matches!(name, "read" | "readall") {
+        let fd = raw.readable_fd()?;
+        if size < 0 {
+            return read_all(ctx, &raw, Vec::new());
+        }
+        let mut bytes = builtins::zeroed_bytes(size)?;
+        let Some(count) = read_once(ctx, fd, &mut bytes)? else {
+            return Ok(NONE);
+        };
+        bytes.truncate(count);
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
     raw.access(|fd| match name {
         "readable" => Ok(builtins::boolean(raw.readable())),
         "writable" => Ok(builtins::boolean(raw.writable())),
@@ -1246,10 +1261,6 @@ fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Resu
         "isatty" => Ok(builtins::boolean(os::isatty(fd))),
         "seekable" => Ok(builtins::boolean(os::seek(fd, 0, libc::SEEK_CUR).is_ok())),
         "tell" => Ok(ctx.int(os::seek(fd, 0, libc::SEEK_CUR)?)),
-        "read" | "readall" | "readline" => {
-            raw.check_direction(true)?;
-            read(ctx, &raw, size, name == "readline", Vec::new())
-        }
         _ => Err(Error::new(
             "AttributeError",
             format!("unsupported FileIO method {name}"),
