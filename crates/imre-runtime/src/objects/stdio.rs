@@ -229,6 +229,70 @@ pub(crate) fn write_line(
     }
 }
 
+fn write_piece(
+    stream: Option<&ObjectOwner>,
+    text: &str,
+    owner: Option<&crate::StrOwner>,
+) -> crate::Result<()> {
+    let input = || {
+        owner
+            .cloned()
+            .map_or_else(|| crate::sys::error_text(text), Ok)
+    };
+    match stream {
+        None => crate::sys::write_stdout_with(text, false, input),
+        Some(file) => {
+            // SAFETY: the caller pins this native text file throughout the write.
+            unsafe { file.0.with_mut(|s| s.file_mut().write_with(text, input)) }
+        }
+    }
+}
+
+/// Print already-evaluated scalars to a single destination, committing each piece before
+/// formatting the next value so conversion and encoding failures preserve earlier writes.
+///
+/// # Safety
+/// Both arrays cover `count` elements. Each word is rooted and has the scalar or tagged scalar union kind at its index.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usize, count: usize) {
+    let stream = match binding() {
+        Binding::Original => original(false),
+        Binding::File(stream) => stream,
+        Binding::None => return,
+        Binding::Missing => return Error::new(Kind::RuntimeError, "lost sys.stdout").raise(),
+    };
+    // SAFETY: the generated caller provides the checked kinds and words in argument order.
+    let (kinds, words) = unsafe {
+        (
+            std::slice::from_raw_parts(kinds, count),
+            std::slice::from_raw_parts(words, count),
+        )
+    };
+    let write =
+        |text: &str, owner: Option<&crate::StrOwner>| write_piece(Some(&stream), text, owner);
+    let result = (|| {
+        for (i, (&kind, &word)) in kinds.iter().zip(words).enumerate() {
+            if i > 0 {
+                write(" ", None)?;
+            }
+            // SAFETY: the caller roots the scalar or tagged union until the write returns.
+            let (kind, word) = unsafe {
+                super::boxed_values::concrete(super::words::WordKind::new(kind.into()), word)
+            };
+            let text = match super::boxed_values::word_text(kind, word, false) {
+                Ok(text) => text,
+                Err(_) if super::exceptions::imre_error_pending() != 0 => return Ok(()),
+                Err(_) => return Err(Error::allocation()),
+            };
+            write(&text, Some(&text))?;
+        }
+        write("\n", None)
+    })();
+    if let Err(error) = result {
+        error.raise();
+    }
+}
+
 /// Pin stdout before repr can replace it. Render a second time only if the original write cannot encode it.
 pub(super) fn display(mut render: impl FnMut() -> Option<crate::StrOwner>) -> bool {
     let stream = match target() {
@@ -245,20 +309,8 @@ pub(super) fn display(mut render: impl FnMut() -> Option<crate::StrOwner>) -> bo
             .clone()
             .or_else(|| ORIGINAL.with(|slot| slot.get().cloned()))
     };
-    let write = |text: &str, owner: Option<&crate::StrOwner>| {
-        let input = || {
-            owner
-                .cloned()
-                .map_or_else(|| crate::sys::error_text(text), Ok)
-        };
-        match pinned() {
-            None => crate::sys::write_stdout_with(text, false, input),
-            Some(file) => {
-                // SAFETY: the local owner pins the file across this native write.
-                unsafe { file.0.with_mut(|s| s.file_mut().write_with(text, input)) }
-            }
-        }
-    };
+    let write =
+        |text: &str, owner: Option<&crate::StrOwner>| write_piece(pinned().as_ref(), text, owner);
     let escape = match render() {
         Some(text) => match write(&text, Some(&text)) {
             Ok(()) => false,

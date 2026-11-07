@@ -12440,11 +12440,26 @@ impl<'a> Checker<'a> {
                 return Ok(Expr::sequence_len(args));
             }
             "print"
-                if args.len() == 1
-                    && matches!(
-                        args[0].ty,
-                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes | Type::None
-                    ) =>
+                if !args.is_empty()
+                    && (args.len() == 1 || call.arguments.keywords.is_empty())
+                    && args.iter().all(|arg| {
+                        let scalar = |ty| {
+                            matches!(
+                                ty,
+                                Type::Int
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Str
+                                    | Type::Bytes
+                                    | Type::None
+                            )
+                        };
+                        scalar(arg.ty)
+                            || self
+                                .types
+                                .members(arg.ty)
+                                .is_some_and(|members| members.into_iter().all(scalar))
+                    }) =>
             {
                 (Builtin::Print, Type::None)
             }
