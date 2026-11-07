@@ -145,104 +145,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                              "with open(fullname, 'rb') as fp:\n            lines = source_lines(fp.read())")
             })))
         }
-        "inspect" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "inspect.py",
-                SOURCE.get_or_init(|| {
-                    // Keep the full CPython Parameter, BoundArguments and Signature implementations.
-                    // The runtime supplies read-only mappings and Unicode identifier validation.
-                    const UPSTREAM: &str = include_str!(
-                        "../../../../benchmarks/cpython_stdlib/full/inspect/upstream/Lib/inspect.py"
-                    );
-                    let section = |start, end| {
-                        let begin = UPSTREAM.find(start).unwrap();
-                        UPSTREAM[begin..].split_once(end).unwrap().0
-                    };
-                    // Some native descriptors implement assignment in the runtime without a
-                    // Python-visible setter on their type.
-                    let descriptors = section(
-                        "def ismethoddescriptor(object):",
-                        "def isfunction(object):",
-                    )
-                    .replace(
-                        "or hasattr(tp, \"__delete__\")",
-                        "or hasattr(tp, \"__delete__\") or _native_data_descriptor(object)",
-                    );
-                    // Keep CPython's class-creation checks and read Imre's abstract flag.
-                    let abstract_predicate = section("def isabstract(object):", "def _getmembers(")
-                        .replace("object.__flags__", "_abstract_flags(object)");
-                    // Load the parser dependencies on first signature inspection. The boxed
-                    // list iterator exposes next() but has no Python-visible __next__ method.
-                    let text_signatures = section(
-                        "def _signature_strip_non_python_syntax(",
-                        "def _signature_from_builtin(",
-                    )
-                    .replace("    if not signature:", "    import token\n    import tokenize\n    if not signature:")
-                    .replace("iter(lines).__next__", "functools.partial(next, iter(lines))")
-                    .replace("    Parameter = cls._parameter_cls", "    import ast\n    Parameter = cls._parameter_cls");
-                    // BlockFinder and getblock share tokenize. Delay its import until the
-                    // first scan so importing inspect alone does not initialize the tokenizer.
-                    let source_blocks = section("class EndOfBlock(", "def walktree(")
-                        .replace(
-                            "        self.indent = 0",
-                            "        global tokenize\n        if 'tokenize' not in globals():\n            import tokenize\n        self.indent = 0",
-                        )
-                        .replace("iter(lines).__next__", "functools.partial(next, iter(lines))");
-                    // Imre records native source positions without CPython bytecode offsets.
-                    let frame_info = section(
-                        "def getframeinfo(",
-                        "# ------------------------------------------------ static version of getattr",
-                    )
-                        .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
-                        .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
-                    // A source module can have a spec but no legacy cached attribute.
-                    let main = UPSTREAM[UPSTREAM.find("def _main():").unwrap()..].replace(
-                        "        print('Cached: {}'.format(module.__cached__))",
-                        concat!(
-                            "        try:\n",
-                            "            cached = module.__cached__\n",
-                            "        except AttributeError:\n",
-                            "            cached = module.__spec__.cached\n",
-                            "        print('Cached: {}'.format(cached))",
-                        ),
-                    );
-                    [
-                        include_str!("../../stdlib/inspect.py"),
-                        include_str!("../../stdlib/inspect_signature.py"),
-                        "import abc\nimport collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _abstract_flags, _frame_position\nfrom operator import attrgetter",
-                        section("TPFLAGS_IS_ABSTRACT =", "def ismethoddescriptor(object):"),
-                        &descriptors,
-                        section("def isfunction(object):", "# A marker for markcoroutinefunction"),
-                        section("def isasyncgenfunction(obj):", "def isabstract(object):"),
-                        &abstract_predicate,
-                        section("def _getmembers(", "def getmro(cls):"),
-                        section("def indentsize(line):", "def _findclass(func):"),
-                        section("def getfile(object):", "class ClassFoundException("),
-                        section("def findsource(object):", "class EndOfBlock("),
-                        &source_blocks,
-                        section("def walktree(", "# ------------------------------------------------ argument list extraction"),
-                        section("AGEN_CREATED =", "_NonUserDefinedCallables ="),
-                        section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
-                        &frame_info,
-                        section("def getmro(cls):", "def indentsize(line):"),
-                        section("def _findclass(func):", "def cleandoc(doc):"),
-                        section("GEN_CREATED = ", "def getgeneratorlocals("),
-                        section("CORO_CREATED = ", "AGEN_CREATED ="),
-                        section("def formatannotation(", "def formatannotationrelativeto("),
-                        section("Arguments = namedtuple(", "def getargs(co):"),
-                        section("FullArgSpec = namedtuple(", "def formatannotation("),
-                        section("def formatargvalues(", "ClosureVars = namedtuple("),
-                        section("_NonUserDefinedCallables =", "def _signature_get_user_defined_method("),
-                        section("def _signature_get_partial(", "def _signature_strip_non_python_syntax("),
-                        &text_signatures,
-                        section("class _void:", "class BufferFlags("),
-                        &main,
-                    ]
-                    .join("\n")
-                }),
-            ))
-        }
         "bisect" => bundled_source!("bisect.py"),
         "email.errors" => Some((
             "email/errors.py",
@@ -668,4 +570,21 @@ fn target(call: &ast::ExprCall) -> Option<String> {
         .split('.')
         .all(ruff_python_stdlib::identifiers::is_identifier)
         .then_some(absolute)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::boxed_source;
+
+    #[test]
+    fn inspect_compiles_the_tracked_python_verbatim() {
+        let (filename, source) = boxed_source("inspect").unwrap();
+        assert_eq!(filename, "inspect.py");
+        // A header may span lines, or its old spelling may occur in a docstring.
+        // Even the body after such a header must reach the parser byte for byte.
+        let body = source
+            .strip_prefix(include_str!("../../stdlib/inspect_cleandoc.py"))
+            .and_then(|rest| rest.strip_prefix('\n'));
+        assert!(body == Some(include_str!("../../stdlib/inspect.py")));
+    }
 }
