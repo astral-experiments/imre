@@ -647,6 +647,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    RuntimeSource(&'static str),
     ContextVars,
     ContextVarsNative,
     Importlib,
@@ -793,6 +794,7 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    RuntimeImport(&'static str),
     Context,
     ContextVar,
     ContextToken,
@@ -1274,6 +1276,8 @@ impl IntrinsicModule {
             "_datetime" => Some(Self::DatetimeNative),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
+            "concurrent" => Some(Self::RuntimeSource("concurrent")),
+            "concurrent.futures" => Some(Self::RuntimeSource("concurrent.futures")),
             "contextvars" => Some(Self::ContextVars),
             "_contextvars" => Some(Self::ContextVarsNative),
             "inspect" => Some(Self::Inspect),
@@ -2978,6 +2982,11 @@ impl SourceModule {
                 return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(export)));
             }
         }
+        if self.is_bundled("unittest.mock") && name == "ThreadingMock" {
+            return Some(Binding::Intrinsic(Intrinsic::RuntimeImport(
+                "unittest.mock",
+            )));
+        }
         if self.is_bundled("unittest.mock") && boxed_mock_export(name) {
             return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                 "unittest.mock objects",
@@ -4102,7 +4111,7 @@ struct Loader<'a> {
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
-    wildcard_import: Option<String>,
+    deferred_object_error: Option<String>,
     inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
     zip_sources: HashMap<PathBuf, crate::zip_entry::ZipSources>,
@@ -4183,7 +4192,7 @@ impl<'a> Loader<'a> {
             zip_files: zip_inputs.files,
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
-            wildcard_import: None,
+            deferred_object_error: None,
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -4373,7 +4382,7 @@ impl<'a> Loader<'a> {
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
             object_builtin_errors: Default::default(),
-            deferred_object_error: self.wildcard_import.into(),
+            deferred_object_error: self.deferred_object_error.into(),
             return_errors: Default::default(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
@@ -4838,6 +4847,18 @@ impl<'a> Loader<'a> {
         binding: Binding,
         node: &impl Ranged,
     ) -> Result<(), String> {
+        // Resolve names for the checked graph, but never erase a provider's initializer.
+        // An independently selected object entry will execute the normal Python import.
+        if let Binding::IntrinsicModule(IntrinsicModule::RuntimeSource(owner))
+        | Binding::Intrinsic(Intrinsic::RuntimeImport(owner)) = binding
+        {
+            self.deferred_object_error.get_or_insert_with(|| {
+                self.modules[module].error(
+                    node,
+                    &format!("{owner} requires runtime import initialization"),
+                )
+            });
+        }
         if self.modules[module].bindings.get(name) == Some(&Binding::ConditionalValue) {
             self.modules[module].bindings.insert(name.into(), binding);
             return Ok(());
@@ -4900,11 +4921,17 @@ impl<'a> Loader<'a> {
                 if import.names.iter().any(|alias| alias.name.as_str() == "*") {
                     // The module initializer chooses its exports. Still resolve the
                     // dependency so checked files retain their ordinary diagnostics.
-                    if import.level != 0 || self.intrinsic_module(&name, None)?.is_none() {
+                    let module = if import.level == 0 {
+                        self.intrinsic_module(&name, None)?
+                    } else {
+                        None
+                    };
+                    if module.is_none() {
                         self.load_module(&name)?;
                     }
-                    self.needs_object_imports = true;
-                    self.wildcard_import.get_or_insert_with(|| {
+                    self.needs_object_imports |=
+                        !matches!(module, Some(IntrinsicModule::RuntimeSource(_)));
+                    self.deferred_object_error.get_or_insert_with(|| {
                         self.modules[id].error(import, "wildcard imports require runtime binding")
                     });
                     return Ok(());

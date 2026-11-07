@@ -25,6 +25,22 @@ LOCALE_FORMAT = (
 )
 
 REJECTED = {
+    "futures_requires_initializer": ({
+        "main.py": "from concurrent.futures import Future\nprint(7)\n",
+    }, "concurrent.futures requires runtime import initialization"),
+    **{
+        f"futures_preserves_first_party_call_{order}": ({
+            "features.py": "import concurrent.futures\n",
+            "scores.py": (
+                "def take(n: int) -> int: return n\n"
+                "def score(debug: bool) -> int:\n"
+                "    if debug: return take('x')\n"
+                "    return take(7)\n"
+            ),
+            "main.py": f"{imports}\nprint(scores.score(False))\n",
+        }, "scores.py:3:27: Imre: expected int, got str")
+        for order, imports in enumerate(("import features, scores", "import scores, features"))
+    },
     "local_source_loader_preserves_typed_call": ({
         "scores.py": "def take(value: int) -> int: return value\n",
         "main.py": (
