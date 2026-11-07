@@ -910,34 +910,12 @@ unsafe fn release_fields<const PACKED: bool>(
     // element first. Both kinds use the same native record layout.
     // SAFETY: semantic metadata, when present, lives as long as the descriptor.
     let semantics = unsafe { descriptor.semantics.as_ref() };
-    let is_tuple = semantics.is_some_and(|value| value.kind == 1);
     if let Some(layout) = semantics.filter(|value| value.flags & (1 << 15) != 0) {
-        let text_slots = layout.flags >> 16;
-        for field in fields {
-            let index = if is_tuple {
-                descriptor.length - 1 - field
-            } else {
-                field
-            };
-            let text_slot = text_slots & (1 << index) != 0;
-            let kind = WordKind::new(if text_slot { 3 } else { 2 });
-            // SAFETY: the compiler mask selects the exact field representation.
-            let word = unsafe { kind.read_record_field(payload.add(index)) };
-            if word == 0 || word & 1 != 0 {
-                continue;
-            }
-            if !text_slot {
-                drop(crate::Int(word));
-            } else if PACKED {
-                // SAFETY: the indexed text slot transfers one live string owner.
-                strings::release(unsafe { StrOwner::from_raw(word as *const crate::Str) });
-            } else {
-                // SAFETY: the indexed text slot transfers one live string owner.
-                unsafe { StrOwner::decrement_strong_count(word as *const crate::Str) };
-            }
-        }
+        // SAFETY: the descriptor identifies full-width integer and text slots in this range.
+        unsafe { release_scalar_fields(payload, descriptor, fields, layout, PACKED) };
         return;
     }
+    let is_tuple = semantics.is_some_and(|value| value.kind == 1);
     for field in fields {
         let index = if is_tuple {
             descriptor.length - 1 - field
@@ -959,6 +937,46 @@ unsafe fn release_fields<const PACKED: bool>(
                 3 if PACKED => strings::release(StrOwner::from_raw(word as *const crate::Str)),
                 3 | 11 => StrOwner::decrement_strong_count(word as *const crate::Str),
                 _ => kind.release(word),
+            }
+        }
+    }
+}
+
+/// Release the short scalar layout with one loop for standalone and block-owned records.
+#[inline(never)]
+unsafe fn release_scalar_fields(
+    payload: *const usize,
+    descriptor: &RecordDescriptor,
+    fields: std::ops::Range<usize>,
+    layout: &RecordSemantics,
+    block_owned: bool,
+) {
+    let text_slots = layout.flags >> 16;
+    for field in fields {
+        let index = if layout.kind == 1 {
+            descriptor.length - 1 - field
+        } else {
+            field
+        };
+        // SAFETY: the caller supplies a live record and an in-bounds release range.
+        let slot = unsafe { payload.add(index) };
+        if text_slots & (1 << index) == 0 {
+            // SAFETY: the compiler stores this tagged integer in a full machine word.
+            let word = unsafe { slot.read() };
+            if word != 0 && word & 1 == 0 {
+                drop(crate::Int(word));
+            }
+        } else {
+            // SAFETY: this text slot is null or contains one owned string pointer.
+            let text = unsafe { slot.cast::<*const crate::Str>().read() };
+            if !text.is_null() {
+                if block_owned {
+                    // SAFETY: transfer the slot's owner to the block string recycler.
+                    strings::release(unsafe { StrOwner::from_raw(text) });
+                } else {
+                    // SAFETY: transfer the slot's owner directly to its reference count.
+                    unsafe { StrOwner::decrement_strong_count(text) };
+                }
             }
         }
     }
