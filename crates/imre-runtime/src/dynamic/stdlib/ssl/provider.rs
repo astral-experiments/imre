@@ -150,7 +150,9 @@ functions! {
     X509_VERIFY_PARAM_clear_flags(Handle, c_ulong) -> c_int;
     X509_VERIFY_PARAM_get_flags(Handle) -> c_ulong;
     SSL_CTX_set_alpn_protos(Handle, *const u8, c_uint) -> c_int;
-    SSL_CTX_set_post_handshake_auth(Handle, c_int) -> ();
+    SSL_set_post_handshake_auth(Handle, c_int) -> ();
+    SSL_set_verify(Handle, c_int, VerifyCallback) -> ();
+    SSL_verify_client_post_handshake(Handle) -> c_int;
     SSL_CTX_load_verify_locations(Handle, *const c_char, *const c_char) -> c_int;
     SSL_new(Handle) -> Handle;
     SSL_free(Handle) -> ();
@@ -399,6 +401,20 @@ impl Api {
         Ok(())
     }
 
+    fn verify_client_post_handshake(&self, ssl: NonNull<c_void>) -> Result<(), Failure> {
+        self.clear();
+        // SAFETY: the session owns this live SSL. OpenSSL queues the request
+        // for a subsequent write and determines whether the TLS state allows it.
+        if unsafe { (self.SSL_verify_client_post_handshake)(ssl.as_ptr()) } == 1 {
+            Ok(())
+        } else {
+            // SAFETY: read the provider reason from this call on the same thread.
+            let error = self.trust_error(unsafe { (self.ERR_peek_last_error)() }, None);
+            self.clear();
+            Err(error)
+        }
+    }
+
     fn file_error(&self) -> Failure {
         // OpenSSL 3 records a failed file open as the first error and may
         // append BIO and X509 errors. Decode its original errno from err.h.
@@ -527,6 +543,7 @@ impl Method {
 
 const SSL_VERIFY_PEER: c_int = 1;
 const SSL_VERIFY_FAIL_IF_NO_PEER_CERT: c_int = 2;
+const SSL_VERIFY_POST_HANDSHAKE: c_int = 8;
 const VERIFY_REQUIRED: c_int = SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
 
 pub(crate) struct Context {
@@ -534,6 +551,7 @@ pub(crate) struct Context {
     handle: NonNull<c_void>,
     pub(super) protocol: Protocol,
     pub(super) check_hostname: bool,
+    pub(super) post_handshake_auth: bool,
 }
 
 /// References retained under the OpenSSL store lock, in provider order.
@@ -578,6 +596,7 @@ impl Context {
             handle,
             protocol,
             check_hostname: protocol == Protocol::Client,
+            post_handshake_auth: false,
         };
         ctx.set_verify_bits(if ctx.check_hostname {
             VERIFY_REQUIRED
@@ -842,11 +861,28 @@ impl Context {
         Ok(())
     }
 
-    pub(crate) fn set_post_handshake_auth(&mut self, enabled: bool) {
-        // SAFETY: configure the PHA ClientHello extension on future SSL objects.
-        unsafe {
-            (self.api.SSL_CTX_set_post_handshake_auth)(self.handle.as_ptr(), i32::from(enabled))
-        };
+    fn new_connection(&self, server: bool) -> Result<NonNull<c_void>, Failure> {
+        let api = self.api;
+        api.clear();
+        // SAFETY: SSL_new acquires a reference to this live context.
+        let handle = NonNull::new(unsafe { (api.SSL_new)(self.handle.as_ptr()) })
+            .ok_or_else(|| api.error("SSL_new"))?;
+        if self.post_handshake_auth {
+            let ssl = handle.as_ptr();
+            // SAFETY: configure only the new SSL. A client advertises PHA in its
+            // ClientHello. A server defers an already configured peer check.
+            unsafe {
+                if server {
+                    let mode = (api.SSL_get_verify_mode)(ssl);
+                    if mode & SSL_VERIFY_PEER != 0 {
+                        (api.SSL_set_verify)(ssl, mode | SSL_VERIFY_POST_HANDSHAKE, None);
+                    }
+                } else {
+                    (api.SSL_set_post_handshake_auth)(ssl, 1);
+                }
+            }
+        }
+        Ok(handle)
     }
 
     /// Decode a PEM DH parameter block and install it on this live context.
@@ -1179,10 +1215,7 @@ impl Session {
         server: bool,
     ) -> Result<Self, bio::BioFailure> {
         let api = ctx.api;
-        api.clear();
-        // SAFETY: SSL_new takes its own reference to this live context.
-        let handle = NonNull::new(unsafe { (api.SSL_new)(ctx.handle.as_ptr()) })
-            .ok_or_else(|| api.error("SSL_new"))?;
+        let handle = ctx.new_connection(server)?;
         let session = Self {
             api,
             handle,
@@ -1214,7 +1247,7 @@ impl Session {
     fn blocking_io<E: From<Failure>>(
         &self,
         mut operation: Operation<'_>,
-        failure: impl FnOnce(&Api, i32, &str) -> E,
+        failure: impl FnOnce(&Api, NonNull<c_void>, i32, &str) -> E,
     ) -> Result<usize, E> {
         let api = self.api;
         let ssl = self.handle.as_ptr();
@@ -1266,7 +1299,7 @@ impl Session {
                 SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
                     return Err(Failure::Io(os_error).into());
                 }
-                _ => return Err(failure(api, kind, label)),
+                _ => return Err(failure(api, self.handle, kind, label)),
             };
             let wait = match events {
                 _ if until.is_some_and(|end| end.remaining().is_zero()) => {
@@ -1314,6 +1347,10 @@ impl Session {
         Some(bytes)
     }
 
+    pub(super) fn verify_client_post_handshake(&self) -> Result<(), Failure> {
+        self.api.verify_client_post_handshake(self.handle)
+    }
+
     pub(crate) fn certificate_chain(&self, verified: bool) -> Result<Vec<Vec<u8>>, Failure> {
         let api = self.api;
         api.clear();
@@ -1346,7 +1383,7 @@ impl Session {
     }
 
     pub(crate) fn send(&mut self, bytes: &[u8]) -> Result<usize, Failure> {
-        let n = self.blocking_io(Operation::Write(bytes), |api, _, label| api.error(label))?;
+        let n = self.blocking_io(Operation::Write(bytes), |api, _, _, label| api.error(label))?;
         if (n == 0 && !bytes.is_empty()) || n > bytes.len() {
             return Err(Failure::Other("invalid SSL_write byte count".into()));
         }
