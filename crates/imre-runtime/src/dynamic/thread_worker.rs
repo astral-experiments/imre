@@ -9,12 +9,14 @@ use std::sync::{
     mpsc,
 };
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::builtins::boolean;
 use super::stdlib::hashlib::digest::SharedHash;
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::locks::{PrimitiveLock, thread_ident};
+#[cfg(unix)]
+use crate::objects::time::Deadline;
 
 type WorkerStatus = std::result::Result<(), String>;
 
@@ -205,9 +207,9 @@ impl Handle {
     fn wait_interruptible(&self, ctx: &mut Context, timeout: Option<Duration>) -> Result<bool> {
         #[cfg(unix)]
         if crate::signals::is_main() && timeout != Some(Duration::ZERO) {
-            let start = Instant::now();
+            let deadline = timeout.map(Deadline::after);
             loop {
-                let remaining = timeout.map(|limit| limit.saturating_sub(start.elapsed()));
+                let remaining = deadline.map(Deadline::remaining);
                 let interval = Duration::from_millis(50);
                 if self.wait(
                     Some(remaining.map_or(interval, |left| left.min(interval))),
@@ -215,7 +217,7 @@ impl Handle {
                 ) {
                     return Ok(true);
                 }
-                if timeout.is_some_and(|limit| start.elapsed() >= limit) {
+                if deadline.is_some_and(|end| end.remaining().is_zero()) {
                     return Ok(false);
                 }
                 ctx.dispatch_signals()?;

@@ -10,12 +10,37 @@ use super::{
 };
 use std::ffi::CStr;
 use std::io;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
 #[cfg(target_os = "linux")]
 mod linux_clock;
+
+/// Monotonic time remaining in one operation, including time spent in callbacks.
+#[derive(Clone, Copy)]
+pub(crate) struct Deadline {
+    start: Instant,
+    duration: Duration,
+}
+
+impl Deadline {
+    pub(crate) fn after(duration: Duration) -> Self {
+        Self {
+            start: Instant::now(),
+            duration,
+        }
+    }
+
+    /// Preserve exact zero for callers that allow a final nonblocking syscall.
+    pub(crate) fn checked_remaining(self) -> Option<Duration> {
+        self.duration.checked_sub(self.start.elapsed())
+    }
+
+    pub(crate) fn remaining(self) -> Duration {
+        self.checked_remaining().unwrap_or_default()
+    }
+}
 
 /// A signal delivered to the sleeping thread interrupts the native wait. A
 /// returning handler resumes against the same deadline, including callback time.

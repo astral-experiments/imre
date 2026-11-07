@@ -1,11 +1,9 @@
 //! POSIX readiness observes fd numbers without taking ownership.
 use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, allocate_record};
+use super::time::Deadline;
 use super::{Int, List, Object, Storage, StorageCell, Words, c_int, errno_error, object};
-use std::{
-    io, ptr,
-    time::{Duration, Instant},
-};
+use std::{io, ptr, time::Duration};
 
 #[derive(Default)]
 pub(crate) struct Poll {
@@ -174,7 +172,7 @@ fn wait(
     timeout: Option<Duration>,
     mut call: impl FnMut(Option<Duration>) -> i32,
 ) -> io::Result<i32> {
-    let start = Instant::now();
+    let deadline = timeout.map(Deadline::after);
     let mut remaining = timeout;
     loop {
         let n = call(remaining);
@@ -185,7 +183,7 @@ fn wait(
         if err.kind() != io::ErrorKind::Interrupted {
             return Err(err);
         }
-        remaining = timeout.map(|limit| limit.saturating_sub(start.elapsed()));
+        remaining = deadline.map(Deadline::remaining);
         if remaining == Some(Duration::ZERO) {
             return Ok(0);
         }
