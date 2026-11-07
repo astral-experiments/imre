@@ -2877,8 +2877,8 @@ impl Context {
             .get("typing.Protocol")
             .is_some_and(|&protocol| {
                 class != protocol
-                    && self.subclass(class, protocol)
                     && self.class_attr(class, "_is_protocol") == Some(TRUE)
+                    && self.subclass(class, protocol)
             })
     }
 
