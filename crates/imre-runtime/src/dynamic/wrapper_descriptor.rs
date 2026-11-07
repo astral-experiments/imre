@@ -183,6 +183,7 @@ impl BuiltinDescriptor {
             Some((defaultdict::CLASS, attr)) => {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
+            Some(("filter", attr)) => Some(("filter", attr, builtins::FILTER_METHODS)),
             Some(("list_iterator", attr)) => {
                 Some(("list_iterator", attr, &["__iter__", "__next__"][..]))
             }

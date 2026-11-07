@@ -352,6 +352,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
+pub(super) const FILTER_METHODS: &[&str] = &["__iter__", "__next__", "__reduce__"];
+
 pub(super) const MAPPING_PROXY_METHODS: &[&str] = &[
     "keys",
     "values",
@@ -391,6 +393,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "list"
             | "mappingproxy"
             | "float"
+            | "filter"
             | "function"
             | "cell"
             | "int"
@@ -1518,6 +1521,33 @@ fn absolute_value(ctx: &mut Context, value: Id) -> Result<Id> {
     }
 }
 
+/// Acquire the input once before the requested filter subtype runs its initializer.
+fn new_filter(ctx: &mut Context, class: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let base = ctx.builtin("filter");
+    if !ctx.direct_subclass(class, base) {
+        return Err(ctx.invalid_new_subtype("filter", class));
+    }
+    if !kwargs.is_empty()
+        && ctx
+            .class_attr(class, "__init__")
+            .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
+    {
+        return Err(type_error("filter() takes no keyword arguments"));
+    }
+    let [predicate, source] = args else {
+        return Err(type_error(format!(
+            "filter expected 2 arguments, got {}",
+            args.len()
+        )));
+    };
+    let input = ctx.iterator(*source)?;
+    let storage = ctx.alloc(Value::Filter {
+        predicate: *predicate,
+        input,
+    });
+    Ok(ctx.with_subclass_storage(class, base, storage))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -1945,6 +1975,12 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "filter" if method == "__new__" => {
+                let Some((&class, args)) = args.split_first() else {
+                    return Err(type_error("filter.__new__(): not enough arguments"));
+                };
+                new_filter(ctx, class, args, kwargs)
+            }
             "super" if method == "__new__" => ctx.super_new(args, kwargs),
             "super" if method == "__init__" => ctx.super_init(args, kwargs),
             "int" | "float" | "str" | "bytes" if method == "__new__" => {
@@ -2833,20 +2869,8 @@ pub(super) fn call(
         }
         "map" | "zip" => ctx.zip_or_map(name, args, kwargs),
         "filter" => {
-            if !kwargs.is_empty() {
-                return Err(type_error("filter() takes no keyword arguments"));
-            }
-            let [predicate, source] = args else {
-                return Err(type_error(format!(
-                    "filter expected 2 arguments, got {}",
-                    args.len()
-                )));
-            };
-            let input = ctx.iterator(*source)?;
-            Ok(ctx.alloc(Value::Filter {
-                predicate: *predicate,
-                input,
-            }))
+            let class = ctx.builtin("filter");
+            new_filter(ctx, class, args, kwargs)
         }
         "memoryview" => {
             let [object] = bind(name, args, kwargs, ["object"])?;

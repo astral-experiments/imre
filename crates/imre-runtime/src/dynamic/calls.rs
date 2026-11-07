@@ -4158,13 +4158,16 @@ impl Context {
                 return Ok(self.builtin("object.__reduce_ex__"));
             }
             Value::Native(ref class)
+                if class == "filter"
+                    && let Some(member) = self.own_class_attr(obj, name) =>
+            {
+                return Ok(member);
+            }
+            Value::Native(ref class)
                 if matches!(class.as_str(), "map" | "filter" | "memory_iterator") =>
             {
                 match name {
                     "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
-                    "__reduce__" if class == "filter" => {
-                        return Ok(self.builtin("filter.__reduce__"));
-                    }
                     "__name__" | "__qualname__" => return Ok(self.text(class.clone())),
                     "__module__" => return Ok(self.text("builtins")),
                     _ => {}
@@ -7106,15 +7109,20 @@ impl Context {
             return Err(self.invalid_new_subtype(kind, class));
         }
         let storage = self.alloc(empty);
+        Ok(self.with_subclass_storage(class, base, storage))
+    }
+
+    /// Attach native storage to a Python subclass, keeping the exact builtin unwrapped.
+    pub(super) fn with_subclass_storage(&mut self, class: Id, base: Id, storage: Id) -> Id {
         if class == base {
-            return Ok(storage);
+            return storage;
         }
         let instance = self.instance(class, None);
         let Value::Instance { scalar, .. } = self.heap.get_mut(instance) else {
             unreachable!()
         };
         *scalar = Some(storage);
-        Ok(instance)
+        instance
     }
 
     /// Allocate the requested tuple subtype from the iterable before invoking any initializer.
