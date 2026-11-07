@@ -1296,6 +1296,24 @@ pub(super) fn endpoint_method(
     args: &[Id],
 ) -> Result<Id> {
     match method {
+        "setblocking" => {
+            native::set_blocking_mode(socket, ctx.truth(argument(args, 0)?)?)?;
+            Ok(NONE)
+        }
+        "gettimeout" => Ok(native::get_timeout(socket).map_or(NONE, |duration| {
+            ctx.alloc(Value::Float(duration.as_secs_f64()))
+        })),
+        "settimeout" => {
+            let value = argument(args, 0)?;
+            let timeout = parse_socket_timeout(ctx, value)?;
+            native::set_timeout(socket, timeout)?;
+            Ok(NONE)
+        }
+        "getblocking" => Ok(if native::imre_socket_getblocking(socket) {
+            super::TRUE
+        } else {
+            super::FALSE
+        }),
         "fileno" => Ok(ctx.int(i64::from(native::fd(socket)))),
         "listen" => {
             let backlog = match args {
@@ -1632,7 +1650,8 @@ pub(super) fn call(
         "__exit__" | "close" => native::close(&s)?,
         "_decref_socketios" => native::release_socketio(&s).map_err(super::os_error)?,
         "detach" => return Ok(ctx.int(i64::from(native::detach(&s)))),
-        "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
+        "fileno" | "listen" | "accept" | "getsockname" | "getpeername" | "setblocking"
+        | "getblocking" | "gettimeout" | "settimeout" => {
             return endpoint_method(ctx, method, &s, args);
         }
         "dup" => {
@@ -1648,24 +1667,6 @@ pub(super) fn call(
             &s,
             &address(ctx, native::family(&s), argument(args, 0)?, method)?,
         )?,
-        "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
-        "gettimeout" => {
-            return Ok(native::get_timeout(&s).map_or(NONE, |duration| {
-                ctx.alloc(Value::Float(duration.as_secs_f64()))
-            }));
-        }
-        "settimeout" => {
-            let value = argument(args, 0)?;
-            let timeout = parse_socket_timeout(ctx, value)?;
-            native::set_timeout(&s, timeout)?;
-        }
-        "getblocking" => {
-            return Ok(if native::imre_socket_getblocking(&s) {
-                super::TRUE
-            } else {
-                super::FALSE
-            });
-        }
         "setsockopt" => native::set_option(
             &s,
             integer(ctx, argument(args, 0)?)?,
