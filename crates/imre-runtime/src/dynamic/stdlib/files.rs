@@ -281,7 +281,11 @@ pub(super) fn binary_method(
                     Ok(NONE)
                 }
                 ("close", []) | ("__exit__", [_, _, _]) => {
-                    file.close().map_err(crate::objects::errno_error)?;
+                    let result = file.close().map_err(crate::objects::errno_error);
+                    if file.closed() {
+                        ctx.heap.forget_closed_descriptor(receiver);
+                    }
+                    result?;
                     Ok(NONE)
                 }
                 ("__enter__", []) if file.closed() => {
@@ -372,7 +376,9 @@ pub(super) fn binary_method(
     }
     let mut slot = slot.borrow_mut();
     if matches!(name, "__exit__" | "close") {
-        if let Some(ReadSource::Socket(mut raw)) = slot.take() {
+        let source = slot.take();
+        ctx.heap.forget_closed_descriptor(receiver);
+        if let Some(ReadSource::Socket(mut raw)) = source {
             raw.close().map_err(os_error)?;
         }
         return Ok(NONE);
@@ -658,7 +664,11 @@ pub(super) fn text_method(
             if ctx.heap.default_stderr == Some(receiver) {
                 ctx.check_thread_reporter_mutable()?;
             }
-            file.close()?;
+            let result = file.close();
+            if file.closed() {
+                ctx.heap.forget_closed_descriptor(receiver);
+            }
+            result?;
             Ok(NONE)
         }
         "__enter__" if file.closed() => {

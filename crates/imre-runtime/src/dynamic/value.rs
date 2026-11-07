@@ -4945,6 +4945,17 @@ impl Heap {
         Ok(id)
     }
 
+    /// Once the file has closed, dropping its last owner cannot flush or close a descriptor.
+    pub(super) fn forget_closed_descriptor(&mut self, id: Id) {
+        if let Some(index) = self
+            .descriptor_owners
+            .iter()
+            .rposition(|&owner| owner == id)
+        {
+            self.descriptor_owners.swap_remove(index);
+        }
+    }
+
     /// Recheck the strong path from a caller-held method to the sole pending finalizer.
     pub(super) fn caller_keeps_only_finalizer(&mut self) -> bool {
         let [owner] = self.ordinary_finalizers.as_slice() else {
