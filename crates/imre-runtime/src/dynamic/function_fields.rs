@@ -12,7 +12,7 @@ pub(super) struct FunctionFields {
     pub annotate: Id,
     annotations: Option<Id>,
     type_params: Id,
-    /// The writable namespace, or `NONE` until a generator expression first needs it.
+    /// The writable namespace, or `NONE` until it is first exposed.
     pub(super) dict: Id,
 }
 
@@ -33,7 +33,9 @@ impl FunctionFields {
             module: ctx.function_module(scope),
             annotations: None,
             type_params: ctx.alloc(Value::Tuple(Vec::new())),
-            dict: if matches!(ctx.heap.get(name), Value::Str(name) if name == "<genexpr>") {
+            dict: if ctx.scope_data(scope).parent.is_none()
+                || matches!(ctx.heap.get(name), Value::Str(name) if name == "<genexpr>")
+            {
                 NONE
             } else {
                 ctx.dict(Vec::new())
