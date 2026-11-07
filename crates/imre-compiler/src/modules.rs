@@ -1,6 +1,6 @@
 //! Loads a closed graph of first-party modules and orders their initialization.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -3091,6 +3091,9 @@ pub(crate) struct SourceGraph {
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<Diagnostic>>,
     pub(crate) runtime_initializer: Option<String>,
+    /// Object discovery must establish its own entry when an import was admitted only
+    /// for checked lowering.
+    pub(crate) has_checked_only_import: bool,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<Diagnostic>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
@@ -3665,14 +3668,14 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
-        site_wheels: &mut SiteWheels,
+        site_probes: &mut SiteProbes,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
             &options.python_archive_indices,
-            Some((options, site_wheels)),
+            Some((options, site_probes)),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
@@ -3708,7 +3711,7 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
-        site_wheels: &mut SiteWheels,
+        site_probes: &mut SiteProbes,
     ) -> Result<Self, String> {
         let filename = std::env::current_dir()
             .map_err(|err| err.to_string())?
@@ -3735,7 +3738,7 @@ impl SourceGraph {
             root,
             &options.extension_paths,
             &options.python_archive_indices,
-            Some((options, site_wheels)),
+            Some((options, site_probes)),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;
@@ -4210,12 +4213,20 @@ pub(crate) enum EntryImportFailure {
 
 /// File probes that affect checked admission, even when the program later uses object imports.
 #[derive(Default)]
-pub(crate) struct SiteWheels {
+pub(crate) struct SiteProbes {
     missing: Vec<PathBuf>,
     selected: bool,
+    file_checks: BTreeMap<PathBuf, bool>,
 }
 
-impl SiteWheels {
+impl SiteProbes {
+    fn is_file(&mut self, fs: &mut FileSystem<'_>, path: PathBuf) -> bool {
+        *self
+            .file_checks
+            .entry(path)
+            .or_insert_with_key(|p| fs.is_file(p))
+    }
+
     fn paired(&mut self, fs: &mut FileSystem<'_>, archive: &Path, stub: &Path) -> bool {
         for file in [archive, stub] {
             if !fs.is_file(file) {
@@ -4229,6 +4240,7 @@ impl SiteWheels {
 
     pub(crate) fn record(&self, inputs: &mut crate::SourceInputs) {
         inputs.missing.extend_from_slice(&self.missing);
+        inputs.file_checks.extend(self.file_checks.clone());
         inputs.relink_site_wheel = self.selected;
     }
 }
@@ -4239,6 +4251,7 @@ struct Loader<'a> {
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
     runtime_initializer: Option<String>,
+    has_checked_only_import: bool,
     imports_runtime_class: bool,
     wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
@@ -4247,7 +4260,7 @@ struct Loader<'a> {
     root: PathBuf,
     search_roots: Vec<PathBuf>,
     archive_roots: usize,
-    site_wheels: Option<(HashSet<PathBuf>, &'a mut SiteWheels)>,
+    site_probes: Option<(HashSet<PathBuf>, &'a mut SiteProbes)>,
     session: Session,
     modules: Vec<SourceModule>,
     by_name: HashMap<String, ModuleId>,
@@ -4271,7 +4284,7 @@ impl<'a> Loader<'a> {
         root: PathBuf,
         extension_paths: &[PathBuf],
         python_archive_indices: &[usize],
-        python: Option<(&crate::CompileOptions, &'a mut SiteWheels)>,
+        python: Option<(&crate::CompileOptions, &'a mut SiteProbes)>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
@@ -4306,7 +4319,7 @@ impl<'a> Loader<'a> {
         }
         let archive_roots = search_roots.len();
         let mut site_roots = HashSet::new();
-        let mut site_wheels = None;
+        let mut site_probes = None;
         if let Some((options, probes)) = python {
             for dir in options.installed_dirs() {
                 let canonical = fs.canonicalize(dir).map_err(|e| e.to_string())?;
@@ -4318,12 +4331,12 @@ impl<'a> Loader<'a> {
                     search_roots.push(canonical);
                 }
             }
-            site_wheels = Some((site_roots, probes));
+            site_probes = Some((site_roots, probes));
         }
         Ok(Self {
             fs,
             archive_roots,
-            site_wheels,
+            site_probes,
             session: Session::new(&root, &search_roots)?,
             search_roots,
             inputs,
@@ -4332,6 +4345,7 @@ impl<'a> Loader<'a> {
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
             runtime_initializer: None,
+            has_checked_only_import: false,
             imports_runtime_class: false,
             wildcard_import: None,
             root,
@@ -4530,6 +4544,7 @@ impl<'a> Loader<'a> {
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
             runtime_initializer: self.runtime_initializer,
+            has_checked_only_import: self.has_checked_only_import,
             deferred_object_error: self.wildcard_import.map(Into::into).into(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
@@ -4576,7 +4591,8 @@ impl<'a> Loader<'a> {
         failure: &mut Option<EntryImportFailure>,
     ) -> Result<(), String> {
         self.scan(id).inspect_err(|_| {
-            if self.import_failure.is_some()
+            if !self.has_checked_only_import
+                && self.import_failure.is_some()
                 && self.modules[id].parsed.has_no_syntax_errors()
                 && self.session.has_valid_semantic_syntax(id)
             {
@@ -5873,30 +5889,58 @@ impl<'a> Loader<'a> {
         Ok(Some((id, child)))
     }
 
+    /// A typeshed declaration alone does not supply a runtime provider. Probe only the
+    /// installed roots, even if an earlier source will win the actual import.
+    fn has_installed_source(&mut self, name: &str) -> bool {
+        let Some((_, probes)) = &mut self.site_probes else {
+            return false;
+        };
+        self.search_roots[self.archive_roots..].iter().any(|site| {
+            let path = site.join(name);
+            probes.is_file(&mut self.fs, path.with_extension("py"))
+                || probes.is_file(&mut self.fs, path.join("__init__.py"))
+        })
+    }
+
+    /// A declaration supplied by ty can describe a third-party module whose executable
+    /// is on a checked search root. Other sealed names keep their normal precedence.
+    fn checked_import_declaration(&mut self, first: &str) -> Result<Option<String>, String> {
+        let declaration = if INTRINSIC_MODULES.contains(&first) {
+            None
+        } else {
+            let Some(file) = vendored_stdlib_declaration(first) else {
+                return Ok(None);
+            };
+            Some(file)
+        };
+        if (first == "quopri"
+            || imre_ast::providers::is_native_fallback(first)
+            || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
+            && self.has_project_source(first)
+        {
+            return Ok(None);
+        }
+        if IntrinsicModule::named(first).is_none() && imre_ast::providers::provider(first).is_none()
+        {
+            if self.has_installed_source(first) {
+                return Ok(None);
+            }
+            if !ruff_python_stdlib::sys::is_known_standard_library(
+                crate::version::LANGUAGE.minor,
+                first,
+            ) && declaration.is_some()
+            {
+                return Ok(declaration);
+            }
+        }
+        Err(format!(
+            "standard-library imports and shadowing are unsupported: {first:?}"
+        ))
+    }
+
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
-        if stdlib_top_level(first)
-            && !((first == "quopri"
-                || imre_ast::providers::is_native_fallback(first)
-                || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
-                && self.has_project_source(first))
-            && (IntrinsicModule::named(first).is_some()
-                || imre_ast::providers::provider(first).is_some()
-                || !self
-                    .search_roots
-                    .iter()
-                    .skip(self.archive_roots)
-                    .any(|site| {
-                        // A typeshed declaration alone does not supply an importable module.
-                        let path = site.join(first);
-                        self.fs.is_file(&path.with_extension("py"))
-                            || self.fs.is_file(&path.join("__init__.py"))
-                    }))
-        {
-            return Err(format!(
-                "standard-library imports and shadowing are unsupported: {first:?}"
-            ));
-        }
+        let declaration = self.checked_import_declaration(first)?;
         let parent = self.package_parent(name)?;
         // Parent initialization can have loaded this child while exposing re-exports.
         if let Some(&id) = self.by_name.get(name) {
@@ -5948,7 +5992,7 @@ impl<'a> Loader<'a> {
                         exists
                     })
                 } else {
-                    self.site_wheels
+                    self.site_probes
                         .as_mut()
                         .filter(|(sites, _)| sites.contains(root))
                         .and_then(|(_, probes)| {
@@ -6001,6 +6045,19 @@ impl<'a> Loader<'a> {
             }
             resolved = Some((path, identity, is_package, root_index, archive));
             break;
+        }
+        if let Some(declaration) = declaration {
+            if resolved.is_some() || (!zip_import && !portions.is_empty()) {
+                self.has_checked_only_import = true;
+            } else if let Some(file) = if name == first {
+                Some(declaration)
+            } else {
+                vendored_stdlib_declaration(&relative)
+            } {
+                return Err(format!(
+                    "no checked runtime provider selected for {name:?} (vendored type declaration {file:?})"
+                ));
+            }
         }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
             if zip_import {
@@ -6106,10 +6163,15 @@ pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom
 }
 
 fn stdlib_top_level(name: &str) -> bool {
+    INTRINSIC_MODULES.contains(&name) || vendored_stdlib_declaration(name).is_some()
+}
+
+fn vendored_stdlib_declaration(name: &str) -> Option<String> {
     let vendored = ty_vendored::file_system();
-    INTRINSIC_MODULES.contains(&name)
-        || vendored.is_file(format!("stdlib/{name}.pyi").as_str())
-        || vendored.is_file(format!("stdlib/{name}/__init__.pyi").as_str())
+    [".pyi", "/__init__.pyi"]
+        .into_iter()
+        .map(|suffix| format!("stdlib/{name}{suffix}"))
+        .find(|path| vendored.is_file(path.as_str()))
 }
 
 /// Recognize an optional import and any bindings initialized by its probe.
@@ -6478,6 +6540,35 @@ fn conditional_export_name(statement: &ast::Stmt) -> Option<&str> {
 mod native_tests {
     use super::SourceGraph;
     use std::fs;
+
+    #[test]
+    fn later_package_imports_are_visible_with_a_separate_type_declaration() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        fs::write(
+            root.join("typing_extensions.py"),
+            "def get_origin(value: int) -> int:\n    return value + 1\n",
+        )
+        .unwrap();
+        fs::create_dir(root.join("helpers")).unwrap();
+        fs::write(root.join("helpers/__init__.py"), "").unwrap();
+        fs::write(
+            root.join("helpers/score.py"),
+            "def twice(value: int) -> int:\n    return value * 2\n",
+        )
+        .unwrap();
+        let entry = root.join("main.py");
+        let external = "from typing_extensions import get_origin";
+        let local = "from helpers.score import twice";
+        for (first, second) in [(external, local), (local, external)] {
+            fs::write(
+                &entry,
+                format!("{first}\n{second}\nprint(get_origin(3), twice(3))\n"),
+            )
+            .unwrap();
+            crate::check_file(&entry, Some(root)).unwrap();
+        }
+    }
 
     #[test]
     fn native_declarations_follow_package_ownership_and_preserve_initializers() {
