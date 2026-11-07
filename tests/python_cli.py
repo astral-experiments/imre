@@ -4662,6 +4662,8 @@ else:
             plugin.write_bytes((fixtures / "boxed_os_waitpid.py").read_bytes())
             child = run(imre, "-IB", "-c", imports + "arithmetic.pidfd()")
             assert (child.returncode, child.stdout, child.stderr) == (0, b"", b""), child
+            plugin.write_bytes((fixtures / "boxed_os_system_queries.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             compare("-IB", str(fixtures / "epoll_descriptors.py"))

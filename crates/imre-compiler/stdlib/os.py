@@ -29,7 +29,7 @@ except ImportError:
     pass
 
 if sys.platform == "linux":
-    from posix import fdatasync
+    from posix import ctermid, fdatasync, getloadavg, sync, uname, uname_result
     from posix import (
         CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED, CLD_TRAPPED,
         P_ALL, P_PGID, P_PID, P_PIDFD, WCONTINUED, WEXITED, WNOWAIT, WSTOPPED,
