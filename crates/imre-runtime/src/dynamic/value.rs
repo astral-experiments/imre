@@ -3333,6 +3333,7 @@ impl Heap {
         } else {
             self.alloc(Value::Weak(reference))
         };
+        self.weak_roots.covers_endpoints = false;
         self.weak
             .entry(target)
             .or_insert(new_references)
