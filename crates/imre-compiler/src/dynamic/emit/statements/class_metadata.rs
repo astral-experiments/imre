@@ -82,11 +82,36 @@ pub(super) fn comprehension_scope(
     (uses.direct, uses.walrus)
 }
 
+/// Resolve the body in its own scope. The leftmost iterable has already been
+/// evaluated in the enclosing scope and cannot contribute to this code's cells.
+pub(super) fn generator_scope(
+    plan: &imre_ast::comprehension::Plan<'_>,
+    string_annotations: bool,
+) -> ClosureNames {
+    let mut uses = Uses {
+        implicit_class: true,
+        ..Uses::new(string_annotations)
+    };
+    plan.visit_body(|expr| uses.visit_expr(expr));
+    uses.direct.append(&mut uses.nested);
+    let mut locals: Vec<_> = plan.target_names().into_iter().collect();
+    locals.sort_unstable();
+    let mut scope = ClosureNames {
+        locals: locals.into_iter().collect(),
+        reads: uses.direct,
+        nonlocals: uses.walrus,
+        ..ClosureNames::default()
+    };
+    scope.finish_scope();
+    scope
+}
+
 #[derive(Default)]
 struct Uses {
     direct: BTreeSet<String>,
     nested: BTreeSet<String>,
     walrus: BTreeSet<String>,
+    implicit_class: bool,
     string_annotations: bool,
 }
 
@@ -95,6 +120,13 @@ impl Uses {
         Self {
             string_annotations,
             ..Self::default()
+        }
+    }
+
+    fn child_scope(&self) -> Self {
+        Self {
+            implicit_class: self.implicit_class,
+            ..Self::new(self.string_annotations)
         }
     }
 
@@ -126,14 +158,14 @@ impl Uses {
     fn suite(&mut self, body: &[ast::Stmt], params: Option<&ast::Parameters>, class: bool) {
         let mut bounds = ClosureNames::default();
         bounds.visit_body(body);
-        let mut child = Self::new(self.string_annotations);
+        let mut child = self.child_scope();
         child.visit_body(body);
         self.child(child, bounds, params, class);
     }
 
     fn comprehension(&mut self, plan: imre_ast::comprehension::Plan<'_>) {
         self.visit_expr(plan.outer);
-        let mut child = Self::new(self.string_annotations);
+        let mut child = self.child_scope();
         let bounds = ClosureNames {
             locals: plan.target_names().into_iter().collect(),
             ..ClosureNames::default()
@@ -182,6 +214,9 @@ impl<'a> Visitor<'a> for Uses {
             ast::Expr::Name(n) if n.ctx == ast::ExprContext::Load => {
                 let name = n.id.as_str();
                 self.direct.insert(name.to_owned());
+                if self.implicit_class && name == "super" {
+                    self.direct.insert("__class__".to_owned());
+                }
             }
             ast::Expr::Named(n) => {
                 if let ast::Expr::Name(target) = &*n.target {
@@ -195,7 +230,7 @@ impl<'a> Visitor<'a> for Uses {
                 }
                 let mut bounds = ClosureNames::default();
                 bounds.visit_expr(&f.body);
-                let mut child = Self::new(self.string_annotations);
+                let mut child = self.child_scope();
                 child.visit_expr(&f.body);
                 self.child(child, bounds, f.parameters.as_deref(), false);
             }

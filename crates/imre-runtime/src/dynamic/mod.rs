@@ -2195,12 +2195,18 @@ impl Context {
     }
 
     /// A walrus binds in the first enclosing code unit outside any eager comprehension.
-    fn named_expression_scope(&self, mut scope: Id) -> Id {
+    fn named_expression_scope(&self, mut scope: Id, name: &str) -> Id {
         while self.scope_data(scope).comprehension.is_some() {
             scope = self
                 .scope_data(scope)
                 .parent
                 .expect("enclosing comprehension scope");
+        }
+        let frame = self.scope_data(scope);
+        if frame.closure.environment && !frame.closure.cells.contains_key(name) {
+            return frame
+                .parent
+                .expect("closure environment has module globals");
         }
         scope
     }
@@ -2288,6 +2294,7 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(environment) else {
             unreachable!()
         };
+        frame.closure.environment = true;
         frame.closure.declared_complete = true;
         frame
             .closure

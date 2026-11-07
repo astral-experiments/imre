@@ -948,6 +948,14 @@ impl Function<'_, '_> {
             Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
                 closure_names.visit_expr(expr)
             }
+            Body::Generator(_, plan) => {
+                closure_names =
+                    class_metadata::generator_scope(plan, self.source.string_annotations);
+                if self.class_locals.is_some() && !self.annotation_lookup {
+                    signature["method_class_cell"] =
+                        json!(closure_names.reads.contains("__class__"));
+                }
+            }
             _ => closure_names.incomplete = true,
         }
         if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
