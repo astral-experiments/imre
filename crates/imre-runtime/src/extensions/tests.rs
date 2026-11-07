@@ -59,6 +59,32 @@ fn cleanup_reentry_keeps_original_exception() {
 }
 
 #[test]
+fn nested_checked_entry_borrows_the_module_until_outer_cleanup() {
+    assert!(imre_extension_enter());
+    unsafe { imre_extension_import(init) };
+    assert!(!imre_extension_enter());
+    unsafe { imre_extension_import(init) };
+    assert_eq!(INITIALIZED.get(), 1);
+    assert_eq!(RELEASED.get(), 0);
+    Error::new(Kind::ValueError, "outer exception").raise();
+    let original = imre_error_take();
+    unsafe { imre_error_set(original) };
+    imre_extension_clear();
+    let after = imre_error_take();
+    assert_eq!(after, original);
+    unsafe {
+        imre_exception_release(after);
+        imre_exception_release(original);
+    }
+    assert_eq!(RELEASED.get(), 1);
+    assert!(imre_extension_enter());
+    unsafe { imre_extension_import(init) };
+    imre_extension_clear();
+    assert_eq!(INITIALIZED.get(), 2);
+    assert_eq!(RELEASED.get(), 2);
+}
+
+#[test]
 fn c_results_obey_the_pending_exception_contract() {
     Error::new(Kind::ValueError, "callback error").raise();
     // SAFETY: NULL with an existing exception propagates it unchanged.

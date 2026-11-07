@@ -553,7 +553,7 @@ fn emit_program(
     }
     if !extension_modules.is_empty() {
         let output = emitter.output.common();
-        output.push_str("declare void @imre_extension_import(ptr)\ndeclare void @imre_extension_clear()\ndeclare i64 @imre_extension_call(ptr, ptr, ptr, ptr, i64, i32)\n");
+        output.push_str("declare i1 @imre_extension_enter()\ndeclare void @imre_extension_import(ptr)\ndeclare void @imre_extension_clear()\ndeclare i64 @imre_extension_call(ptr, ptr, ptr, ptr, i64, i32)\n");
         for name in extension_modules {
             writeln!(output, "declare ptr @PyInit_{name}()").unwrap();
         }
@@ -2501,7 +2501,13 @@ impl Emitter<'_, '_> {
             self.jump(&cleanup);
             self.start(&cleanup);
             if self.has_extensions {
+                let clear = self.label();
+                let done = self.label();
+                self.branch("%extension_owner", &clear, &done);
+                self.start(&clear);
                 self.line("call void @imre_extension_clear()");
+                self.jump(&done);
+                self.start(&done);
             }
             self.cleanup_globals();
             if self.uses_linecache {
@@ -2550,6 +2556,12 @@ impl Emitter<'_, '_> {
             } else {
                 "null"
             };
+            if self.has_extensions {
+                self.code.insert_str(
+                    startup_at,
+                    "  %extension_owner = call i1 @imre_extension_enter()\n",
+                );
+            }
             self.code.insert_str(
                 startup_at,
                 &format!(
