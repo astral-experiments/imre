@@ -5893,6 +5893,18 @@ impl<'a> Loader<'a> {
                             || self.fs.is_file(&path.join("__init__.py"))
                     }))
         {
+            if IntrinsicModule::named(first).is_none()
+                && imre_ast::providers::provider(first).is_none()
+                && !ruff_python_stdlib::sys::is_known_standard_library(
+                    crate::version::LANGUAGE.minor,
+                    first,
+                )
+                && let Some(declaration) = vendored_stdlib_declaration(first)
+            {
+                return Err(format!(
+                    "no checked runtime provider selected for {first:?} (vendored type declaration {declaration:?})"
+                ));
+            }
             return Err(format!(
                 "standard-library imports and shadowing are unsupported: {first:?}"
             ));
@@ -6106,10 +6118,15 @@ pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom
 }
 
 fn stdlib_top_level(name: &str) -> bool {
+    INTRINSIC_MODULES.contains(&name) || vendored_stdlib_declaration(name).is_some()
+}
+
+fn vendored_stdlib_declaration(name: &str) -> Option<String> {
     let vendored = ty_vendored::file_system();
-    INTRINSIC_MODULES.contains(&name)
-        || vendored.is_file(format!("stdlib/{name}.pyi").as_str())
-        || vendored.is_file(format!("stdlib/{name}/__init__.pyi").as_str())
+    [".pyi", "/__init__.pyi"]
+        .into_iter()
+        .map(|suffix| format!("stdlib/{name}{suffix}"))
+        .find(|path| vendored.is_file(path.as_str()))
 }
 
 /// Recognize an optional import and any bindings initialized by its probe.
