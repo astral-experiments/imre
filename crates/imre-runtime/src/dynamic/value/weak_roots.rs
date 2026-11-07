@@ -7,6 +7,8 @@ use std::collections::{HashSet, VecDeque};
 const MAX_WEAK_ENDPOINTS: usize = 16;
 const MAX_NODES: usize = 8192;
 const MAX_EDGES: usize = 65536;
+const FRAME_PROBE_NODES: usize = 256;
+const FRAME_PROBE_EDGES: usize = 2048;
 const CHILDREN_PER_VISIT: usize = 256;
 const SEARCH_BACKOFF: u8 = 63;
 
@@ -185,7 +187,7 @@ impl RootPaths {
         heap: &Heap,
         globals: [Id; 2],
         endpoints: impl Iterator<Item = Id>,
-        from_frames: bool,
+        full_frame_search: bool,
         dict_keys: bool,
     ) -> Option<Self> {
         let mut edges_left = MAX_EDGES;
@@ -204,7 +206,21 @@ impl RootPaths {
             .into_iter()
             .enumerate()
             .map(|(i, id)| (id, Root::Global(i)));
-        if from_frames && !wanted.is_empty() {
+        if !wanted.is_empty() && (full_frame_search || !heap.frames.is_empty()) {
+            // Small weak-reference cohorts may have frame-held targets without a finalizer.
+            // Reserve the rest of the search for paths through global modules.
+            let reserved_nodes = if full_frame_search {
+                0
+            } else {
+                nodes_left.saturating_sub(FRAME_PROBE_NODES)
+            };
+            let reserved_edges = if full_frame_search {
+                0
+            } else {
+                edges_left.saturating_sub(FRAME_PROBE_EDGES)
+            };
+            nodes_left -= reserved_nodes;
+            edges_left -= reserved_edges;
             let roots = heap
                 .frames
                 .iter()
@@ -221,6 +237,8 @@ impl RootPaths {
                 &mut edges_left,
                 false,
             )?;
+            nodes_left += reserved_nodes;
+            edges_left += reserved_edges;
         }
         if !wanted.is_empty() && nodes_left != 0 && edges_left != 0 {
             paths.search(
