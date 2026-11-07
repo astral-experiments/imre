@@ -576,13 +576,16 @@ pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwne
     let family = if family == -1 { libc::AF_INET } else { family };
     let (flags, kind, blocking) = creation_type(if ty == -1 { libc::SOCK_STREAM } else { ty });
     let proto = if proto == -1 { 0 } else { proto };
-    if !matches!(family, libc::AF_INET | libc::AF_INET6 | libc::AF_UNIX)
-        || !matches!(kind, libc::SOCK_STREAM | libc::SOCK_DGRAM)
-    {
-        return Err(Error::new(
-            Kind::NotImplementedError,
-            "only Internet and Unix stream and datagram sockets are supported",
-        ));
+    match (family, kind) {
+        (libc::AF_INET | libc::AF_INET6 | libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_DGRAM) => {}
+        #[cfg(target_os = "linux")]
+        (libc::AF_UNIX, libc::SOCK_SEQPACKET) => {}
+        _ => {
+            return Err(Error::new(
+                Kind::NotImplementedError,
+                format!("unsupported socket family {family} and type {kind}"),
+            ));
+        }
     }
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
     let raw = checked(unsafe { libc::socket(family, flags, proto) }).map_err(errno_error)?;

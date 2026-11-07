@@ -15,6 +15,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             exports!(
                 $module,
                 "AF_INET6",
+                "AF_UNIX",
                 "AI_NUMERICHOST",
                 "AI_NUMERICSERV",
                 "AI_PASSIVE",
@@ -151,7 +152,6 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::SocketNative => socket_exports!(
             "_socket",
             "AF_INET",
-            "AF_UNIX",
             "AF_UNSPEC",
             "IPPROTO_TCP",
             "SHUT_RD",
@@ -509,7 +509,9 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "SocketKind",
             "create_connection",
             "create_server",
-            "has_dualstack_ipv6"
+            "has_dualstack_ipv6",
+            "recv_fds",
+            "send_fds"
         ),
         M::Sys => exports!(
             "sys",
