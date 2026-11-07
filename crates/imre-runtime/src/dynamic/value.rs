@@ -1408,7 +1408,7 @@ pub(super) enum Value {
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
-    AttrGetter(std::rc::Rc<[Vec<String>]>),
+    AttrGetter(std::rc::Rc<[Vec<Id>]>),
     /// A tuple field position and the descriptor’s writable docstring.
     TupleGetter {
         index: i64,
@@ -1973,6 +1973,11 @@ impl Value {
             Self::Count { current, step, .. } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::TupleGetter { doc, .. } => visit.extend(doc),
+            Self::AttrGetter(paths) => {
+                for path in paths.iter() {
+                    visit.extend(path);
+                }
+            }
             Self::ItemGetter(keys) => visit.push(*keys),
             Self::MethodCaller {
                 name,
@@ -2432,7 +2437,6 @@ impl Value {
             | Self::Poll(_)
             | Self::Socket(_)
             | Self::Native(_)
-            | Self::AttrGetter(_)
             | Self::TupleGetterDoc
             | Self::ReadOnlyMember(_, _)
             | Self::NoDefault

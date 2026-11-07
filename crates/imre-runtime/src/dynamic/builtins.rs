@@ -893,6 +893,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::TupleGetter { .. } if super::namedtuple::GETTER_METHODS.contains(&attr) => {
             super::namedtuple::GETTER
         }
+        Value::AttrGetter(_) if attr == "__reduce__" => "operator.attrgetter",
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::MethodCaller { .. } if attr == "__reduce__" => "operator.methodcaller",
         Value::NamedTuple {

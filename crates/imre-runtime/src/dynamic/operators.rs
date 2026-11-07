@@ -3132,10 +3132,8 @@ impl Context {
                 let arguments = paths
                     .iter()
                     .map(|path| {
-                        let mut quoted = String::new();
-                        crate::objects::exceptions::write_string_repr(&path.join("."), &mut quoted)
-                            .expect("writing into a string cannot fail");
-                        quoted
+                        crate::objects::exceptions::string_repr(&self.attrgetter_name(path))
+                            .into_string()
                     })
                     .collect::<Vec<_>>()
                     .join(", ");

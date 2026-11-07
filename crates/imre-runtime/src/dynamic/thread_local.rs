@@ -380,7 +380,7 @@ mod initialization_tests;
 #[cfg(test)]
 mod tests {
     use super::Dictionaries;
-    use crate::dynamic::value::{Heap, Location, NONE, Value};
+    use crate::dynamic::value::{Heap, Id, Location, NONE, Value};
     use std::rc::Rc;
     use std::sync::{Barrier, Mutex};
 
@@ -388,7 +388,7 @@ mod tests {
     fn dictionaries_are_private_and_unrooted_after_thread_exit() {
         let mut heap = Heap::new();
         let mut dictionary = || {
-            let payload: Rc<[Vec<String>]> = Rc::from([]);
+            let payload: Rc<[Vec<Id>]> = Rc::from([]);
             let probe = Rc::downgrade(&payload);
             let value = heap.alloc(Value::AttrGetter(payload));
             (heap.alloc(Value::Dict(vec![(NONE, value)].into())), probe)

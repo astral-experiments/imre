@@ -2620,7 +2620,7 @@ mod tests {
         let source = ctx.alloc(Value::Range(range));
 
         let mark = ctx.heap.temporary_mark();
-        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let value: Rc<[Vec<Id>]> = Rc::from([]);
         let probe = Rc::downgrade(&value);
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
@@ -2646,7 +2646,7 @@ mod tests {
         let encode = ctx.builtin("urllib.parse.urlencode");
 
         let mark = ctx.heap.temporary_mark();
-        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let value: Rc<[Vec<Id>]> = Rc::from([]);
         let probe = Rc::downgrade(&value);
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
@@ -2690,8 +2690,8 @@ mod tests {
             NONE
         }
 
-        fn payload(ctx: &mut Context) -> (Id, Weak<[Vec<String>]>) {
-            let value: Rc<[Vec<String>]> = Rc::from([]);
+        fn payload(ctx: &mut Context) -> (Id, Weak<[Vec<Id>]>) {
+            let value: Rc<[Vec<Id>]> = Rc::from([]);
             let probe = Rc::downgrade(&value);
             (ctx.alloc(Value::AttrGetter(value)), probe)
         }

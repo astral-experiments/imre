@@ -44,7 +44,17 @@ pub(super) fn attrgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
             let Value::Str(name) = ctx.heap.get(id) else {
                 return Err(Error::new("TypeError", "attribute name must be a string"));
             };
-            Ok(name.split('.').map(str::to_owned).collect())
+            // CPython keeps an undotted argument and interns each component of a dotted name.
+            let mut path = if name.contains('.') {
+                name.clone().split('.').map(|part| ctx.text(part)).collect()
+            } else {
+                vec![id]
+            };
+            for id in &mut path {
+                let (heap, roots) = ctx.heap_and_roots();
+                *id = heap.intern(*id, roots);
+            }
+            Ok(path)
         })
         .collect::<Result<_>>()?;
     Ok(ctx.alloc(Value::AttrGetter(paths)))
@@ -81,6 +91,32 @@ pub(super) fn methodcaller(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
         args,
         keywords,
     }))
+}
+
+pub(super) fn reduce_attrgetter(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let getter =
+        builtins::noargs_method_receiver(ctx, "operator.attrgetter", "__reduce__", args, kwargs)?;
+    let Value::AttrGetter(paths) = ctx.heap.get(getter) else {
+        unreachable!("validated attrgetter receiver");
+    };
+    let paths = paths.clone();
+    let names = paths
+        .iter()
+        .map(|path| match path.as_slice() {
+            [name] => Ok(*name),
+            _ => {
+                let name = ctx.attrgetter_name(path);
+                ctx.heap.fresh_string(Value::Str(name.into()))
+            }
+        })
+        .collect::<Result<_>>()?;
+    let names = ctx.alloc(Value::Tuple(names));
+    let class = ctx.builtin("operator.attrgetter");
+    Ok(ctx.alloc(Value::Tuple(vec![class, names])))
 }
 
 pub(super) fn reduce_methodcaller(
@@ -162,16 +198,29 @@ impl Context {
         };
         items
     }
+    /// Join the stored attribute names for the public representation and reduction.
+    pub(in super::super) fn attrgetter_name(&self, path: &[Id]) -> String {
+        let mut name = String::new();
+        for (i, &part) in path.iter().enumerate() {
+            if i > 0 {
+                name.push('.');
+            }
+            name.push_str(self.str_value(part).expect("attrgetter stores strings"));
+        }
+        name
+    }
+
     pub(in super::super) fn apply_attrgetter(
         &mut self,
-        paths: &[Vec<String>],
+        paths: &[Vec<Id>],
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
         self.apply_getter("attrgetter", paths.len(), args, kwargs, |ctx, obj, i| {
-            paths[i]
-                .iter()
-                .try_fold(obj, |obj, name| ctx.lookup_attr(obj, name))
+            paths[i].iter().try_fold(obj, |obj, &id| {
+                let name = ctx.copy_name(id)?;
+                ctx.lookup_named_attr(obj, &name, Some(id))
+            })
         })
     }
 
