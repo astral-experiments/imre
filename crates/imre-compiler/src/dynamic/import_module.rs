@@ -141,7 +141,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     // Python-visible setter on their type.
                     let descriptors = section(
                         "def ismethoddescriptor(object):",
-                        "if hasattr(types, 'GetSetDescriptorType'):",
+                        "def isfunction(object):",
                     )
                     .replace(
                         "or hasattr(tp, \"__delete__\")",

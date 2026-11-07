@@ -325,6 +325,26 @@ If iterable is specified the tuple is initialized from iterable's items.
 
 If the argument is a tuple, the return value is the same object."#
         }
+        "type" => {
+            r#"type(object) -> the object's type
+type(name, bases, dict, **kwds) -> a new type"#
+        }
+        "function" => {
+            r#"Create a function object.
+
+  code
+    a code object
+  globals
+    the globals dictionary
+  name
+    a string that overrides the name from the code object
+  argdefs
+    a tuple that specifies the default argument values
+  closure
+    a tuple that supplies the bindings for free variables
+  kwdefaults
+    a dictionary that specifies the default keyword argument values"#
+        }
         "frozenset" => r#"Build an immutable unordered collection of unique elements."#,
         "_abc_data" => r#"Internal state held by ABC machinery."#,
         _ => return None,
