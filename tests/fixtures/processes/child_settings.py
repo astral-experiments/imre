@@ -6,17 +6,18 @@ from pathlib import Path
 def nullable_group(args: list[str], group: int | None) -> bytes:
     return subprocess.check_output(args, process_group=group)
 
-def report_filename(error: Exception, original: Path) -> None:
+def report_filename(error: Exception, original: Path, keep_path: bool) -> None:
     assert isinstance(error, OSError)
     name = error.filename
-    if isinstance(name, Path):
-        print(name is original)
+    if keep_path:
+        assert isinstance(name, Path)
+        assert name is original
         print(str(name))
-    elif isinstance(name, str):
-        print(False)
-        print(name)
     else:
-        raise AssertionError("launch error lost the executable filename")
+        assert isinstance(name, str)
+        assert name == str(original)
+        print(name)
+
 
 python = sys.argv[1]
 identity = [python, "-c", "import os; print(os.getpid() == os.getsid(0), os.getpid() == os.getpgrp())"]
@@ -34,19 +35,29 @@ for group in [-2, -1, 0]:
 # Even a negative group that doesn't call setpgid affects the original
 # filename object: only exactly -1 permits the direct POSIX spawn interface.
 missing = Path("absent-child-dir/program")
+# These two invalid arguments identify the default launch path without starting a child.
+# Direct spawn checks the executable first; fork/exec checks integer descriptors first.
+try:
+    subprocess.call(["absent-child-dir/program\x00"], stdin=1237940039285380274899124224)
+except ValueError:
+    direct_default = True
+except OverflowError:
+    direct_default = False
+else:
+    raise AssertionError("invalid launch unexpectedly succeeded")
 for group in [-2, -1, 0]:
     try:
         subprocess.Popen([missing], process_group=group)
     except FileNotFoundError as exc:
-        report_filename(exc, missing)
+        report_filename(exc, missing, group != -1 or not direct_default)
 try:
     subprocess.Popen([missing], start_new_session=True)
 except FileNotFoundError as exc:
-    report_filename(exc, missing)
+    report_filename(exc, missing, True)
 try:
     subprocess.Popen([missing], umask=0o053)
 except FileNotFoundError as exc:
-    report_filename(exc, missing)
+    report_filename(exc, missing, True)
 
 with open("parent-before", "wb") as before:
     before.write(b"")

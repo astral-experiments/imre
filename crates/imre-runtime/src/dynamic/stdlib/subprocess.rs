@@ -311,10 +311,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         || !default_fds
         || (streams.iter().any(|(mode, _)| *mode == 1) && bufsize.as_small() != Some(-1));
     let shell = ctx.truth(shell)?;
-    let spelling = matches!(
-        ctx.heap.get(ctx.scalar_value(args)),
-        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
-    );
+    let spelling = posixpath::spelling(ctx, args);
     let path_like = !spelling
         && (matches!(ctx.heap.get(args), Value::DirEntry(_))
             || ctx
@@ -368,7 +365,9 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         super::audit::event(ctx, "subprocess.Popen", &[program, list, cwd, env])?;
         Some(list)
     };
-    let probe = probe || audited_args.is_some();
+    // A path-like argv[0] can return different values for the dirname probe,
+    // the executable, and the argument passed to the child.
+    let probe = probe || audited_args.is_some() || !posixpath::spelling(ctx, program);
     // CPython's dirname probe can call __fspath__ before the actual executable conversion.
     let probed_directory = if probe && BoxedPopen::probes_executable() {
         let probe = posixpath::fspath(ctx, program)?;
