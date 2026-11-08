@@ -563,18 +563,15 @@ impl Function<'_, '_> {
                 ast::Stmt::Import(v) => {
                     for alias in &v.names {
                         let full = alias.name.as_str();
-                        let mut module = self.import(full);
+                        let mut module = self.import(full, "0", 0);
                         let mut parts = full.split('.');
                         let root = parts.next().unwrap();
-                        if root != full {
-                            module = self.import(root);
-                            if alias.asname.is_some()
-                                && !self.source.private_names.imports_root(&alias.name)
-                            {
-                                for part in parts {
-                                    let member = self.code_name(part);
-                                    module = self.op("from", &[&module, &member]);
-                                }
+                        if alias.asname.is_some()
+                            && !self.source.private_names.imports_root(&alias.name)
+                        {
+                            for part in parts {
+                                let member = self.code_name(part);
+                                module = self.op("from", &[&module, &member]);
                             }
                         }
                         let local = alias.asname.as_ref().map_or(root, ast::Identifier::as_str);
@@ -583,16 +580,6 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::ImportFrom(v) => {
                     let name = v.module.as_ref().map_or("", |v| v.as_str());
-                    if name == "__future__" && v.level == 0 {
-                        continue;
-                    }
-                    let Some(name) =
-                        crate::modules::resolve_import(self.source.package, v.level, name)
-                    else {
-                        self.unsupported("relative import beyond the top-level package");
-                        continue;
-                    };
-                    let module = self.import(&name);
                     let fromlist = self.op("list", &[]);
                     let names: Vec<_> = v
                         .names
@@ -602,7 +589,8 @@ impl Function<'_, '_> {
                     for attr in &names {
                         self.op("append", &[&fromlist, attr]);
                     }
-                    self.op("fromlist", &[&module, &fromlist]);
+                    let fromlist = self.op("tuple", &[&fromlist]);
+                    let module = self.import(name, &fromlist, v.level);
                     for (alias, attr) in v.names.iter().zip(names) {
                         if alias.name.as_str() == "*" {
                             self.op("import_star", &[&self.scope.clone(), &module]);
@@ -654,9 +642,12 @@ impl Function<'_, '_> {
         }
     }
 
-    fn import(&mut self, name: &str) -> String {
+    fn import(&mut self, name: &str, fromlist: &str, level: u32) -> String {
         let name = self.code_name(name);
-        self.op("import", &[&self.scope.clone(), &name])
+        self.checked(&format!(
+            "call i64 @imre_dyn_import_name(ptr %ctx, i64 {}, i64 {name}, i64 {fromlist}, i32 {level})",
+            self.scope
+        ))
     }
 
     fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {

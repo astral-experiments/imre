@@ -476,7 +476,7 @@ impl Context {
         let filename = self.import_path_text(path)?;
         let entry = match entry {
             ModuleInitializer::Native(entry)
-            | ModuleInitializer::File(entry)
+            | ModuleInitializer::File(entry, _)
             | ModuleInitializer::Builtin(entry) => entry,
             ModuleInitializer::Source(text) => {
                 let source = self.text(text);
@@ -503,6 +503,36 @@ impl Context {
             flags: 0,
             flags_complete: false,
         })))
+    }
+
+    /// Resolve bytes read from a physical origin to its compiled module code, preserving
+    /// the filename used by nested definitions and leaving namespace creation to exec().
+    pub(super) fn file_code_from_bytes(&mut self, filename: Id, data: Id) -> Result<Option<Id>> {
+        use sha2::{Digest, Sha256};
+        let path = self.import_path(filename)?;
+        let mut entries = self.sources.values().flatten().filter_map(|source| {
+            if source.path.as_os_str() == path.as_os_str()
+                && let ModuleInitializer::File(entry, Some(digest)) = source.code
+            {
+                Some((entry, digest))
+            } else {
+                None
+            }
+        });
+        let Some((entry, digest)) = entries.next() else {
+            return Ok(None);
+        };
+        if entries.any(|(other, hash)| !std::ptr::fn_addr_eq(entry, other) || hash != digest) {
+            return Ok(None);
+        }
+        let Value::Bytes(bytes) = self.heap.get(data) else {
+            return Ok(None);
+        };
+        if Sha256::digest(bytes).as_slice() != digest {
+            return Ok(None);
+        }
+        self.module_code(ModuleInitializer::File(entry, Some(digest)), &path)
+            .map(Some)
     }
 
     fn registered_file(&self, name: &str, filename: &Path) -> Option<&super::SourceModule> {
@@ -582,7 +612,7 @@ impl Context {
             if let Ok(name) = self.str_value(name)
                 && let Some(source) = self.registered_file(name, &path)
                 && source.path.as_os_str() == path.as_os_str()
-                && let entry @ ModuleInitializer::File(_) = source.code
+                && let entry @ ModuleInitializer::File(..) = source.code
             {
                 return self.module_code(entry, &path);
             }

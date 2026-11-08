@@ -825,7 +825,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         repr_sequence_words: super::operators::remaining_repr_words(),
         suspended_typing_frames: 0,
         token_missing: NONE,
-        native_code_objects: HashMap::new(),
         native_filename_labels: HashMap::new(),
         original_builtins: None,
         source_builtins: None,
@@ -906,12 +905,28 @@ pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
     ctx: *mut Context,
     name: *const c_char,
     file: *const c_char,
-    text: *const u8,
+    digest: *const u8,
     len: u64,
     code: Code,
 ) {
-    // SAFETY: the compiler supplies the same static storage as for other compiled sources.
-    unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::File(code)) }
+    // Older file registrations supplied no fingerprint.
+    let digest = if len == 32 && !digest.is_null() {
+        // SAFETY: the compiler emits a static constant containing all 32 SHA-256 bytes.
+        Some(unsafe { &*digest.cast::<[u8; 32]>() })
+    } else {
+        None
+    };
+    // SAFETY: the compiler supplies static names, filename and initializer.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::File(code, digest),
+        )
+    }
 }
 
 /// Register compiled Python that runs after a built-in module installs its native bindings.
@@ -1497,6 +1512,24 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     finish(ctx, result)
 }
 
+/// Execute an import statement through the importing frame's builtins.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_import_name(
+    ctx: *mut Context,
+    scope: Id,
+    name: Id,
+    fromlist: Id,
+    level: u32,
+) -> Id {
+    // SAFETY: generated code passes its current interpreter and live Python handles.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.import_in_scope(ctx.heap.current_code(), scope, name, fromlist, level);
+    finish(ctx, result)
+}
+
 /// Read a contiguous slice and attribute failures to the subscription expression.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_get_slice_at(
@@ -1885,7 +1918,13 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
     // SAFETY: the compiler supplies a live context and a distinct static record for this definition.
     let (ctx, definition) = unsafe { (&mut *ctx, &*site) };
     let key = site as usize;
-    let code = if let Some(&code) = ctx.native_code_objects.get(&key) {
+    let owner = ctx.heap.current_code();
+    let code = if let Some(&(_, code)) = ctx
+        .code_object(owner)
+        .nested
+        .iter()
+        .find(|(site, _)| *site == key)
+    {
         code
     } else {
         // SAFETY: the filename is a nul-terminated constant in the native executable.
@@ -1914,7 +1953,10 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             (qualname, doc),
             (filename, definition.first_line),
         );
-        ctx.native_code_objects.insert(key, code);
+        let Value::Code(parent) = ctx.heap.get_mut(owner) else {
+            unreachable!()
+        };
+        parent.nested.push((key, code));
         code
     };
     ctx.define_function(
@@ -2424,7 +2466,6 @@ impl Context {
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
                 .chain(self.native_type_dicts.values())
-                .chain(self.native_code_objects.values())
                 .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)

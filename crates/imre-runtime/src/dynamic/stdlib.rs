@@ -621,6 +621,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "import_module"
             | "namespace_locations"
             | "get_source_data"
+            | "compile_file"
             | "get_code"
             | "loader_fields"
             | "path_stats"
@@ -2618,6 +2619,15 @@ pub(super) fn call(
             ("get_source_data", [loader, filename], []) => {
                 let data = ctx.registered_source_data(*loader, *filename);
                 return Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes.to_vec()))));
+            }
+            ("compile_file", [compiler, data, filename], []) => {
+                if *compiler == ctx.builtin("compile")
+                    && let Some(code) = ctx.file_code_from_bytes(*filename, *data)?
+                {
+                    return Ok(code);
+                }
+                let mode = ctx.text("exec");
+                return ctx.call(*compiler, vec![*data, *filename, mode], Vec::new());
             }
             ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path, None),
             ("get_code", [loader, path, name, read, convert], []) => {
